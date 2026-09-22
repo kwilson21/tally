@@ -1,0 +1,22 @@
+# Decisions
+
+Settled choices and their reasons. To reverse one, add a new entry that supersedes it. Never edit an old entry.
+
+| # | Date | Decision | Why |
+|---|---|---|---|
+| 1 | 2026-09-22 | Build Tally as a new project instead of porting the Django app | The Django app was built for public signups and many users. Tally only needs to serve one family, plus a public demo, so it can be much simpler. |
+| 2 | 2026-09-22 | Every part must be explainable in one plain sentence | The owner directs AI-written code and must be able to explain every part in their own words, including in interviews. |
+| 3 | 2026-09-22 | Plaid for automatic bank sync | The owner chose auto-sync over statement uploads. Production Plaid access already exists. |
+| 4 | 2026-09-22 | Fresh start; no data migration from Django | Simplest option. Plaid backfills history when a bank is linked. |
+| 5 | 2026-09-22 | One shared household, no per-user permissions | The whole family shares one budget. Changes record who made them. |
+| 6 | 2026-09-22 | Server-rendered HTML (Hono JSX) + HTMX, not React | It's the simplest option the owner can explain, and it matches the "server owns state" approach from the Django app. |
+| 7 | 2026-09-22 | Ship the demo first, then Plaid for the family, then the remaining features in both environments | The portfolio demo goes live early. The family gets the core before the extras. |
+| 8 | 2026-09-22 | GitHub Issues + one milestone per phase; `ROADMAP.md` links to them | Built-in progress tracking, and pull requests close issues. Nothing is written in two places. |
+| 9 | 2026-09-22 | Jev for categories and flags | A fast, cheap classifier with confidence scores. The owner has early access and accepts the risk that comes with it. |
+| 10 | 2026-09-22 | Workers AI for merchant name suggestions, which people accept or reject | Runs on the same Cloudflare account, with no extra vendor or key. Follows the rule "the app helps, it doesn't decide." |
+| 11 | 2026-09-22 | No general LLM (Claude, DeepSeek) in the app for now | None of the 8 features needs one. The "ask a question" box is on the Later list. |
+| 12 | 2026-09-22 | Cloudflare Workers + D1 + R2, with one Worker deployed as two environments | No servers to run. The demo and family app share code but never share data. |
+| 13 | 2026-09-22 | Money stored as integer cents | SQLite has no exact decimal type, and integers avoid floating-point errors. |
+| 14 | 2026-09-22 | Cloudflare Access for family login; no auth code in the app | Removes signup, passwords, and rate limiting from the codebase. |
+| 15 | 2026-09-22 | Public repo | Portfolio visibility. Secrets live only in Wrangler secrets and a git-ignored `.dev.vars`. |
+| 16 | 2026-09-22 | The Django app stays up until Tally replaces it; `finance.thesuperhuman.us` DNS is only changed with the owner's explicit approval | Beta users depend on it. |
