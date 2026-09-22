@@ -8,5 +8,5 @@ app.route("/", health);
 app.route("/", home);
 
 export default {
-  fetch: app.fetch,
+	fetch: app.fetch,
 } satisfies ExportedHandler<Env>;

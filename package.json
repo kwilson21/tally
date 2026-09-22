@@ -1,25 +1,25 @@
 {
-  "name": "tally",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "cf-typegen": "wrangler types",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
-    "lint": "biome check .",
-    "format": "biome check --write .",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "hono": "^4.13.8"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@cloudflare/vitest-plugin": "^1.2.3",
-    "typescript": "^7.0.2",
-    "vitest": "4.1.11",
-    "wrangler": "^4.136.3"
-  }
+	"name": "tally",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
+		"cf-typegen": "wrangler types",
+		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"hono": "^4.13.8"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.14",
+		"@cloudflare/vitest-plugin": "^1.2.3",
+		"typescript": "^7.0.2",
+		"vitest": "4.1.11",
+		"wrangler": "^4.136.3"
+	}
 }
