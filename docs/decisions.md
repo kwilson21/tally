@@ -20,3 +20,6 @@ Settled choices and their reasons. To reverse one, add a new entry that supersed
 | 14 | 2026-09-22 | Cloudflare Access for family login; no auth code in the app | Removes signup, passwords, and rate limiting from the codebase. |
 | 15 | 2026-09-22 | Public repo | Portfolio visibility. Secrets live only in Wrangler secrets and a git-ignored `.dev.vars`. |
 | 16 | 2026-09-22 | The Django app stays up until Tally replaces it; `finance.thesuperhuman.us` DNS is only changed with the owner's explicit approval | Beta users depend on it. |
+| 17 | 2026-09-22 | Identify the user from Cloudflare Access's signed login token (`Cf-Access-Jwt-Assertion`), not the plain email header; Plaid webhooks use an Access Bypass policy for that one path | Cloudflare recommends validating the token. A misconfigured rule can't be used to fake who made a change. |
+| 18 | 2026-09-22 | One Jev call per transaction, asking the category and all flags together | Jev's docs recommend bundling questions in one call, which is cheaper and faster than one call per question. |
+| 19 | 2026-09-22 | Call Plaid and Jev over plain `fetch`, not their SDKs | Neither SDK is confirmed to work on Workers, and `fetch` is one less dependency to explain. |

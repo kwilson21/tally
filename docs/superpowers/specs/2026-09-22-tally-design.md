@@ -110,7 +110,7 @@ All money is stored as **integer cents**, because SQLite has no exact decimal ty
 | `bill_payments` | Links one bill occurrence to the one transaction that paid it. | `bill_id`, `period` (`YYYY-MM` or `YYYY`), `transaction_id`, `matched_by` (`auto` / `user`), `status` (`linked` / `dismissed`), `created_at`. Among `linked` rows: unique on (`bill_id`, `period`) and unique on `transaction_id` |
 | `documents` | Details of each stored PDF, whose file lives in R2. | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
 
-`updated_by`, `linked_by`, and `uploaded_by` hold the email that Cloudflare Access passes in the `Cf-Access-Authenticated-User-Email` header. In the demo they hold `demo`.
+`updated_by`, `linked_by`, and `uploaded_by` hold the email claim from Cloudflare Access's signed login token. The Worker verifies the `Cf-Access-Jwt-Assertion` JWT against the team's public keys (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, cached) and never trusts the plain `Cf-Access-Authenticated-User-Email` header. In one sentence: we read who you are from Cloudflare's signed login token, not from a header anyone could fake. In the demo they hold `demo`.
 
 Schema changes use numbered D1 migration files in `migrations/`.
 
@@ -162,7 +162,7 @@ The amount tolerance (10%) and date window (±5 days) are single config values. 
 
 1. **A person.** A manual choice sets `category_source = user`, which is never overwritten. The edit panel offers "Always use this category for this merchant," which sets `merchants.default_category_id`.
 2. **Merchant rule.** If the merchant has a `default_category_id`, apply it (`category_source = merchant_rule`).
-3. **Jev.** Send the transaction to Jev with the household's category list as the allowed outputs, along with the allowed flags. If the confidence is at or above the threshold, apply the category (`category_source = jev`). Otherwise leave the category null for review. Flags are applied the same way.
+3. **Jev.** Make **one** `POST /v1/systemone` call per transaction. Its `questions` map holds a `category` Choice question (options: the household's category list) and one yes/no (Noul) question per allowed flag (`transfer`, `reimbursement`, `income`), which is the bundling pattern Jev's docs recommend. If the category answer's confidence is at or above the threshold, apply it (`category_source = jev`); otherwise leave the category null for review. Each flag is applied on its own confidence check.
 
 The confidence threshold is a single config value, set during Phase 1 after checking Jev's output on the seed data.
 
@@ -219,9 +219,9 @@ The "How it works" page explains the architecture using the one-sentence explana
 
 | Situation | Behavior |
 |---|---|
-| Bank link needs re-authentication (`ITEM_LOGIN_REQUIRED` etc.) | Set `plaid_items.status = needs_attention` and show Fix connection, which opens Plaid Link in update mode. |
+| Bank link needs re-authentication (`ITEM_LOGIN_REQUIRED` etc.) | Set `plaid_items.status = needs_attention` and show Fix connection, which opens Plaid Link in update mode. The update-mode `link_token` is created when the button is clicked, never ahead of time, because it expires after 30 minutes. |
 | Sync fails partway | Save transactions and the new `sync_cursor` together, in one D1 batch. A retry resumes from the last saved cursor, so nothing is duplicated or skipped. |
-| Plaid webhook | Verify Plaid's webhook signature before acting. The webhook route is the only path excluded from Cloudflare Access. |
+| Plaid webhook | Plaid signs every webhook, and the Worker checks the signature against Plaid's published key before trusting it. The `Plaid-Verification` header is a JWT: reject it unless `alg` is `ES256`, fetch the key for its `kid` from `/webhook_verification_key/get` (cached), and verify with Web Crypto (ECDSA P-256). The webhook path is the only path excluded from Cloudflare Access, via an Access **Bypass** policy scoped to `/webhooks/plaid`. |
 | Jev unavailable or slow | Leave the transaction uncategorized; the nightly job retries it. AI calls never block a page. |
 | Workers AI unavailable | No suggestion; retried the next time the merchant list is opened. |
 | Invalid input (split doesn't add up, bad amount) | Re-render the form with a field error (`role="alert"`). |
@@ -260,7 +260,9 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 
 ## 13. Checked against docs before writing code (Phase 0)
 
-The owner's rule is to confirm every API against current docs. These are the assumptions in this spec that need checking:
+The owner's rule is to confirm every API against current docs. These are the assumptions in this spec that needed checking.
+
+**Checked on 2026-09-22.** Results are in `docs/verified-assumptions.md`. Items 5, 6, and 7 led to the owner-approved changes in §5, §7, and §10. Still unverified: Jev's numeric rate limit (handled by retrying on `RateLimitError`).
 
 1. Workers with static assets is Cloudflare's recommended path for new full-stack apps (vs. Pages).
 2. Hono on Workers: routing, JSX rendering, and the Cron and webhook handlers.
