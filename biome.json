@@ -11,7 +11,8 @@
 			"**",
 			"!worker-configuration.d.ts",
 			"!.wrangler",
-			"!node_modules"
+			"!node_modules",
+			"!package-lock.json"
 		]
 	},
 	"formatter": {
