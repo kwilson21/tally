@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# Real values are stored with `npx wrangler secret put <NAME>` (owner only).
+JEV_API_KEY=replace-me

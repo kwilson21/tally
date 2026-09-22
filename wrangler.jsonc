@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tally",
+  "main": "./src/index.tsx",
+  // Set once at project start; bump deliberately, never automatically.
+  "compatibility_date": "2026-09-22",
+  "assets": {
+    "directory": "./public/",
+    "binding": "ASSETS"
+  }
+}
