@@ -107,6 +107,7 @@ All money is stored as **integer cents**, because SQLite has no exact decimal ty
 | `merchants` | One row per raw name Plaid sends, with its suggested and chosen display names. | `raw_name` (unique), `suggested_name`, `display_name`, `default_category_id` (nullable), `suggestion_status` (`none` / `pending` / `accepted` / `rejected`) |
 | `transactions` | Every transaction and how it's categorized. | `id`, `plaid_transaction_id` (unique, nullable for split children), `account_id`, `date` (`YYYY-MM-DD` as Plaid sends it), `amount_cents`, `raw_name`, `category_id` (nullable), `category_source` (`user` / `merchant_rule` / `jev` / null), `category_confidence`, `flags` (e.g. `transfer`, `reimbursement`, `income`), `excluded`, `parent_id` (nullable), `is_split`, `note`, `updated_by`, `updated_at` |
 | `bills` | Recurring bills and how to recognize their payment. | `id`, `name`, `amount_cents`, `due_day`, `frequency` (`monthly` / `yearly`), `anchor_month` (for yearly), `category_id`, `merchant_raw_name`, `active` |
+| `bill_payments` | Links one bill occurrence to the one transaction that paid it. | `bill_id`, `period` (`YYYY-MM` or `YYYY`), `transaction_id`, `matched_by` (`auto` / `user`), `status` (`linked` / `dismissed`), `created_at`. Among `linked` rows: unique on (`bill_id`, `period`) and unique on `transaction_id` |
 | `documents` | Details of each stored PDF, whose file lives in R2. | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
 
 `updated_by`, `linked_by`, and `uploaded_by` hold the email that Cloudflare Access passes in the `Cf-Access-Authenticated-User-Email` header. In the demo they hold `demo`.
@@ -128,8 +129,28 @@ Schema changes use numbered D1 migration files in `migrations/`.
 | **Left** | Budget minus spent. |
 | **Uncategorized** | Counted transactions with `category_id` null, shown as their own row and never hidden. |
 | **Income** | Absolute value of the sum of counted transactions flagged `income`. |
-| **Bill status** | *Paid* if a transaction in the bill's month matches the bill's `merchant_raw_name` and is within ±10% of `amount_cents`. Otherwise *overdue* if the due date has passed, *due* if it falls within the next 7 days, or *upcoming*. |
+| **Bill status** | *Paid* if the bill occurrence has a linked `bill_payments` row (see §6.1). Otherwise *overdue* if the due date has passed, *due* if it falls within the next 7 days, or *upcoming*. |
 | **Safe to spend** | Total budget for the month, minus all counted spending (every category, including uncategorized and unbudgeted), minus the amounts of bills that are *due* or *overdue* and not *paid*. In one sentence: what's left of the whole budget after setting aside money for bills that are due. |
+
+### 6.1 Matching bills to payments
+
+> Each bill gets at most one payment per period, and each transaction pays at most one bill.
+
+**The key:** a bill *occurrence* is identified by `(bill_id, period)`, where `period` is `YYYY-MM` for monthly bills and `YYYY` for yearly bills. Unique constraints in `bill_payments` let the database itself rule out double matches in either direction, so re-running the matcher changes nothing.
+
+**A transaction is a candidate for a bill occurrence only if all of these hold:**
+1. **Merchant:** its `raw_name` equals the bill's `merchant_raw_name`.
+2. **Amount:** it's within ±10% of `amount_cents`, so a bill that varies a little (like utilities) still matches.
+3. **Date:** it falls within ±5 days of that occurrence's due date. This keeps a late payment from last month from being mistaken for this month's.
+4. **Unclaimed:** it isn't already linked to a bill occurrence, isn't excluded, isn't a split parent, and hasn't been dismissed for this occurrence.
+
+**If several candidates qualify,** the matcher picks the one closest to the due date, then the one closest in amount, then the earliest by `id`, so the result is always the same.
+
+**When matching runs:** after each sync, and after a bill is created or edited. It only fills occurrences that have no payment yet and never changes an existing link.
+
+**People override the matcher.** From a bill, a person can link a transaction by hand (`matched_by = user`) or unlink a wrong match. Unlinking records a `dismissed` row, so the matcher won't pick that transaction for that occurrence again.
+
+The amount tolerance (10%) and date window (±5 days) are single config values. The demo seed exercises all the cases: a bill paid on time, one paid 3 days late, and a lookalike charge outside the window that correctly doesn't match.
 
 **Splits:** splitting creates child transactions (`parent_id` set) and marks the parent `is_split = true`. The children must add up exactly to the parent's `amount_cents`, or the split is rejected. Removing a split deletes the children and clears `is_split`.
 
