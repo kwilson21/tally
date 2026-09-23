@@ -50,25 +50,28 @@ export function TransactionRow({ row, href }: { row: ListRow; href?: string }) {
 	const Row = href ? "a" : "div";
 	return (
 		<li data-transaction={row.id}>
+			{/* Every row is the same height: two lines (name, then caption and tag), long text truncated. */}
 			<Row
 				href={href}
-				class="flex min-h-11 items-start gap-4 py-3 text-ink no-underline"
+				class="flex h-16 items-center gap-4 text-ink no-underline"
 			>
 				<RowIcon row={row} kind={kind} />
 				<span class="min-w-0 flex-1">
 					<span
-						class={`block truncate text-lg ${kind === "excluded" ? "text-muted" : ""}`}
+						class={`block truncate text-lg leading-6 ${kind === "excluded" ? "text-muted" : ""}`}
 					>
 						{row.displayName}
 					</span>
-					{caption && <span class="block truncate text-muted">{caption}</span>}
-					{tag && (
-						<span class="mt-1 inline-block rounded-control bg-band px-2 text-sm text-ink">
-							Needs category
-						</span>
-					)}
+					<span class="flex min-w-0 items-center gap-2 leading-6">
+						{caption && <span class="truncate text-muted">{caption}</span>}
+						{tag && (
+							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
+								Needs category
+							</span>
+						)}
+					</span>
 				</span>
-				<span class="text-lg">
+				<span class="shrink-0 text-lg">
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
 			</Row>

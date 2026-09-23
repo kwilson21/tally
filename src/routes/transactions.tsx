@@ -196,7 +196,7 @@ async function renderList(c: Context<App>, filters: Filters) {
 					) : (
 						byDay(rows).map(([date, dayRows]) => (
 							<>
-								<h2 class="mt-4 text-sm text-muted">{dayLabel(date, today)}</h2>
+								<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
 								<ul class="divide-y divide-rule">
 									{dayRows.map((row) => (
 										<TransactionRow row={row} />

@@ -67,6 +67,15 @@ describe("TransactionRow", () => {
 		expect(html.match(/<a /g)).toHaveLength(1);
 	});
 
+	it("has one fixed height, with the Needs category tag on the caption line", async () => {
+		const html = await TransactionRow({ row: base }).toString();
+		expect(html).toMatch(/<div class="[^"]*\bh-16\b/);
+		// Two lines only: the name, then the caption with the tag beside it.
+		expect(html).toMatch(
+			/<span class="flex[^"]*"><span class="truncate[^"]*">SQ \*LOCAL BAKERY 4432<\/span><span[^>]*>Needs category<\/span><\/span>/,
+		);
+	});
+
 	it("is a plain row without a link otherwise", async () => {
 		const html = await TransactionRow({ row: base }).toString();
 		expect(html).not.toContain("<a ");
