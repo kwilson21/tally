@@ -5,7 +5,7 @@ export function LedgerIllustration() {
 			class="size-28 shrink-0 lg:size-36"
 			viewBox="0 0 120 120"
 			fill="none"
-			stroke-width="2.5"
+			stroke-width="1.75"
 			stroke-linecap="round"
 			stroke-linejoin="round"
 			aria-hidden="true"

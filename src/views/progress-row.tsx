@@ -48,7 +48,7 @@ export function ProgressRow({
 						y1="0"
 						y2="100%"
 						class="stroke-ink"
-						stroke-width="2"
+						stroke-width="1.75"
 					/>
 				</svg>
 				{over && (
