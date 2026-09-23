@@ -10,6 +10,8 @@
 		"dev": "wrangler dev",
 		"deploy": "wrangler deploy",
 		"cf-typegen": "wrangler types",
+		"db:migrate:local": "wrangler d1 migrations apply DB --local",
+		"db:seed:local": "curl -fsS \"http://127.0.0.1:8787/cdn-cgi/handler/scheduled\"",
 		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
 		"lint": "biome check .",
 		"format": "biome check --write .",

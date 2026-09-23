@@ -100,12 +100,12 @@ All money is stored as **integer cents**, because SQLite has no exact decimal ty
 | Table | Job, in one sentence | Key columns |
 |---|---|---|
 | `plaid_items` | One row per linked bank login, holding its encrypted token and sync position. | `id`, `access_token_encrypted`, `institution_name`, `sync_cursor`, `status` (`ok` / `needs_attention`), `linked_by`, `created_at` |
-| `accounts` | Each checking, savings, or credit account and its current balance. | `id`, `plaid_item_id`, `plaid_account_id` (unique), `name`, `mask`, `type`, `subtype`, `is_liability`, `balance_cents`, `updated_at` |
+| `accounts` | Each checking, savings, or credit account and its current balance. | `id`, `plaid_item_id` (nullable, null for demo accounts), `plaid_account_id` (unique, nullable for demo accounts), `name`, `mask`, `type`, `subtype`, `is_liability`, `balance_cents`, `updated_at` |
 | `balance_history` | One balance per account per day, for the net-worth chart. | `account_id`, `date`, `balance_cents` (unique on account + date) |
-| `categories` | The household's category list. | `id`, `name` (unique), `sort_order`, `archived` |
+| `categories` | The household's category list. | `id`, `name` (unique), `icon`, `color` (token name, e.g. `cat-blue`), `sort_order`, `archived` |
 | `budget_amounts` | How much a category gets per month, starting from a given month. | `category_id`, `effective_month` (`YYYY-MM`), `amount_cents` (unique on category + month) |
 | `merchants` | One row per raw name Plaid sends, with its suggested and chosen display names. | `raw_name` (unique), `suggested_name`, `display_name`, `default_category_id` (nullable), `suggestion_status` (`none` / `pending` / `accepted` / `rejected`) |
-| `transactions` | Every transaction and how it's categorized. | `id`, `plaid_transaction_id` (unique, nullable for split children), `account_id`, `date` (`YYYY-MM-DD` as Plaid sends it), `amount_cents`, `raw_name`, `category_id` (nullable), `category_source` (`user` / `merchant_rule` / `jev` / null), `category_confidence`, `flags` (e.g. `transfer`, `reimbursement`, `income`), `excluded`, `parent_id` (nullable), `is_split`, `note`, `updated_by`, `updated_at` |
+| `transactions` | Every transaction and how it's categorized. | `id`, `plaid_transaction_id` (unique, nullable for split children), `account_id`, `date` (`YYYY-MM-DD` as Plaid sends it), `amount_cents`, `raw_name`, `category_id` (nullable), `category_source` (`user` / `merchant_rule` / `jev` / null), `category_confidence`, `flag_transfer`, `flag_reimbursement`, `flag_income` (0/1), `excluded`, `parent_id` (nullable), `is_split`, `note`, `updated_by`, `updated_at` |
 | `bills` | Recurring bills and how to recognize their payment. | `id`, `name`, `amount_cents`, `due_day`, `frequency` (`monthly` / `yearly`), `anchor_month` (for yearly), `category_id`, `merchant_raw_name`, `active` |
 | `bill_payments` | Links one bill occurrence to the one transaction that paid it. | `bill_id`, `period` (`YYYY-MM` or `YYYY`), `transaction_id`, `matched_by` (`auto` / `user`), `status` (`linked` / `dismissed`), `created_at`. Among `linked` rows: unique on (`bill_id`, `period`) and unique on `transaction_id` |
 | `documents` | Details of each stored PDF, whose file lives in R2. | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
@@ -120,7 +120,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 **Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date.
 
-"Counted transactions" for a month means: date in that month, `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead.
+"Counted transactions" for a month means: date in that month, `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. Transactions flagged `income` are counted only toward **Income**. They're left out of Spent, Uncategorized, and Safe to spend.
 
 | Number | Rule |
 |---|---|
@@ -130,7 +130,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 | **Uncategorized** | Counted transactions with `category_id` null, shown as their own row and never hidden. |
 | **Income** | Absolute value of the sum of counted transactions flagged `income`. |
 | **Bill status** | *Paid* if the bill occurrence has a linked `bill_payments` row (see §6.1). Otherwise *overdue* if the due date has passed, *due* if it falls within the next 7 days, or *upcoming*. |
-| **Safe to spend** | Total budget for the month, minus all counted spending (every category, including uncategorized and unbudgeted), minus the amounts of bills that are *due* or *overdue* and not *paid*. In one sentence: what's left of the whole budget after setting aside money for bills that are due. |
+| **Safe to spend** | Total budget for the month, minus all counted spending (every category, including uncategorized and unbudgeted; income excluded), minus the amounts of bills that are *due* or *overdue* and not *paid*. In one sentence: what's left of the whole budget after setting aside money for bills that are due. |
 
 ### 6.1 Matching bills to payments
 
