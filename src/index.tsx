@@ -1,8 +1,11 @@
 import { Hono } from "hono";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
+import { security } from "./security";
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.use("*", security);
 
 app.route("/", health);
 app.route("/", home);
