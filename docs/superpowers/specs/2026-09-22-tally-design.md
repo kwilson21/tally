@@ -194,7 +194,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 - **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires) and a small toast listener.
 - **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and HTMX swap regions use `aria-live="polite"`. Errors use `role="alert"`.
 
-Wireframes (phone 390×844 and desktop 1280×800) are approved before any UI code, per the owner's workflow.
+Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before any UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
 
 ## 9. Demo experience
 
