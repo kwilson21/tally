@@ -64,3 +64,20 @@
 		outline-offset: 2px;
 	}
 }
+
+/* Budget bars grow from the left on load. Reduced motion shows the final state. */
+@keyframes bar-fill {
+	from {
+		transform: scaleX(0);
+	}
+}
+.bar-fill {
+	transform-box: fill-box;
+	transform-origin: left;
+	animation: bar-fill 600ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+	.bar-fill {
+		animation: none;
+	}
+}
