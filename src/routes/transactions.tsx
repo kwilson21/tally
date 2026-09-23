@@ -77,7 +77,7 @@ async function renderList(c: Context<App>, filters: Filters) {
 				id="filters"
 				method="get"
 				action="/transactions"
-				class="mt-4 flex flex-col gap-3"
+				class="mt-4 flex flex-col gap-3 lg:max-w-3xl"
 				hx-get="/transactions"
 				hx-trigger="input delay:300ms, submit"
 				hx-target="#results"
@@ -135,7 +135,10 @@ async function renderList(c: Context<App>, filters: Filters) {
 						value="1"
 						checked={filters.uncategorized}
 					>
-						Needs category (<span id="needs-count">{needs}</span>)
+						{/* One span, so the chip's flex gap doesn't split the text around the count. */}
+						<span>
+							Needs category (<span id="needs-count">{needs}</span>)
+						</span>
 					</Chip>
 					<Chip
 						type="checkbox"
@@ -154,7 +157,7 @@ async function renderList(c: Context<App>, filters: Filters) {
 				</button>
 			</form>
 
-			<div id="page">
+			<div id="page" class="lg:max-w-3xl">
 				<section id="results" class="mt-6" aria-label="Results">
 					{rows.length === 0 ? (
 						<p class="text-muted">
