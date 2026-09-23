@@ -1,5 +1,7 @@
 // Budget math from spec §6. Pure functions: rows in, numbers out. All amounts are integer cents.
 
+import { formatCents } from "./money";
+
 export type BudgetAmount = { categoryId: number; effectiveMonth: string; amountCents: number };
 export type Category = { id: number; name: string };
 /** A counted transaction: in the month, not excluded, not a split parent (the query guarantees this). */
@@ -82,4 +84,21 @@ export function summarizeMonth(input: MonthInput): MonthSummary {
 		totalSpentCents,
 		safeToSpendCents: totalBudgetCents - totalSpentCents - input.unpaidDueBillsCents,
 	};
+}
+
+const listFormat = new Intl.ListFormat("en-US", { style: "long", type: "conjunction" });
+
+/** The one-line status under the headline, written by code from the numbers (never by AI). */
+export function statusSentence(categories: CategorySummary[]): string {
+	if (categories.length === 0) return "No budgets set yet.";
+	const over = categories.filter((c) => c.over);
+	if (over.length === 0) return "Everything is on track.";
+	const rest = over.length < categories.length ? " Everything else is on track." : "";
+	if (over.length === 1) {
+		const [only] = over as [CategorySummary];
+		const amount = -only.leftCents;
+		const text = formatCents(amount, { wholeDollars: amount % 100 === 0 });
+		return `${only.name} is ${text} over.${rest}`;
+	}
+	return `${listFormat.format(over.map((c) => c.name))} are over.${rest}`;
 }

@@ -3,6 +3,7 @@ import {
 	type BudgetAmount,
 	type CountedTransaction,
 	budgetForMonth,
+	statusSentence,
 	summarizeMonth,
 } from "../src/budget";
 
@@ -90,5 +91,27 @@ describe("summarizeMonth", () => {
 		});
 		expect(s.categories.map((c) => c.name)).toEqual(["Groceries", "Eating Out"]);
 		expect(s.totalSpentCents).toBe(5000);
+	});
+});
+
+const cat = (name: string, leftCents: number) => ({
+	id: 0,
+	name,
+	budgetCents: 10000,
+	spentCents: 10000 - leftCents,
+	leftCents,
+	over: leftCents < 0,
+});
+
+describe("statusSentence", () => {
+	it.each([
+		[[cat("Groceries", 100), cat("Gas", 50)], "Everything is on track."],
+		[[cat("Eating Out", -3600), cat("Gas", 50)], "Eating Out is $36 over. Everything else is on track."],
+		[[cat("Eating Out", -3650), cat("Gas", 50)], "Eating Out is $36.50 over. Everything else is on track."],
+		[[cat("Eating Out", -100), cat("Gas", -200), cat("Kids", 5)], "Eating Out and Gas are over. Everything else is on track."],
+		[[cat("Eating Out", -100), cat("Gas", -200), cat("Kids", -5)], "Eating Out, Gas, and Kids are over."],
+		[[], "No budgets set yet."],
+	])("%#", (categories, sentence) => {
+		expect(statusSentence(categories)).toBe(sentence);
 	});
 });
