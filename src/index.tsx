@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { todayUtc } from "./dates";
 import { resetDemo } from "./demo/reset";
 import { destinations } from "./routes/destinations";
 import { health } from "./routes/health";
@@ -20,7 +21,7 @@ export default {
 		// "today" here is the UTC date, which is fine for the demo (it only shifts which day's
 		// seed is shown); production scheduling is decided in Phase 2.
 		if (env.DEMO === "true") {
-			await resetDemo(env.DB, new Date().toISOString().slice(0, 10));
+			await resetDemo(env.DB, todayUtc());
 		}
 	},
 } satisfies ExportedHandler<Env>;
