@@ -50,7 +50,11 @@ home.get("/", async (c) => {
 					Budget
 				</h2>
 				{summary.categories.length === 0 && count === 0 ? (
-					<p class="mt-2 text-muted">No budgets yet.</p>
+					<p class="mt-2">
+						<a href="/settings" class="inline-flex min-h-11 items-center">
+							Add budget amounts in Settings
+						</a>
+					</p>
 				) : (
 					<ul class="mt-2 divide-y divide-rule">
 						{summary.categories.map((cat) => (

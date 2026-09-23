@@ -61,4 +61,12 @@ describe("GET / with no data", () => {
 		expect(html).not.toContain("need a category");
 		expect(html).toContain("$0");
 	});
+
+	it("points to Settings instead of repeating the status sentence", async () => {
+		const { html } = await home();
+		expect(html.match(/No budgets/g)?.length).toBe(1);
+		expect(html).toMatch(
+			/<a href="\/settings"[^>]*>Add budget amounts in Settings<\/a>/,
+		);
+	});
 });
