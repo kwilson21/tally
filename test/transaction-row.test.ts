@@ -1,3 +1,4 @@
+import { jsx } from "hono/jsx";
 import { describe, expect, it } from "vitest";
 import type { ListRow } from "../src/db/transactions";
 import { Chip } from "../src/views/chip";
@@ -56,14 +57,20 @@ describe("rowCaption", () => {
 });
 
 describe("TransactionRow", () => {
-	it("is one link to the edit URL, keeping the filters, with the signed amount", async () => {
+	it("is one link to the edit URL when given one, with the signed amount", async () => {
 		const html = await TransactionRow({
 			row: { ...base, income: true, amountCents: -245000 },
-			query: "uncategorized=1",
+			href: "/transactions/7?uncategorized=1",
 		}).toString();
 		expect(html).toContain('href="/transactions/7?uncategorized=1"');
 		expect(html).toContain("+$2,450.00");
 		expect(html.match(/<a /g)).toHaveLength(1);
+	});
+
+	it("is a plain row without a link otherwise", async () => {
+		const html = await TransactionRow({ row: base }).toString();
+		expect(html).not.toContain("<a ");
+		expect(html).toContain('data-transaction="7"');
 	});
 });
 
@@ -83,15 +90,27 @@ describe("Chip", () => {
 });
 
 describe("FormField", () => {
-	it("labels its control and announces an error", async () => {
+	it("labels its control and links the error to it", async () => {
 		const html = await FormField({
 			id: "note",
 			label: "Note",
 			error: "Too long.",
-			children: "<control>",
+			children: (a11y) => jsx("textarea", { id: "note", ...a11y }),
 		}).toString();
 		expect(html).toContain('<label for="note"');
-		expect(html).toContain('role="alert"');
-		expect(html).toContain('id="note-error"');
+		expect(html).toMatch(
+			/<textarea[^>]*aria-describedby="note-error"[^>]*aria-invalid="true"/,
+		);
+		expect(html).toMatch(/<p id="note-error" role="alert"/);
+	});
+
+	it("adds no error attributes when there's no error", async () => {
+		const html = await FormField({
+			id: "q",
+			label: "Search",
+			children: (a11y) => jsx("input", { id: "q", ...a11y }),
+		}).toString();
+		expect(html).not.toContain("aria-describedby");
+		expect(html).not.toContain("aria-invalid");
 	});
 });

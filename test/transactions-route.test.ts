@@ -11,7 +11,7 @@ async function get(path: string, headers: Record<string, string> = {}) {
 }
 
 const rowCount = (html: string) =>
-	(html.match(/href="\/transactions\/\d+/g) ?? []).length;
+	(html.match(/<li data-transaction=/g) ?? []).length;
 
 beforeEach(async () => {
 	await resetDemo(env.DB, todayUtc());
@@ -59,13 +59,27 @@ describe("GET /transactions", () => {
 		);
 	});
 
-	it("announces the result count to htmx requests", async () => {
-		const { res } = await get("/transactions?uncategorized=1", {
-			"HX-Request": "true",
-		});
-		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
-			announce: "12 transactions",
-		});
+	it("shows the result count in a stable live region that htmx updates in place", async () => {
+		const { html } = await get("/transactions?uncategorized=1");
+		expect(html).toMatch(
+			/<p id="result-count" aria-live="polite"[^>]*>12 transactions<\/p>/,
+		);
+		expect(html).toContain(
+			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"',
+		);
+	});
+
+	it("doesn't link rows to the edit panel until it exists (#11)", async () => {
+		const { html } = await get("/transactions");
+		expect(html).not.toMatch(/href="\/transactions\/\d+/);
+	});
+
+	it("keeps an active month with no transactions selected", async () => {
+		const { html } = await get("/transactions?month=2020-01");
+		expect(html).toMatch(
+			/<option value="2020-01" selected[^>]*>January 2020<\/option>/,
+		);
+		expect(html).toContain("No transactions match.");
 	});
 
 	it("is where Home's band link lands", async () => {

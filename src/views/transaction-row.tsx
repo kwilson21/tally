@@ -44,19 +44,13 @@ function RowIcon({ row, kind }: { row: ListRow; kind: Caption["kind"] }) {
 	);
 }
 
-/** One transaction: a single link to its edit URL, keeping the list's filters. */
-export function TransactionRow({
-	row,
-	query,
-}: {
-	row: ListRow;
-	query: string;
-}) {
+/** One transaction. With `href` the whole row is one link (to its edit panel); without, it's a plain row. */
+export function TransactionRow({ row, href }: { row: ListRow; href?: string }) {
 	const { kind, caption, tag } = rowCaption(row);
-	const href = `/transactions/${row.id}${query ? `?${query}` : ""}`;
+	const Row = href ? "a" : "div";
 	return (
-		<li>
-			<a
+		<li data-transaction={row.id}>
+			<Row
 				href={href}
 				class="flex min-h-11 items-start gap-4 py-3 text-ink no-underline"
 			>
@@ -77,7 +71,7 @@ export function TransactionRow({
 				<span class="text-lg">
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
-			</a>
+			</Row>
 		</li>
 	);
 }

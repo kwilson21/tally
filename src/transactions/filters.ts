@@ -9,7 +9,7 @@ export type Filters = {
 	excluded: boolean;
 };
 
-const MONTH = /^\d{4}-\d{2}$/;
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export function parseFilters(
 	params: URLSearchParams,

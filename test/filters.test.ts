@@ -31,6 +31,8 @@ describe("parseFilters", () => {
 
 	it("ignores malformed values instead of failing", () => {
 		expect(parse("month=nope").month).toBe("2026-09");
+		expect(parse("month=2026-13").month).toBe("2026-09");
+		expect(parse("month=2026-00").month).toBe("2026-09");
 		expect(parse("category=abc").category).toBeNull();
 		expect(parse("category=0").category).toBeNull();
 		expect(parse(`q=${"x".repeat(200)}`).q).toHaveLength(100);

@@ -7,11 +7,7 @@ import {
 	monthsWithTransactions,
 	needsCategoryCount,
 } from "../db/transactions";
-import {
-	type Filters,
-	filtersToQuery,
-	parseFilters,
-} from "../transactions/filters";
+import { type Filters, parseFilters } from "../transactions/filters";
 import { Chip } from "../views/chip";
 import { FormField } from "../views/form-field";
 import { Icon } from "../views/icons";
@@ -40,7 +36,6 @@ const pill =
 /** The whole Transactions page for these filters. Every htmx swap selects a part of this same page. */
 async function renderList(c: Context<App>, filters: Filters) {
 	const today = todayUtc();
-	const thisMonth = today.slice(0, 7);
 	const [{ rows, more }, months, needs, categories] = await Promise.all([
 		listTransactions(c.env.DB, filters),
 		monthsWithTransactions(c.env.DB),
@@ -49,18 +44,14 @@ async function renderList(c: Context<App>, filters: Filters) {
 			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		).all<Category>(),
 	]);
-	const query = filtersToQuery(filters, thisMonth);
-	if (!months.includes(thisMonth)) months.unshift(thisMonth);
 
-	if (c.req.header("HX-Request")) {
-		const n = rows.length;
-		c.header(
-			"HX-Trigger",
-			JSON.stringify({
-				announce: `${more ? "More than " : ""}${n} transaction${n === 1 ? "" : "s"}`,
-			}),
-		);
+	// Keep the active month in the picker even when it has no transactions.
+	if (filters.month !== "all" && !months.includes(filters.month)) {
+		months.push(filters.month);
+		months.sort().reverse();
 	}
+	const n = rows.length;
+	const count = `${more ? "More than " : ""}${n} transaction${n === 1 ? "" : "s"}`;
 
 	return c.html(
 		<Layout
@@ -82,25 +73,28 @@ async function renderList(c: Context<App>, filters: Filters) {
 				hx-trigger="input delay:300ms, submit"
 				hx-target="#results"
 				hx-select="#results"
-				hx-select-oob="#needs-count"
+				hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"
 				hx-swap="outerHTML"
 				hx-push-url="true"
 			>
 				<FormField id="q" label="Search transactions" hideLabel>
-					<div class="relative">
-						<span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
-							<Icon name="search" class="size-5" />
-						</span>
-						<input
-							id="q"
-							name="q"
-							type="search"
-							value={filters.q}
-							placeholder="Search transactions"
-							autocomplete="off"
-							class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
-						/>
-					</div>
+					{(a11y) => (
+						<div class="relative">
+							<span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
+								<Icon name="search" class="size-5" />
+							</span>
+							<input
+								id="q"
+								name="q"
+								type="search"
+								value={filters.q}
+								placeholder="Search transactions"
+								autocomplete="off"
+								class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
+								{...a11y}
+							/>
+						</div>
+					)}
 				</FormField>
 				<div class="flex flex-wrap gap-2">
 					<label for="month" class="sr-only">
@@ -158,7 +152,11 @@ async function renderList(c: Context<App>, filters: Filters) {
 			</form>
 
 			<div id="page" class="lg:max-w-3xl">
-				<section id="results" class="mt-6" aria-label="Results">
+				{/* Stays in place while htmx replaces its text, so screen readers announce each new count (spec §8). */}
+				<p id="result-count" aria-live="polite" class="mt-4 text-sm text-muted">
+					{count}
+				</p>
+				<section id="results" class="mt-2" aria-label="Results">
 					{rows.length === 0 ? (
 						<p class="text-muted">
 							No transactions match.{" "}
@@ -172,7 +170,7 @@ async function renderList(c: Context<App>, filters: Filters) {
 								<h2 class="mt-4 text-sm text-muted">{dayLabel(date, today)}</h2>
 								<ul class="divide-y divide-rule">
 									{dayRows.map((row) => (
-										<TransactionRow row={row} query={query} />
+										<TransactionRow row={row} />
 									))}
 								</ul>
 							</>

@@ -7,7 +7,11 @@ type Props = {
 	/** Visually hide the label (it's still read by screen readers). */
 	hideLabel?: boolean;
 	error?: string;
-	children?: Child;
+	/** Renders the control, given the attributes that link it to its error. */
+	children: (a11y: {
+		"aria-describedby"?: string;
+		"aria-invalid"?: "true";
+	}) => Child;
 };
 
 /** A labeled form control, with its error shown and announced. */
@@ -17,7 +21,11 @@ export function FormField({ id, label, hideLabel, error, children }: Props) {
 			<label for={id} class={hideLabel ? "sr-only" : "text-base text-ink"}>
 				{label}
 			</label>
-			{children}
+			{children(
+				error
+					? { "aria-describedby": `${id}-error`, "aria-invalid": "true" }
+					: {},
+			)}
 			{error && (
 				<p id={`${id}-error`} role="alert" class="text-sm text-over">
 					{error}
