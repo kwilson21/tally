@@ -6,3 +6,5 @@ node_modules/
 dist/
 coverage/
 .DS_Store
+public/assets/
+public/vendor/
