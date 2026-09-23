@@ -21,3 +21,12 @@ Decisions made while reviewing:
 - The exact green is picked during token work, with at least 3:1 contrast against the paper background (WCAG 1.4.11).
 
 Rejected: B "Soft utility" and C "One big number."
+
+## Round 2: Phase 1 screens in Quiet ledger (2026-09-22)
+
+- Home, desktop: [home-desktop-v1.webp](2026-09-22/home-desktop-v1.webp)
+- Transactions, mobile: [transactions-mobile-v1.webp](2026-09-22/transactions-mobile-v1.webp)
+- Transaction edit panel, mobile: [transaction-edit-mobile-v1.webp](2026-09-22/transaction-edit-mobile-v1.webp)
+- How Tally works, desktop: [how-it-works-desktop-v1.webp](2026-09-22/how-it-works-desktop-v1.webp). Layout only; the real diagram is built as SVG.
+
+Owner review: the proportions and hierarchy are right, but the result feels "visually boring and sterile." A character pass (round 3) explores adding warmth and a signature without losing glanceability. Still missing: the Home "Things to try" variant.
