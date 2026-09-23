@@ -13,5 +13,19 @@
 	"build": {
 		"command": "npm run build",
 		"watch_dir": "src"
+	},
+	// Local-only placeholder ID. Real demo/production databases are created in Phase 1d
+	// (wrangler d1 create) and set per environment.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "tally-local",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "migrations"
+		}
+	],
+	// "true" shows the demo banner and lets the nightly job reset the data. Production sets "false" in Phase 1d.
+	"vars": {
+		"DEMO": "true"
 	}
 }

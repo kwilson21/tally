@@ -6,4 +6,9 @@ declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("../src/index");
 	}
+	// `cloudflare:test`'s `env` (and `cloudflare:workers`'s) are both typed as `Cloudflare.Env`,
+	// so this is how test/apply-migrations.ts sees TEST_MIGRATIONS.
+	interface Env {
+		TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
+	}
 }
