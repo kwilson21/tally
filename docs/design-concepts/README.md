@@ -30,3 +30,22 @@ Rejected: B "Soft utility" and C "One big number."
 - How Tally works, desktop: [how-it-works-desktop-v1.webp](2026-09-22/how-it-works-desktop-v1.webp). Layout only; the real diagram is built as SVG.
 
 Owner review: the proportions and hierarchy are right, but the result feels "visually boring and sterile." A character pass (round 3) explores adding warmth and a signature without losing glanceability. Still missing: the Home "Things to try" variant.
+
+## Round 3: character pass (2026-09-22)
+
+Selected: Variant 3, "Illustrated ledger," with Things to try: [home-desktop-illustrated-ledger-v1.webp](2026-09-22/home-desktop-illustrated-ledger-v1.webp). Rejected: Variant 1 "Warm ledger" and Variant 2 "Bento ledger."
+
+What this round adds on top of Quiet ledger:
+- A tally-mark glyph as the brand signature, in the wordmark and as a notch at each budget limit.
+- Serif (Newsreader) for the month and section titles.
+- A small line icon for each category.
+- One line illustration next to the headline amount (notebook, pencil, tally marks).
+- An italic serif status sentence written by code from the numbers.
+- A tinted band behind the one action that matters ("N transactions need a category").
+- The "Things to try" block for the demo.
+
+Proposed corrections to the image (pending owner confirmation):
+- Category colors must not use status hues (green or red). Use dusty blue, plum, ochre, slate, and warm brown.
+- Each category gets an icon in its color, not a dot plus an icon.
+- The navy text is drift. Secondary text goes back to muted gray.
+- The illustration will be redrawn as SVG using the icon stroke rules. Generated art doesn't ship.
