@@ -31,5 +31,10 @@ A family budgeting app on Cloudflare Workers, with a public demo at demo.thesupe
 - npm run dev / npm test / npm run typecheck / npm run lint / npm run format
 - Deploy (owner-approved only): npx wrangler deploy --env <demo|production>
 
+## Pull requests
+- `main` only accepts PRs; required checks: `check` (CI) and `Greptile Review`.
+- UI PRs: screenshots in the description (1280×800 and 390×844); the owner merges after looking. Non-UI PRs may auto-merge.
+- If Greptile hasn't reported within 30 minutes or errors: run `/code-review` (high) plus an independent reviewer agent, post findings as a PR comment titled "Fallback review (Greptile unavailable)", fix and re-review. Only the owner merges such a PR; never use a ruleset bypass.
+
 ## Git
 Conventional commits (feat:, fix:, refactor:, test:, docs:, chore:, ci:). One issue per PR; "Closes #N" in the PR body.

@@ -46,6 +46,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 ## Patterns
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.
 - Illustrations: SVG, drawn with the icon stroke rules, ink plus one accent. Generated images never ship.
+- Money: integer cents in the database and in code; format only in views with `formatCents` (src/money.ts).
 - Motion: bars fill and the headline counts up. `prefers-reduced-motion` shows the final state.
 
 ## Governance
