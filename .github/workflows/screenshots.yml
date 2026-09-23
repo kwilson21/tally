@@ -1,0 +1,71 @@
+name: Screenshots
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: screenshots-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    # Forks get a read-only token and can't push images or edit the description.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:migrate:local
+      - name: Start the app and seed the demo
+        run: |
+          npx wrangler dev --port 8787 > wrangler.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 2; done
+          npm run db:seed:local
+      - run: npm run screenshots
+      - name: Publish images to the screenshots branch
+        id: publish
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          dir="pr-${PR}/${SHA::7}"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth=1 origin screenshots; then
+            git worktree add --detach shots FETCH_HEAD
+          else
+            git worktree add --detach shots
+            git -C shots switch --orphan screenshots
+          fi
+          mkdir -p "shots/$dir"
+          cp screenshots/*.png "shots/$dir/"
+          git -C shots add .
+          git -C shots commit -m "chore: screenshots for #${PR} at ${SHA::7}"
+          # Each run writes its own folder, so a rebase after a race never conflicts.
+          for i in 1 2 3; do
+            if git -C shots push origin HEAD:screenshots; then pushed=1; break; fi
+            git -C shots fetch origin screenshots && git -C shots rebase FETCH_HEAD
+          done
+          [ -n "${pushed:-}" ] || { echo "Could not push screenshots"; exit 1; }
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - name: Update the PR description
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DIR: ${{ steps.publish.outputs.dir }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/update-pr-body.mjs
+      - if: failure()
+        run: tail -50 wrangler.log || true
