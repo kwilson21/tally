@@ -73,17 +73,21 @@ export async function listTransactions(
 	return { rows, more: results.length > LIST_LIMIT };
 }
 
-/** How many of a month's transactions need a category (the chip and Home's band). */
+/** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */
 export async function needsCategoryCount(
 	db: D1Database,
 	month: string,
 ): Promise<number> {
-	const row = await db
-		.prepare(
-			`SELECT COUNT(*) AS n FROM transactions t WHERE substr(t.date, 1, 7) = ? AND ${NEEDS_CATEGORY}`,
-		)
-		.bind(month)
-		.first<{ n: number }>();
+	const inMonth = month === "all" ? "" : "substr(t.date, 1, 7) = ? AND ";
+	const statement = db.prepare(
+		`SELECT COUNT(*) AS n FROM transactions t WHERE ${inMonth}${NEEDS_CATEGORY}`,
+	);
+	const row = await (month === "all"
+		? statement
+		: statement.bind(month)
+	).first<{
+		n: number;
+	}>();
 	return row?.n ?? 0;
 }
 
