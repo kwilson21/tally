@@ -49,3 +49,16 @@ Proposed corrections to the image (pending owner confirmation):
 - Each category gets an icon in its color, not a dot plus an icon.
 - The navy text is drift. Secondary text goes back to muted gray.
 - The illustration will be redrawn as SVG using the icon stroke rules. Generated art doesn't ship.
+
+## Round 4: Phase 1 screens in Illustrated ledger (2026-09-22)
+
+The owner accepted all four studies:
+- Home, mobile: [home-mobile-illustrated-ledger-v1.webp](2026-09-22/home-mobile-illustrated-ledger-v1.webp)
+- Transactions, mobile: [transactions-mobile-illustrated-ledger-v1.webp](2026-09-22/transactions-mobile-illustrated-ledger-v1.webp)
+- Transaction edit panel, mobile (category chips instead of a dropdown): [transaction-edit-mobile-illustrated-ledger-v1.webp](2026-09-22/transaction-edit-mobile-illustrated-ledger-v1.webp)
+- How Tally works, desktop: [how-it-works-desktop-illustrated-ledger-v1.webp](2026-09-22/how-it-works-desktop-illustrated-ledger-v1.webp)
+
+The corrections from round 3 are confirmed: category colors avoid status hues, each category has one icon (no dot), and secondary text is gray. Build notes:
+- The illustration's green strokes become ink with a terracotta pencil, since green is reserved for status.
+- Excluded rows get a muted transfer icon, not the dashed "needs category" slot.
+- The owner asked for a "How X works" section for every feature (spec §9).

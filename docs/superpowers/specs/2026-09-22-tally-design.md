@@ -213,7 +213,12 @@ The seed data tells the story of a fictional household ("the Rivera family") wit
 
 Seed dates are relative to the current month, so the demo always looks current. The nightly job rebuilds the demo database and bucket from the seed. Visitors can edit anything; their changes are gone the next morning.
 
-The "How it works" page explains the architecture using the one-sentence explanations from this spec.
+The "How Tally works" page has two parts:
+
+1. **Architecture:** the system diagram (built as SVG) and the one-sentence explanation of each part (§4).
+2. **One section per feature (all 8),** each with the feature's one-sentence explanation, its rule in plain words (taken from §6 and §6.1), and a small worked example using the demo's own numbers. For example: "Safe to spend = $1,850 budget − $424 spent − $142 overdue bill."
+
+Every screen has a small "How this works" link to its feature's section. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
 
 ## 10. Errors, security, and operations
 
