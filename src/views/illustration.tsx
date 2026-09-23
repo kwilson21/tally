@@ -21,7 +21,8 @@ export function LedgerIllustration() {
 				<line x1="67" y1="38" x2="67" y2="60" />
 				<line x1="41" y1="56" x2="72" y2="42" />
 			</g>
-			<g class="stroke-accent">
+			{/* Filled with paper so the notebook behind the pencil is hidden, not seen through it. */}
+			<g class="stroke-accent fill-paper">
 				<path d="M96 26 L106 30 L88 96 L78 92 Z" />
 				<path d="M78 92 L88 96 L80 106 Z" />
 				<line x1="94" y1="33" x2="104" y2="37" />
