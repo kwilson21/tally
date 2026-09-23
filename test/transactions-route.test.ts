@@ -33,7 +33,7 @@ describe("GET /transactions", () => {
 		expect(html).toMatch(/Excluded/);
 		// Day headings ("Today, Sep 22" or "Sep 21"); which day is newest depends on the seed and today.
 		expect(html).toMatch(/<h2[^>]*>(Today, )?[A-Z][a-z]{2} \d{1,2}<\/h2>/);
-		expect(rowCount(html)).toBe(35);
+		expect(rowCount(html)).toBe(25);
 	});
 
 	it("filters to what needs a category, with the chip checked", async () => {
@@ -66,6 +66,37 @@ describe("GET /transactions", () => {
 		);
 		expect(html).toContain(
 			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"',
+		);
+	});
+
+	it("pages through results with real links, 25 at a time", async () => {
+		const first = (await get("/transactions")).html;
+		expect(first).toMatch(
+			/<p id="result-count"[^>]*>Showing 1–25 of 35 transactions<\/p>/,
+		);
+		expect(first).toMatch(/<nav aria-label="Pages"/);
+		expect(first).toContain("Page 1 of 2");
+		expect(first).toMatch(
+			/<a[^>]*href="\/transactions\?page=2"[^>]*rel="next"[^>]*>Older<\/a>/,
+		);
+		expect(first).not.toContain(">Newer<");
+
+		const second = (await get("/transactions?page=2")).html;
+		expect(rowCount(second)).toBe(10);
+		expect(second).toMatch(/Showing 26–35 of 35 transactions/);
+		expect(second).toMatch(
+			/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
+		);
+		expect(second).not.toContain(">Older<");
+	});
+
+	it("keeps the filters in page links and hides the pager on a single page", async () => {
+		// All months: 90 history rows + 35 this month = 125, so 5 pages.
+		const html = (await get("/transactions?month=all")).html;
+		expect(html).toContain("Page 1 of 5");
+		expect(html).toMatch(/href="\/transactions\?month=all&amp;page=2"/);
+		expect((await get("/transactions?uncategorized=1")).html).not.toContain(
+			'aria-label="Pages"',
 		);
 	});
 

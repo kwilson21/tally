@@ -7,6 +7,8 @@ export type Filters = {
 	category: number | null;
 	uncategorized: boolean;
 	excluded: boolean;
+	/** 1-based page of results. Changing any filter starts again at page 1. */
+	page: number;
 };
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -17,12 +19,14 @@ export function parseFilters(
 ): Filters {
 	const month = params.get("month") ?? "";
 	const category = Number(params.get("category"));
+	const page = Number(params.get("page"));
 	return {
 		q: (params.get("q") ?? "").trim().slice(0, 100),
 		month: month === "all" || MONTH.test(month) ? month : thisMonth,
 		category: Number.isInteger(category) && category > 0 ? category : null,
 		uncategorized: params.get("uncategorized") === "1",
 		excluded: params.get("excluded") === "1",
+		page: Number.isInteger(page) && page > 1 ? page : 1,
 	};
 }
 
@@ -34,6 +38,7 @@ export function filtersToQuery(f: Filters, thisMonth: string): string {
 	if (f.category !== null) p.set("category", String(f.category));
 	if (f.uncategorized) p.set("uncategorized", "1");
 	if (f.excluded) p.set("excluded", "1");
+	if (f.page > 1) p.set("page", String(f.page));
 	return p.toString();
 }
 

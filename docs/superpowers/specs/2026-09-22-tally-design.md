@@ -179,7 +179,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 | Screen | Contents | Features |
 |---|---|---|
 | **Home** | Safe to spend as the headline number; a spent/left bar per category; a "N transactions need a category" prompt linking to a filtered list; bills due in the next 7 days | 1, 2 |
-| **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note. "Needs category" counts the same transactions as Home. The Excluded filter shows only excluded transactions. Search matches the merchant name, raw name, and note. | 3, 4, 5 |
+| **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note. "Needs category" counts the same transactions as Home. The Excluded filter shows only excluded transactions. Search matches the merchant name, raw name, and note. The list shows 25 transactions per page. | 3, 4, 5 |
 | **Bills** | Each bill with its status, plus add, edit, and deactivate | 2 |
 | **Trends** | Spending by category over the last 6 months, and this month vs. last month | 6 |
 | **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, and Fix connection for items that need attention | 7 |

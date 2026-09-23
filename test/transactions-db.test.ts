@@ -6,6 +6,7 @@ import {
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
+	PAGE_SIZE,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
@@ -19,12 +20,33 @@ beforeEach(async () => {
 });
 
 describe("listTransactions", () => {
-	it("lists this month newest first", async () => {
-		const { rows, more } = await list("");
-		expect(rows).toHaveLength(35);
-		expect(more).toBe(false);
-		const dates = rows.map((r) => r.date);
+	it("lists this month newest first, one page at a time", async () => {
+		const first = await list("");
+		expect(first).toMatchObject({ total: 35, page: 1, pages: 2 });
+		expect(first.rows).toHaveLength(PAGE_SIZE);
+		const second = await list("page=2");
+		expect(second).toMatchObject({ total: 35, page: 2, pages: 2 });
+		expect(second.rows).toHaveLength(35 - PAGE_SIZE);
+		const dates = [...first.rows, ...second.rows].map((r) => r.date);
 		expect(dates).toEqual([...dates].sort().reverse());
+		expect(new Set([...first.rows, ...second.rows].map((r) => r.id)).size).toBe(
+			35,
+		);
+	});
+
+	it("shows the last page when asked for one past the end", async () => {
+		const { page, rows } = await list("page=99");
+		expect(page).toBe(2);
+		expect(rows).toHaveLength(35 - PAGE_SIZE);
+	});
+
+	it("has one empty page when nothing matches", async () => {
+		expect(await list("q=zzz")).toMatchObject({
+			rows: [],
+			total: 0,
+			page: 1,
+			pages: 1,
+		});
 	});
 
 	it("filters to what needs a category, matching Home's count", async () => {
@@ -72,6 +94,7 @@ describe("listTransactions", () => {
 
 	it("searches every month when asked", async () => {
 		const { rows } = await list("month=all&q=trader");
+		expect(rows.length).toBeLessThanOrEqual(PAGE_SIZE);
 		expect(new Set(rows.map((r) => r.date.slice(0, 7))).size).toBe(6);
 		expect(rows.every((r) => r.displayName === "Trader Joe's")).toBe(true);
 	});

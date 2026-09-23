@@ -56,7 +56,7 @@ The pure parts are tested first: filter parsing, day labels, search escaping, an
 4. **"Always use this category for this merchant" applies to more than future transactions.** It also recategorizes this merchant's existing transactions, except ones a person already categorized (`category_source = user`). This is spec §7's priority order (a merchant rule outranks Jev), applied now instead of waiting for the next sync, so the demo's "Set a rule for a merchant" shows a visible result.
 5. **Changing the category marks it as a person's choice** (`category_source = user`, confidence cleared). Saving without changing the category, for example only editing the note, leaves the source as it was.
 6. **Form posts from other sites are rejected.** A `POST` whose `Origin` header names another host gets a 403. It's one small middleware. The demo has no login and production uses Access cookies, so this is the simple guard against cross-site form posts. Task B0 adds it to spec §10.
-7. **The list shows at most 200 rows**, with "Showing the first 200. Narrow the search to see more." A month has about 35 rows, so this only matters for "All months".
+7. **The list is paged, 25 rows at a time** (owner request on #42, replacing a 200-row cap). "Newer" and "Older" links plus "Page N of M", with each page a real URL (`?page=2`). Changing a filter returns to page 1, and a page past the end shows the last page. The live count reads "Showing 26–35 of 35 transactions".
 
 ---
 

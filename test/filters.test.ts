@@ -15,6 +15,7 @@ describe("parseFilters", () => {
 			category: null,
 			uncategorized: false,
 			excluded: false,
+			page: 1,
 		});
 	});
 
@@ -27,6 +28,7 @@ describe("parseFilters", () => {
 		expect(parse("month=2026-07").month).toBe("2026-07");
 		expect(parse("category=3").category).toBe(3);
 		expect(parse("q=%20bakery%20").q).toBe("bakery");
+		expect(parse("page=3").page).toBe(3);
 	});
 
 	it("ignores malformed values instead of failing", () => {
@@ -35,6 +37,8 @@ describe("parseFilters", () => {
 		expect(parse("month=2026-00").month).toBe("2026-09");
 		expect(parse("category=abc").category).toBeNull();
 		expect(parse("category=0").category).toBeNull();
+		expect(parse("page=0").page).toBe(1);
+		expect(parse("page=abc").page).toBe(1);
 		expect(parse(`q=${"x".repeat(200)}`).q).toHaveLength(100);
 	});
 });
@@ -46,6 +50,7 @@ describe("filtersToQuery", () => {
 			"q=bakery&month=2026-08&uncategorized=1",
 		);
 		expect(filtersToQuery(parse(""), "2026-09")).toBe("");
+		expect(filtersToQuery(parse("page=2"), "2026-09")).toBe("page=2");
 	});
 });
 

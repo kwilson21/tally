@@ -1,13 +1,17 @@
 import { type Context, Hono } from "hono";
 import { dayLabel, monthLabel, todayUtc } from "../dates";
 import {
-	LIST_LIMIT,
 	type ListRow,
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
+	PAGE_SIZE,
 } from "../db/transactions";
-import { type Filters, parseFilters } from "../transactions/filters";
+import {
+	type Filters,
+	filtersToQuery,
+	parseFilters,
+} from "../transactions/filters";
 import { Chip } from "../views/chip";
 import { FormField } from "../views/form-field";
 import { Icon } from "../views/icons";
@@ -36,22 +40,47 @@ const pill =
 /** The whole Transactions page for these filters. Every htmx swap selects a part of this same page. */
 async function renderList(c: Context<App>, filters: Filters) {
 	const today = todayUtc();
-	const [{ rows, more }, months, needs, categories] = await Promise.all([
-		listTransactions(c.env.DB, filters),
-		monthsWithTransactions(c.env.DB),
-		needsCategoryCount(c.env.DB, filters.month),
-		c.env.DB.prepare(
-			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-		).all<Category>(),
-	]);
+	const [{ rows, total, page, pages }, months, needs, categories] =
+		await Promise.all([
+			listTransactions(c.env.DB, filters),
+			monthsWithTransactions(c.env.DB),
+			needsCategoryCount(c.env.DB, filters.month),
+			c.env.DB.prepare(
+				"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+			).all<Category>(),
+		]);
 
 	// Keep the active month in the picker even when it has no transactions.
 	if (filters.month !== "all" && !months.includes(filters.month)) {
 		months.push(filters.month);
 		months.sort().reverse();
 	}
-	const n = rows.length;
-	const count = `${more ? "More than " : ""}${n} transaction${n === 1 ? "" : "s"}`;
+	const noun = (n: number) => `transaction${n === 1 ? "" : "s"}`;
+	const first = (page - 1) * PAGE_SIZE + 1;
+	const count =
+		pages > 1
+			? `Showing ${first}–${first + rows.length - 1} of ${total} ${noun(total)}`
+			: `${total} ${noun(total)}`;
+	const pageHref = (n: number) => {
+		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
+		return `/transactions${query ? `?${query}` : ""}`;
+	};
+	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
+	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
+		<a
+			href={pageHref(n)}
+			rel={rel}
+			class="inline-flex min-h-11 items-center px-2"
+			hx-get={pageHref(n)}
+			hx-target="#results"
+			hx-select="#results > *"
+			hx-select-oob="#result-count:innerHTML"
+			hx-swap="innerHTML show:top"
+			hx-push-url="true"
+		>
+			{label}
+		</a>
+	);
 
 	return c.html(
 		<Layout
@@ -72,9 +101,9 @@ async function renderList(c: Context<App>, filters: Filters) {
 				hx-get="/transactions"
 				hx-trigger="input delay:300ms, submit"
 				hx-target="#results"
-				hx-select="#results"
+				hx-select="#results > *"
 				hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"
-				hx-swap="outerHTML"
+				hx-swap="innerHTML"
 				hx-push-url="true"
 			>
 				<FormField id="q" label="Search transactions" hideLabel>
@@ -176,10 +205,17 @@ async function renderList(c: Context<App>, filters: Filters) {
 							</>
 						))
 					)}
-					{more && (
-						<p class="mt-4 text-muted">
-							Showing the first {LIST_LIMIT}. Narrow the search to see more.
-						</p>
+					{pages > 1 && (
+						<nav
+							aria-label="Pages"
+							class="mt-4 flex items-center justify-between border-t border-rule pt-2"
+						>
+							<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
+							<span class="text-sm text-muted">
+								Page {page} of {pages}
+							</span>
+							<span>{page < pages && pageLink(page + 1, "next", "Older")}</span>
+						</nav>
 					)}
 				</section>
 				<div id="sheet" />
