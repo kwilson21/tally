@@ -9,11 +9,25 @@ describe("toCents (form input → cents)", () => {
 		["$1,284.50", 128450],
 		[" 0.99 ", 99],
 		["-45.10", -4510],
+		["1,000", 100000],
+		["$12,345.67", 1234567],
+		["-$5", -500],
 	])("%s → %i", (input, cents) => {
 		expect(toCents(input)).toBe(cents);
 	});
 
-	it.each(["", "abc", "12.345", "1.2.3", "$", "--5"])("rejects %j", (input) => {
+	it.each([
+		"",
+		"abc",
+		"12.345",
+		"1.2.3",
+		"$",
+		"--5",
+		"12,34",
+		"1,00",
+		"1,2345",
+		",100",
+	])("rejects %j", (input) => {
 		expect(() => toCents(input)).toThrow();
 	});
 });
@@ -25,8 +39,20 @@ describe("plaidAmountToCents (Plaid float → cents, never float math on stored 
 		[1.005, 101],
 		[-2450, -245000],
 		[64.18, 6418],
+		[2.675, 268],
+		[0.105, 11],
+		[1.015, 102],
+		[0.1 + 0.2, 30],
+		[1234567.89, 123456789],
+		[-0.005, -1],
+		[0.004, 0],
+		[1e-7, 0],
 	])("%d → %i", (amount, cents) => {
 		expect(plaidAmountToCents(amount)).toBe(cents);
+	});
+
+	it.each([1e-7, 0.004, -1e-7, -0.004])("%d → exactly 0, not -0", (amount) => {
+		expect(Object.is(plaidAmountToCents(amount), 0)).toBe(true);
 	});
 });
 

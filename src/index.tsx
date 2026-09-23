@@ -17,6 +17,8 @@ export default {
 	fetch: app.fetch,
 	async scheduled(_controller, env) {
 		// The nightly job. In the demo it restores the seed; production sync is added in Phase 2.
+		// "today" here is the UTC date, which is fine for the demo (it only shifts which day's
+		// seed is shown); production scheduling is decided in Phase 2.
 		if (env.DEMO === "true") {
 			await resetDemo(env.DB, new Date().toISOString().slice(0, 10));
 		}

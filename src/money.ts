@@ -1,22 +1,40 @@
 // Money is integer cents everywhere. Convert at the edges only: form input, Plaid, display.
 
-const DOLLARS = /^-?\d+(\.\d{1,2})?$/;
+// Requires comma grouping in threes ("1,000", "12,345.67") when commas are present; a bare
+// run of digits is also fine ("1000"). Rejects "12,34", "1,00", "1,2345", and a leading ",100".
+const DOLLARS = /^-?\$?(\d{1,3}(,\d{3})+|\d+)(\.\d{1,2})?$/;
 
 /** Parses a typed dollar amount ("$1,284.50") into integer cents. Throws on anything else. */
 export function toCents(input: string): number {
-	const cleaned = input.trim().replace(/[$,]/g, "");
-	if (!DOLLARS.test(cleaned)) throw new Error(`Not a dollar amount: ${input}`);
+	const trimmed = input.trim();
+	if (!DOLLARS.test(trimmed)) throw new Error(`Not a dollar amount: ${input}`);
+	const cleaned = trimmed.replace(/[$,]/g, "");
 	const negative = cleaned.startsWith("-");
 	const [whole = "0", fraction = ""] = cleaned.replace("-", "").split(".");
 	const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
 	return negative ? -cents : cents;
 }
 
-/** Converts Plaid's float amount to integer cents via its decimal string, so 1.005 → 101, not 100. */
+/**
+ * Converts Plaid's float amount to integer cents without trusting toFixed's decimal
+ * reconstruction. toPrecision(15) recovers the decimal a double was actually parsed from
+ * (doubles carry ~15-17 significant digits, and 15 is safely inside that without picking up
+ * binary-representation noise); the thousandths digit is then rounded half-up by hand to get
+ * cents. Amounts under half a cent (abs < 0.005) are zero, including -0, which real Plaid data
+ * never produces but which floating-point subtraction (e.g. 0.1 - 0.1) can.
+ */
 export function plaidAmountToCents(amount: number): number {
-	const [whole, fraction = ""] = Math.abs(amount).toFixed(3).split(".");
-	const thousandths = Number(whole) * 1000 + Number(fraction);
-	const cents = Math.round(thousandths / 10);
+	if (!Number.isFinite(amount) || Math.abs(amount) >= 1e13) {
+		throw new Error(`Not a Plaid amount: ${amount}`);
+	}
+	const abs = Math.abs(amount);
+	if (abs < 0.005) return 0;
+	const [whole = "0", fraction = ""] = abs.toPrecision(15).split(".");
+	const digits = fraction.padEnd(3, "0");
+	const cents =
+		Number(whole) * 100 +
+		Number(digits.slice(0, 2)) +
+		(Number(digits[2]) >= 5 ? 1 : 0);
 	return amount < 0 ? -cents : cents;
 }
 
