@@ -14,7 +14,20 @@ const TABLES_CHILD_FIRST = [
 	"plaid_items",
 ];
 
-/** Wipes the database and reloads the Rivera household. Only ever called when DEMO is "true". */
+/**
+ * The nightly reset runs only in the demo: DEMO is "true" and no Plaid credentials exist.
+ * Production always has Plaid credentials and the demo never does (spec §4), so a
+ * mistaken DEMO="true" in production still cannot wipe the family's data.
+ */
+export function canResetDemo(env: {
+	DEMO?: string;
+	PLAID_SECRET?: string;
+	PLAID_CLIENT_ID?: string;
+}): boolean {
+	return env.DEMO === "true" && !env.PLAID_SECRET && !env.PLAID_CLIENT_ID;
+}
+
+/** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
 export async function resetDemo(db: D1Database, today: string): Promise<void> {
 	const seed = buildSeed(today);
 	const b = (v: boolean) => (v ? 1 : 0);
