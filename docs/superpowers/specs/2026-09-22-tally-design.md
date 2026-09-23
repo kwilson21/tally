@@ -179,7 +179,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 | Screen | Contents | Features |
 |---|---|---|
 | **Home** | Safe to spend as the headline number; a spent/left bar per category; a "N transactions need a category" prompt linking to a filtered list; bills due in the next 7 days | 1, 2 |
-| **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note | 3, 4, 5 |
+| **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note. "Needs category" counts the same transactions as Home. The Excluded filter shows only excluded transactions. Search matches the merchant name, raw name, and note. | 3, 4, 5 |
 | **Bills** | Each bill with its status, plus add, edit, and deactivate | 2 |
 | **Trends** | Spending by category over the last 6 months, and this month vs. last month | 6 |
 | **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, and Fix connection for items that need attention | 7 |
@@ -189,6 +189,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 
 **How the pages behave:**
 - **Edits:** an edit returns the updated fragment, plus an `HX-Trigger` header with `toast` and `announce` keys for the confirmation toast and screen-reader announcement.
+- **Edit panel:** a page region, not a modal. Focus moves into it, and Cancel or the backdrop closes it. Escape isn't supported, because it would need custom JavaScript.
 - **Charts:** the server renders them as inline SVG. No chart library.
 - **Expand and collapse:** `<details>` / `<summary>`. No JavaScript.
 - **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires) and a small toast listener.
@@ -263,6 +264,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - Planned one-time expenses
 - Private per-person accounts
 - Statement upload (CSV or PDF) as a second transaction source
+- A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
 
 ## 13. Checked against docs before writing code (Phase 0)
