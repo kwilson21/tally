@@ -62,3 +62,7 @@ The corrections from round 3 are confirmed: category colors avoid status hues, e
 - The illustration's green strokes become ink with a terracotta pencil, since green is reserved for status.
 - Excluded rows get a muted transfer icon, not the dashed "needs category" slot.
 - The owner asked for a "How X works" section for every feature (spec §9).
+
+## Build checks
+
+- 2026-09-22, Phase 1a shell (branch `phase-1a-design-system`): checked in a browser at 1280×800 and 390×844. Inter and Newsreader load from our own origin; the demo banner, sidebar (desktop), bottom tabs (mobile), and tally-mark wordmark render; Home is marked current in terracotta. The console is clean with no CSP violations, and the toast and announce listeners work. Screenshots were shared with the owner in the review conversation. They weren't committed, to avoid adding a screenshot toolchain for one check.

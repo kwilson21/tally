@@ -7,5 +7,11 @@
 	"assets": {
 		"directory": "./public/",
 		"binding": "ASSETS"
+	},
+	// Runs before `wrangler dev` and `wrangler deploy`, so generated CSS and htmx always ship.
+	// Watch only src/: the build writes into public/, which would otherwise retrigger itself.
+	"build": {
+		"command": "npm run build",
+		"watch_dir": "src"
 	}
 }

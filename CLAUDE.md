@@ -6,6 +6,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at demo.thesupe
 - Spec: docs/superpowers/specs/2026-09-22-tally-design.md. If it isn't in the spec, don't build it; add it to the spec's Later list and ask.
 - Decisions: docs/decisions.md. Never reverse a decision silently; propose a new entry.
 - Tasks: GitHub Issues, one milestone per phase. ROADMAP.md links to them.
+- Design system: DESIGN.md. UI must use its tokens and components; update it in the same PR when adding either.
 
 ## Rules
 - Every part must be explainable in one plain sentence. If you can't explain it that way, don't add it.
