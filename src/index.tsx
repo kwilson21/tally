@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { destinations } from "./routes/destinations";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
 import { security } from "./security";
@@ -9,6 +10,7 @@ app.use("*", security);
 
 app.route("/", health);
 app.route("/", home);
+app.route("/", destinations);
 
 export default {
 	fetch: app.fetch,
