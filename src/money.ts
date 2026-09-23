@@ -27,7 +27,10 @@ type FormatOptions = {
 	signed?: boolean;
 };
 
-const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const dollars = new Intl.NumberFormat("en-US", {
+	style: "currency",
+	currency: "USD",
+});
 const wholeDollars = new Intl.NumberFormat("en-US", {
 	style: "currency",
 	currency: "USD",
@@ -35,7 +38,10 @@ const wholeDollars = new Intl.NumberFormat("en-US", {
 });
 
 /** Formats integer cents for display. */
-export function formatCents(cents: number, options: FormatOptions = {}): string {
+export function formatCents(
+	cents: number,
+	options: FormatOptions = {},
+): string {
 	const formatter = options.wholeDollars ? wholeDollars : dollars;
 	const text = formatter.format(Math.abs(cents) / 100);
 	if (options.signed) return cents < 0 ? `+${text}` : text;

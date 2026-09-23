@@ -16,10 +16,16 @@ beforeAll(async () => {
 		db.prepare("DELETE FROM accounts"),
 	]);
 	await db.batch([
-		db.prepare("INSERT INTO accounts (id, name, type) VALUES (1, 'Checking', 'depository')"),
-		db.prepare("INSERT INTO categories (id, name, icon, color, sort_order) VALUES (1, 'Groceries', 'groceries', 'cat-blue', 1), (2, 'Eating Out', 'eating-out', 'cat-plum', 2), (3, 'Old', 'kids', 'cat-ochre', 3)"),
+		db.prepare(
+			"INSERT INTO accounts (id, name, type) VALUES (1, 'Checking', 'depository')",
+		),
+		db.prepare(
+			"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (1, 'Groceries', 'groceries', 'cat-blue', 1), (2, 'Eating Out', 'eating-out', 'cat-plum', 2), (3, 'Old', 'kids', 'cat-ochre', 3)",
+		),
 		db.prepare("UPDATE categories SET archived = 1 WHERE id = 3"),
-		db.prepare("INSERT INTO budget_amounts VALUES (1, '2026-01', 60000), (2, '2026-01', 25000)"),
+		db.prepare(
+			"INSERT INTO budget_amounts VALUES (1, '2026-01', 60000), (2, '2026-01', 25000)",
+		),
 		db.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, excluded, is_split, parent_id, flag_income) VALUES
 			(1, 1, '2026-09-02', 4000, 'TJ', 1, 0, 0, NULL, 0),
 			(2, 1, '2026-09-30', 1000, 'CAFE', 2, 0, 0, NULL, 0),
@@ -37,10 +43,14 @@ beforeAll(async () => {
 describe("loadMonth", () => {
 	it("returns only counted transactions for the month", async () => {
 		const data = await loadMonth(db, "2026-09");
-		const amounts = data.transactions.map((t) => t.amountCents).sort((a, b) => a - b);
+		const amounts = data.transactions
+			.map((t) => t.amountCents)
+			.sort((a, b) => a - b);
 		// Excludes last/next month, the excluded transfer, and the split parent; keeps its children.
 		expect(amounts).toEqual([-245000, 1000, 1000, 1200, 2000, 4000]);
-		expect(data.transactions.find((t) => t.amountCents === -245000)?.income).toBe(true);
+		expect(
+			data.transactions.find((t) => t.amountCents === -245000)?.income,
+		).toBe(true);
 	});
 
 	it("returns active categories in sort order and all budget amounts", async () => {

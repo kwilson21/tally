@@ -2,31 +2,46 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { loadMonth } from "../src/db/month";
-import { buildSeed } from "../src/demo/seed";
 import { resetDemo } from "../src/demo/reset";
+import { buildSeed } from "../src/demo/seed";
 
 describe("buildSeed", () => {
-	it.each(["2026-09-22", "2026-09-01", "2026-02-28", "2027-01-31"])("designed totals hold on %s", (today) => {
-		const seed = buildSeed(today);
-		const month = today.slice(0, 7);
-		const counted = seed.transactions.filter(
-			(t) => t.date.startsWith(month) && !t.excluded && !t.isSplit,
-		);
+	it.each(["2026-09-22", "2026-09-01", "2026-02-28", "2027-01-31"])(
+		"designed totals hold on %s",
+		(today) => {
+			const seed = buildSeed(today);
+			const month = today.slice(0, 7);
+			const counted = seed.transactions.filter(
+				(t) => t.date.startsWith(month) && !t.excluded && !t.isSplit,
+			);
 
-		const summary = summarizeMonth({
-			month,
-			categories: seed.categories,
-			amounts: seed.budgetAmounts,
-			transactions: counted.map((t) => ({ categoryId: t.categoryId, amountCents: t.amountCents, income: t.flagIncome })),
-			unpaidDueBillsCents: 0,
-		});
+			const summary = summarizeMonth({
+				month,
+				categories: seed.categories,
+				amounts: seed.budgetAmounts,
+				transactions: counted.map((t) => ({
+					categoryId: t.categoryId,
+					amountCents: t.amountCents,
+					income: t.flagIncome,
+				})),
+				unpaidDueBillsCents: 0,
+			});
 
-		const spent = Object.fromEntries(summary.categories.map((c) => [c.name, c.spentCents]));
-		expect(spent).toEqual({ Groceries: 41200, "Eating Out": 28600, Gas: 18600, Kids: 21000, Household: 9500 });
-		expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
-		expect(summary.incomeCents).toBe(490000);
-		expect(summary.safeToSpendCents).toBe(28299);
-	});
+			const spent = Object.fromEntries(
+				summary.categories.map((c) => [c.name, c.spentCents]),
+			);
+			expect(spent).toEqual({
+				Groceries: 41200,
+				"Eating Out": 28600,
+				Gas: 18600,
+				Kids: 21000,
+				Household: 9500,
+			});
+			expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
+			expect(summary.incomeCents).toBe(490000);
+			expect(summary.safeToSpendCents).toBe(28299);
+		},
+	);
 
 	it("never dates a transaction after today", () => {
 		const seed = buildSeed("2026-09-03");
@@ -39,9 +54,9 @@ describe("buildSeed", () => {
 			seed.transactions
 				.filter((t) => t.date.startsWith(month) && t.categoryId === 2)
 				.reduce((sum, t) => sum + t.amountCents, 0);
-		expect(["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"].map(eatingOut)).toEqual([
-			17000, 19500, 21500, 24000, 26200,
-		]);
+		expect(
+			["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"].map(eatingOut),
+		).toEqual([17000, 19500, 21500, 24000, 26200]);
 	});
 
 	it("has exactly one merchant row per raw name, covering every transaction", () => {
@@ -66,11 +81,17 @@ describe("resetDemo", () => {
 		await resetDemo(env.DB, "2026-09-22");
 
 		const data = await loadMonth(env.DB, "2026-09");
-		const summary = summarizeMonth({ month: "2026-09", ...data, unpaidDueBillsCents: 0 });
+		const summary = summarizeMonth({
+			month: "2026-09",
+			...data,
+			unpaidDueBillsCents: 0,
+		});
 		expect(summary.safeToSpendCents).toBe(28299);
 		expect(summary.uncategorized.count).toBe(12);
 
-		const { results } = await env.DB.prepare("SELECT COUNT(*) AS n FROM merchants WHERE raw_name = 'SQ *LOCAL BAKERY 4432'").all<{ n: number }>();
+		const { results } = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM merchants WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).all<{ n: number }>();
 		expect(results[0]?.n).toBe(1);
 	});
 });

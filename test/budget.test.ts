@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	type BudgetAmount,
-	type CountedTransaction,
 	budgetForMonth,
+	type CountedTransaction,
 	statusSentence,
 	summarizeMonth,
 } from "../src/budget";
@@ -34,7 +34,11 @@ describe("budgetForMonth", () => {
 	});
 });
 
-const tx = (categoryId: number | null, amountCents: number, income = false): CountedTransaction => ({
+const tx = (
+	categoryId: number | null,
+	amountCents: number,
+	income = false,
+): CountedTransaction => ({
 	categoryId,
 	amountCents,
 	income,
@@ -60,9 +64,30 @@ describe("summarizeMonth", () => {
 
 	it("computes spent, left, and over per category", () => {
 		expect(summary.categories).toEqual([
-			{ id: 1, name: "Groceries", budgetCents: 60000, spentCents: 41200, leftCents: 18800, over: false },
-			{ id: 2, name: "Eating Out", budgetCents: 25000, spentCents: 28600, leftCents: -3600, over: true },
-			{ id: 3, name: "Gas", budgetCents: 20000, spentCents: 13800, leftCents: 6200, over: false },
+			{
+				id: 1,
+				name: "Groceries",
+				budgetCents: 60000,
+				spentCents: 41200,
+				leftCents: 18800,
+				over: false,
+			},
+			{
+				id: 2,
+				name: "Eating Out",
+				budgetCents: 25000,
+				spentCents: 28600,
+				leftCents: -3600,
+				over: true,
+			},
+			{
+				id: 3,
+				name: "Gas",
+				budgetCents: 20000,
+				spentCents: 13800,
+				leftCents: 6200,
+				over: false,
+			},
 		]);
 	});
 
@@ -89,7 +114,10 @@ describe("summarizeMonth", () => {
 			transactions: [tx(3, 5000)],
 			unpaidDueBillsCents: 0,
 		});
-		expect(s.categories.map((c) => c.name)).toEqual(["Groceries", "Eating Out"]);
+		expect(s.categories.map((c) => c.name)).toEqual([
+			"Groceries",
+			"Eating Out",
+		]);
 		expect(s.totalSpentCents).toBe(5000);
 	});
 });
@@ -106,10 +134,22 @@ const cat = (name: string, leftCents: number) => ({
 describe("statusSentence", () => {
 	it.each([
 		[[cat("Groceries", 100), cat("Gas", 50)], "Everything is on track."],
-		[[cat("Eating Out", -3600), cat("Gas", 50)], "Eating Out is $36 over. Everything else is on track."],
-		[[cat("Eating Out", -3650), cat("Gas", 50)], "Eating Out is $36.50 over. Everything else is on track."],
-		[[cat("Eating Out", -100), cat("Gas", -200), cat("Kids", 5)], "Eating Out and Gas are over. Everything else is on track."],
-		[[cat("Eating Out", -100), cat("Gas", -200), cat("Kids", -5)], "Eating Out, Gas, and Kids are over."],
+		[
+			[cat("Eating Out", -3600), cat("Gas", 50)],
+			"Eating Out is $36 over. Everything else is on track.",
+		],
+		[
+			[cat("Eating Out", -3650), cat("Gas", 50)],
+			"Eating Out is $36.50 over. Everything else is on track.",
+		],
+		[
+			[cat("Eating Out", -100), cat("Gas", -200), cat("Kids", 5)],
+			"Eating Out and Gas are over. Everything else is on track.",
+		],
+		[
+			[cat("Eating Out", -100), cat("Gas", -200), cat("Kids", -5)],
+			"Eating Out, Gas, and Kids are over.",
+		],
 		[[], "No budgets set yet."],
 	])("%#", (categories, sentence) => {
 		expect(statusSentence(categories)).toBe(sentence);

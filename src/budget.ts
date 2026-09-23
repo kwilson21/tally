@@ -2,10 +2,18 @@
 
 import { formatCents } from "./money";
 
-export type BudgetAmount = { categoryId: number; effectiveMonth: string; amountCents: number };
+export type BudgetAmount = {
+	categoryId: number;
+	effectiveMonth: string;
+	amountCents: number;
+};
 export type Category = { id: number; name: string };
 /** A counted transaction: in the month, not excluded, not a split parent (the query guarantees this). */
-export type CountedTransaction = { categoryId: number | null; amountCents: number; income: boolean };
+export type CountedTransaction = {
+	categoryId: number | null;
+	amountCents: number;
+	income: boolean;
+};
 
 export type CategorySummary = Category & {
 	budgetCents: number;
@@ -25,7 +33,11 @@ export type MonthSummary = {
 };
 
 /** The budget for a category in a month: the latest amount effective on or before that month, or null. */
-export function budgetForMonth(amounts: BudgetAmount[], categoryId: number, month: string): number | null {
+export function budgetForMonth(
+	amounts: BudgetAmount[],
+	categoryId: number,
+	month: string,
+): number | null {
 	let best: BudgetAmount | undefined;
 	for (const a of amounts) {
 		if (a.categoryId !== categoryId || a.effectiveMonth > month) continue;
@@ -60,7 +72,10 @@ export function summarizeMonth(input: MonthInput): MonthSummary {
 			uncategorizedCents += t.amountCents;
 			uncategorizedCount += 1;
 		} else {
-			spentByCategory.set(t.categoryId, (spentByCategory.get(t.categoryId) ?? 0) + t.amountCents);
+			spentByCategory.set(
+				t.categoryId,
+				(spentByCategory.get(t.categoryId) ?? 0) + t.amountCents,
+			);
 		}
 	}
 
@@ -70,30 +85,47 @@ export function summarizeMonth(input: MonthInput): MonthSummary {
 		if (budgetCents === null) continue;
 		const spentCents = spentByCategory.get(c.id) ?? 0;
 		const leftCents = budgetCents - spentCents;
-		categories.push({ ...c, budgetCents, spentCents, leftCents, over: leftCents < 0 });
+		categories.push({
+			...c,
+			budgetCents,
+			spentCents,
+			leftCents,
+			over: leftCents < 0,
+		});
 	}
 
-	const totalBudgetCents = categories.reduce((sum, c) => sum + c.budgetCents, 0);
+	const totalBudgetCents = categories.reduce(
+		(sum, c) => sum + c.budgetCents,
+		0,
+	);
 
 	return {
 		month: input.month,
 		categories,
-		uncategorized: { spentCents: uncategorizedCents, count: uncategorizedCount },
+		uncategorized: {
+			spentCents: uncategorizedCents,
+			count: uncategorizedCount,
+		},
 		incomeCents,
 		totalBudgetCents,
 		totalSpentCents,
-		safeToSpendCents: totalBudgetCents - totalSpentCents - input.unpaidDueBillsCents,
+		safeToSpendCents:
+			totalBudgetCents - totalSpentCents - input.unpaidDueBillsCents,
 	};
 }
 
-const listFormat = new Intl.ListFormat("en-US", { style: "long", type: "conjunction" });
+const listFormat = new Intl.ListFormat("en-US", {
+	style: "long",
+	type: "conjunction",
+});
 
 /** The one-line status under the headline, written by code from the numbers (never by AI). */
 export function statusSentence(categories: CategorySummary[]): string {
 	if (categories.length === 0) return "No budgets set yet.";
 	const over = categories.filter((c) => c.over);
 	if (over.length === 0) return "Everything is on track.";
-	const rest = over.length < categories.length ? " Everything else is on track." : "";
+	const rest =
+		over.length < categories.length ? " Everything else is on track." : "";
 	if (over.length === 1) {
 		const [only] = over as [CategorySummary];
 		const amount = -only.leftCents;
