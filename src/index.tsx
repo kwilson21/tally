@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { todayUtc } from "./dates";
-import { resetDemo } from "./demo/reset";
+import { canResetDemo, resetDemo } from "./demo/reset";
 import { destinations } from "./routes/destinations";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
@@ -20,7 +20,7 @@ export default {
 		// The nightly job. In the demo it restores the seed; production sync is added in Phase 2.
 		// "today" here is the UTC date, which is fine for the demo (it only shifts which day's
 		// seed is shown); production scheduling is decided in Phase 2.
-		if (env.DEMO === "true") {
+		if (canResetDemo(env)) {
 			await resetDemo(env.DB, todayUtc());
 		}
 	},
