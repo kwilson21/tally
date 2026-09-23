@@ -41,13 +41,18 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | Icon | Lucide line icons, 1.75 stroke, currentColor, always aria-hidden. |
 | Sidebar / BottomTabs | The same destinations: a sidebar on desktop, four tabs plus More on phones. |
 | Layout | Every page's shell: banner, navigation, main, toast and announce regions. |
-| Planned (Phase 1c): ProgressRow, TransactionRow, CategoryChip, BottomSheet, FormField, Band | Built when the first screen needs them. |
+| CategoryIcon | A category's line icon, drawn in its color token. |
+| ProgressRow | One category: icon, name, "spent of budget," and an SVG bar with a notch at the limit; over budget adds an alert icon and the words "over budget." |
+| Band | The one tinted row per screen that links to the thing to do next. |
+| LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
+| Planned (Phase 1c-2): TransactionRow, CategoryChip, BottomSheet, FormField | Built when the first screen needs them. |
 
 ## Patterns
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.
 - Illustrations: SVG, drawn with the icon stroke rules, ink plus one accent. Generated images never ship.
 - Money: integer cents in the database and in code; format only in views with `formatCents` (src/money.ts).
-- Motion: bars fill and the headline counts up. `prefers-reduced-motion` shows the final state.
+- Motion: budget bars fill on load (CSS). `prefers-reduced-motion` shows the final state. No count-up: it would need custom JavaScript.
+- Bars are inline SVG. The CSP forbids style attributes, and SVG width attributes aren't CSS.
 
 ## Governance
 - A visual change starts as a generated study, gets owner selection, and is recorded in docs/design-concepts/README.md.
