@@ -14,6 +14,13 @@ describe("app shell", () => {
 		expect(html).toContain('src="/js/toast.js"');
 	});
 
+	it("links the tally-mark favicon, so browsers don't request a missing /favicon.ico", async () => {
+		const html = await home();
+		expect(html).toContain(
+			'<link rel="icon" href="/favicon.svg" type="image/svg+xml"',
+		);
+	});
+
 	it("shows the demo banner", async () => {
 		expect(await home()).toContain("Demo data. Nothing here is real.");
 	});

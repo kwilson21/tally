@@ -21,6 +21,7 @@ export function Layout({
 				<meta charset="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
 				<title>{title}</title>
+				<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 				<link rel="stylesheet" href="/assets/app.css" />
 				<script src="/vendor/htmx.min.js" defer></script>
 				<script src="/js/toast.js" defer></script>

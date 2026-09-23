@@ -15,7 +15,8 @@
 		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
 		"lint": "biome check .",
 		"format": "biome check --write .",
-		"test": "vitest run"
+		"test": "vitest run",
+		"screenshots": "node scripts/screenshots.mjs"
 	},
 	"dependencies": {
 		"hono": "^4.13.8",
@@ -25,6 +26,7 @@
 		"@biomejs/biome": "^2.5.14",
 		"@cloudflare/vitest-plugin": "^1.2.3",
 		"@tailwindcss/cli": "^4.3.3",
+		"playwright": "^1.63.0",
 		"tailwindcss": "^4.3.3",
 		"typescript": "^7.0.2",
 		"vitest": "^4.1.11",
