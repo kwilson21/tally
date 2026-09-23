@@ -1,6 +1,9 @@
+import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
+import { loadMonth } from "../src/db/month";
 import { buildSeed } from "../src/demo/seed";
+import { resetDemo } from "../src/demo/reset";
 
 describe("buildSeed", () => {
 	it.each(["2026-09-22", "2026-09-01", "2026-02-28", "2027-01-31"])("designed totals hold on %s", (today) => {
@@ -54,5 +57,20 @@ describe("buildSeed", () => {
 			{ categoryId: 2, effectiveMonth: "2026-04", amountCents: 20000 },
 			{ categoryId: 2, effectiveMonth: "2026-07", amountCents: 25000 },
 		]);
+	});
+});
+
+describe("resetDemo", () => {
+	it("replaces all data with the seed, and running it twice gives the same result", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		await resetDemo(env.DB, "2026-09-22");
+
+		const data = await loadMonth(env.DB, "2026-09");
+		const summary = summarizeMonth({ month: "2026-09", ...data, unpaidDueBillsCents: 0 });
+		expect(summary.safeToSpendCents).toBe(28299);
+		expect(summary.uncategorized.count).toBe(12);
+
+		const { results } = await env.DB.prepare("SELECT COUNT(*) AS n FROM merchants WHERE raw_name = 'SQ *LOCAL BAKERY 4432'").all<{ n: number }>();
+		expect(results[0]?.n).toBe(1);
 	});
 });
