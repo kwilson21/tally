@@ -25,6 +25,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at demo.thesupe
 ## Before writing code
 - Check current docs (Context7 or official docs) for any API you use. Never write from memory.
 - TDD: failing test first. Most tests cover pure money logic; route tests use the Workers runtime; E2E only for critical flows.
+- Tests: import env and exports from "cloudflare:workers" (not the deprecated cloudflare:test exports).
 
 ## Commands
 - npm run dev / npm test / npm run typecheck / npm run lint / npm run format
