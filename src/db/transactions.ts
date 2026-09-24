@@ -1,3 +1,5 @@
+import type { JevInput } from "../ai/categorize";
+import type { Decision } from "../ai/decide";
 import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern } from "../transactions/filters";
 
@@ -122,6 +124,8 @@ export type TransactionDetail = ListRow & {
 	/** The merchant's chosen display name, or null when it falls back to the raw name. */
 	merchantName: string | null;
 	categorySource: "user" | "merchant_rule" | "jev" | null;
+	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
+	categoryConfidence: number | null;
 };
 
 /** One transaction with what the edit panel shows: account, merchant name, and category source. */
@@ -133,7 +137,7 @@ export async function getTransaction(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				COALESCE(m.display_name, t.raw_name) AS displayName, m.display_name AS merchantName, t.note,
-				t.excluded, t.flag_income AS income, t.category_source AS categorySource,
+				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				a.name AS accountName, a.mask AS accountMask
 			FROM transactions t
@@ -212,4 +216,74 @@ export async function saveEdit(
 		);
 	}
 	await db.batch(statements);
+}
+
+/**
+ * Applies merchant rules to transactions nobody has categorized yet (spec §7: a merchant rule
+ * comes before Jev). A person's choice, or a category from anywhere else, is never touched.
+ */
+export async function applyMerchantRules(db: D1Database): Promise<void> {
+	await db
+		.prepare(
+			`UPDATE transactions SET
+				category_id = (SELECT m.default_category_id FROM merchants m WHERE m.raw_name = transactions.raw_name),
+				category_source = 'merchant_rule', category_confidence = NULL, updated_at = datetime('now')
+			WHERE category_id IS NULL AND category_source IS NULL
+				AND EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = transactions.raw_name AND m.default_category_id IS NOT NULL)`,
+		)
+		.run();
+}
+
+/**
+ * Transactions to ask Jev about, newest first: the ones that need a category (the same set
+ * Home counts), with no category source and no stored confidence. A stored confidence means
+ * Jev already looked and wasn't sure (decision 27).
+ */
+export async function pendingForJev(
+	db: D1Database,
+	limit: number,
+): Promise<(JevInput & { id: number })[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, t.raw_name AS rawName, m.display_name AS displayName,
+				t.amount_cents AS amountCents, a.type AS accountType
+			FROM transactions t
+			JOIN accounts a ON a.id = t.account_id
+			LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			WHERE ${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL
+			ORDER BY t.date DESC, t.id DESC
+			LIMIT ?`,
+		)
+		.bind(limit)
+		.all<JevInput & { id: number }>();
+	return results;
+}
+
+/**
+ * Stores what code decided from Jev's answer. It only writes to a transaction that is still
+ * uncategorized with no source, so a person's choice made in the meantime always wins.
+ */
+export async function saveJevResult(
+	db: D1Database,
+	id: number,
+	d: Decision,
+): Promise<void> {
+	await db
+		.prepare(
+			`UPDATE transactions SET
+				category_id = ?, category_source = ?, category_confidence = ?,
+				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
+				flag_income = MAX(flag_income, ?), updated_at = datetime('now')
+			WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
+		)
+		.bind(
+			d.categoryId,
+			d.categoryId === null ? null : "jev",
+			d.confidence,
+			d.flags.transfer ? 1 : 0,
+			d.flags.reimbursement ? 1 : 0,
+			d.flags.income ? 1 : 0,
+			id,
+		)
+		.run();
 }

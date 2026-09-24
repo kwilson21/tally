@@ -369,6 +369,11 @@ function EditSheet({ tx, back, categories, values, errors = {} }: SheetProps) {
 							</Chip>
 						))}
 					</div>
+					{tx.categorySource === "jev" && tx.categoryConfidence !== null && (
+						<p class="text-sm text-muted">
+							Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
+						</p>
+					)}
 					{errors.category && (
 						<p id="category-error" role="alert" class="text-sm text-over">
 							{errors.category}

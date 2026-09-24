@@ -123,19 +123,20 @@
   - A Jev failure never fails the reset.
 - [ ] Wire it into `src/index.tsx` after `resetDemo`. Production calls it too; with no data yet, it does nothing until Phase 2 sync adds transactions.
 
-### Task 5: Set the threshold on the seed data (spec §7)
+### Task 5: Set the threshold on the seed data (spec §7), after the first live run
 
-- [ ] With a real key, run the nightly job locally:
-  - `.dev.vars` holds `JEV_API_KEY`: the owner's laptop, or this environment if the key is added to its settings.
-  - Then `npm run dev`, `npm run db:seed:local`, and `curl /cdn-cgi/handler/scheduled` once more.
-  - Then list the results: `wrangler d1 execute DB --local --command "SELECT raw_name, category_id, category_confidence, flag_income, flag_transfer FROM transactions WHERE category_source = 'jev' OR category_confidence IS NOT NULL"`.
-- [ ] Check the 12 results by eye with the owner, and compare confidences for right and wrong picks. Choose the threshold, keep 0.80 or change it, and record the numbers in the PR and the decision entry.
+The key stays only on the demo Worker (owner's choice): no key in this environment or CI.
+- [ ] Ship with 0.80. After the owner merges and the demo is deployed, the 09:00 UTC run asks Jev about the seed's 12 uncategorized transactions, using the Worker's own `JEV_API_KEY`.
+- [ ] The next morning, read the results from the demo database:
+      `wrangler d1 execute DB --env demo --remote --command "SELECT t.raw_name, c.name AS category, t.category_source, t.category_confidence, t.flag_income, t.flag_transfer, t.flag_reimbursement FROM transactions t LEFT JOIN categories c ON c.id = t.category_id WHERE t.category_source = 'jev' AND t.category_confidence != 0.94 OR (t.category_source IS NULL AND t.category_confidence IS NOT NULL)"`
+      This is fake seed data, so reading it is fine; it isn't logged anywhere.
+- [ ] Review the 12 with the owner: right and wrong picks against their confidences. Keep 0.80 or change it in a one-line PR, and record the numbers in decision 27's follow-up entry.
 
 ### Task 6: Edit sheet line, docs, checks, PR
 
 - [ ] Route test first: a `jev` row's sheet shows "Picked by Jev · 93% sure", and a `user` row's doesn't. Then add the line.
 - [ ] Run `npm run build && npm run typecheck && npm run lint && npm test`, `npm run e2e`, `npm run screenshots`, and the demo dry run.
-- [ ] Open the PR with "Closes #12" and the Task 5 numbers. It's a UI PR, because the sheet line changes; the owner merges.
+- [ ] Open the PR with "Closes #12". It's a UI PR, because the sheet line changes; the owner merges.
 - [ ] After merge, deploy with `npx wrangler deploy --env demo`. The next 09:00 UTC run applies Jev on the live demo. Check the next morning with a remote query of Jev's rows (counts only), and on the site.
 
 ---

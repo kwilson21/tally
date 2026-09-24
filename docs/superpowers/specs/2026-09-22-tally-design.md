@@ -166,6 +166,8 @@ The amount tolerance (10%) and date window (±5 days) are single config values. 
 
 The confidence threshold is a single config value, set during Phase 1 after checking Jev's output on the seed data.
 
+**When Jev runs (Phase 1, #12):** only in the nightly job, never while a page loads. In the demo it runs right after the reset. The job applies merchant rules to uncategorized transactions first, then asks Jev about the rest: at most 40 calls a night. A failed call (rate limit, server error, timeout, bad key) stops that night's run, and the next night retries. The threshold starts at 0.80 and applies to the category's confidence and to each flag's probability. Below the threshold, the category stays empty but its confidence is stored, so Jev isn't asked about the same transaction again (decision 27). Jev is told the raw name, the merchant's display name, the amount in cents with its direction (money out or in), and the account type. The edit panel shows "Picked by Jev · N% sure" when Jev chose the category. Only the log line `jev: <status> <request id>` is ever logged.
+
 **Jev input:** the raw name, merchant display name, amount, account type, and Plaid's own category hint if present.
 
 **Boundary:** all Jev calls go through one module (`src/ai/categorize.ts`) with one function signature. Switching providers changes only that file.

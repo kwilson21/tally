@@ -167,3 +167,43 @@ describe("POST /transactions/:id", () => {
 		expect((await get("/")).html).toContain("11 transactions need a category");
 	});
 });
+
+describe("who picked the category", () => {
+	const setSource = (source: string | null, confidence: number | null) =>
+		env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = ?, category_confidence = ? WHERE id = ?",
+		)
+			.bind(source, confidence, bakery)
+			.run();
+
+	it("says when Jev picked it, with how sure Jev was", async () => {
+		await setSource("jev", 0.934);
+		const { html } = await get(`/transactions/${bakery}`);
+		expect(html).toContain("Picked by Jev · 93% sure");
+	});
+
+	it("says nothing for a person's choice or a merchant rule", async () => {
+		await setSource("user", null);
+		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
+			"Picked by Jev",
+		);
+		await setSource("merchant_rule", null);
+		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
+			"Picked by Jev",
+		);
+	});
+
+	it("goes away once a person chooses the category", async () => {
+		await setSource("jev", 0.9);
+		const { res } = await post(`/transactions/${bakery}`, {
+			category: "1",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+		});
+		expect(res.status).toBe(200);
+		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
+			"Picked by Jev",
+		);
+	});
+});
