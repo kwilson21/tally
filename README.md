@@ -29,14 +29,12 @@ Deploys are manual and done by the owner. The demo is the `demo` environment in 
     npx wrangler d1 migrations apply DB --env demo --remote
     npx wrangler deploy --env demo
 
-**Once, to load the sample data** into the empty database. Seed dates follow today's date, so export and load on the same day.
+**Once, to load the sample data** into the empty database. Seed dates follow today's date, so this copies a freshly seeded local database. Run `npm run db:migrate:local`, start the app with `npm run dev` and leave it running, then in a second terminal run the lines below as one command. The `&&`s stop it at the first failure, so it never copies stale local data: if the local reset doesn't run, nothing is exported or loaded.
 
-    npm run db:migrate:local
-    npm run dev                      # leave running; in a second terminal:
-    npm run db:seed:local
+    npm run db:seed:local && \
     npx wrangler d1 export DB --local --no-schema --output seed.sql \
-      --table categories --table accounts --table budget_amounts --table merchants --table transactions
-    npx wrangler d1 execute DB --env demo --remote --file seed.sql
+      --table categories --table accounts --table budget_amounts --table merchants --table transactions && \
+    npx wrangler d1 execute DB --env demo --remote --file seed.sql && \
     rm seed.sql
 
 **After each merge to `main`:** pull `main`, then `npx wrangler deploy --env demo`. If a PR added a migration, run the `migrations apply` line first.

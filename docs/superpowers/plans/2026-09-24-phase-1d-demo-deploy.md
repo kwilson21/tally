@@ -108,12 +108,12 @@
 ### Task A4: Owner loads the first seed
 
 Run this once, on the empty database. After that, the nightly reset (Part B) keeps it fresh.
+With `npm run db:migrate:local` done and `npm run dev` running, in a second terminal run this as one command. The `&&`s mean a failed local reset stops everything, so stale local data is never copied (Greptile, #46):
 ```sh
-npm run db:migrate:local
-npx wrangler dev          # in a second terminal: npm run db:seed:local
+npm run db:seed:local && \
 npx wrangler d1 export DB --local --no-schema --output seed.sql \
-  --table categories --table accounts --table budget_amounts --table merchants --table transactions
-npx wrangler d1 execute DB --env demo --remote --file seed.sql
+  --table categories --table accounts --table budget_amounts --table merchants --table transactions && \
+npx wrangler d1 execute DB --env demo --remote --file seed.sql && \
 rm seed.sql
 ```
 The executor re-checks this list against the migrations and adds any tables the seed fills by then (balance history, bills). Seed dates are relative to "today", so export and load on the same day.
