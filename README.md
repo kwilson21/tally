@@ -43,6 +43,8 @@ Then, in a second terminal, run this as one command. It stops at the first failu
     npx wrangler d1 execute DB --env demo --remote --file seed.sql && \
     rm seed.sql
 
+**Every day at 09:00 UTC** the demo resets itself to the sample data, so visitors' edits last about a day. After the first deploy, the cron shows in the Cloudflare dashboard under Workers → `tally-demo` → Settings → Trigger events.
+
 **After each merge to `main`:** pull `main`, then `npx wrangler deploy --env demo`. If a PR added a migration, run the `migrations apply` line first.
 
 **Check it** on a phone and a laptop: the page loads over HTTPS, Home shows the Rivera household, every nav link works, and the browser console shows no errors.

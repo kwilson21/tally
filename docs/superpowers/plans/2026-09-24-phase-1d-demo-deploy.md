@@ -144,7 +144,7 @@ Then the PR gets "Closes #15".
   - the custom domain is the only route
   - `env.demo.triggers.crons` equals `["0 9 * * *"]`
 
-  It fails until the cron is added. (The executor checks that a raw-text import of `wrangler.jsonc` works under the Workers Vitest pool. If it doesn't, the same checks move into a small `node` script run by CI.)
+  It fails until the cron is added. (Checked: Vite's `?raw` import of `wrangler.jsonc` works under the Workers Vitest pool; `test/env.d.ts` declares the `*?raw` module type.)
 - [ ] Add `"triggers": { "crons": ["0 9 * * *"] }` to `env.demo` only. The top level stays without crons, so local dev and production are unchanged. Production's sync cron comes in Phase 2.
 - [ ] Checks, dry run, and a PR that "Closes #14". After the owner merges and deploys, the next morning's data shows today's dates again. Also check: Cloudflare dashboard → Workers → `tally-demo` → Settings → Trigger events lists the cron.
 
