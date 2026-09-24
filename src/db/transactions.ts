@@ -1,3 +1,4 @@
+import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern } from "../transactions/filters";
 
 export type ListRow = {
@@ -113,4 +114,102 @@ export async function monthsWithTransactions(
 		)
 		.all<{ month: string }>();
 	return results.map((r) => r.month);
+}
+
+export type TransactionDetail = ListRow & {
+	accountName: string;
+	accountMask: string | null;
+	/** The merchant's chosen display name, or null when it falls back to the raw name. */
+	merchantName: string | null;
+	categorySource: "user" | "merchant_rule" | "jev" | null;
+};
+
+/** One transaction with what the edit panel shows: account, merchant name, and category source. */
+export async function getTransaction(
+	db: D1Database,
+	id: number,
+): Promise<TransactionDetail | null> {
+	const r = await db
+		.prepare(
+			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
+				COALESCE(m.display_name, t.raw_name) AS displayName, m.display_name AS merchantName, t.note,
+				t.excluded, t.flag_income AS income, t.category_source AS categorySource,
+				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				a.name AS accountName, a.mask AS accountMask
+			FROM transactions t
+			JOIN accounts a ON a.id = t.account_id
+			LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			LEFT JOIN categories c ON c.id = t.category_id
+			WHERE t.id = ?`,
+		)
+		.bind(id)
+		.first<
+			Omit<TransactionDetail, "excluded" | "income"> & {
+				excluded: number;
+				income: number;
+			}
+		>();
+	return r
+		? { ...r, excluded: r.excluded === 1, income: r.income === 1 }
+		: null;
+}
+
+/**
+ * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
+ * changes), the note, the merchant's display name, and, if asked, the merchant rule, which also
+ * recategorizes the merchant's other transactions except ones a person chose (spec §7).
+ */
+export async function saveEdit(
+	db: D1Database,
+	id: number,
+	edit: Edit,
+	actor: string,
+): Promise<void> {
+	const current = await db
+		.prepare(
+			"SELECT raw_name AS rawName, category_id AS categoryId FROM transactions WHERE id = ?",
+		)
+		.bind(id)
+		.first<{ rawName: string; categoryId: number | null }>();
+	if (!current) throw new Error(`No transaction ${id}`);
+
+	const changed =
+		edit.categoryId !== null && edit.categoryId !== current.categoryId;
+	const statements = [
+		changed
+			? db
+					.prepare(
+						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
+							note = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+					)
+					.bind(edit.categoryId, edit.note, actor, id)
+			: db
+					.prepare(
+						"UPDATE transactions SET note = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+					)
+					.bind(edit.note, actor, id),
+		db
+			.prepare(
+				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
+				ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name`,
+			)
+			.bind(current.rawName, edit.displayName),
+	];
+	if (edit.alwaysForMerchant && edit.categoryId !== null) {
+		statements.push(
+			db
+				.prepare(
+					"UPDATE merchants SET default_category_id = ? WHERE raw_name = ?",
+				)
+				.bind(edit.categoryId, current.rawName),
+			db
+				.prepare(
+					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
+						updated_by = ?, updated_at = datetime('now')
+					WHERE raw_name = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
+				)
+				.bind(edit.categoryId, actor, current.rawName, id),
+		);
+	}
+	await db.batch(statements);
 }
