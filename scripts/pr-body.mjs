@@ -4,6 +4,10 @@
 export const PAGES = [
 	{ name: "home", path: "/" },
 	{ name: "transactions", path: "/transactions" },
+	{
+		name: "transactions-needs-category",
+		path: "/transactions?uncategorized=1",
+	},
 	{ name: "bills", path: "/bills" },
 	{ name: "trends", path: "/trends" },
 	{ name: "accounts", path: "/accounts" },

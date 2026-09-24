@@ -45,7 +45,10 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | ProgressRow | One category: icon, name, "spent of budget," and an SVG bar with a notch at the limit; over budget adds an alert icon and the words "over budget." |
 | Band | The one tinted row per screen that links to the thing to do next. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
-| Planned (Phase 1c-2): TransactionRow, CategoryChip, BottomSheet, FormField | Built when the first screen needs them. |
+| TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
+| Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. |
+| FormField | A labeled control, with its error shown in `role="alert"`. |
+| Planned (Phase 1c-2 Part B): BottomSheet | Built with the edit panel. |
 
 ## Patterns
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.
