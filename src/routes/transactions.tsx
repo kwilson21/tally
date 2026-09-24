@@ -72,6 +72,7 @@ async function renderList(c: Context<App>, filters: Filters) {
 			rel={rel}
 			class="inline-flex min-h-11 items-center px-2"
 			hx-get={pageHref(n)}
+			hx-sync="#filters:replace"
 			hx-target="#results"
 			hx-select="#results > *"
 			hx-select-oob="#result-count:innerHTML"
@@ -100,6 +101,8 @@ async function renderList(c: Context<App>, filters: Filters) {
 				class="mt-4 flex flex-col gap-3 lg:max-w-3xl"
 				hx-get="/transactions"
 				hx-trigger="input delay:300ms, submit"
+				// The newest request replaces any in flight, so results always match the controls.
+				hx-sync="replace"
 				hx-target="#results"
 				hx-select="#results > *"
 				hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"
@@ -172,12 +175,15 @@ async function renderList(c: Context<App>, filters: Filters) {
 						Excluded
 					</Chip>
 				</div>
-				<button
-					type="submit"
-					class="sr-only rounded-control bg-ink px-4 text-paper focus:not-sr-only focus:min-h-11"
-				>
-					Apply filters
-				</button>
+				{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}
+				<noscript>
+					<button
+						type="submit"
+						class="min-h-11 self-start rounded-control bg-ink px-4 text-paper"
+					>
+						Apply filters
+					</button>
+				</noscript>
 			</form>
 
 			<div id="page" class="lg:max-w-3xl">

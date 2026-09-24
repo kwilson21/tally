@@ -69,6 +69,20 @@ describe("GET /transactions", () => {
 		);
 	});
 
+	it("lets the newest filter or page request win (htmx replace sync)", async () => {
+		const html = (await get("/transactions")).html;
+		expect(html).toMatch(/<form id="filters"[^>]*hx-sync="replace"/);
+		expect(html).toMatch(/<a[^>]*rel="next"[^>]*hx-sync="#filters:replace"/);
+	});
+
+	it("shows a visible Apply filters button only when JavaScript is off", async () => {
+		const html = (await get("/transactions")).html;
+		expect(html).toMatch(
+			/<noscript><button type="submit"[^>]*>Apply filters<\/button><\/noscript>/,
+		);
+		expect(html).not.toMatch(/sr-only[^"]*"[^>]*>Apply filters/);
+	});
+
 	it("pages through results with real links, 25 at a time", async () => {
 		const first = (await get("/transactions")).html;
 		expect(first).toMatch(
