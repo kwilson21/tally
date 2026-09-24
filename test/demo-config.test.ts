@@ -1,13 +1,32 @@
 import { describe, expect, it } from "vitest";
 import raw from "../wrangler.jsonc?raw";
 
-// Every comment in wrangler.jsonc is on its own line, so dropping those lines leaves plain JSON.
-const config = JSON.parse(
-	raw
-		.split("\n")
-		.filter((line) => !line.trim().startsWith("//"))
-		.join("\n"),
-);
+/** Removes line and block comments outside strings, turning JSONC into JSON. */
+function stripJsoncComments(text: string): string {
+	let out = "";
+	let inString = false;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (inString) {
+			out += c;
+			if (c === "\\") out += text[++i];
+			else if (c === '"') inString = false;
+		} else if (c === '"') {
+			inString = true;
+			out += c;
+		} else if (c === "/" && text[i + 1] === "/") {
+			while (i < text.length && text[i] !== "\n") i++;
+			out += "\n";
+		} else if (c === "/" && text[i + 1] === "*") {
+			i = text.indexOf("*/", i + 2) + 1;
+		} else {
+			out += c;
+		}
+	}
+	return out;
+}
+
+const config = JSON.parse(stripJsoncComments(raw));
 const demo = config.env.demo;
 
 describe("demo environment config", () => {
@@ -24,6 +43,7 @@ describe("demo environment config", () => {
 		expect(demo.d1_databases[0]).toMatchObject({
 			binding: "DB",
 			database_name: "tally-demo",
+			database_id: "ce0d954f-0f85-46bf-9a25-0890c589e383",
 		});
 	});
 
@@ -41,5 +61,16 @@ describe("demo environment config", () => {
 
 	it("keeps crons out of local dev and other environments", () => {
 		expect(config.triggers).toBeUndefined();
+	});
+});
+
+describe("stripJsoncComments", () => {
+	it("keeps // and /* inside strings, and drops real comments anywhere", () => {
+		const text =
+			'{ "url": "https://a/*b*/", // trailing\n /* block */ "n": 1 }';
+		expect(JSON.parse(stripJsoncComments(text))).toEqual({
+			url: "https://a/*b*/",
+			n: 1,
+		});
 	});
 });

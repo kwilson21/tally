@@ -36,7 +36,7 @@
 			],
 			"workers_dev": false,
 			"preview_urls": false,
-			// The nightly reset (spec §9): 09:00 UTC is 5 am Eastern, 2 am Pacific. Demo only.
+			// The nightly reset (spec §9), demo only. 09:00 UTC is 4–5 am Eastern and 1–2 am Pacific, depending on daylight saving.
 			"triggers": {
 				"crons": ["0 9 * * *"]
 			},

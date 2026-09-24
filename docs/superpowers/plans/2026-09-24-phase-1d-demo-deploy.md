@@ -38,7 +38,7 @@
 2. **Deploys are manual, from `main`, by the owner** (spec §11 "Deploy: manual at first"). After merging a PR, run one command. If you want to try an unmerged PR, you *can* deploy its branch, but the demo then shows unmerged code until the next deploy from `main`.
 3. **No R2 bucket yet.** #15's title mentions R2. It's created with documents in Phase 4, when something first uses it.
 4. **Not announced until #13.** The URL is public from the first deploy, but nothing links to it until the demo banner and Things to try exist. All the data is fake either way.
-5. **The nightly reset runs at 09:00 UTC** (Part B). That's 5 am Eastern and 2 am Pacific, so a visitor's edits last the rest of their day. Change the hour if you prefer.
+5. **The nightly reset runs at 09:00 UTC** (Part B). That's 4–5 am Eastern and 1–2 am Pacific depending on daylight saving, so a visitor's edits last until the next early-morning reset. Change the hour if you prefer.
 6. **CI dry-runs the demo config on every PR** (one step in the `check` job), so a broken `env.demo` is caught before the owner deploys.
 
 ---
