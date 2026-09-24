@@ -321,12 +321,15 @@ function EditSheet({ tx, back, categories, values, errors = {} }: SheetProps) {
 			closeHref={back}
 			closeAttrs={closeAttrs}
 		>
-			<p class="text-sm text-muted">{tx.rawName}</p>
+			{tx.rawName !== tx.displayName && (
+				<p class="text-sm text-muted">{tx.rawName}</p>
+			)}
 			<h2
 				id="edit-title"
 				tabindex={-1}
 				autofocus
-				class="font-serif text-4xl font-semibold tracking-tight"
+				// Focused only so screen readers start here; it isn't a control, so no ring.
+				class="font-serif text-4xl font-semibold tracking-tight outline-none"
 			>
 				{tx.displayName}
 			</h2>

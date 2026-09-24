@@ -72,6 +72,17 @@ describe("GET /transactions/:id", () => {
 		expect(html).toMatch(/<button type="submit"[^>]*>Save<\/button>/);
 	});
 
+	it("shows the raw bank name only when it differs from the heading", async () => {
+		const paypal = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'PAYPAL *XYZSHOP'",
+			).first<{ id: number }>()
+		)?.id;
+		const { html } = await get(`/transactions/${paypal}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet.match(/PAYPAL \*XYZSHOP/g)).toHaveLength(2); // heading + input placeholder
+	});
+
 	it("is a 404 page for an unknown id", async () => {
 		const { res, html } = await get("/transactions/999999");
 		expect(res.status).toBe(404);
