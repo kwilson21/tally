@@ -114,9 +114,9 @@ describe("GET /transactions", () => {
 		);
 	});
 
-	it("doesn't link rows to the edit panel until it exists (#11)", async () => {
-		const { html } = await get("/transactions");
-		expect(html).not.toMatch(/href="\/transactions\/\d+/);
+	it("returns focus to a row after the edit panel is cancelled", async () => {
+		const { html } = await get("/transactions?focus=110");
+		expect(html).toMatch(/<a href="\/transactions\/110"[^>]*autofocus/);
 	});
 
 	it("keeps an active month with no transactions selected", async () => {
