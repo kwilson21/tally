@@ -118,6 +118,25 @@ describe("categorizePending", () => {
 		expect(await needsCategoryCount(db, MONTH)).toBe(0);
 	});
 
+	it("counts only categories it actually wrote, not ones a person chose mid-run", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		let calls = 0;
+		const fetchImpl = async () => {
+			calls += 1;
+			// While Jev is answering the first call, a person categorizes every pending row.
+			if (calls === 1) {
+				await db
+					.prepare(
+						"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE category_id IS NULL AND flag_income = 0",
+					)
+					.run();
+			}
+			return reply(0.95);
+		};
+		const result = await categorizePending(withKey, fetchImpl);
+		expect(result.applied).toBe(0);
+	});
+
 	it("logs only counts on success, never transaction details", async () => {
 		const logs = vi.spyOn(console, "log").mockImplementation(() => {});
 		await categorizePending(withKey, fakeJev(() => reply(0.95)).fetchImpl);

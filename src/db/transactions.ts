@@ -262,18 +262,20 @@ export async function pendingForJev(
 /**
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
+ * Jev's income answer isn't stored: it changes the budget math, and a person can't undo a flag
+ * until the edit panel gets flag controls (#27, decision 28). Returns whether it wrote the row.
  */
 export async function saveJevResult(
 	db: D1Database,
 	id: number,
 	d: Decision,
-): Promise<void> {
-	await db
+): Promise<boolean> {
+	const result = await db
 		.prepare(
 			`UPDATE transactions SET
 				category_id = ?, category_source = ?, category_confidence = ?,
 				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
-				flag_income = MAX(flag_income, ?), updated_at = datetime('now')
+				updated_at = datetime('now')
 			WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
 		)
 		.bind(
@@ -282,8 +284,8 @@ export async function saveJevResult(
 			d.confidence,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
-			d.flags.income ? 1 : 0,
 			id,
 		)
 		.run();
+	return result.meta.changes > 0;
 }

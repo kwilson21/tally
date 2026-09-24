@@ -37,8 +37,8 @@ export async function categorizePending(
 			return done;
 		}
 		const decision = decide(result.answer, categories, JEV_THRESHOLD);
-		await saveJevResult(env.DB, tx.id, decision);
-		if (decision.categoryId !== null) done.applied += 1;
+		const written = await saveJevResult(env.DB, tx.id, decision);
+		if (written && decision.categoryId !== null) done.applied += 1;
 	}
 
 	console.log(`jev: asked ${done.asked}, applied ${done.applied}`);

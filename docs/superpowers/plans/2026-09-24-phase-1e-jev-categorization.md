@@ -35,6 +35,7 @@
 
 **Out of scope, with where each part goes:**
 - **Plaid's own category hint** (a spec §7 input): the schema has no column for it until Phase 2 sync. The state object gains it then.
+- **Storing Jev's income answer:** held back until the edit panel can change flags (#27), since a wrong income flag takes a purchase out of spending and a person couldn't undo it (Greptile on #48, decision 28).
 - **Acting on the transfer and reimbursement flags:** they're stored, but excluding those transactions from the budget comes with exclusions in Phase 3 (#27). Only `flag_income` affects today's math: income is left out of spending (spec §6).
 - **Showing Jev's below-threshold guess** ("Jev thinks Eating Out, 62%"): that needs a column for the suggested category. It goes on the Later list if wanted.
 - **Workers AI name suggestions:** Phase 4.

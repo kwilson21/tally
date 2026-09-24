@@ -138,6 +138,28 @@ describe("saveJevResult", () => {
 		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
 	});
 
+	it("doesn't apply Jev's income answer, since a person can't undo a flag yet (decision 28)", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: true, reimbursement: false, income: true },
+			}),
+		);
+		expect(await row(id)).toMatchObject({ flag_transfer: 1, flag_income: 0 });
+		// Still counted as spending, so it stays in the list for a person to categorize.
+		expect(await needsCategoryCount(db, "2026-09")).toBe(12);
+	});
+
+	it("reports whether it wrote anything", async () => {
+		const id = await idOf("GOOGLE *YOUTUBE");
+		expect(await saveJevResult(db, id, decision())).toBe(true);
+		expect(await saveJevResult(db, id, decision())).toBe(false);
+	});
+
 	it("stores only the confidence when Jev wasn't sure", async () => {
 		const id = await idOf("VENMO *J RIVERA");
 		await saveJevResult(
