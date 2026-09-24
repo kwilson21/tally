@@ -38,7 +38,7 @@
 2. **Deploys are manual, from `main`, by the owner** (spec §11 "Deploy: manual at first"). After merging a PR, run one command. If you want to try an unmerged PR, you *can* deploy its branch, but the demo then shows unmerged code until the next deploy from `main`.
 3. **No R2 bucket yet.** #15's title mentions R2. It's created with documents in Phase 4, when something first uses it.
 4. **Not announced until #13.** The URL is public from the first deploy, but nothing links to it until the demo banner and Things to try exist. All the data is fake either way.
-5. **The nightly reset runs at 09:00 UTC** (Part B). That's 5 am Eastern and 2 am Pacific, so a visitor's edits last the rest of their day. Change the hour if you prefer.
+5. **The nightly reset runs at 09:00 UTC** (Part B). That's 4–5 am Eastern and 1–2 am Pacific depending on daylight saving, so a visitor's edits last until the next early-morning reset. Change the hour if you prefer.
 6. **CI dry-runs the demo config on every PR** (one step in the `check` job), so a broken `env.demo` is caught before the owner deploys.
 
 ---
@@ -144,7 +144,7 @@ Then the PR gets "Closes #15".
   - the custom domain is the only route
   - `env.demo.triggers.crons` equals `["0 9 * * *"]`
 
-  It fails until the cron is added. (The executor checks that a raw-text import of `wrangler.jsonc` works under the Workers Vitest pool. If it doesn't, the same checks move into a small `node` script run by CI.)
+  It fails until the cron is added. (Checked: Vite's `?raw` import of `wrangler.jsonc` works under the Workers Vitest pool; `test/env.d.ts` declares the `*?raw` module type.)
 - [ ] Add `"triggers": { "crons": ["0 9 * * *"] }` to `env.demo` only. The top level stays without crons, so local dev and production are unchanged. Production's sync cron comes in Phase 2.
 - [ ] Checks, dry run, and a PR that "Closes #14". After the owner merges and deploys, the next morning's data shows today's dates again. Also check: Cloudflare dashboard → Workers → `tally-demo` → Settings → Trigger events lists the cron.
 

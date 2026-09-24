@@ -36,6 +36,10 @@
 			],
 			"workers_dev": false,
 			"preview_urls": false,
+			// The nightly reset (spec §9), demo only. 09:00 UTC is 4–5 am Eastern and 1–2 am Pacific, depending on daylight saving.
+			"triggers": {
+				"crons": ["0 9 * * *"]
+			},
 			// vars and d1_databases are not inherited from the top level, so they're repeated here.
 			"vars": {
 				"DEMO": "true"
