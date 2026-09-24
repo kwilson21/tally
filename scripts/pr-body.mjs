@@ -10,6 +10,8 @@ export const PAGES = [
 	},
 	// 110 is Local Bakery after a reset; test/seed.test.ts keeps that true.
 	{ name: "transaction-edit", path: "/transactions/110?uncategorized=1" },
+	// 94 is a Trader Joe's that Jev categorized, so the sheet shows "Picked by Jev"; test/seed.test.ts keeps that true.
+	{ name: "transaction-edit-jev", path: "/transactions/94" },
 	{ name: "bills", path: "/bills" },
 	{ name: "trends", path: "/trends" },
 	{ name: "accounts", path: "/accounts" },

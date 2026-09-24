@@ -84,6 +84,17 @@ describe("resetDemo", () => {
 		expect(row?.raw_name).toBe("SQ *LOCAL BAKERY 4432");
 	});
 
+	it("gives a Jev-picked Trader Joe's id 94, which the Jev edit-sheet screenshot uses", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const row = await env.DB.prepare(
+			"SELECT raw_name, category_source FROM transactions WHERE id = 94",
+		).first<{ raw_name: string; category_source: string }>();
+		expect(row).toEqual({
+			raw_name: "TRADER JOE'S #552",
+			category_source: "jev",
+		});
+	});
+
 	it("replaces all data with the seed, and running it twice gives the same result", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		await resetDemo(env.DB, "2026-09-22");

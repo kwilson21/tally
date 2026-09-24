@@ -23,4 +23,13 @@ describe("scheduled handler", () => {
 
 		expect(await count()).toBeGreaterThan(0);
 	});
+
+	it("leaves Jev out when there is no key, so the seed's 12 stay uncategorized", async () => {
+		await worker.scheduled({ cron: "0 9 * * *" });
+
+		const untouched = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL AND flag_income = 0 AND excluded = 0",
+		).first<{ n: number }>();
+		expect(untouched?.n).toBeGreaterThanOrEqual(12);
+	});
 });

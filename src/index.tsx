@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { categorizePending } from "./categorize-pending";
 import { todayUtc } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { destinations } from "./routes/destinations";
@@ -26,5 +27,7 @@ export default {
 		if (canResetDemo(env)) {
 			await resetDemo(env.DB, todayUtc());
 		}
+		// Then merchant rules and Jev sort what's uncategorized (spec §7). Without a key it does nothing.
+		await categorizePending(env);
 	},
 } satisfies ExportedHandler<Env>;

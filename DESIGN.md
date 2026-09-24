@@ -52,6 +52,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 
 ## Patterns
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.
+- Who picked a category: when Jev picked it, a muted `text-sm` line under the category chips says "Picked by Jev · N% sure". A person's choice and a merchant rule show nothing extra.
 - Edits: the form saves, the list swaps back with the toast and announcement, and focus returns to the row (or to the result count if the row left a filtered list). Without JavaScript the save redirects back to the list.
 - Sheet backdrop: `bg-ink/30` (ink at 30%), used only behind the BottomSheet; it is decorative, so no contrast target.
 - Illustrations: SVG, drawn with the icon stroke rules, ink plus one accent. Generated images never ship.
