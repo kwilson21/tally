@@ -11,7 +11,7 @@ Tally is a family budgeting app. It pulls in bank transactions automatically, so
 It serves two audiences from one codebase:
 
 1. **The owner's household**: a private app behind a login wall, with real bank data.
-2. **The public**: a portfolio demo at `demo.thesuperhuman.us` with fake data only.
+2. **The public**: a portfolio demo at `tally-demo.thesuperhuman.us` with fake data only.
 
 Tally replaces the owner's Django app (`personal-finance-app`). That app stays in place until Tally has fully taken over its job.
 
@@ -70,7 +70,7 @@ Wrangler environments deploy the same code twice:
 
 | | `production` (family) | `demo` (public) |
 |---|---|---|
-| Hostname | Chosen in Phase 2 (see §11); intended to eventually take over `finance.thesuperhuman.us` | `demo.thesuperhuman.us` |
+| Hostname | Chosen in Phase 2 (see §11); intended to eventually take over `finance.thesuperhuman.us` | `tally-demo.thesuperhuman.us` |
 | D1 database | `tally-prod` | `tally-demo` |
 | R2 bucket | `tally-prod-docs` | `tally-demo-docs` (fake PDFs) |
 | Plaid | On | **Off.** No Plaid secrets exist in this environment. |
@@ -244,7 +244,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 | Phase | Build | Finish line |
 |---|---|---|
 | **0. Setup** | Public repo, this spec, `docs/decisions.md`, `CLAUDE.md` (short, rules taken from this spec), `ROADMAP.md`, milestones and issues, Hono Worker skeleton, CI (type-check + tests), and doc checks for §13 | CI passes on the skeleton |
-| **1. Core demo live** | Wireframes; D1 schema; seed household; Home; Transactions (recategorize, merchant rules, rename); Jev categorization; demo banner, Things to try, How it works; nightly reset; `demo` deploy | `https://demo.thesuperhuman.us` loads over HTTPS, all Phase 1 routes work, and there are no console errors. DNS records are shown to the owner and approved before they're created. |
+| **1. Core demo live** | Wireframes; D1 schema; seed household; Home; Transactions (recategorize, merchant rules, rename); Jev categorization; demo banner, Things to try, How it works; nightly reset; `demo` deploy | `https://tally-demo.thesuperhuman.us` loads over HTTPS, all Phase 1 routes work, and there are no console errors. DNS records are shown to the owner and approved before they're created. |
 | **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection | The family uses it for a week. Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
 | **3. Bills, exclusions, splits** | In both environments, with seed data for each | Shown in the demo, used by the family |
 | **4. Trends, balances, documents, name suggestions** | Trends, net-worth history, R2 documents, Workers AI name suggestions | All 8 features live in both environments |

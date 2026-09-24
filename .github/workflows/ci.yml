@@ -19,6 +19,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Proves the demo config is valid without deploying (no account or secrets needed).
+      - run: npx wrangler deploy --dry-run --env demo --outdir "$RUNNER_TEMP/demo-dry-run"
+        env:
+          WRANGLER_SEND_METRICS: "false"
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
