@@ -235,6 +235,7 @@ Every screen has a small "How this works" link to its feature's section. Each se
 | Plaid access tokens | Encrypted with AES-GCM (Web Crypto) using `TOKEN_ENCRYPTION_KEY` before they're stored. |
 | Backups | D1 Time Travel restores to a point in time. The retention window gets confirmed in Phase 0 and recorded in the README. |
 | Security headers | `X-Frame-Options: DENY`, a strict CSP (no inline scripts; Plaid's CDN allow-listed on the Accounts page), and `SameSite=Lax` on any cookie. |
+| Form posts from other sites | Rejected with 403 unless the browser shows the post came from this site (`Sec-Fetch-Site: same-origin` or a matching `Origin`), using Hono's built-in `csrf` middleware. |
 
 ## 11. Phases
 
