@@ -76,6 +76,14 @@ describe("buildSeed", () => {
 });
 
 describe("resetDemo", () => {
+	it("gives Local Bakery id 110, which the edit-sheet screenshot uses", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const row = await env.DB.prepare(
+			"SELECT raw_name FROM transactions WHERE id = 110",
+		).first<{ raw_name: string }>();
+		expect(row?.raw_name).toBe("SQ *LOCAL BAKERY 4432");
+	});
+
 	it("replaces all data with the seed, and running it twice gives the same result", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		await resetDemo(env.DB, "2026-09-22");

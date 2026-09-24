@@ -34,6 +34,8 @@ jobs:
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 2; done
           npm run db:seed:local
       - run: npm run screenshots
+      # After the screenshots: the E2E changes the demo data.
+      - run: npm run e2e
       - name: Publish images to the screenshots branch
         id: publish
         env:
