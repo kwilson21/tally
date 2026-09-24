@@ -14,8 +14,7 @@
 		"command": "npm run build",
 		"watch_dir": "src"
 	},
-	// Local-only placeholder ID. Real demo/production databases are created in Phase 1d
-	// (wrangler d1 create) and set per environment.
+	// Local-only placeholder ID. Each deployed environment names its own database below.
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -24,8 +23,31 @@
 			"migrations_dir": "migrations"
 		}
 	],
-	// "true" shows the demo banner and lets the nightly job reset the data. Production sets "false" in Phase 1d.
+	// "true" shows the demo banner and lets the nightly job reset the data. Production sets "false" in Phase 2.
 	"vars": {
 		"DEMO": "true"
+	},
+	"env": {
+		// The public demo (decision 26). Deploy with: npx wrangler deploy --env demo
+		"demo": {
+			// Served only here. Cloudflare creates the DNS record and certificate on deploy.
+			"routes": [
+				{ "pattern": "tally-demo.thesuperhuman.us", "custom_domain": true }
+			],
+			"workers_dev": false,
+			"preview_urls": false,
+			// vars and d1_databases are not inherited from the top level, so they're repeated here.
+			"vars": {
+				"DEMO": "true"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "tally-demo",
+					"database_id": "ce0d954f-0f85-46bf-9a25-0890c589e383",
+					"migrations_dir": "migrations"
+				}
+			]
+		}
 	}
 }

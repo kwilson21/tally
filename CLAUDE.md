@@ -1,6 +1,6 @@
 # Tally
 
-A family budgeting app on Cloudflare Workers, with a public demo at demo.thesuperhuman.us.
+A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.thesuperhuman.us.
 
 ## Source of truth
 - Spec: docs/superpowers/specs/2026-09-22-tally-design.md. If it isn't in the spec, don't build it; add it to the spec's Later list and ask.
