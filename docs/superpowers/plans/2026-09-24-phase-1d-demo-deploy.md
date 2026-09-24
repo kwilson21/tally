@@ -108,11 +108,12 @@
 ### Task A4: Owner loads the first seed
 
 Run this once, on the empty database. After that, the nightly reset (Part B) keeps it fresh.
-With `npm run db:migrate:local` done and `npm run dev` running, in a second terminal run this as one command. The `&&`s mean a failed local reset stops everything, so stale local data is never copied (Greptile, #46):
+Start from an empty local database (`rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local`), start `npm run dev`, then in a second terminal run this as one command. Each step must succeed. The `grep` fails if the reset was skipped (for example with local Plaid credentials, where the scheduled endpoint still returns success), because the local database started empty. Both cases were tried locally: normal gives 170 rows; with `--var PLAID_SECRET:x` the chain stops before loading (Greptile, #46).
 ```sh
 npm run db:seed:local && \
 npx wrangler d1 export DB --local --no-schema --output seed.sql \
   --table categories --table accounts --table budget_amounts --table merchants --table transactions && \
+grep -q 'INSERT INTO "transactions"' seed.sql && \
 npx wrangler d1 execute DB --env demo --remote --file seed.sql && \
 rm seed.sql
 ```

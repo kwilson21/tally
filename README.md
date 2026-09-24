@@ -29,11 +29,17 @@ Deploys are manual and done by the owner. The demo is the `demo` environment in 
     npx wrangler d1 migrations apply DB --env demo --remote
     npx wrangler deploy --env demo
 
-**Once, to load the sample data** into the empty database. Seed dates follow today's date, so this copies a freshly seeded local database. Run `npm run db:migrate:local`, start the app with `npm run dev` and leave it running, then in a second terminal run the lines below as one command. The `&&`s stop it at the first failure, so it never copies stale local data: if the local reset doesn't run, nothing is exported or loaded.
+**Once, to load the sample data** into the empty database. Seed dates follow today's date, so this copies a freshly seeded local database. First empty the local database and start the app:
+
+    rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local
+    npm run dev                      # leave running
+
+Then, in a second terminal, run this as one command. It stops at the first failure. The `grep` checks that the export really holds transactions, which catches a reset that was skipped (for example when local Plaid credentials are set) because the local database started empty. So stale or empty data is never loaded.
 
     npm run db:seed:local && \
     npx wrangler d1 export DB --local --no-schema --output seed.sql \
       --table categories --table accounts --table budget_amounts --table merchants --table transactions && \
+    grep -q 'INSERT INTO "transactions"' seed.sql && \
     npx wrangler d1 execute DB --env demo --remote --file seed.sql && \
     rm seed.sql
 
