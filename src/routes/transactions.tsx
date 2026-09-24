@@ -344,6 +344,8 @@ function EditSheet({ tx, back, categories, values, errors = {} }: SheetProps) {
 				action={`/transactions/${tx.id}`}
 				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
 				hx-post={`/transactions/${tx.id}`}
+				// The Needs category count sits in the filter form, outside #page, so update it too.
+				hx-select-oob="#needs-count:innerHTML"
 				hx-target="#page"
 				hx-select="#page"
 				hx-swap="outerHTML"

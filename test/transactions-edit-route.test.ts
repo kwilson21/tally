@@ -114,6 +114,17 @@ describe("POST /transactions/:id", () => {
 		expect(html).toMatch(/<p id="result-count"[^>]*autofocus/);
 	});
 
+	it("updates the Needs category count outside the swapped list after a save", async () => {
+		const { html: sheet } = await get(
+			`/transactions/${bakery}?uncategorized=1`,
+		);
+		expect(sheet).toMatch(
+			/<form method="post"[^>]*hx-select-oob="#needs-count:innerHTML"/,
+		);
+		const { html } = await post(`/transactions/${bakery}`, save);
+		expect(html).toMatch(/<span id="needs-count">11<\/span>/);
+	});
+
 	it("returns focus to the saved row when it's still in the list", async () => {
 		const { html } = await post(`/transactions/${bakery}`, {
 			...save,
