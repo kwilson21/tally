@@ -16,7 +16,8 @@
 		"lint": "biome check .",
 		"format": "biome check --write .",
 		"test": "vitest run",
-		"screenshots": "node scripts/screenshots.mjs"
+		"screenshots": "node scripts/screenshots.mjs",
+		"e2e": "node scripts/e2e.mjs"
 	},
 	"dependencies": {
 		"hono": "^4.13.8",

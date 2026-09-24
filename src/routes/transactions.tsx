@@ -1,17 +1,30 @@
 import { type Context, Hono } from "hono";
+import { actor } from "../actor";
 import { dayLabel, monthLabel, todayUtc } from "../dates";
 import {
+	getTransaction,
 	type ListRow,
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
 	PAGE_SIZE,
+	saveEdit,
+	type TransactionDetail,
 } from "../db/transactions";
+import { formatCents } from "../money";
+import {
+	type Edit,
+	type EditErrors,
+	parseEdit,
+	safeBack,
+} from "../transactions/edit";
 import {
 	type Filters,
 	filtersToQuery,
 	parseFilters,
 } from "../transactions/filters";
+import { BottomSheet } from "../views/bottom-sheet";
+import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { FormField } from "../views/form-field";
 import { Icon } from "../views/icons";
@@ -21,7 +34,7 @@ import { TransactionRow } from "../views/transaction-row";
 type App = { Bindings: Env };
 export const transactions = new Hono<App>();
 
-type Category = { id: number; name: string };
+type Category = { id: number; name: string; icon: string; color: string };
 
 /** Consecutive rows that share a date, in list order. */
 function byDay(rows: ListRow[]): [string, ListRow[]][] {
@@ -37,8 +50,26 @@ function byDay(rows: ListRow[]): [string, ListRow[]][] {
 const pill =
 	"min-h-11 rounded-full border border-rule bg-paper px-4 text-base text-ink";
 
+type ListOptions = {
+	/** The edit sheet to show over the list. */
+	sheet?: (categories: Category[]) => unknown;
+	/** After a save: focus this row, or the result count if it left the list. */
+	focusId?: number;
+	status?: 200 | 404 | 422;
+};
+
+/** The list URL for these filters (the edit sheet's "back"). */
+function listHref(filters: Filters, thisMonth: string) {
+	const query = filtersToQuery(filters, thisMonth);
+	return `/transactions${query ? `?${query}` : ""}`;
+}
+
 /** The whole Transactions page for these filters. Every htmx swap selects a part of this same page. */
-async function renderList(c: Context<App>, filters: Filters) {
+async function renderList(
+	c: Context<App>,
+	filters: Filters,
+	{ sheet, focusId, status = 200 }: ListOptions = {},
+) {
 	const today = todayUtc();
 	const [{ rows, total, page, pages }, months, needs, categories] =
 		await Promise.all([
@@ -46,7 +77,7 @@ async function renderList(c: Context<App>, filters: Filters) {
 			monthsWithTransactions(c.env.DB),
 			needsCategoryCount(c.env.DB, filters.month),
 			c.env.DB.prepare(
-				"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 			).all<Category>(),
 		]);
 
@@ -61,6 +92,9 @@ async function renderList(c: Context<App>, filters: Filters) {
 		pages > 1
 			? `Showing ${first}–${first + rows.length - 1} of ${total} ${noun(total)}`
 			: `${total} ${noun(total)}`;
+	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
+	const focusCount =
+		focusId !== undefined && !rows.some((r) => r.id === focusId);
 	const pageHref = (n: number) => {
 		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
 		return `/transactions${query ? `?${query}` : ""}`;
@@ -85,7 +119,7 @@ async function renderList(c: Context<App>, filters: Filters) {
 
 	return c.html(
 		<Layout
-			title="Transactions · Tally"
+			title={sheet ? "Edit transaction · Tally" : "Transactions · Tally"}
 			active="transactions"
 			demo={c.env.DEMO === "true"}
 		>
@@ -188,7 +222,13 @@ async function renderList(c: Context<App>, filters: Filters) {
 
 			<div id="page" class="lg:max-w-3xl">
 				{/* Stays in place while htmx replaces its text, so screen readers announce each new count (spec §8). */}
-				<p id="result-count" aria-live="polite" class="mt-4 text-sm text-muted">
+				<p
+					id="result-count"
+					aria-live="polite"
+					tabindex={focusCount ? -1 : undefined}
+					autofocus={focusCount}
+					class="mt-4 text-sm text-muted"
+				>
 					{count}
 				</p>
 				<section id="results" class="mt-2" aria-label="Results">
@@ -204,9 +244,24 @@ async function renderList(c: Context<App>, filters: Filters) {
 							<>
 								<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
 								<ul class="divide-y divide-rule">
-									{dayRows.map((row) => (
-										<TransactionRow row={row} />
-									))}
+									{dayRows.map((row) => {
+										const href = `/transactions/${row.id}${listQuery ? `?${listQuery}` : ""}`;
+										return (
+											<TransactionRow
+												row={row}
+												href={href}
+												autofocus={row.id === focusId}
+												// Opening swaps in only the sheet, so the list keeps its place.
+												attrs={{
+													"hx-get": href,
+													"hx-target": "#sheet",
+													"hx-select": "#sheet",
+													"hx-swap": "outerHTML",
+													"hx-push-url": "true",
+												}}
+											/>
+										);
+									})}
 								</ul>
 							</>
 						))
@@ -224,16 +279,263 @@ async function renderList(c: Context<App>, filters: Filters) {
 						</nav>
 					)}
 				</section>
-				<div id="sheet" />
+				<div id="sheet">{sheet?.(categories.results)}</div>
 			</div>
 		</Layout>,
+		status,
 	);
 }
 
 // Transactions: search and filter every transaction (spec §8, feature 3).
-transactions.get("/transactions", (c) =>
-	renderList(
-		c,
-		parseFilters(new URL(c.req.url).searchParams, todayUtc().slice(0, 7)),
-	),
-);
+// Cancelling the edit panel asks for ?focus=<id> so focus returns to that row (the pushed URL stays clean).
+transactions.get("/transactions", (c) => {
+	const params = new URL(c.req.url).searchParams;
+	const focus = Number(params.get("focus"));
+	return renderList(c, parseFilters(params, todayUtc().slice(0, 7)), {
+		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+	});
+});
+
+type SheetProps = {
+	tx: TransactionDetail;
+	back: string;
+	categories: Category[];
+	values: Edit;
+	errors?: EditErrors;
+};
+
+/** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
+function EditSheet({ tx, back, categories, values, errors = {} }: SheetProps) {
+	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
+	const closeAttrs = {
+		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${tx.id}`,
+		"hx-target": "#page",
+		"hx-select": "#page",
+		"hx-swap": "outerHTML",
+		"hx-push-url": back,
+	};
+	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
+	return (
+		<BottomSheet
+			labelledBy="edit-title"
+			closeHref={back}
+			closeAttrs={closeAttrs}
+		>
+			{tx.rawName !== tx.displayName && (
+				<p class="text-sm text-muted">{tx.rawName}</p>
+			)}
+			<h2
+				id="edit-title"
+				tabindex={-1}
+				autofocus
+				// Focused only so screen readers start here; it isn't a control, so no ring.
+				class="font-serif text-4xl font-semibold tracking-tight outline-none"
+			>
+				{tx.displayName}
+			</h2>
+			<p class="font-serif text-4xl font-semibold">
+				{formatCents(tx.amountCents, { signed: true })}
+			</p>
+			<p class="text-muted">
+				{dayLabel(tx.date, todayUtc())} · {account}
+			</p>
+			<form
+				method="post"
+				action={`/transactions/${tx.id}`}
+				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
+				hx-post={`/transactions/${tx.id}`}
+				// The Needs category count sits in the filter form, outside #page, so update it too.
+				hx-select-oob="#needs-count:innerHTML"
+				hx-target="#page"
+				hx-select="#page"
+				hx-swap="outerHTML"
+			>
+				<input type="hidden" name="back" value={back} />
+				<fieldset
+					class="flex flex-col gap-2"
+					aria-describedby={errors.category ? "category-error" : undefined}
+				>
+					<legend class="text-base text-ink">Category</legend>
+					<div class="flex flex-wrap gap-2">
+						{categories.map((cat) => (
+							<Chip
+								type="radio"
+								name="category"
+								value={String(cat.id)}
+								checked={values.categoryId === cat.id}
+								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
+							>
+								{cat.name}
+							</Chip>
+						))}
+					</div>
+					{errors.category && (
+						<p id="category-error" role="alert" class="text-sm text-over">
+							{errors.category}
+						</p>
+					)}
+				</fieldset>
+				<label class="flex min-h-11 items-center gap-3">
+					<input
+						type="checkbox"
+						name="always"
+						value="1"
+						checked={values.alwaysForMerchant}
+						class="size-5"
+					/>
+					Always use this category for this merchant
+				</label>
+				<FormField id="merchant" label="Merchant name" error={errors.merchant}>
+					{(a11y) => (
+						<>
+							<input
+								id="merchant"
+								name="merchant"
+								value={values.displayName ?? ""}
+								placeholder={tx.rawName}
+								autocomplete="off"
+								class="min-h-11 rounded-control border border-rule bg-paper px-3 text-lg"
+								{...a11y}
+							/>
+							<p class="text-sm text-muted">
+								Renames every transaction from this merchant.
+							</p>
+						</>
+					)}
+				</FormField>
+				<FormField id="note" label="Note" error={errors.note}>
+					{(a11y) => (
+						<textarea
+							id="note"
+							name="note"
+							rows={2}
+							class="rounded-control border border-rule bg-paper px-3 py-2 text-lg"
+							{...a11y}
+						>
+							{values.note ?? ""}
+						</textarea>
+					)}
+				</FormField>
+				<div class="mt-2 grid grid-cols-2 gap-3">
+					<a
+						href={back}
+						class="flex min-h-11 items-center justify-center rounded-control border border-ink text-ink no-underline"
+						{...closeAttrs}
+					>
+						Cancel
+					</a>
+					<button
+						type="submit"
+						class="min-h-11 rounded-control bg-ink text-paper"
+					>
+						Save
+					</button>
+				</div>
+			</form>
+		</BottomSheet>
+	);
+}
+
+const filtersFrom = (url: string) =>
+	parseFilters(
+		new URL(url, "http://tally").searchParams,
+		todayUtc().slice(0, 7),
+	);
+
+async function notFound(c: Context<App>) {
+	return c.html(
+		<Layout
+			title="Not found · Tally"
+			active="transactions"
+			demo={c.env.DEMO === "true"}
+		>
+			<h1 class="font-serif text-5xl font-semibold tracking-tight">
+				Not found
+			</h1>
+			<p class="mt-2">
+				<a href="/transactions" class="inline-flex min-h-11 items-center">
+					Back to Transactions
+				</a>
+			</p>
+		</Layout>,
+		404,
+	);
+}
+
+// The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
+transactions.get("/transactions/:id{[0-9]+}", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return notFound(c);
+	const filters = parseFilters(
+		new URL(c.req.url).searchParams,
+		todayUtc().slice(0, 7),
+	);
+	const back = listHref(filters, todayUtc().slice(0, 7));
+	const values: Edit = {
+		categoryId: tx.categoryId,
+		alwaysForMerchant: false,
+		displayName: tx.merchantName,
+		note: tx.note,
+	};
+	return renderList(c, filters, {
+		sheet: (categories) => (
+			<EditSheet tx={tx} back={back} categories={categories} values={values} />
+		),
+	});
+});
+
+// Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
+transactions.post("/transactions/:id{[0-9]+}", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return notFound(c);
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const filters = filtersFrom(back);
+	const { results: categories } = await c.env.DB.prepare(
+		"SELECT id, name FROM categories WHERE archived = 0",
+	).all<{ id: number; name: string }>();
+	const parsed = parseEdit(
+		form,
+		categories.map((cat) => cat.id),
+	);
+
+	if (!parsed.ok) {
+		const values: Edit = {
+			categoryId: Number(form.get("category")) || null,
+			alwaysForMerchant: form.get("always") === "1",
+			displayName: form.get("merchant")?.toString() ?? null,
+			note: form.get("note")?.toString() ?? null,
+		};
+		return renderList(c, filters, {
+			status: 422,
+			sheet: (all) => (
+				<EditSheet
+					tx={tx}
+					back={back}
+					categories={all}
+					values={values}
+					errors={parsed.errors}
+				/>
+			),
+		});
+	}
+
+	await saveEdit(c.env.DB, tx.id, parsed.value, actor(c.env));
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+
+	const name = parsed.value.displayName ?? tx.rawName;
+	const category = categories.find(
+		(cat) => cat.id === parsed.value.categoryId,
+	)?.name;
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message: `Saved ${name}`, type: "success" },
+			announce: category
+				? `Saved. ${name} is now ${category}.`
+				: `Saved ${name}.`,
+		}),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, filters, { focusId: tx.id });
+});

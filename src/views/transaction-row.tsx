@@ -45,7 +45,19 @@ function RowIcon({ row, kind }: { row: ListRow; kind: Caption["kind"] }) {
 }
 
 /** One transaction. With `href` the whole row is one link (to its edit panel); without, it's a plain row. */
-export function TransactionRow({ row, href }: { row: ListRow; href?: string }) {
+export function TransactionRow({
+	row,
+	href,
+	attrs,
+	autofocus,
+}: {
+	row: ListRow;
+	href?: string;
+	/** Extra attributes for the link (htmx). */
+	attrs?: Record<string, string>;
+	/** Move focus here after a swap (the row just saved). */
+	autofocus?: boolean;
+}) {
 	const { kind, caption, tag } = rowCaption(row);
 	const Row = href ? "a" : "div";
 	return (
@@ -53,7 +65,9 @@ export function TransactionRow({ row, href }: { row: ListRow; href?: string }) {
 			{/* Every row is the same height: two lines (name, then caption and tag), long text truncated. */}
 			<Row
 				href={href}
+				autofocus={autofocus}
 				class="flex h-16 items-center gap-4 text-ink no-underline"
+				{...attrs}
 			>
 				<RowIcon row={row} kind={kind} />
 				<span class="min-w-0 flex-1">

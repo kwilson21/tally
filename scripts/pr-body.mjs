@@ -8,6 +8,8 @@ export const PAGES = [
 		name: "transactions-needs-category",
 		path: "/transactions?uncategorized=1",
 	},
+	// 110 is Local Bakery after a reset; test/seed.test.ts keeps that true.
+	{ name: "transaction-edit", path: "/transactions/110?uncategorized=1" },
 	{ name: "bills", path: "/bills" },
 	{ name: "trends", path: "/trends" },
 	{ name: "accounts", path: "/accounts" },
