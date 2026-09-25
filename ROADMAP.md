@@ -10,4 +10,6 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 | 3. Bills, exclusions, splits | In both environments | Shown in demo, used by family | [milestone](https://github.com/kwilson21/tally/milestone/4) |
 | 4. Trends, balances, documents, name suggestions | Remaining features, plus AI suggestions for merchant names and new categories | All 8 features live in both | [milestone](https://github.com/kwilson21/tally/milestone/5) |
 
+Phase 1 finished on 2026-09-25: the demo is live. Review: [docs/reviews/phase-1.md](docs/reviews/phase-1.md).
+
 Later list (not scheduled): see spec §12.
