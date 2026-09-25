@@ -89,6 +89,16 @@ describe("GET /transactions", () => {
 		expect(b).toMatch(/^3 transactions in Gas, /);
 	});
 
+	it("names an archived category a bookmarked link still filters by", async () => {
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 1",
+		).run();
+		const { html } = await get("/transactions?month=all&category=1");
+		expect(html).toMatch(
+			/<p id="result-count"[^>]*>\d+ transactions in Groceries, across all months<\/p>/,
+		);
+	});
+
 	it("lets the newest filter or page request win (htmx replace sync)", async () => {
 		const html = (await get("/transactions")).html;
 		expect(html).toMatch(/<form id="filters"[^>]*hx-sync="replace"/);

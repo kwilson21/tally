@@ -50,17 +50,32 @@ describe("resultCount", () => {
 		);
 	});
 
-	it("names every other filter", () => {
+	it("names the Needs category filter", () => {
+		expect(
+			resultCount(one, { ...base, uncategorized: true }, null, TODAY),
+		).toBe("12 transactions needing a category in September");
+	});
+
+	it("names the Excluded filter", () => {
 		expect(
 			resultCount(
-				one,
-				{ ...base, q: "coffee", uncategorized: true, excluded: true },
+				{ total: 2, first: 1, shown: 2, pages: 1 },
+				{ ...base, excluded: true },
 				null,
 				TODAY,
 			),
-		).toBe(
-			'12 excluded transactions needing a category matching "coffee" in September',
-		);
+		).toBe("2 excluded transactions in September");
+	});
+
+	it("names the search", () => {
+		expect(
+			resultCount(
+				{ total: 3, first: 1, shown: 3, pages: 1 },
+				{ ...base, q: "coffee", uncategorized: true },
+				null,
+				TODAY,
+			),
+		).toBe('3 transactions needing a category matching "coffee" in September');
 	});
 
 	it("says which part of the list a page shows", () => {

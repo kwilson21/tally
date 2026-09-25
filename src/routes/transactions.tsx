@@ -89,8 +89,16 @@ async function renderList(
 		months.sort().reverse();
 	}
 	const first = (page - 1) * PAGE_SIZE + 1;
+	// Named even when archived (a bookmarked link can still filter by it), so the count always
+	// says which category it is and every change is announced (#56).
 	const categoryName =
-		categories.results.find((cat) => cat.id === filters.category)?.name ?? null;
+		filters.category === null
+			? null
+			: ((
+					await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
+						.bind(filters.category)
+						.first<{ name: string }>()
+				)?.name ?? `category ${filters.category}`);
 	const count = resultCount(
 		{ total, first, shown: rows.length, pages },
 		filters,
