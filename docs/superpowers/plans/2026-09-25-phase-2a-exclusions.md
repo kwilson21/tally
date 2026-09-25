@@ -29,3 +29,12 @@ This adds migration `0004`. Apply it before deploying:
 
     npx wrangler d1 migrations apply DB --env demo --remote
     npx wrangler deploy --env demo
+
+## Edit panel design (owner's pick, 2026-09-25)
+
+The first version stacked every option in the panel, which the owner found too cluttered. From three HTML mockups, the owner picked **C, with A's status line**:
+- the category chips first
+- two toggle chips, "Always for this merchant" and "Exclude from budget", each showing a check mark while on
+- "Rename or add a note" behind a disclosure with a turning chevron, which opens itself when there's a note or a field error
+- "Excluded from the budget" with the transfer icon under the date, for an excluded transaction
+- one "How this works" link

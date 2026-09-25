@@ -119,7 +119,6 @@ describe("links in the demo", () => {
 		);
 		const sheet = (await get("/transactions/110")).html;
 		expect(sheet).toContain('href="/how-it-works#categorization"');
-		expect(sheet).toContain('href="/how-it-works#exclusions"');
 		// Under the sheet's title, outside the form, so a tap there never leaves unsaved edits.
 		const link = sheet.indexOf('href="/how-it-works#categorization"');
 		expect(link).toBeGreaterThan(sheet.indexOf('id="edit-title"'));

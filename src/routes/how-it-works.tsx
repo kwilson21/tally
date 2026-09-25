@@ -215,7 +215,8 @@ howItWorks.get("/how-it-works", async (c) => {
 					<ol class="mt-3 list-decimal space-y-1 pl-5">
 						<li>A person's choice, which nothing overwrites.</li>
 						<li>
-							A merchant rule: "Always use this category for this merchant."
+							A merchant rule: "Always use this category for this merchant," set
+							with "Always for this merchant" in the edit panel.
 						</li>
 						<li>
 							Jev, an AI model, which each night picks a category for what's

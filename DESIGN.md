@@ -46,11 +46,11 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | Band | The one tinted row per screen that links to the thing to do next. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
-| Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. |
+| Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
 | BottomSheet | A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop. |
 | ThingsToTry | The demo's bordered "New here? Things to try" block at the top of Home: three links to where each thing is done, plus How Tally works. |
-| HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. With `showTopic` it says its topic on screen ("How this works: excluding"), for a screen with more than one. |
+| HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
 | SystemDiagram | The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers. |
 
 ## Patterns
@@ -58,7 +58,9 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 - Who picked a category: when Jev picked it, a muted `text-sm` line under the category chips says "Picked by Jev · N% sure". A person's choice and a merchant rule show nothing extra.
 - Edits: the form saves, the list swaps back with the toast and announcement, and focus returns to the row (or to the result count if the row left a filtered list). Without JavaScript the save redirects back to the list.
 - Result count: the `aria-live` line above a list names every active filter ("12 transactions needing a category in September", "Showing 1–25 of 35 transactions in Groceries, September"), so any filter change changes its text and is announced.
-- Exclusion: the edit panel's "Exclude from the budget" checkbox, with a muted `text-sm` hint under it. Excluded rows show a muted transfer icon and the word "Excluded" (never color alone).
+- Edit panel layout (owner's pick C, #27): the category chips first; then two toggle chips, "Always for this merchant" and "Exclude from budget"; then "Rename or add a note" behind a disclosure, which opens itself when there's a note or an error. An excluded transaction says "Excluded from the budget" with the transfer icon under the date. One "How this works" link.
+- Disclosure: `<details>` with a `<summary>` row (44px) led by a chevron that turns when open (`group-open:rotate-90`); no JavaScript.
+- Excluded rows in a list show a muted transfer icon and the word "Excluded" (never color alone).
 - Sheet backdrop: `bg-ink/30` (ink at 30%), used only behind the BottomSheet; it is decorative, so no contrast target.
 - Explainer page (How Tally works): each section is a serif h2 with an `id` the HowLinks point to, the rule in a short list quoted from the spec, and a worked example in a band-tinted box ("In the demo: …") computed by code from live numbers. When a rule changes in the spec, its section changes in the same PR.
 - Illustrations: SVG, drawn with the icon stroke rules, ink plus one accent. Generated images never ship.

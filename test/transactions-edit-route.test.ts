@@ -63,7 +63,7 @@ describe("GET /transactions/:id", () => {
 		expect(
 			(html.match(/<input type="radio" name="category"/g) ?? []).length,
 		).toBe(5);
-		expect(html).toContain("Always use this category for this merchant");
+		expect(html).toContain("Always for this merchant");
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value="Local Bakery"/);
 		expect(html).toMatch(/<label for="note"[^>]*>Note<\/label>/);
 		expect(html).toMatch(
@@ -223,7 +223,7 @@ describe("excluding a transaction (spec §6, #27)", () => {
 		const bakerySheet = (await get(`/transactions/${bakery}`)).html;
 		expect(bakerySheet).toMatch(checkbox);
 		expect(bakerySheet.match(checkbox)?.[1]).not.toContain("checked");
-		expect(bakerySheet).toContain("Exclude from the budget");
+		expect(bakerySheet).toContain("Exclude from budget");
 		const transferSheet = (await get(`/transactions/${await transferId()}`))
 			.html;
 		expect(transferSheet.match(checkbox)?.[1]).toContain("checked");
@@ -270,5 +270,53 @@ describe("excluding a transaction (spec §6, #27)", () => {
 			back: "/transactions",
 		});
 		expect(html.match(checkbox)?.[1]).toContain("checked");
+	});
+});
+
+describe("the edit panel's layout (owner's pick C, #27)", () => {
+	const reimbursement = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'DR MARTIN FAMILY PRACTICE REFUND'",
+			).first<{ id: number }>()
+		)?.id as number;
+
+	it("keeps renaming and the note behind one closed disclosure", async () => {
+		const { html } = await get(`/transactions/${bakery}`);
+		expect(html).toMatch(
+			/<details class="[^"]*group[^"]*">\s*<summary[^>]*>[\s\S]*Rename or add a note/,
+		);
+		expect(html).not.toMatch(/<details[^>]*\bopen/);
+		// The name field is inside the disclosure.
+		expect(html.indexOf('name="merchant"')).toBeGreaterThan(
+			html.indexOf("Rename or add a note"),
+		);
+	});
+
+	it("opens the disclosure when there's a note to see", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET note = 'birthday' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		expect(html).toMatch(/<details[^>]*\bopen/);
+	});
+
+	it("says an excluded transaction is excluded, near the top", async () => {
+		const excluded = (await get(`/transactions/${await reimbursement()}`)).html;
+		expect(excluded).toContain("Excluded from the budget");
+		expect(excluded.indexOf("Excluded from the budget")).toBeLessThan(
+			excluded.indexOf('<form method="post"'),
+		);
+		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
+			"Excluded from the budget",
+		);
+	});
+
+	it("has one How this works link", async () => {
+		const html = (await get(`/transactions/${bakery}`)).html;
+		const sheet = html.slice(html.indexOf('id="edit-title"'));
+		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(1);
 	});
 });

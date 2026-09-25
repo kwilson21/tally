@@ -365,11 +365,17 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
+			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
+			{tx.excluded && (
+				<p class="flex items-center gap-2 text-muted">
+					<Icon name="transfer" class="size-5" />
+					Excluded from the budget
+				</p>
+			)}
 			{/* Outside the form, so following it never happens by accident mid-edit. */}
 			{demo && (
-				<p class="flex flex-wrap gap-x-4">
-					<HowLink section="categorization" demo={demo} showTopic />
-					<HowLink section="exclusions" demo={demo} showTopic />
+				<p>
+					<HowLink section="categorization" demo={demo} />
 				</p>
 			)}
 			<form
@@ -413,64 +419,74 @@ function EditSheet({
 						</p>
 					)}
 				</fieldset>
-				<label class="flex min-h-11 items-center gap-3">
-					<input
+				{/* The two things people change most after the category, one tap each (owner's pick C). */}
+				<div class="flex flex-wrap gap-2">
+					<Chip
 						type="checkbox"
 						name="always"
 						value="1"
 						checked={values.alwaysForMerchant}
-						class="size-5"
-					/>
-					Always use this category for this merchant
-				</label>
-				<div>
-					<label class="flex min-h-11 items-center gap-3">
-						<input
-							type="checkbox"
-							name="excluded"
-							value="1"
-							checked={values.excluded}
-							aria-describedby="excluded-hint"
-							class="size-5"
-						/>
-						Exclude from the budget
-					</label>
-					<p id="excluded-hint" class="text-sm text-muted">
-						An excluded transaction doesn't count toward spending or Safe to
-						spend. Transfers and reimbursements start excluded.
-					</p>
+					>
+						Always for this merchant
+					</Chip>
+					<Chip
+						type="checkbox"
+						name="excluded"
+						value="1"
+						checked={values.excluded}
+					>
+						Exclude from budget
+					</Chip>
 				</div>
-				<FormField id="merchant" label="Merchant name" error={errors.merchant}>
-					{(a11y) => (
-						<>
-							<input
-								id="merchant"
-								name="merchant"
-								value={values.displayName ?? ""}
-								placeholder={tx.rawName}
-								autocomplete="off"
-								class="min-h-11 rounded-control border border-rule bg-paper px-3 text-lg"
-								{...a11y}
-							/>
-							<p class="text-sm text-muted">
-								Renames every transaction from this merchant.
-							</p>
-						</>
-					)}
-				</FormField>
-				<FormField id="note" label="Note" error={errors.note}>
-					{(a11y) => (
-						<textarea
-							id="note"
-							name="note"
-							rows={2}
-							class="rounded-control border border-rule bg-paper px-3 py-2 text-lg"
-							{...a11y}
+				{/* Renaming and notes are rarer, so they wait behind one tap; open when there's something to see. */}
+				<details
+					class="group border-t border-rule"
+					open={Boolean(values.note || errors.merchant || errors.note)}
+				>
+					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+						<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
+							<Icon name="chevron-right" class="size-5" />
+						</span>
+						Rename or add a note
+					</summary>
+					<div class="flex flex-col gap-4 pt-2">
+						<FormField
+							id="merchant"
+							label="Merchant name"
+							error={errors.merchant}
 						>
-							{values.note ?? ""}
-						</textarea>
-					)}
-				</FormField>
+							{(a11y) => (
+								<>
+									<input
+										id="merchant"
+										name="merchant"
+										value={values.displayName ?? ""}
+										placeholder={tx.rawName}
+										autocomplete="off"
+										class="min-h-11 rounded-control border border-rule bg-paper px-3 text-lg"
+										{...a11y}
+									/>
+									<p class="text-sm text-muted">
+										Renames every transaction from this merchant.
+									</p>
+								</>
+							)}
+						</FormField>
+						<FormField id="note" label="Note" error={errors.note}>
+							{(a11y) => (
+								<textarea
+									id="note"
+									name="note"
+									rows={2}
+									class="rounded-control border border-rule bg-paper px-3 py-2 text-lg"
+									{...a11y}
+								>
+									{values.note ?? ""}
+								</textarea>
+							)}
+						</FormField>
+					</div>
+				</details>
 				<div class="mt-2 grid grid-cols-2 gap-3">
 					<a
 						href={back}

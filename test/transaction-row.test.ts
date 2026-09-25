@@ -96,6 +96,26 @@ describe("Chip", () => {
 		expect(html).toContain("checked");
 		expect(html).toContain('class="sr-only"');
 	});
+
+	it("shows a check mark on a switched-on toggle, so its state isn't color alone", async () => {
+		const toggle = await Chip({
+			type: "checkbox",
+			name: "excluded",
+			value: "1",
+			children: "Exclude from budget",
+		}).toString();
+		// Always rendered; CSS shows it only while the box is checked (no JavaScript).
+		expect(toggle).toMatch(
+			/<span class="hidden group-has-\[:checked\]:inline-flex"[^>]*><svg/,
+		);
+		const radio = await Chip({
+			type: "radio",
+			name: "category",
+			value: "1",
+			children: "Groceries",
+		}).toString();
+		expect(radio).not.toContain("group-has-[:checked]:inline-flex");
+	});
 });
 
 describe("FormField", () => {

@@ -45,7 +45,7 @@ step("saving shows a toast, closes the sheet, and leaves 11 to categorize");
 
 await page.locator("#results li[data-transaction] a").first().click();
 await page.locator('[role="dialog"]').waitFor();
-await page.getByLabel("Exclude from the budget").check();
+await page.getByText("Exclude from budget", { exact: true }).click();
 await page.getByRole("button", { name: "Save" }).click();
 await page.locator('[role="dialog"]').waitFor({ state: "detached" });
 assert.equal(await rows(), 10);
