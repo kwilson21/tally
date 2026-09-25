@@ -24,7 +24,7 @@ const idOf = async (rawName: string) =>
 const row = (id: number) =>
 	db
 		.prepare(
-			`SELECT category_id, category_source, category_confidence,
+			`SELECT category_id, category_source, category_confidence, jev_category_id,
 				flag_transfer, flag_reimbursement, flag_income, updated_by
 			FROM transactions WHERE id = ?`,
 		)
@@ -33,6 +33,7 @@ const row = (id: number) =>
 
 const decision = (over = {}) => ({
 	categoryId: EATING_OUT,
+	suggestedCategoryId: EATING_OUT,
 	confidence: 0.91,
 	flags: { transfer: false, reimbursement: false, income: false },
 	...over,
@@ -130,6 +131,7 @@ describe("saveJevResult", () => {
 			category_id: EATING_OUT,
 			category_source: "jev",
 			category_confidence: 0.91,
+			jev_category_id: EATING_OUT,
 			flag_transfer: 0,
 			flag_reimbursement: 1,
 			flag_income: 0,
@@ -154,23 +156,47 @@ describe("saveJevResult", () => {
 		expect(await needsCategoryCount(db, "2026-09")).toBe(12);
 	});
 
+	it("records that Jev said none fit: a confidence with no pick", async () => {
+		const id = await idOf("POS 4417 CITY PARKING");
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				suggestedCategoryId: null,
+				confidence: 0.9,
+			}),
+		);
+		expect(await row(id)).toMatchObject({
+			category_id: null,
+			category_confidence: 0.9,
+			jev_category_id: null,
+		});
+		expect((await pendingForJev(db, 40)).map((p) => p.id)).not.toContain(id);
+	});
+
 	it("reports whether it wrote anything", async () => {
 		const id = await idOf("GOOGLE *YOUTUBE");
 		expect(await saveJevResult(db, id, decision())).toBe(true);
 		expect(await saveJevResult(db, id, decision())).toBe(false);
 	});
 
-	it("stores only the confidence when Jev wasn't sure", async () => {
+	it("keeps Jev's pick and confidence when Jev wasn't sure, without applying it", async () => {
 		const id = await idOf("VENMO *J RIVERA");
 		await saveJevResult(
 			db,
 			id,
-			decision({ categoryId: null, confidence: 0.55 }),
+			decision({
+				categoryId: null,
+				suggestedCategoryId: GROCERIES,
+				confidence: 0.55,
+			}),
 		);
 		expect(await row(id)).toMatchObject({
 			category_id: null,
 			category_source: null,
 			category_confidence: 0.55,
+			jev_category_id: GROCERIES,
 		});
 		expect(await needsCategoryCount(db, "2026-09")).toBe(12);
 	});

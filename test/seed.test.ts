@@ -95,6 +95,18 @@ describe("resetDemo", () => {
 		});
 	});
 
+	it("gives the seed's Jev-categorized rows a matching Jev pick", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const mismatched = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE category_source = 'jev' AND jev_category_id IS NOT category_id",
+		).first<{ n: number }>();
+		const others = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE COALESCE(category_source, '') != 'jev' AND jev_category_id IS NOT NULL",
+		).first<{ n: number }>();
+		expect(mismatched?.n).toBe(0);
+		expect(others?.n).toBe(0);
+	});
+
 	it("replaces all data with the seed, and running it twice gives the same result", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		await resetDemo(env.DB, "2026-09-22");

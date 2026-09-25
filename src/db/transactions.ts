@@ -273,7 +273,7 @@ export async function saveJevResult(
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET
-				category_id = ?, category_source = ?, category_confidence = ?,
+				category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
 				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
 				updated_at = datetime('now')
 			WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
@@ -282,6 +282,7 @@ export async function saveJevResult(
 			d.categoryId,
 			d.categoryId === null ? null : "jev",
 			d.confidence,
+			d.suggestedCategoryId,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
 			id,
