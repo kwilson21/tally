@@ -193,7 +193,8 @@ function CategoryRow({
 						<a
 							href="/settings"
 							class={secondary}
-							hx-get="/settings"
+							// Back to the list with focus on this row, so the change is announced.
+							hx-get={`/settings?focus=${c.id}`}
 							hx-target="#categories"
 							hx-select="#categories"
 							hx-swap="outerHTML"
@@ -357,6 +358,28 @@ const budgetPhrase = (cents: number | null) =>
 		? null
 		: `${amount(cents)} a month from ${monthLabel(todayUtc().slice(0, 7), todayUtc())} on`;
 
+/** The form again, open, with what was typed and why it wasn't saved. */
+function retry(
+	c: Context<App>,
+	open: number | "new",
+	form: FormData,
+	errors: CategoryErrors,
+) {
+	return renderSettings(c, {
+		open,
+		values: {
+			name: String(form.get("name") ?? ""),
+			budget: String(form.get("budget") ?? ""),
+		},
+		errors,
+		status: 422,
+	});
+}
+
+/** The database refused a name that differs only in capitals: someone saved it a moment earlier. */
+const nameTaken = (error: unknown) =>
+	error instanceof Error && /UNIQUE/.test(error.message);
+
 const idOf = (c: Context<App>) => Number(c.req.param("id"));
 async function find(c: Context<App>) {
 	const all = await categoryNames(c.env.DB);
@@ -365,25 +388,26 @@ async function find(c: Context<App>) {
 
 // More → Settings (spec §8): the household's categories and their monthly budgets.
 // ?open=<id> opens that category's row, so a row can be linked to (and screenshotted).
+// ?focus=<id> puts focus on that row after Cancel.
 settings.get("/settings", (c) => {
-	const open = Number(c.req.query("open"));
-	return renderSettings(c, Number.isInteger(open) && open > 0 ? { open } : {});
+	const id = (key: string) => {
+		const n = Number(c.req.query(key));
+		return Number.isInteger(n) && n > 0 ? n : undefined;
+	};
+	return renderSettings(c, { open: id("open"), focus: id("focus") });
 });
 
 settings.post("/settings/categories", async (c) => {
 	const form = await c.req.formData();
 	const parsed = parseCategory(form, await categoryNames(c.env.DB), null);
-	if (!parsed.ok)
-		return renderSettings(c, {
-			open: "new",
-			values: {
-				name: String(form.get("name") ?? ""),
-				budget: String(form.get("budget") ?? ""),
-			},
-			errors: parsed.errors,
-			status: 422,
-		});
-	await addCategory(c.env.DB, parsed.value, todayUtc().slice(0, 7));
+	if (!parsed.ok) return retry(c, "new", form, parsed.errors);
+	try {
+		await addCategory(c.env.DB, parsed.value, todayUtc().slice(0, 7));
+	} catch (error) {
+		if (nameTaken(error))
+			return retry(c, "new", form, { name: "That name is taken." });
+		throw error;
+	}
 	const phrase = budgetPhrase(parsed.value.budgetCents);
 	return done(
 		c,
@@ -399,22 +423,19 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 	if (!category || category.archived) return c.notFound();
 	const form = await c.req.formData();
 	const parsed = parseCategory(form, all, category.id);
-	if (!parsed.ok)
-		return renderSettings(c, {
-			open: category.id,
-			values: {
-				name: String(form.get("name") ?? ""),
-				budget: String(form.get("budget") ?? ""),
-			},
-			errors: parsed.errors,
-			status: 422,
-		});
-	await saveCategory(
-		c.env.DB,
-		category.id,
-		parsed.value,
-		todayUtc().slice(0, 7),
-	);
+	if (!parsed.ok) return retry(c, category.id, form, parsed.errors);
+	try {
+		await saveCategory(
+			c.env.DB,
+			category.id,
+			parsed.value,
+			todayUtc().slice(0, 7),
+		);
+	} catch (error) {
+		if (nameTaken(error))
+			return retry(c, category.id, form, { name: "That name is taken." });
+		throw error;
+	}
 	const phrase = budgetPhrase(parsed.value.budgetCents);
 	return done(
 		c,

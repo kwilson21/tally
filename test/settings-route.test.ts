@@ -118,6 +118,34 @@ describe("saving a category", () => {
 	});
 });
 
+describe("Cancel", () => {
+	it("closes the row and moves focus back to it, so the change is announced", async () => {
+		const { html: open } = await get("/settings?open=3");
+		expect(open).toMatch(
+			/<a href="\/settings"[^>]*hx-get="\/settings\?focus=3"[^>]*>Cancel<\/a>/,
+		);
+		const { html } = await get("/settings?focus=3");
+		expect(html).toMatch(/<summary data-category="3"[^>]*autofocus/);
+		expect(html).not.toMatch(/<details[^>]*data-row="3"[^>]*\bopen/);
+	});
+});
+
+describe("a name taken by someone else at the same moment", () => {
+	it("shows the usual error instead of failing", async () => {
+		// The form's check passes, then the database refuses: the first save won.
+		await env.DB.prepare(
+			"CREATE TRIGGER sneak BEFORE INSERT ON categories BEGIN INSERT INTO categories (name, icon, color) VALUES ('travel', 'tag', 'cat-blue'); END",
+		).run();
+		const { res, html } = await post("/settings/categories", {
+			name: "Travel",
+			budget: "",
+		});
+		await env.DB.prepare("DROP TRIGGER sneak").run();
+		expect(res.status).toBe(422);
+		expect(html).toContain("That name is taken.");
+	});
+});
+
 describe("adding a category", () => {
 	it("adds it at the end with its budget", async () => {
 		const { res, html } = await post("/settings/categories", {

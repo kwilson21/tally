@@ -67,6 +67,23 @@ describe("parseCategory", () => {
 		});
 	});
 
+	it("caps a budget at $1,000,000 a month, so cents stay exact", () => {
+		expect(
+			parseCategory(
+				form({ name: "Travel", budget: "1,000,000" }),
+				existing,
+				null,
+			),
+		).toMatchObject({ ok: true, value: { budgetCents: 100000000 } });
+		for (const budget of ["1,000,000.01", "99999999999999999999"])
+			expect(
+				parseCategory(form({ name: "Travel", budget }), existing, null),
+			).toEqual({
+				ok: false,
+				errors: { budget: "Keep the budget to $1,000,000 a month or less." },
+			});
+	});
+
 	it("has no room for more than 254 active categories, since Jev offers each one plus 'None of these fit'", () => {
 		const full = Array.from({ length: MAX_ACTIVE }, (_, i) => ({
 			id: i + 1,

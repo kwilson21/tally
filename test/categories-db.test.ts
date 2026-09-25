@@ -148,6 +148,38 @@ describe("moveCategory", () => {
 	});
 });
 
+describe("restoring after a move", () => {
+	it("puts a restored category at the end, never sharing a place with another", async () => {
+		await setArchived(db, 2, true);
+		await moveCategory(db, 5, "up");
+		await setArchived(db, 2, false);
+		expect(await names()).toEqual([
+			"Groceries",
+			"Gas",
+			"Household",
+			"Kids",
+			"Eating Out",
+		]);
+		const orders = await db
+			.prepare("SELECT sort_order FROM categories WHERE archived = 0")
+			.all<{ sort_order: number }>();
+		const values = orders.results.map((r) => r.sort_order);
+		expect(new Set(values).size).toBe(values.length);
+	});
+});
+
+describe("names that differ only in capitals", () => {
+	it("are refused by the database itself, so two saves at once can't both win", async () => {
+		await addCategory(db, { name: "Travel", budgetCents: null }, MONTH);
+		await expect(
+			addCategory(db, { name: "travel", budgetCents: null }, MONTH),
+		).rejects.toThrow(/UNIQUE/);
+		await expect(
+			saveCategory(db, 1, { name: "GAS", budgetCents: null }, MONTH),
+		).rejects.toThrow(/UNIQUE/);
+	});
+});
+
 describe("categoryNames", () => {
 	it("lists every category, archived too, for the form's checks", async () => {
 		await setArchived(db, 5, true);

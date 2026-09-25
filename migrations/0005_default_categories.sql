@@ -1,6 +1,9 @@
 -- Every new database starts with the same categories, adapted from the owner's earlier app
 -- (spec §7, decision 32). Only a database with no categories gets them: the demo keeps its seed,
 -- and a household's own categories are never touched. No budgets: the family sets those.
+-- Names are unique ignoring case (spec §7). The form checks first; this index settles two saves at once.
+CREATE UNIQUE INDEX IF NOT EXISTS categories_name_nocase ON categories (name COLLATE NOCASE);
+
 INSERT INTO categories (name, icon, color, sort_order)
 SELECT column1, column2, column3, column4 FROM (VALUES
   ('Groceries', 'groceries', 'cat-blue', 1),

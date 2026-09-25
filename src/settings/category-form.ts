@@ -5,6 +5,8 @@ import { toCents } from "../money";
 const MAX_NAME = 40;
 /** Jev's Choice question takes 255 options, and "None of these fit" is always one of them. */
 export const MAX_ACTIVE = 254;
+/** $1,000,000 a month: far above any household budget, and well inside exact integer cents. */
+const MAX_BUDGET_CENTS = 100_000_000;
 
 type Existing = { id: number; name: string; archived: boolean }[];
 export type CategoryValue = { name: string; budgetCents: number | null };
@@ -46,6 +48,8 @@ export function parseCategory(
 		}
 		if (budgetCents < 0)
 			errors.budget = "Enter a dollar amount, like 250 or 250.50.";
+		else if (budgetCents > MAX_BUDGET_CENTS)
+			errors.budget = "Keep the budget to $1,000,000 a month or less.";
 	}
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };

@@ -29,7 +29,7 @@ export async function settingsCategories(
 ): Promise<{ active: SettingsCategory[]; archived: SettingsCategory[] }> {
 	const [categories, amounts] = (await db.batch([
 		db.prepare(
-			"SELECT id, name, icon, color, archived FROM categories ORDER BY sort_order, id",
+			"SELECT id, name, icon, color, archived FROM categories ORDER BY sort_order, name",
 		),
 		db.prepare(
 			"SELECT category_id AS categoryId, effective_month AS effectiveMonth, amount_cents AS amountCents FROM budget_amounts",
@@ -118,15 +118,24 @@ export async function saveCategory(
 	await db.batch(statements);
 }
 
-/** Archives or restores a category. Nothing is deleted, so every pick and source stays meaningful (spec §7). */
+/**
+ * Archives or restores a category. Nothing is deleted, so every pick and source stays meaningful
+ * (spec §7). A restored category goes to the end of the list, so it never shares a place.
+ */
 export async function setArchived(
 	db: D1Database,
 	id: number,
 	archived: boolean,
 ): Promise<void> {
 	await db
-		.prepare("UPDATE categories SET archived = ? WHERE id = ?")
-		.bind(archived ? 1 : 0, id)
+		.prepare(
+			archived
+				? "UPDATE categories SET archived = 1 WHERE id = ?"
+				: `UPDATE categories SET archived = 0,
+					sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE archived = 0)
+				WHERE id = ?`,
+		)
+		.bind(id)
 		.run();
 }
 
@@ -138,7 +147,7 @@ export async function moveCategory(
 ): Promise<void> {
 	const { results } = await db
 		.prepare(
-			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order, id",
+			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		)
 		.all<{ id: number }>();
 	const order = results.map((c) => c.id);
