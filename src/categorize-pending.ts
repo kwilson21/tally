@@ -10,6 +10,9 @@ import {
 /** Enough for a day of family transactions; the rest wait for the next night. */
 export const MAX_JEV_CALLS = 40;
 
+/** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
+const MAX_FAILURES_IN_A_ROW = 3;
+
 type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string };
 
 export async function categorizePending(
@@ -28,6 +31,7 @@ export async function categorizePending(
 	if (categories.length === 0) return done;
 	const names = categories.map((c) => c.name);
 
+	let failuresInARow = 0;
 	for (const tx of await pendingForJev(env.DB, MAX_JEV_CALLS)) {
 		done.asked += 1;
 		const result = await askJev(tx, names, env.JEV_API_KEY, fetchImpl);
@@ -37,10 +41,14 @@ export async function categorizePending(
 				`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
 			);
 			// Jev down, rate-limited, or a bad key would fail every call: stop, and retry next night.
-			// Anything else is about this one transaction: skip it (it stays pending) and carry on.
-			if (serviceWide(result.status)) return done;
+			// Anything else is about this one transaction: skip it (it stays pending) and carry on,
+			// unless it keeps happening, which means it isn't about one transaction after all.
+			failuresInARow += 1;
+			if (serviceWide(result.status) || failuresInARow >= MAX_FAILURES_IN_A_ROW)
+				return done;
 			continue;
 		}
+		failuresInARow = 0;
 		const decision = decide(result.answer, categories, JEV_THRESHOLD);
 		const written = await saveJevResult(env.DB, tx.id, decision);
 		if (written && decision.categoryId !== null) done.applied += 1;

@@ -247,4 +247,28 @@ describe("categorizePending", () => {
 			),
 		).toBe(0);
 	});
+
+	it("stops after three failures in a row, which point at every call, not one transaction", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const jev = fakeJev(() => new Response("{}", { status: 422 }));
+		const result = await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(3);
+		expect(result).toEqual({ asked: 3, applied: 0 });
+	});
+
+	it("resets the count after a good answer, so scattered bad rows are still skipped", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		let calls = 0;
+		// Two failures, a success, two failures, then successes: never three in a row.
+		const fetchImpl = async () => {
+			calls += 1;
+			return [1, 2, 4, 5].includes(calls)
+				? new Response("{}", { status: 422 })
+				: reply(0.95);
+		};
+		const result = await categorizePending(withKey, fetchImpl);
+		expect(calls).toBe(12);
+		expect(result.applied).toBe(8);
+	});
 });
