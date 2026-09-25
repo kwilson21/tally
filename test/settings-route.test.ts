@@ -252,17 +252,17 @@ describe("archiving, restoring and moving", () => {
 		});
 	});
 
-	it("won't restore past 254 active categories, and says why", async () => {
+	it("won't restore past 50 active categories, and says why", async () => {
 		await post("/settings/categories/2/archive", {});
-		// The demo has 4 active now; add 250 more.
+		// The demo has 4 active now; add 46 more.
 		await env.DB.prepare(
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 250)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 46)
 			 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
 		).run();
 		const { res, html } = await post("/settings/categories/2/restore", {});
 		expect(res.status).toBe(422);
 		expect(html).toMatch(
-			/role="alert"[^>]*>Tally has room for 254 categories\. Archive one to restore another\.</,
+			/role="alert"[^>]*>Tally has room for 50 categories\. Archive one to restore another\.</,
 		);
 		expect(rowNames(html)).not.toContain("Eating Out");
 	});

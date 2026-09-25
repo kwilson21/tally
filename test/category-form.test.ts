@@ -93,19 +93,19 @@ describe("parseCategory", () => {
 			});
 	});
 
-	it("has no room for more than 254 active categories, since Jev offers each one plus 'None of these fit'", () => {
+	it("has no room for more than 50 active categories, so every screen can show them all at once", () => {
 		const full = Array.from({ length: MAX_ACTIVE }, (_, i) => ({
 			id: i + 1,
 			name: `C${i}`,
 			archived: false,
 		}));
-		expect(MAX_ACTIVE).toBe(254);
+		expect(MAX_ACTIVE).toBe(50);
 		expect(
 			parseCategory(form({ name: "One more", budget: "" }), full, null),
 		).toEqual({
 			ok: false,
 			errors: {
-				name: "Tally has room for 254 categories. Archive one to add another.",
+				name: "Tally has room for 50 categories. Archive one to add another.",
 			},
 		});
 		// Editing an existing one is fine when full.
@@ -127,7 +127,7 @@ describe("restoreProblem", () => {
 			archived: false,
 		}));
 		expect(restoreProblem(full)).toBe(
-			"Tally has room for 254 categories. Archive one to restore another.",
+			"Tally has room for 50 categories. Archive one to restore another.",
 		);
 	});
 });

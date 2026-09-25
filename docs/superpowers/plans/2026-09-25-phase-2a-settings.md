@@ -23,7 +23,7 @@ The family can set up and change their categories and monthly budgets from the a
 3. **Rules,** in one pure module (`src/settings/category-form.ts`), unit-tested:
    - A name is required, 40 characters at most, and unique ignoring case against every category, archived ones too. The unique index would reject a duplicate anyway, so the form catches it first. If an archived category has the name, the message says to restore it instead.
    - No category may be named "None of these fit" (spec §7), ignoring case.
-   - At most 254 active categories, because Jev's Choice question takes 255 options including "None of these fit". This applies on add and on restore.
+   - At most 50 active categories, so every screen shows them all at once (decision 37; Jev's Choice question takes up to 255 options including "None of these fit"). This applies on add and on restore.
    - A budget is dollars (`toCents`) and 0 or more. Left blank, it doesn't change: a new category then has no budget, and an existing one keeps its budget.
 4. **Saving a budget** writes one `budget_amounts` row for the current month, upserted on (category, month). This month and later use the new amount; earlier months keep theirs (spec §6).
 5. **Feedback:** an `HX-Trigger` with `toast` + `announce`. Errors re-render the open row with `role="alert"`. Without JavaScript, a save redirects back to `/settings`.

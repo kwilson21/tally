@@ -3,8 +3,11 @@ import { NONE_FIT } from "../ai/decide";
 import { toCents } from "../money";
 
 const MAX_NAME = 40;
-/** Jev's Choice question takes 255 options, and "None of these fit" is always one of them. */
-export const MAX_ACTIVE = 254;
+/**
+ * Few enough that Settings, Home and the edit panel always show every category at once, with no
+ * pagination (decision 37). Well under Jev's limit of 255 options, one being "None of these fit".
+ */
+export const MAX_ACTIVE = 50;
 /** $1,000,000 a month: far above any household budget, and well inside exact integer cents. */
 const MAX_BUDGET_CENTS = 100_000_000;
 
