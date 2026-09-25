@@ -17,6 +17,8 @@ export const PAGES = [
 	{ name: "accounts", path: "/accounts" },
 	{ name: "documents", path: "/documents" },
 	{ name: "settings", path: "/settings" },
+	// Gas's row open for editing, as in the round 5 study.
+	{ name: "settings-edit", path: "/settings?open=3" },
 	{ name: "more", path: "/more" },
 	{ name: "how-it-works", path: "/how-it-works" },
 ];
