@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	budgetExample,
 	categorizationExample,
+	exclusionsExample,
 	transactionsExample,
 } from "../src/how-it-works/examples";
 
@@ -106,5 +107,17 @@ describe("categorizationExample", () => {
 		expect(categorizationExample(none)).toBe(
 			"Nothing has been categorized yet this month.",
 		);
+	});
+});
+
+describe("exclusionsExample", () => {
+	it("counts this month's excluded transactions", () => {
+		expect(exclusionsExample(2)).toBe(
+			"This month, 2 transactions are excluded, so they don't count toward spending or safe to spend.",
+		);
+		expect(exclusionsExample(1)).toBe(
+			"This month, 1 transaction is excluded, so it doesn't count toward spending or safe to spend.",
+		);
+		expect(exclusionsExample(0)).toBe("Nothing is excluded this month.");
 	});
 });

@@ -4,10 +4,11 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { summarizeMonth } from "../budget";
 import { todayUtc } from "../dates";
 import { loadMonth } from "../db/month";
-import { monthCounts } from "../db/transactions";
+import { excludedCount, monthCounts } from "../db/transactions";
 import {
 	budgetExample,
 	categorizationExample,
+	exclusionsExample,
 	transactionsExample,
 } from "../how-it-works/examples";
 import { TallyMark } from "../views/brand";
@@ -93,9 +94,10 @@ howItWorks.get("/how-it-works", async (c) => {
 	if (c.env.DEMO !== "true") return c.notFound();
 
 	const month = todayUtc().slice(0, 7);
-	const [data, counts] = await Promise.all([
+	const [data, counts, excluded] = await Promise.all([
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
+		excludedCount(c.env.DB, month),
 	]);
 	// Bills arrive in Phase 3; until then nothing is set aside for them, as on Home.
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents: 0 });
@@ -179,6 +181,30 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 					</ul>
 					<Example>{transactionsExample(counts)}</Example>
+				</Section>
+
+				<Section id="exclusions" title="Excluding transactions">
+					<p class="mt-2">
+						Some transactions aren't spending, like moving money between your
+						own accounts or being paid back. Excluding one leaves it out of the
+						budget.
+					</p>
+					<ul class="mt-3 list-disc space-y-1 pl-5">
+						<li>
+							Transactions flagged as a transfer or a reimbursement start
+							excluded.
+						</li>
+						<li>
+							A person can exclude or include any transaction from its edit
+							panel.
+						</li>
+						<li>
+							An excluded transaction doesn't count toward spending,
+							uncategorized, or safe to spend.
+						</li>
+						<li>The Excluded filter shows only excluded transactions.</li>
+					</ul>
+					<Example>{exclusionsExample(excluded)}</Example>
 				</Section>
 
 				<Section id="categorization" title="Categories">

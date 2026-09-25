@@ -207,3 +207,68 @@ describe("who picked the category", () => {
 		);
 	});
 });
+
+describe("excluding a transaction (spec §6, #27)", () => {
+	const transferId = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'ONLINE TRANSFER TO SAV ...5678' ORDER BY date DESC",
+			).first<{ id: number }>()
+		)?.id as number;
+	// The edit form's box, not the list's Excluded filter chip, which shares the field name.
+	const checkbox =
+		/<form method="post"[\s\S]*<input type="checkbox" name="excluded" value="1"([^>]*)>/;
+
+	it("shows a labeled exclude checkbox that reflects the transaction", async () => {
+		const bakerySheet = (await get(`/transactions/${bakery}`)).html;
+		expect(bakerySheet).toMatch(checkbox);
+		expect(bakerySheet.match(checkbox)?.[1]).not.toContain("checked");
+		expect(bakerySheet).toContain("Exclude from the budget");
+		const transferSheet = (await get(`/transactions/${await transferId()}`))
+			.html;
+		expect(transferSheet.match(checkbox)?.[1]).toContain("checked");
+	});
+
+	it("excludes on save, and says so", async () => {
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			excluded: "1",
+			back: "/transactions?uncategorized=1",
+		});
+		expect(rowCount(html)).toBe(11);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
+			"Saved Local Bakery. It's excluded from the budget.",
+		);
+		expect((await get("/")).html).toContain("11 transactions need a category");
+	});
+
+	it("includes an excluded transaction again when the box is cleared, and says so", async () => {
+		const id = await transferId();
+		const { res } = await post(`/transactions/${id}`, {
+			merchant: "",
+			note: "",
+			back: "/transactions",
+		});
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toMatch(
+			/It counts in the budget again\.$/,
+		);
+		const row = await env.DB.prepare(
+			"SELECT excluded FROM transactions WHERE id = ?",
+		)
+			.bind(id)
+			.first<{ excluded: number }>();
+		expect(row?.excluded).toBe(0);
+	});
+
+	it("keeps the box as typed when the form has an error", async () => {
+		const { html } = await post(`/transactions/${bakery}`, {
+			category: "99",
+			merchant: "",
+			note: "",
+			excluded: "1",
+			back: "/transactions",
+		});
+		expect(html.match(checkbox)?.[1]).toContain("checked");
+	});
+});

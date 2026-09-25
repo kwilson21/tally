@@ -22,7 +22,15 @@ describe("parseEdit", () => {
 				alwaysForMerchant: false,
 				displayName: "Local Bakery",
 				note: null,
+				excluded: false,
 			},
+		});
+	});
+
+	it("reads the exclude checkbox", () => {
+		expect(parseEdit(form({ excluded: "1" }), CATEGORIES)).toMatchObject({
+			ok: true,
+			value: { excluded: true },
 		});
 	});
 

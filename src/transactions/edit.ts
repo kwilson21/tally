@@ -7,6 +7,8 @@ export type Edit = {
 	/** null falls back to the bank's raw name. */
 	displayName: string | null;
 	note: string | null;
+	/** Left out of the budget (spec §6). A person can always toggle it. */
+	excluded: boolean;
 };
 
 export type EditErrors = Partial<
@@ -30,6 +32,7 @@ export function parseEdit(
 	const alwaysForMerchant = form.get("always") === "1";
 	const displayName = text(form, "merchant");
 	const note = text(form, "note");
+	const excluded = form.get("excluded") === "1";
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
 		errors.category = "Pick a category from the list.";
@@ -49,6 +52,7 @@ export function parseEdit(
 			alwaysForMerchant,
 			displayName: displayName || null,
 			note: note || null,
+			excluded,
 		},
 	};
 }

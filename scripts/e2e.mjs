@@ -1,4 +1,4 @@
-// Recategorize end to end (spec §11): Home's band → the Needs category list → the edit sheet → save → Home updates.
+// Recategorize and exclude end to end (spec §11): Home's band → the Needs category list → the edit sheet → save → Home updates.
 // Resets the demo data first, and fails on any console error.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -43,11 +43,19 @@ assert.equal(await rows(), 11);
 assert.match(page.url(), /\/transactions\?uncategorized=1$/);
 step("saving shows a toast, closes the sheet, and leaves 11 to categorize");
 
+await page.locator("#results li[data-transaction] a").first().click();
+await page.locator('[role="dialog"]').waitFor();
+await page.getByLabel("Exclude from the budget").check();
+await page.getByRole("button", { name: "Save" }).click();
+await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+assert.equal(await rows(), 10);
+step("excluding a transaction takes it out of the list, leaving 10");
+
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
-	.getByRole("link", { name: /11 transactions need a category/ })
+	.getByRole("link", { name: /10 transactions need a category/ })
 	.waitFor();
-step("Home now says 11 transactions need a category");
+step("Home now says 10 transactions need a category");
 
 await browser.close();
 assert.deepEqual(errors, [], `console errors:\n${errors.join("\n")}`);

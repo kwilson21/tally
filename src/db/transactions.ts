@@ -160,7 +160,7 @@ export async function getTransaction(
 
 /**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
- * changes), the note, the merchant's display name, and, if asked, the merchant rule, which also
+ * changes), the note, whether it's excluded, the merchant's display name, and, if asked, the merchant rule, which also
  * recategorizes the merchant's other transactions except ones a person chose (spec §7).
  */
 export async function saveEdit(
@@ -184,14 +184,14 @@ export async function saveEdit(
 			? db
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
-							note = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+							note = ?, excluded = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
-					.bind(edit.categoryId, edit.note, actor, id)
+					.bind(edit.categoryId, edit.note, edit.excluded ? 1 : 0, actor, id)
 			: db
 					.prepare(
-						"UPDATE transactions SET note = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+						"UPDATE transactions SET note = ?, excluded = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
 					)
-					.bind(edit.note, actor, id),
+					.bind(edit.note, edit.excluded ? 1 : 0, actor, id),
 		db
 			.prepare(
 				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
@@ -273,8 +273,9 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
 /**
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
- * Jev's income answer isn't stored: it changes the budget math, and a person can't undo a flag
- * until the edit panel gets flag controls (#27, decision 28). Returns whether it wrote the row.
+ * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
+ * with the edit panel's exclude toggle (#27). Jev's income answer isn't stored: it changes the budget
+ * math, and the edit panel has no income control (decision 28). Returns whether it wrote the row.
  */
 export async function saveJevResult(
 	db: D1Database,
@@ -286,7 +287,7 @@ export async function saveJevResult(
 			`UPDATE transactions SET
 				category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
 				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
-				updated_at = datetime('now')
+				excluded = MAX(excluded, ?), updated_at = datetime('now')
 			WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
 		)
 		.bind(
@@ -296,10 +297,25 @@ export async function saveJevResult(
 			d.suggestedCategoryId,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
+			d.flags.transfer || d.flags.reimbursement ? 1 : 0,
 			id,
 		)
 		.run();
 	return result.meta.changes > 0;
+}
+
+/** How many of a month's transactions are excluded (split parents aside), for How Tally works. */
+export async function excludedCount(
+	db: D1Database,
+	month: string,
+): Promise<number> {
+	const row = await db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0",
+		)
+		.bind(month)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
 }
 
 /**

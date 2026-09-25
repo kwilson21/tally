@@ -422,6 +422,23 @@ function EditSheet({
 					/>
 					Always use this category for this merchant
 				</label>
+				<div>
+					<label class="flex min-h-11 items-center gap-3">
+						<input
+							type="checkbox"
+							name="excluded"
+							value="1"
+							checked={values.excluded}
+							aria-describedby="excluded-hint"
+							class="size-5"
+						/>
+						Exclude from the budget
+					</label>
+					<p id="excluded-hint" class="text-sm text-muted">
+						An excluded transaction doesn't count toward spending or Safe to
+						spend. Transfers and reimbursements start excluded.
+					</p>
+				</div>
 				<FormField id="merchant" label="Merchant name" error={errors.merchant}>
 					{(a11y) => (
 						<>
@@ -513,6 +530,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		alwaysForMerchant: false,
 		displayName: tx.merchantName,
 		note: tx.note,
+		excluded: tx.excluded,
 	};
 	return renderList(c, filters, {
 		sheet: (categories) => (
@@ -548,6 +566,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			alwaysForMerchant: form.get("always") === "1",
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
+			excluded: form.get("excluded") === "1",
 		};
 		return renderList(c, filters, {
 			status: 422,
@@ -571,13 +590,20 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;
+	const saved = category
+		? `Saved. ${name} is now ${category}.`
+		: `Saved ${name}.`;
+	const exclusion =
+		parsed.value.excluded === tx.excluded
+			? ""
+			: parsed.value.excluded
+				? " It's excluded from the budget."
+				: " It counts in the budget again.";
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: { message: `Saved ${name}`, type: "success" },
-			announce: category
-				? `Saved. ${name} is now ${category}.`
-				: `Saved ${name}.`,
+			announce: saved + exclusion,
 		}),
 	);
 	c.header("HX-Push-Url", back);
