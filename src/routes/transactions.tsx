@@ -90,15 +90,19 @@ async function renderList(
 	}
 	const first = (page - 1) * PAGE_SIZE + 1;
 	// Named even when archived (a bookmarked link can still filter by it), so the count always
-	// says which category it is and every change is announced (#56).
-	const categoryName =
-		filters.category === null
-			? null
-			: ((
-					await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
-						.bind(filters.category)
-						.first<{ name: string }>()
-				)?.name ?? `category ${filters.category}`);
+	// says which category it is and every change is announced (#56). Only an archived or
+	// unknown id needs the extra lookup.
+	let categoryName: string | null = null;
+	if (filters.category !== null) {
+		categoryName =
+			categories.results.find((cat) => cat.id === filters.category)?.name ??
+			(
+				await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
+					.bind(filters.category)
+					.first<{ name: string }>()
+			)?.name ??
+			`category ${filters.category}`;
+	}
 	const count = resultCount(
 		{ total, first, shown: rows.length, pages },
 		filters,
