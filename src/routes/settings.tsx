@@ -12,6 +12,7 @@ import {
 import { centsToInput, formatCents } from "../money";
 import {
 	type CategoryErrors,
+	fullMessage,
 	parseCategory,
 	restoreProblem,
 } from "../settings/category-form";
@@ -417,7 +418,7 @@ settings.post("/settings/categories", async (c) => {
 	const form = await c.req.formData();
 	const parsed = parseCategory(form, await categoryNames(c.env.DB), null);
 	if (!parsed.ok) return retry(c, "new", form, parsed.errors);
-	let id: number;
+	let id: number | null;
 	try {
 		id = await addCategory(c.env.DB, parsed.value, todayUtc().slice(0, 7));
 	} catch (error) {
@@ -425,6 +426,8 @@ settings.post("/settings/categories", async (c) => {
 			return retry(c, "new", form, { name: "That name is taken." });
 		throw error;
 	}
+	// Another save filled the list between the form's check and this write.
+	if (id === null) return retry(c, "new", form, { name: fullMessage("add") });
 	const phrase = budgetPhrase(parsed.value.budgetCents);
 	return done(
 		c,
@@ -482,7 +485,11 @@ settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 	if (!category?.archived) return gone(c);
 	const problem = restoreProblem(all);
 	if (problem) return renderSettings(c, { restoreError: problem, status: 422 });
-	await setArchived(c.env.DB, category.id, false);
+	if (!(await setArchived(c.env.DB, category.id, false)))
+		return renderSettings(c, {
+			restoreError: fullMessage("restore"),
+			status: 422,
+		});
 	return done(c, `Restored ${category.name}`, `Restored ${category.name}.`, {
 		focus: category.id,
 	});

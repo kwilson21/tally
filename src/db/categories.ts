@@ -1,6 +1,6 @@
 // The household's categories and budget amounts, as Settings shows and changes them (spec §5, §7, §8).
 import { budgetForMonth } from "../budget";
-import type { CategoryValue } from "../settings/category-form";
+import { type CategoryValue, MAX_ACTIVE } from "../settings/category-form";
 
 export type SettingsCategory = {
 	id: number;
@@ -58,7 +58,10 @@ export async function categoryNames(
 	return results.map((c) => ({ ...c, archived: c.archived === 1 }));
 }
 
-/** Sets a category's budget from `month` on, replacing one already set for that month. */
+/**
+ * Sets a category's budget from `month` on, replacing one already set for that month. A category
+ * found by name that wasn't added (the list was full) gets nothing.
+ */
 const setBudget = (
 	db: D1Database,
 	categoryId: number | null,
@@ -69,17 +72,23 @@ const setBudget = (
 	db
 		.prepare(
 			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents)
-			VALUES (COALESCE(?, (SELECT id FROM categories WHERE name = ?)), ?, ?)
+			SELECT id, ?, ? FROM categories WHERE id = COALESCE(?, (SELECT id FROM categories WHERE name = ?))
 			ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
 		)
-		.bind(categoryId, name, month, cents);
+		.bind(month, cents, categoryId, name);
 
-/** Adds a category at the end of the list, with the tag icon, the next color, and its budget if given. */
+/** True while there's room for one more active category; checked inside each write, so two saves at once can't both pass. */
+const ROOM = `(SELECT COUNT(*) FROM categories WHERE archived = 0) < ${MAX_ACTIVE}`;
+
+/**
+ * Adds a category at the end of the list, with the tag icon, the next color, and its budget if given.
+ * Returns its id, or null when the list was already full.
+ */
 export async function addCategory(
 	db: D1Database,
 	value: CategoryValue,
 	month: string,
-): Promise<number> {
+): Promise<number | null> {
 	const count = await db
 		.prepare(
 			"SELECT COUNT(*) AS n, COALESCE(MAX(sort_order), 0) AS last FROM categories",
@@ -88,7 +97,7 @@ export async function addCategory(
 	const statements = [
 		db
 			.prepare(
-				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', ?, ?)",
+				`INSERT INTO categories (name, icon, color, sort_order) SELECT ?, 'tag', ?, ? WHERE ${ROOM}`,
 			)
 			.bind(
 				value.name,
@@ -99,7 +108,7 @@ export async function addCategory(
 	if (value.budgetCents !== null)
 		statements.push(setBudget(db, null, value.name, value.budgetCents, month));
 	const [inserted] = await db.batch(statements);
-	return Number(inserted?.meta.last_row_id);
+	return inserted?.meta.changes ? Number(inserted.meta.last_row_id) : null;
 }
 
 /** Renames a category and, if given, sets its budget from `month` on, in one atomic batch. */
@@ -127,17 +136,19 @@ export async function setArchived(
 	db: D1Database,
 	id: number,
 	archived: boolean,
-): Promise<void> {
-	await db
+): Promise<boolean> {
+	const result = await db
 		.prepare(
 			archived
 				? "UPDATE categories SET archived = 1 WHERE id = ?"
 				: `UPDATE categories SET archived = 0,
 					sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE archived = 0)
-				WHERE id = ?`,
+				WHERE id = ? AND ${ROOM}`,
 		)
 		.bind(id)
 		.run();
+	// False when a restore found the list already full.
+	return result.meta.changes > 0;
 }
 
 /** Moves an active category one place up or down; the list is renumbered 1, 2, 3… as it goes. */

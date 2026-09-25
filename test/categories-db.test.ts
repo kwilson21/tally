@@ -212,3 +212,45 @@ describe("an archived category on Home", () => {
 		expect(await onHome(MONTH)).not.toContain("Eating Out");
 	});
 });
+
+describe("the 50-category limit, checked in the same write", () => {
+	// The demo has 5 active; fill up to 50, as if other saves landed first.
+	const fill = () =>
+		db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 45)
+				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
+			)
+			.run();
+	const count = async (sql: string) =>
+		(await db.prepare(sql).first<{ n: number }>())?.n;
+
+	it("adds nothing, not even a budget, once 50 are active", async () => {
+		await fill();
+		expect(
+			await addCategory(db, { name: "Travel", budgetCents: 40000 }, MONTH),
+		).toBeNull();
+		expect(
+			await count("SELECT COUNT(*) AS n FROM categories WHERE archived = 0"),
+		).toBe(50);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM budget_amounts WHERE category_id NOT IN (SELECT id FROM categories)",
+			),
+		).toBe(0);
+	});
+
+	it("restores nothing once 50 are active", async () => {
+		await setArchived(db, 2, true);
+		await fill();
+		await db
+			.prepare(
+				"INSERT INTO categories (name, icon, color) VALUES ('Extra 46', 'tag', 'cat-blue')",
+			)
+			.run();
+		expect(await setArchived(db, 2, false)).toBe(false);
+		expect(
+			await count("SELECT COUNT(*) AS n FROM categories WHERE archived = 0"),
+		).toBe(50);
+	});
+});

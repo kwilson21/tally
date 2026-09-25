@@ -12,6 +12,10 @@ export const MAX_ACTIVE = 50;
 const MAX_BUDGET_CENTS = 100_000_000;
 
 type Existing = { id: number; name: string; archived: boolean }[];
+/** What a full list says, for adding a category or restoring one. */
+export const fullMessage = (action: "add" | "restore") =>
+	`Tally has room for ${MAX_ACTIVE} categories. Archive one to ${action} another.`;
+
 export type CategoryValue = { name: string; budgetCents: number | null };
 export type CategoryErrors = Partial<Record<"name" | "budget", string>>;
 
@@ -44,7 +48,7 @@ export function parseCategory(
 			? "An archived category has that name. Restore it instead."
 			: "That name is taken.";
 	else if (id === null && activeCount(existing) >= MAX_ACTIVE)
-		errors.name = `Tally has room for ${MAX_ACTIVE} categories. Archive one to add another.`;
+		errors.name = fullMessage("add");
 
 	let budgetCents: number | null = null;
 	if (budget === "" && hasBudget)
@@ -67,7 +71,5 @@ export function parseCategory(
 
 /** Why an archived category can't come back right now, or null when it can. */
 export function restoreProblem(existing: Existing): string | null {
-	return activeCount(existing) >= MAX_ACTIVE
-		? `Tally has room for ${MAX_ACTIVE} categories. Archive one to restore another.`
-		: null;
+	return activeCount(existing) >= MAX_ACTIVE ? fullMessage("restore") : null;
 }
