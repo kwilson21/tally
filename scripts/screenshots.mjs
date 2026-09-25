@@ -14,6 +14,8 @@ const browser = await chromium.launch({
 	executablePath: process.env.CHROMIUM_PATH || undefined,
 });
 const errors = [];
+const today = () => new Date().toISOString().slice(0, 10);
+const started = today();
 
 for (const viewport of VIEWPORTS) {
 	const context = await browser.newContext({
@@ -31,7 +33,13 @@ for (const viewport of VIEWPORTS) {
 		const response = await tab.goto(BASE + page.path, {
 			waitUntil: "networkidle",
 		});
-		if (!response?.ok()) errors.push(`${where}: HTTP ${response?.status()}`);
+		if (!response?.ok()) {
+			errors.push(`${where}: HTTP ${response?.status()}`);
+			// An error page isn't the page: on the base branch this is a page the PR adds, so the
+			// before-and-after marks it new instead of showing the error (#60).
+			await tab.close();
+			continue;
+		}
 		// Retake until two shots in a row match, so a page caught mid-render doesn't count as a
 		// change in the before-and-after comparison (#60).
 		const shoot = () =>
@@ -49,6 +57,12 @@ for (const viewport of VIEWPORTS) {
 }
 
 await browser.close();
+// Proof this run finished, with the UTC dates it ran on: the before-and-after only compares two
+// finished runs from the same day, since the demo data follows the date (scripts/changed-shots.mjs).
+await writeFile(
+	`${OUT}/run.json`,
+	JSON.stringify({ started, finished: today() }),
+);
 if (errors.length > 0) {
 	console.error(`Console errors:\n${errors.join("\n")}`);
 	process.exit(1);

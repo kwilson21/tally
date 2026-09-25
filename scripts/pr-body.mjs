@@ -59,12 +59,34 @@ export function changedShots(shots) {
 }
 
 /**
+ * Why this PR's screenshots can't be compared with the base branch's, or null when they can.
+ * Each run records the UTC dates it started and finished on; the base's record is missing if its
+ * run died. The demo data follows the date, so runs on different days would differ everywhere.
+ * @param {{ started: string, finished: string }} after
+ * @param {{ started: string, finished: string } | null} before
+ * @returns {string | null}
+ */
+export function comparisonProblem(after, before) {
+	if (before === null) return "The screenshots of `main` didn't finish.";
+	const days = new Set([
+		after.started,
+		after.finished,
+		before.started,
+		before.finished,
+	]);
+	return days.size > 1
+		? "The two sets of screenshots were taken either side of midnight UTC, so the demo data differs. Re-run the Screenshots job to compare."
+		: null;
+}
+
+/**
  * The PR description's screenshot section: before and after for every changed image, then every
  * page at both sizes. `raw` is the URL of this run's folder; "before" images sit in `before/`.
- * @param {{ sha: string, raw: string, changes: { file: string, hasBefore: boolean }[] }} options
+ * `unavailable` is why there's no comparison this time (see comparisonProblem).
+ * @param {{ sha: string, raw: string, changes: { file: string, hasBefore: boolean }[], unavailable?: string | null }} options
  * @returns {string}
  */
-export function screenshotSection({ sha, raw, changes }) {
+export function screenshotSection({ sha, raw, changes, unavailable = null }) {
 	const [desktop, phone] = VIEWPORTS;
 	const img = (path, alt, width) =>
 		`<img src="${raw}/${path}" width="${width}" alt="${alt}">`;
@@ -77,8 +99,9 @@ export function screenshotSection({ sha, raw, changes }) {
 	};
 	const width = (file) => (file.endsWith(`-${phone.name}.png`) ? 180 : 480);
 
-	const beforeAfter =
-		changes.length === 0
+	const beforeAfter = unavailable
+		? [`No before-and-after this time: ${unavailable}`]
+		: changes.length === 0
 			? ["No page looks different from `main`."]
 			: [
 					"| Page | Before (`main`) | After (this PR) |",

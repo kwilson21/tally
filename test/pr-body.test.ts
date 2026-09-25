@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	changedShots,
+	comparisonProblem,
 	PAGES,
 	screenshotSection,
 	withScreenshots,
@@ -97,5 +98,44 @@ describe("screenshotSection", () => {
 		expect(section.startsWith("<!-- screenshots:start -->")).toBe(true);
 		expect(section.endsWith("<!-- screenshots:end -->")).toBe(true);
 		for (const page of PAGES) expect(section).toContain(`\`${page.path}\``);
+	});
+});
+
+describe("comparisonProblem", () => {
+	const run = (started: string, finished = started) => ({ started, finished });
+
+	it("allows a comparison when both runs finished on the same UTC day", () => {
+		expect(comparisonProblem(run("2026-09-25"), run("2026-09-25"))).toBeNull();
+	});
+
+	it("says so when the base run never finished, instead of calling its pages new", () => {
+		expect(comparisonProblem(run("2026-09-25"), null)).toMatch(
+			/screenshots of `main` didn't finish/,
+		);
+	});
+
+	it("says so when the runs straddle midnight UTC, since the demo data follows the date", () => {
+		expect(
+			comparisonProblem(run("2026-09-25", "2026-09-26"), run("2026-09-26")),
+		).toMatch(/midnight UTC/);
+		expect(comparisonProblem(run("2026-09-25"), run("2026-09-26"))).toMatch(
+			/midnight UTC/,
+		);
+	});
+});
+
+describe("screenshotSection when there's nothing to compare", () => {
+	it("gives the reason, shows no before-and-after rows, and keeps the full table", () => {
+		const section = screenshotSection({
+			sha: "abc1234",
+			raw: "https://raw.example/x",
+			changes: [],
+			unavailable: "The screenshots of `main` didn't finish.",
+		});
+		expect(section).toContain(
+			"No before-and-after this time: The screenshots of `main` didn't finish.",
+		);
+		expect(section).not.toContain("No page looks different");
+		expect(section).toContain("## Screenshots");
 	});
 });
