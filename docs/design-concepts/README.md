@@ -63,6 +63,25 @@ The corrections from round 3 are confirmed: category colors avoid status hues, e
 - Excluded rows get a muted transfer icon, not the dashed "needs category" slot.
 - The owner asked for a "How X works" section for every feature (spec §9).
 
+## Round 5 brief: Settings and Accounts (Phase 2, decision 35)
+
+The owner generates these. Make each screen in the Illustrated ledger direction at 390×844 (mobile) and 1280×800 (desktop), with the same paper, ink, rules, type, icons and category colors as round 4. Use the Rivera household's names and plausible numbers; code does the math.
+
+- **Settings** (More → Settings; spec §7, §8). One page, three sections:
+  - **Categories:**
+    - Each row shows its icon in its category color, its name, and this month's budget (or "No budget").
+    - Actions: "Add category", rename, reorder, archive (the word is "Archive", never "Delete"), and set a budget "from <month> on".
+    - Show one row being edited: a name field and a budget field, with a field error under the name ("That name is taken").
+  - **Merchant names** (built in Phase 4): one suggested name, such as "SQ *FARMERS MKT" → "Farmers Market", with Accept and Reject.
+  - **Suggested categories** (built in Phase 4): one suggestion, such as "Pets", with the three transactions behind it, and Create and Dismiss.
+- **Accounts** (More → Accounts; spec §8):
+  - Net worth as the headline number. Leave room for the net-worth chart that comes in Phase 4.
+  - Accounts grouped by bank: checking, savings and a credit card, with their balances. Debt shows as negative.
+  - One bank connection that needs attention, with "Fix connection" and a word plus an icon for its status (status is never color alone).
+  - A "Link a bank" button.
+
+Save the selected images in `docs/design-concepts/<date>/` and record the selection here, as for rounds 2–4.
+
 ## Build checks
 
 - 2026-09-22, Phase 1a shell (branch `phase-1a-design-system`): checked in a browser at 1280×800 and 390×844. Inter and Newsreader load from our own origin; the demo banner, sidebar (desktop), bottom tabs (mobile), and tally-mark wordmark render; Home is marked current in terracotta. The console is clean with no CSP violations, and the toast and announce listeners work. Screenshots were shared with the owner in the review conversation. They weren't committed, to avoid adding a screenshot toolchain for one check.
