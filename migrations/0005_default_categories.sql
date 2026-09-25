@@ -1,0 +1,40 @@
+-- Every new database starts with the same categories, adapted from the owner's earlier app
+-- (spec §7, decision 32). Only a database with no categories gets them: the demo keeps its seed,
+-- and a household's own categories are never touched. No budgets: the family sets those.
+-- Names are unique ignoring case (spec §7). The form checks first; this index settles two saves at once.
+-- A database from before this rule could hold names that differ only in capitals ("Gas" and "gas"),
+-- which would stop the index being made. The later one gets its id added ("gas (6)"), so this always runs.
+-- The name is shortened first so the result stays within the form's 40 characters. If another category
+-- already has that name, random letters join the id instead ("gas (6-3fa9c2d1)"), so it still reads as gas.
+UPDATE categories SET name = CASE
+  WHEN EXISTS (
+    SELECT 1 FROM categories other
+    WHERE other.name = rtrim(substr(categories.name, 1, 40 - length(' (' || categories.id || ')'))) || ' (' || categories.id || ')' COLLATE NOCASE
+  ) THEN rtrim(substr(name, 1, 40 - length(' (' || id || '-12345678)'))) || ' (' || id || '-' || lower(hex(randomblob(4))) || ')'
+  ELSE rtrim(substr(name, 1, 40 - length(' (' || id || ')'))) || ' (' || id || ')'
+END
+WHERE EXISTS (
+  SELECT 1 FROM categories earlier
+  WHERE earlier.name = categories.name COLLATE NOCASE AND earlier.id < categories.id
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS categories_name_nocase ON categories (name COLLATE NOCASE);
+
+INSERT INTO categories (name, icon, color, sort_order)
+SELECT column1, column2, column3, column4 FROM (VALUES
+  ('Groceries', 'groceries', 'cat-blue', 1),
+  ('Eating Out', 'eating-out', 'cat-plum', 2),
+  ('Gas', 'gas', 'cat-slate', 3),
+  ('Car & Transport', 'car', 'cat-ochre', 4),
+  ('Rent', 'rent', 'cat-brown', 5),
+  ('Utilities', 'utilities', 'cat-blue', 6),
+  ('Subscriptions', 'subscriptions', 'cat-plum', 7),
+  ('Shopping', 'shopping', 'cat-slate', 8),
+  ('Personal Care', 'personal-care', 'cat-ochre', 9),
+  ('Health', 'health', 'cat-brown', 10),
+  ('Entertainment', 'entertainment', 'cat-blue', 11),
+  ('Kids', 'kids', 'cat-plum', 12),
+  ('Date Night', 'date-night', 'cat-slate', 13),
+  ('Donations & Charity', 'donations', 'cat-ochre', 14)
+)
+WHERE NOT EXISTS (SELECT 1 FROM categories);

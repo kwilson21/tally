@@ -82,6 +82,25 @@ The owner generates these. Make each screen in the Illustrated ledger direction 
 
 Save the selected images in `docs/design-concepts/<date>/` and record the selection here, as for rounds 2–4.
 
+## Round 5: Settings and Accounts (2026-09-25)
+
+The owner generated these without the reference image attached, and accepted all four as layout guides:
+- Settings, mobile: [settings-mobile-v1.webp](2026-09-25/settings-mobile-v1.webp)
+- Settings, desktop: [settings-desktop-v1.webp](2026-09-25/settings-desktop-v1.webp)
+- Accounts, mobile: [accounts-mobile-v1.webp](2026-09-25/accounts-mobile-v1.webp)
+- Accounts, desktop: [accounts-desktop-v1.webp](2026-09-25/accounts-desktop-v1.webp)
+
+**What to take from them:**
+- **Settings:** categories as a list with icon, name and "$600 a month". One row opens in place to edit its name and "Budget from <month> on". On desktop the name and budget fields sit side by side. The error uses an icon and words. "Archive" is a link, never a delete button. "+ Add category" and "Archived (1)" sit under the list. Merchant names and suggested categories (Phase 4) sit below, each with a primary and an outline button.
+- **Accounts:** net worth as the serif headline, with a ruled space for the Phase 4 chart. Accounts are grouped by bank, with debt shown negative. A connection that needs attention shows an alert icon and words, plus "Fix connection". "Link a bank" is the primary button.
+
+**Build notes: where the studies drifted, the design system wins.**
+- The demo banner, wordmark, navigation and nav icons come from the built Layout, Sidebar and BottomTabs. The studies moved the banner under the wordmark, left it off the desktop Settings study, and drew different nav icons.
+- Row names, field labels and bank names use the sans (Inter), never the serif. Some desktop labels drifted into the serif, and so did the "Link a bank" button text.
+- Bank group names use the muted small sans, not uppercase with letter spacing, which isn't in DESIGN.md.
+- "+ Add category" has no chevron and is terracotta like a link. As built (#55) it opens the add form in place, like the other rows.
+- Account rows keep a line icon on both sizes. The desktop Accounts study dropped them.
+
 ## Build checks
 
 - 2026-09-22, Phase 1a shell (branch `phase-1a-design-system`): checked in a browser at 1280×800 and 390×844. Inter and Newsreader load from our own origin; the demo banner, sidebar (desktop), bottom tabs (mobile), and tally-mark wordmark render; Home is marked current in terracotta. The console is clean with no CSP violations, and the toast and announce listeners work. Screenshots were shared with the owner in the review conversation. They weren't committed, to avoid adding a screenshot toolchain for one check.

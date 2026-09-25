@@ -229,15 +229,18 @@ export async function saveEdit(
 /**
  * Applies merchant rules to transactions nobody has categorized yet (spec §7: a merchant rule
  * comes before Jev). A person's choice, or a category from anywhere else, is never touched.
+ * A rule whose category is archived is skipped, and works again once the category is restored.
  */
 export async function applyMerchantRules(db: D1Database): Promise<void> {
+	const rule = `SELECT m.default_category_id FROM merchants m
+		JOIN categories c ON c.id = m.default_category_id AND c.archived = 0
+		WHERE m.raw_name = transactions.raw_name`;
 	await db
 		.prepare(
 			`UPDATE transactions SET
-				category_id = (SELECT m.default_category_id FROM merchants m WHERE m.raw_name = transactions.raw_name),
+				category_id = (${rule}),
 				category_source = 'merchant_rule', category_confidence = NULL, updated_at = datetime('now')
-			WHERE category_id IS NULL AND category_source IS NULL
-				AND EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = transactions.raw_name AND m.default_category_id IS NOT NULL)`,
+			WHERE category_id IS NULL AND category_source IS NULL AND EXISTS (${rule})`,
 		)
 		.run();
 }

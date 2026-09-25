@@ -1,4 +1,4 @@
-// Recategorize and exclude end to end (spec §11): Home's band → the Needs category list → the edit sheet → save → Home updates.
+// Recategorize, exclude, and change a budget amount end to end (spec §11): Home's band → the Needs category list → the edit sheet → save → Home updates.
 // Resets the demo data first, and fails on any console error.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -56,6 +56,40 @@ await page
 	.getByRole("link", { name: /10 transactions need a category/ })
 	.waitFor();
 step("Home now says 10 transactions need a category");
+
+// Change a budget amount (spec §11): Settings → Groceries → 650 → Home shows it.
+await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+await page.locator('summary[data-category="1"]').click();
+await page
+	.getByLabel(/^Budget from /)
+	.first()
+	.fill("650");
+await page
+	.locator('details[data-row="1"]')
+	.getByRole("button", { name: "Save" })
+	.click();
+await page.locator("#toasts").getByText("Saved Groceries").waitFor();
+await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+await page.getByText(/of \$650/).waitFor();
+step("changing Groceries' budget in Settings shows on Home");
+
+// Reorder through htmx: the button inside the edit form must send its own direction.
+await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+await page.locator('summary[data-category="3"]').click();
+await page
+	.locator('details[data-row="3"]')
+	.getByRole("button", { name: "Move up" })
+	.click();
+await page.locator("#toasts").getByText("Moved Gas").waitFor();
+assert.deepEqual(
+	(
+		await page
+			.locator("summary[data-category] span.font-medium")
+			.allTextContents()
+	).slice(0, 3),
+	["Groceries", "Gas", "Eating Out"],
+);
+step("Move up in Settings moves Gas up one place");
 
 await browser.close();
 assert.deepEqual(errors, [], `console errors:\n${errors.join("\n")}`);

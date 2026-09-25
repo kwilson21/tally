@@ -6,7 +6,7 @@ Direction: "Illustrated ledger" (docs/design-concepts/README.md). Calm, warm, gl
 1. One thing matters per screen. It gets the serif, the size, or the band. Nothing else competes.
 2. Status is never color alone. Every red or green state also has an icon and a word.
 3. Categories and status never share a hue. Status: green/brick. Categories: blue, plum, slate, ochre, brown.
-4. Terracotta means "you can click this." Links and the current nav item only.
+4. Terracotta means "you can click this." Links, link-styled actions (Archive, Restore, Add category) and the current nav item only.
 5. Explainable in one sentence. If a component can't be, it doesn't exist.
 
 ## Tokens (src/styles/app.css @theme)
@@ -60,6 +60,8 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 - Result count: the `aria-live` line above a list names every active filter ("12 transactions needing a category in September", "Showing 1–25 of 35 transactions in Groceries, September"), so any filter change changes its text and is announced.
 - Edit panel layout (owner's pick C, #27): the category chips first; then two toggle chips, "Always for this merchant" and "Exclude from budget"; then "Rename or add a note" behind a disclosure, which opens itself when there's a note or an error. An excluded transaction says "Excluded from the budget" with the transfer icon under the date. One "How this works" link.
 - Disclosure: `<details>` with a `<summary>` row (44px) led by a chevron that turns when open (`group-open:rotate-90`); no JavaScript.
+- Settings list (round 5 studies, #55): each category is a disclosure row (icon, name, "$600 a month" with "a month" muted, chevron at the far right) that opens in place to edit. Name and "Budget from <month> on" sit side by side on desktop. Save and Cancel sit on one line with Archive, a terracotta text button, at the far right; Move up and Move down, outline buttons, sit below. "+ Add category" is a terracotta disclosure row; "Archived (n)" lists archived categories with Restore.
+- Extra actions in a form (Archive, Move): a second submit button with `formaction` and its own `hx-post`, so it works without JavaScript and never needs a form inside a form. Anything the action needs goes in its URL (`…/move/up`), because htmx doesn't send which button was pressed.
 - Excluded rows in a list show a muted transfer icon and the word "Excluded" (never color alone).
 - Sheet backdrop: `bg-ink/30` (ink at 30%), used only behind the BottomSheet; it is decorative, so no contrast target.
 - Explainer page (How Tally works): each section is a serif h2 with an `id` the HowLinks point to, the rule in a short list quoted from the spec, and a worked example in a band-tinted box ("In the demo: …") computed by code from live numbers. When a rule changes in the spec, its section changes in the same PR.
