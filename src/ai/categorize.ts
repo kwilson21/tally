@@ -84,14 +84,21 @@ export async function askJev(
 	const requestId = response.headers.get("x-typesafe-request-id");
 	if (!response.ok) return { ok: false, status: response.status, requestId };
 
-	const answer = parseAnswer(await response.json().catch(() => null));
+	const answer = parseAnswer(await response.json().catch(() => null), [
+		...categories,
+		NONE_FIT,
+	]);
 	return answer
 		? { ok: true, answer }
 		: { ok: false, status: response.status, requestId };
 }
 
-/** Reads the answers Jev documents: a choice with a confidence, and a yes-probability per flag. */
-function parseAnswer(data: unknown): JevAnswer | null {
+/**
+ * Reads the answers Jev documents: a choice with a confidence, and a yes-probability per flag.
+ * A choice that wasn't one of the options offered is malformed, so it's never stored and can't
+ * be mistaken for "None of these fit".
+ */
+function parseAnswer(data: unknown, options: string[]): JevAnswer | null {
 	const answers = (data as { answers?: Record<string, unknown> } | null)
 		?.answers;
 	const category = answers?.category as
@@ -99,6 +106,7 @@ function parseAnswer(data: unknown): JevAnswer | null {
 		| undefined;
 	if (
 		typeof category?.choice !== "string" ||
+		!options.includes(category.choice) ||
 		!isProbability(category.confidence)
 	) {
 		return null;
