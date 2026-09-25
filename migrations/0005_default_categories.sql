@@ -5,12 +5,12 @@
 -- A database from before this rule could hold names that differ only in capitals ("Gas" and "gas"),
 -- which would stop the index being made. The later one gets its id added ("gas (6)"), so this always runs.
 -- The name is shortened first so the result stays within the form's 40 characters. If another category
--- already has that name, the renamed one gets a random one ("Category 6 3fa9c2d1") instead.
+-- already has that name, random letters join the id instead ("gas (6-3fa9c2d1)"), so it still reads as gas.
 UPDATE categories SET name = CASE
   WHEN EXISTS (
     SELECT 1 FROM categories other
     WHERE other.name = rtrim(substr(categories.name, 1, 40 - length(' (' || categories.id || ')'))) || ' (' || categories.id || ')' COLLATE NOCASE
-  ) THEN 'Category ' || id || ' ' || lower(hex(randomblob(4)))
+  ) THEN rtrim(substr(name, 1, 40 - length(' (' || id || '-12345678)'))) || ' (' || id || '-' || lower(hex(randomblob(4))) || ')'
   ELSE rtrim(substr(name, 1, 40 - length(' (' || id || ')'))) || ' (' || id || ')'
 END
 WHERE EXISTS (

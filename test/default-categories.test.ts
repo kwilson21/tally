@@ -91,7 +91,7 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 		).rejects.toThrow(/UNIQUE/);
 	});
 
-	it("gives a renamed category a random name if its new name was already taken", async () => {
+	it("adds random letters to a renamed category's id if its new name was already taken", async () => {
 		await resetDemo(db, "2026-09-22");
 		await db.prepare("DROP INDEX categories_name_nocase").run();
 		await db
@@ -104,7 +104,7 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 		expect(names).toContain("Gas");
 		// The name someone chose stays; only the generated one moves.
 		expect(names).toContain("gas (6)");
-		expect(names.some((n) => /^Category 6 [0-9a-f]{8}$/.test(n))).toBe(true);
+		expect(names.some((n) => /^gas \(6-[0-9a-f]{8}\)$/.test(n))).toBe(true);
 	});
 
 	it("shortens a long renamed name so it stays within the form's 40 characters", async () => {
