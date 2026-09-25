@@ -1,7 +1,7 @@
 # Tally — Design Spec
 
 - **Date:** 2026-09-22
-- **Status:** Draft, awaiting owner review
+- **Status:** Approved by the owner (2026-09-25, Phase 1 review)
 - **Owner:** Kazon Wilson
 
 ## 1. What Tally is
@@ -76,7 +76,7 @@ Wrangler environments deploy the same code twice:
 | Plaid | On | **Off.** No Plaid secrets exist in this environment. |
 | Jev / Workers AI | On | On |
 | Login | Cloudflare Access | Public, with a demo banner on every page |
-| Nightly job | Sync plus categorization retry | Reset the database and bucket to the seed |
+| Nightly job | Sync plus categorization retry | Reset the database and bucket to the seed, then categorize |
 
 **How real data stays out of the demo:** the demo database is only ever built from seed files in the repo. The demo environment has no Plaid credentials and no binding to the production database or bucket, so no code path can reach real data.
 
@@ -168,11 +168,13 @@ The confidence threshold is a single config value, set during Phase 1 after chec
 
 **When Jev runs (Phase 1, #12):** only in the nightly job, never while a page loads. In the demo it runs right after the reset. The job applies merchant rules to uncategorized transactions first, then asks Jev about the rest: at most 40 calls a night. A failure that would hit every call (rate limit, server error, timeout, bad key) stops that night's run, and the next night retries; a failure about one transaction (Jev rejects it, or answers with something that isn't one of the options) skips just that transaction, which stays pending; three such failures in a row stop the run, since they point at every call. A transaction Jev failed on is asked about last from then on (`jev_failed_at`, decision 31), so it can never block the others. With no categories to offer, Jev isn't asked at all. The threshold starts at 0.80 and applies to the category's confidence and to each flag's probability. Below the threshold, the category stays empty but its confidence is stored, so Jev isn't asked about the same transaction again (decision 27). Jev is told the raw name, the merchant's display name, the amount in cents with its direction (money out or in), and the account type. The category question also offers "None of these fit", which never applies a category. Jev's pick is kept in `jev_category_id` either way, next to its confidence, so the threshold can be tuned from real picks (#49). Jev's income answer isn't stored until the edit panel can change flags (#27, decision 28), because a wrong one would silently take a purchase out of spending. The edit panel shows "Picked by Jev · N% sure" when Jev chose the category. Only the log line `jev: <status> <request id>` is ever logged.
 
-**Jev input:** the raw name, merchant display name, amount, account type, and Plaid's own category hint if present.
+**Jev input:** the raw name, merchant display name, amount, account type, and Plaid's own category hint if present (from Phase 2, once sync stores it, #18).
 
 **Boundary:** all Jev calls go through one module (`src/ai/categorize.ts`) with one function signature. Switching providers changes only that file.
 
 **Categories are archived, never deleted.** Archiving keeps every stored pick, confidence and source meaningful; deleting would null `category_id` and `jev_category_id` while leaving the source and confidence behind, which miscounts rows and hides them from merchant rules and Jev. No category may be named "None of these fit", Jev's extra option. Settings enforces both when it manages categories.
+
+**Default categories (decision 32, #55):** every new database starts with the same categories, adapted from the owner's earlier app: Groceries, Eating Out, Gas, Car & Transport, Rent, Utilities, Subscriptions, Shopping, Personal Care, Health, Entertainment, Kids, Date Night, and Donations & Charity. None has a budget until the family sets one. Income, transfers, payments, savings and refunds aren't categories, because flags and exclusions handle them (§6); there's no "Other", because "None of these fit" and new-category suggestions do that job. The demo uses its seed's categories instead.
 
 **New category suggestions (Phase 4, owner-approved 2026-09-25, #51):** when Jev says "None of these fit", Workers AI suggests a new category name from the transactions Jev couldn't place, through `src/ai/suggest-name.ts`. The Settings screen shows each suggestion with the transactions behind it. A person creates the category (it then works like any other, and Jev offers it from the next run) or dismisses the suggestion. Nothing is created automatically.
 
@@ -199,7 +201,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 - **Charts:** the server renders them as inline SVG. No chart library.
 - **Expand and collapse:** `<details>` / `<summary>`. No JavaScript.
 - **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires) and a small toast listener.
-- **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and HTMX swap regions use `aria-live="polite"`. Errors use `role="alert"`.
+- **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and every HTMX swap is announced: through an `aria-live="polite"` count or announcer, or by moving focus (a whole list is never a live region, which would read out every row). Known gap: a filter change that leaves the result count the same isn't announced yet (#56). Errors use `role="alert"`.
 
 Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before any UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
 
@@ -253,8 +255,8 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 |---|---|---|
 | **0. Setup** | Public repo, this spec, `docs/decisions.md`, `CLAUDE.md` (short, rules taken from this spec), `ROADMAP.md`, milestones and issues, Hono Worker skeleton, CI (type-check + tests), and doc checks for §13 | CI passes on the skeleton |
 | **1. Core demo live** | Wireframes; D1 schema; seed household; Home; Transactions (recategorize, merchant rules, rename); Jev categorization; demo banner, Things to try, How it works; nightly reset; `demo` deploy | `https://tally-demo.thesuperhuman.us` loads over HTTPS, all Phase 1 routes work, and there are no console errors. DNS records are shown to the owner and approved before they're created. |
-| **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection | The family uses it for a week. Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
-| **3. Bills, exclusions, splits** | In both environments, with seed data for each | Shown in the demo, used by the family |
+| **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection, Settings for categories and budget amounts with the default categories (decision 32), and exclusions (decision 33), so the family's numbers are right from the first week | The family uses it for a week. Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
+| **3. Bills and splits** | In both environments, with seed data for each (exclusions moved to Phase 2, decision 33) | Shown in the demo, used by the family |
 | **4. Trends, balances, documents, name suggestions** | Trends, net-worth history, R2 documents, Workers AI name suggestions (merchant names and new categories) | All 8 features live in both environments |
 
 ### Testing
@@ -281,7 +283,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 
 The owner's rule is to confirm every API against current docs. These are the assumptions in this spec that needed checking.
 
-**Checked on 2026-09-22.** Results are in `docs/verified-assumptions.md`. Items 5, 6, and 7 led to the owner-approved changes in §5, §7, and §10. Still unverified: Jev's numeric rate limit (handled by retrying on `RateLimitError`).
+**Checked on 2026-09-22.** Results are in `docs/verified-assumptions.md`. Items 5, 6, and 7 led to the owner-approved changes in §5, §7, and §10. Still unverified: Jev's numeric rate limit (a 429 stops that night's run and the next night retries; there's no SDK, decision 19).
 
 1. Workers with static assets is Cloudflare's recommended path for new full-stack apps (vs. Pages).
 2. Hono on Workers: routing, JSX rendering, and the Cron and webhook handlers.

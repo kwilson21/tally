@@ -67,4 +67,4 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 ## Governance
 - A visual change starts as a generated study, gets owner selection, and is recorded in docs/design-concepts/README.md.
 - A new token or component updates this file in the same PR, with its contrast value if it's a color.
-- Accessibility: 44px targets, focus-visible ring, labeled forms, aria-live on swap regions.
+- Accessibility: 44px targets, focus-visible ring, labeled forms, every HTMX swap announced through an aria-live count or announcer, or by moving focus (never a live list).

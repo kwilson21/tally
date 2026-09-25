@@ -8,7 +8,6 @@
 		"build:vendor": "mkdir -p public/vendor && cp node_modules/htmx.org/dist/htmx.min.js public/vendor/htmx.min.js",
 		"build": "npm run build:vendor && npm run build:css",
 		"dev": "wrangler dev",
-		"deploy": "wrangler deploy",
 		"cf-typegen": "wrangler types",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local",
 		"db:seed:local": "curl -fsS \"http://127.0.0.1:8787/cdn-cgi/handler/scheduled\"",
