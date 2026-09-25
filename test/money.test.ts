@@ -82,9 +82,15 @@ describe("centsToInput (cents → a form field's value)", () => {
 		[5, "0.05"],
 		[0, "0"],
 		[123456789, "1234567.89"],
+		[-5, "-0.05"],
+		[-61250, "-612.50"],
 	])("%i → %s", (cents, text) => {
 		expect(centsToInput(cents)).toBe(text);
 		// What the field shows reads back as the same cents.
 		expect(toCents(text)).toBe(cents);
+	});
+
+	it("refuses anything that isn't integer cents", () => {
+		expect(() => centsToInput(12.5)).toThrow();
 	});
 });

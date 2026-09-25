@@ -13,7 +13,10 @@ export type MonthData = {
 	transactions: CountedTransaction[];
 };
 
-/** Loads what summarizeMonth needs for a month ('YYYY-MM'). Counted = in month, not excluded, not a split parent. */
+/**
+ * Loads what summarizeMonth needs for a month ('YYYY-MM'). Counted = in month, not excluded, not a split parent.
+ * Categories are the active ones plus any archived one with counted spending that month (spec §7).
+ */
 export async function loadMonth(
 	db: D1Database,
 	month: string,
@@ -21,9 +24,17 @@ export async function loadMonth(
 	// db.batch()'s return type is D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess
 	// treats each destructured element as possibly undefined; the query list above guarantees all three.
 	const [categories, amounts, transactions] = (await db.batch([
-		db.prepare(
-			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-		),
+		// An archived category stays for a month it has counted spending in, so the month still adds up.
+		db
+			.prepare(
+				`SELECT id, name, icon, color FROM categories c
+				 WHERE archived = 0 OR EXISTS (
+					SELECT 1 FROM transactions t
+					WHERE t.category_id = c.id AND substr(t.date, 1, 7) = ?1 AND t.excluded = 0 AND t.is_split = 0
+				 )
+				 ORDER BY sort_order, name`,
+			)
+			.bind(month),
 		db.prepare(
 			"SELECT category_id AS categoryId, effective_month AS effectiveMonth, amount_cents AS amountCents FROM budget_amounts",
 		),

@@ -122,6 +122,28 @@ describe("applyMerchantRules", () => {
 			category_source: "user",
 		});
 	});
+
+	it("skips a rule while its category is archived, so the transaction still needs a category", async () => {
+		const id = await idOf("SQ *FARMERS MKT");
+		await db
+			.prepare(
+				"UPDATE merchants SET default_category_id = ? WHERE raw_name = 'SQ *FARMERS MKT'",
+			)
+			.bind(EATING_OUT)
+			.run();
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(EATING_OUT)
+			.run();
+
+		await applyMerchantRules(db);
+
+		expect(await row(id)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+		expect(await needsCategoryCount(db, "2026-09")).toBe(12);
+	});
 });
 
 describe("saveJevResult", () => {

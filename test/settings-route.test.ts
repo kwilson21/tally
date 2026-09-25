@@ -208,9 +208,13 @@ describe("adding a category", () => {
 		expect(rowNames(html).at(-1)).toBe("Travel");
 		expect(textOf(html)).toContain("$400 a month");
 		// Focus lands on the new row, not back at the top of the page.
+		const travel = await env.DB.prepare(
+			"SELECT id FROM categories WHERE name = 'Travel'",
+		).first<{ id: number }>();
 		expect(html).toMatch(
-			/<summary data-category="\d+"[^>]*autofocus[^>]*>[\s\S]*?Travel</,
+			new RegExp(`<summary data-category="${travel?.id}"[^>]*autofocus`),
 		);
+		expect(html.match(/autofocus/g)).toHaveLength(1);
 		expect(trigger(res).announce).toBe(
 			`Added Travel, $400 a month from ${THIS_MONTH()} on.`,
 		);
