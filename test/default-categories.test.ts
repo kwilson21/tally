@@ -68,4 +68,26 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 		for (const sql of statements) await db.prepare(sql).run();
 		expect(await categories()).toEqual(before);
 	});
+
+	it("renames a later category whose name differs only in capitals, so the unique index can always be made", async () => {
+		await resetDemo(db, "2026-09-22");
+		// A database from before this migration could hold both.
+		await db.prepare("DROP INDEX categories_name_nocase").run();
+		await db
+			.prepare(
+				"INSERT INTO categories (id, name, icon, color) VALUES (6, 'gas', 'tag', 'cat-blue')",
+			)
+			.run();
+		for (const sql of statements) await db.prepare(sql).run();
+		const names = (await categories()).map((c) => c.name);
+		expect(names).toContain("Gas");
+		expect(names).toContain("gas (6)");
+		await expect(
+			db
+				.prepare(
+					"INSERT INTO categories (name, icon, color) VALUES ('GAS', 'tag', 'cat-blue')",
+				)
+				.run(),
+		).rejects.toThrow(/UNIQUE/);
+	});
 });

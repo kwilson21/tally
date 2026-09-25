@@ -2,6 +2,14 @@
 -- (spec §7, decision 32). Only a database with no categories gets them: the demo keeps its seed,
 -- and a household's own categories are never touched. No budgets: the family sets those.
 -- Names are unique ignoring case (spec §7). The form checks first; this index settles two saves at once.
+-- A database from before this rule could hold names that differ only in capitals ("Gas" and "gas"),
+-- which would stop the index being made. The later one gets its id added ("gas (6)"), so this always runs.
+UPDATE categories SET name = name || ' (' || id || ')'
+WHERE EXISTS (
+  SELECT 1 FROM categories earlier
+  WHERE earlier.name = categories.name COLLATE NOCASE AND earlier.id < categories.id
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS categories_name_nocase ON categories (name COLLATE NOCASE);
 
 INSERT INTO categories (name, icon, color, sort_order)
