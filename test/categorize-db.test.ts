@@ -4,6 +4,7 @@ import {
 	applyMerchantRules,
 	needsCategoryCount,
 	pendingForJev,
+	saveEdit,
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -30,6 +31,14 @@ const row = (id: number) =>
 		)
 		.bind(id)
 		.first<Record<string, unknown>>();
+
+const personEdit = {
+	categoryId: null,
+	alwaysForMerchant: false,
+	displayName: null,
+	note: null,
+	excluded: false,
+};
 
 const decision = (over = {}) => ({
 	categoryId: EATING_OUT,
@@ -166,6 +175,23 @@ describe("saveJevResult", () => {
 		const id = await idOf("TST* CORNER DELI");
 		await saveJevResult(db, id, decision());
 		expect(await row(id)).toMatchObject({ excluded: 0 });
+	});
+
+	it("never overrides a person who included a transaction again (#27)", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		// A person excluded it, then included it again from the edit panel.
+		await saveEdit(db, id, { ...personEdit, excluded: true }, "demo");
+		await saveEdit(db, id, { ...personEdit, excluded: false }, "demo");
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: true, reimbursement: false, income: false },
+			}),
+		);
+		expect(await row(id)).toMatchObject({ flag_transfer: 1, excluded: 0 });
 	});
 
 	it("records that Jev said none fit: a confidence with no pick", async () => {

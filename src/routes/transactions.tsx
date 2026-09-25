@@ -367,8 +367,9 @@ function EditSheet({
 			</p>
 			{/* Outside the form, so following it never happens by accident mid-edit. */}
 			{demo && (
-				<p>
-					<HowLink section="categorization" demo={demo} />
+				<p class="flex flex-wrap gap-x-4">
+					<HowLink section="categorization" demo={demo} showTopic />
+					<HowLink section="exclusions" demo={demo} showTopic />
 				</p>
 			)}
 			<form

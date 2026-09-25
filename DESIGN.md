@@ -50,7 +50,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | FormField | A labeled control, with its error shown in `role="alert"`. |
 | BottomSheet | A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop. |
 | ThingsToTry | The demo's bordered "New here? Things to try" block at the top of Home: three links to where each thing is done, plus How Tally works. |
-| HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
+| HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. With `showTopic` it says its topic on screen ("How this works: excluding"), for a screen with more than one. |
 | SystemDiagram | The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers. |
 
 ## Patterns

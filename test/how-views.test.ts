@@ -39,6 +39,15 @@ describe("HowLink", () => {
 		expect(html).toContain('aria-label="How this works: the budget"');
 	});
 
+	it("can say its topic on screen, for a screen with more than one link", async () => {
+		const html = String(
+			await HowLink({ section: "exclusions", demo: true, showTopic: true }),
+		);
+		expect(html).toMatch(/href="\/how-it-works#exclusions"/);
+		expect(html).toContain(">How this works: excluding</a>");
+		expect(html).toContain('aria-label="How this works: excluding"');
+	});
+
 	it("renders nothing outside the demo", async () => {
 		expect(HowLink({ section: "budget", demo: false })).toBeNull();
 	});

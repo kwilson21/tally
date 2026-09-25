@@ -29,7 +29,7 @@ const idOf = async (rawName: string) =>
 const row = (id: number) =>
 	db
 		.prepare(
-			"SELECT category_id, category_source, category_confidence, note, excluded, updated_by FROM transactions WHERE id = ?",
+			"SELECT category_id, category_source, category_confidence, note, excluded, excluded_source, updated_by FROM transactions WHERE id = ?",
 		)
 		.bind(id)
 		.first<Record<string, unknown>>();
@@ -104,7 +104,16 @@ describe("saveEdit", () => {
 		const id = await idOf("ONLINE TRANSFER TO SAV ...5678");
 		expect(await row(id)).toMatchObject({ excluded: 1 });
 		await saveEdit(db, id, edit({ excluded: false }), "demo");
-		expect(await row(id)).toMatchObject({ excluded: 0 });
+		expect(await row(id)).toMatchObject({
+			excluded: 0,
+			excluded_source: "user",
+		});
+	});
+
+	it("leaves who decided the exclusion alone when a save doesn't change it", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await saveEdit(db, id, edit({ note: "hi" }), "demo");
+		expect(await row(id)).toMatchObject({ excluded: 0, excluded_source: null });
 	});
 
 	it("leaves the source alone when only the note changes", async () => {

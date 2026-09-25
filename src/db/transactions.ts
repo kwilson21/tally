@@ -158,6 +158,10 @@ export async function getTransaction(
 		: null;
 }
 
+/** Sets `excluded`, recording a person as its source only when the value changes. */
+const EXCLUDE =
+	"excluded_source = CASE WHEN excluded = ? THEN excluded_source ELSE 'user' END, excluded = ?";
+
 /**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
  * changes), the note, whether it's excluded, the merchant's display name, and, if asked, the merchant rule, which also
@@ -179,19 +183,23 @@ export async function saveEdit(
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
+	// Changing the exclusion makes it a person's choice, which Jev never overrides.
+	const excluded = edit.excluded ? 1 : 0;
+	const excludeArgs = [excluded, excluded];
+
 	const statements = [
 		changed
 			? db
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
-							note = ?, excluded = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+							note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
-					.bind(edit.categoryId, edit.note, edit.excluded ? 1 : 0, actor, id)
+					.bind(edit.categoryId, edit.note, ...excludeArgs, actor, id)
 			: db
 					.prepare(
-						"UPDATE transactions SET note = ?, excluded = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+						`UPDATE transactions SET note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
-					.bind(edit.note, edit.excluded ? 1 : 0, actor, id),
+					.bind(edit.note, ...excludeArgs, actor, id),
 		db
 			.prepare(
 				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
@@ -274,7 +282,7 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
- * with the edit panel's exclude toggle (#27). Jev's income answer isn't stored: it changes the budget
+ * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion choice. Jev's income answer isn't stored: it changes the budget
  * math, and the edit panel has no income control (decision 28). Returns whether it wrote the row.
  */
 export async function saveJevResult(
@@ -282,12 +290,16 @@ export async function saveJevResult(
 	id: number,
 	d: Decision,
 ): Promise<boolean> {
+	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise.
+	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET
 				category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
 				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
-				excluded = MAX(excluded, ?), updated_at = datetime('now')
+				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
+				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
+				updated_at = datetime('now')
 			WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
 		)
 		.bind(
@@ -297,7 +309,8 @@ export async function saveJevResult(
 			d.suggestedCategoryId,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
-			d.flags.transfer || d.flags.reimbursement ? 1 : 0,
+			excludes,
+			excludes,
 			id,
 		)
 		.run();

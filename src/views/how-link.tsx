@@ -2,15 +2,19 @@ const NAMES = {
 	budget: "the budget",
 	transactions: "transactions",
 	categorization: "categories",
+	exclusions: "excluding",
 } as const;
 
 /** A small "How this works" link from a screen to its section of How Tally works; demo only (spec §9). */
 export function HowLink({
 	section,
 	demo,
+	showTopic = false,
 }: {
-	section: "budget" | "transactions" | "categorization";
+	section: keyof typeof NAMES;
 	demo: boolean;
+	/** Say the topic on screen too, for when one screen has more than one link. */
+	showTopic?: boolean;
 }) {
 	if (!demo) return null;
 	return (
@@ -20,7 +24,7 @@ export function HowLink({
 			aria-label={`How this works: ${NAMES[section]}`}
 			class="inline-flex min-h-11 items-center text-sm"
 		>
-			How this works
+			{showTopic ? `How this works: ${NAMES[section]}` : "How this works"}
 		</a>
 	);
 }

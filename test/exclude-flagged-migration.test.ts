@@ -5,14 +5,14 @@ import { resetDemo } from "../src/demo/reset";
 
 const db = env.DB;
 
-/** The migration's statements, without comments. */
+/** The migration's backfill statements, without comments (the tests' database already has its column). */
 const statements = migration
 	.split("\n")
 	.filter((line) => !line.startsWith("--"))
 	.join("\n")
 	.split(";")
 	.map((s) => s.trim())
-	.filter(Boolean);
+	.filter((s) => s.startsWith("UPDATE"));
 
 const excludedOf = async (rawName: string) =>
 	(
@@ -45,6 +45,12 @@ describe("migration 0004: exclude what Jev already flagged (#27)", () => {
 		for (const sql of statements) await db.prepare(sql).run();
 
 		expect(await excludedOf("VENMO *J RIVERA")).toBe(1);
+		const source = await db
+			.prepare(
+				"SELECT excluded_source FROM transactions WHERE raw_name = 'VENMO *J RIVERA' LIMIT 1",
+			)
+			.first<{ excluded_source: string | null }>();
+		expect(source?.excluded_source).toBe("jev");
 		expect(await excludedOf("TST* CORNER DELI")).toBe(1);
 		expect(await excludedOf("SQ *LOCAL BAKERY 4432")).toBe(0);
 		const venmoAndDeli = await db
