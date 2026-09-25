@@ -4,8 +4,15 @@
 -- Names are unique ignoring case (spec §7). The form checks first; this index settles two saves at once.
 -- A database from before this rule could hold names that differ only in capitals ("Gas" and "gas"),
 -- which would stop the index being made. The later one gets its id added ("gas (6)"), so this always runs.
--- The name is shortened first so the result stays within the form's 40 characters.
-UPDATE categories SET name = rtrim(substr(name, 1, 40 - length(' (' || id || ')'))) || ' (' || id || ')'
+-- The name is shortened first so the result stays within the form's 40 characters. If another category
+-- already has that name, the renamed one gets a random one ("Category 6 3fa9c2d1") instead.
+UPDATE categories SET name = CASE
+  WHEN EXISTS (
+    SELECT 1 FROM categories other
+    WHERE other.name = rtrim(substr(categories.name, 1, 40 - length(' (' || categories.id || ')'))) || ' (' || categories.id || ')' COLLATE NOCASE
+  ) THEN 'Category ' || id || ' ' || lower(hex(randomblob(4)))
+  ELSE rtrim(substr(name, 1, 40 - length(' (' || id || ')'))) || ' (' || id || ')'
+END
 WHERE EXISTS (
   SELECT 1 FROM categories earlier
   WHERE earlier.name = categories.name COLLATE NOCASE AND earlier.id < categories.id

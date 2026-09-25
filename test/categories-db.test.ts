@@ -200,4 +200,15 @@ describe("an archived category on Home", () => {
 		expect(await onHome(MONTH)).toContain("Eating Out");
 		expect(await onHome("2026-10")).not.toContain("Eating Out");
 	});
+
+	it("doesn't come back for a month whose only rows in it are income", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1 WHERE category_id = 2 AND substr(date, 1, 7) = ?",
+			)
+			.bind(MONTH)
+			.run();
+		await setArchived(db, 2, true);
+		expect(await onHome(MONTH)).not.toContain("Eating Out");
+	});
 });
