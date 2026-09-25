@@ -74,8 +74,8 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 			db
 				.prepare(
 					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence,
-					 flag_transfer, flag_reimbursement, flag_income, excluded, is_split, updated_by)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo')`,
+					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, updated_by)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo')`,
 				)
 				.bind(
 					t.accountId,
@@ -85,6 +85,8 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					t.categoryId,
 					t.categorySource,
 					t.categoryConfidence,
+					// The seed's Jev-categorized rows are Jev's picks, so they carry a matching pick.
+					t.categorySource === "jev" ? t.categoryId : null,
 					b(t.flagTransfer),
 					b(t.flagReimbursement),
 					b(t.flagIncome),

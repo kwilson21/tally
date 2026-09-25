@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { askJev, JEV_THRESHOLD, JEV_URL } from "../src/ai/categorize";
+import { NONE_FIT } from "../src/ai/decide";
 
 const input = {
 	rawName: "SQ *LOCAL BAKERY 4432",
@@ -66,7 +67,11 @@ describe("askJev", () => {
 			"transfer",
 		]);
 		expect(body.questions.category.type).toBe("choice");
-		expect(Object.keys(body.questions.category.criteria)).toEqual(categories);
+		expect(Object.keys(body.questions.category.criteria)).toEqual([
+			...categories,
+			NONE_FIT,
+		]);
+		expect(body.questions.category.criteria[NONE_FIT]).toMatch(/none/i);
 		for (const flag of ["transfer", "reimbursement", "income"]) {
 			expect(body.questions[flag].type).toBe("noul");
 		}

@@ -1,6 +1,6 @@
 // The only place Tally talks to Jev (CLAUDE.md, spec §7): one plain fetch per transaction,
 // asking the category and every flag together. It returns Jev's answers and decides nothing.
-import type { Flag, JevAnswer } from "./decide";
+import { type Flag, type JevAnswer, NONE_FIT } from "./decide";
 
 export const JEV_URL = "https://api.typesafe.ai/v1/systemone";
 
@@ -51,7 +51,11 @@ export async function askJev(
 				type: "choice",
 				instructions:
 					"Which of this household's budget categories does this bank transaction belong to?",
-				criteria: Object.fromEntries(categories.map((name) => [name, null])),
+				criteria: {
+					...Object.fromEntries(categories.map((name) => [name, null])),
+					[NONE_FIT]:
+						"None of these categories fits this transaction, so a person should decide.",
+				},
 			},
 			...Object.fromEntries(
 				Object.entries(FLAG_QUESTIONS).map(([flag, instructions]) => [
