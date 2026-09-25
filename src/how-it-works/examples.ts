@@ -39,11 +39,13 @@ export function categorizationExample(c: {
 	unsure: number;
 	/** Jev said none of the categories fit. */
 	noneFit: number;
+	/** Needs a category and Jev hasn't been asked yet. */
+	notYetAsked: number;
 }): string {
 	const parts: string[] = [];
 	if (c.jev > 0) {
 		parts.push(
-			`Jev picked ${plural(c.jev, "category", "categories")} on its own.`,
+			`Jev categorized ${plural(c.jev, "transaction", "transactions")}.`,
 		);
 	}
 	const left: string[] = [];
@@ -52,6 +54,11 @@ export function categorizationExample(c: {
 	if (left.length > 0) {
 		parts.push(
 			`${c.jev > 0 ? "It" : "Jev"} left ${left.join(" and ")} for a person.`,
+		);
+	}
+	if (c.notYetAsked > 0) {
+		parts.push(
+			`${c.notYetAsked} ${c.notYetAsked === 1 ? "is" : "are"} waiting for tonight's run.`,
 		);
 	}
 	if (c.merchantRule > 0)

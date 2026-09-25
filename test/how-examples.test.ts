@@ -60,7 +60,16 @@ describe("transactionsExample", () => {
 });
 
 describe("categorizationExample", () => {
-	it("names each source with a nonzero count", () => {
+	const none = {
+		user: 0,
+		merchantRule: 0,
+		jev: 0,
+		unsure: 0,
+		noneFit: 0,
+		notYetAsked: 0,
+	};
+
+	it("counts transactions, not categories, and covers every source", () => {
 		expect(
 			categorizationExample({
 				user: 1,
@@ -68,47 +77,34 @@ describe("categorizationExample", () => {
 				jev: 8,
 				unsure: 3,
 				noneFit: 1,
+				notYetAsked: 4,
 			}),
 		).toBe(
-			"This month, Jev picked 8 categories on its own. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 2 came from merchant rules. 1 was chosen by a person.",
+			"This month, Jev categorized 8 transactions. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 4 are waiting for tonight's run. 2 came from merchant rules. 1 was chosen by a person.",
 		);
 	});
 
 	it("names only the kinds of leftovers there are", () => {
-		expect(
-			categorizationExample({
-				user: 0,
-				merchantRule: 0,
-				jev: 5,
-				unsure: 0,
-				noneFit: 2,
-			}),
-		).toBe(
-			"This month, Jev picked 5 categories on its own. It left 2 that fit none of the categories for a person.",
+		expect(categorizationExample({ ...none, jev: 5, noneFit: 2 })).toBe(
+			"This month, Jev categorized 5 transactions. It left 2 that fit none of the categories for a person.",
 		);
 	});
 
-	it("leaves out Jev when Jev hasn't picked anything", () => {
-		expect(
-			categorizationExample({
-				user: 3,
-				merchantRule: 0,
-				jev: 0,
-				unsure: 0,
-				noneFit: 0,
-			}),
-		).toBe("This month, 3 were chosen by a person.");
+	it("uses the singular for one", () => {
+		expect(categorizationExample({ ...none, jev: 1, notYetAsked: 1 })).toBe(
+			"This month, Jev categorized 1 transaction. 1 is waiting for tonight's run.",
+		);
+	});
+
+	it("leaves out Jev when Jev hasn't categorized anything", () => {
+		expect(categorizationExample({ ...none, user: 3 })).toBe(
+			"This month, 3 were chosen by a person.",
+		);
 	});
 
 	it("says so when there's nothing to show", () => {
-		expect(
-			categorizationExample({
-				user: 0,
-				merchantRule: 0,
-				jev: 0,
-				unsure: 0,
-				noneFit: 0,
-			}),
-		).toBe("Nothing has been categorized yet this month.");
+		expect(categorizationExample(none)).toBe(
+			"Nothing has been categorized yet this month.",
+		);
 	});
 });

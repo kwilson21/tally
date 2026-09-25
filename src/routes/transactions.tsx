@@ -349,6 +349,12 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
+			{/* Outside the form, so following it never happens by accident mid-edit. */}
+			{demo && (
+				<p>
+					<HowLink section="categorization" demo={demo} />
+				</p>
+			)}
 			<form
 				method="post"
 				action={`/transactions/${tx.id}`}
@@ -384,7 +390,6 @@ function EditSheet({
 							Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
 						</p>
 					)}
-					<HowLink section="categorization" demo={demo} />
 					{errors.category && (
 						<p id="category-error" role="alert" class="text-sm text-over">
 							{errors.category}

@@ -34,7 +34,7 @@ const PARTS: [string, string][] = [
 	["D1 (SQLite)", "Stores all data."],
 	["R2", "Stores document PDFs; D1 keeps only each file's name and details."],
 	[
-		"Plaid",
+		"Plaid (REST over fetch)",
 		"Supplies accounts, transactions, and balances from the family's banks.",
 	],
 	[
@@ -108,9 +108,10 @@ howItWorks.get("/how-it-works", async (c) => {
 					How Tally works
 				</h1>
 				<p class="mt-4 text-lg">
-					Tally is a small family budgeting app. One server builds every page, a
-					database keeps the numbers, and two small AI models help, but code
-					does all the math.
+					Tally is a small family budgeting app. One server builds every page
+					and a database keeps the numbers. AI helps with names and categories:
+					Jev picks categories today, and Workers AI will suggest merchant names
+					later. Code does all the math.
 				</p>
 				<p class="mt-2 text-muted">
 					This demo has no bank connection. It runs on a made-up household, the
@@ -146,15 +147,16 @@ howItWorks.get("/how-it-works", async (c) => {
 							category; refunds reduce it.
 						</li>
 						<li>Left is budget minus spent.</li>
+						<li>Income counts only toward Income, not spending.</li>
 						<li>
 							Safe to spend is the whole month's budget, minus all counted
-							spending (including uncategorized), minus bills that are due or
-							overdue and not yet paid.
+							spending (including uncategorized and unbudgeted), minus bills
+							that are due or overdue and not yet paid.
 						</li>
 					</ul>
 					<Example>
-						{budgetExample(summary)} Bills due this week are also set aside; the
-						demo adds bills in a later phase.
+						{budgetExample(summary)} Bills that are due or overdue are also set
+						aside; the demo adds bills in a later phase.
 					</Example>
 				</Section>
 
@@ -190,8 +192,8 @@ howItWorks.get("/how-it-works", async (c) => {
 							A merchant rule: "Always use this category for this merchant."
 						</li>
 						<li>
-							Jev, a small AI model, which each night picks a category for
-							what's left. Tally applies Jev's pick only when Jev is at least{" "}
+							Jev, an AI model, which each night picks a category for what's
+							left. Tally applies Jev's pick only when Jev is at least{" "}
 							{threshold} sure, and never when Jev says none of the categories
 							fit; anything else waits for a person.
 						</li>

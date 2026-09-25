@@ -18,9 +18,10 @@ export function ThingsToTry() {
 			aria-labelledby="things-title"
 			class="rounded-control border border-rule px-4 py-3"
 		>
-			<h2 id="things-title" class="font-serif text-2xl font-semibold">
+			{/* A labelled paragraph, not a heading, so the page's first heading stays its h1. */}
+			<p id="things-title" class="font-serif text-2xl font-semibold">
 				New here? Things to try
-			</h2>
+			</p>
 			<ul class="mt-1 flex flex-col lg:flex-row lg:flex-wrap lg:gap-x-8">
 				{ITEMS.map((item) => (
 					<li>

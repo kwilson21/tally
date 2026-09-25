@@ -45,6 +45,7 @@ describe("monthCounts", () => {
 			jev: await countWhere("category_source = 'jev'"),
 			unsure: 0,
 			noneFit: 0,
+			notYetAsked: 12,
 		});
 		expect(counts.needsCategory).toBe(12);
 		expect(counts.jev).toBeGreaterThan(0);
@@ -88,6 +89,7 @@ describe("monthCounts", () => {
 			merchantRule: 1,
 			unsure: 1,
 			noneFit: 1,
+			notYetAsked: 8,
 		});
 	});
 });

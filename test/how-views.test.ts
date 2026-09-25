@@ -8,7 +8,7 @@ describe("ThingsToTry", () => {
 		const html = await ThingsToTry().toString();
 		expect(html).toMatch(/<section[^>]*aria-labelledby="things-title"/);
 		expect(html).toMatch(
-			/<h2 id="things-title"[^>]*>New here\? Things to try<\/h2>/,
+			/<p id="things-title"[^>]*>New here\? Things to try<\/p>/,
 		);
 		const links = [...html.matchAll(/<a href="([^"]+)"[^>]*>([^<]+)</g)].map(
 			(m) => [m[1], m[2]],
@@ -35,6 +35,8 @@ describe("HowLink", () => {
 		expect(html).toMatch(/href="\/how-it-works#budget"/);
 		expect(html).toContain("How this works");
 		expect(html).toContain("min-h-11");
+		// Each link says where it goes, so several on one page stay distinct (WCAG 2.4.4).
+		expect(html).toContain('aria-label="How this works: the budget"');
 	});
 
 	it("renders nothing outside the demo", async () => {

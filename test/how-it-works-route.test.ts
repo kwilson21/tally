@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
 import { todayUtc } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
@@ -13,6 +14,12 @@ const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
 	return { res, html: await res.text() };
 };
+/** Undoes the HTML escaping Hono applies to text, for comparing with plain strings. */
+const decodeHtml = (html: string) =>
+	html
+		.replaceAll("&#39;", "'")
+		.replaceAll("&quot;", '"')
+		.replaceAll("&amp;", "&");
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 beforeEach(async () => {
@@ -34,11 +41,10 @@ describe("GET /how-it-works in the demo", () => {
 			expect(html).toMatch(new RegExp(`<section[^>]*id="${id}"`));
 		}
 		expect(html).toContain('role="img"');
-		// The parts table quotes spec §4.
-		expect(html).toContain("Stores all data.");
-		expect(html).toContain(
-			"Picks a category and flags for each transaction, with a confidence score.",
-		);
+		expect(html).toContain("Income counts only toward Income, not spending.");
+		expect(html).toContain("Bills that are due or overdue are also set aside");
+		expect(html).toMatch(/including uncategorized and\s+unbudgeted/);
+		expect(html).not.toMatch(/small AI/);
 	});
 
 	it("works its budget example from the same numbers Home shows", async () => {
@@ -55,7 +61,8 @@ describe("GET /how-it-works in the demo", () => {
 	it("counts this month's transactions and who categorized them", async () => {
 		const { html } = await get("/how-it-works");
 		expect(html).toMatch(/counted transactions, and 12 need a category\./);
-		expect(html).toMatch(/Jev picked \d+ categories on its own\./);
+		expect(html).toMatch(/Jev categorized \d+ transactions\./);
+		expect(decodeHtml(html)).toContain("12 are waiting for tonight's run.");
 		expect(html).toContain("80%");
 	});
 });
@@ -90,6 +97,8 @@ describe("outside the demo", () => {
 describe("links in the demo", () => {
 	it("Home has Things to try and a link to the budget section", async () => {
 		const { html } = await get("/");
+		// The page's first heading is its h1; the block's title isn't a heading.
+		expect(html.match(/<h[1-6]\b/)?.[0]).toBe("<h1");
 		expect(html).toContain("New here? Things to try");
 		expect(html).toContain('href="/how-it-works#budget"');
 		// Things to try comes before the month, as in the study.
@@ -100,8 +109,13 @@ describe("links in the demo", () => {
 		expect((await get("/transactions")).html).toContain(
 			'href="/how-it-works#transactions"',
 		);
-		expect((await get("/transactions/110")).html).toContain(
-			'href="/how-it-works#categorization"',
+		const sheet = (await get("/transactions/110")).html;
+		expect(sheet).toContain('href="/how-it-works#categorization"');
+		// Under the sheet's title, outside the form, so a tap there never leaves unsaved edits.
+		const link = sheet.indexOf('href="/how-it-works#categorization"');
+		expect(link).toBeGreaterThan(sheet.indexOf('id="edit-title"'));
+		expect(link).toBeLessThan(
+			sheet.indexOf("<form", sheet.indexOf('id="edit-title"')),
 		);
 	});
 
@@ -109,5 +123,26 @@ describe("links in the demo", () => {
 		expect((await get("/more")).html).toMatch(
 			/<a href="\/how-it-works"[^>]*>How Tally works<\/a>/,
 		);
+	});
+});
+
+describe("the parts table", () => {
+	it("quotes spec §4 word for word, row by row", async () => {
+		const section = spec.slice(
+			spec.indexOf("## 4. Architecture"),
+			spec.indexOf("### 4.1"),
+		);
+		const rows = [...section.matchAll(/^\| \*\*(.+?)\*\* \| (.+) \|$/gm)].map(
+			([, part = "", job = ""]) => [
+				part.replaceAll("`", ""),
+				job.replaceAll("`", ""),
+			],
+		);
+		expect(rows.length).toBeGreaterThan(10);
+		const { html } = await get("/how-it-works");
+		const page = [
+			...html.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd[^>]*>([^<]+)<\/dd>/g),
+		].map(([, part = "", job = ""]) => [decodeHtml(part), decodeHtml(job)]);
+		expect(page).toEqual(rows);
 	});
 });
