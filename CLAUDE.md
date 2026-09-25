@@ -20,7 +20,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 - The demo environment never gets Plaid secrets or production bindings.
 - Secrets only via `wrangler secret put` (owner runs it). Never commit .dev.vars. Never log tokens or transaction details.
 - HTMX feedback: HX-Trigger header with `toast` + `announce` keys.
-- Accessibility: labeled forms, focus-visible rings, 44px touch targets, aria-live on swap regions, role="alert" for errors.
+- Accessibility: labeled forms, focus-visible rings, 44px touch targets, every HTMX swap announced (an aria-live count or announcer, or moving focus; never a live list), role="alert" for errors.
 
 ## Before writing code
 - Check current docs (Context7 or official docs) for any API you use. Never write from memory.

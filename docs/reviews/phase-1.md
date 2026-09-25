@@ -47,7 +47,7 @@
 
 ## Findings
 
-Most important first; item 7 was added after review. Nothing here blocks the demo. Items 1 to 4 and 7 need the owner's decision.
+Most important first; item 7 was added after review. Nothing here blocks the demo. The owner approved every proposal; see Owner decisions below.
 
 1. **Settings for categories and budget amounts has no issue in any phase.**
    - Spec §8 lists it under More → Settings, and §11's E2E list includes "change a budget amount". The only Settings work with an issue is merchant-name review (#33, Phase 4).

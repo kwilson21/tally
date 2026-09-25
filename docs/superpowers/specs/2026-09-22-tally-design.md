@@ -201,7 +201,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 - **Charts:** the server renders them as inline SVG. No chart library.
 - **Expand and collapse:** `<details>` / `<summary>`. No JavaScript.
 - **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires) and a small toast listener.
-- **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and every HTMX swap is announced: through an `aria-live="polite"` count or announcer, or by moving focus (a whole list is never a live region, which would read out every row). Errors use `role="alert"`.
+- **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and every HTMX swap is announced: through an `aria-live="polite"` count or announcer, or by moving focus (a whole list is never a live region, which would read out every row). Known gap: a filter change that leaves the result count the same isn't announced yet (#56). Errors use `role="alert"`.
 
 Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before any UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
 
