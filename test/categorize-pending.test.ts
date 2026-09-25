@@ -173,4 +173,78 @@ describe("categorizePending", () => {
 		await categorizePending(withKey, jev.fetchImpl);
 		expect(jev.calls()).toBe(40);
 	});
+
+	it("skips one transaction Jev can't answer usefully and carries on with the rest", async () => {
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		// The first (newest) transaction always gets an answer that isn't one of the options.
+		let calls = 0;
+		const fetchImpl = async () => {
+			calls += 1;
+			if (calls === 1) {
+				return new Response(
+					JSON.stringify({
+						answers: {
+							category: {
+								type: "choice",
+								choice: "eating out",
+								confidence: 0.9,
+							},
+							transfer: { type: "noul", noul: 0.01 },
+							reimbursement: { type: "noul", noul: 0.01 },
+							income: { type: "noul", noul: 0.01 },
+						},
+					}),
+					{ status: 200, headers: { "x-typesafe-request-id": "req_bad" } },
+				);
+			}
+			return reply(0.95);
+		};
+
+		const result = await categorizePending(withKey, fetchImpl);
+
+		expect(calls).toBe(12);
+		expect(result).toEqual({ asked: 12, applied: 11 });
+		expect(await needsCategoryCount(db, MONTH)).toBe(1);
+		expect(errors).toHaveBeenCalledWith("jev: 200 req_bad");
+	});
+
+	it.each([422, 400])(
+		"skips a transaction Jev rejects with %i instead of stopping",
+		async (status) => {
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			let calls = 0;
+			const fetchImpl = async () => {
+				calls += 1;
+				return calls === 1 ? new Response("{}", { status }) : reply(0.95);
+			};
+			await categorizePending(withKey, fetchImpl);
+			expect(calls).toBe(12);
+		},
+	);
+
+	it.each([401, 403, 429, 500, 529])(
+		"stops the whole run on %i, which would fail every call",
+		async (status) => {
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			const jev = fakeJev(() => new Response("{}", { status }));
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(1);
+		},
+	);
+
+	it("doesn't ask Jev at all when there are no categories to offer", async () => {
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		const jev = fakeJev(() => reply(0.95));
+		const result = await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(0);
+		expect(result).toEqual({ asked: 0, applied: 0 });
+		// Nothing was marked as looked at, so Jev asks once categories exist.
+		expect(
+			await countWhere(
+				"category_confidence IS NOT NULL AND category_source IS NULL",
+			),
+		).toBe(0);
+	});
 });
