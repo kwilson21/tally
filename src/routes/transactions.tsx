@@ -23,6 +23,7 @@ import {
 	filtersToQuery,
 	parseFilters,
 } from "../transactions/filters";
+import { resultCount } from "../transactions/result-count";
 import { BottomSheet } from "../views/bottom-sheet";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
@@ -87,12 +88,15 @@ async function renderList(
 		months.push(filters.month);
 		months.sort().reverse();
 	}
-	const noun = (n: number) => `transaction${n === 1 ? "" : "s"}`;
 	const first = (page - 1) * PAGE_SIZE + 1;
-	const count =
-		pages > 1
-			? `Showing ${first}–${first + rows.length - 1} of ${total} ${noun(total)}`
-			: `${total} ${noun(total)}`;
+	const categoryName =
+		categories.results.find((cat) => cat.id === filters.category)?.name ?? null;
+	const count = resultCount(
+		{ total, first, shown: rows.length, pages },
+		filters,
+		categoryName,
+		today,
+	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	const focusCount =
 		focusId !== undefined && !rows.some((r) => r.id === focusId);

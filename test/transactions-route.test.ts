@@ -62,11 +62,31 @@ describe("GET /transactions", () => {
 	it("shows the result count in a stable live region that htmx updates in place", async () => {
 		const { html } = await get("/transactions?uncategorized=1");
 		expect(html).toMatch(
-			/<p id="result-count" aria-live="polite"[^>]*>12 transactions<\/p>/,
+			/<p id="result-count" aria-live="polite"[^>]*>12 transactions needing a category in [A-Z][a-z]+<\/p>/,
 		);
 		expect(html).toContain(
 			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"',
 		);
+	});
+
+	it("names the filters in the count, so two filters with the same count still read differently (#56)", async () => {
+		// Every earlier month has three transactions in each category.
+		const [y, m] = todayUtc().slice(0, 7).split("-").map(Number) as [
+			number,
+			number,
+		];
+		const last =
+			m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+		const countText = (html: string) =>
+			html.match(/<p id="result-count"[^>]*>([^<]+)<\/p>/)?.[1];
+		const a = countText(
+			(await get(`/transactions?month=${last}&category=1`)).html,
+		);
+		const b = countText(
+			(await get(`/transactions?month=${last}&category=3`)).html,
+		);
+		expect(a).toMatch(/^3 transactions in Groceries, /);
+		expect(b).toMatch(/^3 transactions in Gas, /);
 	});
 
 	it("lets the newest filter or page request win (htmx replace sync)", async () => {
@@ -86,7 +106,7 @@ describe("GET /transactions", () => {
 	it("pages through results with real links, 25 at a time", async () => {
 		const first = (await get("/transactions")).html;
 		expect(first).toMatch(
-			/<p id="result-count"[^>]*>Showing 1–25 of 35 transactions<\/p>/,
+			/<p id="result-count"[^>]*>Showing 1–25 of 35 transactions in [A-Z][a-z]+<\/p>/,
 		);
 		expect(first).toMatch(/<nav aria-label="Pages"/);
 		expect(first).toContain("Page 1 of 2");
