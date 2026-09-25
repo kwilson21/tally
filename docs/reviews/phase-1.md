@@ -75,6 +75,20 @@ Most important first; item 7 was added after review. Nothing here blocks the dem
    - The result count is the only live region for filter changes, and it gives only the number. Switching from one category to another with the same number of transactions leaves its text unchanged, so a screen reader says nothing, even though the list changed.
    - **Proposal:** a small issue in Phase 2. The count names what it's showing, for example "25 transactions in Groceries, September 2026", so every filter change changes its text. It needs a route test covering two filters with equal counts.
 
+## Owner decisions (2026-09-25)
+
+The owner approved every proposal. For finding 1, they chose default categories that everyone starts with, as in the earlier app.
+
+| Finding | Outcome |
+|---|---|
+| 1. Settings | New issue #55 in Phase 2, starting from 14 default categories adapted from superhuman-personal-finance (decision 32, spec §7 and §11) |
+| 2. Plaid hint | Added to #18; the spec says it arrives with Phase 2 sync |
+| 3. Exclusions | #27 moved to Phase 2 (decision 33); spec §11 and the roadmap updated |
+| 4. Spec text | All five lines corrected, and the spec marked approved |
+| 5. `npm run deploy` | Removed |
+| 6. Review issues | Phase 3 review is #57 |
+| 7. Filter announcements | New issue #56 in Phase 2 |
+
 ## What went well
 
 - **Reviews caught real bugs before they shipped.** Greptile and the two independent review agents on #52 found issues that tests alone didn't.
