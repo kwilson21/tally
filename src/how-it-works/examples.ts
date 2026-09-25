@@ -12,7 +12,12 @@ export function budgetExample(
 		"totalBudgetCents" | "totalSpentCents" | "safeToSpendCents"
 	>,
 ): string {
-	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent = ${formatCents(s.safeToSpendCents)} safe to spend.`;
+	// What was set aside for bills is whatever makes the sum add up (spec §6); 0 until bills ship.
+	const billsCents =
+		s.totalBudgetCents - s.totalSpentCents - s.safeToSpendCents;
+	const bills =
+		billsCents > 0 ? ` − ${formatCents(billsCents)} for bills due` : "";
+	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent${bills} = ${formatCents(s.safeToSpendCents)} safe to spend.`;
 }
 
 export function transactionsExample(c: {
@@ -30,19 +35,24 @@ export function categorizationExample(c: {
 	user: number;
 	merchantRule: number;
 	jev: number;
+	/** Jev picked a category but wasn't sure enough to apply it. */
 	unsure: number;
+	/** Jev said none of the categories fit. */
+	noneFit: number;
 }): string {
 	const parts: string[] = [];
 	if (c.jev > 0) {
 		parts.push(
-			`Jev picked ${plural(c.jev, "category", "categories")} on its own${
-				c.unsure > 0
-					? ` and left ${c.unsure} it wasn't sure about for a person`
-					: ""
-			}.`,
+			`Jev picked ${plural(c.jev, "category", "categories")} on its own.`,
 		);
-	} else if (c.unsure > 0) {
-		parts.push(`Jev left ${c.unsure} it wasn't sure about for a person.`);
+	}
+	const left: string[] = [];
+	if (c.unsure > 0) left.push(`${c.unsure} it wasn't sure about`);
+	if (c.noneFit > 0) left.push(`${c.noneFit} that fit none of the categories`);
+	if (left.length > 0) {
+		parts.push(
+			`${c.jev > 0 ? "It" : "Jev"} left ${left.join(" and ")} for a person.`,
+		);
 	}
 	if (c.merchantRule > 0)
 		parts.push(`${c.merchantRule} came from merchant rules.`);

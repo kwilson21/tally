@@ -16,6 +16,18 @@ describe("budgetExample", () => {
 		).toBe("$2,450.00 budget − $1,166.12 spent = $1,283.88 safe to spend.");
 	});
 
+	it("includes bills set aside, so the sum still adds up once bills exist", () => {
+		expect(
+			budgetExample({
+				totalBudgetCents: 245000,
+				totalSpentCents: 116612,
+				safeToSpendCents: 114188,
+			}),
+		).toBe(
+			"$2,450.00 budget − $1,166.12 spent − $142.00 for bills due = $1,141.88 safe to spend.",
+		);
+	});
+
 	it("shows a negative result plainly when spending is over the budget", () => {
 		expect(
 			budgetExample({
@@ -50,21 +62,53 @@ describe("transactionsExample", () => {
 describe("categorizationExample", () => {
 	it("names each source with a nonzero count", () => {
 		expect(
-			categorizationExample({ user: 1, merchantRule: 2, jev: 8, unsure: 4 }),
+			categorizationExample({
+				user: 1,
+				merchantRule: 2,
+				jev: 8,
+				unsure: 3,
+				noneFit: 1,
+			}),
 		).toBe(
-			"This month, Jev picked 8 categories on its own and left 4 it wasn't sure about for a person. 2 came from merchant rules. 1 was chosen by a person.",
+			"This month, Jev picked 8 categories on its own. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 2 came from merchant rules. 1 was chosen by a person.",
+		);
+	});
+
+	it("names only the kinds of leftovers there are", () => {
+		expect(
+			categorizationExample({
+				user: 0,
+				merchantRule: 0,
+				jev: 5,
+				unsure: 0,
+				noneFit: 2,
+			}),
+		).toBe(
+			"This month, Jev picked 5 categories on its own. It left 2 that fit none of the categories for a person.",
 		);
 	});
 
 	it("leaves out Jev when Jev hasn't picked anything", () => {
 		expect(
-			categorizationExample({ user: 3, merchantRule: 0, jev: 0, unsure: 0 }),
+			categorizationExample({
+				user: 3,
+				merchantRule: 0,
+				jev: 0,
+				unsure: 0,
+				noneFit: 0,
+			}),
 		).toBe("This month, 3 were chosen by a person.");
 	});
 
 	it("says so when there's nothing to show", () => {
 		expect(
-			categorizationExample({ user: 0, merchantRule: 0, jev: 0, unsure: 0 }),
+			categorizationExample({
+				user: 0,
+				merchantRule: 0,
+				jev: 0,
+				unsure: 0,
+				noneFit: 0,
+			}),
 		).toBe("Nothing has been categorized yet this month.");
 	});
 });

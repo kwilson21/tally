@@ -305,6 +305,7 @@ export async function monthCounts(
 	merchantRule: number;
 	jev: number;
 	unsure: number;
+	noneFit: number;
 }> {
 	const row = await db
 		.prepare(
@@ -313,7 +314,8 @@ export async function monthCounts(
 				COALESCE(SUM(t.category_source = 'user'), 0) AS user,
 				COALESCE(SUM(t.category_source = 'merchant_rule'), 0) AS merchantRule,
 				COALESCE(SUM(t.category_source = 'jev'), 0) AS jev,
-				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL), 0) AS unsure
+				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NOT NULL), 0) AS unsure,
+				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NULL), 0) AS noneFit
 			FROM transactions t
 			WHERE substr(t.date, 1, 7) = ? AND t.excluded = 0 AND t.is_split = 0`,
 		)
@@ -325,6 +327,7 @@ export async function monthCounts(
 			merchantRule: number;
 			jev: number;
 			unsure: number;
+			noneFit: number;
 		}>();
 	return (
 		row ?? {
@@ -334,6 +337,7 @@ export async function monthCounts(
 			merchantRule: 0,
 			jev: 0,
 			unsure: 0,
+			noneFit: 0,
 		}
 	);
 }

@@ -44,6 +44,7 @@ describe("monthCounts", () => {
 			merchantRule: 0,
 			jev: await countWhere("category_source = 'jev'"),
 			unsure: 0,
+			noneFit: 0,
 		});
 		expect(counts.needsCategory).toBe(12);
 		expect(counts.jev).toBeGreaterThan(0);
@@ -66,11 +67,18 @@ describe("monthCounts", () => {
 				"UPDATE transactions SET category_id = 1, category_source = 'merchant_rule' WHERE raw_name = 'SQ *FARMERS MKT'",
 			)
 			.run();
-		await saveJevResult(db, await idOf("VENMO *J RIVERA"), {
+		const unsure = {
 			categoryId: null,
-			suggestedCategoryId: null,
+			suggestedCategoryId: 1,
 			confidence: 0.5,
 			flags: { transfer: false, reimbursement: false, income: false },
+		};
+		await saveJevResult(db, await idOf("VENMO *J RIVERA"), unsure);
+		// "None of these fit": a confidence but no pick.
+		await saveJevResult(db, await idOf("POS 4417 CITY PARKING"), {
+			...unsure,
+			suggestedCategoryId: null,
+			confidence: 0.9,
 		});
 
 		const counts = await monthCounts(db, MONTH);
@@ -79,6 +87,7 @@ describe("monthCounts", () => {
 			user: 1,
 			merchantRule: 1,
 			unsure: 1,
+			noneFit: 1,
 		});
 	});
 });
