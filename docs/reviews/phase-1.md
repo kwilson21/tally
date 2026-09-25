@@ -36,8 +36,8 @@
 
 **Cross-cutting rules, checked in code:**
 - **Money:** amounts are integer cents; the database rejects anything else (`typeof(...) = 'integer'`).
-- **Page behavior:** edits send an `HX-Trigger` header with `toast` and `announce`. Every swap is announced, though not the way §8's wording says (finding 4):
-  - A filter or page change updates the `aria-live` result count ("25 transactions").
+- **Page behavior:** edits send an `HX-Trigger` header with `toast` and `announce`. Swaps are announced, though not the way §8's wording says (finding 4), and with one gap (finding 7):
+  - A filter or page change updates the `aria-live` result count ("25 transactions", or "Showing 26–50 of 125 transactions"). A filter change that leaves the count the same changes nothing in the live region, so nothing is announced.
   - A save is announced through the `aria-live` announcer.
   - Opening the edit panel moves focus to its heading.
   - The swapped containers themselves (`#results`, `#page`, `#sheet`) aren't `aria-live`, which is deliberate: a live list would read out every row.
@@ -47,7 +47,7 @@
 
 ## Findings
 
-Ranked by how much they matter. Nothing here blocks the demo. Items 1 to 4 need the owner's decision.
+Most important first; item 7 was added after review. Nothing here blocks the demo. Items 1 to 4 and 7 need the owner's decision.
 
 1. **Settings for categories and budget amounts has no issue in any phase.**
    - Spec §8 lists it under More → Settings, and §11's E2E list includes "change a budget amount". The only Settings work with an issue is merchant-name review (#33, Phase 4).
@@ -71,6 +71,9 @@ Ranked by how much they matter. Nothing here blocks the demo. Items 1 to 4 need 
    - It most likely fails at the database binding, but it's a trap next to the documented `--env demo` command.
    - **Proposal:** remove the script. README and CLAUDE.md already give the full command.
 6. **Review issues (low).** Phases 2 and 4 have review issues (#24, #35); Phases 1 and 3 had none. This review is #53. **Proposal:** add a "Phase 3 review" issue to its milestone.
+7. **Some filter changes aren't announced (accessibility).**
+   - The result count is the only live region for filter changes, and it gives only the number. Switching from one category to another with the same number of transactions leaves its text unchanged, so a screen reader says nothing, even though the list changed.
+   - **Proposal:** a small issue in Phase 2. The count names what it's showing, for example "25 transactions in Groceries, September 2026", so every filter change changes its text. It needs a route test covering two filters with equal counts.
 
 ## What went well
 
