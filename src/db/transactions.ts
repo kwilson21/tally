@@ -290,3 +290,50 @@ export async function saveJevResult(
 		.run();
 	return result.meta.changes > 0;
 }
+
+/**
+ * This month's numbers for the How Tally works page (spec §9): counted transactions, how many
+ * need a category (the same set Home counts), and who categorized the rest.
+ */
+export async function monthCounts(
+	db: D1Database,
+	month: string,
+): Promise<{
+	counted: number;
+	needsCategory: number;
+	user: number;
+	merchantRule: number;
+	jev: number;
+	unsure: number;
+}> {
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS counted,
+				COALESCE(SUM(CASE WHEN ${NEEDS_CATEGORY} THEN 1 ELSE 0 END), 0) AS needsCategory,
+				COALESCE(SUM(t.category_source = 'user'), 0) AS user,
+				COALESCE(SUM(t.category_source = 'merchant_rule'), 0) AS merchantRule,
+				COALESCE(SUM(t.category_source = 'jev'), 0) AS jev,
+				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL), 0) AS unsure
+			FROM transactions t
+			WHERE substr(t.date, 1, 7) = ? AND t.excluded = 0 AND t.is_split = 0`,
+		)
+		.bind(month)
+		.first<{
+			counted: number;
+			needsCategory: number;
+			user: number;
+			merchantRule: number;
+			jev: number;
+			unsure: number;
+		}>();
+	return (
+		row ?? {
+			counted: 0,
+			needsCategory: 0,
+			user: 0,
+			merchantRule: 0,
+			jev: 0,
+			unsure: 0,
+		}
+	);
+}

@@ -4,10 +4,12 @@ import { monthName, todayUtc } from "../dates";
 import { loadMonth } from "../db/month";
 import { formatCents } from "../money";
 import { Band } from "../views/band";
+import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { Layout } from "../views/layout";
 import { ProgressRow } from "../views/progress-row";
+import { ThingsToTry } from "../views/things-to-try";
 
 export const home = new Hono<{ Bindings: Env }>();
 
@@ -20,12 +22,19 @@ home.get("/", async (c) => {
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const { count, spentCents } = summary.uncategorized;
 	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
+	const demo = c.env.DEMO === "true";
 
 	return c.html(
-		<Layout active="home" demo={c.env.DEMO === "true"}>
+		<Layout active="home" demo={demo}>
+			{demo && (
+				<div class="mb-6">
+					<ThingsToTry />
+				</div>
+			)}
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">
 				{monthName(month)}
 			</h1>
+			<HowLink section="budget" demo={demo} />
 			<div class="mt-4 flex items-center justify-between gap-6 lg:justify-start lg:gap-12">
 				<div>
 					<p class="text-lg text-muted">Safe to spend</p>

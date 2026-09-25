@@ -223,7 +223,9 @@ The "How Tally works" page has two parts:
 1. **Architecture:** the system diagram (built as SVG) and the one-sentence explanation of each part (§4).
 2. **One section per feature (all 8),** each with the feature's one-sentence explanation, its rule in plain words (taken from §6 and §6.1), and a small worked example using the demo's own numbers. For example: "Safe to spend = $1,850 budget − $424 spent − $142 overdue bill."
 
-Every screen has a small "How this works" link to its feature's section. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
+Every screen has a small "How this works" link to its feature's section. In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
+
+**Demo only (#13):** the "How Tally works" page (`/how-it-works`), the Things to try block and the "How this works" links appear only when `DEMO` is `"true"`; outside the demo the page is a 404. **Things to try** is a short block at the top of Home with three items, each linking to where it's done: "Give a transaction a category" (the Needs category list), "Set a rule for a merchant" and "Rename a merchant" (the Local Bakery edit panel), plus a "How Tally works" link. It has no close button: the demo resets nightly and remembering a dismissal would need saved state. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
 
 ## 10. Errors, security, and operations
 
@@ -271,6 +273,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - Statement upload (CSV or PDF) as a second transaction source
 - A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
+- A close (×) button on the demo's Things to try block, remembered with a cookie
 
 ## 13. Checked against docs before writing code (Phase 0)
 

@@ -18,6 +18,7 @@ export const PAGES = [
 	{ name: "documents", path: "/documents" },
 	{ name: "settings", path: "/settings" },
 	{ name: "more", path: "/more" },
+	{ name: "how-it-works", path: "/how-it-works" },
 ];
 
 export const VIEWPORTS = [

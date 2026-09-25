@@ -29,12 +29,17 @@ for (const item of SIDEBAR_ITEMS.filter(
 	);
 }
 
-destinations.get("/more", (c) =>
-	c.html(
+destinations.get("/more", (c) => {
+	// The demo also lists How Tally works (spec §9); it doesn't exist outside the demo.
+	const items =
+		c.env.DEMO === "true"
+			? [...MORE_ITEMS, { label: "How Tally works", href: "/how-it-works" }]
+			: MORE_ITEMS;
+	return c.html(
 		<Layout title="More · Tally" active="more" demo={c.env.DEMO === "true"}>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
 			<ul class="mt-6 divide-y divide-rule border-y border-rule">
-				{MORE_ITEMS.map((item) => (
+				{items.map((item) => (
 					<li>
 						<a
 							href={item.href}
@@ -46,5 +51,5 @@ destinations.get("/more", (c) =>
 				))}
 			</ul>
 		</Layout>,
-	),
-);
+	);
+});
