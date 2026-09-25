@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatCents, plaidAmountToCents, toCents } from "../src/money";
+import {
+	centsToInput,
+	formatCents,
+	plaidAmountToCents,
+	toCents,
+} from "../src/money";
 
 describe("toCents (form input → cents)", () => {
 	it.each([
@@ -67,5 +72,19 @@ describe("formatCents (cents → display)", () => {
 		[0, {}, "$0.00"],
 	] as const)("%i %j → %s", (cents, options, text) => {
 		expect(formatCents(cents, options)).toBe(text);
+	});
+});
+
+describe("centsToInput (cents → a form field's value)", () => {
+	it.each([
+		[60000, "600"],
+		[61250, "612.50"],
+		[5, "0.05"],
+		[0, "0"],
+		[123456789, "1234567.89"],
+	])("%i → %s", (cents, text) => {
+		expect(centsToInput(cents)).toBe(text);
+		// What the field shows reads back as the same cents.
+		expect(toCents(text)).toBe(cents);
 	});
 });

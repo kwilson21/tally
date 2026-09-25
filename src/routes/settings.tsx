@@ -9,7 +9,7 @@ import {
 	setArchived,
 	settingsCategories,
 } from "../db/categories";
-import { formatCents } from "../money";
+import { centsToInput, formatCents } from "../money";
 import {
 	type CategoryErrors,
 	parseCategory,
@@ -26,13 +26,6 @@ export const settings = new Hono<App>();
 /** "$600" or "$612.50": a budget as the list shows it. */
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
-/** A budget as the form field shows it: "600" or "612.50", with no symbol or commas. */
-const fieldValue = (cents: number | null) =>
-	cents === null
-		? ""
-		: cents % 100 === 0
-			? String(cents / 100)
-			: `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 
 /** Every form on the page swaps the Categories section in place; without JavaScript it posts normally. */
 const swap = (url: string) => ({
@@ -70,13 +63,15 @@ const secondary =
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
-	/** Move focus here after a swap: a row's summary. */
-	focus?: number;
+	/** Move focus here after a swap: a row's summary, or the Archived summary. */
+	focus?: number | "archived";
 	/** What was typed, shown again with the errors. */
 	values?: { name: string; budget: string };
 	errors?: CategoryErrors;
 	/** Why a restore didn't happen. */
 	restoreError?: string;
+	/** Why the change didn't happen, shown above the list. */
+	listError?: string;
 	status?: 200 | 404 | 422;
 };
 
@@ -181,7 +176,9 @@ function CategoryRow({
 						budget={
 							isOpen && view.values
 								? view.values.budget
-								: fieldValue(c.budgetCents)
+								: c.budgetCents === null
+									? ""
+									: centsToInput(c.budgetCents)
 						}
 						month={month}
 						errors={isOpen ? view.errors : undefined}
@@ -262,6 +259,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				<h2 id="categories-title" class="font-serif text-3xl font-semibold">
 					Categories
 				</h2>
+				{view.listError && (
+					<p role="alert" class="mt-3 text-sm text-over">
+						{view.listError}
+					</p>
+				)}
 				<div class="mt-3 border-t border-rule">
 					{active.map((category, i) => (
 						<CategoryRow
@@ -304,7 +306,10 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							class="group border-b border-rule"
 							open={Boolean(view.restoreError)}
 						>
-							<summary class={summaryClass}>
+							<summary
+								class={summaryClass}
+								autofocus={view.focus === "archived"}
+							>
 								Archived ({archived.length}){chevron}
 							</summary>
 							{view.restoreError && (
@@ -380,6 +385,17 @@ function retry(
 const nameTaken = (error: unknown) =>
 	error instanceof Error && /UNIQUE/.test(error.message);
 
+/**
+ * The category was archived, restored or never existed: another screen got there first. The
+ * current list comes back with a message, so the section is never swapped for a bare 404.
+ */
+const gone = (c: Context<App>) =>
+	renderSettings(c, {
+		listError:
+			"That category was changed somewhere else. Here's the current list.",
+		status: 404,
+	});
+
 const idOf = (c: Context<App>) => Number(c.req.param("id"));
 async function find(c: Context<App>) {
 	const all = await categoryNames(c.env.DB);
@@ -401,8 +417,9 @@ settings.post("/settings/categories", async (c) => {
 	const form = await c.req.formData();
 	const parsed = parseCategory(form, await categoryNames(c.env.DB), null);
 	if (!parsed.ok) return retry(c, "new", form, parsed.errors);
+	let id: number;
 	try {
-		await addCategory(c.env.DB, parsed.value, todayUtc().slice(0, 7));
+		id = await addCategory(c.env.DB, parsed.value, todayUtc().slice(0, 7));
 	} catch (error) {
 		if (nameTaken(error))
 			return retry(c, "new", form, { name: "That name is taken." });
@@ -415,22 +432,22 @@ settings.post("/settings/categories", async (c) => {
 		phrase
 			? `Added ${parsed.value.name}, ${phrase}.`
 			: `Added ${parsed.value.name}.`,
+		{ focus: id },
 	);
 });
 
 settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 	const { all, category } = await find(c);
-	if (!category || category.archived) return c.notFound();
+	if (!category || category.archived) return gone(c);
+	const thisMonth = todayUtc().slice(0, 7);
+	const { active } = await settingsCategories(c.env.DB, thisMonth);
+	const hasBudget =
+		active.find((x) => x.id === category.id)?.budgetCents != null;
 	const form = await c.req.formData();
-	const parsed = parseCategory(form, all, category.id);
+	const parsed = parseCategory(form, all, category.id, hasBudget);
 	if (!parsed.ok) return retry(c, category.id, form, parsed.errors);
 	try {
-		await saveCategory(
-			c.env.DB,
-			category.id,
-			parsed.value,
-			todayUtc().slice(0, 7),
-		);
+		await saveCategory(c.env.DB, category.id, parsed.value, thisMonth);
 	} catch (error) {
 		if (nameTaken(error))
 			return retry(c, category.id, form, { name: "That name is taken." });
@@ -449,18 +466,20 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 
 settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
 	const { category } = await find(c);
-	if (!category || category.archived) return c.notFound();
+	if (!category || category.archived) return gone(c);
 	await setArchived(c.env.DB, category.id, true);
 	return done(
 		c,
 		`Archived ${category.name}`,
 		`Archived ${category.name}. Its transactions keep their category.`,
+		// Its row is gone, so focus goes to the Archived list it moved to.
+		{ focus: "archived" },
 	);
 });
 
 settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 	const { all, category } = await find(c);
-	if (!category?.archived) return c.notFound();
+	if (!category?.archived) return gone(c);
 	const problem = restoreProblem(all);
 	if (problem) return renderSettings(c, { restoreError: problem, status: 422 });
 	await setArchived(c.env.DB, category.id, false);
@@ -474,7 +493,7 @@ settings.post(
 	"/settings/categories/:id{[0-9]+}/move/:direction{up|down}",
 	async (c) => {
 		const { category } = await find(c);
-		if (!category || category.archived) return c.notFound();
+		if (!category || category.archived) return gone(c);
 		const direction = c.req.param("direction") === "up" ? "up" : "down";
 		await moveCategory(c.env.DB, category.id, direction);
 		const { active } = await settingsCategories(

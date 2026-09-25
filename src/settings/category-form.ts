@@ -16,11 +16,15 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
 
-/** Reads the add or edit form. `id` is the category being edited, or null when adding one. */
+/**
+ * Reads the add or edit form. `id` is the category being edited, or null when adding one.
+ * `hasBudget`: the category has a budget this month, so an empty field can't mean "no change".
+ */
 export function parseCategory(
 	form: FormData,
 	existing: Existing,
 	id: number | null,
+	hasBudget = false,
 ): { ok: true; value: CategoryValue } | { ok: false; errors: CategoryErrors } {
 	const name = String(form.get("name") ?? "").trim();
 	const budget = String(form.get("budget") ?? "").trim();
@@ -40,7 +44,9 @@ export function parseCategory(
 		errors.name = `Tally has room for ${MAX_ACTIVE} categories. Archive one to add another.`;
 
 	let budgetCents: number | null = null;
-	if (budget !== "") {
+	if (budget === "" && hasBudget)
+		errors.budget = "Enter an amount. A budget can't be removed yet.";
+	else if (budget !== "") {
 		try {
 			budgetCents = toCents(budget);
 		} catch {

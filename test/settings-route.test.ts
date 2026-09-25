@@ -27,7 +27,8 @@ const trigger = (res: Response) =>
 		announce?: string;
 	};
 /** The page's text, without markup. */
-const textOf = (html: string) => html.replace(/<[^>]+>/g, "");
+const textOf = (html: string) =>
+	html.replace(/<[^>]+>/g, "").replaceAll("&#39;", "'");
 const THIS_MONTH = () => monthName(todayUtc().slice(0, 7));
 /** The names in the Categories list, in order. */
 const rowNames = (html: string) =>
@@ -116,6 +117,57 @@ describe("saving a category", () => {
 		});
 		expect(res.status).toBe(404);
 	});
+
+	it("moves focus back to the saved row", async () => {
+		const { html } = await post("/settings/categories/3", {
+			name: "Fuel",
+			budget: "150",
+		});
+		expect(html).toMatch(/<summary data-category="3"[^>]*autofocus/);
+	});
+
+	it("won't quietly keep a budget that was cleared", async () => {
+		// Groceries has a budget, and there's no way to remove one yet.
+		const { res, html } = await post("/settings/categories/1", {
+			name: "Groceries",
+			budget: "",
+		});
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain(
+			"Enter an amount. A budget can't be removed yet.",
+		);
+		expect(html).toMatch(/<details[^>]*data-row="1"[^>]*\bopen/);
+	});
+});
+
+describe("a page left open while someone else changed a category", () => {
+	it.each([
+		["save", "/settings/categories/2"],
+		["archive", "/settings/categories/2/archive"],
+		["move", "/settings/categories/2/move/up"],
+	])(
+		"shows the current list with a message on %s, instead of emptying the section",
+		async (_, path) => {
+			await post("/settings/categories/2/archive", {});
+			const { res, html } = await post(path, {
+				name: "Eating Out",
+				budget: "",
+			});
+			expect(res.status).toBe(404);
+			expect(html).toMatch(/<section id="categories"/);
+			expect(html).toMatch(/role="alert"[^>]*>That category was changed/);
+			expect(textOf(html)).toContain(
+				"That category was changed somewhere else. Here's the current list.",
+			);
+		},
+	);
+
+	it("does the same on restore, once it's already back", async () => {
+		const { res, html } = await post("/settings/categories/2/restore", {});
+		expect(res.status).toBe(404);
+		expect(html).toMatch(/<section id="categories"/);
+		expect(html).toContain("That category was changed somewhere else.");
+	});
 });
 
 describe("Cancel", () => {
@@ -155,6 +207,10 @@ describe("adding a category", () => {
 		expect(res.status).toBe(200);
 		expect(rowNames(html).at(-1)).toBe("Travel");
 		expect(textOf(html)).toContain("$400 a month");
+		// Focus lands on the new row, not back at the top of the page.
+		expect(html).toMatch(
+			/<summary data-category="\d+"[^>]*autofocus[^>]*>[\s\S]*?Travel</,
+		);
 		expect(trigger(res).announce).toBe(
 			`Added Travel, $400 a month from ${THIS_MONTH()} on.`,
 		);
@@ -179,10 +235,32 @@ describe("archiving, restoring and moving", () => {
 		expect(trigger(archived.res).announce).toBe(
 			"Archived Eating Out. Its transactions keep their category.",
 		);
+		// The archived row is gone, so focus goes to where it went.
+		expect(archived.html).toMatch(/<summary[^>]*autofocus[^>]*>Archived \(1\)/);
 
 		const restored = await post("/settings/categories/2/restore", {});
 		expect(rowNames(restored.html)).toContain("Eating Out");
 		expect(restored.html).not.toContain("Archived (");
+		expect(restored.html).toMatch(/<summary data-category="2"[^>]*autofocus/);
+		expect(trigger(restored.res)).toEqual({
+			toast: { message: "Restored Eating Out", type: "success" },
+			announce: "Restored Eating Out.",
+		});
+	});
+
+	it("won't restore past 254 active categories, and says why", async () => {
+		await post("/settings/categories/2/archive", {});
+		// The demo has 4 active now; add 250 more.
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 250)
+			 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
+		).run();
+		const { res, html } = await post("/settings/categories/2/restore", {});
+		expect(res.status).toBe(422);
+		expect(html).toMatch(
+			/role="alert"[^>]*>Tally has room for 254 categories\. Archive one to restore another\.</,
+		);
+		expect(rowNames(html)).not.toContain("Eating Out");
 	});
 
 	it("moves a category up, keeping its row open for another move", async () => {
@@ -193,6 +271,7 @@ describe("archiving, restoring and moving", () => {
 			"Eating Out",
 		]);
 		expect(html).toMatch(/<details[^>]*data-row="3"[^>]*\bopen/);
+		expect(html).toMatch(/<summary data-category="3"[^>]*autofocus/);
 		expect(trigger(res).announce).toBe("Moved Gas up. It's now 2 of 5.");
 	});
 });

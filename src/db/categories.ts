@@ -79,7 +79,7 @@ export async function addCategory(
 	db: D1Database,
 	value: CategoryValue,
 	month: string,
-): Promise<void> {
+): Promise<number> {
 	const count = await db
 		.prepare(
 			"SELECT COUNT(*) AS n, COALESCE(MAX(sort_order), 0) AS last FROM categories",
@@ -98,7 +98,8 @@ export async function addCategory(
 	];
 	if (value.budgetCents !== null)
 		statements.push(setBudget(db, null, value.name, value.budgetCents, month));
-	await db.batch(statements);
+	const [inserted] = await db.batch(statements);
+	return Number(inserted?.meta.last_row_id);
 }
 
 /** Renames a category and, if given, sets its budget from `month` on, in one atomic batch. */

@@ -55,6 +55,15 @@ const wholeDollars = new Intl.NumberFormat("en-US", {
 	maximumFractionDigits: 0,
 });
 
+/** Integer cents as a form field's value: "600" or "612.50", no symbol or commas. toCents reads it back. */
+export function centsToInput(cents: number): string {
+	const whole = Math.trunc(cents / 100);
+	const rest = cents % 100;
+	return rest === 0
+		? String(whole)
+		: `${whole}.${String(rest).padStart(2, "0")}`;
+}
+
 /** Formats integer cents for display. */
 export function formatCents(
 	cents: number,

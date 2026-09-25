@@ -36,6 +36,15 @@ describe("parseCategory", () => {
 		});
 	});
 
+	it("won't take a blank budget as 'no change' when the category has one, since it can't be removed", () => {
+		expect(
+			parseCategory(form({ name: "Groceries", budget: "" }), existing, 1, true),
+		).toEqual({
+			ok: false,
+			errors: { budget: "Enter an amount. A budget can't be removed yet." },
+		});
+	});
+
 	it("lets a category keep its own name", () => {
 		expect(
 			parseCategory(form({ name: "gas", budget: "200" }), existing, 2),

@@ -98,7 +98,7 @@ The owner generated these without the reference image attached, and accepted all
 - The demo banner, wordmark, navigation and nav icons come from the built Layout, Sidebar and BottomTabs. The studies moved the banner under the wordmark, left it off the desktop Settings study, and drew different nav icons.
 - Row names, field labels and bank names use the sans (Inter), never the serif. Some desktop labels drifted into the serif, and so did the "Link a bank" button text.
 - Bank group names use the muted small sans, not uppercase with letter spacing, which isn't in DESIGN.md.
-- "+ Add category" has no chevron: it's a link, not a row that opens.
+- "+ Add category" has no chevron and is terracotta like a link. As built (#55) it opens the add form in place, like the other rows.
 - Account rows keep a line icon on both sizes. The desktop Accounts study dropped them.
 
 ## Build checks

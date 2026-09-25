@@ -6,7 +6,7 @@ Direction: "Illustrated ledger" (docs/design-concepts/README.md). Calm, warm, gl
 1. One thing matters per screen. It gets the serif, the size, or the band. Nothing else competes.
 2. Status is never color alone. Every red or green state also has an icon and a word.
 3. Categories and status never share a hue. Status: green/brick. Categories: blue, plum, slate, ochre, brown.
-4. Terracotta means "you can click this." Links and the current nav item only.
+4. Terracotta means "you can click this." Links, link-styled actions (Archive, Restore, Add category) and the current nav item only.
 5. Explainable in one sentence. If a component can't be, it doesn't exist.
 
 ## Tokens (src/styles/app.css @theme)
