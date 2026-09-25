@@ -39,7 +39,7 @@ All eight features are in scope and ship across phases (§11):
 | 7 | Account balances and net worth over time |
 | 8 | Documents: stored statements and receipts (PDF) |
 
-Also in scope: AI-suggested merchant name cleanup (accept or reject), the demo banner, a "Things to try" list, and a "How it works" page.
+Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggested new categories when none of the household's categories fit (a person creates or dismisses them), the demo banner, a "Things to try" list, and a "How it works" page.
 
 **Household model:** one shared household. Everyone who can log in sees and edits the same data. Changes record who made them.
 
@@ -172,6 +172,8 @@ The confidence threshold is a single config value, set during Phase 1 after chec
 
 **Boundary:** all Jev calls go through one module (`src/ai/categorize.ts`) with one function signature. Switching providers changes only that file.
 
+**New category suggestions (Phase 4, owner-approved 2026-09-25, #51):** when Jev says "None of these fit", Workers AI suggests a new category name from the transactions Jev couldn't place, through `src/ai/suggest-name.ts`. The Settings screen shows each suggestion with the transactions behind it. A person creates the category (it then works like any other, and Jev offers it from the next run) or dismisses the suggestion. Nothing is created automatically.
+
 **Merchant names:** the Settings screen lists merchants without a chosen name. Workers AI generates a `suggested_name` once per `raw_name` and caches it. A person accepts it (it becomes `display_name`) or rejects it. Renaming a merchant renames every transaction from that merchant, because display names are looked up from `merchants`. All Workers AI calls go through `src/ai/suggest-name.ts`.
 
 ## 8. Screens
@@ -249,7 +251,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 | **1. Core demo live** | Wireframes; D1 schema; seed household; Home; Transactions (recategorize, merchant rules, rename); Jev categorization; demo banner, Things to try, How it works; nightly reset; `demo` deploy | `https://tally-demo.thesuperhuman.us` loads over HTTPS, all Phase 1 routes work, and there are no console errors. DNS records are shown to the owner and approved before they're created. |
 | **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection | The family uses it for a week. Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
 | **3. Bills, exclusions, splits** | In both environments, with seed data for each | Shown in the demo, used by the family |
-| **4. Trends, balances, documents, name suggestions** | Trends, net-worth history, R2 documents, Workers AI name suggestions | All 8 features live in both environments |
+| **4. Trends, balances, documents, name suggestions** | Trends, net-worth history, R2 documents, Workers AI name suggestions (merchant names and new categories) | All 8 features live in both environments |
 
 ### Testing
 
@@ -269,7 +271,6 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - Statement upload (CSV or PDF) as a second transaction source
 - A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
-- When Jev says no category fits, suggest a new category name for a person to create (needs text generation, likely Workers AI, and category management in Settings; owner request, #49)
 
 ## 13. Checked against docs before writing code (Phase 0)
 
