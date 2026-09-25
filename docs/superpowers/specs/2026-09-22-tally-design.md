@@ -70,7 +70,7 @@ Wrangler environments deploy the same code twice:
 
 | | `production` (family) | `demo` (public) |
 |---|---|---|
-| Hostname | Chosen in Phase 2 (see §11); intended to eventually take over `finance.thesuperhuman.us` | `tally-demo.thesuperhuman.us` |
+| Hostname | `tally.thesuperhuman.us` (decision 34); may later take over `finance.thesuperhuman.us` as its own decision (decision 16) | `tally-demo.thesuperhuman.us` |
 | D1 database | `tally-prod` | `tally-demo` |
 | R2 bucket | `tally-prod-docs` | `tally-demo-docs` (fake PDFs) |
 | Plaid | On | **Off.** No Plaid secrets exist in this environment. |
@@ -91,7 +91,7 @@ Secrets are stored with `wrangler secret put` and never committed. The owner ent
 | `PLAID_WEBHOOK_URL` (plain config, not secret) | yes | no |
 | `JEV_API_KEY` | yes | yes |
 
-Local development uses a git-ignored `.dev.vars` file. The repo commits a `.dev.vars.example` with placeholder names only.
+Local development uses a git-ignored `.dev.vars` file, with Plaid **Sandbox** keys only (decision 36); tests fake Plaid at `fetch`, and production keys exist only as secrets on the production Worker. The repo commits a `.dev.vars.example` with placeholder names only.
 
 ## 5. Data model
 
@@ -201,7 +201,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 - **Charts:** the server renders them as inline SVG. No chart library.
 - **Expand and collapse:** `<details>` / `<summary>`. No JavaScript.
 - **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires) and a small toast listener.
-- **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and every HTMX swap is announced: through an `aria-live="polite"` count or announcer, or by moving focus (a whole list is never a live region, which would read out every row). Known gap: a filter change that leaves the result count the same isn't announced yet (#56). Errors use `role="alert"`.
+- **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and every HTMX swap is announced: through an `aria-live="polite"` count or announcer, or by moving focus (a whole list is never a live region, which would read out every row). Errors use `role="alert"`.
 
 Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before any UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
 
