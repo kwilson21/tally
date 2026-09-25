@@ -27,6 +27,7 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { FormField } from "../views/form-field";
+import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { TransactionRow } from "../views/transaction-row";
@@ -126,6 +127,7 @@ async function renderList(
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">
 				Transactions
 			</h1>
+			<HowLink section="transactions" demo={c.env.DEMO === "true"} />
 
 			{/* Works as a plain GET form; htmx re-requests the same URL and swaps in only the results. */}
 			<form
@@ -302,10 +304,18 @@ type SheetProps = {
 	categories: Category[];
 	values: Edit;
 	errors?: EditErrors;
+	demo: boolean;
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
-function EditSheet({ tx, back, categories, values, errors = {} }: SheetProps) {
+function EditSheet({
+	tx,
+	back,
+	categories,
+	values,
+	errors = {},
+	demo,
+}: SheetProps) {
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
 	const closeAttrs = {
 		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${tx.id}`,
@@ -339,6 +349,12 @@ function EditSheet({ tx, back, categories, values, errors = {} }: SheetProps) {
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
+			{/* Outside the form, so following it never happens by accident mid-edit. */}
+			{demo && (
+				<p>
+					<HowLink section="categorization" demo={demo} />
+				</p>
+			)}
 			<form
 				method="post"
 				action={`/transactions/${tx.id}`}
@@ -484,7 +500,13 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	};
 	return renderList(c, filters, {
 		sheet: (categories) => (
-			<EditSheet tx={tx} back={back} categories={categories} values={values} />
+			<EditSheet
+				tx={tx}
+				back={back}
+				categories={categories}
+				values={values}
+				demo={c.env.DEMO === "true"}
+			/>
 		),
 	});
 });
@@ -520,6 +542,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					categories={all}
 					values={values}
 					errors={parsed.errors}
+					demo={c.env.DEMO === "true"}
 				/>
 			),
 		});

@@ -49,12 +49,16 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
 | BottomSheet | A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop. |
+| ThingsToTry | The demo's bordered "New here? Things to try" block at the top of Home: three links to where each thing is done, plus How Tally works. |
+| HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
+| SystemDiagram | The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers. |
 
 ## Patterns
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.
 - Who picked a category: when Jev picked it, a muted `text-sm` line under the category chips says "Picked by Jev · N% sure". A person's choice and a merchant rule show nothing extra.
 - Edits: the form saves, the list swaps back with the toast and announcement, and focus returns to the row (or to the result count if the row left a filtered list). Without JavaScript the save redirects back to the list.
 - Sheet backdrop: `bg-ink/30` (ink at 30%), used only behind the BottomSheet; it is decorative, so no contrast target.
+- Explainer page (How Tally works): each section is a serif h2 with an `id` the HowLinks point to, the rule in a short list quoted from the spec, and a worked example in a band-tinted box ("In the demo: …") computed by code from live numbers. When a rule changes in the spec, its section changes in the same PR.
 - Illustrations: SVG, drawn with the icon stroke rules, ink plus one accent. Generated images never ship.
 - Money: integer cents in the database and in code; format only in views with `formatCents` (src/money.ts).
 - Motion: budget bars fill on load (CSS). `prefers-reduced-motion` shows the final state. No count-up: it would need custom JavaScript.

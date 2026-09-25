@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending, MAX_JEV_CALLS } from "../src/categorize-pending";
-import { needsCategoryCount } from "../src/db/transactions";
+import { needsCategoryCount, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const db = env.DB;
@@ -172,5 +172,141 @@ describe("categorizePending", () => {
 		const jev = fakeJev(() => reply(0.5));
 		await categorizePending(withKey, jev.fetchImpl);
 		expect(jev.calls()).toBe(40);
+	});
+
+	it("skips one transaction Jev can't answer usefully and carries on with the rest", async () => {
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		// The first (newest) transaction always gets an answer that isn't one of the options.
+		let calls = 0;
+		const fetchImpl = async () => {
+			calls += 1;
+			if (calls === 1) {
+				return new Response(
+					JSON.stringify({
+						answers: {
+							category: {
+								type: "choice",
+								choice: "eating out",
+								confidence: 0.9,
+							},
+							transfer: { type: "noul", noul: 0.01 },
+							reimbursement: { type: "noul", noul: 0.01 },
+							income: { type: "noul", noul: 0.01 },
+						},
+					}),
+					{ status: 200, headers: { "x-typesafe-request-id": "req_bad" } },
+				);
+			}
+			return reply(0.95);
+		};
+
+		const result = await categorizePending(withKey, fetchImpl);
+
+		expect(calls).toBe(12);
+		expect(result).toEqual({ asked: 12, applied: 11 });
+		expect(await needsCategoryCount(db, MONTH)).toBe(1);
+		expect(errors).toHaveBeenCalledWith("jev: 200 req_bad");
+	});
+
+	it.each([422, 400])(
+		"skips a transaction Jev rejects with %i instead of stopping",
+		async (status) => {
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			let calls = 0;
+			const fetchImpl = async () => {
+				calls += 1;
+				return calls === 1 ? new Response("{}", { status }) : reply(0.95);
+			};
+			await categorizePending(withKey, fetchImpl);
+			expect(calls).toBe(12);
+		},
+	);
+
+	it.each([401, 403, 429, 500, 529])(
+		"stops the whole run on %i, which would fail every call",
+		async (status) => {
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			const jev = fakeJev(() => new Response("{}", { status }));
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(1);
+		},
+	);
+
+	it("doesn't ask Jev at all when there are no categories to offer", async () => {
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		const jev = fakeJev(() => reply(0.95));
+		const result = await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(0);
+		expect(result).toEqual({ asked: 0, applied: 0 });
+		// Nothing was marked as looked at, so Jev asks once categories exist.
+		expect(
+			await countWhere(
+				"category_confidence IS NOT NULL AND category_source IS NULL",
+			),
+		).toBe(0);
+	});
+
+	it("stops after three failures in a row, which point at every call, not one transaction", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const jev = fakeJev(() => new Response("{}", { status: 422 }));
+		const result = await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(3);
+		expect(result).toEqual({ asked: 3, applied: 0 });
+	});
+
+	it("resets the count after a good answer, so scattered bad rows are still skipped", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		let calls = 0;
+		// Two failures, a success, two failures, then successes: never three in a row.
+		const fetchImpl = async () => {
+			calls += 1;
+			return [1, 2, 4, 5].includes(calls)
+				? new Response("{}", { status: 422 })
+				: reply(0.95);
+		};
+		const result = await categorizePending(withKey, fetchImpl);
+		expect(calls).toBe(12);
+		expect(result.applied).toBe(8);
+	});
+
+	it("asks about transactions that failed before last, so they never block the rest", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		// The three newest pending transactions always get an unusable answer.
+		const newest = (await pendingForJev(db, 3)).map((t) => t.id);
+		const fetchImpl = async (_url: string, init?: RequestInit) => {
+			const state = JSON.parse(String(init?.body)).state;
+			const bad = await db
+				.prepare("SELECT id FROM transactions WHERE raw_name = ?")
+				.bind(state.bank_description)
+				.first<{ id: number }>();
+			return newest.includes(bad?.id ?? -1)
+				? new Response("{}", { status: 422 })
+				: reply(0.95);
+		};
+
+		// Night 1: the three bad ones come first, so the run stops after them.
+		expect(await categorizePending(withKey, fetchImpl)).toEqual({
+			asked: 3,
+			applied: 0,
+		});
+		// Night 2: the other nine are asked first and applied; the three bad ones are last.
+		expect(await categorizePending(withKey, fetchImpl)).toEqual({
+			asked: 12,
+			applied: 9,
+		});
+		expect(await needsCategoryCount(db, MONTH)).toBe(3);
+	});
+
+	it("doesn't mark a transaction as failed when Jev itself is down", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		await categorizePending(
+			withKey,
+			fakeJev(() => new Response("{}", { status: 503 })).fetchImpl,
+		);
+		expect(await countWhere("jev_failed_at IS NOT NULL")).toBe(0);
 	});
 });

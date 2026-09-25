@@ -5,6 +5,7 @@ import { canResetDemo, resetDemo } from "./demo/reset";
 import { destinations } from "./routes/destinations";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
+import { howItWorks } from "./routes/how-it-works";
 import { transactions } from "./routes/transactions";
 import { sameOrigin, security } from "./security";
 
@@ -15,6 +16,7 @@ app.use("*", sameOrigin);
 
 app.route("/", health);
 app.route("/", home);
+app.route("/", howItWorks);
 app.route("/", transactions);
 app.route("/", destinations);
 

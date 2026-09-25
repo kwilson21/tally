@@ -147,6 +147,37 @@ describe("askJev", () => {
 		expect(calls[0]?.init.signal).toBeInstanceOf(AbortSignal);
 	});
 
+	it("treats a category that wasn't one of the options as a malformed answer", async () => {
+		const { fetchImpl } = fakeFetch(() =>
+			ok({
+				...goodBody,
+				answers: {
+					...goodBody.answers,
+					category: { type: "choice", choice: "Travel", confidence: 0.9 },
+				},
+			}),
+		);
+		expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
+			ok: false,
+			status: 200,
+			requestId: null,
+		});
+	});
+
+	it("accepts None of these fit as an answer", async () => {
+		const { fetchImpl } = fakeFetch(() =>
+			ok({
+				...goodBody,
+				answers: {
+					...goodBody.answers,
+					category: { type: "choice", choice: NONE_FIT, confidence: 0.9 },
+				},
+			}),
+		);
+		const result = await askJev(input, categories, "k", fetchImpl);
+		expect(result.ok && result.answer.category.label).toBe(NONE_FIT);
+	});
+
 	it("treats a malformed answer as a failure", async () => {
 		const { fetchImpl } = fakeFetch(() =>
 			ok({ answers: { category: { type: "choice", choice: 3 } } }),
