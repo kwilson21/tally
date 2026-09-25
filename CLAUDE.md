@@ -33,7 +33,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 
 ## Pull requests
 - `main` only accepts PRs; required checks: `check` (CI) and `Greptile Review`.
-- UI PRs: CI adds screenshots (1280×800 and 390×844) to the description; check them before asking for review. The owner merges after looking. Non-UI PRs may auto-merge.
+- UI PRs: CI adds a before-and-after table (every page that looks different from `main`) and screenshots of every page (1280×800 and 390×844) to the description; check them before asking for review. The owner merges after looking. Non-UI PRs may auto-merge.
 - If Greptile hasn't reported within 30 minutes or errors: run `/code-review` (high) plus an independent reviewer agent, post findings as a PR comment titled "Fallback review (Greptile unavailable)", fix and re-review. Only the owner merges such a PR; never use a ruleset bypass.
 
 ## Git

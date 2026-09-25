@@ -34,6 +34,25 @@ jobs:
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 2; done
           npm run db:seed:local
       - run: npm run screenshots
+      # The same pages on the base branch, so the PR description can show what changed (#60).
+      - name: Screenshot the base branch for before and after
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+          git worktree add --detach ../base "$BASE_SHA"
+          (
+            cd ../base
+            npm ci
+            npm run build
+            npm run db:migrate:local
+            npx wrangler dev --port 8788 --inspector-port 9230 > "$GITHUB_WORKSPACE/base-wrangler.log" 2>&1 &
+            for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 2; done
+            curl -fsS http://127.0.0.1:8788/cdn-cgi/handler/scheduled
+          )
+          # The base's own console errors aren't this PR's; its images are only for comparison.
+          OUT=screenshots-before BASE_URL=http://127.0.0.1:8788 npm run screenshots || true
+          node scripts/changed-shots.mjs
       # After the screenshots: the E2E changes the demo data.
       - run: npm run e2e
       - name: Publish images to the screenshots branch
@@ -53,6 +72,8 @@ jobs:
           fi
           mkdir -p "shots/$dir"
           cp screenshots/*.png "shots/$dir/"
+          # "Before" images, only for the pages that changed (scripts/changed-shots.mjs).
+          cp -r screenshots/before "shots/$dir/"
           git -C shots add .
           # A rerun of the same commit can produce identical images; nothing to commit is fine.
           git -C shots diff --cached --quiet || git -C shots commit -m "chore: screenshots for #${PR} at ${SHA::7}"
@@ -71,4 +92,6 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/update-pr-body.mjs
       - if: failure()
-        run: tail -50 wrangler.log || true
+        run: |
+          tail -50 wrangler.log || true
+          tail -50 base-wrangler.log || true
