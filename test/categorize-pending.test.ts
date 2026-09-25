@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending, MAX_JEV_CALLS } from "../src/categorize-pending";
-import { needsCategoryCount } from "../src/db/transactions";
+import { needsCategoryCount, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const db = env.DB;
@@ -270,5 +270,43 @@ describe("categorizePending", () => {
 		const result = await categorizePending(withKey, fetchImpl);
 		expect(calls).toBe(12);
 		expect(result.applied).toBe(8);
+	});
+
+	it("asks about transactions that failed before last, so they never block the rest", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		// The three newest pending transactions always get an unusable answer.
+		const newest = (await pendingForJev(db, 3)).map((t) => t.id);
+		const fetchImpl = async (_url: string, init?: RequestInit) => {
+			const state = JSON.parse(String(init?.body)).state;
+			const bad = await db
+				.prepare("SELECT id FROM transactions WHERE raw_name = ?")
+				.bind(state.bank_description)
+				.first<{ id: number }>();
+			return newest.includes(bad?.id ?? -1)
+				? new Response("{}", { status: 422 })
+				: reply(0.95);
+		};
+
+		// Night 1: the three bad ones come first, so the run stops after them.
+		expect(await categorizePending(withKey, fetchImpl)).toEqual({
+			asked: 3,
+			applied: 0,
+		});
+		// Night 2: the other nine are asked first and applied; the three bad ones are last.
+		expect(await categorizePending(withKey, fetchImpl)).toEqual({
+			asked: 12,
+			applied: 9,
+		});
+		expect(await needsCategoryCount(db, MONTH)).toBe(3);
+	});
+
+	it("doesn't mark a transaction as failed when Jev itself is down", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		await categorizePending(
+			withKey,
+			fakeJev(() => new Response("{}", { status: 503 })).fetchImpl,
+		);
+		expect(await countWhere("jev_failed_at IS NOT NULL")).toBe(0);
 	});
 });

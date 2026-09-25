@@ -251,12 +251,23 @@ export async function pendingForJev(
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			WHERE ${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL
-			ORDER BY t.date DESC, t.id DESC
+			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
+			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
 			LIMIT ?`,
 		)
 		.bind(limit)
 		.all<JevInput & { id: number }>();
 	return results;
+}
+
+/** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */
+export async function markJevFailed(db: D1Database, id: number): Promise<void> {
+	await db
+		.prepare(
+			"UPDATE transactions SET jev_failed_at = datetime('now') WHERE id = ?",
+		)
+		.bind(id)
+		.run();
 }
 
 /**

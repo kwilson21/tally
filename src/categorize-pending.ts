@@ -3,6 +3,7 @@ import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { decide } from "./ai/decide";
 import {
 	applyMerchantRules,
+	markJevFailed,
 	pendingForJev,
 	saveJevResult,
 } from "./db/transactions";
@@ -43,9 +44,11 @@ export async function categorizePending(
 			// Jev down, rate-limited, or a bad key would fail every call: stop, and retry next night.
 			// Anything else is about this one transaction: skip it (it stays pending) and carry on,
 			// unless it keeps happening, which means it isn't about one transaction after all.
+			if (serviceWide(result.status)) return done;
+			// Asked last from now on, so it can't hold up the others.
+			await markJevFailed(env.DB, tx.id);
 			failuresInARow += 1;
-			if (serviceWide(result.status) || failuresInARow >= MAX_FAILURES_IN_A_ROW)
-				return done;
+			if (failuresInARow >= MAX_FAILURES_IN_A_ROW) return done;
 			continue;
 		}
 		failuresInARow = 0;
