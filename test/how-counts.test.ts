@@ -60,6 +60,7 @@ describe("monthCounts", () => {
 				alwaysForMerchant: false,
 				displayName: null,
 				note: null,
+				excluded: false,
 			},
 			"demo",
 		);

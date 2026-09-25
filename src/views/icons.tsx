@@ -128,6 +128,7 @@ const PATHS = {
 		</>
 	),
 	"chevron-right": <path d="m9 18 6-6-6-6" />,
+	check: <path d="M20 6 9 17l-5-5" />,
 	"circle-dashed": (
 		<>
 			<path d="M10.1 2.182a10 10 0 0 1 3.8 0" />

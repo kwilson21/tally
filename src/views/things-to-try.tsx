@@ -32,8 +32,8 @@ export function ThingsToTry() {
 				))}
 			</ul>
 			<p class="text-sm text-muted">
-				For a rule or a new name, open a transaction and tick "Always use this
-				category for this merchant," or change its merchant name.
+				For a rule or a new name, open a transaction and tap "Always for this
+				merchant," or "Rename or add a note."
 			</p>
 			<a
 				href="/how-it-works"

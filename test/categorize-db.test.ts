@@ -4,6 +4,7 @@ import {
 	applyMerchantRules,
 	needsCategoryCount,
 	pendingForJev,
+	saveEdit,
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -25,11 +26,19 @@ const row = (id: number) =>
 	db
 		.prepare(
 			`SELECT category_id, category_source, category_confidence, jev_category_id,
-				flag_transfer, flag_reimbursement, flag_income, updated_by
+				flag_transfer, flag_reimbursement, flag_income, excluded, updated_by
 			FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<Record<string, unknown>>();
+
+const personEdit = {
+	categoryId: null,
+	alwaysForMerchant: false,
+	displayName: null,
+	note: null,
+	excluded: false,
+};
 
 const decision = (over = {}) => ({
 	categoryId: EATING_OUT,
@@ -135,6 +144,8 @@ describe("saveJevResult", () => {
 			flag_transfer: 0,
 			flag_reimbursement: 1,
 			flag_income: 0,
+			// A reimbursement starts excluded (spec §6); a person can include it again (#27).
+			excluded: 1,
 			updated_by: before,
 		});
 		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
@@ -151,9 +162,36 @@ describe("saveJevResult", () => {
 				flags: { transfer: true, reimbursement: false, income: true },
 			}),
 		);
-		expect(await row(id)).toMatchObject({ flag_transfer: 1, flag_income: 0 });
-		// Still counted as spending, so it stays in the list for a person to categorize.
-		expect(await needsCategoryCount(db, "2026-09")).toBe(12);
+		// The transfer flag excludes it (spec §6), so it leaves the list; income isn't stored.
+		expect(await row(id)).toMatchObject({
+			flag_transfer: 1,
+			flag_income: 0,
+			excluded: 1,
+		});
+		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+	});
+
+	it("leaves a transaction counted when Jev flags neither transfer nor reimbursement", async () => {
+		const id = await idOf("TST* CORNER DELI");
+		await saveJevResult(db, id, decision());
+		expect(await row(id)).toMatchObject({ excluded: 0 });
+	});
+
+	it("never overrides a person who included a transaction again (#27)", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		// A person excluded it, then included it again from the edit panel.
+		await saveEdit(db, id, { ...personEdit, excluded: true }, "demo");
+		await saveEdit(db, id, { ...personEdit, excluded: false }, "demo");
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: true, reimbursement: false, income: false },
+			}),
+		);
+		expect(await row(id)).toMatchObject({ flag_transfer: 1, excluded: 0 });
 	});
 
 	it("records that Jev said none fit: a confidence with no pick", async () => {

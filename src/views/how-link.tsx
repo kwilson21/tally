@@ -2,6 +2,7 @@ const NAMES = {
 	budget: "the budget",
 	transactions: "transactions",
 	categorization: "categories",
+	exclusions: "excluding",
 } as const;
 
 /** A small "How this works" link from a screen to its section of How Tally works; demo only (spec §9). */
@@ -9,7 +10,7 @@ export function HowLink({
 	section,
 	demo,
 }: {
-	section: "budget" | "transactions" | "categorization";
+	section: keyof typeof NAMES;
 	demo: boolean;
 }) {
 	if (!demo) return null;

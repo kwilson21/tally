@@ -365,6 +365,13 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
+			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
+			{tx.excluded && (
+				<p class="flex items-center gap-2 text-muted">
+					<Icon name="transfer" class="size-5" />
+					Excluded from the budget
+				</p>
+			)}
 			{/* Outside the form, so following it never happens by accident mid-edit. */}
 			{demo && (
 				<p>
@@ -412,47 +419,80 @@ function EditSheet({
 						</p>
 					)}
 				</fieldset>
-				<label class="flex min-h-11 items-center gap-3">
-					<input
+				{/* The two things people change most after the category, one tap each (owner's pick C). */}
+				<div class="flex flex-wrap gap-2">
+					<Chip
 						type="checkbox"
 						name="always"
 						value="1"
 						checked={values.alwaysForMerchant}
-						class="size-5"
-					/>
-					Always use this category for this merchant
-				</label>
-				<FormField id="merchant" label="Merchant name" error={errors.merchant}>
-					{(a11y) => (
-						<>
-							<input
-								id="merchant"
-								name="merchant"
-								value={values.displayName ?? ""}
-								placeholder={tx.rawName}
-								autocomplete="off"
-								class="min-h-11 rounded-control border border-rule bg-paper px-3 text-lg"
-								{...a11y}
-							/>
-							<p class="text-sm text-muted">
-								Renames every transaction from this merchant.
-							</p>
-						</>
+					>
+						Always for this merchant
+					</Chip>
+					<Chip
+						type="checkbox"
+						name="excluded"
+						value="1"
+						checked={values.excluded}
+					>
+						Exclude from budget
+					</Chip>
+				</div>
+				{/* Renaming and notes are rarer, so they wait behind one tap. It opens when there's something to
+				    see: a note, a typed name that isn't saved yet (after a failed save), or an error. */}
+				<details
+					class="group border-t border-rule"
+					open={Boolean(
+						values.note ||
+							(values.displayName || null) !== tx.merchantName ||
+							errors.merchant ||
+							errors.note,
 					)}
-				</FormField>
-				<FormField id="note" label="Note" error={errors.note}>
-					{(a11y) => (
-						<textarea
-							id="note"
-							name="note"
-							rows={2}
-							class="rounded-control border border-rule bg-paper px-3 py-2 text-lg"
-							{...a11y}
+				>
+					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+						<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
+							<Icon name="chevron-right" class="size-5" />
+						</span>
+						Rename or add a note
+					</summary>
+					<div class="flex flex-col gap-4 pt-2">
+						<FormField
+							id="merchant"
+							label="Merchant name"
+							error={errors.merchant}
 						>
-							{values.note ?? ""}
-						</textarea>
-					)}
-				</FormField>
+							{(a11y) => (
+								<>
+									<input
+										id="merchant"
+										name="merchant"
+										value={values.displayName ?? ""}
+										placeholder={tx.rawName}
+										autocomplete="off"
+										class="min-h-11 rounded-control border border-rule bg-paper px-3 text-lg"
+										{...a11y}
+									/>
+									<p class="text-sm text-muted">
+										Renames every transaction from this merchant.
+									</p>
+								</>
+							)}
+						</FormField>
+						<FormField id="note" label="Note" error={errors.note}>
+							{(a11y) => (
+								<textarea
+									id="note"
+									name="note"
+									rows={2}
+									class="rounded-control border border-rule bg-paper px-3 py-2 text-lg"
+									{...a11y}
+								>
+									{values.note ?? ""}
+								</textarea>
+							)}
+						</FormField>
+					</div>
+				</details>
 				<div class="mt-2 grid grid-cols-2 gap-3">
 					<a
 						href={back}
@@ -513,6 +553,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		alwaysForMerchant: false,
 		displayName: tx.merchantName,
 		note: tx.note,
+		excluded: tx.excluded,
 	};
 	return renderList(c, filters, {
 		sheet: (categories) => (
@@ -548,6 +589,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			alwaysForMerchant: form.get("always") === "1",
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
+			excluded: form.get("excluded") === "1",
 		};
 		return renderList(c, filters, {
 			status: 422,
@@ -571,13 +613,20 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;
+	const saved = category
+		? `Saved. ${name} is now ${category}.`
+		: `Saved ${name}.`;
+	const exclusion =
+		parsed.value.excluded === tx.excluded
+			? ""
+			: parsed.value.excluded
+				? " It's excluded from the budget."
+				: " It counts in the budget again.";
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: { message: `Saved ${name}`, type: "success" },
-			announce: category
-				? `Saved. ${name} is now ${category}.`
-				: `Saved ${name}.`,
+			announce: saved + exclusion,
 		}),
 	);
 	c.header("HX-Push-Url", back);

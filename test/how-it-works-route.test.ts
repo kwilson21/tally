@@ -36,6 +36,7 @@ describe("GET /how-it-works in the demo", () => {
 			"architecture",
 			"budget",
 			"transactions",
+			"exclusions",
 			"categorization",
 		]) {
 			expect(html).toMatch(new RegExp(`<section[^>]*id="${id}"`));
@@ -56,6 +57,13 @@ describe("GET /how-it-works in the demo", () => {
 		);
 		const homeHtml = (await get("/")).html;
 		expect(homeHtml).toContain(formatCents(cents, { wholeDollars: true }));
+	});
+
+	it("explains exclusions with this month's excluded count", async () => {
+		const { html } = await get("/how-it-works");
+		expect(decodeHtml(html)).toMatch(
+			/This month, \d+ transactions? (is|are) excluded, so (it doesn't|they don't) count toward spending or safe to spend\./,
+		);
 	});
 
 	it("counts this month's transactions and who categorized them", async () => {

@@ -31,6 +31,13 @@ export function transactionsExample(c: {
 	return `This month has ${plural(c.counted, "counted transaction", "counted transactions")}, and ${needs}.`;
 }
 
+export function exclusionsExample(excluded: number): string {
+	if (excluded === 0) return "Nothing is excluded this month.";
+	return excluded === 1
+		? "This month, 1 transaction is excluded, so it doesn't count toward spending or safe to spend."
+		: `This month, ${excluded} transactions are excluded, so they don't count toward spending or safe to spend.`;
+}
+
 export function categorizationExample(c: {
 	user: number;
 	merchantRule: number;
