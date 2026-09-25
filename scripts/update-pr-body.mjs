@@ -1,6 +1,7 @@
-// Writes the screenshot table into the PR description.
+// Writes the before-and-after and screenshot tables into the PR description.
 // Env: GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, DIR, SHA (GITHUB_API_URL is set by Actions).
-import { PAGES, VIEWPORTS, withScreenshots } from "./pr-body.mjs";
+import { readFile } from "node:fs/promises";
+import { screenshotSection, withScreenshots } from "./pr-body.mjs";
 
 const { GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, DIR, SHA } = process.env;
 const API = process.env.GITHUB_API_URL ?? "https://api.github.com";
@@ -11,23 +12,11 @@ const headers = {
 	"X-GitHub-Api-Version": "2022-11-28",
 };
 const raw = `https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots/${DIR}`;
-const img = (page, viewport, width) =>
-	`<img src="${raw}/${page.name}-${viewport.name}.png" width="${width}" alt="${page.name}, ${viewport.name}">`;
-
-const [desktop, phone] = VIEWPORTS;
-const section = [
-	"<!-- screenshots:start -->",
-	"## Screenshots",
-	`_Taken by CI at ${SHA.slice(0, 7)} on the seeded demo data. Desktop ${desktop.width}×${desktop.height}, phone ${phone.width}×${phone.height}._`,
-	"",
-	"| Page | Desktop | Phone |",
-	"|---|---|---|",
-	...PAGES.map(
-		(p) =>
-			`| \`${p.path}\` | ${img(p, desktop, 480)} | ${img(p, phone, 180)} |`,
-	),
-	"<!-- screenshots:end -->",
-].join("\n");
+// Written by scripts/changed-shots.mjs.
+const { changes, unavailable } = JSON.parse(
+	await readFile("screenshots/changes.json", "utf8"),
+);
+const section = screenshotSection({ sha: SHA, raw, changes, unavailable });
 
 const current = await fetch(url, { headers });
 if (!current.ok) throw new Error(`GET PR failed: ${current.status}`);
