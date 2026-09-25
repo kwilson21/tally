@@ -438,10 +438,16 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
-				{/* Renaming and notes are rarer, so they wait behind one tap; open when there's something to see. */}
+				{/* Renaming and notes are rarer, so they wait behind one tap. It opens when there's something to
+				    see: a note, a typed name that isn't saved yet (after a failed save), or an error. */}
 				<details
 					class="group border-t border-rule"
-					open={Boolean(values.note || errors.merchant || errors.note)}
+					open={Boolean(
+						values.note ||
+							(values.displayName || null) !== tx.merchantName ||
+							errors.merchant ||
+							errors.note,
+					)}
 				>
 					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
 						<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">

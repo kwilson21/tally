@@ -303,6 +303,18 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 		expect(html).toMatch(/<details[^>]*\bopen/);
 	});
 
+	it("opens the disclosure when a failed save brings back a typed new name", async () => {
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			category: "99",
+			merchant: "Corner Bakery",
+			note: "",
+			back: "/transactions",
+		});
+		expect(res.status).toBe(422);
+		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(html).toMatch(/name="merchant"[^>]*value="Corner Bakery"/);
+	});
+
 	it("says an excluded transaction is excluded, near the top", async () => {
 		const excluded = (await get(`/transactions/${await reimbursement()}`)).html;
 		expect(excluded).toContain("Excluded from the budget");
