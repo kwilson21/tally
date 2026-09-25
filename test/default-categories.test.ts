@@ -90,4 +90,20 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 				.run(),
 		).rejects.toThrow(/UNIQUE/);
 	});
+
+	it("shortens a long renamed name so it stays within the form's 40 characters", async () => {
+		await resetDemo(db, "2026-09-22");
+		await db.prepare("DROP INDEX categories_name_nocase").run();
+		const long = "Weekend Trips And Family Outings Budget!"; // 40 characters
+		await db
+			.prepare(
+				"INSERT INTO categories (id, name, icon, color) VALUES (7, ?, 'tag', 'cat-blue'), (8, ?, 'tag', 'cat-blue')",
+			)
+			.bind(long, long.toLowerCase())
+			.run();
+		for (const sql of statements) await db.prepare(sql).run();
+		const names = (await categories()).map((c) => c.name);
+		expect(names).toContain(long);
+		expect(names).toContain("weekend trips and family outings bud (8)");
+	});
 });
