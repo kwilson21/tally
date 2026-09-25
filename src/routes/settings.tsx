@@ -485,11 +485,15 @@ settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 	if (!category?.archived) return gone(c);
 	const problem = restoreProblem(all);
 	if (problem) return renderSettings(c, { restoreError: problem, status: 422 });
-	if (!(await setArchived(c.env.DB, category.id, false)))
+	if (!(await setArchived(c.env.DB, category.id, false))) {
+		// Someone restored it a moment earlier, or the list filled up.
+		const now = (await find(c)).category;
+		if (!now?.archived) return gone(c);
 		return renderSettings(c, {
 			restoreError: fullMessage("restore"),
 			status: 422,
 		});
+	}
 	return done(c, `Restored ${category.name}`, `Restored ${category.name}.`, {
 		focus: category.id,
 	});

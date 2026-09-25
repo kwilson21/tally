@@ -240,6 +240,31 @@ describe("the 50-category limit, checked in the same write", () => {
 		).toBe(0);
 	});
 
+	it("leaves a same-named category's budget alone when the add is refused", async () => {
+		// Someone else added Travel with $400 and took the last place.
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 44)
+				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
+			)
+			.run();
+		expect(
+			await addCategory(db, { name: "Travel", budgetCents: 40000 }, MONTH),
+		).not.toBeNull();
+		expect(
+			await addCategory(db, { name: "Travel", budgetCents: 90000 }, MONTH),
+		).toBeNull();
+		const travel = (await settingsCategories(db, MONTH)).active.find(
+			(c) => c.name === "Travel",
+		);
+		expect(travel?.budgetCents).toBe(40000);
+	});
+
+	it("doesn't restore a category that's already active, so it keeps its place", async () => {
+		expect(await setArchived(db, 2, false)).toBe(false);
+		expect((await names())[1]).toBe("Eating Out");
+	});
+
 	it("restores nothing once 50 are active", async () => {
 		await setArchived(db, 2, true);
 		await fill();

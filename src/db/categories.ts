@@ -58,24 +58,19 @@ export async function categoryNames(
 	return results.map((c) => ({ ...c, archived: c.archived === 1 }));
 }
 
-/**
- * Sets a category's budget from `month` on, replacing one already set for that month. A category
- * found by name that wasn't added (the list was full) gets nothing.
- */
+/** Sets a category's budget from `month` on, replacing one already set for that month. */
 const setBudget = (
 	db: D1Database,
-	categoryId: number | null,
-	name: string,
+	categoryId: number,
 	cents: number,
 	month: string,
 ) =>
 	db
 		.prepare(
-			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents)
-			SELECT id, ?, ? FROM categories WHERE id = COALESCE(?, (SELECT id FROM categories WHERE name = ?))
+			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, ?, ?)
 			ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
 		)
-		.bind(month, cents, categoryId, name);
+		.bind(categoryId, month, cents);
 
 /** True while there's room for one more active category; checked inside each write, so two saves at once can't both pass. */
 const ROOM = `(SELECT COUNT(*) FROM categories WHERE archived = 0) < ${MAX_ACTIVE}`;
@@ -105,8 +100,17 @@ export async function addCategory(
 				(count?.last ?? 0) + 1,
 			),
 	];
+	// The budget goes on the row just inserted, and nowhere when the insert was refused. The batch
+	// runs in order on one connection, so changes() and last_insert_rowid() are that insert's.
 	if (value.budgetCents !== null)
-		statements.push(setBudget(db, null, value.name, value.budgetCents, month));
+		statements.push(
+			db
+				.prepare(
+					`INSERT INTO budget_amounts (category_id, effective_month, amount_cents)
+					SELECT last_insert_rowid(), ?, ? WHERE changes() > 0`,
+				)
+				.bind(month, value.budgetCents),
+		);
 	const [inserted] = await db.batch(statements);
 	return inserted?.meta.changes ? Number(inserted.meta.last_row_id) : null;
 }
@@ -124,7 +128,7 @@ export async function saveCategory(
 			.bind(value.name, id),
 	];
 	if (value.budgetCents !== null)
-		statements.push(setBudget(db, id, value.name, value.budgetCents, month));
+		statements.push(setBudget(db, id, value.budgetCents, month));
 	await db.batch(statements);
 }
 
@@ -143,11 +147,11 @@ export async function setArchived(
 				? "UPDATE categories SET archived = 1 WHERE id = ?"
 				: `UPDATE categories SET archived = 0,
 					sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE archived = 0)
-				WHERE id = ? AND ${ROOM}`,
+				WHERE id = ? AND archived = 1 AND ${ROOM}`,
 		)
 		.bind(id)
 		.run();
-	// False when a restore found the list already full.
+	// False when a restore found the category already active, or the list already full.
 	return result.meta.changes > 0;
 }
 
