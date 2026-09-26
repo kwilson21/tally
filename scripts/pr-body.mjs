@@ -5,6 +5,8 @@ export const PAGES = [
 	{ name: "home", path: "/" },
 	// Groceries' budget sheet over Home (#66), with the nudges and the last-month chip.
 	{ name: "budget-edit", path: "/budget/1" },
+	// Home in Adjust mode (#94): − and + on every budgeted row.
+	{ name: "home-adjust", path: "/?adjust=1" },
 	{ name: "transactions", path: "/transactions" },
 	{
 		name: "transactions-needs-category",

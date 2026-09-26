@@ -101,6 +101,19 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 		expect(await row(18600, 20000)).not.toContain("hidden sm:contents");
 	});
 
+	it("can put focus on one button, for when a tap turns the other off", async () => {
+		const html = await ProgressRow({
+			name: "Gas",
+			icon: "gas",
+			color: "cat-slate",
+			spentCents: 0,
+			budgetCents: 0,
+			nudge: { href: "/budget/3/nudge", id: "nudge-3", focus: "up" },
+		}).toString();
+		expect(html).toMatch(/id="nudge-3-up"[^>]*autofocus/);
+		expect(html).not.toMatch(/id="nudge-3-down"[^>]*autofocus/);
+	});
+
 	it("draws no buttons day to day", async () => {
 		expect(await row(18600, 20000)).not.toContain("<button");
 	});

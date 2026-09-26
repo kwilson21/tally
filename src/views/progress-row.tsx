@@ -21,7 +21,13 @@ type Props = {
 	 * `${href}/down` or `${href}/up`. `id` prefixes the buttons' ids, so htmx keeps focus on the one
 	 * tapped when the list is swapped back in.
 	 */
-	nudge?: { href: string; id: string; attrs?: Record<string, string> };
+	nudge?: {
+		href: string;
+		id: string;
+		attrs?: Record<string, string>;
+		/** Put focus on this button: after a tap turns the other one off at a limit, so focus isn't lost. */
+		focus?: "up" | "down";
+	};
 };
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
@@ -81,6 +87,7 @@ function Nudge({
 				id={`${nudge.id}-${direction}`}
 				aria-label={label}
 				disabled={stuck}
+				autofocus={nudge.focus === direction}
 				class={round}
 			>
 				<span aria-hidden="true">{direction === "down" ? "−" : "+"}</span>

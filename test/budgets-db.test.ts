@@ -1,8 +1,11 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { MAX_BUDGET_CENTS } from "../src/budgets/amount";
+import { nudgeCents } from "../src/budgets/nudge";
 import {
 	budgetCategory,
 	lastMonthSpentCents,
+	nudgeBudget,
 	setBudget,
 } from "../src/db/budgets";
 import { settingsCategories } from "../src/db/categories";
@@ -71,5 +74,48 @@ describe("lastMonthSpentCents", () => {
 			)
 			.run();
 		expect(await lastMonthSpentCents(db, 1, "2026-01")).toBe(4200);
+	});
+});
+
+describe("nudgeBudget", () => {
+	it("follows nudgeCents' rule exactly, in both directions", async () => {
+		const amounts = [
+			0,
+			1,
+			500,
+			999,
+			1000,
+			1001,
+			70000,
+			71240,
+			71999,
+			MAX_BUDGET_CENTS - 1,
+			MAX_BUDGET_CENTS,
+		];
+		for (const cents of amounts)
+			for (const direction of ["up", "down"] as const) {
+				await setBudget(db, 1, cents, MONTH);
+				const expected = nudgeCents(cents, direction);
+				expect(await nudgeBudget(db, 1, direction, MONTH)).toBe(
+					expected === cents ? null : expected,
+				);
+				expect((await budgetCategory(db, 1, MONTH))?.budgetCents).toBe(
+					expected,
+				);
+			}
+	});
+
+	it("nudges an earlier month's budget from this month on, leaving the earlier month alone", async () => {
+		await db.prepare("DELETE FROM budget_amounts WHERE category_id = 1").run();
+		await setBudget(db, 1, 70000, "2026-07");
+		expect(await nudgeBudget(db, 1, "up", MONTH)).toBe(71000);
+		expect((await budgetCategory(db, 1, "2026-08"))?.budgetCents).toBe(70000);
+		expect((await budgetCategory(db, 1, MONTH))?.budgetCents).toBe(71000);
+	});
+
+	it("does nothing for a category with no budget", async () => {
+		await db.prepare("DELETE FROM budget_amounts WHERE category_id = 1").run();
+		expect(await nudgeBudget(db, 1, "up", MONTH)).toBeNull();
+		expect((await budgetCategory(db, 1, MONTH))?.budgetCents).toBeNull();
 	});
 });
