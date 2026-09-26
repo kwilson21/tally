@@ -79,6 +79,14 @@ function Intro() {
 				real component the app uses, given sample data, so this page can't show
 				something the app doesn't. The rules are in DESIGN.md.
 			</p>
+			<p class="mt-2">
+				<a
+					href="/design-system/proposals"
+					class="inline-flex min-h-11 items-center"
+				>
+					Proposals waiting for a decision
+				</a>
+			</p>
 			<dl class="mt-6 grid gap-3 sm:grid-cols-3">
 				{(
 					[

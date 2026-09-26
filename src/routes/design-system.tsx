@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { Catalog, SheetSpecimen } from "../design-system/catalog";
+import { Proposals } from "../design-system/proposals";
 import { Layout } from "../views/layout";
 
 export const designSystem = new Hono<{ Bindings: Env }>();
@@ -23,6 +24,14 @@ designSystem.get("/design-system/bottom-sheet", (c) =>
 	c.html(
 		<Layout title="BottomSheet · Design system · Tally" demo>
 			<SheetSpecimen />
+		</Layout>,
+	),
+);
+
+designSystem.get("/design-system/proposals", (c) =>
+	c.html(
+		<Layout title="Proposals · Design system · Tally" demo>
+			<Proposals />
 		</Layout>,
 	),
 );
