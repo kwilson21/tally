@@ -69,9 +69,14 @@ assert.equal(await budget.inputValue(), "651.01");
 // The round-up chip appears once there are cents.
 await page.getByRole("button", { name: "Round to $652" }).click();
 assert.equal(await budget.inputValue(), "652.00");
+// The keyboard nudges like the original's number field: ↓ takes a cent, Shift+↑ adds a dollar.
+await budget.press("ArrowDown");
+await budget.press("Shift+ArrowUp");
+assert.equal(await budget.inputValue(), "652.99");
+await page.getByRole("button", { name: "Round to $653" }).click();
 await page.getByRole("button", { name: "Save" }).click();
 await page.locator("#toasts").getByText("Saved the Groceries budget").waitFor();
-await page.getByText(/of \$652/).waitFor();
+await page.getByText(/of \$653/).waitFor();
 assert.equal(new URL(page.url()).pathname, "/");
 step(
 	"changing Groceries' budget on Home, with nudges and round-up, shows on Home",

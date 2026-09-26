@@ -98,6 +98,25 @@ if (typeof document !== "undefined") {
 		}
 	});
 
+	// As in the original's number field: ↑ / ↓ change the amount by a cent, and by a dollar with Shift.
+	document.addEventListener("keydown", (event) => {
+		const input = event.target;
+		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+		if (
+			!input.matches?.("[data-money-input]") ||
+			event.altKey ||
+			event.ctrlKey ||
+			event.metaKey
+		)
+			return;
+		const root = input.closest("[data-money]");
+		if (!root) return;
+		event.preventDefault();
+		const step = event.shiftKey ? 100 : 1;
+		input.value = nudged(input.value, event.key === "ArrowUp" ? step : -step);
+		update(root);
+	});
+
 	document.addEventListener("input", (event) => {
 		const input = event.target;
 		if (!input.matches?.("[data-money-input]")) return;
