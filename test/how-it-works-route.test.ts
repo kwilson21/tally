@@ -62,7 +62,41 @@ describe("GET /how-it-works in the demo", () => {
 	it("explains exclusions with this month's excluded count", async () => {
 		const { html } = await get("/how-it-works");
 		expect(decodeHtml(html)).toMatch(
-			/This month, \d+ transactions? (is|are) excluded, so (it doesn't|they don't) count toward spending or safe to spend\./,
+			/This month, \d+ transactions? (is|are) excluded \([^)]+\), so (it doesn't|they don't) count toward spending or safe to spend\./,
+		);
+	});
+
+	it("draws each section's diagram from the same numbers as its worked example", async () => {
+		const page = decodeHtml((await get("/how-it-works")).html);
+		const descOf = (id: string) =>
+			page.match(new RegExp(`<desc id="${id}-desc">([^<]+)<`))?.[1] ?? "";
+		const example = (re: RegExp) => page.match(re)?.slice(1) ?? [];
+
+		const [safe] = example(/= (-?\$[\d,]+\.\d\d) safe to spend\./);
+		expect(descOf("budget-diagram")).toContain(`leaves ${safe} safe to spend.`);
+
+		const [counted, needs] = example(
+			/has (\d+) counted transactions, and (\d+) need a category\./,
+		);
+		expect(descOf("transactions-diagram")).toContain(`so ${counted} count.`);
+		expect(descOf("transactions-diagram")).toContain(
+			`${needs} of those need a category.`,
+		);
+
+		const [excluded, kinds] = example(
+			/This month, (\d+) transactions are excluded \(([^)]+)\)/,
+		);
+		expect(descOf("exclusions-diagram")).toContain(
+			`${counted} count toward the budget and ${excluded} are excluded: ${kinds}.`,
+		);
+
+		const [jev] = example(/Jev categorized (\d+) transactions\./);
+		expect(descOf("categories-diagram")).toContain(
+			`Jev ${jev}, and ${needs} wait`,
+		);
+		const [income] = example(/(\d+) are income, which needs no category\./);
+		expect(descOf("categories-diagram")).toContain(
+			`${income} are income, which needs no category.`,
 		);
 	});
 

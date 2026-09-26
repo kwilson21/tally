@@ -68,6 +68,7 @@ describe("categorizationExample", () => {
 		unsure: 0,
 		noneFit: 0,
 		notYetAsked: 0,
+		income: 0,
 	};
 
 	it("counts transactions, not categories, and covers every source", () => {
@@ -79,9 +80,16 @@ describe("categorizationExample", () => {
 				unsure: 3,
 				noneFit: 1,
 				notYetAsked: 4,
+				income: 2,
 			}),
 		).toBe(
-			"This month, Jev categorized 8 transactions. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 4 are waiting for tonight's run. 2 came from merchant rules. 1 was chosen by a person.",
+			"This month, Jev categorized 8 transactions. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 4 are waiting for tonight's run. 2 came from merchant rules. 1 was chosen by a person. 2 are income, which needs no category.",
+		);
+	});
+
+	it("uses the singular for one income transaction", () => {
+		expect(categorizationExample({ ...none, jev: 3, income: 1 })).toBe(
+			"This month, Jev categorized 3 transactions. 1 is income, which needs no category.",
 		);
 	});
 
@@ -111,13 +119,20 @@ describe("categorizationExample", () => {
 });
 
 describe("exclusionsExample", () => {
-	it("counts this month's excluded transactions", () => {
-		expect(exclusionsExample(2)).toBe(
-			"This month, 2 transactions are excluded, so they don't count toward spending or safe to spend.",
+	const none = { transfer: 0, reimbursement: 0, byPerson: 0 };
+
+	it("counts this month's excluded transactions and names each kind", () => {
+		expect(
+			exclusionsExample({ transfer: 1, reimbursement: 1, byPerson: 1 }),
+		).toBe(
+			"This month, 3 transactions are excluded (1 transfer, 1 reimbursement and 1 excluded by a person), so they don't count toward spending or safe to spend.",
 		);
-		expect(exclusionsExample(1)).toBe(
-			"This month, 1 transaction is excluded, so it doesn't count toward spending or safe to spend.",
+		expect(exclusionsExample({ ...none, transfer: 2, byPerson: 3 })).toBe(
+			"This month, 5 transactions are excluded (2 transfers and 3 excluded by a person), so they don't count toward spending or safe to spend.",
 		);
-		expect(exclusionsExample(0)).toBe("Nothing is excluded this month.");
+		expect(exclusionsExample({ ...none, reimbursement: 1 })).toBe(
+			"This month, 1 transaction is excluded (1 reimbursement), so it doesn't count toward spending or safe to spend.",
+		);
+		expect(exclusionsExample(none)).toBe("Nothing is excluded this month.");
 	});
 });
