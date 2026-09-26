@@ -55,6 +55,24 @@ describe("GET / with the demo seed", () => {
 		expect(html).not.toContain("Uncategorized");
 	});
 
+	it("says the uncategorized amount even when refunds are more than the spending", async () => {
+		// Make the uncategorized transactions net to −$50: refunds more than purchases.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 0 WHERE category_id IS NULL",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -5000 WHERE id = (SELECT MIN(id) FROM transactions WHERE category_id IS NULL AND excluded = 0 AND flag_income = 0 AND date LIKE ?)",
+		)
+			.bind(`${todayUtc().slice(0, 7)}%`)
+			.run();
+		const { html } = await home();
+		expect(html).toContain("$50 more refunded than spent");
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 0 WHERE category_id IS NULL",
+		).run();
+		expect((await home()).html).toContain("$0 of this month&#39;s spending");
+	});
+
 	it("puts the number first: the month, Safe to spend, the Band, Budget, then Things to try (#92)", async () => {
 		const { html } = await home();
 		const at = (s: string) => html.indexOf(s);

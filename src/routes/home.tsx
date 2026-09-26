@@ -114,10 +114,11 @@ async function renderHome(
 										href: "/transactions?uncategorized=1",
 										text: needs,
 										// Home says "needs a category" once: the Band carries the amount (decision 50).
+										// Refunds can outweigh the spending; it says so, as the budget sheet does.
 										detail:
-											spentCents > 0
-												? `${formatCents(spentCents, { wholeDollars: true })} of this month's spending`
-												: undefined,
+											spentCents < 0
+												? `${formatCents(-spentCents, { wholeDollars: true })} more refunded than spent`
+												: `${formatCents(spentCents, { wholeDollars: true })} of this month's spending`,
 									}
 								: undefined
 						}
