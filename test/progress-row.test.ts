@@ -35,4 +35,9 @@ describe("ProgressRow", () => {
 		const html = await row(28600, 25000);
 		expect(html).toMatch(/\$36 over<span class="sr-only"> budget<\/span>/);
 	});
+
+	it("keeps the cents when the overage isn't whole dollars", async () => {
+		const html = await row(28650, 25000);
+		expect(html).toMatch(/\$36\.50 over<span class="sr-only"> budget<\/span>/);
+	});
 });
