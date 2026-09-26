@@ -2,12 +2,12 @@ import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
-import { nudgeCents } from "../budgets/nudge";
 import { monthName, todayUtc } from "../dates";
 import {
 	type BudgetCategory,
 	budgetCategory,
 	lastMonthSpentCents,
+	nudgeBudget,
 	setBudget,
 } from "../db/budgets";
 import { loadMonth } from "../db/month";
@@ -400,14 +400,16 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 	if (!category || category.budgetCents === null) return c.notFound();
 	const direction = c.req.param("direction") === "up" ? "up" : "down";
 	const month = todayUtc().slice(0, 7);
-	const cents = nudgeCents(category.budgetCents, direction);
-	const moved = cents !== category.budgetCents;
-	if (moved) await setBudget(c.env.DB, category.id, cents, month);
+	// Read and written in one statement, so two taps at once (two phones) both count.
+	const cents = await nudgeBudget(c.env.DB, category.id, direction, month);
 	if (!c.req.header("HX-Request")) return c.redirect("/?adjust=1", 303);
+	// At a limit nothing changes, and it still says so on screen and to screen readers.
+	const limit =
+		direction === "down" ? "already $0" : "already the largest budget";
 	c.header(
 		"HX-Trigger",
 		JSON.stringify(
-			moved
+			cents !== null
 				? {
 						toast: {
 							message: `${category.name} is ${amount(cents)} a month`,
@@ -416,16 +418,15 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 						announce: `${category.name} is ${amount(cents)} a month from ${monthName(month)} on.`,
 					}
 				: {
-						announce:
-							direction === "down"
-								? `${category.name} is at $0.`
-								: `${category.name} is at the largest budget.`,
+						toast: { message: `${category.name} is ${limit}`, type: "info" },
+						announce: `${category.name} is ${limit}.`,
 					},
 		),
 	);
 	c.header("HX-Push-Url", "/?adjust=1");
 	// Reaching a limit turns the tapped button off, so focus moves to the row's other one.
 	const atLimit =
+		cents === null ||
 		(direction === "down" && cents === 0) ||
 		(direction === "up" && cents === MAX_BUDGET_CENTS);
 	return renderHome(c, {

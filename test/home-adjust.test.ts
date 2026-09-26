@@ -100,6 +100,11 @@ describe("POST /budget/:id/nudge/:direction", () => {
 		expect(html).toContain('aria-label="Raise Groceries to $720"');
 	});
 
+	it("counts every tap, even two at once from different phones", async () => {
+		await Promise.all([post("/budget/1/nudge/up"), post("/budget/1/nudge/up")]);
+		expect((await groceriesBudget()).amount_cents).toBe(72000);
+	});
+
 	it("goes down to the next round $10 too", async () => {
 		await setBudget(env.DB, 1, 71240, THIS_MONTH());
 		await post("/budget/1/nudge/down");
@@ -116,7 +121,11 @@ describe("POST /budget/:id/nudge/:direction", () => {
 		const again = await post("/budget/1/nudge/down");
 		expect(again.res.status).toBe(200);
 		expect((await groceriesBudget()).amount_cents).toBe(0);
-		expect(trigger(again.res)).toEqual({ announce: "Groceries is at $0." });
+		// Nothing changed, and it still says so on screen and to screen readers.
+		expect(trigger(again.res)).toEqual({
+			toast: { message: "Groceries is already $0", type: "info" },
+			announce: "Groceries is already $0.",
+		});
 	});
 
 	it("redirects back to Adjust mode without JavaScript", async () => {
