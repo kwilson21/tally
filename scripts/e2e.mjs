@@ -1,4 +1,4 @@
-// Recategorize, exclude, and change a budget amount end to end (spec §11): Home's band → the Needs category list → the edit sheet → save → Home updates.
+// Recategorize, exclude, and change a budget amount (the sheet and Adjust mode) end to end (spec §11): Home's band → the Needs category list → the edit sheet → save → Home updates.
 // Resets the demo data first, and fails on any console error.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -81,6 +81,29 @@ assert.equal(new URL(page.url()).pathname, "/");
 step(
 	"changing Groceries' budget on Home, with nudges and round-up, shows on Home",
 );
+
+// Adjust mode (#94): Adjust → + on Groceries → each tap saves the next round $10, in place.
+await page.getByRole("link", { name: "Adjust budgets" }).click();
+await page.getByRole("link", { name: "Done adjusting budgets" }).waitFor();
+assert.match(page.url(), /\/\?adjust=1$/);
+await page.getByRole("button", { name: "Raise Groceries to $660" }).click();
+await page.locator("#toasts").getByText("Groceries is $660 a month").waitFor();
+await page.getByText(/of \$660/).waitFor();
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"nudge-1-up",
+);
+step("in Adjust mode, + saves Groceries at the next round $10, keeping focus");
+
+// Two quick taps queue rather than race, so both count.
+const plus = page.locator("#nudge-1-up");
+await plus.click();
+await plus.click();
+await page.getByText(/of \$680/).waitFor();
+await page.getByRole("link", { name: "Done adjusting budgets" }).click();
+await page.getByRole("link", { name: "Adjust budgets" }).waitFor();
+assert.equal(await page.locator("#nudge-1-up").count(), 0);
+step("two quick taps both count ($680), and Done puts the buttons away");
 
 // Reorder through htmx: the button inside the edit form must send its own direction.
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });

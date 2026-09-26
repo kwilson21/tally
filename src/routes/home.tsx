@@ -1,7 +1,8 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { statusSentence, summarizeMonth } from "../budget";
-import { parseBudgetAmount } from "../budgets/amount";
+import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
+import { nudgeCents } from "../budgets/nudge";
 import { monthName, todayUtc } from "../dates";
 import {
 	type BudgetCategory,
@@ -11,6 +12,7 @@ import {
 } from "../db/budgets";
 import { loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
+import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { CategoryIcon } from "../views/category";
@@ -38,11 +40,32 @@ const openAttrs = (href: string) => ({
 	"hx-push-url": "true",
 });
 
+// Adjust mode (#94): Adjust, Done and each − or + swap Home in place. Taps queue on the body, which
+// is never swapped, so rapid taps apply one after another; focus stays on the tapped button by its id.
+const adjustAttrs = (href: string) => ({
+	id: "adjust-link",
+	"hx-get": href,
+	"hx-target": "#page",
+	"hx-select": "#page",
+	"hx-swap": "outerHTML",
+	"hx-push-url": "true",
+});
+const nudgeAttrs = {
+	"hx-target": "#page",
+	"hx-select": "#page",
+	"hx-swap": "outerHTML",
+	"hx-sync": "body:queue all",
+};
+
 type HomeOptions = {
 	/** The budget sheet over Home, drawn with this month's numbers. */
 	sheet?: (spentCents: (id: number) => number) => Child;
 	/** Move focus to this category's row: after a save, or when the sheet closes. */
 	focusId?: number;
+	/** Adjust mode: − and + on every budgeted row (#94). */
+	adjusting?: boolean;
+	/** After a tap reaches a limit, focus goes to the row's other button. */
+	nudgeFocus?: { id: number; direction: "up" | "down" };
 	status?: 200 | 404 | 422;
 };
 
@@ -50,7 +73,7 @@ type HomeOptions = {
 // Every htmx swap selects a part of this same page.
 async function renderHome(
 	c: Context<App>,
-	{ sheet, focusId, status = 200 }: HomeOptions = {},
+	{ sheet, focusId, adjusting, nudgeFocus, status = 200 }: HomeOptions = {},
 ) {
 	const month = todayUtc().slice(0, 7);
 	const data = await loadMonth(c.env.DB, month);
@@ -67,6 +90,8 @@ async function renderHome(
 		data.categories.filter((cat) => !cat.archived).map((cat) => cat.id),
 	);
 	const focusHeading = focusId !== undefined && !linked.has(focusId);
+	// Adjust is offered when there's a budget it can change: a budgeted category that isn't archived.
+	const canAdjust = summary.categories.some((cat) => linked.has(cat.id));
 	const { count, spentCents } = summary.uncategorized;
 	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
 	const demo = c.env.DEMO === "true";
@@ -108,14 +133,22 @@ async function renderHome(
 				)}
 
 				<section class="mt-8 lg:max-w-2xl" aria-labelledby="budget-title">
-					<h2
-						id="budget-title"
-						class="font-serif text-3xl font-semibold"
-						tabindex={focusHeading ? -1 : undefined}
-						autofocus={focusHeading}
-					>
-						Budget
-					</h2>
+					<div class="flex items-baseline justify-between gap-4">
+						<h2
+							id="budget-title"
+							class="font-serif text-3xl font-semibold"
+							tabindex={focusHeading ? -1 : undefined}
+							autofocus={focusHeading}
+						>
+							Budget
+						</h2>
+						{canAdjust && (
+							<AdjustLink
+								adjusting={adjusting === true}
+								attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
+							/>
+						)}
+					</div>
 					{(summary.categories.length > 0 || count > 0) && (
 						<ul class="mt-2 divide-y divide-rule">
 							{summary.categories.map((cat) => {
@@ -134,6 +167,19 @@ async function renderHome(
 										href={href}
 										attrs={href ? openAttrs(href) : undefined}
 										autofocus={cat.id === focusId}
+										nudge={
+											adjusting && href
+												? {
+														href: `${href}/nudge`,
+														id: `nudge-${cat.id}`,
+														attrs: nudgeAttrs,
+														focus:
+															nudgeFocus?.id === cat.id
+																? nudgeFocus.direction
+																: undefined,
+													}
+												: undefined
+										}
 									/>
 								);
 							})}
@@ -277,10 +323,12 @@ async function activeCategory(c: Context<App>) {
 }
 
 // ?focus=<id> puts focus on that row when the sheet closes.
+// ?adjust=1 is Adjust mode (#94).
 home.get("/", (c) => {
 	const focus = Number(c.req.query("focus"));
 	return renderHome(c, {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		adjusting: c.req.query("adjust") === "1",
 	});
 });
 
@@ -342,4 +390,48 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 	);
 	c.header("HX-Push-Url", "/");
 	return renderHome(c, { focusId: category.id });
+});
+
+// One tap in Adjust mode (#94, decision 48): the budget moves to the next round $10, from this month
+// on, as the sheet saves it. htmx gets Home back in Adjust mode; plain browsers are redirected there.
+home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
+	const category = await activeCategory(c);
+	// Only a budgeted category has buttons; one without a budget gets it from its sheet.
+	if (!category || category.budgetCents === null) return c.notFound();
+	const direction = c.req.param("direction") === "up" ? "up" : "down";
+	const month = todayUtc().slice(0, 7);
+	const cents = nudgeCents(category.budgetCents, direction);
+	const moved = cents !== category.budgetCents;
+	if (moved) await setBudget(c.env.DB, category.id, cents, month);
+	if (!c.req.header("HX-Request")) return c.redirect("/?adjust=1", 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify(
+			moved
+				? {
+						toast: {
+							message: `${category.name} is ${amount(cents)} a month`,
+							type: "success",
+						},
+						announce: `${category.name} is ${amount(cents)} a month from ${monthName(month)} on.`,
+					}
+				: {
+						announce:
+							direction === "down"
+								? `${category.name} is at $0.`
+								: `${category.name} is at the largest budget.`,
+					},
+		),
+	);
+	c.header("HX-Push-Url", "/?adjust=1");
+	// Reaching a limit turns the tapped button off, so focus moves to the row's other one.
+	const atLimit =
+		(direction === "down" && cents === 0) ||
+		(direction === "up" && cents === MAX_BUDGET_CENTS);
+	return renderHome(c, {
+		adjusting: true,
+		nudgeFocus: atLimit
+			? { id: category.id, direction: direction === "up" ? "down" : "up" }
+			: undefined,
+	});
 });
