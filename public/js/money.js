@@ -2,13 +2,14 @@
 // cent or a dollar, round up, use last month's amount, and stop typing at two decimals. All math is
 // integer cents. Without this script the buttons stay hidden and the field is a plain text field.
 
-const DOLLARS = /^\$?(\d{1,3}(,\d{3})+|\d+)?(\.\d{0,2})?$/;
+// The same format the server saves (src/money.ts toCents): digits, commas in threes, one or two decimals.
+const DOLLARS = /^\$?(\d{1,3}(,\d{3})+|\d+)(\.\d{1,2})?$/;
 
 /** The field's text as integer cents: "" is 0, anything unreadable is null. */
 export function fieldCents(text) {
 	const trimmed = text.trim();
 	if (trimmed === "") return 0;
-	if (!DOLLARS.test(trimmed) || trimmed === "$" || trimmed === ".") return null;
+	if (!DOLLARS.test(trimmed)) return null;
 	const [whole = "", fraction = ""] = trimmed.replace(/[$,]/g, "").split(".");
 	return Number(whole || "0") * 100 + Number(fraction.padEnd(2, "0"));
 }

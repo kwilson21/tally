@@ -1,3 +1,4 @@
+import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
@@ -9,14 +10,36 @@ type Props = {
 	color: string;
 	spentCents: number;
 	budgetCents: number;
-	/** Where the row goes: its budget sheet (#66). */
-	href: string;
+	/** Where the row goes: its budget sheet (#66). None for an archived category, which can't be budgeted. */
+	href?: string;
 	/** htmx attributes that open the sheet in place. */
 	attrs?: Record<string, string>;
 	autofocus?: boolean;
 };
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
+
+/** The row's box: a link to its budget sheet, or a plain block when there's nowhere to go. */
+function Wrap({
+	href,
+	autofocus,
+	attrs,
+	children,
+}: {
+	href?: string;
+	autofocus?: boolean;
+	attrs?: Record<string, string>;
+	children?: Child;
+}) {
+	const box = "flex items-start gap-4 py-3 text-ink no-underline";
+	return href ? (
+		<a href={href} autofocus={autofocus} class={box} {...attrs}>
+			{children}
+		</a>
+	) : (
+		<div class={box}>{children}</div>
+	);
+}
 
 /** One budget category: icon, name, "spent of budget", and a bar with a notch at the limit. */
 export function ProgressRow({
@@ -33,12 +56,7 @@ export function ProgressRow({
 	const { fillPct, limitPct } = barGeometry(spentCents, budgetCents);
 	return (
 		<li>
-			<a
-				href={href}
-				autofocus={autofocus}
-				class="flex items-start gap-4 py-3 text-ink no-underline"
-				{...attrs}
-			>
+			<Wrap href={href} autofocus={autofocus} attrs={attrs}>
 				<CategoryIcon icon={icon} color={color} />
 				<div class="min-w-0 flex-1">
 					<div class="flex items-baseline justify-between gap-3">
@@ -71,9 +89,9 @@ export function ProgressRow({
 							over budget
 						</p>
 					)}
-					<span class="sr-only">, change the budget</span>
+					{href && <span class="sr-only">, change the budget</span>}
 				</div>
-			</a>
+			</Wrap>
 		</li>
 	);
 }

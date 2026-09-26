@@ -59,6 +59,15 @@ describe("Home's budget rows", () => {
 		expect(textOf(html)).toContain("Travel Add a budget");
 	});
 
+	it("show an archived category with spending, but not as a link, since it can't be budgeted", async () => {
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 2",
+		).run();
+		const { html } = await get("/");
+		expect(textOf(html)).toContain("Eating Out");
+		expect(html).not.toContain('href="/budget/2"');
+	});
+
 	it("leave archived categories out of Not budgeted", async () => {
 		await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES ('Old', 'tag', 'cat-blue', 9, 1)",
@@ -72,8 +81,13 @@ describe("GET /budget/:id", () => {
 	it("opens the sheet with the amount, the nudges and last month's chip", async () => {
 		const { res, html } = await get("/budget/1");
 		expect(res.status).toBe(200);
-		expect(html).toMatch(/role="dialog"[^>]*aria-labelledby="budget-title"/);
+		expect(html).toMatch(
+			/role="dialog"[^>]*aria-labelledby="budget-sheet-title"/,
+		);
 		expect(html).toContain(`Budget from ${THIS_MONTH()} on`);
+		// Its own heading id: Home's Budget heading keeps "budget-title".
+		expect(html).toMatch(/<h2 id="budget-sheet-title"[^>]*>Groceries<\/h2>/);
+		expect(html.match(/id="budget-title"/g)).toHaveLength(1);
 		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="700"/);
 		expect(html).toMatch(/<input[^>]*inputmode="decimal"/);
 		for (const [delta, label] of <[string, string][]>[
@@ -94,6 +108,20 @@ describe("GET /budget/:id", () => {
 		// $700 has no cents, so there's nothing to round up yet.
 		expect(html).toMatch(/<button[^>]*data-roundup[^>]*hidden/);
 		expect(html).toContain('src="/js/money.js"');
+	});
+
+	it("says so when refunds are more than the spending, matching Home", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -amount_cents WHERE category_id = 1 AND substr(date, 1, 7) = ?",
+		)
+			.bind(todayUtc().slice(0, 7))
+			.run();
+		const { html } = await get("/budget/1");
+		expect(textOf(html)).toMatch(
+			new RegExp(
+				`\\$[\\d,]+\\.\\d\\d more refunded than spent in ${THIS_MONTH()}`,
+			),
+		);
 	});
 
 	it("starts empty for a category with no budget, with the minus buttons off", async () => {

@@ -108,7 +108,11 @@ async function renderHome(
 					{(summary.categories.length > 0 || count > 0) && (
 						<ul class="mt-2 divide-y divide-rule">
 							{summary.categories.map((cat) => {
-								const href = `/budget/${cat.id}`;
+								// An archived category shows for a month it has spending in (spec §7), but it
+								// can't be budgeted, so its row isn't a link.
+								const href = looks.get(cat.id)?.archived
+									? undefined
+									: `/budget/${cat.id}`;
 								return (
 									<ProgressRow
 										name={cat.name}
@@ -117,7 +121,7 @@ async function renderHome(
 										spentCents={cat.spentCents}
 										budgetCents={cat.budgetCents}
 										href={href}
-										attrs={openAttrs(href)}
+										attrs={href ? openAttrs(href) : undefined}
 										autofocus={cat.id === focusId}
 									/>
 								);
@@ -192,14 +196,14 @@ function BudgetSheet({
 	};
 	return (
 		<BottomSheet
-			labelledBy="budget-title"
+			labelledBy="budget-sheet-title"
 			closeHref="/"
 			closeAttrs={closeAttrs}
 		>
 			<div class="flex items-center gap-3">
 				<CategoryIcon icon={category.icon} color={category.color} />
 				<h2
-					id="budget-title"
+					id="budget-sheet-title"
 					class="font-serif text-3xl font-semibold"
 					tabindex={-1}
 				>
@@ -207,7 +211,10 @@ function BudgetSheet({
 				</h2>
 			</div>
 			<p class="mt-1 text-muted">
-				{formatCents(Math.max(spentCents, 0))} spent so far in {month}
+				{/* The same net amount as the Home row: refunds reduce spending (spec §6). */}
+				{spentCents < 0
+					? `${formatCents(-spentCents)} more refunded than spent in ${month}`
+					: `${formatCents(spentCents)} spent so far in ${month}`}
 			</p>
 			<form
 				method="post"

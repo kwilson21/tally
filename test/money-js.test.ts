@@ -12,6 +12,7 @@ describe("fieldCents (the field's text → cents, or null)", () => {
 	it.each([
 		["612.40", 61240],
 		["612.4", 61240],
+		["0.05", 5],
 		["612", 61200],
 		["$1,234.56", 123456],
 		["0", 0],
@@ -25,6 +26,10 @@ describe("fieldCents (the field's text → cents, or null)", () => {
 		expect(fieldCents("abc")).toBeNull();
 		expect(fieldCents("1.2.3")).toBeNull();
 		expect(fieldCents("-5")).toBeNull();
+		// The same format the server saves: digits before the point, one or two after it.
+		expect(fieldCents(".5")).toBeNull();
+		expect(fieldCents("12.")).toBeNull();
+		expect(fieldCents("$")).toBeNull();
 	});
 });
 
