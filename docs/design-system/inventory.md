@@ -106,7 +106,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Plaid Link (4) | Link a bank, Fix connection | Later (Phase 2, #16, #21) |
 | Split (3) | Split a transaction | Later (Phase 3) |
 | Keyboard shortcuts (2) | Shortcuts | Adapt with #72 (after its allowed-JS decision) |
-| Onboarding (6) | None | Not needed (not in spec) |
+| Onboarding (6) | Things to try (demo only) | Adapt with #95 (decision 49): its care and guidance, not its length |
 | CSV import (4) | None | Not needed (Later list: statement upload) |
 | Reorder (2) | Move up/down in Settings | Enhancement: drag to reorder, with Move up/down kept |
 | Select mode (4), organize (1) | None | Not needed |

@@ -39,7 +39,7 @@ All eight features are in scope and ship across phases (§11):
 | 7 | Account balances and net worth over time |
 | 8 | Documents: stored statements and receipts (PDF) |
 
-Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggested new categories when none of the household's categories fit (a person creates or dismisses them), the demo banner, a "Things to try" list, and a "How it works" page.
+Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggested new categories when none of the household's categories fit (a person creates or dismisses them), the demo banner, a "Things to try" list, a "How it works" page, and onboarding: what a first visit shows and teaches, in the demo and in the family's first week (decision 49, #95).
 
 **Household model:** one shared household. Everyone who can log in sees and edits the same data. Changes record who made them.
 
@@ -206,7 +206,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 
 Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before a new screen's UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
 
-**Design system catalog (decisions 42–44):** `/design-system` shows every component in its states, rendered by importing the real components with fake data, so the catalog can't drift from the app. It exists in the demo and in development, and production returns 404. Each component is marked with one tier: **Visual** (static states side by side, inert), **Interactive** (works in the browser without the server) or **Flow** (a multi-step journey on fake data, on its own page, with the step in the URL). Every UI change starts there and the owner signs it off there before it reaches an app page. The process is in `DESIGN.md`; the inventory of the original app's components is in `docs/design-system/inventory.md`.
+**Design system catalog (decisions 42–44, 47):** `/design-system` shows every component in its states, rendered by importing the real components with fake data, so the catalog can't drift from the app. It exists in the demo and in development, and production returns 404. Each component is marked with one tier: **Visual** (static states side by side, inert), **Interactive** (works in the browser without the server) or **Flow** (a multi-step journey on fake data, on its own page, with the step in the URL). Every UI change starts there and the owner signs it off there before it reaches an app page. A proposal that changes how something looks is decided by seeing it: `/design-system/proposals` shows each open proposal next to today's version at 1280 and 390, and lists what's been decided, with the issue each ships in (decision 47). Proposed versions are prototypes that live only on that page until the owner picks. The process is in `DESIGN.md`; the inventory of the original app's components is in `docs/design-system/inventory.md`.
 
 ## 9. Demo experience
 

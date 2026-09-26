@@ -2,6 +2,55 @@
 
 Direction: "Illustrated ledger" (docs/design-concepts/README.md). Calm, warm, glanceable in under 3 seconds. A well-kept paper ledger with a little personality.
 
+## Design language (#79)
+
+### The brief (owner, 2026-09-26)
+> Tally should feel like a breath of fresh air to people who have tried budgeting apps but felt they were too hard to use or could not commit to using it consistently.
+
+> The tell is a finished but lazily done project. Finishing an idea is half the battle; you have to do the work to have something of value at the end.
+
+So every screen is judged by two questions: **would someone who gave up on budgeting apps come back to this tomorrow**, and **what would a careful designer have done here that we skipped?** "It renders" is not done. Every state, edge case and word is part of the work, and the test is day 30, not day 1.
+
+Every screen and component is designed in three layers, in this order.
+
+### 1. Scenery: what sets the feeling
+The elements people don't consciously notice. Together they make Tally feel light, warm and in control, the opposite of a bank statement. Each one has a job and a limit.
+
+| Element | Its job | It must never |
+|---|---|---|
+| Paper (`paper`, `band`) | Warmth; the page feels like a notebook, not a form | Turn into cards, boxes or panels that make the page feel busy |
+| Rules and space | Separate things quietly; one column, one measure per screen | Vary in width from block to block, or leave leftover gaps that look unplanned |
+| Type | Newsreader for the one thing that matters; Inter for everything else | Put two serif headlines of similar size on one screen |
+| Illustration and the tally mark | Personality, once per screen at most | Crowd the number it sits beside, or appear as decoration everywhere |
+| Category icons and colors | Recognition at a glance | Carry meaning about status (that's green/brick only) |
+| Bars | Show how much of a budget is used | Paint the page; a column of saturated bars is louder than the words it supports |
+| Voice | Plain, second person, calm; numbers first, then what they mean ("$120 left") | Shout (capitals, exclamation marks), blame ("you failed"), or use bank jargon (raw merchant strings, "debit", "posted") |
+| Motion | Confirms that something happened (a bar fills, a row is highlighted) | Decorate, bounce, or delay; reduced motion always shows the end state |
+
+### 2. Signage: what directs attention
+What a person should see first, second and third, and the one thing to do. Signs are few; each one is earned.
+
+- **First:** the one thing the screen is for (Home: how much is safe to spend and for how long; Transactions: the list; a sheet: the choice being made). It gets the serif, the size or the band. Nothing else on the screen uses the same size.
+- **Second:** what it means, in a sentence (the status sentence, the result count).
+- **Third:** the one next action (the Band, or a sheet's primary button). One primary action per screen or sheet.
+- **Everything else is quieter.** Secondary actions are outline buttons; tertiary ones (Archive, Move, "How this works") are terracotta text, placed where they're found, never beside the primary.
+- **A sign appears once.** If a count, a tag or a link already says it, don't repeat it on every row.
+- **Demo aids** (the banner, Things to try, How this works) help a visitor, but never push the one thing out of the first screen on a phone.
+
+### 3. Use: how each interactive part behaves
+Every interactive component has a written spec, shown next to it in the catalog. The spec answers:
+
+1. **Purpose:** one sentence, in the person's words.
+2. **Affordance:** how it shows it can be used, without hovering (touch has no hover).
+3. **States:** rest, hover, focus, pressed, disabled, loading, done, error; which ones apply, and what each looks like.
+4. **Feedback:** what happens after each action, where the eye goes next, and what's announced.
+5. **Input:** touch (44px targets, gestures if any), keyboard (Tab order, keys), screen reader (name, role, state).
+6. **Motion:** what moves, for how long, and the reduced-motion version.
+7. **Edge cases:** empty, zero, one, very long text, very large numbers, slow network, no JavaScript.
+8. **Words:** every label, error and confirmation, written out.
+
+A component isn't ready for sign-off until every line is answered or marked "not applicable" with a reason.
+
 ## Principles
 1. One thing matters per screen. It gets the serif, the size, or the band. Nothing else competes.
 2. Status is never color alone. Every red or green state also has an icon and a word.
@@ -96,11 +145,13 @@ Where it lives: `src/routes/design-system.tsx` (the pages and their gate), `src/
 
 ## Process for a UI change (decision 43)
 1. **Design in the catalog.** Build or change the component there, at its tier, with fake data. A new screen starts with a generated study first (decisions 21, 35); a component starts here.
-2. **Audit** against this file: tokens only, type roles, 44px targets, focus-visible rings, status never color alone, and every swap announced.
+2. **Audit** against this file: the design language's three layers (scenery, signage, and a complete use spec for anything interactive), then tokens only, type roles, 44px targets, focus-visible rings, status never color alone, and every swap announced.
 3. **Screenshots** of the catalog at 1280 and 390, and the owner checks the catalog in a browser and signs off. CI screenshots only the pages listed in `PAGES` in `scripts/pr-body.mjs`, so every catalog and flow page is added there in the PR that adds it.
 4. **Use it in the app.** The app imports the same component, so there's nothing to copy.
 5. **E2E** for the critical flows.
 6. **The owner verifies** the app pages.
+
+**Visual decisions are made by seeing, not by reading.** Every proposal that changes how something looks is shown in the catalog as current and proposed, side by side, at 1280 and 390, before the owner decides. A decision entry is written only after that, and each accepted proposal ships in its own PR, so undoing it is one revert.
 
 A backend-only change skips step 1.
 

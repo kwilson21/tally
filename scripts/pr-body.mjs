@@ -26,6 +26,7 @@ export const PAGES = [
 	// The design system catalog (#76) and the pages it links to; every catalog page goes here.
 	{ name: "design-system", path: "/design-system" },
 	{ name: "design-system-bottom-sheet", path: "/design-system/bottom-sheet" },
+	{ name: "design-system-proposals", path: "/design-system/proposals" },
 ];
 
 export const VIEWPORTS = [
