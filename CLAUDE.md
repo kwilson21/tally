@@ -34,7 +34,8 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 
 ## Pull requests
 - `main` only accepts PRs; required checks: `check` (CI) and `Greptile Review`.
-- UI PRs: CI adds a before-and-after table (every page that looks different from `main`) and screenshots of every page (1280×800 and 390×844) to the description; check them before asking for review. The owner merges after looking. Non-UI PRs may auto-merge.
+- UI PRs: CI adds a before-and-after table (every page that looks different from `main`) and screenshots of every page (1280×800 and 390×844) to the description; check them and send the owner the pages that changed. Claude merges a PR itself once it's complete (decision 51): CI green, Greptile clean, every comment addressed, and its look and decisions already the owner's (signed off in the catalog or picked on the proposals page). New visual choices, spec changes and reversing a decision go to the owner first.
+- Work split (decision 51): Sonnet subagents implement well-specified issues from a brief (tests first); an Opus subagent reviews each diff against this file, DESIGN.md and the issue; a Sonnet subagent fixes the findings. The main session writes the briefs, checks the result in a browser, and owns the PR. Design and product decisions stay in the main session.
 - If Greptile hasn't reported within 30 minutes or errors: run `/code-review` (high) plus an independent reviewer agent, post findings as a PR comment titled "Fallback review (Greptile unavailable)", fix and re-review. Only the owner merges such a PR; never use a ruleset bypass.
 
 ## Git
