@@ -78,7 +78,7 @@ export function MoneyInput({
 					−
 				</button>
 				<div
-					class={`flex w-[292px] min-w-0 items-center gap-1 rounded-lg border bg-paper py-3 pl-3 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-accent ${error ? "border-over" : "border-rule"}`}
+					class={`flex min-h-[90px] w-[292px] min-w-0 items-center gap-1 rounded-lg border bg-paper py-3 pl-3 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-accent ${error ? "border-over" : "border-rule"}`}
 				>
 					<span
 						aria-hidden="true"

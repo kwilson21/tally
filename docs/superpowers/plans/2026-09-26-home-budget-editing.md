@@ -21,6 +21,7 @@ A budget is changed where it's seen: tap a budget row on Home. The amount field 
    - **Layout:** the owner's hero amount from the original app. A round −$1 button, then a big amount field (`$`, bold, always with cents: "700.00") with ▲▼ cent arrows stacked inside its right edge, then a round +$1 button.
      - The first version swapped this for a row of four 44px buttons to meet the target-size rule.
      - The owner asked for the original design back (2026-09-26), so the original is kept.
+     - To meet the 44px rule without changing the look, the field is 90px tall, so each stacked cent arrow is 44×44 (the owner's pick, from a side-by-side).
    - **Chips:**
      - "Round to $251" shows only when the amount has cents.
      - "Last month: $612.40" shows what the category spent last month (counted spending, not income), only when that's above $0. It dims when the field already holds it.
