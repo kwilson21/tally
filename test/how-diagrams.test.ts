@@ -118,6 +118,22 @@ describe("ExclusionsDiagram", () => {
 		expect(html.match(/stroke-dasharray/g)).toHaveLength(3);
 	});
 
+	it("keeps every slice inside the picture, even when everything is excluded", async () => {
+		const html = await render(
+			ExclusionsDiagram({
+				counted: 0,
+				breakdown: { transfer: 30, reimbursement: 1, byPerson: 1 },
+			}),
+		);
+		const width = Number(html.match(/viewBox="0 0 (\d+)/)?.[1]);
+		for (const rect of html.match(/<rect [^>]*stroke-dasharray[^>]*>/g) ?? []) {
+			const x = Number(rect.match(/ x="([\d.]+)"/)?.[1]);
+			const w = Number(rect.match(/ width="([\d.]+)"/)?.[1]);
+			expect(x).toBeGreaterThanOrEqual(0);
+			expect(x + w).toBeLessThanOrEqual(width);
+		}
+	});
+
 	it("says so when nothing is excluded", async () => {
 		const html = await render(
 			ExclusionsDiagram({

@@ -225,14 +225,24 @@ export function ExclusionsDiagram({
 			[breakdown.byPerson, "by a person", "by a person"],
 		] as [number, string, string][]
 	).filter(([n]) => n > 0);
-	// Each slice is at least 8 wide so a single exclusion stays visible; the counted part takes the rest.
+	// Each slice is at least 8 wide so a single exclusion stays visible. The slices shrink to fit
+	// beside the counted part, or fill the bar when nothing counts; tenths are rounded down, so
+	// nothing ever runs past the edge.
 	const gap = 3;
-	const slices = kinds.map(([n]) =>
-		Math.max(8, Math.round((W * n) / Math.max(total, 1))),
-	);
+	const gaps = gap * (kinds.length - (counted > 0 ? 0 : 1));
+	const raw = kinds.map(([n]) => Math.max(8, (W * n) / Math.max(total, 1)));
+	const room = W - gaps - (counted > 0 ? 8 : 0);
+	const rawSum = raw.reduce((a, b) => a + b, 0);
+	const scale = counted > 0 ? Math.min(1, room / rawSum) : room / rawSum;
+	const widths = raw.map((w) => Math.floor(w * scale * 10) / 10);
 	const countedW =
-		counted > 0 ? W - slices.reduce((a, b) => a + b + gap, 0) : 0;
-	let x = countedW;
+		counted > 0 ? W - gaps - widths.reduce((a, b) => a + b, 0) : 0;
+	let x = counted > 0 ? countedW + gap : 0;
+	const slices = widths.map((w) => {
+		const at = { x: x, w };
+		x += w + gap;
+		return at;
+	});
 	const said = kinds.map(([n, one, many]) =>
 		one === "by a person" ? `${n} excluded by a person` : plural(n, one, many),
 	);
@@ -271,14 +281,12 @@ export function ExclusionsDiagram({
 					stroke="none"
 				/>
 			)}
-			{slices.map((w) => {
-				const sx = x + gap;
-				x = sx + w;
+			{slices.map((s) => {
 				return (
 					<rect
-						x={sx}
+						x={s.x}
 						y="8"
-						width={Math.max(w - 1, 1)}
+						width={s.w}
 						height="22"
 						rx="3"
 						class="fill-paper stroke-ink"

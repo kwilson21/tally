@@ -323,8 +323,9 @@ export async function saveJevResult(
 
 /** How many of a month's transactions are excluded (split parents aside), for How Tally works. */
 /**
- * This month's excluded transactions by why (How Tally works, spec §9): flagged as a transfer,
- * flagged as a reimbursement (and not a transfer), or neither, so a person excluded it.
+ * This month's excluded transactions by why (How Tally works, spec §9): a person's choice when a
+ * person excluded it (even if it's also flagged) or it has no flag; otherwise its flag, transfer
+ * first.
  */
 export async function excludedBreakdown(
 	db: D1Database,
@@ -332,10 +333,10 @@ export async function excludedBreakdown(
 ): Promise<ExcludedBreakdown> {
 	const row = await db
 		.prepare(
-			`SELECT COALESCE(SUM(flag_transfer = 1), 0) AS transfer,
-				COALESCE(SUM(flag_transfer = 0 AND flag_reimbursement = 1), 0) AS reimbursement,
-				COALESCE(SUM(flag_transfer = 0 AND flag_reimbursement = 0), 0) AS byPerson
-			FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0`,
+			`SELECT COALESCE(SUM(NOT person AND flag_transfer = 1), 0) AS transfer,
+				COALESCE(SUM(NOT person AND flag_transfer = 0 AND flag_reimbursement = 1), 0) AS reimbursement,
+				COALESCE(SUM(person OR (flag_transfer = 0 AND flag_reimbursement = 0)), 0) AS byPerson
+			FROM (SELECT *, COALESCE(excluded_source = 'user', 0) AS person FROM transactions) WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0`,
 		)
 		.bind(month)
 		.first<ExcludedBreakdown>();

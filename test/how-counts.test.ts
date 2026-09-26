@@ -137,4 +137,17 @@ describe("excludedBreakdown", () => {
 			byPerson: before.byPerson + (await n("POS 4417 CITY PARKING")),
 		});
 	});
+
+	it("counts a flagged transaction a person excluded as the person's choice", async () => {
+		const before = await excludedBreakdown(db, MONTH);
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user', flag_transfer = 1 WHERE raw_name = 'POS 4417 CITY PARKING' AND substr(date, 1, 7) = ?",
+			)
+			.bind(MONTH)
+			.run();
+		const after = await excludedBreakdown(db, MONTH);
+		expect(after.transfer).toBe(before.transfer);
+		expect(after.byPerson).toBeGreaterThan(before.byPerson);
+	});
 });
