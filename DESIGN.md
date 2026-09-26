@@ -151,6 +151,8 @@ Where it lives: `src/routes/design-system.tsx` (the pages and their gate), `src/
 5. **E2E** for the critical flows.
 6. **The owner verifies** the app pages.
 
+**Visual decisions are made by seeing, not by reading.** Every proposal that changes how something looks is shown in the catalog as current and proposed, side by side, at 1280 and 390, before the owner decides. A decision entry is written only after that, and each accepted proposal ships in its own PR, so undoing it is one revert.
+
 A backend-only change skips step 1.
 
 ## Governance
