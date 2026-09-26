@@ -143,8 +143,10 @@ describe("links in the demo", () => {
 		expect(html.match(/<h[1-6]\b/)?.[0]).toBe("<h1");
 		expect(html).toContain("New here? Things to try");
 		expect(html).toContain('href="/how-it-works#budget"');
-		// Things to try comes before the month, as in the study.
-		expect(html.indexOf("Things to try")).toBeLessThan(html.indexOf("<h1"));
+		// Things to try comes after the Budget list, so safe to spend leads (#92, decision 46).
+		expect(html.indexOf("Things to try")).toBeGreaterThan(
+			html.indexOf('id="budget-title"'),
+		);
 	});
 
 	it("Transactions links to its section, and the edit sheet to categorization", async () => {

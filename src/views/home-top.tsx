@@ -13,8 +13,8 @@ type Props = {
 	/** The status sentence: "Eating Out is $36 over. Everything else is on track." */
 	status: string;
 	demo: boolean;
-	/** The one next action, when there is one: "12 transactions need a category". */
-	band?: { href: string; text: string };
+	/** The one next action, when there is one: "12 transactions need a category", and its amount (decision 50). */
+	band?: { href: string; text: string; detail?: string };
 };
 
 /** The month, then Safe to spend, the status sentence, How this works (demo only) and the Band. */
@@ -41,7 +41,9 @@ export function HomeTop({
 			<HowLink section="budget" demo={demo} />
 			{band && (
 				<div class="mt-4">
-					<Band href={band.href}>{band.text}</Band>
+					<Band href={band.href} detail={band.detail}>
+						{band.text}
+					</Band>
 				</div>
 			)}
 		</>

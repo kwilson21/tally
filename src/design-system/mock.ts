@@ -142,6 +142,7 @@ export const HOME_TOP = {
 	band: {
 		href: "/transactions?uncategorized=1",
 		text: "12 transactions need a category",
+		detail: "$228 of this month's spending",
 	},
 };
 export const HOME_ROWS = [

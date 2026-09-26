@@ -387,7 +387,7 @@ function describeHome({ band = true, rows = true } = {}) {
 		`Safe to spend ${whole(HOME_TOP.safeToSpendCents)}`,
 		HOME_TOP.status,
 		"How this works",
-		...(band ? [HOME_TOP.band.text] : []),
+		...(band ? [HOME_TOP.band.text, HOME_TOP.band.detail] : []),
 	];
 	if (rows)
 		parts.push(
@@ -510,11 +510,20 @@ function Rows() {
 				title="Band"
 				tier="visual"
 				components={["Band"]}
-				sentence="The one tinted row per screen that links to the thing to do next. This one opens the demo's real list of transactions that need a category."
+				sentence="The one tinted row per screen that links to the thing to do next, with an optional quiet second line. Both open the demo's real list of transactions that need a category."
 			>
-				<div class="max-w-xl">
-					<Band href={BAND.href}>{BAND.text}</Band>
-				</div>
+				<State label="One line">
+					<div class="max-w-xl">
+						<Band href={BAND.href}>{BAND.text}</Band>
+					</div>
+				</State>
+				<State label="With a second line, as on Home (decision 50)">
+					<div class="max-w-xl">
+						<Band href={BAND.href} detail={HOME_TOP.band.detail}>
+							{BAND.text}
+						</Band>
+					</div>
+				</State>
 			</Specimen>
 		</Group>
 	);
@@ -678,7 +687,7 @@ function Demo() {
 				title="ThingsToTry"
 				tier="visual"
 				components={["ThingsToTry"]}
-				sentence="The demo's bordered “New here? Things to try” block at the top of Home: three links to where each thing is done, plus How Tally works."
+				sentence="The demo's bordered “New here? Things to try” block, below Home's Budget list until onboarding (#95) replaces it: three links to where each thing is done, plus How Tally works."
 			>
 				<ThingsToTry />
 			</Specimen>
