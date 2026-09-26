@@ -1,5 +1,6 @@
 // Typed fake data for the catalog. It never touches the database; TypeScript checks each value
 // against the component's props, so a changed component fails `npm run typecheck` here first.
+import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import type { ListRow } from "../db/transactions";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 
@@ -85,6 +86,53 @@ export const PROGRESS_ROWS = [
 		},
 	},
 ];
+
+/**
+ * Home's budget list in Adjust mode (#94): a round amount, one between round $10s, one over budget,
+ * one at $0 and one at the largest budget. The nudge paths are Home's real ones, but the specimen is Visual, so nothing posts.
+ */
+export const ADJUST_ROWS = [
+	{
+		name: "Groceries",
+		icon: "groceries",
+		color: "cat-blue",
+		spentCents: 41200,
+		budgetCents: 70000,
+	},
+	{
+		name: "Household",
+		icon: "household",
+		color: "cat-brown",
+		spentCents: 9500,
+		budgetCents: 71200,
+	},
+	{
+		name: "Eating out",
+		icon: "eating-out",
+		color: "cat-plum",
+		spentCents: 28600,
+		budgetCents: 25000,
+	},
+	{
+		name: "Kids",
+		icon: "kids",
+		color: "cat-ochre",
+		spentCents: 0,
+		budgetCents: 0,
+	},
+	{
+		name: "Rent",
+		icon: "rent",
+		color: "cat-slate",
+		spentCents: 1_000_000,
+		budgetCents: MAX_BUDGET_CENTS,
+	},
+].map((row, i) => ({
+	...row,
+	// Each row opens the catalog's sheet page, as a Home row opens its budget sheet.
+	href: "/design-system/bottom-sheet",
+	nudge: { href: `/budget/${i + 1}/nudge`, id: `ds-nudge-${i + 1}` },
+}));
 
 /** The Band links to the demo's real "needs a category" list, which is what it says. */
 export const BAND = {

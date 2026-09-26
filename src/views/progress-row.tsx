@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+import { nudgeCents } from "../budgets/nudge";
 import { formatCents } from "../money";
 import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
@@ -15,6 +16,12 @@ type Props = {
 	/** htmx attributes that open the sheet in place. */
 	attrs?: Record<string, string>;
 	autofocus?: boolean;
+	/**
+	 * Adjust mode (#94, decision 48): a − before the row and a + after it, each posting to
+	 * `${href}/down` or `${href}/up`. `id` prefixes the buttons' ids, so htmx keeps focus on the one
+	 * tapped when the list is swapped back in.
+	 */
+	nudge?: { href: string; id: string; attrs?: Record<string, string> };
 };
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
@@ -24,20 +31,61 @@ function Wrap({
 	href,
 	autofocus,
 	attrs,
+	adjusting,
 	children,
 }: {
 	href?: string;
 	autofocus?: boolean;
 	attrs?: Record<string, string>;
+	adjusting?: boolean;
 	children?: Child;
 }) {
-	const box = "flex items-start gap-4 py-3 text-ink no-underline";
+	const box = `flex items-start py-3 text-ink no-underline ${adjusting ? "min-w-0 flex-1 gap-3" : "gap-4"}`;
 	return href ? (
 		<a href={href} autofocus={autofocus} class={box} {...attrs}>
 			{children}
 		</a>
 	) : (
 		<div class={box}>{children}</div>
+	);
+}
+
+// The same round button as the money input's ±$1 (P3: the owner kept those), at 44px.
+const round =
+	"flex size-11 shrink-0 items-center justify-center rounded-full border border-rule bg-paper text-xl font-semibold leading-none text-muted select-none hover:text-ink disabled:opacity-40";
+
+/** One − or + in Adjust mode: a form that posts without JavaScript, labeled with where it goes. */
+function Nudge({
+	name,
+	budgetCents,
+	direction,
+	nudge,
+}: {
+	name: string;
+	budgetCents: number;
+	direction: "up" | "down";
+	nudge: NonNullable<Props["nudge"]>;
+}) {
+	const to = nudgeCents(budgetCents, direction);
+	const stuck = to === budgetCents;
+	const label = stuck
+		? direction === "down"
+			? `${name} is at $0`
+			: `${name} is at the largest budget`
+		: `${direction === "down" ? "Lower" : "Raise"} ${name} to ${whole(to)}`;
+	const href = `${nudge.href}/${direction}`;
+	return (
+		<form method="post" action={href} hx-post={href} {...nudge.attrs}>
+			<button
+				type="submit"
+				id={`${nudge.id}-${direction}`}
+				aria-label={label}
+				disabled={stuck}
+				class={round}
+			>
+				<span aria-hidden="true">{direction === "down" ? "−" : "+"}</span>
+			</button>
+		</form>
 	);
 }
 
@@ -51,20 +99,37 @@ export function ProgressRow({
 	href,
 	attrs,
 	autofocus,
+	nudge,
 }: Props) {
 	const over = spentCents > budgetCents;
 	const { fillPct } = barGeometry(spentCents, budgetCents);
 	// Cents only when there are some, as the status sentence says it: "$36 over", "$36.50 over".
 	const overBy = spentCents - budgetCents;
 	const overText = formatCents(overBy, { wholeDollars: overBy % 100 === 0 });
+	const nudgeProps = nudge && { name, budgetCents, nudge };
 	return (
-		<li>
-			<Wrap href={href} autofocus={autofocus} attrs={attrs}>
-				<CategoryIcon icon={icon} color={color} />
+		<li class={nudge ? "flex items-center gap-2" : undefined}>
+			{nudgeProps && <Nudge direction="down" {...nudgeProps} />}
+			<Wrap
+				href={href}
+				autofocus={autofocus}
+				attrs={attrs}
+				adjusting={nudge !== undefined}
+			>
+				{nudge ? (
+					// On a phone in Adjust mode, − takes the icon's place, so the name and amount fit on one line.
+					<span class="hidden sm:contents">
+						<CategoryIcon icon={icon} color={color} />
+					</span>
+				) : (
+					<CategoryIcon icon={icon} color={color} />
+				)}
 				<div class="min-w-0 flex-1">
-					<div class="flex items-baseline justify-between gap-3">
+					{/* When name and amount don't fit on one line, the amount moves under the name; if it still
+					    doesn't fit (a narrow phone in Adjust mode), it breaks at "of", never inside a number. */}
+					<div class="flex flex-wrap items-baseline justify-between gap-x-3">
 						<span class="text-lg">{name}</span>
-						<span class="text-lg">
+						<span class="ml-auto text-right text-lg">
 							{whole(spentCents)} of {whole(budgetCents)}
 						</span>
 					</div>
@@ -76,7 +141,8 @@ export function ProgressRow({
 							width={`${fillPct}%`}
 							height="100%"
 							rx="2"
-							class={`bar-fill ${over ? "fill-over" : "fill-ok"}`}
+							// In Adjust mode each tap redraws the list; replaying every fill would make it jump.
+							class={`${nudge ? "" : "bar-fill "}${over ? "fill-over" : "fill-ok"}`}
 						/>
 					</svg>
 					{over && (
@@ -88,6 +154,7 @@ export function ProgressRow({
 					{href && <span class="sr-only">, change the budget</span>}
 				</div>
 			</Wrap>
+			{nudgeProps && <Nudge direction="up" {...nudgeProps} />}
 		</li>
 	);
 }

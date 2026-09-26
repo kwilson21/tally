@@ -1,6 +1,7 @@
 // The catalog's content (decisions 42–44): every component from src/views/, imported and given
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
+import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
@@ -22,6 +23,7 @@ import { SystemDiagram } from "../views/system-diagram";
 import { ThingsToTry } from "../views/things-to-try";
 import { TransactionRow } from "../views/transaction-row";
 import {
+	ADJUST_ROWS,
 	BAND,
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
@@ -31,7 +33,13 @@ import {
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
 } from "./mock";
-import { Specimen, State, TierPill } from "./specimen";
+import {
+	Specimen,
+	State,
+	TierPill,
+	UseSpec,
+	type UseSpecText,
+} from "./specimen";
 import { CATEGORY_COLORS, COLOR_TOKENS, TYPE_ROLES } from "./tokens";
 
 // The catalog's own buttons, in Settings' outline style; a Button component comes later in #76.
@@ -283,6 +291,43 @@ function Shell() {
 	);
 }
 
+/** Home's Budget heading with its Adjust switch, as Home draws it. */
+function BudgetHeading({ adjusting }: { adjusting: boolean }) {
+	// Here Adjust and Done jump between the two states, rather than leaving for Home.
+	return (
+		<div
+			id={adjusting ? "adjust-on" : "adjust-off"}
+			class="flex max-w-xl items-baseline justify-between"
+		>
+			<h4 class="font-serif text-3xl font-semibold">Budget</h4>
+			<AdjustLink
+				adjusting={adjusting}
+				href={adjusting ? "#adjust-off" : "#adjust-on"}
+			/>
+		</div>
+	);
+}
+
+// Adjust mode's use spec (#94): every line answered before the owner signs it off.
+const ADJUST_SPEC: UseSpecText = {
+	purpose:
+		"Nudge a budget up or down by $10 right where you see it, without opening its sheet.",
+	affordance:
+		"“Adjust” is terracotta text beside the Budget heading. In Adjust mode every budgeted row has a round − before it and a round + after it, the same buttons as the money input's ±$1, visible without hovering. On a phone, − takes the category icon's place so the name and amount fit. The row itself is still a link to its sheet, for an exact amount.",
+	states:
+		"Rest: muted glyph on paper, with a hairline ring. Hover: the glyph turns ink. Focus: the focus-visible ring. Disabled: − at $0 and + at $1,000,000, faded to 40%, and named so a screen reader hears why. Loading: taps queue in order and the row keeps its amount until the new one arrives; “Saving…” comes with #69. Done: the new amount is in the row. Error: if the category was archived on another screen, the list comes back without it.",
+	feedback:
+		"The row's “of $710” changes in place, and so do Safe to spend and the status sentence, because they count the budget too. Focus stays on the button you tapped, so you can keep tapping. A toast says “Groceries is $710 a month”, with Undo once #70 lands. The announcer reads “Groceries is $710 a month from September on.”",
+	input:
+		"Touch: 44px round buttons, no gestures. Keyboard: Tab goes −, the row, + for each row in turn; Enter or Space presses. Screen reader: “Lower Groceries to $690, button” and “Raise Groceries to $710, button”; at $0, “Kids is at $0, button, dimmed”. The switch reads “Adjust budgets” and “Done adjusting budgets”.",
+	motion:
+		"None added. In Adjust mode the bars don't replay their fill on each tap: they redraw at the new width at once, so the list stays still. Day to day they fill on load as before, and reduced motion shows the end state.",
+	edges:
+		"$0: − is off. $1,000,000: + is off. Cents ($712.40): − goes to $710 and + to $720. Over budget: the row stays brick until a tap takes the budget past the spending. A long name, or a narrow phone: the amount moves under the name, and if it still doesn't fit (“$10,000 of $1,000,000” at 320px) it breaks at “of”, never inside a number. No budgeted categories: no Adjust link. Not budgeted categories keep “Add a budget” and get no buttons; an archived category with spending this month gets none either. Slow network: taps queue and apply in order. No JavaScript: Adjust is a link to Home in Adjust mode, and each button is a form that saves and comes back to it.",
+	words:
+		"Adjust · Done · Lower {name} to {amount} · Raise {name} to {amount} · {name} is at $0 · {name} is at the largest budget · Toast: {name} is {amount} a month · Announced: {name} is {amount} a month from {month} on.",
+};
+
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
@@ -300,6 +345,31 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="adjust-mode"
+				title="Adjust mode: AdjustLink and ProgressRow's − and +"
+				tier="visual"
+				components={["AdjustLink"]}
+				sentence="Home's budget list with − and + on every budgeted row, so a budget moves to the next round $10 where it's seen (decision 48). “Adjust” beside the Budget heading turns it on, and “Done” puts it away. Here nothing posts; on Home each tap saves."
+			>
+				<State label="Day to day">
+					<BudgetHeading adjusting={false} />
+					<ul class="max-w-xl divide-y divide-rule">
+						{ADJUST_ROWS.map(({ nudge: _, ...row }) => (
+							<ProgressRow {...row} />
+						))}
+					</ul>
+				</State>
+				<State label="Adjusting: a round amount, one between round $10s, over budget, $0 (− is off) and the largest budget (+ is off). Each row opens the sheet page">
+					<BudgetHeading adjusting={true} />
+					<ul class="max-w-xl divide-y divide-rule">
+						{ADJUST_ROWS.map((row) => (
+							<ProgressRow {...row} />
+						))}
+					</ul>
+				</State>
+				<UseSpec spec={ADJUST_SPEC} />
 			</Specimen>
 			<Specimen
 				id="transaction-row"

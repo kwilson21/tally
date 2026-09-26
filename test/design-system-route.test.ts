@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import design from "../DESIGN.md?raw";
 import {
+	ADJUST_ROWS,
 	BAND,
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
@@ -11,8 +12,10 @@ import {
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
 } from "../src/design-system/mock";
+import { USE_SPEC_PARTS } from "../src/design-system/specimen";
 import { CATEGORY_COLORS } from "../src/design-system/tokens";
 import { designSystem } from "../src/routes/design-system";
+import { AdjustLink } from "../src/views/adjust-link";
 import { Band } from "../src/views/band";
 import { TallyMark, Wordmark } from "../src/views/brand";
 import { CategoryIcon } from "../src/views/category";
@@ -91,6 +94,9 @@ describe("GET /design-system in the demo", () => {
 			Sidebar({}),
 			BottomTabs({}),
 			...PROGRESS_ROWS.map((s) => ProgressRow(s.props)),
+			...ADJUST_ROWS.map((row) => ProgressRow(row)),
+			AdjustLink({ adjusting: false, href: "#adjust-on" }),
+			AdjustLink({ adjusting: true, href: "#adjust-off" }),
 			...TRANSACTION_ROWS.map((s) => TransactionRow({ row: s.row })),
 			Band({ href: BAND.href, children: BAND.text }),
 			Chip({
@@ -117,6 +123,26 @@ describe("GET /design-system in the demo", () => {
 		// Layout: the toast region and the announcer are this page's own.
 		expect(html).toContain('id="toasts"');
 		expect(html).toContain('id="announcer"');
+	});
+
+	it("shows Adjust mode with its whole use spec, for sign-off (#94)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="adjust-mode"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain("How it&#39;s used");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		expect(section).toContain('aria-label="Kids is at $0"');
+		expect(section).toContain('aria-label="Rent is at the largest budget"');
+		// Each adjusting row is a link, between its − and +, as on Home.
+		expect(section).toMatch(
+			/id="ds-nudge-1-down"[\s\S]*?<a href="\/design-system\/bottom-sheet"[\s\S]*?id="ds-nudge-1-up"/,
+		);
+		// Adjust and Done move between the two states here; they don't leave for Home.
+		expect(section).toContain('href="#adjust-on"');
+		expect(section).toContain('href="#adjust-off"');
+		expect(section).not.toMatch(/href="\/(\?adjust=1)?"/);
 	});
 
 	it("draws the bottom sheet on its own page", async () => {
