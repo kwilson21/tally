@@ -10,7 +10,10 @@ const SOURCES = import.meta.glob(
 
 /** The source without comments, so prose like "rounded down" isn't read as a class. */
 const stripComments = (text: string) =>
-	text.replace(/\{?\/\*[\s\S]*?\*\/\}?/g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+	// A comment starts a line or follows a space or "{"; "/design-system/*" in a string isn't one.
+	text
+		.replace(/(^|[\s{])\/\*[\s\S]*?\*\/\}?/gm, "$1")
+		.replace(/(^|\s)\/\/.*$/gm, "$1");
 
 /** Each class-like word with its variants removed: "has-[:checked]:bg-band" → "bg-band". */
 function utilities(text: string): string[] {
@@ -32,16 +35,18 @@ function utilities(text: string): string[] {
 const PALETTE =
 	"white|black|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
 const COLOR_UTILITY = new RegExp(
-	`^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-((${PALETTE})(-\\d+)?(/\\d+)?|\\[(#|rgb|hsl|oklch|color).*)$`,
+	`^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-((${PALETTE})(-\\d+)?(/\\d+)?|\\[(#|rgb|hsl|oklch|color|var).*|\\[[a-z]+\\])$`,
 );
 const RADIUS = /^-?rounded(-(t|r|b|l|s|e|tl|tr|br|bl|ss|se|es|ee))?(-(.+))?$/;
 const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
 
 /**
- * Off-token classes that are allowed for now, each with its reason. The money input keeps the
- * original app's corners until the owner reviews it in the catalog (the next #76 PR).
+ * Off-token classes that are allowed, each with its reason. Toasts are the one shadow (DESIGN.md).
+ * The money input keeps the original app's corners until the owner reviews it in the catalog
+ * (the next #76 PR).
  */
 const EXCEPTIONS: Record<string, string[]> = {
+	"../public/js/toast.js": ["shadow-sm"],
 	"../src/views/money-input.tsx": [
 		"rounded-lg",
 		"rounded-tr-lg",
@@ -59,7 +64,7 @@ function problems(file: string, text: string): string[] {
 		// "rounded" alone must also be a class here, not part of a word like "roundedUp".
 		if (radius && !TOKEN_RADII.has(radius[4] ?? ""))
 			found.push(`${u}: radii are rounded-control, -sheet or -full`);
-		if (/^shadow(-|$)/.test(u) && file !== "../public/js/toast.js")
+		if (/^(drop-|inset-)?shadow(-|$)/.test(u))
 			found.push(`${u}: no shadows except toasts`);
 	}
 	return found;
@@ -82,15 +87,24 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(
 			problems(
 				"x.tsx",
-				'<p class="bg-white text-stone-700 border-[#ccc] rounded-lg shadow-md hover:rounded-xl">',
+				'<p class="bg-white text-stone-700 border-[#ccc] text-[red] bg-[var(--x)] rounded-lg shadow-md drop-shadow-sm hover:rounded-xl">',
 			),
-		).toHaveLength(6);
+		).toHaveLength(9);
 		expect(
 			problems(
 				"x.tsx",
-				'// rounded down\nconst a = roundedUp(x);\n<p class="rounded-control lg:rounded-l-sheet has-[:checked]:bg-band bg-ink/30 text-cat-blue">',
+				'// rounded down\nconst a = roundedUp(x);\n<p class="rounded-control lg:rounded-l-sheet has-[:checked]:bg-band bg-ink/30 text-cat-blue text-[1.75rem]">',
 			),
 		).toEqual([]);
+	});
+
+	it("doesn't read a /* inside a string as the start of a comment", () => {
+		expect(
+			problems(
+				"x.tsx",
+				'app.use("/design-system/*", f);\n<p class="bg-white">{/* a note */}</p>',
+			),
+		).toHaveLength(1);
 	});
 
 	it("lists every color token in the catalog, with app.css's value", () => {

@@ -92,7 +92,7 @@ Every component has exactly one tier, shown as a pill:
 
 `ds.js` only runs catalog controls (fire a sample toast, replay an animation). It never intercepts or fakes a request, and app pages never load it.
 
-Where it lives: `src/routes/design-system.tsx` (the pages and their gate), `src/design-system/catalog.tsx` (the specimens), `mock.ts` (typed fake data) and `tokens.ts` (the color and type tables). Tests keep it honest: every component in the table above must appear in the catalog, every Visual specimen carries `hx-ignore`, the catalog's colors must match `app.css`, and `test/design-tokens.test.ts` fails on colors, radii or shadows outside the tokens. Its one allowed exception, the money input's original corners, is reviewed with the owner in the MoneyInput PR.
+Where it lives: `src/routes/design-system.tsx` (the pages and their gate), `src/design-system/catalog.tsx` (the specimens), `mock.ts` (typed fake data) and `tokens.ts` (the color and type tables). Tests keep it honest: every component in the table above must appear in the catalog, every Visual specimen carries `hx-ignore`, the catalog's colors must match `app.css`, and `test/design-tokens.test.ts` fails on colors, radii or shadows outside the tokens. Its exceptions are listed in the test with their reasons: the toast's `shadow-sm`, and the money input's original corners, which are reviewed with the owner in the MoneyInput PR.
 
 ## Process for a UI change (decision 43)
 1. **Design in the catalog.** Build or change the component there, at its tier, with fake data. A new screen starts with a generated study first (decisions 21, 35); a component starts here.

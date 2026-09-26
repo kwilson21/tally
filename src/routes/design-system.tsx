@@ -5,10 +5,7 @@ import { Layout } from "../views/layout";
 export const designSystem = new Hono<{ Bindings: Env }>();
 
 // The catalog exists in the demo and in development, never in production (decision 42).
-designSystem.use("/design-system", async (c, next) => {
-	if (c.env.DEMO !== "true") return c.notFound();
-	await next();
-});
+// Hono's "/design-system/*" also matches "/design-system" itself.
 designSystem.use("/design-system/*", async (c, next) => {
 	if (c.env.DEMO !== "true") return c.notFound();
 	await next();
