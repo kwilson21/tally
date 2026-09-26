@@ -10,20 +10,12 @@ const get = async (path: string) => {
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 describe("GET /design-system/proposals", () => {
-	it("shows P7 with today's version and both options, and lists every decision with its issue", async () => {
+	it("says nothing is open, and lists every decision with its issue", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
-		for (const name of [
-			"Today",
-			"A · The Band carries the amount",
-			"B · The row is the link",
-		])
-			expect(html).toContain(name);
-		expect(html).toMatch(
-			/12 transactions need a category<\/span><span[^>]*>\$228/,
-		);
-		expect(DECIDED.length).toBe(6);
+		expect(html).toContain("Nothing waiting");
+		expect(DECIDED.length).toBe(7);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(`/issues/${d.issue}"`);
