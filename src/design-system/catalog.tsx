@@ -84,7 +84,7 @@ function Intro() {
 					href="/design-system/proposals"
 					class="inline-flex min-h-11 items-center"
 				>
-					Proposals waiting for a decision
+					Proposals, open and decided
 				</a>
 			</p>
 			<dl class="mt-6 grid gap-3 sm:grid-cols-3">
