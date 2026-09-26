@@ -35,7 +35,7 @@ function utilities(text: string): string[] {
 const PALETTE =
 	"white|black|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
 const COLOR_UTILITY = new RegExp(
-	`^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-((${PALETTE})(-\\d+)?(/\\d+)?|\\[(#|rgb|hsl|oklch|color|var).*|\\[[a-z]+\\])$`,
+	`^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-((${PALETTE})(-\\d+)?(/\\d+)?|\\[(#|rgb|hsl|oklch|color|var).*|\\[[a-z]+\\](/\\d+)?)$`,
 );
 const RADIUS = /^-?rounded(-(t|r|b|l|s|e|tl|tr|br|bl|ss|se|es|ee))?(-(.+))?$/;
 const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
@@ -87,9 +87,9 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(
 			problems(
 				"x.tsx",
-				'<p class="bg-white text-stone-700 border-[#ccc] text-[red] bg-[var(--x)] rounded-lg shadow-md drop-shadow-sm hover:rounded-xl">',
+				'<p class="bg-white text-stone-700 border-[#ccc] text-[red] bg-[var(--x)] bg-[#ffffff]/30 text-[red]/50 rounded-lg shadow-md drop-shadow-sm hover:rounded-xl">',
 			),
-		).toHaveLength(9);
+		).toHaveLength(11);
 		expect(
 			problems(
 				"x.tsx",

@@ -22,9 +22,11 @@ import { SystemDiagram } from "../views/system-diagram";
 import { ThingsToTry } from "../views/things-to-try";
 import { TransactionRow } from "../views/transaction-row";
 import {
+	BAND,
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
 	EXCLUSIONS_EXAMPLE,
+	MONEY_STATES,
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
@@ -182,7 +184,7 @@ function Foundation() {
 			>
 				<ul>
 					{PROGRESS_ROWS.slice(0, 1).map((s) => (
-						<ProgressRow {...s.props} href={undefined} />
+						<ProgressRow {...s.props} />
 					))}
 				</ul>
 			</Specimen>
@@ -281,7 +283,7 @@ function Rows() {
 				title="ProgressRow"
 				tier="visual"
 				components={["ProgressRow"]}
-				sentence="One category: icon, name, “spent of budget,” and an SVG bar with a notch at the limit; over budget adds an alert icon and the words “over budget.”"
+				sentence="One category: icon, name, “spent of budget,” and an SVG bar with a notch at the limit; over budget adds an alert icon and the words “over budget.” In the app each row opens its budget sheet; here they don't link anywhere."
 			>
 				{PROGRESS_ROWS.map((s) => (
 					<State label={s.label}>
@@ -296,15 +298,12 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. Here the rows don't link anywhere."
 			>
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
-							<TransactionRow
-								row={s.row}
-								href="/design-system#transaction-row"
-							/>
+							<TransactionRow row={s.row} />
 						</ul>
 					</State>
 				))}
@@ -314,12 +313,10 @@ function Rows() {
 				title="Band"
 				tier="visual"
 				components={["Band"]}
-				sentence="The one tinted row per screen that links to the thing to do next."
+				sentence="The one tinted row per screen that links to the thing to do next. This one opens the demo's real list of transactions that need a category."
 			>
 				<div class="max-w-xl">
-					<Band href="/design-system#band">
-						12 transactions need a category
-					</Band>
+					<Band href={BAND.href}>{BAND.text}</Band>
 				</div>
 			</Specimen>
 		</Group>
@@ -416,41 +413,11 @@ function Controls() {
 				components={["MoneyInput"]}
 				sentence="The owner's hero amount from the original app: ±$1 round buttons, ▲▼ cent arrows inside the field, Round-to and Last-month chips. Try the buttons, the chips and the ↑ ↓ keys."
 			>
-				<State label="$0: the minus buttons are off">
-					<MoneyInput
-						id="ds-money-zero"
-						name="ds-money-zero"
-						label="Budget"
-						value="0.00"
-					/>
-				</State>
-				<State label="With cents: “Round to” appears">
-					<MoneyInput
-						id="ds-money-cents"
-						name="ds-money-cents"
-						label="Budget"
-						value="612.40"
-						lastMonthCents={60000}
-					/>
-				</State>
-				<State label="Equal to last month: its chip is dimmed">
-					<MoneyInput
-						id="ds-money-last"
-						name="ds-money-last"
-						label="Budget"
-						value="600.00"
-						lastMonthCents={60000}
-					/>
-				</State>
-				<State label="With an error">
-					<MoneyInput
-						id="ds-money-error"
-						name="ds-money-error"
-						label="Budget"
-						value="12.3.4"
-						error="Enter a dollar amount, like 250 or 250.50."
-					/>
-				</State>
+				{MONEY_STATES.map((s) => (
+					<State label={s.label}>
+						<MoneyInput {...s.props} />
+					</State>
+				))}
 			</Specimen>
 		</Group>
 	);
@@ -602,7 +569,7 @@ export function SheetSpecimen() {
 			</p>
 			<ul class="mt-6 max-w-xl">
 				{PROGRESS_ROWS.map((s) => (
-					<ProgressRow {...s.props} href={undefined} />
+					<ProgressRow {...s.props} />
 				))}
 			</ul>
 			<div hx-ignore="">

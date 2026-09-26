@@ -59,17 +59,19 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 	},
 ];
 
-/** Budget rows: on track, over, and one with nowhere to go (an archived category). */
+/**
+ * Budget rows, on track and over. They're shown without links: in the app each row opens its
+ * budget sheet, and a link here would go nowhere (DESIGN.md "No broken windows").
+ */
 export const PROGRESS_ROWS = [
 	{
-		label: "On track, links to its budget sheet",
+		label: "On track",
 		props: {
 			name: "Groceries",
 			icon: "groceries",
 			color: "cat-blue",
 			spentCents: 41200,
 			budgetCents: 60000,
-			href: "/design-system#progress-row",
 		},
 	},
 	{
@@ -80,17 +82,55 @@ export const PROGRESS_ROWS = [
 			color: "cat-plum",
 			spentCents: 23850,
 			budgetCents: 20000,
-			href: "/design-system#progress-row",
+		},
+	},
+];
+
+/** The Band links to the demo's real "needs a category" list, which is what it says. */
+export const BAND = {
+	href: "/transactions?uncategorized=1",
+	text: "12 transactions need a category",
+};
+
+/** The money input in each state it can show. */
+export const MONEY_STATES = [
+	{
+		label: "$0: the minus buttons are off",
+		props: {
+			id: "ds-money-zero",
+			name: "ds-money-zero",
+			label: "Budget",
+			value: "0.00",
 		},
 	},
 	{
-		label: "No link (archived)",
+		label: "With cents: “Round to” appears",
 		props: {
-			name: "Gas",
-			icon: "gas",
-			color: "cat-slate",
-			spentCents: 6000,
-			budgetCents: 15000,
+			id: "ds-money-cents",
+			name: "ds-money-cents",
+			label: "Budget",
+			value: "612.40",
+			lastMonthCents: 60000,
+		},
+	},
+	{
+		label: "Equal to last month: its chip is dimmed",
+		props: {
+			id: "ds-money-last",
+			name: "ds-money-last",
+			label: "Budget",
+			value: "600.00",
+			lastMonthCents: 60000,
+		},
+	},
+	{
+		label: "With an error",
+		props: {
+			id: "ds-money-error",
+			name: "ds-money-error",
+			label: "Budget",
+			value: "12.3.4",
+			error: "Enter a dollar amount, like 250 or 250.50.",
 		},
 	},
 ];

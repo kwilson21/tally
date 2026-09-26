@@ -1,7 +1,37 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import design from "../DESIGN.md?raw";
+import {
+	BAND,
+	BUDGET_EXAMPLE,
+	CATEGORIES_EXAMPLE,
+	EXCLUSIONS_EXAMPLE,
+	MONEY_STATES,
+	PROGRESS_ROWS,
+	TRANSACTION_ROWS,
+	TRANSACTIONS_EXAMPLE,
+} from "../src/design-system/mock";
+import { CATEGORY_COLORS } from "../src/design-system/tokens";
 import { designSystem } from "../src/routes/design-system";
+import { Band } from "../src/views/band";
+import { TallyMark, Wordmark } from "../src/views/brand";
+import { CategoryIcon } from "../src/views/category";
+import { Chip } from "../src/views/chip";
+import {
+	BudgetDiagram,
+	CategoriesDiagram,
+	ExclusionsDiagram,
+	TransactionsDiagram,
+} from "../src/views/how-diagrams";
+import { HowLink } from "../src/views/how-link";
+import { ICON_NAMES, Icon } from "../src/views/icons";
+import { LedgerIllustration } from "../src/views/illustration";
+import { MoneyInput } from "../src/views/money-input";
+import { BottomTabs, Sidebar } from "../src/views/nav";
+import { ProgressRow } from "../src/views/progress-row";
+import { SystemDiagram } from "../src/views/system-diagram";
+import { ThingsToTry } from "../src/views/things-to-try";
+import { TransactionRow } from "../src/views/transaction-row";
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -46,6 +76,60 @@ describe("GET /design-system in the demo", () => {
 		const names = designComponents();
 		expect(names.length).toBeGreaterThan(15);
 		for (const name of names) expect(shown).toContain(name);
+	});
+
+	it("renders each component's own output, with the catalog's sample data", async () => {
+		const { html } = await get("/design-system");
+		const outputs = [
+			Wordmark(),
+			TallyMark({ class: "size-12" }),
+			...ICON_NAMES.map((name) => Icon({ name })),
+			...CATEGORY_COLORS.map((color) =>
+				CategoryIcon({ icon: "groceries", color }),
+			),
+			LedgerIllustration(),
+			Sidebar({}),
+			BottomTabs({}),
+			...PROGRESS_ROWS.map((s) => ProgressRow(s.props)),
+			...TRANSACTION_ROWS.map((s) => TransactionRow({ row: s.row })),
+			Band({ href: BAND.href, children: BAND.text }),
+			Chip({
+				type: "checkbox",
+				name: "ds-exclude",
+				value: "1",
+				children: "Exclude from budget",
+			}),
+			...MONEY_STATES.map((s) => MoneyInput(s.props)),
+			ThingsToTry(),
+			HowLink({ section: "budget", demo: true }),
+			SystemDiagram(),
+			BudgetDiagram(BUDGET_EXAMPLE),
+			TransactionsDiagram(TRANSACTIONS_EXAMPLE),
+			ExclusionsDiagram(EXCLUSIONS_EXAMPLE),
+			CategoriesDiagram(CATEGORIES_EXAMPLE),
+		];
+		for (const output of outputs) {
+			expect(html).toContain(await String(output ?? ""));
+		}
+		// FormField: its label points at the control, and its error is announced.
+		expect(html).toContain('for="ds-name"');
+		expect(html).toMatch(/<p id="ds-name-error-error" role="alert"/);
+		// Layout: the toast region and the announcer are this page's own.
+		expect(html).toContain('id="toasts"');
+		expect(html).toContain('id="announcer"');
+	});
+
+	it("draws the bottom sheet on its own page", async () => {
+		const { html } = await get("/design-system/bottom-sheet");
+		expect(html).toMatch(
+			/<section role="dialog" aria-labelledby="ds-sheet-title"/,
+		);
+		expect(html).toContain('id="ds-sheet-title"');
+	});
+
+	it("has no links that go nowhere: no specimen links back to the catalog itself", async () => {
+		const { html } = await get("/design-system");
+		expect(html).not.toMatch(/href="\/design-system#/);
 	});
 
 	it("gives every specimen one tier, and makes Visual ones inert to htmx", async () => {
