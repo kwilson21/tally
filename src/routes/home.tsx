@@ -28,6 +28,10 @@ export const home = new Hono<App>();
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
+/** The Band's amount: whole dollars like the budget rows, but cents under $1, so it never reads "$0" for 30¢. */
+const bandAmount = (cents: number) =>
+	formatCents(cents, { wholeDollars: cents >= 100 || cents === 0 });
+
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
 	"hx-get": href,
@@ -117,8 +121,8 @@ async function renderHome(
 										// Refunds can outweigh the spending; it says so, as the budget sheet does.
 										detail:
 											spentCents < 0
-												? `${formatCents(-spentCents, { wholeDollars: true })} more refunded than spent`
-												: `${formatCents(spentCents, { wholeDollars: true })} of this month's spending`,
+												? `${bandAmount(-spentCents)} more refunded than spent`
+												: `${bandAmount(spentCents)} of this month's spending`,
 									}
 								: undefined
 						}

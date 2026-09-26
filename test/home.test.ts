@@ -71,6 +71,13 @@ describe("GET / with the demo seed", () => {
 			"UPDATE transactions SET amount_cents = 0 WHERE category_id IS NULL",
 		).run();
 		expect((await home()).html).toContain("$0 of this month&#39;s spending");
+		// Cents only when there are some, so a small refund surplus isn't rounded away.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -30 WHERE id = (SELECT MIN(id) FROM transactions WHERE category_id IS NULL AND excluded = 0 AND flag_income = 0 AND date LIKE ?)",
+		)
+			.bind(`${todayUtc().slice(0, 7)}%`)
+			.run();
+		expect((await home()).html).toContain("$0.30 more refunded than spent");
 	});
 
 	it("puts the number first: the month, Safe to spend, the Band, Budget, then Things to try (#92)", async () => {
