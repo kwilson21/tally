@@ -291,7 +291,7 @@ function Rows() {
 				title="ProgressRow"
 				tier="visual"
 				components={["ProgressRow"]}
-				sentence="One category: icon, name, “spent of budget,” and an SVG bar with a notch at the limit; over budget adds an alert icon and the words “over budget.” In the app each row opens its budget sheet; here they don't link anywhere."
+				sentence="One category: icon, name, “spent of budget,” and a 4px bar with no limit marker (decision 46); over budget, the bar is full and brick, with an alert icon and how much it's over in words (“$36 over”). In the app each row opens its budget sheet; here they don't link anywhere."
 			>
 				{PROGRESS_ROWS.map((s) => (
 					<State label={s.label}>

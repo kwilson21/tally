@@ -92,7 +92,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | Sidebar / BottomTabs | The same destinations: a sidebar on desktop, four tabs plus More on phones. |
 | Layout | Every page's shell: banner, navigation, main, toast and announce regions. |
 | CategoryIcon | A category's line icon, drawn in its color token. |
-| ProgressRow | One category: icon, name, "spent of budget," and an SVG bar with a notch at the limit; over budget adds an alert icon and the words "over budget." |
+| ProgressRow | One category: icon, name, "spent of budget," and a 4px bar with no limit marker (decision 46); over budget, the bar is full and brick, with an alert icon and how much it's over in words ("$36 over"). |
 | Band | The one tinted row per screen that links to the thing to do next. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |

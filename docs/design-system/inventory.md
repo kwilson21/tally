@@ -29,7 +29,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Select | Custom chevron | Chips instead of selects | Not needed |
 | Checkbox, radio, toggle | Hidden peer input, focus ring | Chip (checkbox and radio) | Keep |
 | Status badges (paid, due, overdue, missed, future) | Word plus color | None yet | Later (bills, Phase 3) |
-| Progress bar (under, warning, over) | Three states | Bar in ProgressRow (two states, notch at the limit) | Keep |
+| Progress bar (under, warning, over) | Three states | Bar in ProgressRow (two states, a 4px bar with no limit marker, decision 46) | Keep |
 | Spinner | Three sizes | None | Adapt with #69 ("Saving…") |
 | Focus rings | `focus-visible:ring-2` only | Same rule | Keep |
 | Tooltip | Tap or hover, `aria-describedby` | HowLink instead | Not needed |
