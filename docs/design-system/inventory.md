@@ -5,7 +5,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 - **Keep:** Tally already has it or the spec needs it now; it goes in the catalog.
 - **Adapt:** the spec needs it; bring the original's details over in Illustrated ledger tokens, through the catalog.
 - **Later:** the spec needs it in a later phase; it enters the catalog with its feature.
-- **Not needed:** not in the spec, or the app would need custom JavaScript beyond Plaid Link, toast.js and money.js (CLAUDE.md). The catalog's `ds.js` (decision 44) only runs catalog controls, so it doesn't change these verdicts.
+- **Not needed:** not in the spec, or the app would need custom JavaScript beyond Plaid Link, toast.js and money.js (CLAUDE.md) that no issue asks for. #72 and #73 are Adapt because each already asks for its own allowed-JS decision. The catalog's `ds.js` (decision 44) only runs catalog controls, so it doesn't change these verdicts.
 
 ## Foundation and motion
 | Original | Intuitive details | Tally | Verdict |
@@ -67,7 +67,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Dialog (basic, form, danger) | Escape and backdrop close, focus trap, focus restored | BottomSheet (not modal; Cancel or backdrop) | Keep BottomSheet; a modal dialog needs JS, so not needed |
 | Dialog form variants | Hero amount, "optional" divider, compact category grid, rename suggestion chips | MoneyInput, edit panel | Keep; rename chips later (name suggestions, Phase 4) |
 | Toasts (success, error, info, undo) | Auto-dismiss 4s, above the mobile nav | toast.js | Keep; Undo comes with #70 |
-| Keyboard shortcuts modal | `?` opens it | None | Adapt with #72 |
+| Keyboard shortcuts modal | `?` opens it | None | Adapt with #72, which needs its own allowed-JS decision (a small `keyboard.js`, as #72 says); the list itself is a `<details>` that reads without it |
 | Split modal | Live "Remaining", submit disabled until it balances | None | Later (Phase 3; server-checked) |
 | Category create, edit, delete | Create and edit states | Settings disclosure rows | Keep |
 | Disconnect bank, danger zone | Confirm first | None | Later (Accounts) / Not needed |
@@ -80,7 +80,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Content spinner | Fades in over the list | None | Not needed |
 | Empty states (bills, targets, generic) | Action when there is one | None | Adapt (with Empty state above) |
 | Form validation, field shake | Shake the field for 400ms, not the message; `aria-invalid`, `role="alert"` | FormField error | Adapt with #69 |
-| Banners (reauth, offline, adblock) | Forced visible in the catalog | Demo banner | Offline with #73; reauth later; adblock not needed |
+| Banners (reauth, offline, adblock) | Forced visible in the catalog | Demo banner | Offline with #73, which needs its own allowed-JS decision (a small `offline.js`, as #73 says); reauth later; adblock not needed |
 | Form and budget errors | Inline, specific | FormField | Keep |
 | Uncategorized banner | Count and link | Band | Keep |
 | Picker loading and success check | Confirms the change | Toast, focus back to the row | Adapt with #71 (highlight) |
@@ -104,7 +104,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Filter bar (3) | Transactions filters and result count | Keep |
 | Plaid Link (4) | Link a bank, Fix connection | Later (Phase 2, #16, #21) |
 | Split (3) | Split a transaction | Later (Phase 3) |
-| Keyboard shortcuts (2) | Shortcuts | Adapt with #72 |
+| Keyboard shortcuts (2) | Shortcuts | Adapt with #72 (after its allowed-JS decision) |
 | Onboarding (6) | None | Not needed (not in spec) |
 | CSV import (4) | None | Not needed (Later list: statement upload) |
 | Select mode (4), reorder (2), organize (1) | Move up/down in Settings | Not needed |

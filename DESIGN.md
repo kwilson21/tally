@@ -79,7 +79,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 Principles, from the original app's integrity protocol:
 - **No broken windows.** If something looks clickable in the catalog, it works. If it can't work there, it doesn't look clickable.
 - **No fake interactivity.** Nothing in the catalog pretends to talk to the server. If a component needs the server, it's Visual in the catalog and works in a Flow.
-- **The real component, never a copy.** The catalog imports the component from `src/views/` and passes it typed fake data, so it can't drift from the app.
+- **The real component, never a copy.** The catalog imports the component from `src/views/` and passes it typed fake data, so it can't drift from the app. UI that is still assembled inside a route (for example the Transactions filters or Home's headline and status sentence) is extracted into `src/views/` first, in the PR that catalogs it; the catalog never copies its markup.
 - **The catalog doesn't make its own bugs.** A catalog-only bug that costs time and fixes nothing in the app means the process failed.
 
 Every component has exactly one tier, shown as a pill:
@@ -94,7 +94,7 @@ Every component has exactly one tier, shown as a pill:
 ## Process for a UI change (decision 43)
 1. **Design in the catalog.** Build or change the component there, at its tier, with fake data. A new screen starts with a generated study first (decisions 21, 35); a component starts here.
 2. **Audit** against this file: tokens only, type roles, 44px targets, focus-visible rings, status never color alone, and every swap announced.
-3. **Screenshots** of the catalog at 1280 and 390 (CI takes them), and the owner checks the catalog in a browser and signs off.
+3. **Screenshots** of the catalog at 1280 and 390, and the owner checks the catalog in a browser and signs off. CI screenshots only the pages listed in `PAGES` in `scripts/pr-body.mjs`, so every catalog and flow page is added there in the PR that adds it.
 4. **Use it in the app.** The app imports the same component, so there's nothing to copy.
 5. **E2E** for the critical flows.
 6. **The owner verifies** the app pages.
