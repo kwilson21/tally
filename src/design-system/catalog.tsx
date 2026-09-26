@@ -8,6 +8,7 @@ import { TallyMark, Wordmark } from "../views/brand";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { FormField } from "../views/form-field";
+import { HomeTop } from "../views/home-top";
 import {
 	BudgetDiagram,
 	CategoriesDiagram,
@@ -28,6 +29,8 @@ import {
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
 	EXCLUSIONS_EXAMPLE,
+	HOME_ROWS,
+	HOME_TOP,
 	MONEY_STATES,
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
@@ -50,6 +53,7 @@ const SECTIONS = [
 	["foundation", "Foundation"],
 	["brand", "Brand and icons"],
 	["shell", "Page shell"],
+	["home", "Home's top"],
 	["rows", "Rows"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
@@ -327,6 +331,93 @@ const ADJUST_SPEC: UseSpecText = {
 	words:
 		"Adjust · Done · Lower {name} to {amount} · Raise {name} to {amount} · {name} is at $0 · {name} is at the largest budget · Toast: {name} is {amount} a month · Announced: {name} is {amount} a month from {month} on. · At a limit, toast and announced: {name} is already $0 · {name} is already the largest budget.",
 };
+
+/**
+ * A phone's first screen: 390 wide inside its 1px border and 788 tall, which is 844 minus the 56px
+ * tab bar. What's below its edge is what a person scrolls to see. On a narrower screen it scrolls
+ * sideways in its column rather than shrinking, so the text wraps exactly as on a real phone.
+ */
+function PhoneFrame({ label, children }: { label: string; children?: Child }) {
+	// A picture of a screen, not a working one: one labelled image with nothing inside to Tab to.
+	return (
+		<div class="overflow-x-auto">
+			<div
+				role="img"
+				aria-label={label}
+				class="h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+			>
+				<div inert>
+					<p class="bg-band py-2 text-center text-sm text-muted">
+						Demo data. Nothing here is real.
+					</p>
+					<div class="px-5 pt-6">
+						<div class="mb-4">
+							<Wordmark />
+						</div>
+						{children}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/**
+ * A picture of part of a page: HomeTop draws the page's h1 and real links, so here it's one labelled
+ * image with nothing inside to Tab to, and the catalog keeps its own h1.
+ */
+function Picture({ label, children }: { label: string; children?: Child }) {
+	return (
+		<div role="img" aria-label={label} class="max-w-2xl">
+			<div inert>{children}</div>
+		</div>
+	);
+}
+
+/** Home's top and the Budget list under it, as Home will draw them (#92). */
+function HomeSketch({ band = true }: { band?: boolean }) {
+	return (
+		<>
+			<HomeTop {...HOME_TOP} demo band={band ? HOME_TOP.band : undefined} />
+			<h2 class="mt-8 font-serif text-3xl font-semibold">Budget</h2>
+			<ul class="mt-2 divide-y divide-rule">
+				{HOME_ROWS.map((row) => (
+					<ProgressRow {...row} />
+				))}
+			</ul>
+		</>
+	);
+}
+
+function HomeTopGroup() {
+	return (
+		<Group id="home" title="Home's top">
+			<Specimen
+				id="home-top"
+				title="HomeTop"
+				tier="visual"
+				components={["HomeTop"]}
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works (demo only) and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
+			>
+				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
+					<PhoneFrame label="Home on a phone's first screen, with the demo's numbers">
+						<HomeSketch />
+					</PhoneFrame>
+				</State>
+				<State label="Desktop: the top and the Budget list share one width, with no gap beside them">
+					<Picture label="Home's top and Budget list on desktop, one width">
+						<HomeSketch />
+					</Picture>
+				</State>
+				<State label="Nothing needs a category: no Band">
+					<Picture label="Home's top when nothing needs a category, with no Band">
+						<HomeTop {...HOME_TOP} demo band={undefined} />
+					</Picture>
+				</State>
+			</Specimen>
+		</Group>
+	);
+}
 
 function Rows() {
 	return (
@@ -625,6 +716,7 @@ export function Catalog() {
 			<Foundation />
 			<Brand />
 			<Shell />
+			<HomeTopGroup />
 			<Rows />
 			<Controls />
 			<Feedback />

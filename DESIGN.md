@@ -95,6 +95,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | ProgressRow | One category: icon, name, "spent of budget," and a 4px bar with no limit marker (decision 46); over budget, the bar is full and brick, with an alert icon and how much it's over in words ("$36 over"). In Adjust mode (#94) it adds a round − before the row and a round + after it, each a form that moves the budget to the next round $10; on a phone − takes the icon's place, and its bar redraws without replaying the fill. When the name and amount don't fit on one line, the amount moves under the name, breaking at "of" if it must, never inside a number. |
 | AdjustLink | "Adjust" beside Home's Budget heading, a terracotta text link that shows − and + on every budgeted row; in Adjust mode it says "Done". |
 | Band | The one tinted row per screen that links to the thing to do next. |
+| HomeTop | Home's top (#92, decision 46): the month as a small serif heading, then Safe to spend (the one thing, on a phone's first screen), the status sentence, How this works (demo only) and the Band. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |

@@ -134,6 +134,54 @@ export const ADJUST_ROWS = [
 	nudge: { href: `/budget/${i + 1}/nudge`, id: `ds-nudge-${i + 1}` },
 }));
 
+/** Home's top with the demo's numbers after a reset (#92), and Home's budget rows under it. */
+export const HOME_TOP = {
+	month: "September",
+	safeToSpendCents: 28300,
+	status: "Eating Out is $36 over. Everything else is on track.",
+	band: {
+		href: "/transactions?uncategorized=1",
+		text: "12 transactions need a category",
+	},
+};
+export const HOME_ROWS = [
+	{
+		name: "Groceries",
+		icon: "groceries",
+		color: "cat-blue",
+		spentCents: 41200,
+		budgetCents: 70000,
+	},
+	{
+		name: "Eating Out",
+		icon: "eating-out",
+		color: "cat-plum",
+		spentCents: 28600,
+		budgetCents: 25000,
+	},
+	{
+		name: "Gas",
+		icon: "gas",
+		color: "cat-slate",
+		spentCents: 18600,
+		budgetCents: 20000,
+	},
+	{
+		name: "Kids",
+		icon: "kids",
+		color: "cat-ochre",
+		spentCents: 21000,
+		budgetCents: 30000,
+	},
+	{
+		name: "Household",
+		icon: "household",
+		color: "cat-brown",
+		spentCents: 9500,
+		budgetCents: 25000,
+	},
+];
+
 /** The Band links to the demo's real "needs a category" list, which is what it says. */
 export const BAND = {
 	href: "/transactions?uncategorized=1",
