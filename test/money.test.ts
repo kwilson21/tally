@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-	centsToInput,
+	centsToAmount,
 	formatCents,
 	plaidAmountToCents,
 	toCents,
@@ -75,22 +75,19 @@ describe("formatCents (cents → display)", () => {
 	});
 });
 
-describe("centsToInput (cents → a form field's value)", () => {
+describe("centsToAmount (cents → the money input's text)", () => {
 	it.each([
-		[60000, "600"],
-		[61250, "612.50"],
+		[70000, "700.00"],
+		[61240, "612.40"],
 		[5, "0.05"],
-		[0, "0"],
-		[123456789, "1234567.89"],
-		[-5, "-0.05"],
-		[-61250, "-612.50"],
+		[0, "0.00"],
 	])("%i → %s", (cents, text) => {
-		expect(centsToInput(cents)).toBe(text);
-		// What the field shows reads back as the same cents.
+		expect(centsToAmount(cents)).toBe(text);
 		expect(toCents(text)).toBe(cents);
 	});
 
-	it("refuses anything that isn't integer cents", () => {
-		expect(() => centsToInput(12.5)).toThrow();
+	it("refuses anything that isn't a non-negative integer", () => {
+		expect(() => centsToAmount(-1)).toThrow();
+		expect(() => centsToAmount(1.5)).toThrow();
 	});
 });

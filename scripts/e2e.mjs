@@ -63,12 +63,12 @@ await page.locator('a[href="/budget/1"]').first().click();
 const budget = page.getByLabel(/^Budget from /);
 await budget.waitFor();
 await budget.fill("650");
-await page.getByRole("button", { name: "Add $1" }).click();
-await page.getByRole("button", { name: "Add 1 cent" }).click();
+await page.getByRole("button", { name: "Increase by $1" }).click();
+await page.getByRole("button", { name: "Increase by 1 cent" }).click();
 assert.equal(await budget.inputValue(), "651.01");
 // The round-up chip appears once there are cents.
-await page.getByRole("button", { name: "Round up to $652" }).click();
-assert.equal(await budget.inputValue(), "652");
+await page.getByRole("button", { name: "Round to $652" }).click();
+assert.equal(await budget.inputValue(), "652.00");
 await page.getByRole("button", { name: "Save" }).click();
 await page.locator("#toasts").getByText("Saved the Groceries budget").waitFor();
 await page.getByText(/of \$652/).waitFor();

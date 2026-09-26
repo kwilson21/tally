@@ -14,13 +14,9 @@ export function fieldCents(text) {
 	return Number(whole || "0") * 100 + Number(fraction.padEnd(2, "0"));
 }
 
-/** Integer cents as the field shows them: "612.40", "612", "0.05". */
+/** Integer cents as the field shows them, always with cents, as in the original: "612.40", "612.00". */
 export function showCents(cents) {
-	const whole = Math.floor(cents / 100);
-	const rest = cents % 100;
-	return rest === 0
-		? String(whole)
-		: `${whole}.${String(rest).padStart(2, "0")}`;
+	return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
 
 /** The field after adding `delta` cents, never below $0. Text it can't read is left alone. */
@@ -54,7 +50,8 @@ function update(root) {
 	if (round) {
 		const up = roundedUp(input.value);
 		round.hidden = up === null;
-		if (up !== null) round.textContent = `Round up to $${up}`;
+		if (up !== null)
+			round.textContent = `Round to $${Math.round(fieldCents(up) / 100)}`;
 	}
 	for (const chip of root.querySelectorAll("[data-set]")) {
 		chip.setAttribute(

@@ -88,13 +88,13 @@ describe("GET /budget/:id", () => {
 		// Its own heading id: Home's Budget heading keeps "budget-title".
 		expect(html).toMatch(/<h2 id="budget-sheet-title"[^>]*>Groceries<\/h2>/);
 		expect(html.match(/id="budget-title"/g)).toHaveLength(1);
-		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="700"/);
+		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="700.00"/);
 		expect(html).toMatch(/<input[^>]*inputmode="decimal"/);
 		for (const [delta, label] of <[string, string][]>[
-			["-100", "Take away $1"],
-			["-1", "Take away 1 cent"],
-			["1", "Add 1 cent"],
-			["100", "Add $1"],
+			["-100", "Decrease by $1"],
+			["-1", "Decrease by 1 cent"],
+			["1", "Increase by 1 cent"],
+			["100", "Increase by $1"],
 		]) {
 			expect(html).toMatch(
 				new RegExp(

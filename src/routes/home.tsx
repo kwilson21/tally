@@ -10,7 +10,7 @@ import {
 	setBudget,
 } from "../db/budgets";
 import { loadMonth } from "../db/month";
-import { centsToInput, formatCents } from "../money";
+import { centsToAmount, formatCents } from "../money";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { CategoryIcon } from "../views/category";
@@ -300,7 +300,7 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 				value={
 					category.budgetCents === null
 						? ""
-						: centsToInput(category.budgetCents)
+						: centsToAmount(category.budgetCents)
 				}
 				spentCents={spent(category.id)}
 				lastMonthCents={lastMonth}

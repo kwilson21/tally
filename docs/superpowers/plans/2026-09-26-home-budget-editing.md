@@ -18,10 +18,11 @@ A budget is changed where it's seen: tap a budget row on Home. The amount field 
    - **Errors:** "Enter a dollar amount, like 250 or 250.50." and "Keep the budget to $1,000,000 a month or less." Both come back in the sheet with `role="alert"`.
    - **No budget removal yet:** the field is required (the Later list has removing a budget).
 3. **MoneyInput** (`src/views/money-input.tsx`) and `public/js/money.js`:
-   - **The field:** `$`, then a text field with `inputmode="decimal"`.
-   - **Nudges:** a row of four 44px buttons under the field, **−$1 · −1¢ · +1¢ · +$1**. The original's cent arrows sat inside the field, below Tally's 44px target rule, so they move into this row.
+   - **Layout:** the owner's hero amount from the original app. A round −$1 button, then a big amount field (`$`, bold, always with cents: "700.00") with ▲▼ cent arrows stacked inside its right edge, then a round +$1 button.
+     - The first version swapped this for a row of four 44px buttons to meet the target-size rule.
+     - The owner asked for the original design back (2026-09-26), so the original is kept.
    - **Chips:**
-     - "Round up to $251" shows only when the amount has cents.
+     - "Round to $251" shows only when the amount has cents.
      - "Last month: $612.40" shows what the category spent last month (counted spending, not income), only when that's above $0. It dims when the field already holds it.
    - **Rules:** typing stops at two decimals, and the minus buttons are disabled at $0.
    - **Without JavaScript:** the buttons and chips stay hidden (`html.js` turns them on), and the field still saves.

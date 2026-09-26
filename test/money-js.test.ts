@@ -33,12 +33,12 @@ describe("fieldCents (the field's text → cents, or null)", () => {
 	});
 });
 
-describe("showCents (cents → the field's text)", () => {
+describe("showCents (cents → the field's text, always with cents, as in the original)", () => {
 	it.each([
 		[61240, "612.40"],
-		[61200, "612"],
+		[61200, "612.00"],
 		[5, "0.05"],
-		[0, "0"],
+		[0, "0.00"],
 	])("%i → %j", (cents, text) => {
 		expect(showCents(cents)).toBe(text);
 	});
@@ -55,12 +55,12 @@ describe("nudged", () => {
 	});
 
 	it("never goes below $0", () => {
-		expect(nudged("0.50", -100)).toBe("0");
-		expect(nudged("0", -1)).toBe("0");
+		expect(nudged("0.50", -100)).toBe("0.00");
+		expect(nudged("0", -1)).toBe("0.00");
 	});
 
 	it("starts from $0 when the field is empty", () => {
-		expect(nudged("", 100)).toBe("1");
+		expect(nudged("", 100)).toBe("1.00");
 	});
 
 	it("leaves text it can't read alone", () => {
@@ -70,8 +70,8 @@ describe("nudged", () => {
 
 describe("roundedUp", () => {
 	it("goes up to the next whole dollar when there are cents", () => {
-		expect(roundedUp("250.01")).toBe("251");
-		expect(roundedUp("612.40")).toBe("613");
+		expect(roundedUp("250.01")).toBe("251.00");
+		expect(roundedUp("612.40")).toBe("613.00");
 	});
 
 	it("is null when there's nothing to round", () => {
