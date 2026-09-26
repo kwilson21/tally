@@ -2,6 +2,7 @@
 // by seeing, not reading (DESIGN.md). Prototypes live only here while a proposal is open; an
 // accepted one moves into the real component in its own PR, and a decided one leaves this page
 // for the Decided list.
+import { NudgeOptions } from "./proposal-nudges";
 import { Specimen } from "./specimen";
 
 // What the owner decided on 2026-09-26 (decision 46), and the issue each ships in.
@@ -53,11 +54,13 @@ export function Proposals() {
 					Open
 				</h2>
 				<Specimen
-					id="open-empty"
-					title="Nothing waiting"
+					id="p6"
+					title="P6 · Nudge buttons on Home's budget rows"
 					tier="visual"
-					sentence="Every proposal so far is decided. The next one appears here, next to today's version, before anything is built."
-				/>
+					sentence="Your request: adjust a budget right where you see it, as Mint did. Three layouts; the buttons here are pictures and do nothing."
+				>
+					<NudgeOptions />
+				</Specimen>
 			</section>
 
 			<section aria-labelledby="decided-title" class="mt-12">
