@@ -145,6 +145,21 @@ describe("GET /design-system in the demo", () => {
 		expect(section).not.toMatch(/href="\/(\?adjust=1)?"/);
 	});
 
+	it("describes each picture of Home's top in words, for screen readers (#92)", async () => {
+		const { html } = await get("/design-system");
+		const labels = [...html.matchAll(/role="img" aria-label="([^"]*)"/g)]
+			.map((m) => m[1] ?? "")
+			.filter((l) => l.includes("Home"));
+		expect(labels).toHaveLength(3);
+		for (const label of labels) {
+			expect(label).toContain("Safe to spend $283");
+			expect(label).toContain("Eating Out is $36 over");
+		}
+		expect(labels[0]).toContain("12 transactions need a category");
+		expect(labels[0]).toContain("Groceries $412 of $700");
+		expect(labels[2]).not.toContain("need a category");
+	});
+
 	it("draws the bottom sheet on its own page", async () => {
 		const { html } = await get("/design-system/bottom-sheet");
 		expect(html).toMatch(

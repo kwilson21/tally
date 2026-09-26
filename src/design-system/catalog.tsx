@@ -1,6 +1,7 @@
 // The catalog's content (decisions 42–44): every component from src/views/, imported and given
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
+import { formatCents } from "../money";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
@@ -374,6 +375,27 @@ function Picture({ label, children }: { label: string; children?: Child }) {
 	);
 }
 
+const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
+
+/**
+ * What a picture of Home shows, in words, built from the same data it draws, so a screen reader
+ * hears the content being compared rather than only the picture's name.
+ */
+function describeHome({ band = true, rows = true } = {}) {
+	const parts = [
+		HOME_TOP.month,
+		`Safe to spend ${whole(HOME_TOP.safeToSpendCents)}`,
+		HOME_TOP.status,
+		"How this works",
+		...(band ? [HOME_TOP.band.text] : []),
+	];
+	if (rows)
+		parts.push(
+			`Budget: ${HOME_ROWS.map((r) => `${r.name} ${whole(r.spentCents)} of ${whole(r.budgetCents)}`).join(", ")}`,
+		);
+	return parts.join(". ").replaceAll("..", ".");
+}
+
 /** Home's top and the Budget list under it, as Home will draw them (#92). */
 function HomeSketch({ band = true }: { band?: boolean }) {
 	return (
@@ -400,17 +422,23 @@ function HomeTopGroup() {
 				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works (demo only) and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
-					<PhoneFrame label="Home on a phone's first screen, with the demo's numbers">
+					<PhoneFrame
+						label={`Home on a phone's first screen, top to bottom: ${describeHome()}`}
+					>
 						<HomeSketch />
 					</PhoneFrame>
 				</State>
 				<State label="Desktop: the top and the Budget list share one width, with no gap beside them">
-					<Picture label="Home's top and Budget list on desktop, one width">
+					<Picture
+						label={`Home on desktop, top and Budget list at one width: ${describeHome()}`}
+					>
 						<HomeSketch />
 					</Picture>
 				</State>
 				<State label="Nothing needs a category: no Band">
-					<Picture label="Home's top when nothing needs a category, with no Band">
+					<Picture
+						label={`Home's top when nothing needs a category, with no Band: ${describeHome({ band: false, rows: false })}`}
+					>
 						<HomeTop {...HOME_TOP} demo band={undefined} />
 					</Picture>
 				</State>
