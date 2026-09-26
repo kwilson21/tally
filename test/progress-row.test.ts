@@ -18,13 +18,21 @@ describe("ProgressRow", () => {
 		expect(html).toContain('<span class="sr-only">, change the budget</span>');
 	});
 
-	it("draws the limit notch at the icon stroke width", async () => {
-		const notch = (await row(18600, 20000)).match(/<line[^>]*>/)?.[0];
-		expect(notch).toContain('stroke-width="1.75"');
+	it("draws a 4px bar with no limit marker (decision 46)", async () => {
+		for (const html of [await row(18600, 20000), await row(28600, 25000)]) {
+			expect(html).toMatch(/<svg class="mt-2 h-1 w-full"/);
+			expect(html).not.toContain("<line");
+		}
 	});
 
-	it("says over budget in words, not only color", async () => {
-		expect(await row(18600, 20000)).not.toContain("over budget");
-		expect(await row(28600, 25000)).toContain("over budget");
+	it("over budget, the bar is full and brick", async () => {
+		const html = await row(28600, 25000);
+		expect(html).toMatch(/<rect width="100%"[^>]*class="bar-fill fill-over"/);
+	});
+
+	it("says by how much it's over, in words, not only color", async () => {
+		expect(await row(18600, 20000)).not.toContain(" over");
+		const html = await row(28600, 25000);
+		expect(html).toMatch(/\$36 over<span class="sr-only"> budget<\/span>/);
 	});
 });

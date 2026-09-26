@@ -40,7 +40,11 @@ describe("GET / with the demo seed", () => {
 		const { html } = await home();
 		expect(html).toMatch(/\$412\s+of\s+\$700/);
 		expect(html).toMatch(/\$286\s+of\s+\$250/);
-		expect(html.match(/over budget/g)?.length).toBe(1);
+		// Eating Out is $36 over; its words say by how much (decision 46).
+		expect(
+			html.match(/ over<span class="sr-only"> budget<\/span>/g)?.length,
+		).toBe(1);
+		expect(html).toContain("$36 over");
 		expect(html).toContain("Uncategorized");
 		expect(html).toContain("$228");
 	});

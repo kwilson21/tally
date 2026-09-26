@@ -41,7 +41,7 @@ function Wrap({
 	);
 }
 
-/** One budget category: icon, name, "spent of budget", and a bar with a notch at the limit. */
+/** One budget category: icon, name, "spent of budget", and a 4px bar; over budget, it's full and says by how much. */
 export function ProgressRow({
 	name,
 	icon,
@@ -53,7 +53,10 @@ export function ProgressRow({
 	autofocus,
 }: Props) {
 	const over = spentCents > budgetCents;
-	const { fillPct, limitPct } = barGeometry(spentCents, budgetCents);
+	const { fillPct } = barGeometry(spentCents, budgetCents);
+	// Cents only when there are some, as the status sentence says it: "$36 over", "$36.50 over".
+	const overBy = spentCents - budgetCents;
+	const overText = formatCents(overBy, { wholeDollars: overBy % 100 === 0 });
 	return (
 		<li>
 			<Wrap href={href} autofocus={autofocus} attrs={attrs}>
@@ -66,27 +69,20 @@ export function ProgressRow({
 						</span>
 					</div>
 					{/* SVG, not a styled div: the CSP forbids style attributes, and SVG width attributes aren't CSS. */}
-					<svg class="mt-2 h-2 w-full" aria-hidden="true">
-						<rect width="100%" height="100%" rx="4" class="fill-rule" />
+					{/* 4px, no limit marker (decision 46): over budget is a full brick bar plus the words. */}
+					<svg class="mt-2 h-1 w-full" aria-hidden="true">
+						<rect width="100%" height="100%" rx="2" class="fill-rule" />
 						<rect
 							width={`${fillPct}%`}
 							height="100%"
-							rx="4"
+							rx="2"
 							class={`bar-fill ${over ? "fill-over" : "fill-ok"}`}
-						/>
-						<line
-							x1={`${limitPct}%`}
-							x2={`${limitPct}%`}
-							y1="0"
-							y2="100%"
-							class="stroke-ink"
-							stroke-width="1.75"
 						/>
 					</svg>
 					{over && (
 						<p class="mt-1 flex items-center justify-end gap-1 text-over">
 							<Icon name="alert" class="size-5" />
-							over budget
+							{overText} over<span class="sr-only"> budget</span>
 						</p>
 					)}
 					{href && <span class="sr-only">, change the budget</span>}
