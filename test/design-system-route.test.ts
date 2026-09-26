@@ -134,6 +134,11 @@ describe("GET /design-system in the demo", () => {
 			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
 		}
 		expect(section).toContain('aria-label="Kids is at $0"');
+		expect(section).toContain('aria-label="Rent is at the largest budget"');
+		// Each adjusting row is a link, between its − and +, as on Home.
+		expect(section).toMatch(
+			/id="ds-nudge-1-down"[\s\S]*?<a href="\/design-system\/bottom-sheet"[\s\S]*?id="ds-nudge-1-up"/,
+		);
 		// Adjust and Done move between the two states here; they don't leave for Home.
 		expect(section).toContain('href="#adjust-on"');
 		expect(section).toContain('href="#adjust-off"');

@@ -323,7 +323,7 @@ const ADJUST_SPEC: UseSpecText = {
 	motion:
 		"None added. In Adjust mode the bars don't replay their fill on each tap: they redraw at the new width at once, so the list stays still. Day to day they fill on load as before, and reduced motion shows the end state.",
 	edges:
-		"$0: − is off. $1,000,000: + is off. Cents ($712.40): − goes to $710 and + to $720. Over budget: the row stays brick until a tap takes the budget past the spending. A long name, or a narrow phone: the amount moves under the name, never broken. No budgeted categories: no Adjust link. Not budgeted categories keep “Add a budget” and get no buttons; an archived category with spending this month gets none either. Slow network: taps queue and apply in order. No JavaScript: Adjust is a link to Home in Adjust mode, and each button is a form that saves and comes back to it.",
+		"$0: − is off. $1,000,000: + is off. Cents ($712.40): − goes to $710 and + to $720. Over budget: the row stays brick until a tap takes the budget past the spending. A long name, or a narrow phone: the amount moves under the name, and if it still doesn't fit (“$10,000 of $1,000,000” at 320px) it breaks at “of”, never inside a number. No budgeted categories: no Adjust link. Not budgeted categories keep “Add a budget” and get no buttons; an archived category with spending this month gets none either. Slow network: taps queue and apply in order. No JavaScript: Adjust is a link to Home in Adjust mode, and each button is a form that saves and comes back to it.",
 	words:
 		"Adjust · Done · Lower {name} to {amount} · Raise {name} to {amount} · {name} is at $0 · {name} is at the largest budget · Toast: {name} is {amount} a month · Announced: {name} is {amount} a month from {month} on.",
 };
@@ -361,7 +361,7 @@ function Rows() {
 						))}
 					</ul>
 				</State>
-				<State label="Adjusting: a round amount, one between round $10s, over budget, and $0 (− is off)">
+				<State label="Adjusting: a round amount, one between round $10s, over budget, $0 (− is off) and the largest budget (+ is off). Each row opens the sheet page">
 					<BudgetHeading adjusting={true} />
 					<ul class="max-w-xl divide-y divide-rule">
 						{ADJUST_ROWS.map((row) => (

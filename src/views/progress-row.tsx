@@ -125,10 +125,11 @@ export function ProgressRow({
 					<CategoryIcon icon={icon} color={color} />
 				)}
 				<div class="min-w-0 flex-1">
-					{/* The amount never breaks; when name and amount don't fit on one line, it moves under the name. */}
+					{/* When name and amount don't fit on one line, the amount moves under the name; if it still
+					    doesn't fit (a narrow phone in Adjust mode), it breaks at "of", never inside a number. */}
 					<div class="flex flex-wrap items-baseline justify-between gap-x-3">
 						<span class="text-lg">{name}</span>
-						<span class="ml-auto whitespace-nowrap text-lg">
+						<span class="ml-auto text-right text-lg">
 							{whole(spentCents)} of {whole(budgetCents)}
 						</span>
 					</div>
