@@ -225,7 +225,7 @@ Seed dates are relative to the current month, so the demo always looks current. 
 The "How Tally works" page has two parts:
 
 1. **Architecture:** the system diagram (built as SVG) and the one-sentence explanation of each part (§4).
-2. **One section per feature (all 8),** each with the feature's one-sentence explanation, its rule in plain words (taken from §6 and §6.1), and a small worked example using the demo's own numbers. For example: "Safe to spend = $1,850 budget − $424 spent − $142 overdue bill."
+2. **One section per feature (all 8),** each with the feature's one-sentence explanation, its rule in plain words (taken from §6 and §6.1), a small diagram of the rule, and a small worked example using the demo's own numbers. Code draws the diagram from the same numbers as the example (#61), as inline SVG with a title and description for screen readers. For example: "Safe to spend = $1,850 budget − $424 spent − $142 overdue bill."
 
 Every screen has a small "How this works" link to its feature's section. In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
 

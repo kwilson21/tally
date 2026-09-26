@@ -1,5 +1,6 @@
 import type { JevInput } from "../ai/categorize";
 import type { Decision } from "../ai/decide";
+import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern } from "../transactions/filters";
 
@@ -321,17 +322,25 @@ export async function saveJevResult(
 }
 
 /** How many of a month's transactions are excluded (split parents aside), for How Tally works. */
-export async function excludedCount(
+/**
+ * This month's excluded transactions by why (How Tally works, spec §9): a person's choice when a
+ * person excluded it (even if it's also flagged) or it has no flag; otherwise its flag, transfer
+ * first.
+ */
+export async function excludedBreakdown(
 	db: D1Database,
 	month: string,
-): Promise<number> {
+): Promise<ExcludedBreakdown> {
 	const row = await db
 		.prepare(
-			"SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0",
+			`SELECT COALESCE(SUM(NOT person AND flag_transfer = 1), 0) AS transfer,
+				COALESCE(SUM(NOT person AND flag_transfer = 0 AND flag_reimbursement = 1), 0) AS reimbursement,
+				COALESCE(SUM(person OR (flag_transfer = 0 AND flag_reimbursement = 0)), 0) AS byPerson
+			FROM (SELECT *, COALESCE(excluded_source = 'user', 0) AS person FROM transactions) WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0`,
 		)
 		.bind(month)
-		.first<{ n: number }>();
-	return row?.n ?? 0;
+		.first<ExcludedBreakdown>();
+	return row ?? { transfer: 0, reimbursement: 0, byPerson: 0 };
 }
 
 /**
@@ -350,6 +359,8 @@ export async function monthCounts(
 	unsure: number;
 	noneFit: number;
 	notYetAsked: number;
+	/** Income with no category: it needs none, so it isn't waiting. */
+	income: number;
 }> {
 	const row = await db
 		.prepare(
@@ -360,7 +371,8 @@ export async function monthCounts(
 				COALESCE(SUM(t.category_source = 'jev'), 0) AS jev,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NOT NULL), 0) AS unsure,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NULL), 0) AS noneFit,
-				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL), 0) AS notYetAsked
+				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL), 0) AS notYetAsked,
+				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income
 			FROM transactions t
 			WHERE substr(t.date, 1, 7) = ? AND t.excluded = 0 AND t.is_split = 0`,
 		)
@@ -374,6 +386,7 @@ export async function monthCounts(
 			unsure: number;
 			noneFit: number;
 			notYetAsked: number;
+			income: number;
 		}>();
 	return (
 		row ?? {
@@ -385,6 +398,7 @@ export async function monthCounts(
 			unsure: 0,
 			noneFit: 0,
 			notYetAsked: 0,
+			income: 0,
 		}
 	);
 }

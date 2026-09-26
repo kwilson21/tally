@@ -52,6 +52,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | ThingsToTry | The demo's bordered "New here? Things to try" block at the top of Home: three links to where each thing is done, plus How Tally works. |
 | HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
 | SystemDiagram | The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers. |
+| BudgetDiagram, TransactionsDiagram, ExclusionsDiagram, CategoriesDiagram | How Tally works' section diagrams (#61), drawn from the same numbers as each worked example: boxes and arrows for Budget, Transactions and Categories; one bar for Excluding. Ink, muted and rule only, plus ok (or over) on the safe-to-spend box, always with its words. A dashed outline means "not counted" or "not decided yet". |
 
 ## Patterns
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.

@@ -31,11 +31,36 @@ export function transactionsExample(c: {
 	return `This month has ${plural(c.counted, "counted transaction", "counted transactions")}, and ${needs}.`;
 }
 
-export function exclusionsExample(excluded: number): string {
-	if (excluded === 0) return "Nothing is excluded this month.";
-	return excluded === 1
-		? "This month, 1 transaction is excluded, so it doesn't count toward spending or safe to spend."
-		: `This month, ${excluded} transactions are excluded, so they don't count toward spending or safe to spend.`;
+/** "a, b and c": a list as a sentence says it. */
+const listed = (items: string[]) =>
+	items.length < 2
+		? items.join("")
+		: `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
+/** This month's excluded transactions by why: flagged transfer, flagged reimbursement, or a person's choice. */
+export type ExcludedBreakdown = {
+	transfer: number;
+	reimbursement: number;
+	byPerson: number;
+};
+
+export const excludedTotal = (b: ExcludedBreakdown) =>
+	b.transfer + b.reimbursement + b.byPerson;
+
+export function exclusionsExample(b: ExcludedBreakdown): string {
+	const total = excludedTotal(b);
+	if (total === 0) return "Nothing is excluded this month.";
+	const kinds = listed(
+		[
+			b.transfer > 0 && plural(b.transfer, "transfer", "transfers"),
+			b.reimbursement > 0 &&
+				plural(b.reimbursement, "reimbursement", "reimbursements"),
+			b.byPerson > 0 && `${b.byPerson} excluded by a person`,
+		].filter((k): k is string => Boolean(k)),
+	);
+	return total === 1
+		? `This month, 1 transaction is excluded (${kinds}), so it doesn't count toward spending or safe to spend.`
+		: `This month, ${total} transactions are excluded (${kinds}), so they don't count toward spending or safe to spend.`;
 }
 
 export function categorizationExample(c: {
@@ -48,6 +73,8 @@ export function categorizationExample(c: {
 	noneFit: number;
 	/** Needs a category and Jev hasn't been asked yet. */
 	notYetAsked: number;
+	/** Income with no category: it needs none. */
+	income: number;
 }): string {
 	const parts: string[] = [];
 	if (c.jev > 0) {
@@ -73,6 +100,10 @@ export function categorizationExample(c: {
 	if (c.user > 0)
 		parts.push(
 			`${c.user} ${c.user === 1 ? "was" : "were"} chosen by a person.`,
+		);
+	if (c.income > 0)
+		parts.push(
+			`${c.income} ${c.income === 1 ? "is" : "are"} income, which needs no category.`,
 		);
 	if (parts.length === 0) return "Nothing has been categorized yet this month.";
 	return `This month, ${parts.join(" ")}`;

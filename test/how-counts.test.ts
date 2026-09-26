@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	excludedBreakdown,
 	monthCounts,
 	needsCategoryCount,
 	saveEdit,
@@ -46,7 +47,9 @@ describe("monthCounts", () => {
 			unsure: 0,
 			noneFit: 0,
 			notYetAsked: 12,
+			income: await countWhere("category_id IS NULL AND flag_income = 1"),
 		});
+		expect(counts.income).toBeGreaterThan(0);
 		expect(counts.needsCategory).toBe(12);
 		expect(counts.jev).toBeGreaterThan(0);
 	});
@@ -92,5 +95,59 @@ describe("monthCounts", () => {
 			noneFit: 1,
 			notYetAsked: 8,
 		});
+	});
+});
+
+describe("excludedBreakdown", () => {
+	const exclude = (rawName: string, flags: string) =>
+		db
+			.prepare(
+				`UPDATE transactions SET excluded = 1, ${flags} WHERE raw_name = ? AND substr(date, 1, 7) = ?`,
+			)
+			.bind(rawName, MONTH)
+			.run();
+
+	it("splits this month's excluded transactions by why: a transfer, a reimbursement, or a person", async () => {
+		const before = await excludedBreakdown(db, MONTH);
+		await exclude(
+			"SQ *FARMERS MKT",
+			"flag_transfer = 1, flag_reimbursement = 1",
+		);
+		await exclude(
+			"VENMO *J RIVERA",
+			"flag_transfer = 0, flag_reimbursement = 1",
+		);
+		await exclude(
+			"POS 4417 CITY PARKING",
+			"flag_transfer = 0, flag_reimbursement = 0",
+		);
+		const n = async (rawName: string) =>
+			(
+				await db
+					.prepare(
+						"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = ? AND substr(date, 1, 7) = ? AND is_split = 0",
+					)
+					.bind(rawName, MONTH)
+					.first<{ n: number }>()
+			)?.n ?? 0;
+		// Both flags count once, as a transfer.
+		expect(await excludedBreakdown(db, MONTH)).toEqual({
+			transfer: before.transfer + (await n("SQ *FARMERS MKT")),
+			reimbursement: before.reimbursement + (await n("VENMO *J RIVERA")),
+			byPerson: before.byPerson + (await n("POS 4417 CITY PARKING")),
+		});
+	});
+
+	it("counts a flagged transaction a person excluded as the person's choice", async () => {
+		const before = await excludedBreakdown(db, MONTH);
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user', flag_transfer = 1 WHERE raw_name = 'POS 4417 CITY PARKING' AND substr(date, 1, 7) = ?",
+			)
+			.bind(MONTH)
+			.run();
+		const after = await excludedBreakdown(db, MONTH);
+		expect(after.transfer).toBe(before.transfer);
+		expect(after.byPerson).toBeGreaterThan(before.byPerson);
 	});
 });

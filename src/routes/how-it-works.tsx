@@ -4,14 +4,21 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { summarizeMonth } from "../budget";
 import { todayUtc } from "../dates";
 import { loadMonth } from "../db/month";
-import { excludedCount, monthCounts } from "../db/transactions";
+import { excludedBreakdown, monthCounts } from "../db/transactions";
 import {
 	budgetExample,
 	categorizationExample,
+	excludedTotal,
 	exclusionsExample,
 	transactionsExample,
 } from "../how-it-works/examples";
 import { TallyMark } from "../views/brand";
+import {
+	BudgetDiagram,
+	CategoriesDiagram,
+	ExclusionsDiagram,
+	TransactionsDiagram,
+} from "../views/how-diagrams";
 import { Layout } from "../views/layout";
 import { SystemDiagram } from "../views/system-diagram";
 
@@ -79,6 +86,11 @@ function Section({
 	);
 }
 
+/** A section's diagram, drawn from the same numbers as its worked example. */
+function Diagram({ children }: { children?: Child }) {
+	return <div class="mt-4">{children}</div>;
+}
+
 /** A worked example: the rule applied to the demo's own numbers. */
 function Example({ children }: { children?: Child }) {
 	return (
@@ -97,7 +109,7 @@ howItWorks.get("/how-it-works", async (c) => {
 	const [data, counts, excluded] = await Promise.all([
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
-		excludedCount(c.env.DB, month),
+		excludedBreakdown(c.env.DB, month),
 	]);
 	// Bills arrive in Phase 3; until then nothing is set aside for them, as on Home.
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents: 0 });
@@ -156,6 +168,9 @@ howItWorks.get("/how-it-works", async (c) => {
 							that are due or overdue and not yet paid.
 						</li>
 					</ul>
+					<Diagram>
+						<BudgetDiagram {...summary} />
+					</Diagram>
 					<Example>
 						{budgetExample(summary)} Bills that are due or overdue are also set
 						aside; the demo adds bills in a later phase.
@@ -180,6 +195,13 @@ howItWorks.get("/how-it-works", async (c) => {
 							Search matches the merchant name, the bank's name, and the note.
 						</li>
 					</ul>
+					<Diagram>
+						<TransactionsDiagram
+							counted={counts.counted}
+							excluded={excludedTotal(excluded)}
+							needsCategory={counts.needsCategory}
+						/>
+					</Diagram>
 					<Example>{transactionsExample(counts)}</Example>
 				</Section>
 
@@ -204,6 +226,9 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>
+					<Diagram>
+						<ExclusionsDiagram counted={counts.counted} breakdown={excluded} />
+					</Diagram>
 					<Example>{exclusionsExample(excluded)}</Example>
 				</Section>
 
@@ -225,6 +250,16 @@ howItWorks.get("/how-it-works", async (c) => {
 							fit; anything else waits for a person.
 						</li>
 					</ol>
+					<Diagram>
+						<CategoriesDiagram
+							user={counts.user}
+							merchantRule={counts.merchantRule}
+							jev={counts.jev}
+							waiting={counts.needsCategory}
+							income={counts.income}
+							threshold={threshold}
+						/>
+					</Diagram>
 					<Example>{categorizationExample(counts)}</Example>
 				</Section>
 
