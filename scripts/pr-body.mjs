@@ -23,6 +23,9 @@ export const PAGES = [
 	{ name: "settings-edit", path: "/settings?open=3" },
 	{ name: "more", path: "/more" },
 	{ name: "how-it-works", path: "/how-it-works" },
+	// The design system catalog (#76) and the pages it links to; every catalog page goes here.
+	{ name: "design-system", path: "/design-system" },
+	{ name: "design-system-bottom-sheet", path: "/design-system/bottom-sheet" },
 ];
 
 export const VIEWPORTS = [

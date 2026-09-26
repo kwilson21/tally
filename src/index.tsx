@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { categorizePending } from "./categorize-pending";
 import { todayUtc } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
+import { designSystem } from "./routes/design-system";
 import { destinations } from "./routes/destinations";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
@@ -21,6 +22,7 @@ app.route("/", howItWorks);
 app.route("/", transactions);
 app.route("/", settings);
 app.route("/", destinations);
+app.route("/", designSystem);
 
 export default {
 	fetch: app.fetch,

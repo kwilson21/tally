@@ -3,7 +3,11 @@
 	"compilerOptions": {
 		"moduleResolution": "bundler",
 		"allowJs": true,
-		"types": ["@cloudflare/vitest-plugin/types", "../worker-configuration.d.ts"]
+		"types": [
+			"@cloudflare/vitest-plugin/types",
+			"../worker-configuration.d.ts",
+			"vite/client"
+		]
 	},
 	"include": [
 		"./**/*.ts",

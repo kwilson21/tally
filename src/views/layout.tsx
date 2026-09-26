@@ -6,6 +6,8 @@ type LayoutProps = {
 	title?: string;
 	active?: NavKey;
 	demo: boolean;
+	/** Extra scripts for this page only (the catalog's ds.js, decision 44). */
+	scripts?: string[];
 	children?: Child;
 };
 
@@ -13,6 +15,7 @@ export function Layout({
 	title = "Tally",
 	active,
 	demo,
+	scripts = [],
 	children,
 }: LayoutProps) {
 	return (
@@ -27,6 +30,9 @@ export function Layout({
 				<script src="/js/toast.js" defer></script>
 				{/* The money input's nudges and chips (decision 39); module scripts are deferred. */}
 				<script src="/js/money.js" type="module"></script>
+				{scripts.map((src) => (
+					<script src={src} defer></script>
+				))}
 			</head>
 			<body class="min-h-screen">
 				<a
