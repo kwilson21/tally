@@ -39,6 +39,17 @@ describe("GET /design-system/proposals", () => {
 		);
 	});
 
+	it("shows pictures, not live controls: the phone frames and P3's money input are inert", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(html.match(/role="img"[^>]*>\s*<div inert/g)?.length).toBe(2);
+		expect(html).toMatch(/<div inert[^>]*>\s*<div data-money/);
+	});
+
+	it("draws each phone frame a real phone's width: 390 inside a 1px border", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(html.match(/w-\[392px\] shrink-0/g)?.length).toBe(2);
+	});
+
 	it("is linked from the catalog", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain('href="/design-system/proposals"');

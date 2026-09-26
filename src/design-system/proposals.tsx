@@ -100,26 +100,30 @@ function Compare({
 }
 
 /**
- * A phone's first screen: 390 wide, and 788 tall, which is 844 minus the 56px tab bar. Anything
- * below its edge is what a person has to scroll to see.
+ * A phone's first screen: exactly 390 wide inside its 1px border, and 788 tall, which is 844 minus
+ * the 56px tab bar. Anything below its edge is what a person has to scroll to see. On a screen
+ * narrower than that, it scrolls sideways in its column rather than shrinking, so the text wraps
+ * exactly as it does on a real phone.
  */
 function PhoneFrame({ label, children }: { label: string; children?: Child }) {
 	// A picture of a screen, not a working one: one labelled image, with nothing inside to Tab to.
 	return (
-		<div
-			role="img"
-			aria-label={label}
-			class="h-[788px] w-full max-w-[390px] overflow-hidden rounded-control border border-ink bg-paper"
-		>
-			<div inert>
-				<p class="bg-band py-2 text-center text-sm text-muted">
-					Demo data. Nothing here is real.
-				</p>
-				<div class="px-5 pt-6">
-					<div class="mb-4">
-						<Wordmark />
+		<div class="overflow-x-auto">
+			<div
+				role="img"
+				aria-label={label}
+				class="h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+			>
+				<div inert>
+					<p class="bg-band py-2 text-center text-sm text-muted">
+						Demo data. Nothing here is real.
+					</p>
+					<div class="px-5 pt-6">
+						<div class="mb-4">
+							<Wordmark />
+						</div>
+						{children}
 					</div>
-					{children}
 				</div>
 			</div>
 		</div>
@@ -371,13 +375,17 @@ export function Proposals() {
 			>
 				<Compare
 					today={
-						<MoneyInput
-							id="p3-today"
-							name="p3-today"
-							label="Budget"
-							value="612.40"
-							lastMonthCents={60000}
-						/>
+						// Inert, like the other option: a picture to compare, so neither changes while
+						// you look. The working one is in the catalog's MoneyInput entry.
+						<div inert>
+							<MoneyInput
+								id="p3-today"
+								name="p3-today"
+								label="Budget"
+								value="612.40"
+								lastMonthCents={60000}
+							/>
+						</div>
 					}
 					proposed={<StackedMoney />}
 					otherLabel="The other option"
