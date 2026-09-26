@@ -172,7 +172,7 @@ The confidence threshold is a single config value, set during Phase 1 after chec
 
 **Boundary:** all Jev calls go through one module (`src/ai/categorize.ts`) with one function signature. Switching providers changes only that file.
 
-**Categories are archived, never deleted.** Archiving keeps every stored pick, confidence and source meaningful; deleting would null `category_id` and `jev_category_id` while leaving the source and confidence behind, which miscounts rows and hides them from merchant rules and Jev. No category may be named "None of these fit", Jev's extra option. Settings enforces both when it manages categories (#55): names are unique ignoring case (archived ones included), at most 50 categories are active, so every screen shows them all at once with no pagination (decision 37; well under Jev's 255-option limit, one being "None of these fit"), and an archived category can be restored. A budget set in Settings applies from the current month on; once a category has a budget, it can be changed but not removed. Settings can move a category up or down, and that order is the order on every screen. An archived category stays on Home for any month it has spending in, so that month still adds up, and leaves from the next month on. A merchant rule pointing at an archived category is skipped until the category is restored. A new category gets the tag icon and the next color.
+**Categories are archived, never deleted.** Archiving keeps every stored pick, confidence and source meaningful; deleting would null `category_id` and `jev_category_id` while leaving the source and confidence behind, which miscounts rows and hides them from merchant rules and Jev. No category may be named "None of these fit", Jev's extra option. Settings enforces both when it manages categories (#55): names are unique ignoring case (archived ones included), at most 50 categories are active, so every screen shows them all at once with no pagination (decision 37; well under Jev's 255-option limit, one being "None of these fit"), and an archived category can be restored. A budget is set on Home (decision 38): tapping a budget row, or a category under "Not budgeted", opens a sheet whose amount applies from the current month on; once a category has a budget, it can be changed but not removed. The amount field (the money input, #66) has the original app's helpers: −$1, −1¢, +1¢ and +$1 buttons, a "Round up" chip when there are cents, and a "Last month" chip with what the category spent last month; typing stops at two decimals and it never goes below $0. Settings can move a category up or down, and that order is the order on every screen. An archived category stays on Home for any month it has spending in, so that month still adds up, and leaves from the next month on. A merchant rule pointing at an archived category is skipped until the category is restored. A new category gets the tag icon and the next color.
 
 **Default categories (decision 32, #55):** every new database starts with the same categories, adapted from the owner's earlier app: Groceries, Eating Out, Gas, Car & Transport, Rent, Utilities, Subscriptions, Shopping, Personal Care, Health, Entertainment, Kids, Date Night, and Donations & Charity. None has a budget until the family sets one. Income, transfers, payments, savings and refunds aren't categories, because flags and exclusions handle them (§6); there's no "Other", because "None of these fit" and new-category suggestions do that job. The demo uses its seed's categories instead.
 
@@ -186,13 +186,13 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 
 | Screen | Contents | Features |
 |---|---|---|
-| **Home** | Safe to spend as the headline number; a spent/left bar per category; a "N transactions need a category" prompt linking to a filtered list; bills due in the next 7 days | 1, 2 |
+| **Home** | Safe to spend as the headline number; a spent/left bar per category, each opening its budget sheet; a quiet "Not budgeted" list of categories with no budget; a "N transactions need a category" prompt linking to a filtered list; bills due in the next 7 days | 1, 2 |
 | **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note. "Needs category" counts the same transactions as Home. The Excluded filter shows only excluded transactions. Search matches the merchant name, raw name, and note. The list shows 25 transactions per page. | 3, 4, 5 |
 | **Bills** | Each bill with its status, plus add, edit, and deactivate | 2 |
 | **Trends** | Spending by category over the last 6 months, and this month vs. last month | 6 |
 | **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, and Fix connection for items that need attention | 7 |
 | **More → Documents** | Upload, list, download, and delete PDFs | 8 |
-| **More → Settings** | Categories and budget amounts; merchant name review | — |
+| **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review | — |
 | **Demo only** | A banner on every page ("Demo data. Nothing here is real."), a "Things to try" list, and a "How it works" page | — |
 
 **How the pages behave:**
@@ -200,7 +200,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 - **Edit panel:** a page region, not a modal. Focus moves into it, and Cancel or the backdrop closes it. Escape isn't supported, because it would need custom JavaScript.
 - **Charts:** the server renders them as inline SVG. No chart library.
 - **Expand and collapse:** `<details>` / `<summary>`. No JavaScript.
-- **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires) and a small toast listener.
+- **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires), a small toast listener, and the money input's `money.js` (decision 39). Without `money.js` the money input is a plain field.
 - **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and every HTMX swap is announced: through an `aria-live="polite"` count or announcer, or by moving focus (a whole list is never a live region, which would read out every row). Errors use `role="alert"`.
 
 Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before any UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
@@ -279,7 +279,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - Pruning old PR screenshots from the screenshots branch
 - A close (×) button on the demo's Things to try block, remembered with a cookie
 - Choosing a category's icon and color in Settings (new categories get the tag icon and the next color)
-- Removing a category's budget (for now Settings refuses a cleared budget field rather than quietly keeping the old amount)
+- Removing a category's budget (for now the budget sheet requires an amount)
 
 ## 13. Checked against docs before writing code (Phase 0)
 

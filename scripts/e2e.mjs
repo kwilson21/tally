@@ -57,21 +57,25 @@ await page
 	.waitFor();
 step("Home now says 10 transactions need a category");
 
-// Change a budget amount (spec §11): Settings → Groceries → 650 → Home shows it.
-await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
-await page.locator('summary[data-category="1"]').click();
-await page
-	.getByLabel(/^Budget from /)
-	.first()
-	.fill("650");
-await page
-	.locator('details[data-row="1"]')
-	.getByRole("button", { name: "Save" })
-	.click();
-await page.locator("#toasts").getByText("Saved Groceries").waitFor();
+// Change a budget amount (spec §11): Home → Groceries → 650, nudged up $1 and 1¢ → Home shows it.
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-await page.getByText(/of \$650/).waitFor();
-step("changing Groceries' budget in Settings shows on Home");
+await page.locator('a[href="/budget/1"]').first().click();
+const budget = page.getByLabel(/^Budget from /);
+await budget.waitFor();
+await budget.fill("650");
+await page.getByRole("button", { name: "Add $1" }).click();
+await page.getByRole("button", { name: "Add 1 cent" }).click();
+assert.equal(await budget.inputValue(), "651.01");
+// The round-up chip appears once there are cents.
+await page.getByRole("button", { name: "Round up to $652" }).click();
+assert.equal(await budget.inputValue(), "652");
+await page.getByRole("button", { name: "Save" }).click();
+await page.locator("#toasts").getByText("Saved the Groceries budget").waitFor();
+await page.getByText(/of \$652/).waitFor();
+assert.equal(new URL(page.url()).pathname, "/");
+step(
+	"changing Groceries' budget on Home, with nudges and round-up, shows on Home",
+);
 
 // Reorder through htmx: the button inside the edit form must send its own direction.
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });

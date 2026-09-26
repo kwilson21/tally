@@ -1,4 +1,4 @@
-// The household's categories and budget amounts, as Settings shows and changes them (spec §5, §7, §8).
+// The household's categories, as Settings shows and changes them (spec §5, §7, §8). Budgets: db/budgets.ts.
 import { budgetForMonth } from "../budget";
 import { type CategoryValue, MAX_ACTIVE } from "../settings/category-form";
 
@@ -58,78 +58,45 @@ export async function categoryNames(
 	return results.map((c) => ({ ...c, archived: c.archived === 1 }));
 }
 
-/** Sets a category's budget from `month` on, replacing one already set for that month. */
-const setBudget = (
-	db: D1Database,
-	categoryId: number,
-	cents: number,
-	month: string,
-) =>
-	db
-		.prepare(
-			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, ?, ?)
-			ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
-		)
-		.bind(categoryId, month, cents);
-
 /** True while there's room for one more active category; checked inside each write, so two saves at once can't both pass. */
 const ROOM = `(SELECT COUNT(*) FROM categories WHERE archived = 0) < ${MAX_ACTIVE}`;
 
 /**
- * Adds a category at the end of the list, with the tag icon, the next color, and its budget if given.
+ * Adds a category at the end of the list, with the tag icon and the next color.
  * Returns its id, or null when the list was already full.
  */
 export async function addCategory(
 	db: D1Database,
 	value: CategoryValue,
-	month: string,
 ): Promise<number | null> {
 	const count = await db
 		.prepare(
 			"SELECT COUNT(*) AS n, COALESCE(MAX(sort_order), 0) AS last FROM categories",
 		)
 		.first<{ n: number; last: number }>();
-	const statements = [
-		db
-			.prepare(
-				`INSERT INTO categories (name, icon, color, sort_order) SELECT ?, 'tag', ?, ? WHERE ${ROOM}`,
-			)
-			.bind(
-				value.name,
-				COLORS[(count?.n ?? 0) % COLORS.length],
-				(count?.last ?? 0) + 1,
-			),
-	];
-	// The budget goes on the row just inserted, and nowhere when the insert was refused. The batch
-	// runs in order on one connection, so changes() and last_insert_rowid() are that insert's.
-	if (value.budgetCents !== null)
-		statements.push(
-			db
-				.prepare(
-					`INSERT INTO budget_amounts (category_id, effective_month, amount_cents)
-					SELECT last_insert_rowid(), ?, ? WHERE changes() > 0`,
-				)
-				.bind(month, value.budgetCents),
-		);
-	const [inserted] = await db.batch(statements);
-	return inserted?.meta.changes ? Number(inserted.meta.last_row_id) : null;
+	const inserted = await db
+		.prepare(
+			`INSERT INTO categories (name, icon, color, sort_order) SELECT ?, 'tag', ?, ? WHERE ${ROOM}`,
+		)
+		.bind(
+			value.name,
+			COLORS[(count?.n ?? 0) % COLORS.length],
+			(count?.last ?? 0) + 1,
+		)
+		.run();
+	return inserted.meta.changes ? Number(inserted.meta.last_row_id) : null;
 }
 
-/** Renames a category and, if given, sets its budget from `month` on, in one atomic batch. */
+/** Renames a category. */
 export async function saveCategory(
 	db: D1Database,
 	id: number,
 	value: CategoryValue,
-	month: string,
 ): Promise<void> {
-	const statements = [
-		db
-			.prepare("UPDATE categories SET name = ? WHERE id = ?")
-			.bind(value.name, id),
-	];
-	if (value.budgetCents !== null)
-		statements.push(setBudget(db, id, value.budgetCents, month));
-	await db.batch(statements);
+	await db
+		.prepare("UPDATE categories SET name = ? WHERE id = ?")
+		.bind(value.name, id)
+		.run();
 }
 
 /**

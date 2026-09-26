@@ -43,7 +43,7 @@ beforeEach(async () => {
 });
 
 describe("GET /settings", () => {
-	it("lists the categories with this month's budget, each opening in place to edit", async () => {
+	it("lists the categories with this month's budget, each opening in place to rename", async () => {
 		const { res, html } = await get("/settings");
 		expect(res.status).toBe(200);
 		expect(html).toMatch(/<h1[^>]*>Settings<\/h1>/);
@@ -56,7 +56,12 @@ describe("GET /settings", () => {
 			"Household",
 		]);
 		expect(textOf(html)).toContain("$700 a month");
-		expect(html).toContain(`Budget from ${THIS_MONTH()} on`);
+		// Budgets are changed on Home (decision 38); each row links there.
+		expect(html).not.toContain(`Budget from ${THIS_MONTH()} on`);
+		expect(html).not.toContain('name="budget"');
+		expect(html).toMatch(
+			/<a href="\/budget\/1"[^>]*>Change its budget on Home<\/a>/,
+		);
 		expect(html).toContain("Add category");
 		// Nothing is archived yet, so there's no Archived section.
 		expect(html).not.toContain("Archived (");
@@ -74,36 +79,32 @@ describe("GET /settings?open=<id>", () => {
 });
 
 describe("saving a category", () => {
-	it("sets the budget from this month on, confirms it, and Home follows", async () => {
+	it("renames it and says so", async () => {
 		const { res, html } = await post("/settings/categories/1", {
-			name: "Groceries",
-			budget: "650",
+			name: "Food at home",
 		});
 		expect(res.status).toBe(200);
-		expect(textOf(html)).toContain("$650 a month");
+		expect(rowNames(html)[0]).toBe("Food at home");
 		expect(trigger(res)).toMatchObject({
-			toast: { message: "Saved Groceries" },
-			announce: `Saved. Groceries is $650 a month from ${THIS_MONTH()} on.`,
+			toast: { message: "Saved Food at home" },
+			announce: "Saved Food at home.",
 		});
-		expect((await get("/")).html).toMatch(/of \$650/);
 	});
 
 	it("keeps the row open with the error and what was typed when the name is taken", async () => {
 		const { res, html } = await post("/settings/categories/1", {
 			name: "gas",
-			budget: "650",
 		});
 		expect(res.status).toBe(422);
 		expect(html).toMatch(/role="alert"[^>]*>That name is taken\./);
 		expect(html).toMatch(/<details[^>]*data-row="1"[^>]*\bopen/);
 		expect(html).toMatch(/name="name"[^>]*value="gas"/);
-		expect(html).toMatch(/name="budget"[^>]*value="650"/);
 	});
 
 	it("redirects back to Settings without JavaScript", async () => {
 		const { res } = await post(
 			"/settings/categories/1",
-			{ name: "Groceries", budget: "650" },
+			{ name: "Groceries" },
 			false,
 		);
 		expect(res.status).toBe(303);
@@ -113,7 +114,6 @@ describe("saving a category", () => {
 	it("is a 404 for a category that doesn't exist", async () => {
 		const { res } = await post("/settings/categories/999", {
 			name: "X",
-			budget: "",
 		});
 		expect(res.status).toBe(404);
 	});
@@ -121,22 +121,8 @@ describe("saving a category", () => {
 	it("moves focus back to the saved row", async () => {
 		const { html } = await post("/settings/categories/3", {
 			name: "Fuel",
-			budget: "150",
 		});
 		expect(html).toMatch(/<summary data-category="3"[^>]*autofocus/);
-	});
-
-	it("won't quietly keep a budget that was cleared", async () => {
-		// Groceries has a budget, and there's no way to remove one yet.
-		const { res, html } = await post("/settings/categories/1", {
-			name: "Groceries",
-			budget: "",
-		});
-		expect(res.status).toBe(422);
-		expect(textOf(html)).toContain(
-			"Enter an amount. A budget can't be removed yet.",
-		);
-		expect(html).toMatch(/<details[^>]*data-row="1"[^>]*\bopen/);
 	});
 });
 
@@ -151,7 +137,6 @@ describe("a page left open while someone else changed a category", () => {
 			await post("/settings/categories/2/archive", {});
 			const { res, html } = await post(path, {
 				name: "Eating Out",
-				budget: "",
 			});
 			expect(res.status).toBe(404);
 			expect(html).toMatch(/<section id="categories"/);
@@ -190,7 +175,6 @@ describe("a name taken by someone else at the same moment", () => {
 		).run();
 		const { res, html } = await post("/settings/categories", {
 			name: "Travel",
-			budget: "",
 		});
 		await env.DB.prepare("DROP TRIGGER sneak").run();
 		expect(res.status).toBe(422);
@@ -199,14 +183,13 @@ describe("a name taken by someone else at the same moment", () => {
 });
 
 describe("adding a category", () => {
-	it("adds it at the end with its budget", async () => {
+	it("adds it at the end, with no budget yet", async () => {
 		const { res, html } = await post("/settings/categories", {
 			name: "Travel",
-			budget: "400",
 		});
 		expect(res.status).toBe(200);
 		expect(rowNames(html).at(-1)).toBe("Travel");
-		expect(textOf(html)).toContain("$400 a month");
+		expect(textOf(html)).toContain("No budget");
 		// Focus lands on the new row, not back at the top of the page.
 		const travel = await env.DB.prepare(
 			"SELECT id FROM categories WHERE name = 'Travel'",
@@ -215,15 +198,12 @@ describe("adding a category", () => {
 			new RegExp(`<summary data-category="${travel?.id}"[^>]*autofocus`),
 		);
 		expect(html.match(/autofocus/g)).toHaveLength(1);
-		expect(trigger(res).announce).toBe(
-			`Added Travel, $400 a month from ${THIS_MONTH()} on.`,
-		);
+		expect(trigger(res).announce).toBe("Added Travel. Set its budget on Home.");
 	});
 
 	it("refuses Jev's reserved name, keeping the Add form open", async () => {
 		const { res, html } = await post("/settings/categories", {
 			name: "None of these fit",
-			budget: "",
 		});
 		expect(res.status).toBe(422);
 		expect(html).toMatch(/<details[^>]*data-row="new"[^>]*\bopen/);

@@ -56,8 +56,20 @@ describe("loadMonth", () => {
 	it("returns active categories in sort order and all budget amounts", async () => {
 		const data = await loadMonth(db, "2026-09");
 		expect(data.categories).toEqual([
-			{ id: 1, name: "Groceries", icon: "groceries", color: "cat-blue" },
-			{ id: 2, name: "Eating Out", icon: "eating-out", color: "cat-plum" },
+			{
+				id: 1,
+				name: "Groceries",
+				icon: "groceries",
+				color: "cat-blue",
+				archived: false,
+			},
+			{
+				id: 2,
+				name: "Eating Out",
+				icon: "eating-out",
+				color: "cat-plum",
+				archived: false,
+			},
 		]);
 		expect(data.amounts).toHaveLength(2);
 	});
