@@ -281,6 +281,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
 - A close (×) button on the demo's Things to try block, remembered with a cookie
+- An onboarding initiative: what a first visit (the demo, and the family's first week) shows and teaches, and where Things to try lives once it leaves the top of Home (decision 46)
 - Choosing a category's icon and color in Settings (new categories get the tag icon and the next color)
 - Removing a category's budget (for now the budget sheet requires an amount)
 
