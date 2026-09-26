@@ -61,6 +61,12 @@ async function renderHome(
 	const notBudgeted = data.categories.filter(
 		(cat) => !cat.archived && !budgeted.has(cat.id),
 	);
+	// Focus goes to the row asked for; if it isn't a link any more (archived on another screen while
+	// its sheet was open), to the Budget heading, so focus is never lost.
+	const linked = new Set(
+		data.categories.filter((cat) => !cat.archived).map((cat) => cat.id),
+	);
+	const focusHeading = focusId !== undefined && !linked.has(focusId);
 	const { count, spentCents } = summary.uncategorized;
 	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
 	const demo = c.env.DEMO === "true";
@@ -102,7 +108,12 @@ async function renderHome(
 				)}
 
 				<section class="mt-8 lg:max-w-2xl" aria-labelledby="budget-title">
-					<h2 id="budget-title" class="font-serif text-3xl font-semibold">
+					<h2
+						id="budget-title"
+						class="font-serif text-3xl font-semibold"
+						tabindex={focusHeading ? -1 : undefined}
+						autofocus={focusHeading}
+					>
 						Budget
 					</h2>
 					{(summary.categories.length > 0 || count > 0) && (

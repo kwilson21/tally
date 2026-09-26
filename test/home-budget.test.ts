@@ -186,4 +186,19 @@ describe("closing the sheet", () => {
 		const { html } = await get("/?focus=1");
 		expect(html).toMatch(/<a href="\/budget\/1"[^>]*autofocus/);
 	});
+
+	it("falls back to the Budget heading when the row is gone, so focus is never lost", async () => {
+		// Someone archived it on another screen while the sheet was open.
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 2",
+		).run();
+		const { html } = await get("/?focus=2");
+		expect(html).toMatch(
+			/<h2 id="budget-title"[^>]*tabindex="-1"[^>]*autofocus/,
+		);
+		expect(html.match(/autofocus/g)).toHaveLength(1);
+		// With a row to go to, the heading stays out of the way.
+		const { html: normal } = await get("/?focus=1");
+		expect(normal).not.toMatch(/<h2 id="budget-title"[^>]*autofocus/);
+	});
 });
