@@ -13,12 +13,9 @@ import {
 import { loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
 import { AdjustLink } from "../views/adjust-link";
-import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { CategoryIcon } from "../views/category";
-import { HowLink } from "../views/how-link";
-import { Icon } from "../views/icons";
-import { LedgerIllustration } from "../views/illustration";
+import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
@@ -30,6 +27,10 @@ export const home = new Hono<App>();
 /** "$650" or "$650.25": a budget as a sentence says it. */
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
+
+/** The Band's amount: whole dollars like the budget rows, but cents under $1, so it never reads "$0" for 30¢. */
+const bandAmount = (cents: number) =>
+	formatCents(cents, { wholeDollars: cents >= 100 || cents === 0 });
 
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
@@ -104,123 +105,116 @@ async function renderHome(
 	return c.html(
 		<Layout active="home" demo={demo}>
 			<div id="page">
-				{demo && (
-					<div class="mb-6">
-						<ThingsToTry />
-					</div>
-				)}
-				<h1 class="font-serif text-5xl font-semibold tracking-tight">
-					{monthName(month)}
-				</h1>
-				<HowLink section="budget" demo={demo} />
-				<div class="mt-4 flex items-center justify-between gap-6 lg:justify-start lg:gap-12">
-					<div>
-						<p class="text-lg text-muted">Safe to spend</p>
-						<p class="font-serif text-6xl font-semibold tracking-tight lg:text-7xl">
-							{formatCents(summary.safeToSpendCents, { wholeDollars: true })}
-						</p>
-					</div>
-					<LedgerIllustration />
-				</div>
-				<p class="mt-3 font-serif text-lg italic">
-					{statusSentence(summary.categories)}
-				</p>
+				{/* One width for the top and the Budget list on desktop (#92, H6). */}
+				<div class="lg:max-w-2xl">
+					<HomeTop
+						month={monthName(month)}
+						safeToSpendCents={summary.safeToSpendCents}
+						status={statusSentence(summary.categories)}
+						demo={demo}
+						band={
+							count > 0
+								? {
+										href: "/transactions?uncategorized=1",
+										text: needs,
+										// Home says "needs a category" once: the Band carries the amount (decision 50).
+										// Refunds can outweigh the spending; it says so, as the budget sheet does.
+										detail:
+											spentCents < 0
+												? `${bandAmount(-spentCents)} more refunded than spent`
+												: `${bandAmount(spentCents)} of this month's spending`,
+									}
+								: undefined
+						}
+					/>
 
-				{count > 0 && (
-					<div class="mt-6">
-						<Band href="/transactions?uncategorized=1">{needs}</Band>
-					</div>
-				)}
-
-				<section class="mt-8 lg:max-w-2xl" aria-labelledby="budget-title">
-					<div class="flex items-baseline justify-between gap-4">
-						<h2
-							id="budget-title"
-							class="font-serif text-3xl font-semibold"
-							tabindex={focusHeading ? -1 : undefined}
-							autofocus={focusHeading}
-						>
-							Budget
-						</h2>
-						{canAdjust && (
-							<AdjustLink
-								adjusting={adjusting === true}
-								attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
-							/>
-						)}
-					</div>
-					{(summary.categories.length > 0 || count > 0) && (
-						<ul class="mt-2 divide-y divide-rule">
-							{summary.categories.map((cat) => {
-								// An archived category shows for a month it has spending in (spec §7), but it
-								// can't be budgeted, so its row isn't a link.
-								const href = looks.get(cat.id)?.archived
-									? undefined
-									: `/budget/${cat.id}`;
-								return (
-									<ProgressRow
-										name={cat.name}
-										icon={looks.get(cat.id)?.icon ?? "list"}
-										color={looks.get(cat.id)?.color ?? ""}
-										spentCents={cat.spentCents}
-										budgetCents={cat.budgetCents}
-										href={href}
-										attrs={href ? openAttrs(href) : undefined}
-										autofocus={cat.id === focusId}
-										nudge={
-											adjusting && href
-												? {
-														href: `${href}/nudge`,
-														id: `nudge-${cat.id}`,
-														attrs: nudgeAttrs,
-														focus:
-															nudgeFocus?.id === cat.id
-																? nudgeFocus.direction
-																: undefined,
-													}
-												: undefined
-										}
-									/>
-								);
-							})}
-							{count > 0 && (
-								<li class="flex items-center gap-4 py-3 text-muted">
-									<Icon name="circle-dashed" class="size-7 shrink-0" />
-									<span class="flex-1 text-lg">Uncategorized</span>
-									<span class="text-lg">
-										{formatCents(spentCents, { wholeDollars: true })}
-									</span>
-								</li>
+					<section class="mt-8" aria-labelledby="budget-title">
+						<div class="flex items-baseline justify-between gap-4">
+							<h2
+								id="budget-title"
+								class="font-serif text-3xl font-semibold"
+								tabindex={focusHeading ? -1 : undefined}
+								autofocus={focusHeading}
+							>
+								Budget
+							</h2>
+							{canAdjust && (
+								<AdjustLink
+									adjusting={adjusting === true}
+									attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
+								/>
 							)}
-						</ul>
-					)}
-					{notBudgeted.length > 0 && (
-						<>
-							<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
-							<ul class="divide-y divide-rule">
-								{notBudgeted.map((cat) => {
-									const href = `/budget/${cat.id}`;
+						</div>
+						{summary.categories.length > 0 && (
+							<ul class="mt-2 divide-y divide-rule">
+								{summary.categories.map((cat) => {
+									// An archived category shows for a month it has spending in (spec §7), but it
+									// can't be budgeted, so its row isn't a link.
+									const href = looks.get(cat.id)?.archived
+										? undefined
+										: `/budget/${cat.id}`;
 									return (
-										<li>
-											<a
-												href={href}
-												autofocus={cat.id === focusId}
-												class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
-												{...openAttrs(href)}
-											>
-												<CategoryIcon icon={cat.icon} color={cat.color} />
-												<span class="min-w-0 flex-1 truncate text-lg">
-													{cat.name}
-												</span>
-												<span class="text-accent">Add a budget</span>
-											</a>
-										</li>
+										<ProgressRow
+											name={cat.name}
+											icon={looks.get(cat.id)?.icon ?? "list"}
+											color={looks.get(cat.id)?.color ?? ""}
+											spentCents={cat.spentCents}
+											budgetCents={cat.budgetCents}
+											href={href}
+											attrs={href ? openAttrs(href) : undefined}
+											autofocus={cat.id === focusId}
+											nudge={
+												adjusting && href
+													? {
+															href: `${href}/nudge`,
+															id: `nudge-${cat.id}`,
+															attrs: nudgeAttrs,
+															focus:
+																nudgeFocus?.id === cat.id
+																	? nudgeFocus.direction
+																	: undefined,
+														}
+													: undefined
+											}
+										/>
 									);
 								})}
 							</ul>
-						</>
+						)}
+						{notBudgeted.length > 0 && (
+							<>
+								<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
+								<ul class="divide-y divide-rule">
+									{notBudgeted.map((cat) => {
+										const href = `/budget/${cat.id}`;
+										return (
+											<li>
+												<a
+													href={href}
+													autofocus={cat.id === focusId}
+													class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
+													{...openAttrs(href)}
+												>
+													<CategoryIcon icon={cat.icon} color={cat.color} />
+													<span class="min-w-0 flex-1 truncate text-lg">
+														{cat.name}
+													</span>
+													<span class="text-accent">Add a budget</span>
+												</a>
+											</li>
+										);
+									})}
+								</ul>
+							</>
+						)}
+					</section>
+					{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
+					{demo && (
+						<div class="mt-8">
+							<ThingsToTry />
+						</div>
 					)}
-				</section>
+				</div>
 				<div id="sheet">{sheet?.(spent)}</div>
 			</div>
 		</Layout>,

@@ -4,7 +4,7 @@
 // for the Decided list.
 import { Specimen } from "./specimen";
 
-// What the owner decided on 2026-09-26 (decisions 46 and 48), and the issue each ships in.
+// What the owner decided on 2026-09-26 (decisions 46, 48 and 50), and the issue each ships in.
 export const DECIDED = [
 	{
 		title: "P1 · The number on a phone's first screen",
@@ -34,6 +34,12 @@ export const DECIDED = [
 		outcome:
 			"Option C: an Adjust mode shows − and + on every row until Done, each tap moving the budget to the next round $10 (decision 48).",
 		issue: 94,
+	},
+	{
+		title: "P7 · The Band and the Uncategorized row say one thing twice",
+		outcome:
+			"Option A: the Band carries the amount on a quiet second line, and the Uncategorized row goes (decision 50).",
+		issue: 92,
 	},
 ] as const;
 

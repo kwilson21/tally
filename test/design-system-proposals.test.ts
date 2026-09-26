@@ -15,7 +15,7 @@ describe("GET /design-system/proposals", () => {
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
 		expect(html).toContain("Nothing waiting");
-		expect(DECIDED.length).toBe(6);
+		expect(DECIDED.length).toBe(7);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(`/issues/${d.issue}"`);
