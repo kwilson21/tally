@@ -25,6 +25,8 @@ export function Layout({
 				<link rel="stylesheet" href="/assets/app.css" />
 				<script src="/vendor/htmx.min.js" defer></script>
 				<script src="/js/toast.js" defer></script>
+				{/* The money input's nudges and chips (decision 39); module scripts are deferred. */}
+				<script src="/js/money.js" type="module"></script>
 			</head>
 			<body class="min-h-screen">
 				<a

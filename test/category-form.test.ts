@@ -17,38 +17,15 @@ const existing = [
 ];
 
 describe("parseCategory", () => {
-	it("reads a name and a budget in dollars as cents", () => {
-		expect(
-			parseCategory(
-				form({ name: " Travel ", budget: "$1,250.50" }),
-				existing,
-				null,
-			),
-		).toEqual({ ok: true, value: { name: "Travel", budgetCents: 125050 } });
-	});
-
-	it("leaves the budget alone when it's blank", () => {
-		expect(
-			parseCategory(form({ name: "Travel", budget: "" }), existing, null),
-		).toEqual({
+	it("reads the name, trimmed", () => {
+		expect(parseCategory(form({ name: " Travel " }), existing, null)).toEqual({
 			ok: true,
-			value: { name: "Travel", budgetCents: null },
-		});
-	});
-
-	it("won't take a blank budget as 'no change' when the category has one, since it can't be removed", () => {
-		expect(
-			parseCategory(form({ name: "Groceries", budget: "" }), existing, 1, true),
-		).toEqual({
-			ok: false,
-			errors: { budget: "Enter an amount. A budget can't be removed yet." },
+			value: { name: "Travel" },
 		});
 	});
 
 	it("lets a category keep its own name", () => {
-		expect(
-			parseCategory(form({ name: "gas", budget: "200" }), existing, 2),
-		).toMatchObject({
+		expect(parseCategory(form({ name: "gas" }), existing, 2)).toMatchObject({
 			ok: true,
 		});
 	});
@@ -61,36 +38,10 @@ describe("parseCategory", () => {
 		["None of these fit", "That name is reserved for Jev. Pick another."],
 		["none of these FIT", "That name is reserved for Jev. Pick another."],
 	])("rejects the name %j", (name, message) => {
-		expect(parseCategory(form({ name, budget: "" }), existing, null)).toEqual({
+		expect(parseCategory(form({ name }), existing, null)).toEqual({
 			ok: false,
 			errors: { name: message },
 		});
-	});
-
-	it.each(["abc", "-5", "12.345"])("rejects the budget %j", (budget) => {
-		expect(
-			parseCategory(form({ name: "Travel", budget }), existing, null),
-		).toEqual({
-			ok: false,
-			errors: { budget: "Enter a dollar amount, like 250 or 250.50." },
-		});
-	});
-
-	it("caps a budget at $1,000,000 a month, so cents stay exact", () => {
-		expect(
-			parseCategory(
-				form({ name: "Travel", budget: "1,000,000" }),
-				existing,
-				null,
-			),
-		).toMatchObject({ ok: true, value: { budgetCents: 100000000 } });
-		for (const budget of ["1,000,000.01", "99999999999999999999"])
-			expect(
-				parseCategory(form({ name: "Travel", budget }), existing, null),
-			).toEqual({
-				ok: false,
-				errors: { budget: "Keep the budget to $1,000,000 a month or less." },
-			});
 	});
 
 	it("has no room for more than 50 active categories, so every screen can show them all at once", () => {
@@ -100,18 +51,16 @@ describe("parseCategory", () => {
 			archived: false,
 		}));
 		expect(MAX_ACTIVE).toBe(50);
-		expect(
-			parseCategory(form({ name: "One more", budget: "" }), full, null),
-		).toEqual({
+		expect(parseCategory(form({ name: "One more" }), full, null)).toEqual({
 			ok: false,
 			errors: {
 				name: "Tally has room for 50 categories. Archive one to add another.",
 			},
 		});
 		// Editing an existing one is fine when full.
-		expect(
-			parseCategory(form({ name: "C0", budget: "" }), full, 1),
-		).toMatchObject({ ok: true });
+		expect(parseCategory(form({ name: "C0" }), full, 1)).toMatchObject({
+			ok: true,
+		});
 	});
 });
 

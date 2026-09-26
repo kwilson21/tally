@@ -5,6 +5,8 @@ export type CategoryRow = {
 	name: string;
 	icon: string;
 	color: string;
+	/** Archived categories only appear for a month they have spending in. */
+	archived: boolean;
 };
 
 export type MonthData = {
@@ -27,7 +29,7 @@ export async function loadMonth(
 		// An archived category stays for a month it has counted spending in (not income), so the month still adds up.
 		db
 			.prepare(
-				`SELECT id, name, icon, color FROM categories c
+				`SELECT id, name, icon, color, archived FROM categories c
 				 WHERE archived = 0 OR EXISTS (
 					SELECT 1 FROM transactions t
 					WHERE t.category_id = c.id AND substr(t.date, 1, 7) = ?1 AND t.excluded = 0 AND t.is_split = 0
@@ -49,7 +51,11 @@ export async function loadMonth(
 	])) as [D1Result, D1Result, D1Result];
 
 	return {
-		categories: categories.results as CategoryRow[],
+		categories: (
+			categories.results as (Omit<CategoryRow, "archived"> & {
+				archived: number;
+			})[]
+		).map((c) => ({ ...c, archived: c.archived === 1 })),
 		amounts: amounts.results as BudgetAmount[],
 		transactions: (
 			transactions.results as {

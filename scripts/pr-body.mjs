@@ -3,6 +3,8 @@
 /** Every page in the app. test/pr-body.test.ts fails if a nav destination is missing. */
 export const PAGES = [
 	{ name: "home", path: "/" },
+	// Groceries' budget sheet over Home (#66), with the nudges and the last-month chip.
+	{ name: "budget-edit", path: "/budget/1" },
 	{ name: "transactions", path: "/transactions" },
 	{
 		name: "transactions-needs-category",

@@ -1,5 +1,5 @@
 import { type Context, Hono } from "hono";
-import { monthLabel, todayUtc } from "../dates";
+import { todayUtc } from "../dates";
 import {
 	addCategory,
 	categoryNames,
@@ -9,7 +9,7 @@ import {
 	setArchived,
 	settingsCategories,
 } from "../db/categories";
-import { centsToInput, formatCents } from "../money";
+import { formatCents } from "../money";
 import {
 	type CategoryErrors,
 	fullMessage,
@@ -67,7 +67,7 @@ type View = {
 	/** Move focus here after a swap: a row's summary, or the Archived summary. */
 	focus?: number | "archived";
 	/** What was typed, shown again with the errors. */
-	values?: { name: string; budget: string };
+	values?: { name: string };
 	errors?: CategoryErrors;
 	/** Why a restore didn't happen. */
 	restoreError?: string;
@@ -76,72 +76,41 @@ type View = {
 	status?: 200 | 404 | 422;
 };
 
-/** The name and budget fields, for adding a category or editing one. */
-function CategoryFields({
+/** The name field, for adding a category or renaming one. Budgets are set on Home (decision 38). */
+function NameField({
 	idPrefix,
 	name,
-	budget,
-	month,
 	errors = {},
 }: {
 	idPrefix: string;
 	name: string;
-	budget: string;
-	month: string;
 	errors?: CategoryErrors;
 }) {
 	return (
-		<div class="grid gap-4 sm:grid-cols-2">
-			<FormField id={`${idPrefix}-name`} label="Name" error={errors.name}>
-				{(a11y) => (
-					<input
-						id={`${idPrefix}-name`}
-						name="name"
-						value={name}
-						maxlength={40}
-						autocomplete="off"
-						autofocus={Boolean(errors.name)}
-						class="min-h-11 rounded-control border border-rule bg-band px-3 text-lg"
-						{...a11y}
-					/>
-				)}
-			</FormField>
-			<FormField
-				id={`${idPrefix}-budget`}
-				label={`Budget from ${month} on`}
-				error={errors.budget}
-			>
-				{(a11y) => (
-					<div class="relative">
-						<span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
-							$
-						</span>
-						<input
-							id={`${idPrefix}-budget`}
-							name="budget"
-							value={budget}
-							inputmode="decimal"
-							autocomplete="off"
-							autofocus={!errors.name && Boolean(errors.budget)}
-							class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-7 pr-3 text-lg"
-							{...a11y}
-						/>
-					</div>
-				)}
-			</FormField>
-		</div>
+		<FormField id={`${idPrefix}-name`} label="Name" error={errors.name}>
+			{(a11y) => (
+				<input
+					id={`${idPrefix}-name`}
+					name="name"
+					value={name}
+					maxlength={40}
+					autocomplete="off"
+					autofocus={Boolean(errors.name)}
+					class="min-h-11 rounded-control border border-rule bg-band px-3 text-lg sm:max-w-sm"
+					{...a11y}
+				/>
+			)}
+		</FormField>
 	);
 }
 
 function CategoryRow({
 	category: c,
-	month,
 	view,
 	first,
 	last,
 }: {
 	category: SettingsCategory;
-	month: string;
 	view: View;
 	first: boolean;
 	last: boolean;
@@ -171,19 +140,22 @@ function CategoryRow({
 			</summary>
 			<div class="flex flex-col gap-4 pb-5 sm:pl-11">
 				<form class="flex flex-col gap-4" {...swap(url)}>
-					<CategoryFields
+					<NameField
 						idPrefix={`c${c.id}`}
 						name={isOpen && view.values ? view.values.name : c.name}
-						budget={
-							isOpen && view.values
-								? view.values.budget
-								: c.budgetCents === null
-									? ""
-									: centsToInput(c.budgetCents)
-						}
-						month={month}
 						errors={isOpen ? view.errors : undefined}
 					/>
+					<p class="text-muted">
+						{c.budgetCents === null ? "No budget yet. " : ""}
+						<a
+							href={`/budget/${c.id}`}
+							class="inline-flex min-h-11 items-center"
+						>
+							{c.budgetCents === null
+								? "Add one on Home"
+								: "Change its budget on Home"}
+						</a>
+					</p>
 					<div class="flex flex-wrap items-center gap-3">
 						<button type="submit" class={primary}>
 							Save
@@ -239,9 +211,7 @@ function CategoryRow({
 
 /** The whole Settings page. Every swap selects #categories from this same page. */
 async function renderSettings(c: Context<App>, view: View = {}) {
-	const today = todayUtc();
-	const thisMonth = today.slice(0, 7);
-	const month = monthLabel(thisMonth, today);
+	const thisMonth = todayUtc().slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const adding = view.open === "new";
 
@@ -269,7 +239,6 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					{active.map((category, i) => (
 						<CategoryRow
 							category={category}
-							month={month}
 							view={view}
 							first={i === 0}
 							last={i === active.length - 1}
@@ -288,11 +257,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							class="flex flex-col gap-4 pb-5"
 							{...swap("/settings/categories")}
 						>
-							<CategoryFields
+							<NameField
 								idPrefix="new"
 								name={adding && view.values ? view.values.name : ""}
-								budget={adding && view.values ? view.values.budget : ""}
-								month={month}
 								errors={adding ? view.errors : undefined}
 							/>
 							<div>
@@ -358,12 +325,6 @@ function done(
 	return renderSettings(c, view);
 }
 
-/** "$650 a month from September on", or nothing when the budget wasn't changed. */
-const budgetPhrase = (cents: number | null) =>
-	cents === null
-		? null
-		: `${amount(cents)} a month from ${monthLabel(todayUtc().slice(0, 7), todayUtc())} on`;
-
 /** The form again, open, with what was typed and why it wasn't saved. */
 function retry(
 	c: Context<App>,
@@ -373,10 +334,7 @@ function retry(
 ) {
 	return renderSettings(c, {
 		open,
-		values: {
-			name: String(form.get("name") ?? ""),
-			budget: String(form.get("budget") ?? ""),
-		},
+		values: { name: String(form.get("name") ?? "") },
 		errors,
 		status: 422,
 	});
@@ -403,7 +361,7 @@ async function find(c: Context<App>) {
 	return { all, category: all.find((x) => x.id === idOf(c)) };
 }
 
-// More → Settings (spec §8): the household's categories and their monthly budgets.
+// More → Settings (spec §8): the household's categories. Budgets are set on Home (decision 38).
 // ?open=<id> opens that category's row, so a row can be linked to (and screenshotted).
 // ?focus=<id> puts focus on that row after Cancel.
 settings.get("/settings", (c) => {
@@ -420,7 +378,7 @@ settings.post("/settings/categories", async (c) => {
 	if (!parsed.ok) return retry(c, "new", form, parsed.errors);
 	let id: number | null;
 	try {
-		id = await addCategory(c.env.DB, parsed.value, todayUtc().slice(0, 7));
+		id = await addCategory(c.env.DB, parsed.value);
 	} catch (error) {
 		if (nameTaken(error))
 			return retry(c, "new", form, { name: "That name is taken." });
@@ -428,13 +386,10 @@ settings.post("/settings/categories", async (c) => {
 	}
 	// Another save filled the list between the form's check and this write.
 	if (id === null) return retry(c, "new", form, { name: fullMessage("add") });
-	const phrase = budgetPhrase(parsed.value.budgetCents);
 	return done(
 		c,
 		`Added ${parsed.value.name}`,
-		phrase
-			? `Added ${parsed.value.name}, ${phrase}.`
-			: `Added ${parsed.value.name}.`,
+		`Added ${parsed.value.name}. Set its budget on Home.`,
 		{ focus: id },
 	);
 });
@@ -442,29 +397,19 @@ settings.post("/settings/categories", async (c) => {
 settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 	const { all, category } = await find(c);
 	if (!category || category.archived) return gone(c);
-	const thisMonth = todayUtc().slice(0, 7);
-	const { active } = await settingsCategories(c.env.DB, thisMonth);
-	const hasBudget =
-		active.find((x) => x.id === category.id)?.budgetCents != null;
 	const form = await c.req.formData();
-	const parsed = parseCategory(form, all, category.id, hasBudget);
+	const parsed = parseCategory(form, all, category.id);
 	if (!parsed.ok) return retry(c, category.id, form, parsed.errors);
 	try {
-		await saveCategory(c.env.DB, category.id, parsed.value, thisMonth);
+		await saveCategory(c.env.DB, category.id, parsed.value);
 	} catch (error) {
 		if (nameTaken(error))
 			return retry(c, category.id, form, { name: "That name is taken." });
 		throw error;
 	}
-	const phrase = budgetPhrase(parsed.value.budgetCents);
-	return done(
-		c,
-		`Saved ${parsed.value.name}`,
-		phrase
-			? `Saved. ${parsed.value.name} is ${phrase}.`
-			: `Saved ${parsed.value.name}.`,
-		{ focus: category.id },
-	);
+	return done(c, `Saved ${parsed.value.name}`, `Saved ${parsed.value.name}.`, {
+		focus: category.id,
+	});
 });
 
 settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {

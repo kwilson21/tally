@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { summarizeMonth } from "../src/budget";
 import {
 	addCategory,
 	categoryNames,
@@ -37,65 +36,21 @@ describe("settingsCategories", () => {
 });
 
 describe("addCategory", () => {
-	it("adds a category at the end, with the tag icon, the next color and its budget", async () => {
-		await addCategory(db, { name: "Travel", budgetCents: 40000 }, MONTH);
-		const { active } = await settingsCategories(db, MONTH);
-		expect(active.at(-1)).toMatchObject({
+	it("adds a category at the end, with the tag icon, the next color and no budget", async () => {
+		expect(await addCategory(db, { name: "Travel" })).not.toBeNull();
+		expect((await settingsCategories(db, MONTH)).active.at(-1)).toMatchObject({
 			name: "Travel",
 			icon: "tag",
 			color: "cat-blue",
-			budgetCents: 40000,
+			budgetCents: null,
 		});
-	});
-
-	it("adds one with no budget when none is given", async () => {
-		await addCategory(db, { name: "Travel", budgetCents: null }, MONTH);
-		expect(
-			(await settingsCategories(db, MONTH)).active.at(-1)?.budgetCents,
-		).toBeNull();
 	});
 });
 
 describe("saveCategory", () => {
-	it("renames, and sets the budget from this month on, leaving earlier months as they were", async () => {
-		await saveCategory(
-			db,
-			1,
-			{ name: "Food at home", budgetCents: 65000 },
-			MONTH,
-		);
+	it("renames, leaving the budget as it was", async () => {
+		await saveCategory(db, 1, { name: "Food at home" });
 		expect(await names()).toContain("Food at home");
-		const sept = summarizeMonth({
-			month: MONTH,
-			...(await loadMonth(db, MONTH)),
-			unpaidDueBillsCents: 0,
-		});
-		expect(sept.categories.find((c) => c.id === 1)?.budgetCents).toBe(65000);
-		const aug = summarizeMonth({
-			month: "2026-08",
-			...(await loadMonth(db, "2026-08")),
-			unpaidDueBillsCents: 0,
-		});
-		expect(aug.categories.find((c) => c.id === 1)?.budgetCents).toBe(70000);
-	});
-
-	it("changes this month's amount again rather than adding a second one", async () => {
-		await saveCategory(db, 1, { name: "Groceries", budgetCents: 65000 }, MONTH);
-		await saveCategory(db, 1, { name: "Groceries", budgetCents: 66000 }, MONTH);
-		const rows = await db
-			.prepare(
-				"SELECT COUNT(*) AS n FROM budget_amounts WHERE category_id = 1 AND effective_month = ?",
-			)
-			.bind(MONTH)
-			.first<{ n: number }>();
-		expect(rows?.n).toBe(1);
-		expect((await settingsCategories(db, MONTH)).active[0]?.budgetCents).toBe(
-			66000,
-		);
-	});
-
-	it("keeps the budget when none is given", async () => {
-		await saveCategory(db, 1, { name: "Groceries", budgetCents: null }, MONTH);
 		expect((await settingsCategories(db, MONTH)).active[0]?.budgetCents).toBe(
 			70000,
 		);
@@ -170,13 +125,11 @@ describe("restoring after a move", () => {
 
 describe("names that differ only in capitals", () => {
 	it("are refused by the database itself, so two saves at once can't both win", async () => {
-		await addCategory(db, { name: "Travel", budgetCents: null }, MONTH);
-		await expect(
-			addCategory(db, { name: "travel", budgetCents: null }, MONTH),
-		).rejects.toThrow(/UNIQUE/);
-		await expect(
-			saveCategory(db, 1, { name: "GAS", budgetCents: null }, MONTH),
-		).rejects.toThrow(/UNIQUE/);
+		await addCategory(db, { name: "Travel" });
+		await expect(addCategory(db, { name: "travel" })).rejects.toThrow(/UNIQUE/);
+		await expect(saveCategory(db, 1, { name: "GAS" })).rejects.toThrow(
+			/UNIQUE/,
+		);
 	});
 });
 
@@ -225,39 +178,12 @@ describe("the 50-category limit, checked in the same write", () => {
 	const count = async (sql: string) =>
 		(await db.prepare(sql).first<{ n: number }>())?.n;
 
-	it("adds nothing, not even a budget, once 50 are active", async () => {
+	it("adds nothing once 50 are active", async () => {
 		await fill();
-		expect(
-			await addCategory(db, { name: "Travel", budgetCents: 40000 }, MONTH),
-		).toBeNull();
+		expect(await addCategory(db, { name: "Travel" })).toBeNull();
 		expect(
 			await count("SELECT COUNT(*) AS n FROM categories WHERE archived = 0"),
 		).toBe(50);
-		expect(
-			await count(
-				"SELECT COUNT(*) AS n FROM budget_amounts WHERE category_id NOT IN (SELECT id FROM categories)",
-			),
-		).toBe(0);
-	});
-
-	it("leaves a same-named category's budget alone when the add is refused", async () => {
-		// Someone else added Travel with $400 and took the last place.
-		await db
-			.prepare(
-				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 44)
-				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
-			)
-			.run();
-		expect(
-			await addCategory(db, { name: "Travel", budgetCents: 40000 }, MONTH),
-		).not.toBeNull();
-		expect(
-			await addCategory(db, { name: "Travel", budgetCents: 90000 }, MONTH),
-		).toBeNull();
-		const travel = (await settingsCategories(db, MONTH)).active.find(
-			(c) => c.name === "Travel",
-		);
-		expect(travel?.budgetCents).toBe(40000);
 	});
 
 	it("doesn't restore a category that's already active, so it keeps its place", async () => {

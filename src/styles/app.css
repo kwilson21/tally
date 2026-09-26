@@ -65,6 +65,11 @@
 	}
 }
 
+/* The money input's buttons and chips need money.js, which marks <html class="js">. */
+html:not(.js) [data-money-js] {
+	display: none;
+}
+
 /* Budget bars grow from the left on load. Reduced motion shows the final state. */
 @keyframes bar-fill {
 	from {
