@@ -5,6 +5,7 @@ import { formatCents } from "../money";
 import { barGeometry } from "../views/bar";
 import { CategoryIcon } from "../views/category";
 import { Icon } from "../views/icons";
+import { ProgressRow } from "../views/progress-row";
 
 type Row = {
 	name: string;
@@ -123,9 +124,9 @@ function NudgeRow({
 			<li class="flex items-start gap-4 py-3">
 				<CategoryIcon icon={row.icon} color={row.color} />
 				<div class="min-w-0 flex-1">
-					<div class="flex items-center justify-between gap-2">
-						<span class="text-lg">{row.name}</span>
-						<span class="flex items-center gap-2 text-lg">
+					<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+						<span class="min-w-0 text-lg">{row.name}</span>
+						<span class="flex flex-wrap items-center justify-end gap-2 text-lg">
 							{whole(row.spentCents)} of
 							<Nudge sign="−" />
 							{whole(row.budgetCents)}
@@ -183,6 +184,21 @@ export function NudgeOptions() {
 				Undo, and the change is announced. The step size is open too: $10 is
 				shown.
 			</p>
+			<div class="flex min-w-0 max-w-2xl flex-col gap-2">
+				<p class="text-sm font-semibold uppercase tracking-wide text-muted">
+					Today
+				</p>
+				<p class="text-sm text-muted">
+					Home's real rows as they are now: tap a row to open its budget sheet
+					and type an amount. (Its 8px bar and limit line are already set to
+					change: decision 46.)
+				</p>
+				<ul class="divide-y divide-rule">
+					{NUDGE_ROWS.map((row) => (
+						<ProgressRow {...row} />
+					))}
+				</ul>
+			</div>
 			{NUDGE_OPTIONS.map((opt) => (
 				<div class="flex min-w-0 max-w-2xl flex-col gap-2">
 					<p class="text-sm font-semibold uppercase tracking-wide text-muted">

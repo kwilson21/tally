@@ -16,6 +16,10 @@ describe("GET /design-system/proposals", () => {
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
 		expect(html).toMatch(/<section[^>]*id="p6"/);
+		// Today's version comes first, drawn by the real component.
+		const p6 = html.split('id="p6"')[1] ?? "";
+		expect(p6.indexOf(">Today<")).toBeGreaterThan(-1);
+		expect(p6.indexOf(">Today<")).toBeLessThan(p6.indexOf("Option A"));
 		for (const opt of NUDGE_OPTIONS)
 			expect(html).toContain(opt.title.replaceAll("'", "&#39;"));
 		expect(DECIDED.length).toBe(5);
