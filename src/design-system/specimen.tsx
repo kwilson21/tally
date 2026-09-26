@@ -78,3 +78,34 @@ export function State({
 		</div>
 	);
 }
+
+/** DESIGN.md's eight questions for an interactive component, in order. */
+export const USE_SPEC_PARTS = [
+	["purpose", "Purpose"],
+	["affordance", "Affordance"],
+	["states", "States"],
+	["feedback", "Feedback"],
+	["input", "Input"],
+	["motion", "Motion"],
+	["edges", "Edge cases"],
+	["words", "Words"],
+] as const;
+
+export type UseSpecText = Record<(typeof USE_SPEC_PARTS)[number][0], Child>;
+
+/** A component's use spec (DESIGN.md, "Use"): all eight answers, shown next to it for sign-off. */
+export function UseSpec({ spec }: { spec: UseSpecText }) {
+	return (
+		<div class="max-w-prose">
+			<p class="text-sm font-medium text-muted">How it's used</p>
+			<dl class="mt-2 divide-y divide-rule border-y border-rule">
+				{USE_SPEC_PARTS.map(([key, label]) => (
+					<div class="py-3 sm:grid sm:grid-cols-[8rem_1fr] sm:gap-4">
+						<dt class="font-medium">{label}</dt>
+						<dd class="mt-1 sm:mt-0">{spec[key]}</dd>
+					</div>
+				))}
+			</dl>
+		</div>
+	);
+}

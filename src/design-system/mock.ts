@@ -86,6 +86,44 @@ export const PROGRESS_ROWS = [
 	},
 ];
 
+/**
+ * Home's budget list in Adjust mode (#94): a round amount, one between round $10s, one over budget
+ * and one at $0. The nudge paths are Home's real ones, but the specimen is Visual, so nothing posts.
+ */
+export const ADJUST_ROWS = [
+	{
+		name: "Groceries",
+		icon: "groceries",
+		color: "cat-blue",
+		spentCents: 41200,
+		budgetCents: 70000,
+	},
+	{
+		name: "Household",
+		icon: "household",
+		color: "cat-brown",
+		spentCents: 9500,
+		budgetCents: 71200,
+	},
+	{
+		name: "Eating out",
+		icon: "eating-out",
+		color: "cat-plum",
+		spentCents: 28600,
+		budgetCents: 25000,
+	},
+	{
+		name: "Kids",
+		icon: "kids",
+		color: "cat-ochre",
+		spentCents: 0,
+		budgetCents: 0,
+	},
+].map((row, i) => ({
+	...row,
+	nudge: { href: `/budget/${i + 1}/nudge`, id: `ds-nudge-${i + 1}` },
+}));
+
 /** The Band links to the demo's real "needs a category" list, which is what it says. */
 export const BAND = {
 	href: "/transactions?uncategorized=1",
