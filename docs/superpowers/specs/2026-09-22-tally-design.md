@@ -200,10 +200,12 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 - **Edit panel:** a page region, not a modal. Focus moves into it, and Cancel or the backdrop closes it. Escape isn't supported, because it would need custom JavaScript.
 - **Charts:** the server renders them as inline SVG. No chart library.
 - **Expand and collapse:** `<details>` / `<summary>`. No JavaScript.
-- **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires), a small toast listener, and the money input's `money.js` (decision 39). Without `money.js` the money input is a plain field.
+- **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires), a small toast listener, and the money input's `money.js` (decision 39). Without `money.js` the money input is a plain field. The design system catalog has one script of its own, served only on its pages (decision 44).
 - **Accessibility:** every form is labeled, focus rings use `focus-visible`, touch targets are at least 44×44 px, and every HTMX swap is announced: through an `aria-live="polite"` count or announcer, or by moving focus (a whole list is never a live region, which would read out every row). Errors use `role="alert"`.
 
-Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before any UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
+Generated design studies (phone 390×844, desktop 1280×800) are selected by the owner before a new screen's UI code. They're composition references only; the real UI comes from the design system. The selected direction is "Quiet ledger"; see `docs/design-concepts/README.md` and decisions 20–21.
+
+**Design system catalog (decisions 42–44):** `/design-system` shows every component in its states, rendered by importing the real components with fake data, so the catalog can't drift from the app. It exists in the demo and in development, and production returns 404. Each component is marked with one tier: **Visual** (static states side by side, inert), **Interactive** (works in the browser without the server) or **Flow** (a multi-step journey on fake data, on its own page, with the step in the URL). Every UI change starts there and the owner signs it off there before it reaches an app page. The process is in `DESIGN.md`; the inventory of the original app's components is in `docs/design-system/inventory.md`.
 
 ## 9. Demo experience
 

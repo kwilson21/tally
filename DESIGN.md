@@ -73,7 +73,35 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 - Motion: budget bars fill on load (CSS). `prefers-reduced-motion` shows the final state. No count-up: it would need custom JavaScript.
 - Bars are inline SVG. The CSP forbids style attributes, and SVG width attributes aren't CSS.
 
+## Catalog (decisions 42–44)
+`/design-system` shows every component in its states. It exists in the demo and in development; production returns 404. The inventory of the original app's components, and what Tally keeps, is in docs/design-system/inventory.md.
+
+Principles, from the original app's integrity protocol:
+- **No broken windows.** If something looks clickable in the catalog, it works. If it can't work there, it doesn't look clickable.
+- **No fake interactivity.** Nothing in the catalog pretends to talk to the server. If a component needs the server, it's Visual in the catalog and works in a Flow.
+- **The real component, never a copy.** The catalog imports the component from `src/views/` and passes it typed fake data, so it can't drift from the app. UI that is still assembled inside a route (for example the Transactions filters or Home's headline and status sentence) is extracted into `src/views/` first, in the PR that catalogs it; the catalog never copies its markup.
+- **The catalog doesn't make its own bugs.** A catalog-only bug that costs time and fixes nothing in the app means the process failed.
+
+Every component has exactly one tier, shown as a pill:
+| Tier | Rule | Where |
+|---|---|---|
+| Visual | Static states side by side. The wrapper has `hx-ignore` (htmx 4's name for making a subtree inert) and the catalog's CSP has `form-action 'none'`, so nothing can post. | Catalog sections |
+| Interactive | Works in the browser without the server: CSS, `<details>`, money.js, toast.js, and the catalog's own controls in `ds.js`. | Catalog sections |
+| Flow | A multi-step journey on fake data. The step is in the URL (`?step=2`), and each step renders the real components. | Its own page under `/design-system/flows/` |
+
+`ds.js` only runs catalog controls (fire a sample toast, replay an animation). It never intercepts or fakes a request, and app pages never load it.
+
+## Process for a UI change (decision 43)
+1. **Design in the catalog.** Build or change the component there, at its tier, with fake data. A new screen starts with a generated study first (decisions 21, 35); a component starts here.
+2. **Audit** against this file: tokens only, type roles, 44px targets, focus-visible rings, status never color alone, and every swap announced.
+3. **Screenshots** of the catalog at 1280 and 390, and the owner checks the catalog in a browser and signs off. CI screenshots only the pages listed in `PAGES` in `scripts/pr-body.mjs`, so every catalog and flow page is added there in the PR that adds it.
+4. **Use it in the app.** The app imports the same component, so there's nothing to copy.
+5. **E2E** for the critical flows.
+6. **The owner verifies** the app pages.
+
+A backend-only change skips step 1.
+
 ## Governance
-- A visual change starts as a generated study, gets owner selection, and is recorded in docs/design-concepts/README.md.
-- A new token or component updates this file in the same PR, with its contrast value if it's a color.
+- A new screen's visual direction starts as a generated study, gets owner selection, and is recorded in docs/design-concepts/README.md. Its components then go through the catalog.
+- A new token or component updates this file and the catalog in the same PR, with its contrast value if it's a color.
 - Accessibility: 44px targets, focus-visible ring, labeled forms, every HTMX swap announced through an aria-live count or announcer, or by moving focus (never a live list).
