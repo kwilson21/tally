@@ -1,6 +1,10 @@
 import { csrf } from "hono/csrf";
 import { secureHeaders } from "hono/secure-headers";
 
+/** True for the design system catalog's pages (decision 42). */
+const inCatalog = (path: string) =>
+	path === "/design-system" || path.startsWith("/design-system/");
+
 // Everything is served from our own origin; Plaid's CDN is added on the Accounts page in Phase 2.
 export const security = secureHeaders({
 	xFrameOptions: "DENY",
@@ -14,7 +18,8 @@ export const security = secureHeaders({
 		objectSrc: ["'none'"],
 		frameAncestors: ["'none'"],
 		baseUri: ["'self'"],
-		formAction: ["'self'"],
+		// No form on a catalog page can submit, even without JavaScript (DESIGN.md "Catalog").
+		formAction: [(c) => (inCatalog(c.req.path) ? "'none'" : "'self'")],
 	},
 });
 

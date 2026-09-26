@@ -198,6 +198,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 **How the pages behave:**
 - **Edits:** an edit returns the updated fragment, plus an `HX-Trigger` header with `toast` and `announce` keys for the confirmation toast and screen-reader announcement.
 - **Edit panel:** a page region, not a modal. Focus moves into it, and Cancel or the backdrop closes it. Escape isn't supported, because it would need custom JavaScript.
+- **Enhancements (decision 45):** swipe gestures, drag and modal dialogs, as in the original app, each built through the catalog with its own allowed-JS decision. Every page works without them; until a modal dialog is built, the edit panel below stays a page region.
 - **Charts:** the server renders them as inline SVG. No chart library.
 - **Expand and collapse:** `<details>` / `<summary>`. No JavaScript.
 - **JavaScript:** the only custom JavaScript is Plaid Link (loaded from Plaid's CDN, as Plaid requires), a small toast listener, and the money input's `money.js` (decision 39). Without `money.js` the money input is a plain field. The design system catalog has one script of its own, served only on its pages (decision 44).

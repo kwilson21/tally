@@ -5,7 +5,8 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 - **Keep:** Tally already has it or the spec needs it now; it goes in the catalog.
 - **Adapt:** the spec needs it; bring the original's details over in Illustrated ledger tokens, through the catalog.
 - **Later:** the spec needs it in a later phase; it enters the catalog with its feature.
-- **Not needed:** not in the spec, or the app would need custom JavaScript beyond Plaid Link, toast.js and money.js (CLAUDE.md) that no issue asks for. #72 and #73 are Adapt because each already asks for its own allowed-JS decision. The catalog's `ds.js` (decision 44) only runs catalog controls, so it doesn't change these verdicts.
+- **Enhancement:** the owner wants it for the feel of the app (decision 45), though nothing depends on it. The app works without it; its script gets its own allowed-JS decision, and what it does in Tally is agreed with the owner, when it's built through the catalog.
+- **Not needed:** not in the spec, or the app would need custom JavaScript beyond Plaid Link, toast.js and money.js (CLAUDE.md) that no issue or decision asks for. #72 and #73 are Adapt because each already asks for its own allowed-JS decision. The catalog's `ds.js` (decision 44) only runs catalog controls, so it doesn't change these verdicts.
 
 ## Foundation and motion
 | Original | Intuitive details | Tally | Verdict |
@@ -64,14 +65,14 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 ## Overlays
 | Original | Intuitive details | Tally | Verdict |
 |---|---|---|---|
-| Dialog (basic, form, danger) | Escape and backdrop close, focus trap, focus restored | BottomSheet (not modal; Cancel or backdrop) | Keep BottomSheet; a modal dialog needs JS, so not needed |
+| Dialog (basic, form, danger) | Escape and backdrop close, focus trap, focus restored | BottomSheet (not modal; Cancel or backdrop) | Keep BottomSheet; a modal dialog (Escape, focus trap, focus restored) is an Enhancement |
 | Dialog form variants | Hero amount, "optional" divider, compact category grid, rename suggestion chips | MoneyInput, edit panel | Keep; rename chips later (name suggestions, Phase 4) |
 | Toasts (success, error, info, undo) | Auto-dismiss 4s, above the mobile nav | toast.js | Keep; Undo comes with #70 |
 | Keyboard shortcuts modal | `?` opens it | None | Adapt with #72, which needs its own allowed-JS decision (a small `keyboard.js`, as #72 says); the list itself is a `<details>` that reads without it |
 | Split modal | Live "Remaining", submit disabled until it balances | None | Later (Phase 3; server-checked) |
 | Category create, edit, delete | Create and edit states | Settings disclosure rows | Keep |
 | Disconnect bank, danger zone | Confirm first | None | Later (Accounts) / Not needed |
-| Bottom sheet (mobile) | Drag handle, swipe or backdrop dismisses | BottomSheet (backdrop, Cancel) | Keep; swipe needs JS, so not needed |
+| Bottom sheet (mobile) | Drag handle, swipe or backdrop dismisses | BottomSheet (backdrop, Cancel) | Keep; swipe-to-close is an Enhancement |
 
 ## Feedback and states
 | Original | Intuitive details | Tally | Verdict |
@@ -93,7 +94,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Transaction and new-item highlight | None | Adapt with #71 (CSS) |
 | Undo delete sequence (row exits, 5s countdown) | None | Adapt only what #70 needs |
 | Enter/exit, pop, expand, stagger, swap transitions, scroll reveal, pulse, swipe hint | None | Not needed |
-| Swipe to delete, pull to refresh, drag, sheet swipe | None (would need custom JS) | Not needed |
+| Swipe on a row, pull to refresh, drag, sheet swipe | None | Enhancement (each gesture's action agreed with the owner first; Tally deletes nothing, so a row swipe would do something else, such as exclude) |
 
 ## Flows
 | Original (steps) | Tally flow | Verdict |
@@ -107,7 +108,8 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Keyboard shortcuts (2) | Shortcuts | Adapt with #72 (after its allowed-JS decision) |
 | Onboarding (6) | None | Not needed (not in spec) |
 | CSV import (4) | None | Not needed (Later list: statement upload) |
-| Select mode (4), reorder (2), organize (1) | Move up/down in Settings | Not needed |
+| Reorder (2) | Move up/down in Settings | Enhancement: drag to reorder, with Move up/down kept |
+| Select mode (4), organize (1) | None | Not needed |
 
 ## Process pieces
 | Original | Tally | Verdict |
