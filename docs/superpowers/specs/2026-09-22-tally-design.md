@@ -39,7 +39,7 @@ All eight features are in scope and ship across phases (§11):
 | 7 | Account balances and net worth over time |
 | 8 | Documents: stored statements and receipts (PDF) |
 
-Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggested new categories when none of the household's categories fit (a person creates or dismisses them), the demo banner, a "Things to try" list, and a "How it works" page.
+Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggested new categories when none of the household's categories fit (a person creates or dismisses them), the demo banner, a "Things to try" list, a "How it works" page, and onboarding: what a first visit shows and teaches, in the demo and in the family's first week (decision 49, #95).
 
 **Household model:** one shared household. Everyone who can log in sees and edits the same data. Changes record who made them.
 
@@ -281,7 +281,6 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
 - A close (×) button on the demo's Things to try block, remembered with a cookie
-- An onboarding initiative: what a first visit (the demo, and the family's first week) shows and teaches, and where Things to try lives once it leaves the top of Home (decision 46)
 - Choosing a category's icon and color in Settings (new categories get the tag icon and the next color)
 - Removing a category's budget (for now the budget sheet requires an amount)
 
