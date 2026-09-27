@@ -190,6 +190,45 @@ describe("syncItem", () => {
 		).toEqual({ n: 1 });
 	});
 
+	it("skips a pending transaction for an unknown account", async () => {
+		const id = await addItem();
+		await expect(
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				id,
+				plaidFetch(
+					() =>
+						response(
+							page({
+								added: [transaction({ account_id: "unknown", pending: true })],
+							}),
+						),
+					[],
+				),
+			),
+		).resolves.toEqual({ added: 0, modified: 0, removed: 0 });
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
+		).toEqual({ n: 0 });
+	});
+
+	it("adds and logs nothing when the same page is synced twice", async () => {
+		const id = await addItem();
+		const fetchImpl = plaidFetch(() =>
+			response(page({ added: [transaction()] })),
+		);
+		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		await expect(
+			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+		).resolves.toEqual({ added: 0, modified: 0, removed: 0 });
+		expect(log).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
+		).toEqual({ n: 1 });
+		log.mockRestore();
+	});
+
 	it("restarts mutated pagination from the run's initial cursor without duplicates", async () => {
 		const id = await addItem();
 		await env.DB.prepare(

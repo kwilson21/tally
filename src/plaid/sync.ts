@@ -274,9 +274,11 @@ export async function syncItem(
 			summary.added += inserted;
 			summary.modified += page.modified.length;
 			summary.removed += page.removed.length;
-			console.log(
-				`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
-			);
+			if (inserted || page.modified.length || page.removed.length) {
+				console.log(
+					`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
+				);
+			}
 			if (!page.has_more) return summary;
 		}
 	} finally {
