@@ -14,6 +14,7 @@ import { loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
 import { AdjustLink } from "../views/adjust-link";
 import { BottomSheet } from "../views/bottom-sheet";
+import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
@@ -286,19 +287,12 @@ function BudgetSheet({
 					autofocus
 				/>
 				<div class="mt-2 grid grid-cols-2 gap-3">
-					<a
-						href="/"
-						class="flex min-h-11 items-center justify-center rounded-control border border-ink text-ink no-underline"
-						{...closeAttrs}
-					>
+					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
 						Cancel
-					</a>
-					<button
-						type="submit"
-						class="min-h-11 rounded-control bg-ink text-paper"
-					>
+					</Button>
+					<Button type="submit" class="w-full">
 						Save
-					</button>
+					</Button>
 				</div>
 			</form>
 		</BottomSheet>

@@ -16,10 +16,11 @@ import {
 	parseCategory,
 	restoreProblem,
 } from "../settings/category-form";
+import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
-import { FormField } from "../views/form-field";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { TextInput } from "../views/text-input";
 
 type App = { Bindings: Env };
 export const settings = new Hono<App>();
@@ -57,9 +58,6 @@ const chevron = (
 		<Icon name="chevron-right" class="size-5" />
 	</span>
 );
-const primary = "min-h-11 rounded-control bg-ink px-5 text-paper";
-const secondary =
-	"inline-flex min-h-11 items-center justify-center rounded-control border border-ink px-5 text-ink no-underline";
 
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
@@ -87,20 +85,17 @@ function NameField({
 	errors?: CategoryErrors;
 }) {
 	return (
-		<FormField id={`${idPrefix}-name`} label="Name" error={errors.name}>
-			{(a11y) => (
-				<input
-					id={`${idPrefix}-name`}
-					name="name"
-					value={name}
-					maxlength={40}
-					autocomplete="off"
-					autofocus={Boolean(errors.name)}
-					class="min-h-11 rounded-control border border-rule bg-band px-3 text-lg sm:max-w-sm"
-					{...a11y}
-				/>
-			)}
-		</FormField>
+		<TextInput
+			id={`${idPrefix}-name`}
+			label="Name"
+			name="name"
+			value={name}
+			maxlength={40}
+			autocomplete="off"
+			autofocus={Boolean(errors.name)}
+			error={errors.name}
+			class="sm:max-w-sm"
+		/>
 	);
 }
 
@@ -157,12 +152,10 @@ function CategoryRow({
 						</a>
 					</p>
 					<div class="flex flex-wrap items-center gap-3">
-						<button type="submit" class={primary}>
-							Save
-						</button>
-						<a
+						<Button type="submit">Save</Button>
+						<Button
 							href="/settings"
-							class={secondary}
+							kind="secondary"
 							// Back to the list with focus on this row, so the change is announced.
 							hx-get={`/settings?focus=${c.id}`}
 							hx-target="#categories"
@@ -170,36 +163,39 @@ function CategoryRow({
 							hx-swap="outerHTML"
 						>
 							Cancel
-						</a>
-						<button
+						</Button>
+						<Button
 							type="submit"
-							class="ml-auto min-h-11 px-2 text-accent"
+							kind="text"
+							class="ml-auto"
 							{...action(`${url}/archive`)}
 						>
 							Archive
-						</button>
+						</Button>
 					</div>
 					{!(first && last) && (
 						<div class="flex flex-wrap gap-2">
 							{!first && (
-								<button
+								<Button
 									type="submit"
-									class={`${secondary} gap-2 px-3`}
+									kind="secondary"
+									class="gap-2 px-3"
 									{...action(`${url}/move/up`)}
 								>
 									<Icon name="arrow-up" class="size-4" />
 									Move up
-								</button>
+								</Button>
 							)}
 							{!last && (
-								<button
+								<Button
 									type="submit"
-									class={`${secondary} gap-2 px-3`}
+									kind="secondary"
+									class="gap-2 px-3"
 									{...action(`${url}/move/down`)}
 								>
 									<Icon name="arrow-down" class="size-4" />
 									Move down
-								</button>
+								</Button>
 							)}
 						</div>
 					)}
@@ -263,9 +259,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 								errors={adding ? view.errors : undefined}
 							/>
 							<div>
-								<button type="submit" class={primary}>
-									Add category
-								</button>
+								<Button type="submit">Add category</Button>
 							</div>
 						</form>
 					</details>
@@ -294,9 +288,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 											class="ml-auto"
 											{...swap(`/settings/categories/${a.id}/restore`)}
 										>
-											<button type="submit" class="min-h-11 px-2 text-accent">
+											<Button type="submit" kind="text">
 												Restore
-											</button>
+											</Button>
 										</form>
 									</li>
 								))}

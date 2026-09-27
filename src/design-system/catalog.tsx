@@ -6,9 +6,9 @@ import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
+import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
-import { FormField } from "../views/form-field";
 import { HomeTop } from "../views/home-top";
 import {
 	BudgetDiagram,
@@ -22,6 +22,7 @@ import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { SystemDiagram } from "../views/system-diagram";
+import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TransactionRow } from "../views/transaction-row";
 import {
@@ -45,10 +46,6 @@ import {
 	type UseSpecText,
 } from "./specimen";
 import { CATEGORY_COLORS, COLOR_TOKENS, TYPE_ROLES } from "./tokens";
-
-// The catalog's own buttons, in Settings' outline style; a Button component comes later in #76.
-const catalogButton =
-	"inline-flex min-h-11 items-center justify-center rounded-control border border-ink px-5 text-ink no-underline";
 
 const SECTIONS = [
 	["foundation", "Foundation"],
@@ -529,9 +526,120 @@ function Rows() {
 	);
 }
 
+const BUTTON_SPEC: UseSpecText = {
+	purpose:
+		"Do the main action, a secondary alternative, or a quiet text action.",
+	affordance:
+		"A filled, outlined, or terracotta label looks actionable without hover.",
+	states:
+		"Rest, hover, focus, pressed, and disabled apply; loading, done, and error belong to the action's feedback.",
+	feedback:
+		"The destination or form result appears, focus follows the changed content, and HTMX actions announce their result.",
+	input:
+		"Every target is at least 44px; Tab focuses it, Enter or Space activates a button, and a screen reader announces its name, role, and disabled state.",
+	motion: "Nothing moves; reduced motion is unchanged.",
+	edges:
+		"Long labels may wrap. A slow request leaves the control available until loading behavior arrives in #69; links still navigate and forms still submit without JavaScript.",
+	words:
+		"Use a short verb phrase such as Save, Cancel, Archive, Restore, or Add category.",
+};
+
+const TEXT_INPUT_SPEC: UseSpecText = {
+	purpose: "Enter or change one short piece of text.",
+	affordance:
+		"A labeled bordered field shows where to type without relying on hover.",
+	states:
+		"Rest, focus, filled, error, and disabled apply; hover, pressed, loading, and done are not separate field states.",
+	feedback:
+		"Typing appears immediately; validation shows an error below the field and a screen reader hears it as an alert.",
+	input:
+		"The field is at least 44px high; tap or Tab focuses it, typing edits it, and a screen reader announces its label, value, and invalid or disabled state.",
+	motion: "Nothing moves; reduced motion is unchanged.",
+	edges:
+		"Empty and long values use the form's validation and length limit; a disabled field cannot be edited; native form submission works without JavaScript.",
+	words:
+		"The visible label names the value; errors say what to do, for example Give the category a name.",
+};
+
 function Controls() {
 	return (
 		<Group id="controls" title="Controls">
+			<Specimen
+				id="button"
+				title="Button"
+				tier="visual"
+				components={["Button"]}
+				sentence="A primary, secondary, or quiet text action, rendered as a button or link."
+			>
+				<div class="flex flex-wrap gap-3">
+					{(["primary", "secondary", "text"] as const).map((kind) => (
+						<>
+							<State label={`${kind}, rest`}>
+								<Button kind={kind} type="button">
+									{kind === "primary"
+										? "Save"
+										: kind === "secondary"
+											? "Cancel"
+											: "Archive"}
+								</Button>
+							</State>
+							<State label={`${kind}, disabled`}>
+								<Button kind={kind} type="button" disabled>
+									{kind === "primary"
+										? "Save"
+										: kind === "secondary"
+											? "Cancel"
+											: "Archive"}
+								</Button>
+							</State>
+						</>
+					))}
+				</div>
+				<p class="max-w-prose text-muted">
+					One primary button per screen or sheet, at the end of the form, with
+					Cancel beside it.
+				</p>
+				<UseSpec spec={BUTTON_SPEC} />
+			</Specimen>
+			<Specimen
+				id="text-input"
+				title="TextInput"
+				tier="visual"
+				components={["TextInput"]}
+				sentence="A labeled single-line text field with accessible error and disabled states."
+			>
+				<div class="grid gap-4 sm:grid-cols-2">
+					<State label="Rest">
+						<TextInput id="ds-input-rest" label="Name" name="rest" />
+					</State>
+					<State label="Filled">
+						<TextInput
+							id="ds-input-filled"
+							label="Name"
+							name="filled"
+							value="Groceries"
+						/>
+					</State>
+					<State label="Error">
+						<TextInput
+							id="ds-input-error"
+							label="Name"
+							name="error"
+							error="Give the category a name."
+						/>
+					</State>
+					<State label="Disabled">
+						<TextInput
+							id="ds-input-disabled"
+							label="Name"
+							name="disabled"
+							value="Groceries"
+							disabled
+						/>
+					</State>
+				</div>
+				<UseSpec spec={TEXT_INPUT_SPEC} />
+			</Specimen>
 			<Specimen
 				id="chip"
 				title="Chip"
@@ -592,23 +700,19 @@ function Controls() {
 				components={["FormField"]}
 				sentence="A labeled control, with its error shown in role=“alert”."
 			>
-				{/* The input is Settings' name field; a text input component comes with Button in #76. */}
 				{[
 					["Default", "ds-name", "Groceries", undefined],
 					["With an error", "ds-name-error", "", "Give the category a name."],
 				].map(([label, id, value, error]) => (
 					<State label={label as string}>
-						<FormField id={id as string} label="Name" error={error}>
-							{(a11y) => (
-								<input
-									id={id}
-									value={value}
-									autocomplete="off"
-									class="min-h-11 rounded-control border border-rule bg-band px-3 text-lg sm:max-w-sm"
-									{...a11y}
-								/>
-							)}
-						</FormField>
+						<TextInput
+							id={id as string}
+							label="Name"
+							value={value}
+							autocomplete="off"
+							error={error}
+							class="sm:max-w-sm"
+						/>
 					</State>
 				))}
 			</Specimen>
@@ -639,22 +743,22 @@ function Feedback() {
 				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds and the announcer reads it. These buttons send the same events."
 			>
 				<div class="flex flex-wrap gap-3">
-					<button
+					<Button
 						type="button"
+						kind="secondary"
 						data-ds-toast="success"
 						data-ds-message="Saved Groceries' budget."
-						class={catalogButton}
 					>
 						Show a saved toast
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
+						kind="secondary"
 						data-ds-toast="error"
 						data-ds-message="That didn't save. Try again."
-						class={catalogButton}
 					>
 						Show an error toast
-					</button>
+					</Button>
 				</div>
 			</Specimen>
 			<Specimen
@@ -794,12 +898,13 @@ export function SheetSpecimen() {
 						On phones it rises from the bottom; on desktop it's a panel on the
 						right. It isn't a modal: the page behind it stays in place.
 					</p>
-					<a
+					<Button
 						href="/design-system#bottom-sheet"
-						class="mt-6 inline-flex min-h-11 items-center justify-center rounded-control border border-ink px-5 text-ink no-underline"
+						kind="secondary"
+						class="mt-6"
 					>
 						Cancel
-					</a>
+					</Button>
 				</BottomSheet>
 			</div>
 		</>
