@@ -15,7 +15,7 @@ type Bindings = Env & PlaidEnv;
 type App = { Bindings: Bindings; Variables: { actor: string } };
 export const plaid = new Hono<App>();
 
-function enabled(env: Bindings) {
+export function enabled(env: Bindings) {
 	return (
 		env.DEMO !== "true" &&
 		Boolean(env.PLAID_CLIENT_ID && env.PLAID_SECRET) &&
