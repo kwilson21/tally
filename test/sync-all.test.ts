@@ -185,6 +185,69 @@ describe("syncAllItems", () => {
 		});
 	});
 
+	it("stops starting Items after the twelve-minute budget", async () => {
+		await addItem();
+		await addItem();
+		const fetchImpl = fakePlaid();
+		const times = [0, 0, 12 * 60 * 1000 + 1];
+
+		expect(
+			await syncAllItems(enabledEnv, fetchImpl, () => times.shift() ?? 0),
+		).toEqual({
+			synced: 1,
+			skipped: 1,
+			failed: 0,
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it("rechecks an Item's status just before syncing it", async () => {
+		await addItem();
+		const second = await addItem();
+		const fetchImpl = fakePlaid();
+		let calls = 0;
+		fetchImpl.mockImplementation(async (url, init) => {
+			calls += 1;
+			if (calls === 2) {
+				await env.DB.prepare(
+					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+				)
+					.bind(second)
+					.run();
+			}
+			return fakePlaid()(url, init);
+		});
+
+		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			synced: 1,
+			skipped: 1,
+			failed: 0,
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it("logs only the row id and error name for a non-Plaid failure", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET access_token_encrypted = ? WHERE id = ?",
+		)
+			.bind(new TextEncoder().encode("private-token"), id)
+			.run();
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
+			synced: 0,
+			skipped: 0,
+			failed: 1,
+		});
+		expect(error.mock.calls).toEqual([
+			[`plaid daily sync: item ${id} failed Error`],
+		]);
+		expect(JSON.stringify(error.mock.calls)).not.toMatch(
+			/private-token|Bank|person@example\.com|token-|amount/,
+		);
+	});
+
 	it("logs only request IDs and the final counts", async () => {
 		await addItem();
 		await addItem();
@@ -207,7 +270,17 @@ describe("syncAllItems", () => {
 		]);
 		expect(error.mock.calls).toEqual([
 			["plaid sync error request-1"],
+			[
+				expect.stringMatching(
+					/^plaid daily sync: item \d+ failed plaid request-1$/,
+				),
+			],
 			["plaid sync error request-2"],
+			[
+				expect.stringMatching(
+					/^plaid daily sync: item \d+ failed plaid request-2$/,
+				),
+			],
 		]);
 	});
 });

@@ -55,7 +55,7 @@ const PARTS: [string, string][] = [
 	],
 	[
 		"Cron Triggers",
-		"Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. In the demo, reset the data nightly instead.",
+		"Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. The demo has no bank sync: each night it resets to the seed data, then retries uncategorized transactions.",
 	],
 	[
 		"Cloudflare Access",

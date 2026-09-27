@@ -39,15 +39,21 @@ export async function plaidPost<T>(
 		env.PLAID_ENV === "production"
 			? "https://production.plaid.com"
 			: "https://sandbox.plaid.com";
-	const response = await fetchImpl(`${baseUrl}${path}`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			...body,
-			client_id: env.PLAID_CLIENT_ID,
-			secret: env.PLAID_SECRET,
-		}),
-	});
+	let response: Response;
+	try {
+		response = await fetchImpl(`${baseUrl}${path}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				...body,
+				client_id: env.PLAID_CLIENT_ID,
+				secret: env.PLAID_SECRET,
+			}),
+			signal: AbortSignal.timeout(30_000),
+		});
+	} catch {
+		throw new PlaidError();
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(await response.text());
