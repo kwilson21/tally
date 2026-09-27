@@ -59,7 +59,7 @@ export function Button({
 	const look = layout?.split(/\s+/).some((token) => token.startsWith("px-"))
 		? LOOK[kind].replace(/(?:^|\s)px-\S+/, "")
 		: LOOK[kind];
-	const className = `${look}${layout ? ` ${layout}` : ""}`;
+	const className = `${look}${layout ? ` ${layout}` : ""}${busyLabel ? " [&.htmx-request]:opacity-100!" : ""}`;
 	const buttonClassName = `${className} disabled:opacity-40`;
 	if (href && disabled) {
 		return (

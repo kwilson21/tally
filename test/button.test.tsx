@@ -91,4 +91,12 @@ describe("Button", () => {
 		expect(html).not.toContain("button-spinner");
 		expect(html).not.toContain("Saving…");
 	});
+
+	it("keeps only the requesting busy button at full opacity", () => {
+		const busy = renderToString(<Button busyLabel="Saving…">Save</Button>);
+		const plain = renderToString(<Button>Cancel</Button>);
+
+		expect(busy).toContain("[&amp;.htmx-request]:opacity-100!");
+		expect(plain).not.toContain("[&amp;.htmx-request]:opacity-100!");
+	});
 });
