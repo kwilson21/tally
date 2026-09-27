@@ -101,6 +101,18 @@ describe("askJev", () => {
 		expect(second.state.direction).toBe("money in");
 	});
 
+	it("includes Plaid's category hint when present", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(
+			{ ...input, plaidCategory: "FOOD_AND_DRINK" },
+			categories,
+			"k",
+			fetchImpl,
+		);
+		const body = JSON.parse(String(calls[0]?.init.body));
+		expect(body.state.plaid_category).toBe("FOOD_AND_DRINK");
+	});
+
 	it("parses the category pick and the flag probabilities", async () => {
 		const { fetchImpl } = fakeFetch(() => ok(goodBody));
 		expect(await askJev(input, categories, "k", fetchImpl)).toEqual({

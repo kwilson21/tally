@@ -62,6 +62,7 @@ describe("pendingForJev", () => {
 			displayName: "Local Bakery",
 			amountCents: 1200,
 			accountType: "credit",
+			plaidCategory: null,
 		});
 	});
 

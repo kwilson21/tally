@@ -270,7 +270,8 @@ export async function pendingForJev(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, m.display_name AS displayName,
-				t.amount_cents AS amountCents, a.type AS accountType
+				t.amount_cents AS amountCents, a.type AS accountType,
+				t.plaid_category AS plaidCategory
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
