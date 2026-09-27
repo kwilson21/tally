@@ -180,6 +180,8 @@ The confidence threshold is a single config value, set during Phase 1 after chec
 
 **Merchant names:** the Settings screen lists merchants without a chosen name. Workers AI generates a `suggested_name` once per `raw_name` and caches it. A person accepts it (it becomes `display_name`) or rejects it. Renaming a merchant renames every transaction from that merchant, because display names are looked up from `merchants`. All Workers AI calls go through `src/ai/suggest-name.ts`.
 
+**Tidied names (decision 46, #93):** until a person names a merchant, its raw bank text is tidied by code for display only — card and processor prefixes and store numbers removed, sentence case, with a short list of acronyms kept in capitals — while `raw_name` itself is never touched, so search still matches it. Phase 4's name suggestions (#33) replace this once Workers AI has looked at the merchant; either way, a person's own rename always wins.
+
 ## 8. Screens
 
 Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, More); desktop gets the same items in a sidebar.

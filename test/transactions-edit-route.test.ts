@@ -72,7 +72,7 @@ describe("GET /transactions/:id", () => {
 		expect(html).toMatch(/<button type="submit"[^>]*>Save<\/button>/);
 	});
 
-	it("shows the raw bank name only when it differs from the heading", async () => {
+	it("tidies an unnamed merchant's raw text for the heading, showing the raw text underneath and as the input placeholder", async () => {
 		const paypal = (
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'PAYPAL *XYZSHOP'",
@@ -80,7 +80,9 @@ describe("GET /transactions/:id", () => {
 		)?.id;
 		const { html } = await get(`/transactions/${paypal}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
-		expect(sheet.match(/PAYPAL \*XYZSHOP/g)).toHaveLength(2); // heading + input placeholder
+		expect(sheet).toMatch(/<h2 id="edit-title"[^>]*>Xyzshop<\/h2>/);
+		// The raw text differs from the tidied heading, so it shows underneath and as the placeholder.
+		expect(sheet.match(/PAYPAL \*XYZSHOP/g)).toHaveLength(2);
 	});
 
 	it("is a 404 page for an unknown id", async () => {

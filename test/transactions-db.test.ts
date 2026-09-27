@@ -85,6 +85,15 @@ describe("listTransactions", () => {
 		expect((await list("q=%25")).rows).toHaveLength(0);
 	});
 
+	it("searches an unnamed merchant's raw text, even though the list shows its tidied name", async () => {
+		const { rows } = await list("q=DOORDASH");
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			rawName: "DD *DOORDASH TACO",
+			displayName: "Doordash taco",
+		});
+	});
+
 	it("searches notes", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET note = 'birthday cake' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
