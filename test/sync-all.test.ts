@@ -283,4 +283,39 @@ describe("syncAllItems", () => {
 			],
 		]);
 	});
+
+	it("counts a failed status check as failed and carries on", async () => {
+		const first = await addItem();
+		await addItem();
+		let statusChecks = 0;
+		// A DB whose first per-Item status read throws; every other query is real.
+		const db = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "prepare") {
+					return (sql: string) => {
+						if (
+							sql.startsWith("SELECT status FROM plaid_items") &&
+							++statusChecks === 1
+						) {
+							throw new Error("D1 unavailable");
+						}
+						return target.prepare(sql);
+					};
+				}
+				const value = Reflect.get(target, prop);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		expect(await syncAllItems({ ...enabledEnv, DB: db }, fakePlaid())).toEqual({
+			synced: 1,
+			skipped: 0,
+			failed: 1,
+		});
+		expect(error).toHaveBeenCalledWith(
+			`plaid daily sync: item ${first} failed Error`,
+		);
+	});
 });

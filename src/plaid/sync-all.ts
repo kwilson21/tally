@@ -33,17 +33,16 @@ export async function syncAllItems(
 			break;
 		}
 
-		const current = await env.DB.prepare(
-			"SELECT status FROM plaid_items WHERE id = ?",
-		)
-			.bind(item.id)
-			.first<{ status: string }>();
-		if (current?.status !== "ok") {
-			result.skipped += 1;
-			continue;
-		}
-
 		try {
+			const current = await env.DB.prepare(
+				"SELECT status FROM plaid_items WHERE id = ?",
+			)
+				.bind(item.id)
+				.first<{ status: string }>();
+			if (current?.status !== "ok") {
+				result.skipped += 1;
+				continue;
+			}
 			const synced = await syncItem(env, item.id, fetchImpl);
 			if ("skipped" in synced) result.skipped += 1;
 			else result.synced += 1;
