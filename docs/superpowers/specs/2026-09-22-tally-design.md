@@ -100,7 +100,7 @@ All money is stored as **integer cents**, because SQLite has no exact decimal ty
 
 | Table | Job, in one sentence | Key columns |
 |---|---|---|
-| `plaid_items` | One row per linked bank login, holding its encrypted token and sync position. | `id`, `access_token_encrypted`, `institution_name`, `sync_cursor`, `status` (`ok` / `needs_attention`), `linked_by`, `created_at` |
+| `plaid_items` | One row per linked bank login, holding its encrypted token and sync position. | `id`, `plaid_item_id` (Plaid's `item_id`, unique; webhooks identify an Item by it), `access_token_encrypted`, `institution_name`, `sync_cursor`, `status` (`ok` / `needs_attention`), `linked_by`, `created_at` |
 | `accounts` | Each checking, savings, or credit account and its current balance. | `id`, `plaid_item_id` (nullable, null for demo accounts), `plaid_account_id` (unique, nullable for demo accounts), `name`, `mask`, `type`, `subtype`, `is_liability`, `balance_cents`, `updated_at` |
 | `balance_history` | One balance per account per day, for the net-worth chart. | `account_id`, `date`, `balance_cents` (unique on account + date) |
 | `categories` | The household's category list. | `id`, `name` (unique), `icon`, `color` (token name, e.g. `cat-blue`), `sort_order`, `archived` |

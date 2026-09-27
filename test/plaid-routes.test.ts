@@ -136,6 +136,7 @@ describe("Plaid routes", () => {
 
 	it("stores only the encrypted access token and bank attribution", async () => {
 		const { jwt, jwk } = await accessIdentity();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const plaidResponses: Record<string, unknown>[] = [
 			{ access_token: "access-private", item_id: "item-1" },
 			{ item: { institution_id: "ins-1" } },
@@ -154,19 +155,23 @@ describe("Plaid routes", () => {
 		expect(response.status).toBe(204);
 		expect(JSON.stringify([...response.headers])).not.toMatch(/private/);
 		expect(await response.text()).not.toMatch(/private/);
+		expect(JSON.stringify([...response.headers])).not.toContain("item-1");
+		expect(JSON.stringify(errors.mock.calls)).not.toContain("item-1");
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message: "Linked First Bank.", type: "success" },
 			announce: "Linked First Bank.",
 		});
 		const row = await env.DB.prepare(
-			"SELECT access_token_encrypted, institution_name, linked_by FROM plaid_items",
+			"SELECT access_token_encrypted, institution_name, linked_by, plaid_item_id FROM plaid_items",
 		).first<{
 			access_token_encrypted: ArrayBuffer;
 			institution_name: string;
 			linked_by: string;
+			plaid_item_id: string;
 		}>();
 		expect(row?.institution_name).toBe("First Bank");
 		expect(row?.linked_by).toBe("family.member@example.com");
+		expect(row?.plaid_item_id).toBe("item-1");
 		expect(
 			await decryptToken(row?.access_token_encrypted as ArrayBuffer, KEY),
 		).toBe("access-private");
@@ -333,6 +338,64 @@ describe("Plaid routes", () => {
 			)?.n,
 		).toBe(0);
 		expect(JSON.stringify(errors.mock.calls)).not.toContain("access-private");
+	});
+
+	it("rejects a duplicate Plaid item id and removes the second Item", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Existing Bank', 'family@example.com', 'item-duplicate')",
+		)
+			.bind(new Uint8Array([1, 2, 3]))
+			.run();
+		const plaidRequests: Array<{ url: string; body: Record<string, unknown> }> =
+			[];
+		vi.stubGlobal(
+			"fetch",
+			async (input: string | URL | Request, init?: RequestInit) => {
+				if (String(input).includes("cloudflareaccess.com")) {
+					return Response.json({ keys: [jwk] });
+				}
+				plaidRequests.push({
+					url: String(input),
+					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+				});
+				if (String(input).endsWith("/item/public_token/exchange")) {
+					return Response.json({
+						access_token: "access-second",
+						item_id: "item-duplicate",
+					});
+				}
+				if (String(input).endsWith("/item/get")) {
+					return Response.json({ item: {} });
+				}
+				return Response.json({ request_id: "req-remove-duplicate" });
+			},
+		);
+
+		const response = await post(
+			"/plaid/exchange",
+			jwt,
+			"public_token=single-use",
+		);
+
+		expect(response.status).toBe(502);
+		expect(await response.text()).toContain("Couldn&#39;t link the bank");
+		expect(plaidRequests.at(-1)?.url).toBe(
+			"https://sandbox.plaid.com/item/remove",
+		);
+		expect(plaidRequests.at(-1)?.body.access_token).toBe("access-second");
+		expect(
+			(
+				await env.DB.prepare("SELECT COUNT(*) n FROM plaid_items").first<{
+					n: number;
+				}>()
+			)?.n,
+		).toBe(1);
+		expect(JSON.stringify([...response.headers])).not.toContain(
+			"item-duplicate",
+		);
+		expect(JSON.stringify(errors.mock.calls)).not.toContain("item-duplicate");
 	});
 
 	it("returns 415 for malformed JSON request bodies", async () => {

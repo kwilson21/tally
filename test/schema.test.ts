@@ -57,6 +57,24 @@ describe("schema", () => {
 		]);
 	});
 
+	it("rejects duplicate Plaid item ids", async () => {
+		const token = new Uint8Array([1, 2, 3]);
+		await db
+			.prepare(
+				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'First Bank', 'family@example.com', 'item-duplicate')",
+			)
+			.bind(token)
+			.run();
+		await expect(
+			db
+				.prepare(
+					"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Second Bank', 'family@example.com', 'item-duplicate')",
+				)
+				.bind(token)
+				.run(),
+		).rejects.toThrow();
+	});
+
 	it("stores money as integers and rejects fractional cents", async () => {
 		await expect(
 			db

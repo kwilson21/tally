@@ -107,9 +107,9 @@ plaid.post("/plaid/exchange", async (c) => {
 				c.env.TOKEN_ENCRYPTION_KEY as string,
 			);
 			await c.env.DB.prepare(
-				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (?, ?, ?)",
+				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, ?, ?, ?)",
 			)
-				.bind(encrypted, institution, actor(c))
+				.bind(encrypted, institution, actor(c), exchanged.item_id)
 				.run();
 		} catch (error) {
 			try {
