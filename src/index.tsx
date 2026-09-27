@@ -11,10 +11,11 @@ import { howItWorks } from "./routes/how-it-works";
 import { plaid } from "./routes/plaid";
 import { settings } from "./routes/settings";
 import { transactions } from "./routes/transactions";
+import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
 
 type App = { Bindings: Env; Variables: { actor: string } };
-const app = new Hono<App>();
+export const app = new Hono<App>();
 
 app.use("*", security);
 app.use("*", sameOrigin);
@@ -52,6 +53,7 @@ app.route("/", transactions);
 app.route("/", settings);
 app.route("/", destinations);
 app.route("/", designSystem);
+app.route("/", webhooks);
 
 export default {
 	fetch: app.fetch,
