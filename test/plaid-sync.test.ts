@@ -431,7 +431,7 @@ describe("syncItem", () => {
 		});
 		const lockB = (await itemState(id))?.sync_lock_id;
 		releaseA();
-		await runA;
+		await expect(runA).rejects.toThrow("lost its lock");
 		expect(await itemState(id)).toMatchObject({ sync_lock_id: lockB });
 		releaseB();
 		await runB;
@@ -575,6 +575,33 @@ describe("syncItem", () => {
 		expect(
 			(await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions").first())
 				?.n,
+		).toBe(0);
+	});
+
+	it("writes nothing once another run has taken its expired lock", async () => {
+		const id = await addItem();
+		const fetchImpl = plaidFetch(async () => {
+			await env.DB.prepare(
+				"UPDATE plaid_items SET sync_lock_id = 'newer-run', sync_locked_until = datetime('now', '+5 minutes'), sync_cursor = 'newer-cursor' WHERE id = ?",
+			)
+				.bind(id)
+				.run();
+			return response(page({ added: [transaction()] }));
+		});
+
+		await expect(
+			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+		).rejects.toThrow("lost its lock");
+		expect(await itemState(id)).toMatchObject({
+			sync_cursor: "newer-cursor",
+			sync_lock_id: "newer-run",
+		});
+		expect(
+			(await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions").first())
+				?.n,
+		).toBe(0);
+		expect(
+			(await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts").first())?.n,
 		).toBe(0);
 	});
 

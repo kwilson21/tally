@@ -51,9 +51,14 @@ const transient = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 export type SyncSummary = { added: number; modified: number; removed: number };
 export type SyncResult = SyncSummary | { skipped: true };
 
+/** True only while this run still holds the Item's lock; every page write carries it. */
+const OWNS_LOCK =
+	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ?)";
+
 function accountUpsert(
 	env: SyncEnv,
 	itemRowId: number,
+	lockId: string,
 	account: PlaidAccount,
 ): D1PreparedStatement {
 	const balance =
@@ -63,7 +68,7 @@ function accountUpsert(
 	return env.DB.prepare(
 		`INSERT INTO accounts
 			(plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0))
+		 SELECT ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0) WHERE ${OWNS_LOCK}
 		 ON CONFLICT(plaid_account_id) DO UPDATE SET
 			plaid_item_id = excluded.plaid_item_id, name = excluded.name, mask = excluded.mask,
 			type = excluded.type, subtype = excluded.subtype,
@@ -79,6 +84,8 @@ function accountUpsert(
 		account.subtype ?? null,
 		account.type === "credit" || account.type === "loan" ? 1 : 0,
 		balance,
+		itemRowId,
+		lockId,
 		balance,
 	);
 }
@@ -228,7 +235,7 @@ export async function syncItem(
 			}
 			if (firstPage) {
 				for (const account of accounts) {
-					statements.push(accountUpsert(env, itemRowId, account));
+					statements.push(accountUpsert(env, itemRowId, lockId, account));
 				}
 			}
 			const firstAddedStatement = statements.length;
@@ -237,7 +244,8 @@ export async function syncItem(
 					env.DB.prepare(
 						`INSERT INTO transactions
 							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category)
-						 SELECT ?, id, ?, ?, ?, ? FROM accounts WHERE plaid_account_id = ?
+						 SELECT ?, id, ?, ?, ?, ? FROM accounts
+						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
 							amount_cents = excluded.amount_cents,
@@ -251,6 +259,8 @@ export async function syncItem(
 						transaction.name,
 						transaction.personal_finance_category?.primary ?? null,
 						transaction.account_id,
+						itemRowId,
+						lockId,
 					),
 				);
 			}
@@ -259,29 +269,35 @@ export async function syncItem(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?, amount_cents = ?, raw_name = ?,
 							plaid_category = ?, updated_at = datetime('now')
-						 WHERE plaid_transaction_id = ?`,
+						 WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
 					).bind(
 						transaction.date,
 						plaidAmountToCents(transaction.amount),
 						transaction.name,
 						transaction.personal_finance_category?.primary ?? null,
 						transaction.transaction_id,
+						itemRowId,
+						lockId,
 					),
 				);
 			}
 			for (const transaction of page.removed) {
 				statements.push(
 					env.DB.prepare(
-						"DELETE FROM transactions WHERE plaid_transaction_id = ?",
-					).bind(transaction.transaction_id),
+						`DELETE FROM transactions WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
+					).bind(transaction.transaction_id, itemRowId, lockId),
 				);
 			}
 			statements.push(
 				env.DB.prepare(
-					"UPDATE plaid_items SET sync_cursor = ? WHERE id = ?",
-				).bind(page.next_cursor, itemRowId),
+					"UPDATE plaid_items SET sync_cursor = ? WHERE id = ? AND sync_lock_id = ?",
+				).bind(page.next_cursor, itemRowId, lockId),
 			);
 			const results = await env.DB.batch(statements);
+			// The renewal changed nothing: a newer run owns the Item, and every guarded write above was a no-op.
+			if (results[0]?.meta.changes === 0) {
+				throw new Error("Plaid sync lost its lock to a newer run");
+			}
 			let inserted = 0;
 			for (const [index, transaction] of posted.entries()) {
 				const changed = results[firstAddedStatement + index]?.meta.changes ?? 0;
