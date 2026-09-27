@@ -10,11 +10,18 @@ const get = async (path: string) => {
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 describe("GET /design-system/proposals", () => {
-	it("says nothing is open, and lists every decision with its issue", async () => {
+	it("shows P8, empty lists, as three options side by side, and lists every decision with its issue", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
-		expect(html).toContain("Nothing waiting");
+		expect(html).not.toContain("Nothing waiting");
+		expect(html).toContain("P8 · Empty lists");
+		for (const option of ["Option A", "Option B", "Option C"]) {
+			expect(html).toContain(option);
+		}
+		// Each option shows both cases: a filter with no results, and a good empty.
+		expect(html.match(/No transactions match these filters/g)?.length).toBe(3);
+		expect(html.match(/Every transaction has a category/g)?.length).toBe(3);
 		expect(DECIDED.length).toBe(7);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
