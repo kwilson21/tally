@@ -172,6 +172,57 @@ describe("Plaid routes", () => {
 		).toBe("access-private");
 	});
 
+	it("stores the linked item with a fallback name when Plaid name lookup fails", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		let plaidRequest = 0;
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com")) {
+				return Response.json({ keys: [jwk] });
+			}
+			plaidRequest += 1;
+			return plaidRequest === 1
+				? Response.json({ access_token: "access-private", item_id: "item-1" })
+				: Response.json(
+						{
+							error_type: "ITEM_ERROR",
+							error_code: "ITEM_NOT_FOUND",
+							request_id: "req-name-lookup",
+						},
+						{ status: 400 },
+					);
+		});
+
+		const response = await post(
+			"/plaid/exchange",
+			jwt,
+			new URLSearchParams({ public_token: "public-private" }).toString(),
+		);
+
+		expect(response.status).toBe(204);
+		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Linked Your bank.", type: "success" },
+			announce: "Linked Your bank.",
+		});
+		const row = await env.DB.prepare(
+			"SELECT access_token_encrypted, institution_name FROM plaid_items",
+		).first<{
+			access_token_encrypted: ArrayBuffer;
+			institution_name: string;
+		}>();
+		expect(row?.institution_name).toBe("Your bank");
+		expect(
+			await decryptToken(row?.access_token_encrypted as ArrayBuffer, KEY),
+		).toBe("access-private");
+		expect(errors).toHaveBeenCalledTimes(1);
+		expect(errors).toHaveBeenCalledWith("Plaid request failed", {
+			request_id: "req-name-lookup",
+		});
+		expect(JSON.stringify(errors.mock.calls)).not.toMatch(
+			/access-private|public-private|ITEM_ERROR|ITEM_NOT_FOUND/,
+		);
+	});
+
 	it("shows a generic Plaid failure without storing or logging a token", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});

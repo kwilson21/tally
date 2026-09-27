@@ -32,10 +32,14 @@ async function clientUserId(email: string) {
 }
 
 function linkFailure(error: unknown) {
+	logPlaidRequestId(error);
+	return <p role="alert">Couldn't link the bank. Try again.</p>;
+}
+
+function logPlaidRequestId(error: unknown) {
 	if (error instanceof PlaidError && error.request_id) {
 		console.error("Plaid request failed", { request_id: error.request_id });
 	}
-	return <p role="alert">Couldn't link the bank. Try again.</p>;
 }
 
 plaid.post("/plaid/link-token", async (c) => {
@@ -71,11 +75,17 @@ plaid.post("/plaid/exchange", async (c) => {
 		}
 
 		const exchanged = await exchangePublicToken(c.env, publicToken);
-		const item = await getItem(c.env, exchanged.access_token);
-		const institutionName = item.item.institution_id
-			? await getInstitutionName(c.env, item.item.institution_id)
-			: undefined;
-		const institution = institutionName || "Your bank";
+		let institution = "Your bank";
+		try {
+			const item = await getItem(c.env, exchanged.access_token);
+			if (item.item.institution_id) {
+				institution =
+					(await getInstitutionName(c.env, item.item.institution_id)) ||
+					institution;
+			}
+		} catch (error) {
+			logPlaidRequestId(error);
+		}
 		const encrypted = await encryptToken(
 			exchanged.access_token,
 			c.env.TOKEN_ENCRYPTION_KEY as string,
