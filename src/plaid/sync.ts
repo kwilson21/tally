@@ -42,70 +42,107 @@ type ItemRow = {
 };
 
 export type SyncSummary = { added: number; modified: number; removed: number };
+export type SyncResult = SyncSummary | { skipped: true };
 
 /** Pulls every available page for one Item, committing each page and its cursor atomically. */
 export async function syncItem(
 	env: SyncEnv,
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
-): Promise<SyncSummary> {
-	const item = await env.DB.prepare(
-		"SELECT access_token_encrypted, sync_cursor FROM plaid_items WHERE id = ?",
+): Promise<SyncResult> {
+	const claim = await env.DB.prepare(
+		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes')
+		 WHERE id = ?
+		 AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
 	)
 		.bind(itemRowId)
-		.first<ItemRow>();
-	if (!item) throw new Error("Plaid Item not found");
-	if (!env.TOKEN_ENCRYPTION_KEY)
-		throw new Error("TOKEN_ENCRYPTION_KEY is required");
+		.run();
+	if (claim.meta.changes === 0) {
+		const exists = await env.DB.prepare(
+			"SELECT id FROM plaid_items WHERE id = ?",
+		)
+			.bind(itemRowId)
+			.first();
+		if (!exists) throw new Error("Plaid Item not found");
+		return { skipped: true };
+	}
 
-	const accessToken = await decryptToken(
-		item.access_token_encrypted,
-		env.TOKEN_ENCRYPTION_KEY,
-	);
-	let cursor = item.sync_cursor;
-	let mutationRestarts = 0;
-	const summary: SyncSummary = { added: 0, modified: 0, removed: 0 };
+	try {
+		const item = await env.DB.prepare(
+			"SELECT access_token_encrypted, sync_cursor FROM plaid_items WHERE id = ?",
+		)
+			.bind(itemRowId)
+			.first<ItemRow>();
+		if (!item) throw new Error("Plaid Item not found");
+		if (!env.TOKEN_ENCRYPTION_KEY)
+			throw new Error("TOKEN_ENCRYPTION_KEY is required");
 
-	for (;;) {
-		let page: SyncResponse;
-		try {
-			page = await plaidPost<SyncResponse>(
-				env,
-				"/transactions/sync",
-				{
-					access_token: accessToken,
-					...(cursor === null ? {} : { cursor }),
-				},
-				fetchImpl,
-			);
-		} catch (error) {
-			if (
-				error instanceof PlaidError &&
-				error.error_code === "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION" &&
-				mutationRestarts < 3
-			) {
-				mutationRestarts += 1;
-				continue;
-			}
-			if (error instanceof PlaidError) {
-				console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
-				if (error.error_type === "ITEM_ERROR") {
-					await env.DB.prepare(
-						"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
-					)
-						.bind(itemRowId)
-						.run();
+		const accessToken = await decryptToken(
+			item.access_token_encrypted,
+			env.TOKEN_ENCRYPTION_KEY,
+		);
+		const startCursor = item.sync_cursor;
+		let cursor = startCursor;
+		let mutationRestarts = 0;
+		const summary: SyncSummary = { added: 0, modified: 0, removed: 0 };
+
+		for (;;) {
+			let page: SyncResponse;
+			try {
+				page = await plaidPost<SyncResponse>(
+					env,
+					"/transactions/sync",
+					{
+						access_token: accessToken,
+						...(cursor === null ? {} : { cursor }),
+					},
+					fetchImpl,
+				);
+			} catch (error) {
+				if (
+					error instanceof PlaidError &&
+					error.error_code === "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION" &&
+					mutationRestarts < 3
+				) {
+					mutationRestarts += 1;
+					cursor = startCursor;
+					continue;
 				}
+				if (error instanceof PlaidError) {
+					console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
+					if (error.error_type === "ITEM_ERROR") {
+						await env.DB.prepare(
+							"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+						)
+							.bind(itemRowId)
+							.run();
+					}
+				}
+				throw error;
 			}
-			throw error;
-		}
 
-		const posted = page.added.filter((transaction) => !transaction.pending);
-		const statements: D1PreparedStatement[] = [];
-		for (const account of page.accounts) {
-			statements.push(
-				env.DB.prepare(
-					`INSERT INTO accounts
+			const posted = page.added.filter((transaction) => !transaction.pending);
+			const storedAccounts = await env.DB.prepare(
+				"SELECT plaid_account_id FROM accounts WHERE plaid_item_id = ?",
+			)
+				.bind(itemRowId)
+				.all<{ plaid_account_id: string }>();
+			const knownAccountIds = new Set([
+				...storedAccounts.results.map((account) => account.plaid_account_id),
+				...page.accounts.map((account) => account.account_id),
+			]);
+			if (
+				page.added.some(
+					(transaction) => !knownAccountIds.has(transaction.account_id),
+				)
+			) {
+				throw new Error("Plaid sync page contains an unknown account");
+			}
+			const statements: D1PreparedStatement[] = [];
+			for (const account of page.accounts) {
+				statements.push(
+					env.DB.prepare(
+						`INSERT INTO accounts
 						(plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents)
 					 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0))
 					 ON CONFLICT(plaid_account_id) DO UPDATE SET
@@ -114,88 +151,89 @@ export async function syncItem(
 						is_liability = excluded.is_liability,
 						balance_cents = COALESCE(?, accounts.balance_cents),
 						updated_at = datetime('now')`,
-				).bind(
-					itemRowId,
-					account.account_id,
-					account.name,
-					account.mask ?? null,
-					account.type,
-					account.subtype ?? null,
-					account.type === "credit" || account.type === "loan" ? 1 : 0,
-					account.balances.current === null ||
-						account.balances.current === undefined
-						? null
-						: plaidAmountToCents(account.balances.current),
-					account.balances.current === null ||
-						account.balances.current === undefined
-						? null
-						: plaidAmountToCents(account.balances.current),
-				),
-			);
-		}
-		const firstAddedStatement = statements.length;
-		for (const transaction of posted) {
-			statements.push(
-				env.DB.prepare(
-					`INSERT INTO transactions
+					).bind(
+						itemRowId,
+						account.account_id,
+						account.name,
+						account.mask ?? null,
+						account.type,
+						account.subtype ?? null,
+						account.type === "credit" || account.type === "loan" ? 1 : 0,
+						account.balances.current === null ||
+							account.balances.current === undefined
+							? null
+							: plaidAmountToCents(account.balances.current),
+						account.balances.current === null ||
+							account.balances.current === undefined
+							? null
+							: plaidAmountToCents(account.balances.current),
+					),
+				);
+			}
+			const firstAddedStatement = statements.length;
+			for (const transaction of posted) {
+				statements.push(
+					env.DB.prepare(
+						`INSERT INTO transactions
 						(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category)
 					 SELECT ?, id, ?, ?, ?, ? FROM accounts WHERE plaid_account_id = ?
 					 ON CONFLICT(plaid_transaction_id) DO NOTHING`,
-				).bind(
-					transaction.transaction_id,
-					transaction.date,
-					plaidAmountToCents(transaction.amount),
-					transaction.merchant_name ?? transaction.name,
-					transaction.personal_finance_category?.primary ?? null,
-					transaction.account_id,
-				),
-			);
-		}
-		for (const transaction of page.modified) {
-			statements.push(
-				env.DB.prepare(
-					`UPDATE transactions SET date = ?, amount_cents = ?, raw_name = ?,
+					).bind(
+						transaction.transaction_id,
+						transaction.date,
+						plaidAmountToCents(transaction.amount),
+						transaction.name,
+						transaction.personal_finance_category?.primary ?? null,
+						transaction.account_id,
+					),
+				);
+			}
+			for (const transaction of page.modified) {
+				statements.push(
+					env.DB.prepare(
+						`UPDATE transactions SET date = ?, amount_cents = ?, raw_name = ?,
 						plaid_category = ?, updated_at = datetime('now')
 					 WHERE plaid_transaction_id = ?`,
-				).bind(
-					transaction.date,
-					plaidAmountToCents(transaction.amount),
-					transaction.merchant_name ?? transaction.name,
-					transaction.personal_finance_category?.primary ?? null,
-					transaction.transaction_id,
-				),
-			);
-		}
-		for (const transaction of page.removed) {
+					).bind(
+						transaction.date,
+						plaidAmountToCents(transaction.amount),
+						transaction.name,
+						transaction.personal_finance_category?.primary ?? null,
+						transaction.transaction_id,
+					),
+				);
+			}
+			for (const transaction of page.removed) {
+				statements.push(
+					env.DB.prepare(
+						"DELETE FROM transactions WHERE plaid_transaction_id = ?",
+					).bind(transaction.transaction_id),
+				);
+			}
 			statements.push(
 				env.DB.prepare(
-					"DELETE FROM transactions WHERE plaid_transaction_id = ?",
-				).bind(transaction.transaction_id),
+					"UPDATE plaid_items SET sync_cursor = ? WHERE id = ?",
+				).bind(page.next_cursor, itemRowId),
 			);
-		}
-		statements.push(
-			env.DB.prepare(
-				"UPDATE plaid_items SET sync_cursor = ? WHERE id = ?",
-			).bind(page.next_cursor, itemRowId),
-		);
-		const results = await env.DB.batch(statements);
-		const inserted = results
-			.slice(firstAddedStatement, firstAddedStatement + posted.length)
-			.reduce((count, result) => count + (result.meta.changes ?? 0), 0);
-		const skipped = posted.length - inserted;
+			const results = await env.DB.batch(statements);
+			const inserted = results
+				.slice(firstAddedStatement, firstAddedStatement + posted.length)
+				.reduce((count, result) => count + (result.meta.changes ?? 0), 0);
 
-		cursor = page.next_cursor;
-		summary.added += inserted;
-		summary.modified += page.modified.length;
-		summary.removed += page.removed.length;
-		console.log(
-			`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
-		);
-		if (skipped > 0) {
+			cursor = page.next_cursor;
+			summary.added += inserted;
+			summary.modified += page.modified.length;
+			summary.removed += page.removed.length;
 			console.log(
-				`plaid sync: skipped ${skipped} ${skipped === 1 ? "transaction" : "transactions"} for an unknown account`,
+				`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
 			);
+			if (!page.has_more) return summary;
 		}
-		if (!page.has_more) return summary;
+	} finally {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET sync_locked_until = NULL WHERE id = ?",
+		)
+			.bind(itemRowId)
+			.run();
 	}
 }
