@@ -11,11 +11,12 @@ import {
 } from "../plaid/client";
 import { encryptToken, isValidKey } from "../plaid/token-crypto";
 
-type Bindings = Env & PlaidEnv;
+type PlaidBindings = PlaidEnv & { DEMO?: string };
+type Bindings = Env & PlaidBindings;
 type App = { Bindings: Bindings; Variables: { actor: string } };
 export const plaid = new Hono<App>();
 
-export function enabled(env: Bindings) {
+export function enabled(env: PlaidBindings) {
 	return (
 		env.DEMO !== "true" &&
 		Boolean(env.PLAID_CLIENT_ID && env.PLAID_SECRET) &&

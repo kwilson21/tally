@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from "vitest";
 import { PlaidError, plaidPost } from "../src/plaid/client";
 
 describe("plaidPost", () => {
+	it("turns network timeouts into bodyless Plaid errors", async () => {
+		let options: RequestInit | undefined;
+		const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+			options = init;
+			throw new DOMException("upstream details", "TimeoutError");
+		});
+
+		const error = await plaidPost({}, "/test", {}, fetch).catch(
+			(caught) => caught as PlaidError,
+		);
+
+		expect(error).toBeInstanceOf(PlaidError);
+		expect(error).toMatchObject({
+			error_type: undefined,
+			error_code: undefined,
+			request_id: undefined,
+		});
+		expect(fetch).toHaveBeenCalledOnce();
+		expect(options?.signal).toBeInstanceOf(AbortSignal);
+	});
+
 	it.each([
 		[undefined, "https://sandbox.plaid.com/test"],
 		["sandbox", "https://sandbox.plaid.com/test"],
