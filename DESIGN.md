@@ -151,7 +151,7 @@ Where it lives: `src/routes/design-system.tsx` (the pages and their gate), `src/
 3. **Screenshots** of the catalog at 1280 and 390, and the owner checks the catalog in a browser and signs off. CI screenshots only the pages listed in `PAGES` in `scripts/pr-body.mjs`, so every catalog and flow page is added there in the PR that adds it.
 4. **Use it in the app.** The app imports the same component, so there's nothing to copy.
 5. **E2E** for the critical flows.
-6. **The owner verifies** the app pages.
+6. **The owner verifies** the app pages: Claude sends the pages that changed (CI's before-and-after) and, once the PR is complete, merges it (decision 51). The owner can check them after the merge, and anything they want changed becomes a follow-up or a revert.
 
 **Visual decisions are made by seeing, not by reading.** Every proposal that changes how something looks is shown in the catalog as current and proposed, side by side, at 1280 and 390, before the owner decides. A decision entry is written only after that, and each accepted proposal ships in its own PR, so undoing it is one revert.
 
