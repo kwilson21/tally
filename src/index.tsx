@@ -8,6 +8,7 @@ import { destinations } from "./routes/destinations";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
 import { howItWorks } from "./routes/how-it-works";
+import { plaid } from "./routes/plaid";
 import { settings } from "./routes/settings";
 import { transactions } from "./routes/transactions";
 import { sameOrigin, security } from "./security";
@@ -46,6 +47,7 @@ app.use("*", async (c, next) => {
 app.route("/", health);
 app.route("/", home);
 app.route("/", howItWorks);
+app.route("/", plaid);
 app.route("/", transactions);
 app.route("/", settings);
 app.route("/", destinations);
