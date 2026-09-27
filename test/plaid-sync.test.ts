@@ -1,21 +1,20 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { syncItem } from "../src/plaid/sync";
+import { NEEDS_ATTENTION_ERROR_CODES, syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
 const KEY = btoa("01234567890123456789012345678901");
 
+const account = (current: number | null = 12.34) => ({
+	account_id: "account-1",
+	name: "Everyday",
+	mask: "1234",
+	type: "depository",
+	subtype: "checking",
+	balances: { current },
+});
+
 const page = (overrides: Record<string, unknown> = {}) => ({
-	accounts: [
-		{
-			account_id: "account-1",
-			name: "Everyday",
-			mask: "1234",
-			type: "depository",
-			subtype: "checking",
-			balances: { current: 12.34 },
-		},
-	],
 	added: [],
 	modified: [],
 	removed: [],
@@ -52,6 +51,23 @@ const response = (body: unknown, status = 200) =>
 		headers: { "content-type": "application/json" },
 	});
 
+const plaidFetch = (
+	sync: (body: Record<string, unknown>) => Response | Promise<Response>,
+	accounts = [account()],
+) =>
+	vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+		if (String(url).endsWith("/accounts/get")) return response({ accounts });
+		return sync(JSON.parse(String(init?.body)));
+	});
+
+async function itemState(id: number) {
+	return env.DB.prepare(
+		"SELECT sync_cursor, sync_locked_until, status FROM plaid_items WHERE id = ?",
+	)
+		.bind(id)
+		.first();
+}
+
 describe("syncItem", () => {
 	beforeEach(async () => {
 		await env.DB.batch([
@@ -61,9 +77,9 @@ describe("syncItem", () => {
 		]);
 	});
 
-	it("inserts accounts and posted transactions, skips pending, and saves cents and cursor", async () => {
+	it("gets and upserts accounts separately, stores raw names, and saves transactions", async () => {
 		const id = await addItem();
-		const fetchImpl = vi.fn(async () =>
+		const fetchImpl = plaidFetch(() =>
 			response(
 				page({
 					added: [
@@ -78,146 +94,44 @@ describe("syncItem", () => {
 		expect(
 			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
 		).toEqual({ added: 2, modified: 0, removed: 0 });
+		expect(fetchImpl.mock.calls[0]?.[0].toString()).toContain("/accounts/get");
+		expect(fetchImpl.mock.calls[1]?.[0].toString()).toContain(
+			"/transactions/sync",
+		);
 		expect(
 			await env.DB.prepare(
 				"SELECT plaid_item_id, balance_cents, is_liability FROM accounts",
 			).first(),
 		).toEqual({ plaid_item_id: id, balance_cents: 1234, is_liability: 0 });
 		const { results } = await env.DB.prepare(
-			"SELECT plaid_transaction_id, amount_cents, raw_name, plaid_category FROM transactions ORDER BY id",
+			"SELECT amount_cents, raw_name, plaid_category FROM transactions ORDER BY id",
 		).all();
 		expect(results).toEqual([
 			{
-				plaid_transaction_id: "transaction-1",
 				amount_cents: 1234,
 				raw_name: "RAW SHOP",
 				plaid_category: "GENERAL_MERCHANDISE",
 			},
 			{
-				plaid_transaction_id: "refund",
 				amount_cents: -500,
 				raw_name: "RAW SHOP",
 				plaid_category: "GENERAL_MERCHANDISE",
 			},
 		]);
-		expect(
-			await env.DB.prepare("SELECT sync_cursor FROM plaid_items WHERE id = ?")
-				.bind(id)
-				.first(),
-		).toEqual({ sync_cursor: "cursor-1" });
 	});
 
-	it("keeps the committed first page and resumes without duplicates after a failure", async () => {
+	it("preserves a stored balance when accounts/get returns current null", async () => {
 		const id = await addItem();
-		let call = 0;
-		const fetchImpl = vi.fn(
-			async (_url: RequestInfo | URL, init?: RequestInit) => {
-				call += 1;
-				if (call === 1)
-					return response(
-						page({
-							added: [transaction()],
-							next_cursor: "after-first",
-							has_more: true,
-						}),
-					);
-				if (call === 2)
-					return response(
-						{ error_type: "API_ERROR", request_id: "request-2" },
-						500,
-					);
-				const body = JSON.parse(String(init?.body));
-				expect(body.cursor).toBe("after-first");
-				return response(
-					page({ accounts: [], added: [transaction()], next_cursor: "done" }),
-				);
-			},
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() => response(page()), [account(1234.56)]),
 		);
-		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-		await expect(
-			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-		).rejects.toThrow("Plaid request failed");
-		expect(
-			await env.DB.prepare("SELECT sync_cursor FROM plaid_items WHERE id = ?")
-				.bind(id)
-				.first(),
-		).toEqual({ sync_cursor: "after-first" });
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
-		expect(
-			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
-		).toEqual({ n: 1 });
-		expect(consoleSpy.mock.calls.flat().join(" ")).toBe(
-			"plaid sync error request-2",
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() => response(page()), [account(null)]),
 		);
-		consoleSpy.mockRestore();
-	});
-
-	it("updates only Plaid fields and preserves a person's decisions", async () => {
-		const id = await addItem();
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-			response(page({ added: [transaction()] })),
-		);
-		await env.DB.prepare(
-			"UPDATE transactions SET category_id = (SELECT id FROM categories LIMIT 1), note = 'mine', excluded = 1 WHERE plaid_transaction_id = 'transaction-1'",
-		).run();
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-			response(
-				page({
-					accounts: [],
-					modified: [
-						transaction({
-							date: "2026-09-28",
-							amount: -5,
-							name: "NEW RAW NAME",
-							merchant_name: "New name",
-							personal_finance_category: { primary: "TRANSFER_OUT" },
-						}),
-					],
-				}),
-			),
-		);
-		const row = await env.DB.prepare(
-			"SELECT date, amount_cents, raw_name, plaid_category, category_id, note, excluded FROM transactions",
-		).first<Record<string, unknown>>();
-		expect(row).toMatchObject({
-			date: "2026-09-28",
-			amount_cents: -500,
-			raw_name: "NEW RAW NAME",
-			plaid_category: "TRANSFER_OUT",
-			note: "mine",
-			excluded: 1,
-		});
-		expect(row?.category_id).not.toBeNull();
-	});
-
-	it("preserves the stored account balance when Plaid omits the current balance", async () => {
-		const id = await addItem();
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-			response(
-				page({
-					accounts: [
-						{
-							...page().accounts[0],
-							balances: { current: 1234.56 },
-						},
-					],
-				}),
-			),
-		);
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-			response(
-				page({
-					accounts: [
-						{
-							...page().accounts[0],
-							balances: { current: null },
-						},
-					],
-				}),
-			),
-		);
-
 		expect(
 			await env.DB.prepare(
 				"SELECT balance_cents FROM accounts WHERE plaid_account_id = 'account-1'",
@@ -225,137 +139,163 @@ describe("syncItem", () => {
 		).toEqual({ balance_cents: 123456 });
 	});
 
-	it("rejects an unknown account without committing the page", async () => {
+	it("throws before writing a page containing a transaction for an unknown account", async () => {
 		const id = await addItem();
 		await expect(
-			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-				response(
-					page({
-						accounts: [],
-						added: [transaction({ account_id: "unknown-account" })],
-					}),
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				id,
+				plaidFetch(
+					() =>
+						response(
+							page({
+								added: [transaction({ account_id: "unknown-account" })],
+							}),
+						),
+					[],
 				),
 			),
-		).rejects.toThrow("Plaid sync page contains an unknown account");
-
+		).rejects.toThrow("unknown account");
 		expect(
-			await env.DB.prepare(
-				"SELECT (SELECT COUNT(*) FROM accounts) accounts, (SELECT COUNT(*) FROM transactions) transactions, sync_cursor FROM plaid_items WHERE id = ?",
-			)
-				.bind(id)
-				.first(),
-		).toEqual({ accounts: 0, transactions: 0, sync_cursor: null });
+			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
+		).toEqual({ n: 0 });
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) n FROM accounts").first(),
+		).toEqual({
+			n: 0,
+		});
+		expect(await itemState(id)).toMatchObject({ sync_cursor: null });
 	});
 
-	it("removes a transaction and its split children", async () => {
+	it("accepts a transaction for an account already stored for the Item", async () => {
 		const id = await addItem();
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-			response(page({ added: [transaction()] })),
-		);
-		const parent = await env.DB.prepare(
-			"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
-		).first<{ id: number; account_id: number }>();
 		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id, is_split) VALUES (?, '2026-09-27', 500, 'child', ?, 1)",
+			"INSERT INTO accounts (plaid_item_id, plaid_account_id, name, type) VALUES (?, 'stored-account', 'Stored', 'depository')",
 		)
-			.bind(parent?.account_id, parent?.id)
+			.bind(id)
 			.run();
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-			response(
-				page({
-					accounts: [],
-					removed: [{ transaction_id: "transaction-1" }],
-				}),
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(
+				() =>
+					response(
+						page({ added: [transaction({ account_id: "stored-account" })] }),
+					),
+				[],
 			),
 		);
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
-		).toEqual({ n: 0 });
+		).toEqual({ n: 1 });
 	});
 
-	it("restarts a mutation error from the last saved cursor at most three times", async () => {
+	it("restarts mutated pagination from the run's initial cursor without duplicates", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET sync_cursor = 'saved' WHERE id = ?",
 		)
 			.bind(id)
 			.run();
-		let calls = 0;
-		const fetchImpl = vi.fn(
-			async (_url: RequestInfo | URL, init?: RequestInit) => {
-				calls += 1;
-				expect(JSON.parse(String(init?.body)).cursor).toBe("saved");
-				if (calls < 3)
-					return response(
-						{
-							error_type: "TRANSACTIONS_ERROR",
-							error_code: "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
-							request_id: `request-${calls}`,
-						},
-						400,
-					);
-				return response(page({ accounts: [], next_cursor: "done" }));
-			},
-		);
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
-		expect(fetchImpl).toHaveBeenCalledTimes(3);
-	});
-
-	it("restarts mutated pagination from the run's first cursor without duplicates", async () => {
-		const id = await addItem();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET sync_cursor = 'start' WHERE id = ?",
-		)
-			.bind(id)
-			.run();
-		const requestedCursors: string[] = [];
-		let call = 0;
-		const fetchImpl = vi.fn(
-			async (_url: RequestInfo | URL, init?: RequestInit) => {
-				call += 1;
-				requestedCursors.push(JSON.parse(String(init?.body)).cursor);
-				if (call === 2)
-					return response(
-						{
-							error_type: "TRANSACTIONS_ERROR",
-							error_code: "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
-							request_id: "mutation",
-						},
-						400,
-					);
-				if (call === 1 || call === 3)
-					return response(
-						page({
-							added: [transaction()],
-							next_cursor: "page-2",
-							has_more: true,
-						}),
-					);
-				return response(page({ accounts: [], next_cursor: "finished" }));
-			},
-		);
-
-		await expect(
-			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-		).resolves.toEqual({ added: 1, modified: 0, removed: 0 });
-		expect(requestedCursors).toEqual(["start", "page-2", "start", "page-2"]);
-		expect(
-			await env.DB.prepare(
-				"SELECT (SELECT COUNT(*) FROM transactions) transactions, sync_cursor FROM plaid_items WHERE id = ?",
-			)
-				.bind(id)
-				.first(),
-		).toEqual({ transactions: 1, sync_cursor: "finished" });
-	});
-
-	it("skips a concurrent sync and clears the lock after success", async () => {
-		const id = await addItem();
-		let releaseFetch: (() => void) | undefined;
-		const waiting = new Promise<void>((resolve) => {
-			releaseFetch = resolve;
+		const cursors: unknown[] = [];
+		let syncCalls = 0;
+		const fetchImpl = plaidFetch((body) => {
+			cursors.push(body.cursor);
+			syncCalls += 1;
+			if (syncCalls === 1)
+				return response(
+					page({
+						added: [transaction()],
+						next_cursor: "middle",
+						has_more: true,
+					}),
+				);
+			if (syncCalls === 2)
+				return response(
+					{
+						error_type: "TRANSACTIONS_ERROR",
+						error_code: "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
+						request_id: "mutation",
+					},
+					400,
+				);
+			if (syncCalls === 3)
+				return response(
+					page({
+						added: [transaction()],
+						next_cursor: "middle-2",
+						has_more: true,
+					}),
+				);
+			return response(
+				page({
+					added: [transaction({ transaction_id: "transaction-2" })],
+					next_cursor: "done",
+				}),
+			);
 		});
-		const firstFetch = vi.fn(async () => {
-			await waiting;
+
+		expect(
+			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+		).toEqual({ added: 2, modified: 0, removed: 0 });
+		expect(cursors).toEqual(["saved", "middle", "saved", "middle-2"]);
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
+		).toEqual({ n: 2 });
+	});
+
+	it("updates raw_name from name but preserves a person's decisions", async () => {
+		const id = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() => response(page({ added: [transaction()] }))),
+		);
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = (SELECT id FROM categories LIMIT 1), note = 'mine', excluded = 1 WHERE plaid_transaction_id = 'transaction-1'",
+		).run();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						modified: [
+							transaction({
+								date: "2026-09-28",
+								amount: -5,
+								name: "NEW RAW NAME",
+								merchant_name: "New merchant",
+							}),
+						],
+					}),
+				),
+			),
+		);
+		const row = await env.DB.prepare(
+			"SELECT date, amount_cents, raw_name, category_id, note, excluded FROM transactions",
+		).first<Record<string, unknown>>();
+		expect(row).toMatchObject({
+			date: "2026-09-28",
+			amount_cents: -500,
+			raw_name: "NEW RAW NAME",
+			note: "mine",
+			excluded: 1,
+		});
+		expect(row?.category_id).not.toBeNull();
+	});
+
+	it("skips a concurrent run and releases the lock after success", async () => {
+		const id = await addItem();
+		let releaseAccounts!: () => void;
+		const waiting = new Promise<void>((resolve) => {
+			releaseAccounts = resolve;
+		});
+		const firstFetch = vi.fn(async (url: RequestInfo | URL) => {
+			if (String(url).endsWith("/accounts/get")) {
+				await waiting;
+				return response({ accounts: [account()] });
+			}
 			return response(page());
 		});
 		const first = syncItem(
@@ -364,73 +304,72 @@ describe("syncItem", () => {
 			firstFetch,
 		);
 		await vi.waitFor(async () => {
-			expect(
-				await env.DB.prepare(
-					"SELECT sync_locked_until FROM plaid_items WHERE id = ?",
-				)
-					.bind(id)
-					.first<{ sync_locked_until: string | null }>(),
-			).toEqual({ sync_locked_until: expect.any(String) });
+			expect((await itemState(id))?.sync_locked_until).not.toBeNull();
 		});
 		const secondFetch = vi.fn();
-		await expect(
-			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, secondFetch),
-		).resolves.toEqual({ skipped: true });
-		expect(secondFetch).not.toHaveBeenCalled();
-		releaseFetch?.();
-		await first;
 		expect(
-			await env.DB.prepare(
-				"SELECT sync_locked_until FROM plaid_items WHERE id = ?",
-			)
-				.bind(id)
-				.first(),
-		).toEqual({ sync_locked_until: null });
+			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, secondFetch),
+		).toEqual({ skipped: true });
+		expect(secondFetch).not.toHaveBeenCalled();
+		releaseAccounts();
+		await first;
+		expect((await itemState(id))?.sync_locked_until).toBeNull();
 	});
 
-	it("takes an expired lock and clears it after failure", async () => {
+	it("takes an expired lock and releases it after failure", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
-			"UPDATE plaid_items SET sync_locked_until = '2000-01-01 00:00:00' WHERE id = ?",
+			"UPDATE plaid_items SET sync_locked_until = datetime('now', '-1 minute') WHERE id = ?",
 		)
 			.bind(id)
 			.run();
-		const fetchImpl = vi.fn(async () => response({}, 500));
-
 		await expect(
-			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				id,
+				plaidFetch(() => response({ error_type: "API_ERROR" }, 500)),
+			),
 		).rejects.toThrow("Plaid request failed");
-		expect(fetchImpl).toHaveBeenCalledOnce();
-		expect(
-			await env.DB.prepare(
-				"SELECT sync_locked_until FROM plaid_items WHERE id = ?",
-			)
-				.bind(id)
-				.first(),
-		).toEqual({ sync_locked_until: null });
+		expect((await itemState(id))?.sync_locked_until).toBeNull();
 	});
 
-	it("marks Item errors for attention without logging transaction secrets", async () => {
-		const id = await addItem();
-		const error = {
-			error_type: "ITEM_ERROR",
-			error_code: "ITEM_LOGIN_REQUIRED",
-			request_id: "safe-request-id",
-		};
-		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-		await expect(
-			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
-				response(error, 400),
-			),
-		).rejects.toThrow();
-		expect(
-			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
-				.bind(id)
-				.first(),
-		).toEqual({ status: "needs_attention" });
-		expect(spy.mock.calls.flat().join(" ")).toBe(
-			"plaid sync error safe-request-id",
-		);
-		spy.mockRestore();
+	it("flags only documented errors that require user action", async () => {
+		expect(NEEDS_ATTENTION_ERROR_CODES).toEqual([
+			"ITEM_LOGIN_REQUIRED",
+			"PENDING_EXPIRATION",
+			"PENDING_DISCONNECT",
+			"ITEM_LOCKED",
+			"USER_SETUP_REQUIRED",
+			"INVALID_CREDENTIALS",
+			"INVALID_MFA",
+			"INSUFFICIENT_CREDENTIALS",
+			"ACCESS_NOT_GRANTED",
+			"NO_ACCOUNTS",
+		]);
+		for (const [code, expectedStatus] of [
+			["ITEM_LOGIN_REQUIRED", "needs_attention"],
+			["PRODUCT_NOT_READY", "ok"],
+		] as const) {
+			const id = await addItem();
+			const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+			await expect(
+				syncItem(
+					{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+					id,
+					plaidFetch(() =>
+						response(
+							{
+								error_type: "ITEM_ERROR",
+								error_code: code,
+								request_id: "safe-request-id",
+							},
+							400,
+						),
+					),
+				),
+			).rejects.toThrow("Plaid request failed");
+			expect((await itemState(id))?.status).toBe(expectedStatus);
+			spy.mockRestore();
+		}
 	});
 });

@@ -31,7 +31,6 @@ type SyncResponse = {
 	added: PlaidTransaction[];
 	modified: PlaidTransaction[];
 	removed: { transaction_id: string }[];
-	accounts: PlaidAccount[];
 	next_cursor: string;
 	has_more: boolean;
 };
@@ -41,8 +40,73 @@ type ItemRow = {
 	sync_cursor: string | null;
 };
 
+export const NEEDS_ATTENTION_ERROR_CODES = [
+	"ITEM_LOGIN_REQUIRED",
+	"PENDING_EXPIRATION",
+	"PENDING_DISCONNECT",
+	"ITEM_LOCKED",
+	"USER_SETUP_REQUIRED",
+	"INVALID_CREDENTIALS",
+	"INVALID_MFA",
+	"INSUFFICIENT_CREDENTIALS",
+	"ACCESS_NOT_GRANTED",
+	"NO_ACCOUNTS",
+] as const;
+
+const needsAttention = new Set<string>(NEEDS_ATTENTION_ERROR_CODES);
+
 export type SyncSummary = { added: number; modified: number; removed: number };
 export type SyncResult = SyncSummary | { skipped: true };
+
+function accountUpsert(
+	env: SyncEnv,
+	itemRowId: number,
+	account: PlaidAccount,
+): D1PreparedStatement {
+	const balance =
+		account.balances.current === null || account.balances.current === undefined
+			? null
+			: plaidAmountToCents(account.balances.current);
+	return env.DB.prepare(
+		`INSERT INTO accounts
+			(plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0))
+		 ON CONFLICT(plaid_account_id) DO UPDATE SET
+			plaid_item_id = excluded.plaid_item_id, name = excluded.name, mask = excluded.mask,
+			type = excluded.type, subtype = excluded.subtype,
+			is_liability = excluded.is_liability,
+			balance_cents = COALESCE(?, accounts.balance_cents),
+			updated_at = datetime('now')`,
+	).bind(
+		itemRowId,
+		account.account_id,
+		account.name,
+		account.mask ?? null,
+		account.type,
+		account.subtype ?? null,
+		account.type === "credit" || account.type === "loan" ? 1 : 0,
+		balance,
+		balance,
+	);
+}
+
+async function handlePlaidError(
+	env: SyncEnv,
+	itemRowId: number,
+	error: unknown,
+): Promise<never> {
+	if (error instanceof PlaidError) {
+		console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
+		if (error.error_code && needsAttention.has(error.error_code)) {
+			await env.DB.prepare(
+				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+			)
+				.bind(itemRowId)
+				.run();
+		}
+	}
+	throw error;
+}
 
 /** Pulls every available page for one Item, committing each page and its cursor atomically. */
 export async function syncItem(
@@ -50,14 +114,13 @@ export async function syncItem(
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
 ): Promise<SyncResult> {
-	const claim = await env.DB.prepare(
+	const lock = await env.DB.prepare(
 		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes')
-		 WHERE id = ?
-		 AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
+		 WHERE id = ? AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
 	)
 		.bind(itemRowId)
 		.run();
-	if (claim.meta.changes === 0) {
+	if (lock.meta.changes === 0) {
 		const exists = await env.DB.prepare(
 			"SELECT id FROM plaid_items WHERE id = ?",
 		)
@@ -81,9 +144,31 @@ export async function syncItem(
 			item.access_token_encrypted,
 			env.TOKEN_ENCRYPTION_KEY,
 		);
+		let accounts: PlaidAccount[];
+		try {
+			({ accounts } = await plaidPost<{ accounts: PlaidAccount[] }>(
+				env,
+				"/accounts/get",
+				{ access_token: accessToken },
+				fetchImpl,
+			));
+		} catch (error) {
+			return await handlePlaidError(env, itemRowId, error);
+		}
+		const stored = await env.DB.prepare(
+			"SELECT plaid_account_id FROM accounts WHERE plaid_item_id = ?",
+		)
+			.bind(itemRowId)
+			.all<{ plaid_account_id: string }>();
+		const knownAccounts = new Set([
+			...accounts.map((account) => account.account_id),
+			...stored.results.map((account) => account.plaid_account_id),
+		]);
+
 		const startCursor = item.sync_cursor;
 		let cursor = startCursor;
 		let mutationRestarts = 0;
+		let firstPage = true;
 		const summary: SyncSummary = { added: 0, modified: 0, removed: 0 };
 
 		for (;;) {
@@ -106,78 +191,35 @@ export async function syncItem(
 				) {
 					mutationRestarts += 1;
 					cursor = startCursor;
+					firstPage = true;
 					continue;
 				}
-				if (error instanceof PlaidError) {
-					console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
-					if (error.error_type === "ITEM_ERROR") {
-						await env.DB.prepare(
-							"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
-						)
-							.bind(itemRowId)
-							.run();
-					}
-				}
-				throw error;
+				return await handlePlaidError(env, itemRowId, error);
 			}
 
 			const posted = page.added.filter((transaction) => !transaction.pending);
-			const storedAccounts = await env.DB.prepare(
-				"SELECT plaid_account_id FROM accounts WHERE plaid_item_id = ?",
-			)
-				.bind(itemRowId)
-				.all<{ plaid_account_id: string }>();
-			const knownAccountIds = new Set([
-				...storedAccounts.results.map((account) => account.plaid_account_id),
-				...page.accounts.map((account) => account.account_id),
-			]);
 			if (
-				page.added.some(
-					(transaction) => !knownAccountIds.has(transaction.account_id),
-				)
+				posted.some((transaction) => !knownAccounts.has(transaction.account_id))
 			) {
-				throw new Error("Plaid sync page contains an unknown account");
-			}
-			const statements: D1PreparedStatement[] = [];
-			for (const account of page.accounts) {
-				statements.push(
-					env.DB.prepare(
-						`INSERT INTO accounts
-						(plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0))
-					 ON CONFLICT(plaid_account_id) DO UPDATE SET
-						plaid_item_id = excluded.plaid_item_id, name = excluded.name, mask = excluded.mask,
-						type = excluded.type, subtype = excluded.subtype,
-						is_liability = excluded.is_liability,
-						balance_cents = COALESCE(?, accounts.balance_cents),
-						updated_at = datetime('now')`,
-					).bind(
-						itemRowId,
-						account.account_id,
-						account.name,
-						account.mask ?? null,
-						account.type,
-						account.subtype ?? null,
-						account.type === "credit" || account.type === "loan" ? 1 : 0,
-						account.balances.current === null ||
-							account.balances.current === undefined
-							? null
-							: plaidAmountToCents(account.balances.current),
-						account.balances.current === null ||
-							account.balances.current === undefined
-							? null
-							: plaidAmountToCents(account.balances.current),
-					),
+				throw new Error(
+					"Plaid sync returned a transaction for an unknown account",
 				);
+			}
+
+			const statements: D1PreparedStatement[] = [];
+			if (firstPage) {
+				for (const account of accounts) {
+					statements.push(accountUpsert(env, itemRowId, account));
+				}
 			}
 			const firstAddedStatement = statements.length;
 			for (const transaction of posted) {
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-						(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category)
-					 SELECT ?, id, ?, ?, ?, ? FROM accounts WHERE plaid_account_id = ?
-					 ON CONFLICT(plaid_transaction_id) DO NOTHING`,
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category)
+						 SELECT ?, id, ?, ?, ?, ? FROM accounts WHERE plaid_account_id = ?
+						 ON CONFLICT(plaid_transaction_id) DO NOTHING`,
 					).bind(
 						transaction.transaction_id,
 						transaction.date,
@@ -192,8 +234,8 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?, amount_cents = ?, raw_name = ?,
-						plaid_category = ?, updated_at = datetime('now')
-					 WHERE plaid_transaction_id = ?`,
+							plaid_category = ?, updated_at = datetime('now')
+						 WHERE plaid_transaction_id = ?`,
 					).bind(
 						transaction.date,
 						plaidAmountToCents(transaction.amount),
@@ -221,6 +263,7 @@ export async function syncItem(
 				.reduce((count, result) => count + (result.meta.changes ?? 0), 0);
 
 			cursor = page.next_cursor;
+			firstPage = false;
 			summary.added += inserted;
 			summary.modified += page.modified.length;
 			summary.removed += page.removed.length;
