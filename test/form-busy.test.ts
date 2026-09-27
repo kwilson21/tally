@@ -19,6 +19,18 @@ beforeEach(async () => {
 });
 
 describe("htmx posting forms", () => {
+	it("makes each sheet's Save its own busy indicator, so it stays full colour while it works", async () => {
+		expect(await get("/budget/1")).toMatch(
+			/<form[^>]*hx-indicator="#budget-save"[^>]*>[\s\S]*?<button[^>]*id="budget-save"/,
+		);
+		const transaction = await env.DB.prepare(
+			"SELECT id FROM transactions LIMIT 1",
+		).first<{ id: number }>();
+		expect(await get(`/transactions/${transaction?.id}`)).toMatch(
+			/<form[^>]*hx-indicator="#edit-save"[^>]*>[\s\S]*?<button[^>]*id="edit-save"/,
+		);
+	});
+
 	it("disable every submit button and label Home's save while it is busy", async () => {
 		const sheet = await get("/budget/1");
 		const forms = htmxForms(sheet);
