@@ -108,9 +108,30 @@ describe("verifyPlaidWebhook", () => {
 				value.fetchImpl,
 			),
 		).toBe(false);
+		// Change a character in the middle: the last one carries unused bits.
 		const parts = value.token.split(".");
 		const signature = parts[2] as string;
-		parts[2] = `${signature.slice(0, -1)}${signature.endsWith("A") ? "B" : "A"}`;
+		const middle = Math.floor(signature.length / 2);
+		parts[2] = `${signature.slice(0, middle)}${signature[middle] === "A" ? "B" : "A"}${signature.slice(middle + 1)}`;
+		expect(
+			await verifyPlaidWebhook(
+				env,
+				value.body,
+				parts.join("."),
+				value.fetchImpl,
+			),
+		).toBe(false);
+	});
+
+	it("rejects a signature whose unused trailing bits are set", async () => {
+		const value = await fixture();
+		const parts = value.token.split(".");
+		const signature = parts[2] as string;
+		// 64 bytes encode to 86 characters; the last holds 4 data bits and 2 unused ones.
+		const alphabet =
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+		const last = alphabet.indexOf(signature.at(-1) as string);
+		parts[2] = `${signature.slice(0, -1)}${alphabet[last | 1]}`;
 		expect(
 			await verifyPlaidWebhook(
 				env,

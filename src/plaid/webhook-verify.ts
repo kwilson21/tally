@@ -16,10 +16,14 @@ function decode(part: string): Uint8Array {
 		throw new Error("Invalid base64url");
 	}
 	const base64 = part.replaceAll("-", "+").replaceAll("_", "/");
-	return Uint8Array.from(
-		atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")),
-		(character) => character.charCodeAt(0),
-	);
+	const binary = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="));
+	// Only the canonical spelling: unused trailing bits must be zero, so one value has one encoding.
+	const canonical = btoa(binary)
+		.replaceAll("+", "-")
+		.replaceAll("/", "_")
+		.replace(/=+$/, "");
+	if (canonical !== part) throw new Error("Invalid base64url");
+	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function json<T>(part: string): T {
