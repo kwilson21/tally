@@ -62,7 +62,7 @@ const plaidFetch = (
 
 async function itemState(id: number) {
 	return env.DB.prepare(
-		"SELECT sync_cursor, sync_locked_until, status FROM plaid_items WHERE id = ?",
+		"SELECT sync_cursor, sync_locked_until, sync_lock_id, status FROM plaid_items WHERE id = ?",
 	)
 		.bind(id)
 		.first();
@@ -331,6 +331,60 @@ describe("syncItem", () => {
 			),
 		).rejects.toThrow("Plaid request failed");
 		expect((await itemState(id))?.sync_locked_until).toBeNull();
+	});
+
+	it("does not release a newer run's lock after its own lease expires", async () => {
+		const id = await addItem();
+		let finishFirst!: () => void;
+		let finishSecond!: () => void;
+		const firstWaiting = new Promise<void>((resolve) => {
+			finishFirst = resolve;
+		});
+		const secondWaiting = new Promise<void>((resolve) => {
+			finishSecond = resolve;
+		});
+		const first = syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			vi.fn(async () => {
+				await firstWaiting;
+				throw new Error("first run finished late");
+			}),
+		);
+		await vi.waitFor(async () => {
+			expect((await itemState(id))?.sync_lock_id).not.toBeNull();
+		});
+		const firstLockId = (await itemState(id))?.sync_lock_id;
+		await env.DB.prepare(
+			"UPDATE plaid_items SET sync_locked_until = datetime('now', '-1 minute') WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+
+		const second = syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			vi.fn(async (url: RequestInfo | URL) => {
+				await secondWaiting;
+				return String(url).endsWith("/accounts/get")
+					? response({ accounts: [account()] })
+					: response(page());
+			}),
+		);
+		await vi.waitFor(async () => {
+			expect((await itemState(id))?.sync_lock_id).not.toBe(firstLockId);
+		});
+		const secondLock = await itemState(id);
+
+		finishFirst();
+		await expect(first).rejects.toThrow("first run finished late");
+		expect(await itemState(id)).toMatchObject({
+			sync_lock_id: secondLock?.sync_lock_id,
+			sync_locked_until: secondLock?.sync_locked_until,
+		});
+
+		finishSecond();
+		await second;
 	});
 
 	it("flags only documented errors that require user action", async () => {

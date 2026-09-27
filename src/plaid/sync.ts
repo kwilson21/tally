@@ -114,11 +114,13 @@ export async function syncItem(
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
 ): Promise<SyncResult> {
+	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
-		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes')
+		`UPDATE plaid_items
+		 SET sync_locked_until = datetime('now', '+5 minutes'), sync_lock_id = ?
 		 WHERE id = ? AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
 	)
-		.bind(itemRowId)
+		.bind(lockId, itemRowId)
 		.run();
 	if (lock.meta.changes === 0) {
 		const exists = await env.DB.prepare(
@@ -206,7 +208,12 @@ export async function syncItem(
 				);
 			}
 
-			const statements: D1PreparedStatement[] = [];
+			const statements: D1PreparedStatement[] = [
+				env.DB.prepare(
+					`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes')
+					 WHERE id = ? AND sync_lock_id = ?`,
+				).bind(itemRowId, lockId),
+			];
 			if (firstPage) {
 				for (const account of accounts) {
 					statements.push(accountUpsert(env, itemRowId, account));
@@ -274,9 +281,10 @@ export async function syncItem(
 		}
 	} finally {
 		await env.DB.prepare(
-			"UPDATE plaid_items SET sync_locked_until = NULL WHERE id = ?",
+			`UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL
+			 WHERE id = ? AND sync_lock_id = ?`,
 		)
-			.bind(itemRowId)
+			.bind(itemRowId, lockId)
 			.run();
 	}
 }
