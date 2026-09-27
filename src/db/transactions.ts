@@ -44,11 +44,13 @@ export async function listTransactions(
 	if (f.uncategorized) where.push(NEEDS_CATEGORY);
 	if (f.excluded) where.push("t.excluded = 1");
 	if (f.q) {
+		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
+		// "google youtube" finds "GOOGLE *YOUTUBE".
 		where.push(
-			"(COALESCE(m.display_name, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')",
+			"(COALESCE(m.display_name, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')",
 		);
 		const pattern = likePattern(f.q);
-		args.push(pattern, pattern, pattern);
+		args.push(pattern, pattern, pattern, pattern);
 	}
 
 	const from = `FROM transactions t

@@ -94,6 +94,11 @@ describe("listTransactions", () => {
 		});
 	});
 
+	it("finds an unnamed merchant by the full name it shows, where a * joins the words", async () => {
+		const { rows } = await list("q=google%20youtube");
+		expect(rows.map((r) => r.displayName)).toEqual(["Google youtube"]);
+	});
+
 	it("searches notes", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET note = 'birthday cake' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
