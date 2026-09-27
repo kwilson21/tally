@@ -26,12 +26,14 @@ import {
 import { resultCount } from "../transactions/result-count";
 import { tidyName } from "../transactions/tidy-name";
 import { BottomSheet } from "../views/bottom-sheet";
+import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 
 type App = { Bindings: Env };
@@ -230,12 +232,9 @@ async function renderList(
 				</div>
 				{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}
 				<noscript>
-					<button
-						type="submit"
-						class="min-h-11 self-start rounded-control bg-ink px-4 text-paper"
-					>
+					<Button type="submit" class="self-start px-4">
 						Apply filters
-					</button>
+					</Button>
 				</noscript>
 			</form>
 
@@ -457,28 +456,17 @@ function EditSheet({
 						Rename or add a note
 					</summary>
 					<div class="flex flex-col gap-4 pt-2">
-						<FormField
+						<TextInput
 							id="merchant"
 							label="Merchant name"
+							name="merchant"
+							value={values.displayName ?? ""}
+							placeholder={tx.rawName}
+							autocomplete="off"
+							surface="paper"
+							hint="Renames every transaction from this merchant."
 							error={errors.merchant}
-						>
-							{(a11y) => (
-								<>
-									<input
-										id="merchant"
-										name="merchant"
-										value={values.displayName ?? ""}
-										placeholder={tx.rawName}
-										autocomplete="off"
-										class="min-h-11 rounded-control border border-rule bg-paper px-3 text-lg"
-										{...a11y}
-									/>
-									<p class="text-sm text-muted">
-										Renames every transaction from this merchant.
-									</p>
-								</>
-							)}
-						</FormField>
+						/>
 						<FormField id="note" label="Note" error={errors.note}>
 							{(a11y) => (
 								<textarea
@@ -495,19 +483,12 @@ function EditSheet({
 					</div>
 				</details>
 				<div class="mt-2 grid grid-cols-2 gap-3">
-					<a
-						href={back}
-						class="flex min-h-11 items-center justify-center rounded-control border border-ink text-ink no-underline"
-						{...closeAttrs}
-					>
+					<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
 						Cancel
-					</a>
-					<button
-						type="submit"
-						class="min-h-11 rounded-control bg-ink text-paper"
-					>
+					</Button>
+					<Button type="submit" class="w-full">
 						Save
-					</button>
+					</Button>
 				</div>
 			</form>
 		</BottomSheet>
