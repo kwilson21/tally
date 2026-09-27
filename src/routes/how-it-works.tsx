@@ -55,7 +55,7 @@ const PARTS: [string, string][] = [
 	],
 	[
 		"Cron Triggers",
-		"Run the daily Plaid sync (a backup for webhooks), retry uncategorized transactions, and reset the demo nightly.",
+		"Reset the demo nightly. In production, sync every ok Item one at a time (one failure does not stop the others), leave needs_attention Items for Fix connection, then retry categorization. This daily sync backs up webhooks.",
 	],
 	[
 		"Cloudflare Access",

@@ -3,6 +3,8 @@ import { verifiedEmail } from "./access";
 import { categorizePending } from "./categorize-pending";
 import { todayUtc } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
+import type { PlaidEnv } from "./plaid/client";
+import { syncAllItems } from "./plaid/sync-all";
 import { designSystem } from "./routes/design-system";
 import { destinations } from "./routes/destinations";
 import { health } from "./routes/health";
@@ -15,7 +17,25 @@ import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
 
 type App = { Bindings: Env; Variables: { actor: string } };
+type ScheduledEnv = PlaidEnv & {
+	DB: D1Database;
+	DEMO?: string;
+	JEV_API_KEY?: string;
+};
 export const app = new Hono<App>();
+
+export async function runScheduled(
+	env: ScheduledEnv,
+	fetchImpl?: typeof fetch,
+) {
+	// The nightly job resets the demo first; production then catches up every healthy Plaid Item.
+	if (canResetDemo(env)) {
+		await resetDemo(env.DB, todayUtc());
+	}
+	await syncAllItems(env, fetchImpl);
+	// Merchant rules and Jev run after sync so newly fetched transactions are sorted tonight.
+	await categorizePending(env, fetchImpl);
+}
 
 app.use("*", security);
 app.use("*", sameOrigin);
@@ -58,13 +78,6 @@ app.route("/", webhooks);
 export default {
 	fetch: app.fetch,
 	async scheduled(_controller, env) {
-		// The nightly job. In the demo it restores the seed; production sync is added in Phase 2.
-		// "today" here is the UTC date, which is fine for the demo (it only shifts which day's
-		// seed is shown); production scheduling is decided in Phase 2.
-		if (canResetDemo(env)) {
-			await resetDemo(env.DB, todayUtc());
-		}
-		// Then merchant rules and Jev sort what's uncategorized (spec §7). Without a key it does nothing.
-		await categorizePending(env);
+		await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;

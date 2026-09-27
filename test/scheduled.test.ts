@@ -1,5 +1,9 @@
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { runScheduled } from "../src/index";
+import { encryptToken } from "../src/plaid/token-crypto";
+
+const KEY = btoa("01234567890123456789012345678901");
 
 // The Workers runtime supports scheduled() on the Worker's own export, but the
 // generated Fetcher type only declares fetch() and connect().
@@ -18,10 +22,13 @@ describe("scheduled handler", () => {
 	it("restores the demo seed through the Worker entry point when the guard allows it", async () => {
 		await env.DB.prepare("DELETE FROM transactions").run();
 		expect(await count()).toBe(0);
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
 
 		await worker.scheduled({ cron: "0 8 * * *" });
 
 		expect(await count()).toBeGreaterThan(0);
+		expect(fetchSpy).not.toHaveBeenCalled();
+		fetchSpy.mockRestore();
 	});
 
 	it("leaves Jev out when there is no key, so the seed's 12 stay uncategorized", async () => {
@@ -31,5 +38,80 @@ describe("scheduled handler", () => {
 			"SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL AND flag_income = 0 AND excluded = 0",
 		).first<{ n: number }>();
 		expect(untouched?.n).toBeGreaterThanOrEqual(12);
+	});
+
+	it("syncs before categorizing, so a new transaction gets its merchant rule", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
+		]);
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('NEW SHOP', ?)",
+		)
+			.bind(category?.id)
+			.run();
+		const token = await encryptToken("access-token", KEY);
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', 'item')",
+		)
+			.bind(token)
+			.run();
+		const fetchImpl = async (url: RequestInfo | URL) => {
+			if (String(url).endsWith("/accounts/get")) {
+				return new Response(
+					JSON.stringify({
+						accounts: [
+							{
+								account_id: "account",
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					}),
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					added: [
+						{
+							transaction_id: "new-transaction",
+							account_id: "account",
+							date: "2026-09-27",
+							amount: 12,
+							name: "NEW SHOP",
+							pending: false,
+						},
+					],
+					modified: [],
+					removed: [],
+					next_cursor: "next",
+					has_more: false,
+				}),
+			);
+		};
+
+		await runScheduled(
+			{
+				...env,
+				DEMO: "false",
+				PLAID_CLIENT_ID: "client",
+				PLAID_SECRET: "secret",
+				TOKEN_ENCRYPTION_KEY: KEY,
+				JEV_API_KEY: "jev",
+			},
+			fetchImpl,
+		);
+
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE plaid_transaction_id = 'new-transaction'",
+			).first(),
+		).toEqual({ category_id: category?.id, category_source: "merchant_rule" });
 	});
 });

@@ -60,7 +60,7 @@ Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggest
 | **Plaid (REST over `fetch`)** | Supplies accounts, transactions, and balances from the family's banks. |
 | **Jev (TypeSafe AI)** | Picks a category and flags for each transaction, with a confidence score. |
 | **Workers AI** | Suggests a clean merchant name, which a person accepts or rejects. |
-| **Cron Triggers** | Run the daily Plaid sync (a backup for webhooks), retry uncategorized transactions, and reset the demo nightly. |
+| **Cron Triggers** | Reset the demo nightly. In production, sync every `ok` Item one at a time (one failure does not stop the others), leave `needs_attention` Items for Fix connection, then retry categorization. This daily sync backs up webhooks. |
 | **Cloudflare Access** | A login wall with the family's emails in front of the family app; the app has no login code of its own. |
 | **Wrangler** | The command-line tool that deploys the Worker and stores secrets. |
 
