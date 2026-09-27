@@ -335,7 +335,7 @@ describe("Plaid routes", () => {
 		expect(JSON.stringify(errors.mock.calls)).not.toContain("access-private");
 	});
 
-	it("returns 422 for malformed request bodies", async () => {
+	it("returns 415 for malformed JSON request bodies", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		vi.stubGlobal("fetch", async () => Response.json({ keys: [jwk] }));
 		const response = await exports.default.fetch(`${BASE}/plaid/exchange`, {
@@ -347,8 +347,82 @@ describe("Plaid routes", () => {
 			},
 			body: "{malformed",
 		});
-		expect(response.status).toBe(422);
+		expect(response.status).toBe(415);
 		expect(await response.text()).toContain("Couldn&#39;t link the bank");
+	});
+
+	it("rejects cross-site JSON exchanges without calling Plaid", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const plaidFetch = vi.fn();
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com")) {
+				return Response.json({ keys: [jwk] });
+			}
+			plaidFetch(input);
+			return Response.json({ access_token: "must-not-exist" });
+		});
+
+		const response = await exports.default.fetch(`${BASE}/plaid/exchange`, {
+			method: "POST",
+			headers: {
+				Origin: "https://evil.example",
+				"content-type": "application/json",
+				"Cf-Access-Jwt-Assertion": jwt,
+			},
+			body: JSON.stringify({ public_token: "single-use" }),
+		});
+
+		expect(response.status).toBe(403);
+		expect(plaidFetch).not.toHaveBeenCalled();
+	});
+
+	it("rejects cross-site bodiless Link-token requests without calling Plaid", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const plaidFetch = vi.fn();
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com")) {
+				return Response.json({ keys: [jwk] });
+			}
+			plaidFetch(input);
+			return Response.json({ link_token: "must-not-exist" });
+		});
+
+		const response = await exports.default.fetch(`${BASE}/plaid/link-token`, {
+			method: "POST",
+			headers: {
+				Origin: "https://evil.example",
+				"Cf-Access-Jwt-Assertion": jwt,
+			},
+		});
+
+		expect(response.status).toBe(403);
+		expect(plaidFetch).not.toHaveBeenCalled();
+	});
+
+	it("rejects non-form exchanges from the same origin without calling Plaid", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const plaidFetch = vi.fn();
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com")) {
+				return Response.json({ keys: [jwk] });
+			}
+			plaidFetch(input);
+			return Response.json({ access_token: "must-not-exist" });
+		});
+
+		const response = await exports.default.fetch(`${BASE}/plaid/exchange`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/json",
+				"Cf-Access-Jwt-Assertion": jwt,
+			},
+			body: JSON.stringify({ public_token: "single-use" }),
+		});
+
+		expect(response.status).toBe(415);
+		expect(await response.text()).toContain("Couldn&#39;t link the bank");
+		expect(plaidFetch).not.toHaveBeenCalled();
 	});
 
 	it("returns 404 in the demo or when required configuration is absent", async () => {

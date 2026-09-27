@@ -44,7 +44,14 @@ function logPlaidRequestId(error: unknown) {
 	}
 }
 
+function isSameOrigin(request: Request) {
+	if (request.headers.get("Sec-Fetch-Site") === "same-origin") return true;
+	const origin = request.headers.get("Origin");
+	return origin !== null && origin === new URL(request.url).origin;
+}
+
 plaid.post("/plaid/link-token", async (c) => {
+	if (!isSameOrigin(c.req.raw)) return c.body(null, 403);
 	if (!enabled(c.env)) return c.notFound();
 	try {
 		const result = await createLinkToken(c.env, {
@@ -62,16 +69,18 @@ plaid.post("/plaid/link-token", async (c) => {
 });
 
 plaid.post("/plaid/exchange", async (c) => {
+	if (!isSameOrigin(c.req.raw)) return c.body(null, 403);
 	if (!enabled(c.env)) return c.notFound();
+	const contentType = c.req.header("content-type")?.split(";", 1)[0]?.trim();
+	if (
+		contentType !== "application/x-www-form-urlencoded" &&
+		contentType !== "multipart/form-data"
+	) {
+		return c.html(linkFailure(undefined), 415);
+	}
 	let publicToken: unknown;
 	try {
-		const contentType = c.req.header("content-type") ?? "";
-		if (contentType.includes("application/json")) {
-			publicToken = ((await c.req.json()) as { public_token?: unknown })
-				.public_token;
-		} else {
-			publicToken = (await c.req.formData()).get("public_token");
-		}
+		publicToken = (await c.req.formData()).get("public_token");
 	} catch {
 		return c.html(linkFailure(undefined), 422);
 	}
