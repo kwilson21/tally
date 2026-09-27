@@ -68,10 +68,10 @@ describe("verifyPlaidWebhook", () => {
 		const valid = await fixture();
 		expect(
 			await verifyPlaidWebhook(env, valid.body, valid.token, valid.fetchImpl),
-		).toBe(true);
+		).toBe("valid");
 		expect(
 			await verifyPlaidWebhook(env, valid.body, valid.token, valid.fetchImpl),
-		).toBe(true);
+		).toBe("valid");
 		expect(valid.fetchImpl).toHaveBeenCalledOnce();
 	});
 
@@ -81,13 +81,25 @@ describe("verifyPlaidWebhook", () => {
 		["missing kid", { header: { kid: undefined } }],
 		["crit", { header: { crit: ["anything"] } }],
 		["old iat", { claims: { iat: Math.floor(Date.now() / 1000) - 361 } }],
-		["future iat", { claims: { iat: Math.floor(Date.now() / 1000) + 1 } }],
+		[
+			"iat 61 seconds ahead",
+			{ claims: { iat: Math.floor(Date.now() / 1000) + 61 } },
+		],
 		["expired key", { expiredAt: "2026-01-01T00:00:00Z" }],
 	] as const)("rejects %s", async (_name, overrides) => {
 		const value = await fixture(overrides);
 		expect(
 			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
-		).toBe(false);
+		).toBe("invalid");
+	});
+
+	it("accepts an iat 30 seconds ahead", async () => {
+		const value = await fixture({
+			claims: { iat: Math.floor(Date.now() / 1000) + 30 },
+		});
+		expect(
+			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
+		).toBe("valid");
 	});
 
 	it("rejects malformed encodings, body changes, and signature changes", async () => {
@@ -99,7 +111,7 @@ describe("verifyPlaidWebhook", () => {
 				`a=.b.${value.token.split(".")[2]}`,
 				value.fetchImpl,
 			),
-		).toBe(false);
+		).toBe("invalid");
 		expect(
 			await verifyPlaidWebhook(
 				env,
@@ -107,7 +119,7 @@ describe("verifyPlaidWebhook", () => {
 				value.token,
 				value.fetchImpl,
 			),
-		).toBe(false);
+		).toBe("invalid");
 		// Change a character in the middle: the last one carries unused bits.
 		const parts = value.token.split(".");
 		const signature = parts[2] as string;
@@ -120,7 +132,7 @@ describe("verifyPlaidWebhook", () => {
 				parts.join("."),
 				value.fetchImpl,
 			),
-		).toBe(false);
+		).toBe("invalid");
 	});
 
 	it("rejects a signature whose unused trailing bits are set", async () => {
@@ -139,17 +151,54 @@ describe("verifyPlaidWebhook", () => {
 				parts.join("."),
 				value.fetchImpl,
 			),
-		).toBe(false);
+		).toBe("invalid");
 	});
 
-	it("does not cache a failed key request", async () => {
+	it("temporarily caches a failed key request as unavailable", async () => {
+		vi.useFakeTimers();
 		const value = await fixture({ fetchStatus: 500 });
 		expect(
 			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
-		).toBe(false);
+		).toBe("unavailable");
 		expect(
 			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
-		).toBe(false);
+		).toBe("unavailable");
+		expect(value.fetchImpl).toHaveBeenCalledOnce();
+		vi.advanceTimersByTime(60_001);
+		expect(
+			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
+		).toBe("unavailable");
 		expect(value.fetchImpl).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
+	});
+
+	it("caps failed kid entries at 32 and evicts the oldest", async () => {
+		const value = await fixture({ fetchStatus: 500 });
+		const parts = value.token.split(".");
+		const tokenFor = (kid: string) =>
+			`${json64({ alg: "ES256", kid })}.${parts[1]}.${parts[2]}`;
+		for (let index = 0; index < 33; index += 1) {
+			await verifyPlaidWebhook(
+				env,
+				value.body,
+				tokenFor(`bounded-kid-${index}`),
+				value.fetchImpl,
+			);
+		}
+		await verifyPlaidWebhook(
+			env,
+			value.body,
+			tokenFor("bounded-kid-0"),
+			value.fetchImpl,
+		);
+		expect(value.fetchImpl).toHaveBeenCalledTimes(34);
+	});
+
+	it("rejects an over-long kid without fetching", async () => {
+		const value = await fixture({ header: { kid: "k".repeat(129) } });
+		expect(
+			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
+		).toBe("invalid");
+		expect(value.fetchImpl).not.toHaveBeenCalled();
 	});
 });

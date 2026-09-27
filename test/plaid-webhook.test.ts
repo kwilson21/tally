@@ -98,6 +98,29 @@ describe("Plaid webhook route", () => {
 		expect(prepare).not.toHaveBeenCalled();
 	});
 
+	it("returns 503 when Plaid's key service is unavailable", async () => {
+		const sign = await signer();
+		const body = "{}";
+		const { token } = await sign(body);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(null, { status: 500 })),
+		);
+		const response = await app.request(
+			"http://tally.test/webhooks/plaid",
+			{
+				method: "POST",
+				body,
+				headers: {
+					"content-type": "application/json",
+					"Plaid-Verification": token,
+				},
+			},
+			env,
+		);
+		expect(response.status).toBe(503);
+	});
+
 	it("accepts signed JSON without an Origin and ignores an unknown Item", async () => {
 		const sign = await signer();
 		const body = JSON.stringify({
@@ -147,6 +170,33 @@ describe("Plaid webhook route", () => {
 		);
 		expect(response.status).toBe(400);
 	});
+
+	it.each(["null", "[]"])(
+		"ignores a signed non-object body: %s",
+		async (body) => {
+			const prepare = vi.spyOn(env.DB, "prepare");
+			const sign = await signer();
+			const { token, jwk } = await sign(body);
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
+			);
+			const response = await app.request(
+				"http://tally.test/webhooks/plaid",
+				{
+					method: "POST",
+					body,
+					headers: {
+						"content-type": "application/json",
+						"Plaid-Verification": token,
+					},
+				},
+				env,
+			);
+			expect(response.status).toBe(200);
+			expect(prepare).not.toHaveBeenCalled();
+		},
+	);
 
 	it.each([
 		["ERROR", "ITEM_LOGIN_REQUIRED", "needs_attention"],

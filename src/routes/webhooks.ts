@@ -24,21 +24,23 @@ export const webhooks = new Hono<App>();
 webhooks.post("/webhooks/plaid", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
 	const rawBody = await c.req.text();
-	if (
-		!(await verifyPlaidWebhook(
-			c.env,
-			rawBody,
-			c.req.header("Plaid-Verification"),
-		))
-	) {
-		return c.body(null, 401);
-	}
-	let body: Webhook;
+	const verification = await verifyPlaidWebhook(
+		c.env,
+		rawBody,
+		c.req.header("Plaid-Verification"),
+	);
+	if (verification === "unavailable") return c.body(null, 503);
+	if (verification === "invalid") return c.body(null, 401);
+	let parsed: unknown;
 	try {
-		body = JSON.parse(rawBody) as Webhook;
+		parsed = JSON.parse(rawBody);
 	} catch {
 		return c.body(null, 400);
 	}
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return c.body(null, 200);
+	}
+	const body = parsed as Webhook;
 	if (typeof body.item_id !== "string") return c.body(null, 200);
 	const item = await c.env.DB.prepare(
 		"SELECT id FROM plaid_items WHERE plaid_item_id = ?",
