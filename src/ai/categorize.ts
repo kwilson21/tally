@@ -16,6 +16,7 @@ export type JevInput = {
 	/** Plaid's sign convention: positive is money out. */
 	amountCents: number;
 	accountType: string;
+	plaidCategory?: string | null;
 };
 
 export type JevResult =
@@ -45,6 +46,7 @@ export async function askJev(
 			amount_cents: Math.abs(input.amountCents),
 			direction: input.amountCents >= 0 ? "money out" : "money in",
 			account_type: input.accountType,
+			...(input.plaidCategory ? { plaid_category: input.plaidCategory } : {}),
 		},
 		questions: {
 			category: {
