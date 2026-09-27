@@ -179,7 +179,7 @@ function CategoryRow({
 								<Button
 									type="submit"
 									kind="secondary"
-									class="gap-2 px-3"
+									class="gap-2"
 									{...action(`${url}/move/up`)}
 								>
 									<Icon name="arrow-up" class="size-4" />
@@ -190,7 +190,7 @@ function CategoryRow({
 								<Button
 									type="submit"
 									kind="secondary"
-									class="gap-2 px-3"
+									class="gap-2"
 									{...action(`${url}/move/down`)}
 								>
 									<Icon name="arrow-down" class="size-4" />
