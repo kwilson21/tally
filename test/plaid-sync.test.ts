@@ -190,6 +190,65 @@ describe("syncItem", () => {
 		expect(row?.category_id).not.toBeNull();
 	});
 
+	it("preserves the stored account balance when Plaid omits the current balance", async () => {
+		const id = await addItem();
+		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
+			response(
+				page({
+					accounts: [
+						{
+							...page().accounts[0],
+							balances: { current: 1234.56 },
+						},
+					],
+				}),
+			),
+		);
+		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>
+			response(
+				page({
+					accounts: [
+						{
+							...page().accounts[0],
+							balances: { current: null },
+						},
+					],
+				}),
+			),
+		);
+
+		expect(
+			await env.DB.prepare(
+				"SELECT balance_cents FROM accounts WHERE plaid_account_id = 'account-1'",
+			).first(),
+		).toEqual({ balance_cents: 123456 });
+	});
+
+	it("does not count a transaction skipped for an unknown account", async () => {
+		const id = await addItem();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const result = await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			async () =>
+				response(
+					page({
+						accounts: [],
+						added: [transaction({ account_id: "unknown-account" })],
+					}),
+				),
+		);
+
+		expect(result).toEqual({ added: 0, modified: 0, removed: 0 });
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
+		).toEqual({ n: 0 });
+		expect(logSpy).toHaveBeenCalledWith(
+			"plaid sync: skipped 1 transaction for an unknown account",
+		);
+		logSpy.mockRestore();
+	});
+
 	it("removes a transaction and its split children", async () => {
 		const id = await addItem();
 		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, async () =>

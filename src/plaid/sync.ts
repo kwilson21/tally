@@ -107,11 +107,12 @@ export async function syncItem(
 				env.DB.prepare(
 					`INSERT INTO accounts
 						(plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0))
 					 ON CONFLICT(plaid_account_id) DO UPDATE SET
 						plaid_item_id = excluded.plaid_item_id, name = excluded.name, mask = excluded.mask,
 						type = excluded.type, subtype = excluded.subtype,
-						is_liability = excluded.is_liability, balance_cents = excluded.balance_cents,
+						is_liability = excluded.is_liability,
+						balance_cents = COALESCE(?, accounts.balance_cents),
 						updated_at = datetime('now')`,
 				).bind(
 					itemRowId,
@@ -121,10 +122,18 @@ export async function syncItem(
 					account.type,
 					account.subtype ?? null,
 					account.type === "credit" || account.type === "loan" ? 1 : 0,
-					plaidAmountToCents(account.balances.current ?? 0),
+					account.balances.current === null ||
+						account.balances.current === undefined
+						? null
+						: plaidAmountToCents(account.balances.current),
+					account.balances.current === null ||
+						account.balances.current === undefined
+						? null
+						: plaidAmountToCents(account.balances.current),
 				),
 			);
 		}
+		const firstAddedStatement = statements.length;
 		for (const transaction of posted) {
 			statements.push(
 				env.DB.prepare(
@@ -169,15 +178,24 @@ export async function syncItem(
 				"UPDATE plaid_items SET sync_cursor = ? WHERE id = ?",
 			).bind(page.next_cursor, itemRowId),
 		);
-		await env.DB.batch(statements);
+		const results = await env.DB.batch(statements);
+		const inserted = results
+			.slice(firstAddedStatement, firstAddedStatement + posted.length)
+			.reduce((count, result) => count + (result.meta.changes ?? 0), 0);
+		const skipped = posted.length - inserted;
 
 		cursor = page.next_cursor;
-		summary.added += posted.length;
+		summary.added += inserted;
 		summary.modified += page.modified.length;
 		summary.removed += page.removed.length;
 		console.log(
-			`plaid sync: added ${posted.length}, modified ${page.modified.length}, removed ${page.removed.length}`,
+			`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
 		);
+		if (skipped > 0) {
+			console.log(
+				`plaid sync: skipped ${skipped} ${skipped === 1 ? "transaction" : "transactions"} for an unknown account`,
+			);
+		}
 		if (!page.has_more) return summary;
 	}
 }
