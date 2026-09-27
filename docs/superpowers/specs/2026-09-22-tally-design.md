@@ -89,6 +89,7 @@ Secrets are stored with `wrangler secret put` and never committed. The owner ent
 | `PLAID_CLIENT_ID`, `PLAID_SECRET` | yes | no |
 | `TOKEN_ENCRYPTION_KEY` (encrypts Plaid access tokens) | yes | no |
 | `PLAID_WEBHOOK_URL` (plain config, not secret) | yes | no |
+| `PLAID_ENV` (plain config: `sandbox` or `production`; anything else means sandbox) | yes | no |
 | `JEV_API_KEY` | yes | yes |
 
 Local development uses a git-ignored `.dev.vars` file, with Plaid **Sandbox** keys only (decision 36); tests fake Plaid at `fetch`, and production keys exist only as secrets on the production Worker. The repo commits a `.dev.vars.example` with placeholder names only.

@@ -1,5 +1,7 @@
 # Copy to .dev.vars for local development. Never commit .dev.vars.
 # Real values are stored with `npx wrangler secret put <NAME>` (owner only).
 JEV_API_KEY=replace-me
+# Plaid uses Sandbox unless this is exactly "production".
+PLAID_ENV=sandbox
 # Generate with: openssl rand -base64 32
 TOKEN_ENCRYPTION_KEY=replace-with-base64-32-byte-key
