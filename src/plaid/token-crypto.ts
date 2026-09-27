@@ -18,6 +18,16 @@ function decodeKey(keyBase64: string): Uint8Array {
 	}
 }
 
+export function isValidKey(keyBase64: string | undefined): boolean {
+	if (!keyBase64) return false;
+	try {
+		decodeKey(keyBase64);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 async function importKey(keyBase64: string): Promise<CryptoKey> {
 	return crypto.subtle.importKey(
 		"raw",
