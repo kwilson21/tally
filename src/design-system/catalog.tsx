@@ -532,7 +532,7 @@ const BUTTON_SPEC: UseSpecText = {
 	affordance:
 		"A filled, outlined, or terracotta label looks actionable without hover.",
 	states:
-		"Rest, focus, disabled, and loading apply; hover and pressed use the browser defaults. Loading disables submit actions and replaces their label with a spinner and action-specific word; done and error appear in the result.",
+		"Rest, focus, disabled, and loading apply; hover and pressed use the browser defaults. Loading disables submit actions and swaps their label for a spinner and action-specific word; the button may grow to fit it, and done and error appear in the result.",
 	feedback:
 		"A form action immediately shows its busy label and cannot be submitted twice; then the destination or result appears, focus follows changed content, and HTMX announces the result.",
 	input:
@@ -540,7 +540,7 @@ const BUTTON_SPEC: UseSpecText = {
 	motion:
 		"The loading ring spins until the request ends; with reduced motion it stays still while the busy words remain visible.",
 	edges:
-		"Long labels may wrap and loading keeps the button's size stable. A slow request stays disabled and busy; without JavaScript the form submits normally and no busy label shows.",
+		"Long labels may wrap, and a longer loading label may make the button grow during the request. A slow request stays disabled and busy; without JavaScript the form submits normally and no busy label shows.",
 	words:
 		"Use a short verb phrase such as Save, Cancel, Archive, Restore, or Add category. Place one primary button per screen or sheet, at the end of the form, with Cancel beside it.",
 };

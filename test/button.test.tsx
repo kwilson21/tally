@@ -76,13 +76,14 @@ describe("Button", () => {
 		);
 	});
 
-	it("renders a stable busy label and hidden spinner when requested", () => {
+	it("swaps resting content for busy content without affecting resting size", () => {
 		const html = renderToString(<Button busyLabel="Saving…">Save</Button>);
 		expect(html).toContain("Saving…");
 		expect(html).toContain('aria-hidden="true"');
 		expect(html).toContain("button-spinner");
-		expect(html).toContain("[.htmx-request_&amp;]:invisible");
-		expect(html).toContain("[.htmx-request_&amp;]:visible");
+		expect(html).toContain("[.htmx-request_&amp;]:hidden");
+		expect(html).toContain('class="hidden [.htmx-request_&amp;]:inline-flex');
+		expect(html).not.toContain("inline-grid");
 	});
 
 	it("does not render busy content unless requested", () => {

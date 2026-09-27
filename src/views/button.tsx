@@ -26,11 +26,9 @@ function Content({
 }) {
 	if (!busyLabel) return <>{children}</>;
 	return (
-		<span class="inline-grid items-center justify-items-center">
-			<span class="col-start-1 row-start-1 [.htmx-request_&]:invisible">
-				{children}
-			</span>
-			<span class="invisible col-start-1 row-start-1 inline-flex items-center gap-2 [.htmx-request_&]:visible">
+		<>
+			<span class="[.htmx-request_&]:hidden">{children}</span>
+			<span class="hidden [.htmx-request_&]:inline-flex items-center gap-2">
 				<svg
 					class="button-spinner size-4"
 					viewBox="0 0 24 24"
@@ -44,7 +42,7 @@ function Content({
 				</svg>
 				{busyLabel}
 			</span>
-		</span>
+		</>
 	);
 }
 

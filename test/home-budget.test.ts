@@ -166,6 +166,9 @@ describe("POST /budget/:id", () => {
 			/role="alert"[^>]*>[^<]*Enter a dollar amount, like 250 or 250.50./,
 		);
 		expect(html).toMatch(/<input[^>]*aria-invalid="true"/);
+		expect(html).toMatch(
+			/<input[^>]*aria-invalid="true"[^>]*class="[^"]*field-shake[^"]*"/,
+		);
 	});
 
 	it("redirects to Home without JavaScript", async () => {
