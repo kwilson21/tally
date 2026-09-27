@@ -86,3 +86,40 @@ html:not(.js) [data-money-js] {
 		animation: none;
 	}
 }
+
+/* A returned field error draws the eye once without moving for reduced motion. */
+@keyframes field-shake {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	25% {
+		transform: translateX(-4px);
+	}
+	50% {
+		transform: translateX(4px);
+	}
+	75% {
+		transform: translateX(-2px);
+	}
+}
+.field-shake {
+	animation: field-shake 300ms ease-out;
+}
+
+/* The request label remains visible; reduced motion only stops its ring. */
+@keyframes button-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+.button-spinner {
+	animation: button-spin 700ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.field-shake,
+	.button-spinner {
+		animation: none;
+	}
+}

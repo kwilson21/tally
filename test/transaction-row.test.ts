@@ -128,7 +128,7 @@ describe("FormField", () => {
 		}).toString();
 		expect(html).toContain('<label for="note"');
 		expect(html).toMatch(
-			/<textarea[^>]*aria-describedby="note-error"[^>]*aria-invalid="true"/,
+			/<textarea[^>]*aria-describedby="note-error"[^>]*aria-invalid="true"[^>]*class="field-shake"/,
 		);
 		expect(html).toMatch(/<p id="note-error" role="alert"/);
 	});

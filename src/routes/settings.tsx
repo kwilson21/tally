@@ -30,10 +30,12 @@ const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
 /** Every form on the page swaps the Categories section in place; without JavaScript it posts normally. */
-const swap = (url: string) => ({
+const swap = (url: string, indicator: string) => ({
 	method: "post" as const,
 	action: url,
 	"hx-post": url,
+	"hx-disable": "findAll button[type=submit]",
+	"hx-indicator": `#${indicator}`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
 	"hx-swap": "outerHTML",
@@ -43,9 +45,10 @@ const swap = (url: string) => ({
  * A second submit button in a form that posts somewhere else (Archive, Move): `formaction` without
  * JavaScript, and its own htmx request with it. htmx 4 doesn't inherit hx-target, so it's repeated.
  */
-const action = (url: string) => ({
+const action = (url: string, formId: string) => ({
 	formaction: url,
 	"hx-post": url,
+	"hx-disable": `#${formId} button[type=submit]`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
 	"hx-swap": "outerHTML",
@@ -112,6 +115,7 @@ function CategoryRow({
 }) {
 	const isOpen = view.open === c.id;
 	const url = `/settings/categories/${c.id}`;
+	const formId = `cat-${c.id}-form`;
 	return (
 		<details class="group border-b border-rule" data-row={c.id} open={isOpen}>
 			<summary
@@ -134,7 +138,11 @@ function CategoryRow({
 				{chevron}
 			</summary>
 			<div class="flex flex-col gap-4 pb-5 sm:pl-11">
-				<form class="flex flex-col gap-4" {...swap(url)}>
+				<form
+					id={formId}
+					class="flex flex-col gap-4"
+					{...swap(url, `cat-${c.id}-save`)}
+				>
 					<NameField
 						idPrefix={`c${c.id}`}
 						name={isOpen && view.values ? view.values.name : c.name}
@@ -152,7 +160,9 @@ function CategoryRow({
 						</a>
 					</p>
 					<div class="flex flex-wrap items-center gap-3">
-						<Button type="submit">Save</Button>
+						<Button id={`cat-${c.id}-save`} type="submit" busyLabel="Saving…">
+							Save
+						</Button>
 						<Button
 							href="/settings"
 							kind="secondary"
@@ -168,7 +178,9 @@ function CategoryRow({
 							type="submit"
 							kind="text"
 							class="ml-auto"
-							{...action(`${url}/archive`)}
+							busyLabel="Archiving…"
+							id={`cat-${c.id}-archive`}
+							{...action(`${url}/archive`, formId)}
 						>
 							Archive
 						</Button>
@@ -180,7 +192,9 @@ function CategoryRow({
 									type="submit"
 									kind="secondary"
 									class="gap-2"
-									{...action(`${url}/move/up`)}
+									busyLabel="Moving…"
+									id={`cat-${c.id}-move-up`}
+									{...action(`${url}/move/up`, formId)}
 								>
 									<Icon name="arrow-up" class="size-4" />
 									Move up
@@ -191,7 +205,9 @@ function CategoryRow({
 									type="submit"
 									kind="secondary"
 									class="gap-2"
-									{...action(`${url}/move/down`)}
+									busyLabel="Moving…"
+									id={`cat-${c.id}-move-down`}
+									{...action(`${url}/move/down`, formId)}
 								>
 									<Icon name="arrow-down" class="size-4" />
 									Move down
@@ -250,8 +266,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							Add category
 						</summary>
 						<form
+							id="new-category-form"
 							class="flex flex-col gap-4 pb-5"
-							{...swap("/settings/categories")}
+							{...swap("/settings/categories", "new-category-save")}
 						>
 							<NameField
 								idPrefix="new"
@@ -259,7 +276,13 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 								errors={adding ? view.errors : undefined}
 							/>
 							<div>
-								<Button type="submit">Add category</Button>
+								<Button
+									id="new-category-save"
+									type="submit"
+									busyLabel="Adding…"
+								>
+									Add category
+								</Button>
 							</div>
 						</form>
 					</details>
@@ -285,10 +308,19 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 										<CategoryIcon icon={a.icon} color={a.color} />
 										<span class="text-lg text-muted">{a.name}</span>
 										<form
+											id={`cat-${a.id}-restore-form`}
 											class="ml-auto"
-											{...swap(`/settings/categories/${a.id}/restore`)}
+											{...swap(
+												`/settings/categories/${a.id}/restore`,
+												`cat-${a.id}-restore`,
+											)}
 										>
-											<Button type="submit" kind="text">
+											<Button
+												id={`cat-${a.id}-restore`}
+												type="submit"
+												kind="text"
+												busyLabel="Restoring…"
+											>
 												Restore
 											</Button>
 										</form>

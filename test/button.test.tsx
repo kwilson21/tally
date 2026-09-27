@@ -75,4 +75,28 @@ describe("Button", () => {
 			"disabled:opacity-40",
 		);
 	});
+
+	it("swaps resting content for busy content without affecting resting size", () => {
+		const html = renderToString(<Button busyLabel="Saving…">Save</Button>);
+		expect(html).toContain("Saving…");
+		expect(html).toContain('aria-hidden="true"');
+		expect(html).toContain("button-spinner");
+		expect(html).toContain('class="contents [.htmx-request_&amp;]:hidden"');
+		expect(html).toContain('class="hidden [.htmx-request_&amp;]:inline-flex');
+		expect(html).not.toContain("inline-grid");
+	});
+
+	it("does not render busy content unless requested", () => {
+		const html = renderToString(<Button>Save</Button>);
+		expect(html).not.toContain("button-spinner");
+		expect(html).not.toContain("Saving…");
+	});
+
+	it("keeps only the requesting busy button at full opacity", () => {
+		const busy = renderToString(<Button busyLabel="Saving…">Save</Button>);
+		const plain = renderToString(<Button>Cancel</Button>);
+
+		expect(busy).toContain("[&amp;.htmx-request]:opacity-100!");
+		expect(plain).not.toContain("[&amp;.htmx-request]:opacity-100!");
+	});
 });

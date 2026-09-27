@@ -22,10 +22,10 @@ export function TextInput({
 }: Props) {
 	return (
 		<FormField id={id} label={label} hint={hint} error={error}>
-			{(a11y) => (
+			{({ class: errorClass, ...a11y }) => (
 				<input
 					id={id}
-					class={`min-h-11 rounded-control border border-rule ${surface === "paper" ? "bg-paper" : "bg-band"} px-3 text-lg disabled:opacity-40${layout ? ` ${layout}` : ""}`}
+					class={`min-h-11 rounded-control border border-rule ${surface === "paper" ? "bg-paper" : "bg-band"} px-3 text-lg disabled:opacity-40 ${errorClass ?? ""} ${layout ?? ""}`}
 					{...attrs}
 					{...a11y}
 				/>
