@@ -59,4 +59,17 @@ describe("plaidPost", () => {
 			/client|secret|public-secret|do-not-copy/,
 		);
 	});
+
+	it("sanitizes non-JSON error responses", async () => {
+		const error = await plaidPost(
+			{ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" },
+			"/test",
+			{},
+			vi.fn(async () => new Response("upstream secret", { status: 500 })),
+		).catch((caught) => caught as PlaidError);
+
+		expect(error).toBeInstanceOf(PlaidError);
+		expect((error as PlaidError).message).toBe("Plaid request failed");
+		expect(JSON.stringify(error)).not.toContain("secret");
+	});
 });

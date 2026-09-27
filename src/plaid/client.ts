@@ -48,9 +48,20 @@ export async function plaidPost<T>(
 			secret: env.PLAID_SECRET,
 		}),
 	});
-	const result = (await response.json()) as PlaidErrorBody & T;
-	if (!response.ok) throw new PlaidError(result);
-	return result;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(await response.text());
+	} catch {
+		throw new PlaidError();
+	}
+	if (!response.ok) {
+		throw new PlaidError(
+			typeof parsed === "object" && parsed !== null
+				? (parsed as PlaidErrorBody)
+				: {},
+		);
+	}
+	return parsed as T;
 }
 
 export type LinkTokenRequest = {
@@ -89,6 +100,18 @@ export const getItem = (
 	plaidPost<{ item: { institution_id?: string | null } }>(
 		env,
 		"/item/get",
+		{ access_token: accessToken },
+		fetchImpl,
+	);
+
+export const removeItem = (
+	env: PlaidEnv,
+	accessToken: string,
+	fetchImpl?: typeof fetch,
+) =>
+	plaidPost<{ request_id?: string }>(
+		env,
+		"/item/remove",
 		{ access_token: accessToken },
 		fetchImpl,
 	);

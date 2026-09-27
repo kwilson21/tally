@@ -7,8 +7,9 @@ import {
 	getItem,
 	type PlaidEnv,
 	PlaidError,
+	removeItem,
 } from "../plaid/client";
-import { encryptToken } from "../plaid/token-crypto";
+import { encryptToken, isValidKey } from "../plaid/token-crypto";
 
 type Bindings = Env & PlaidEnv;
 type App = { Bindings: Bindings; Variables: { actor: string } };
@@ -17,7 +18,8 @@ export const plaid = new Hono<App>();
 function enabled(env: Bindings) {
 	return (
 		env.DEMO !== "true" &&
-		Boolean(env.PLAID_CLIENT_ID && env.PLAID_SECRET && env.TOKEN_ENCRYPTION_KEY)
+		Boolean(env.PLAID_CLIENT_ID && env.PLAID_SECRET) &&
+		isValidKey(env.TOKEN_ENCRYPTION_KEY)
 	);
 }
 
@@ -61,19 +63,23 @@ plaid.post("/plaid/link-token", async (c) => {
 
 plaid.post("/plaid/exchange", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
+	let publicToken: unknown;
 	try {
 		const contentType = c.req.header("content-type") ?? "";
-		let publicToken: unknown;
 		if (contentType.includes("application/json")) {
 			publicToken = ((await c.req.json()) as { public_token?: unknown })
 				.public_token;
 		} else {
 			publicToken = (await c.req.formData()).get("public_token");
 		}
-		if (typeof publicToken !== "string" || publicToken.length === 0) {
-			return c.html(linkFailure(undefined), 422);
-		}
+	} catch {
+		return c.html(linkFailure(undefined), 422);
+	}
+	if (typeof publicToken !== "string" || publicToken.length === 0) {
+		return c.html(linkFailure(undefined), 422);
+	}
 
+	try {
 		const exchanged = await exchangePublicToken(c.env, publicToken);
 		let institution = "Your bank";
 		try {
@@ -86,15 +92,24 @@ plaid.post("/plaid/exchange", async (c) => {
 		} catch (error) {
 			logPlaidRequestId(error);
 		}
-		const encrypted = await encryptToken(
-			exchanged.access_token,
-			c.env.TOKEN_ENCRYPTION_KEY as string,
-		);
-		await c.env.DB.prepare(
-			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (?, ?, ?)",
-		)
-			.bind(encrypted, institution, actor(c))
-			.run();
+		try {
+			const encrypted = await encryptToken(
+				exchanged.access_token,
+				c.env.TOKEN_ENCRYPTION_KEY as string,
+			);
+			await c.env.DB.prepare(
+				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (?, ?, ?)",
+			)
+				.bind(encrypted, institution, actor(c))
+				.run();
+		} catch (error) {
+			try {
+				await removeItem(c.env, exchanged.access_token);
+			} catch (removeError) {
+				logPlaidRequestId(removeError);
+			}
+			throw error;
+		}
 
 		const message = `Linked ${institution}.`;
 		c.header(

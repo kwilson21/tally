@@ -260,6 +260,97 @@ describe("Plaid routes", () => {
 		).toBe(0);
 	});
 
+	it("rejects an invalid encryption key before calling Plaid", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		Object.assign(env, { TOKEN_ENCRYPTION_KEY: "invalid" });
+		const plaidFetch = vi.fn();
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com")) {
+				return Response.json({ keys: [jwk] });
+			}
+			plaidFetch(input);
+			return Response.json({ access_token: "must-not-exist" });
+		});
+
+		expect(
+			(await post("/plaid/exchange", jwt, "public_token=single-use")).status,
+		).toBe(404);
+		expect(plaidFetch).not.toHaveBeenCalled();
+	});
+
+	it("removes the Plaid item when storing its exchanged token fails", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		const plaidRequests: Array<{ url: string; body: Record<string, unknown> }> =
+			[];
+		await env.DB.exec(
+			"CREATE TRIGGER fail_plaid_insert BEFORE INSERT ON plaid_items BEGIN SELECT RAISE(ABORT, 'failed insert'); END",
+		);
+		vi.stubGlobal(
+			"fetch",
+			async (input: string | URL | Request, init?: RequestInit) => {
+				if (String(input).includes("cloudflareaccess.com")) {
+					return Response.json({ keys: [jwk] });
+				}
+				plaidRequests.push({
+					url: String(input),
+					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+				});
+				if (String(input).endsWith("/item/public_token/exchange")) {
+					return Response.json({
+						access_token: "access-private",
+						item_id: "item-1",
+					});
+				}
+				if (String(input).endsWith("/item/get")) {
+					return Response.json({ item: {} });
+				}
+				return Response.json({ request_id: "req-remove" });
+			},
+		);
+
+		const response = await post(
+			"/plaid/exchange",
+			jwt,
+			"public_token=single-use",
+		);
+		await env.DB.exec("DROP TRIGGER fail_plaid_insert");
+
+		expect(response.status).toBe(502);
+		expect(plaidRequests.at(-1)).toEqual({
+			url: "https://sandbox.plaid.com/item/remove",
+			body: {
+				access_token: "access-private",
+				client_id: "client-id",
+				secret: "plaid-secret",
+			},
+		});
+		expect(
+			(
+				await env.DB.prepare("SELECT COUNT(*) n FROM plaid_items").first<{
+					n: number;
+				}>()
+			)?.n,
+		).toBe(0);
+		expect(JSON.stringify(errors.mock.calls)).not.toContain("access-private");
+	});
+
+	it("returns 422 for malformed request bodies", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		vi.stubGlobal("fetch", async () => Response.json({ keys: [jwk] }));
+		const response = await exports.default.fetch(`${BASE}/plaid/exchange`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/json",
+				"Cf-Access-Jwt-Assertion": jwt,
+			},
+			body: "{malformed",
+		});
+		expect(response.status).toBe(422);
+		expect(await response.text()).toContain("Couldn&#39;t link the bank");
+	});
+
 	it("returns 404 in the demo or when required configuration is absent", async () => {
 		Object.assign(env, { DEMO: "true" });
 		expect((await post("/plaid/link-token")).status).toBe(404);
