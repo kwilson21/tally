@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NEEDS_ATTENTION_ERROR_CODES, syncItem } from "../src/plaid/sync";
+import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
 const KEY = btoa("01234567890123456789012345678901");
@@ -485,22 +485,109 @@ describe("syncItem", () => {
 		}
 	});
 
-	it("flags only documented errors that require user action", async () => {
-		expect(NEEDS_ATTENTION_ERROR_CODES).toEqual([
-			"ITEM_LOGIN_REQUIRED",
-			"PENDING_EXPIRATION",
-			"PENDING_DISCONNECT",
-			"ITEM_LOCKED",
-			"USER_SETUP_REQUIRED",
-			"INVALID_CREDENTIALS",
-			"INVALID_MFA",
-			"INSUFFICIENT_CREDENTIALS",
-			"ACCESS_NOT_GRANTED",
-			"NO_ACCOUNTS",
+	it("keeps page one and its cursor after page two fails, then resumes without duplicates", async () => {
+		const id = await addItem();
+		const run = () =>
+			plaidFetch((body) =>
+				body.cursor === undefined
+					? response(
+							page({
+								added: [transaction()],
+								next_cursor: "cursor-1",
+								has_more: true,
+							}),
+						)
+					: body.cursor === "cursor-1" && failing
+						? response(
+								{
+									error_type: "API_ERROR",
+									error_code: "INTERNAL_SERVER_ERROR",
+								},
+								500,
+							)
+						: response(
+								page({
+									added: [transaction({ transaction_id: "transaction-2" })],
+									next_cursor: "cursor-2",
+								}),
+							),
+			);
+		let failing = true;
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+		await expect(
+			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, run()),
+		).rejects.toThrow();
+		spy.mockRestore();
+		expect((await itemState(id))?.sync_cursor).toBe("cursor-1");
+		expect(
+			(await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions").first())
+				?.n,
+		).toBe(1);
+
+		failing = false;
+		const resumed = run();
+		expect(
+			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, resumed),
+		).toEqual({ added: 1, modified: 0, removed: 0 });
+		expect(JSON.parse(String(resumed.mock.calls[1]?.[1]?.body)).cursor).toBe(
+			"cursor-1",
+		);
+		const { results } = await env.DB.prepare(
+			"SELECT plaid_transaction_id FROM transactions ORDER BY id",
+		).all();
+		expect(results.map((row) => row.plaid_transaction_id)).toEqual([
+			"transaction-1",
+			"transaction-2",
 		]);
-		for (const [code, expectedStatus] of [
-			["ITEM_LOGIN_REQUIRED", "needs_attention"],
-			["PRODUCT_NOT_READY", "ok"],
+		expect((await itemState(id))?.sync_cursor).toBe("cursor-2");
+	});
+
+	it("removes a transaction and its split children", async () => {
+		const id = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() => response(page({ added: [transaction()] }))),
+		);
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number; account_id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (?, '2026-09-27', 600, 'RAW SHOP', ?), (?, '2026-09-27', 634, 'RAW SHOP', ?)",
+		)
+			.bind(parent?.account_id, parent?.id, parent?.account_id, parent?.id)
+			.run();
+
+		expect(
+			await syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				id,
+				plaidFetch(() =>
+					response(
+						page({
+							removed: [{ transaction_id: "transaction-1" }],
+							next_cursor: "cursor-2",
+						}),
+					),
+				),
+			),
+		).toEqual({ added: 0, modified: 0, removed: 1 });
+		expect(
+			(await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions").first())
+				?.n,
+		).toBe(0);
+	});
+
+	it("flags every Item error except temporary ones, and always rethrows", async () => {
+		expect(TRANSIENT_ITEM_ERROR_CODES).toEqual([
+			"PRODUCT_NOT_READY",
+			"TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
+		]);
+		for (const [type, code, expectedStatus] of [
+			["ITEM_ERROR", "ITEM_LOGIN_REQUIRED", "needs_attention"],
+			["ITEM_ERROR", "PASSWORD_RESET_REQUIRED", "needs_attention"],
+			["ITEM_ERROR", "PRODUCT_NOT_READY", "ok"],
+			["INSTITUTION_ERROR", "INSTITUTION_DOWN", "ok"],
 		] as const) {
 			const id = await addItem();
 			const spy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -511,7 +598,7 @@ describe("syncItem", () => {
 					plaidFetch(() =>
 						response(
 							{
-								error_type: "ITEM_ERROR",
+								error_type: type,
 								error_code: code,
 								request_id: "safe-request-id",
 							},

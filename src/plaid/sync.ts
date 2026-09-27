@@ -40,20 +40,13 @@ type ItemRow = {
 	sync_cursor: string | null;
 };
 
-export const NEEDS_ATTENTION_ERROR_CODES = [
-	"ITEM_LOGIN_REQUIRED",
-	"PENDING_EXPIRATION",
-	"PENDING_DISCONNECT",
-	"ITEM_LOCKED",
-	"USER_SETUP_REQUIRED",
-	"INVALID_CREDENTIALS",
-	"INVALID_MFA",
-	"INSUFFICIENT_CREDENTIALS",
-	"ACCESS_NOT_GRANTED",
-	"NO_ACCOUNTS",
+/** Item errors that clear up on their own; every other ITEM_ERROR needs the person to fix the connection. */
+export const TRANSIENT_ITEM_ERROR_CODES = [
+	"PRODUCT_NOT_READY",
+	"TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
 ] as const;
 
-const needsAttention = new Set<string>(NEEDS_ATTENTION_ERROR_CODES);
+const transient = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 
 export type SyncSummary = { added: number; modified: number; removed: number };
 export type SyncResult = SyncSummary | { skipped: true };
@@ -97,7 +90,10 @@ async function handlePlaidError(
 ): Promise<never> {
 	if (error instanceof PlaidError) {
 		console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
-		if (error.error_code && needsAttention.has(error.error_code)) {
+		if (
+			error.error_type === "ITEM_ERROR" &&
+			!transient.has(error.error_code ?? "")
+		) {
 			await env.DB.prepare(
 				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
 			)
