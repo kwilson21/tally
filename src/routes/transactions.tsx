@@ -456,21 +456,17 @@ function EditSheet({
 						Rename or add a note
 					</summary>
 					<div class="flex flex-col gap-4 pt-2">
-						<div class="flex flex-col gap-1">
-							<TextInput
-								id="merchant"
-								label="Merchant name"
-								name="merchant"
-								value={values.displayName ?? ""}
-								placeholder={tx.rawName}
-								autocomplete="off"
-								surface="paper"
-								error={errors.merchant}
-							/>
-							<p class="text-sm text-muted">
-								Renames every transaction from this merchant.
-							</p>
-						</div>
+						<TextInput
+							id="merchant"
+							label="Merchant name"
+							name="merchant"
+							value={values.displayName ?? ""}
+							placeholder={tx.rawName}
+							autocomplete="off"
+							surface="paper"
+							hint="Renames every transaction from this merchant."
+							error={errors.merchant}
+						/>
 						<FormField id="note" label="Note" error={errors.note}>
 							{(a11y) => (
 								<textarea

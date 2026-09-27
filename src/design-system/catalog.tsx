@@ -532,7 +532,7 @@ const BUTTON_SPEC: UseSpecText = {
 	affordance:
 		"A filled, outlined, or terracotta label looks actionable without hover.",
 	states:
-		"Rest, hover, focus, pressed, and disabled apply; loading, done, and error belong to the action's feedback.",
+		"Rest, focus, and disabled apply; hover and pressed use the browser defaults, while loading, done, and error belong to the action's feedback.",
 	feedback:
 		"The destination or form result appears, focus follows the changed content, and HTMX actions announce their result.",
 	input:
@@ -541,7 +541,7 @@ const BUTTON_SPEC: UseSpecText = {
 	edges:
 		"Long labels may wrap. A slow request leaves the control available until loading behavior arrives in #69; links still navigate and forms still submit without JavaScript.",
 	words:
-		"Use a short verb phrase such as Save, Cancel, Archive, Restore, or Add category.",
+		"Use a short verb phrase such as Save, Cancel, Archive, Restore, or Add category. Place one primary button per screen or sheet, at the end of the form, with Cancel beside it.",
 };
 
 const TEXT_INPUT_SPEC: UseSpecText = {
@@ -595,10 +595,6 @@ function Controls() {
 						</>
 					))}
 				</div>
-				<p class="max-w-prose text-muted">
-					One primary button per screen or sheet, at the end of the form, with
-					Cancel beside it.
-				</p>
 				<UseSpec spec={BUTTON_SPEC} />
 			</Specimen>
 			<Specimen

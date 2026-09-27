@@ -4,6 +4,7 @@ import { FormField } from "./form-field";
 type Props = Omit<JSX.IntrinsicElements["input"], "class"> & {
 	id: string;
 	label: string;
+	hint?: string;
 	error?: string;
 	surface?: "band" | "paper";
 	class?: string;
@@ -13,13 +14,14 @@ type Props = Omit<JSX.IntrinsicElements["input"], "class"> & {
 export function TextInput({
 	id,
 	label,
+	hint,
 	error,
 	surface = "band",
 	class: layout,
 	...attrs
 }: Props) {
 	return (
-		<FormField id={id} label={label} error={error}>
+		<FormField id={id} label={label} hint={hint} error={error}>
 			{(a11y) => (
 				<input
 					id={id}

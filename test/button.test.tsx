@@ -33,4 +33,36 @@ describe("Button", () => {
 		expect(html).toContain('formaction="/save"');
 		expect(html).toContain("disabled");
 	});
+
+	it("uses caller horizontal padding instead of the kind default", () => {
+		const custom = renderToString(<Button class="px-3">Act</Button>);
+		expect(custom).toContain("px-3");
+		expect(custom).not.toContain("px-5");
+		expect(renderToString(<Button>Act</Button>)).toContain("px-5");
+	});
+
+	it.each(["primary", "text"] as const)(
+		"gives a %s link a full button target without an underline",
+		(kind) => {
+			const html = renderToString(
+				<Button href="/next" kind={kind}>
+					Next
+				</Button>,
+			);
+			expect(html).toContain("inline-flex");
+			expect(html).toContain("items-center");
+			expect(html).toContain("justify-center");
+			expect(html).toContain("no-underline");
+		},
+	);
+
+	it("renders a disabled link action as a disabled button", () => {
+		const html = renderToString(
+			<Button href="/next" disabled>
+				Next
+			</Button>,
+		);
+		expect(html).toContain('<button type="button" disabled');
+		expect(html).not.toContain("<a");
+	});
 });

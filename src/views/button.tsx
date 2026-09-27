@@ -22,18 +22,33 @@ export function Button({
 	href,
 	class: layout,
 	children,
+	disabled,
 	...attrs
 }: Props) {
-	const className = `${LOOK[kind]}${layout ? ` ${layout}` : ""}`;
+	const look = layout?.split(/\s+/).some((token) => token.startsWith("px-"))
+		? LOOK[kind].replace(/(?:^|\s)px-\S+/, "")
+		: LOOK[kind];
+	const className = `${look}${layout ? ` ${layout}` : ""}`;
+	if (href && disabled) {
+		return (
+			<button type="button" disabled {...attrs} class={className}>
+				{children}
+			</button>
+		);
+	}
 	if (href) {
 		return (
-			<a href={href} {...attrs} class={className}>
+			<a
+				href={href}
+				{...attrs}
+				class={`${className} inline-flex items-center justify-center no-underline`}
+			>
 				{children}
 			</a>
 		);
 	}
 	return (
-		<button {...attrs} class={className}>
+		<button disabled={disabled} {...attrs} class={className}>
 			{children}
 		</button>
 	);

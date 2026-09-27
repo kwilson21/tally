@@ -42,4 +42,27 @@ describe("TextInput", () => {
 			renderToString(<TextInput id="name" label="Name" disabled />),
 		).toContain("disabled");
 	});
+
+	it("connects a hint to the input", () => {
+		const html = renderToString(
+			<TextInput id="merchant" label="Merchant" hint="Helpful text" />,
+		);
+		expect(html).toContain('aria-describedby="merchant-hint"');
+		expect(html).toContain('<p id="merchant-hint" class="text-sm text-muted">');
+	});
+
+	it("connects a hint before an error", () => {
+		const html = renderToString(
+			<TextInput
+				id="merchant"
+				label="Merchant"
+				hint="Helpful text"
+				error="Required"
+			/>,
+		);
+		expect(html).toContain('aria-describedby="merchant-hint merchant-error"');
+		expect(html.indexOf('id="merchant-hint"')).toBeLessThan(
+			html.indexOf('role="alert"'),
+		);
+	});
 });
