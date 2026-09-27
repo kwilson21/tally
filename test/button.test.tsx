@@ -63,6 +63,16 @@ describe("Button", () => {
 			</Button>,
 		);
 		expect(html).toContain('<button type="button" disabled');
+		expect(html).toContain("disabled:opacity-40");
 		expect(html).not.toContain("<a");
+	});
+
+	it("dims disabled buttons without adding the disabled style to links", () => {
+		expect(renderToString(<Button disabled>Save</Button>)).toContain(
+			"disabled:opacity-40",
+		);
+		expect(renderToString(<Button href="/next">Next</Button>)).not.toContain(
+			"disabled:opacity-40",
+		);
 	});
 });

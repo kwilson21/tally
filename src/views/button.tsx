@@ -29,9 +29,10 @@ export function Button({
 		? LOOK[kind].replace(/(?:^|\s)px-\S+/, "")
 		: LOOK[kind];
 	const className = `${look}${layout ? ` ${layout}` : ""}`;
+	const buttonClassName = `${className} disabled:opacity-40`;
 	if (href && disabled) {
 		return (
-			<button type="button" disabled {...attrs} class={className}>
+			<button type="button" disabled {...attrs} class={buttonClassName}>
 				{children}
 			</button>
 		);
@@ -48,7 +49,7 @@ export function Button({
 		);
 	}
 	return (
-		<button disabled={disabled} {...attrs} class={className}>
+		<button disabled={disabled} {...attrs} class={buttonClassName}>
 			{children}
 		</button>
 	);

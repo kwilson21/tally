@@ -38,9 +38,9 @@ describe("TextInput", () => {
 	});
 
 	it("passes disabled through", () => {
-		expect(
-			renderToString(<TextInput id="name" label="Name" disabled />),
-		).toContain("disabled");
+		const html = renderToString(<TextInput id="name" label="Name" disabled />);
+		expect(html).toContain("disabled");
+		expect(html).toContain("disabled:opacity-40");
 	});
 
 	it("connects a hint to the input", () => {

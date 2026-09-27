@@ -25,7 +25,7 @@ export function TextInput({
 			{(a11y) => (
 				<input
 					id={id}
-					class={`min-h-11 rounded-control border border-rule ${surface === "paper" ? "bg-paper" : "bg-band"} px-3 text-lg${layout ? ` ${layout}` : ""}`}
+					class={`min-h-11 rounded-control border border-rule ${surface === "paper" ? "bg-paper" : "bg-band"} px-3 text-lg disabled:opacity-40${layout ? ` ${layout}` : ""}`}
 					{...attrs}
 					{...a11y}
 				/>
