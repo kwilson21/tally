@@ -24,6 +24,7 @@ import {
 	parseFilters,
 } from "../transactions/filters";
 import { resultCount } from "../transactions/result-count";
+import { tidyName } from "../transactions/tidy-name";
 import { BottomSheet } from "../views/bottom-sheet";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
@@ -609,7 +610,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	await saveEdit(c.env.DB, tx.id, parsed.value, actor(c.env));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
-	const name = parsed.value.displayName ?? tx.rawName;
+	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).
+	const name = parsed.value.displayName ?? tidyName(tx.rawName);
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;

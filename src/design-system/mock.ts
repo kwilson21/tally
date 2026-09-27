@@ -3,13 +3,17 @@
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import type { ListRow } from "../db/transactions";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
+import { tidyName } from "../transactions/tidy-name";
 
+// An unnamed merchant: nobody has chosen a display name for it yet, so the row shows tidyName's
+// output (spec §7), with the raw bank text underneath.
+const rawName = "DD *DOORDASH TACO";
 const row: ListRow = {
 	id: 1,
 	date: "2026-09-22",
 	amountCents: 1240,
-	rawName: "SQ *LOCAL BAKERY 4432",
-	displayName: "Local Bakery",
+	rawName,
+	displayName: tidyName(rawName),
 	note: null,
 	excluded: false,
 	income: false,
@@ -35,7 +39,7 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 			categoryColor: "cat-blue",
 		},
 	},
-	{ label: "Needs a category (raw name shown)", row },
+	{ label: "Needs a category (unnamed merchant, raw text tidied)", row },
 	{
 		label: "Income",
 		row: {

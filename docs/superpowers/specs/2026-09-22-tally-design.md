@@ -180,6 +180,8 @@ The confidence threshold is a single config value, set during Phase 1 after chec
 
 **Merchant names:** the Settings screen lists merchants without a chosen name. Workers AI generates a `suggested_name` once per `raw_name` and caches it. A person accepts it (it becomes `display_name`) or rejects it. Renaming a merchant renames every transaction from that merchant, because display names are looked up from `merchants`. All Workers AI calls go through `src/ai/suggest-name.ts`.
 
+**Tidied names (decision 46, #93):** until a person names a merchant, its raw bank text is tidied by code for display only — card and processor prefixes, codes and store numbers removed, a `*` between words read as a space, sentence case, with a short list of acronyms kept in capitals — while `raw_name` itself is never touched, so search still matches it. A Workers AI name suggestion (#33) replaces it only when a person accepts it, and a person's own rename always wins.
+
 ## 8. Screens
 
 Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, More); desktop gets the same items in a sidebar.
@@ -283,6 +285,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - A close (×) button on the demo's Things to try block, remembered with a cookie
 - Choosing a category's icon and color in Settings (new categories get the tag icon and the next color)
 - Removing a category's budget (for now the budget sheet requires an amount)
+- The raw bank text under a categorized row's tidied name in the Transactions list (#93 shows it under rows that need a category and in the edit panel; categorized rows would need a third line, a TransactionRow shape change for the catalog)
 
 ## 13. Checked against docs before writing code (Phase 0)
 

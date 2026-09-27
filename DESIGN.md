@@ -24,7 +24,7 @@ The elements people don't consciously notice. Together they make Tally feel ligh
 | Illustration and the tally mark | Personality, once per screen at most | Crowd the number it sits beside, or appear as decoration everywhere |
 | Category icons and colors | Recognition at a glance | Carry meaning about status (that's green/brick only) |
 | Bars | Show how much of a budget is used | Paint the page; a column of saturated bars is louder than the words it supports |
-| Voice | Plain, second person, calm; numbers first, then what they mean ("$120 left") | Shout (capitals, exclamation marks), blame ("you failed"), or use bank jargon (raw merchant strings, "debit", "posted") |
+| Voice | Plain, second person, calm; numbers first, then what they mean ("$120 left") | Shout (capitals, exclamation marks), blame ("you failed"), or use bank jargon (raw merchant strings, "debit", "posted"), except the small muted bank text under a name tidied from it (#93) |
 | Motion | Confirms that something happened (a bar fills, a row is highlighted) | Decorate, bounce, or delay; reduced motion always shows the end state |
 
 ### 2. Signage: what directs attention

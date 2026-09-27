@@ -3,6 +3,7 @@ import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern } from "../transactions/filters";
+import { tidyName } from "../transactions/tidy-name";
 
 export type ListRow = {
 	id: number;
@@ -43,11 +44,13 @@ export async function listTransactions(
 	if (f.uncategorized) where.push(NEEDS_CATEGORY);
 	if (f.excluded) where.push("t.excluded = 1");
 	if (f.q) {
+		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
+		// "google youtube" finds "GOOGLE *YOUTUBE".
 		where.push(
-			"(COALESCE(m.display_name, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')",
+			"(COALESCE(m.display_name, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')",
 		);
 		const pattern = likePattern(f.q);
-		args.push(pattern, pattern, pattern);
+		args.push(pattern, pattern, pattern, pattern);
 	}
 
 	const from = `FROM transactions t
@@ -66,7 +69,7 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				COALESCE(m.display_name, t.raw_name) AS displayName, t.note,
+				m.display_name AS merchantName, t.note,
 				t.excluded, t.flag_income AS income,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor
 			${from}
@@ -75,16 +78,19 @@ export async function listTransactions(
 		)
 		.bind(...args)
 		.all<
-			Omit<ListRow, "excluded" | "income"> & {
+			Omit<ListRow, "excluded" | "income" | "displayName"> & {
+				merchantName: string | null;
 				excluded: number;
 				income: number;
 			}
 		>();
 
-	const rows = results.map((r) => ({
+	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
+	const rows = results.map(({ merchantName, ...r }) => ({
 		...r,
 		excluded: r.excluded === 1,
 		income: r.income === 1,
+		displayName: merchantName ?? tidyName(r.rawName),
 	}));
 	return { rows, total, page, pages };
 }
@@ -137,7 +143,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				COALESCE(m.display_name, t.raw_name) AS displayName, m.display_name AS merchantName, t.note,
+				m.display_name AS merchantName, t.note,
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				a.name AS accountName, a.mask AS accountMask
@@ -149,13 +155,19 @@ export async function getTransaction(
 		)
 		.bind(id)
 		.first<
-			Omit<TransactionDetail, "excluded" | "income"> & {
+			Omit<TransactionDetail, "excluded" | "income" | "displayName"> & {
 				excluded: number;
 				income: number;
 			}
 		>();
+	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
 	return r
-		? { ...r, excluded: r.excluded === 1, income: r.income === 1 }
+		? {
+				...r,
+				excluded: r.excluded === 1,
+				income: r.income === 1,
+				displayName: r.merchantName ?? tidyName(r.rawName),
+			}
 		: null;
 }
 

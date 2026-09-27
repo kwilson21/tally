@@ -72,7 +72,7 @@ describe("GET /transactions/:id", () => {
 		expect(html).toMatch(/<button type="submit"[^>]*>Save<\/button>/);
 	});
 
-	it("shows the raw bank name only when it differs from the heading", async () => {
+	it("tidies an unnamed merchant's raw text for the heading, showing the raw text underneath and as the input placeholder", async () => {
 		const paypal = (
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'PAYPAL *XYZSHOP'",
@@ -80,7 +80,9 @@ describe("GET /transactions/:id", () => {
 		)?.id;
 		const { html } = await get(`/transactions/${paypal}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
-		expect(sheet.match(/PAYPAL \*XYZSHOP/g)).toHaveLength(2); // heading + input placeholder
+		expect(sheet).toMatch(/<h2 id="edit-title"[^>]*>Xyzshop<\/h2>/);
+		// The raw text differs from the tidied heading, so it shows underneath and as the placeholder.
+		expect(sheet.match(/PAYPAL \*XYZSHOP/g)).toHaveLength(2);
 	});
 
 	it("is a 404 page for an unknown id", async () => {
@@ -112,6 +114,22 @@ describe("POST /transactions/:id", () => {
 		);
 		// The saved row left this filtered list, so focus goes to the result count.
 		expect(html).toMatch(/<p id="result-count"[^>]*autofocus/);
+	});
+
+	it("names an unnamed merchant by its tidied text in the toast and announcement, never the raw bank text", async () => {
+		const paypal = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'PAYPAL *XYZSHOP'",
+			).first<{ id: number }>()
+		)?.id;
+		const { res } = await post(`/transactions/${paypal}`, {
+			...save,
+			merchant: "",
+		});
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Saved Xyzshop", type: "success" },
+			announce: "Saved. Xyzshop is now Eating Out.",
+		});
 	});
 
 	it("updates the Needs category count outside the swapped list after a save", async () => {
