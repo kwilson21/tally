@@ -190,10 +190,10 @@ describe("syncItem", () => {
 		).toEqual({ n: 1 });
 	});
 
-	it("skips a pending transaction for an unknown account", async () => {
+	it("ignores a pending transaction for an unknown account", async () => {
 		const id = await addItem();
-		await expect(
-			syncItem(
+		expect(
+			await syncItem(
 				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 				id,
 				plaidFetch(
@@ -206,7 +206,7 @@ describe("syncItem", () => {
 					[],
 				),
 			),
-		).resolves.toEqual({ added: 0, modified: 0, removed: 0 });
+		).toEqual({ added: 0, modified: 0, removed: 0 });
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
 		).toEqual({ n: 0 });
@@ -217,19 +217,24 @@ describe("syncItem", () => {
 		const fetchImpl = plaidFetch(() =>
 			response(page({ added: [transaction()] })),
 		);
-		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
+		expect(
+			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+		).toMatchObject({ added: 1 });
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
-		await expect(
-			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-		).resolves.toEqual({ added: 0, modified: 0, removed: 0 });
-		expect(log).not.toHaveBeenCalled();
+		try {
+			expect(
+				await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+			).toEqual({ added: 0, modified: 0, removed: 0 });
+			expect(log).not.toHaveBeenCalled();
+		} finally {
+			log.mockRestore();
+		}
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
 		).toEqual({ n: 1 });
-		log.mockRestore();
 	});
 
-	it("restarts mutated pagination from the run's initial cursor without duplicates", async () => {
+	it("restarts mutated pagination, corrects re-added rows, and preserves decisions", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET sync_cursor = 'saved' WHERE id = ?",
@@ -238,18 +243,28 @@ describe("syncItem", () => {
 			.run();
 		const cursors: unknown[] = [];
 		let syncCalls = 0;
-		const fetchImpl = plaidFetch((body) => {
+		let chosenCategory: number | undefined;
+		const fetchImpl = plaidFetch(async (body) => {
 			cursors.push(body.cursor);
 			syncCalls += 1;
 			if (syncCalls === 1)
 				return response(
 					page({
-						added: [transaction()],
+						added: [transaction({ amount: 10 })],
 						next_cursor: "middle",
 						has_more: true,
 					}),
 				);
-			if (syncCalls === 2)
+			if (syncCalls === 2) {
+				const category = await env.DB.prepare(
+					"SELECT id FROM categories LIMIT 1",
+				).first<{ id: number }>();
+				chosenCategory = category?.id;
+				await env.DB.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'user', note = 'keep', excluded = 1 WHERE plaid_transaction_id = 'transaction-1'",
+				)
+					.bind(chosenCategory)
+					.run();
 				return response(
 					{
 						error_type: "TRANSACTIONS_ERROR",
@@ -258,29 +273,33 @@ describe("syncItem", () => {
 					},
 					400,
 				);
+			}
 			if (syncCalls === 3)
 				return response(
 					page({
-						added: [transaction()],
-						next_cursor: "middle-2",
-						has_more: true,
+						added: [transaction({ amount: 12, name: "CORRECTED RAW" })],
+						next_cursor: "done",
 					}),
 				);
-			return response(
-				page({
-					added: [transaction({ transaction_id: "transaction-2" })],
-					next_cursor: "done",
-				}),
-			);
+			throw new Error("unexpected request");
 		});
 
 		expect(
 			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-		).toEqual({ added: 2, modified: 0, removed: 0 });
-		expect(cursors).toEqual(["saved", "middle", "saved", "middle-2"]);
+		).toEqual({ added: 1, modified: 0, removed: 0 });
+		expect(cursors).toEqual(["saved", "middle", "saved"]);
 		expect(
-			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
-		).toEqual({ n: 2 });
+			await env.DB.prepare(
+				"SELECT amount_cents, raw_name, category_id, category_source, note, excluded FROM transactions",
+			).first(),
+		).toEqual({
+			amount_cents: 1200,
+			raw_name: "CORRECTED RAW",
+			category_id: chosenCategory,
+			category_source: "user",
+			note: "keep",
+			excluded: 1,
+		});
 	});
 
 	it("updates raw_name from name but preserves a person's decisions", async () => {
@@ -372,58 +391,98 @@ describe("syncItem", () => {
 		expect((await itemState(id))?.sync_locked_until).toBeNull();
 	});
 
-	it("does not release a newer run's lock after its own lease expires", async () => {
+	it("does not release a newer owner's lock after its own lease expires", async () => {
 		const id = await addItem();
-		let finishFirst!: () => void;
-		let finishSecond!: () => void;
-		const firstWaiting = new Promise<void>((resolve) => {
-			finishFirst = resolve;
+		let releaseA!: () => void;
+		let releaseB!: () => void;
+		const waitA = new Promise<void>((resolve) => {
+			releaseA = resolve;
 		});
-		const secondWaiting = new Promise<void>((resolve) => {
-			finishSecond = resolve;
+		const waitB = new Promise<void>((resolve) => {
+			releaseB = resolve;
 		});
-		const first = syncItem(
+		const runA = syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			id,
-			vi.fn(async () => {
-				await firstWaiting;
-				throw new Error("first run finished late");
+			plaidFetch(async () => {
+				await waitA;
+				return response(page());
 			}),
 		);
 		await vi.waitFor(async () => {
 			expect((await itemState(id))?.sync_lock_id).not.toBeNull();
 		});
-		const firstLockId = (await itemState(id))?.sync_lock_id;
+		const lockA = (await itemState(id))?.sync_lock_id;
 		await env.DB.prepare(
 			"UPDATE plaid_items SET sync_locked_until = datetime('now', '-1 minute') WHERE id = ?",
 		)
 			.bind(id)
 			.run();
-
-		const second = syncItem(
+		const runB = syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			id,
-			vi.fn(async (url: RequestInfo | URL) => {
-				await secondWaiting;
-				return String(url).endsWith("/accounts/get")
-					? response({ accounts: [account()] })
-					: response(page());
+			plaidFetch(async () => {
+				await waitB;
+				return response(page());
 			}),
 		);
 		await vi.waitFor(async () => {
-			expect((await itemState(id))?.sync_lock_id).not.toBe(firstLockId);
+			expect((await itemState(id))?.sync_lock_id).not.toBe(lockA);
 		});
-		const secondLock = await itemState(id);
-
-		finishFirst();
-		await expect(first).rejects.toThrow("first run finished late");
+		const lockB = (await itemState(id))?.sync_lock_id;
+		releaseA();
+		await runA;
+		expect(await itemState(id)).toMatchObject({ sync_lock_id: lockB });
+		releaseB();
+		await runB;
 		expect(await itemState(id)).toMatchObject({
-			sync_lock_id: secondLock?.sync_lock_id,
-			sync_locked_until: secondLock?.sync_locked_until,
+			sync_lock_id: null,
+			sync_locked_until: null,
 		});
+	});
 
-		finishSecond();
-		await second;
+	it("never logs tokens, names, or amounts on success followed by an Item error", async () => {
+		const id = await addItem();
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		let calls = 0;
+		try {
+			await expect(
+				syncItem(
+					{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+					id,
+					plaidFetch(() => {
+						calls += 1;
+						if (calls === 1) {
+							return response(
+								page({
+									added: [
+										transaction({ name: "SECRET NAME", amount: 9876.54 }),
+									],
+									next_cursor: "secret-cursor",
+									has_more: true,
+								}),
+							);
+						}
+						return response(
+							{
+								error_type: "ITEM_ERROR",
+								error_code: "ITEM_LOGIN_REQUIRED",
+								request_id: "safe-request-id",
+							},
+							400,
+						);
+					}),
+				),
+			).rejects.toThrow("Plaid request failed");
+			const output = [...log.mock.calls, ...error.mock.calls].flat().join(" ");
+			for (const secret of ["secret-access-token", "SECRET NAME", "9876.54"]) {
+				expect(output).not.toContain(secret);
+			}
+		} finally {
+			log.mockRestore();
+			error.mockRestore();
+		}
 	});
 
 	it("flags only documented errors that require user action", async () => {

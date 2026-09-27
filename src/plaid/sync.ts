@@ -116,8 +116,7 @@ export async function syncItem(
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
-		`UPDATE plaid_items
-		 SET sync_locked_until = datetime('now', '+5 minutes'), sync_lock_id = ?
+		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes'), sync_lock_id = ?
 		 WHERE id = ? AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
 	)
 		.bind(lockId, itemRowId)
@@ -171,7 +170,8 @@ export async function syncItem(
 		let cursor = startCursor;
 		let mutationRestarts = 0;
 		let firstPage = true;
-		const summary: SyncSummary = { added: 0, modified: 0, removed: 0 };
+		let summary: SyncSummary = { added: 0, modified: 0, removed: 0 };
+		const addedDuringRun = new Set<string>();
 
 		for (;;) {
 			let page: SyncResponse;
@@ -191,9 +191,13 @@ export async function syncItem(
 					error.error_code === "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION" &&
 					mutationRestarts < 3
 				) {
+					console.error(
+						`plaid sync mutation retry ${mutationRestarts + 1} ${error.request_id ?? ""}`.trim(),
+					);
 					mutationRestarts += 1;
 					cursor = startCursor;
 					firstPage = true;
+					summary = { added: 0, modified: 0, removed: 0 };
 					continue;
 				}
 				return await handlePlaidError(env, itemRowId, error);
@@ -214,6 +218,18 @@ export async function syncItem(
 					 WHERE id = ? AND sync_lock_id = ?`,
 				).bind(itemRowId, lockId),
 			];
+			const existingTransactionIds = new Set<string>();
+			if (posted.length > 0) {
+				const placeholders = posted.map(() => "?").join(", ");
+				const existing = await env.DB.prepare(
+					`SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id IN (${placeholders})`,
+				)
+					.bind(...posted.map((transaction) => transaction.transaction_id))
+					.all<{ plaid_transaction_id: string }>();
+				for (const row of existing.results) {
+					existingTransactionIds.add(row.plaid_transaction_id);
+				}
+			}
 			if (firstPage) {
 				for (const account of accounts) {
 					statements.push(accountUpsert(env, itemRowId, account));
@@ -226,7 +242,12 @@ export async function syncItem(
 						`INSERT INTO transactions
 							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category)
 						 SELECT ?, id, ?, ?, ?, ? FROM accounts WHERE plaid_account_id = ?
-						 ON CONFLICT(plaid_transaction_id) DO NOTHING`,
+						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
+							date = excluded.date,
+							amount_cents = excluded.amount_cents,
+							raw_name = excluded.raw_name,
+							plaid_category = excluded.plaid_category,
+							updated_at = datetime('now')`,
 					).bind(
 						transaction.transaction_id,
 						transaction.date,
@@ -265,16 +286,30 @@ export async function syncItem(
 				).bind(page.next_cursor, itemRowId),
 			);
 			const results = await env.DB.batch(statements);
-			const inserted = results
-				.slice(firstAddedStatement, firstAddedStatement + posted.length)
-				.reduce((count, result) => count + (result.meta.changes ?? 0), 0);
+			let inserted = 0;
+			for (const [index, transaction] of posted.entries()) {
+				const changed = results[firstAddedStatement + index]?.meta.changes ?? 0;
+				if (
+					changed > 0 &&
+					(!existingTransactionIds.has(transaction.transaction_id) ||
+						addedDuringRun.has(transaction.transaction_id))
+				) {
+					inserted += 1;
+				}
+				if (
+					!existingTransactionIds.has(transaction.transaction_id) &&
+					changed > 0
+				) {
+					addedDuringRun.add(transaction.transaction_id);
+				}
+			}
 
 			cursor = page.next_cursor;
 			firstPage = false;
 			summary.added += inserted;
 			summary.modified += page.modified.length;
 			summary.removed += page.removed.length;
-			if (inserted || page.modified.length || page.removed.length) {
+			if (inserted + page.modified.length + page.removed.length > 0) {
 				console.log(
 					`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
 				);
@@ -283,8 +318,7 @@ export async function syncItem(
 		}
 	} finally {
 		await env.DB.prepare(
-			`UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL
-			 WHERE id = ? AND sync_lock_id = ?`,
+			"UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND sync_lock_id = ?",
 		)
 			.bind(itemRowId, lockId)
 			.run();
