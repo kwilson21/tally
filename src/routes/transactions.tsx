@@ -588,7 +588,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		});
 	}
 
-	await saveEdit(c.env.DB, tx.id, parsed.value, actor(c.env));
+	await saveEdit(c.env.DB, tx.id, parsed.value, actor(c));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).

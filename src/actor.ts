@@ -1,10 +1,12 @@
-/**
- * Who is making a change, recorded in updated_by. In the demo it's "demo" (spec §5). Anywhere else
- * it throws, so no edit is saved under the wrong name before #22 adds the verified Cloudflare Access email.
- */
-export function actor(env: Env): string {
-	if (env.DEMO === "true") return "demo";
-	throw new Error(
-		"No verified identity yet: #22 adds the Cloudflare Access email.",
-	);
+type ActorContext = {
+	env: { DEMO: string };
+	get(key: "actor"): string | undefined;
+};
+
+/** Who is making a change, as established by the Access middleware. */
+export function actor(c: ActorContext): string {
+	if (c.env.DEMO === "true") return "demo";
+	const email = c.get("actor");
+	if (email) return email;
+	throw new Error("No verified Cloudflare Access identity.");
 }
