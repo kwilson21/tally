@@ -55,7 +55,7 @@ const PARTS: [string, string][] = [
 	],
 	[
 		"Cron Triggers",
-		"Reset the demo nightly. In production, sync every ok Item one at a time (one failure does not stop the others), leave needs_attention Items for Fix connection, then retry categorization. This daily sync backs up webhooks.",
+		"Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. In the demo, reset the data nightly instead.",
 	],
 	[
 		"Cloudflare Access",
