@@ -100,6 +100,8 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
+| Button | A primary, secondary, or quiet text action, rendered as a button or link. |
+| TextInput | A labeled single-line text field with accessible error and disabled states. |
 | BottomSheet | A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop. |
 | ThingsToTry | The demo's bordered "New here? Things to try" block, below Home's Budget list until onboarding (#95) replaces it: three links to where each thing is done, plus How Tally works. |
 | HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
