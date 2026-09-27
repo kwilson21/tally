@@ -48,7 +48,7 @@ export async function encryptToken(
 }
 
 export async function decryptToken(
-	stored: Uint8Array | ArrayBuffer,
+	stored: Uint8Array | ArrayBuffer | readonly number[],
 	keyBase64: string,
 ): Promise<string> {
 	const bytes = stored instanceof Uint8Array ? stored : new Uint8Array(stored);

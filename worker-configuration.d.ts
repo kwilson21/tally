@@ -5,7 +5,6 @@ interface __BaseEnv_Env {
 	DB: D1Database;
 	ASSETS: Fetcher;
 	DEMO: "true";
-	TOKEN_ENCRYPTION_KEY?: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

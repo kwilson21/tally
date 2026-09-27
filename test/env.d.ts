@@ -10,7 +10,6 @@ declare namespace Cloudflare {
 	// so this is how test/apply-migrations.ts sees TEST_MIGRATIONS.
 	interface Env {
 		TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
-		TOKEN_ENCRYPTION_KEY?: string;
 	}
 }
 

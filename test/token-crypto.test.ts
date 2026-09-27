@@ -78,9 +78,9 @@ describe("Plaid token encryption", () => {
 			.run();
 		const row = await env.DB.prepare(
 			"SELECT encrypted FROM token_crypto_test",
-		).first<{ encrypted: ArrayBuffer }>();
-		expect(await decryptToken(row?.encrypted as ArrayBuffer, key)).toBe(
-			"database-token",
-		);
+		).first<{ encrypted: number[] }>();
+		if (!row) throw new Error("Missing encrypted token row");
+		expect(Array.isArray(row.encrypted)).toBe(true);
+		expect(await decryptToken(row.encrypted, key)).toBe("database-token");
 	});
 });
