@@ -63,6 +63,30 @@ async function token(
 		.replace(/=+$/, "")}`;
 }
 
+async function tokenWithPayload(
+	privateKey: CryptoKey,
+	payload: string,
+	header: Record<string, unknown> = {},
+) {
+	const encodedHeader = encode({ alg: "RS256", kid: "test-key", ...header });
+	const encodedPayload = btoa(payload)
+		.replaceAll("+", "-")
+		.replaceAll("/", "_")
+		.replace(/=+$/, "");
+	const signed = `${encodedHeader}.${encodedPayload}`;
+	const signature = new Uint8Array(
+		await crypto.subtle.sign(
+			"RSASSA-PKCS1-v1_5",
+			privateKey,
+			encoder.encode(signed),
+		),
+	);
+	return `${signed}.${btoa(String.fromCharCode(...signature))
+		.replaceAll("+", "-")
+		.replaceAll("/", "_")
+		.replace(/=+$/, "")}`;
+}
+
 const request = (jwt?: string, emailHeader?: string) =>
 	new Request("https://tally.test/", {
 		headers: {
@@ -74,7 +98,10 @@ const request = (jwt?: string, emailHeader?: string) =>
 	});
 
 describe("verifiedEmail", () => {
-	afterEach(() => vi.unstubAllGlobals());
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
 
 	it("returns a lower-cased email and caches the certs across verifications", async () => {
 		const team = "valid.cloudflareaccess.com";
@@ -96,7 +123,9 @@ describe("verifiedEmail", () => {
 			}),
 		).toBe("family.member@example.com");
 		expect(fetch).toHaveBeenCalledTimes(1);
-		expect(fetch).toHaveBeenCalledWith(`https://${team}/cdn-cgi/access/certs`);
+		expect(fetch).toHaveBeenCalledWith(`https://${team}/cdn-cgi/access/certs`, {
+			redirect: "error",
+		});
 	});
 
 	it.each([
@@ -140,7 +169,7 @@ describe("verifiedEmail", () => {
 		).toBeNull();
 	});
 
-	it("refetches once and rejects an unknown kid", async () => {
+	it("fetches only once for an unknown kid when the cache is empty", async () => {
 		const team = "unknown.cloudflareaccess.com";
 		const { privateKey, jwk } = await keys();
 		const fetch = vi.fn(async () =>
@@ -154,7 +183,157 @@ describe("verifiedEmail", () => {
 				ACCESS_AUD: "test-aud",
 			}),
 		).toBeNull();
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not refetch for different unknown kids inside 30 seconds", async () => {
+		const team = "unknown-cooldown.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		const fetch = vi.fn(async () => Response.json({ keys: [jwk] }));
+		vi.stubGlobal("fetch", fetch);
+		for (const kid of ["forged-one", "forged-two"]) {
+			const jwt = await token(privateKey, team, {}, { kid });
+			expect(
+				await verifiedEmail(request(jwt), {
+					ACCESS_TEAM_DOMAIN: team,
+					ACCESS_AUD: "test-aud",
+				}),
+			).toBeNull();
+		}
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it("may refetch once for an unknown kid after 30 seconds", async () => {
+		vi.useFakeTimers();
+		const team = "unknown-after-cooldown.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		const fetch = vi.fn(async () => Response.json({ keys: [jwk] }));
+		vi.stubGlobal("fetch", fetch);
+		const jwt = await token(privateKey, team, {}, { kid: "forged" });
+		expect(
+			await verifiedEmail(request(jwt), {
+				ACCESS_TEAM_DOMAIN: team,
+				ACCESS_AUD: "test-aud",
+			}),
+		).toBeNull();
+		await vi.advanceTimersByTimeAsync(30_001);
+		expect(
+			await verifiedEmail(request(jwt), {
+				ACCESS_TEAM_DOMAIN: team,
+				ACCESS_AUD: "test-aud",
+			}),
+		).toBeNull();
 		expect(fetch).toHaveBeenCalledTimes(2);
+	});
+
+	it("coalesces concurrent cert fetches for a domain", async () => {
+		const team = "concurrent.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		let resolveFetch: ((response: Response) => void) | undefined;
+		const fetch = vi.fn(
+			() =>
+				new Promise<Response>((resolve) => {
+					resolveFetch = resolve;
+				}),
+		);
+		vi.stubGlobal("fetch", fetch);
+		const jwt = await token(privateKey, team);
+		const verification = Promise.all([
+			verifiedEmail(request(jwt), {
+				ACCESS_TEAM_DOMAIN: team,
+				ACCESS_AUD: "test-aud",
+			}),
+			verifiedEmail(request(jwt), {
+				ACCESS_TEAM_DOMAIN: team,
+				ACCESS_AUD: "test-aud",
+			}),
+		]);
+		expect(fetch).toHaveBeenCalledTimes(1);
+		resolveFetch?.(Response.json({ keys: [jwk] }));
+		expect(await verification).toEqual([
+			"family.member@example.com",
+			"family.member@example.com",
+		]);
+	});
+
+	it("rejects non-finite expiry and not-before claims", async () => {
+		const team = "finite.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		const base = `"aud":["test-aud"],"iss":"https://${team}","email":"member@example.com"`;
+		const future = Math.floor(Date.now() / 1000) + 300;
+		for (const claims of [
+			`{${base},"exp":1e309}`,
+			`{${base},"exp":${future},"nbf":1e309}`,
+		]) {
+			const jwt = await tokenWithPayload(privateKey, claims);
+			expect(
+				await verifiedEmail(request(jwt), {
+					ACCESS_TEAM_DOMAIN: team,
+					ACCESS_AUD: "test-aud",
+				}),
+			).toBeNull();
+		}
+	});
+
+	it.each([
+		"evil.com",
+		"team.cloudflareaccess.com.evil.com",
+		"user@team.cloudflareaccess.com",
+		"team.cloudflareaccess.com/#",
+	])("rejects invalid team domain %s without fetching", async (team) => {
+		const { privateKey } = await keys();
+		const fetch = vi.fn();
+		vi.stubGlobal("fetch", fetch);
+		const jwt = await token(privateKey, team);
+		expect(
+			await verifiedEmail(request(jwt), {
+				ACCESS_TEAM_DOMAIN: team,
+				ACCESS_AUD: "test-aud",
+			}),
+		).toBeNull();
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it("rejects standard padded base64 in a token segment", async () => {
+		const team = "strict-base64.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		const fetch = vi.fn(async () => Response.json({ keys: [jwk] }));
+		vi.stubGlobal("fetch", fetch);
+		const jwt = await token(privateKey, team);
+		const [header, payload, signature = ""] = jwt.split(".");
+		const standardSignature = signature
+			.replaceAll("-", "+")
+			.replaceAll("_", "/")
+			.padEnd(Math.ceil(signature.length / 4) * 4, "=");
+		expect(
+			await verifiedEmail(
+				request(`${header}.${payload}.${standardSignature}`),
+				{
+					ACCESS_TEAM_DOMAIN: team,
+					ACCESS_AUD: "test-aud",
+				},
+			),
+		).toBeNull();
+	});
+
+	it("rejects a critical protected header", async () => {
+		const team = "critical.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		const jwt = await token(privateKey, team, {}, { crit: ["example"] });
+		expect(
+			await verifiedEmail(request(jwt), {
+				ACCESS_TEAM_DOMAIN: team,
+				ACCESS_AUD: "test-aud",
+			}),
+		).toBeNull();
 	});
 
 	it("rejects missing configuration, a missing JWT, and the plain email header", async () => {
@@ -233,12 +412,20 @@ describe("Access middleware", () => {
 		expect(row?.updated_by).toBe("family.member@example.com");
 	});
 
-	it("keeps the demo identity and does not block the webhook path", async () => {
-		Object.assign(env, { DEMO: "true" });
+	it("exempts only the exact webhook path outside the demo", async () => {
 		const webhook = await exports.default.fetch(
 			"http://tally.test/webhooks/plaid",
 			{ method: "POST", headers: { Origin: "http://tally.test" } },
 		);
 		expect(webhook.status).not.toBe(403);
+		for (const path of [
+			"/webhooks/plaidX",
+			"/webhooks/plaid/",
+			"/design-systemX",
+		]) {
+			const response = await exports.default.fetch(`http://tally.test${path}`);
+			expect(response.status).toBe(403);
+			expect(await response.text()).toBe("Sign in through Cloudflare Access.");
+		}
 	});
 });
