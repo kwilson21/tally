@@ -81,7 +81,7 @@ describe("Button", () => {
 		expect(html).toContain("Saving…");
 		expect(html).toContain('aria-hidden="true"');
 		expect(html).toContain("button-spinner");
-		expect(html).toContain("[.htmx-request_&amp;]:hidden");
+		expect(html).toContain('class="contents [.htmx-request_&amp;]:hidden"');
 		expect(html).toContain('class="hidden [.htmx-request_&amp;]:inline-flex');
 		expect(html).not.toContain("inline-grid");
 	});

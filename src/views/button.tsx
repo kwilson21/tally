@@ -27,7 +27,7 @@ function Content({
 	if (!busyLabel) return <>{children}</>;
 	return (
 		<>
-			<span class="[.htmx-request_&]:hidden">{children}</span>
+			<span class="contents [.htmx-request_&]:hidden">{children}</span>
 			<span class="hidden [.htmx-request_&]:inline-flex items-center gap-2">
 				<svg
 					class="button-spinner size-4"

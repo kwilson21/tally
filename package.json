@@ -14,6 +14,7 @@
 		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
 		"lint": "biome check .",
 		"format": "biome check --write .",
+		"pretest": "npm run build:css",
 		"test": "vitest run",
 		"screenshots": "node scripts/screenshots.mjs",
 		"e2e": "node scripts/e2e.mjs"
