@@ -605,6 +605,33 @@ describe("syncItem", () => {
 		).toBe(0);
 	});
 
+	it("doesn't flag the Item for an error after another run has taken its lock", async () => {
+		const id = await addItem();
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+		await expect(
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				id,
+				plaidFetch(async () => {
+					await env.DB.prepare(
+						"UPDATE plaid_items SET sync_lock_id = 'newer-run', sync_locked_until = datetime('now', '+5 minutes') WHERE id = ?",
+					)
+						.bind(id)
+						.run();
+					return response(
+						{ error_type: "ITEM_ERROR", error_code: "ITEM_LOGIN_REQUIRED" },
+						400,
+					);
+				}),
+			),
+		).rejects.toThrow("Plaid request failed");
+		spy.mockRestore();
+		expect(await itemState(id)).toMatchObject({
+			status: "ok",
+			sync_lock_id: "newer-run",
+		});
+	});
+
 	it("flags every Item error except temporary ones, and always rethrows", async () => {
 		expect(TRANSIENT_ITEM_ERROR_CODES).toEqual([
 			"PRODUCT_NOT_READY",

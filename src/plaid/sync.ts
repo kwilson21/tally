@@ -93,6 +93,7 @@ function accountUpsert(
 async function handlePlaidError(
 	env: SyncEnv,
 	itemRowId: number,
+	lockId: string,
 	error: unknown,
 ): Promise<never> {
 	if (error instanceof PlaidError) {
@@ -102,9 +103,9 @@ async function handlePlaidError(
 			!transient.has(error.error_code ?? "")
 		) {
 			await env.DB.prepare(
-				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ?",
 			)
-				.bind(itemRowId)
+				.bind(itemRowId, lockId)
 				.run();
 		}
 	}
@@ -157,7 +158,7 @@ export async function syncItem(
 				fetchImpl,
 			));
 		} catch (error) {
-			return await handlePlaidError(env, itemRowId, error);
+			return await handlePlaidError(env, itemRowId, lockId, error);
 		}
 		const stored = await env.DB.prepare(
 			"SELECT plaid_account_id FROM accounts WHERE plaid_item_id = ?",
@@ -203,7 +204,7 @@ export async function syncItem(
 					summary = { added: 0, modified: 0, removed: 0 };
 					continue;
 				}
-				return await handlePlaidError(env, itemRowId, error);
+				return await handlePlaidError(env, itemRowId, lockId, error);
 			}
 
 			const posted = page.added.filter((transaction) => !transaction.pending);
