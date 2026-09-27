@@ -110,10 +110,7 @@ function EmptyA({ c }: { c: EmptyCase }) {
 			{c.action && (
 				<>
 					{" "}
-					<a
-						href="/design-system/proposals"
-						class="inline-flex min-h-11 items-center"
-					>
+					<a href="#p8-empty" class="inline-flex min-h-11 items-center">
 						{c.action}
 					</a>
 				</>
@@ -131,7 +128,7 @@ function EmptyB({ c }: { c: EmptyCase }) {
 			{c.hint && <p class="mt-1 max-w-xs text-muted">{c.hint}</p>}
 			{c.action && (
 				<div class="mt-4">
-					<Button kind="secondary" href="/design-system/proposals">
+					<Button kind="secondary" href="#p8-empty">
 						{c.action}
 					</Button>
 				</div>
@@ -150,10 +147,7 @@ function EmptyC({ c }: { c: EmptyCase }) {
 				{c.hint && <p class="text-sm text-muted">{c.hint}</p>}
 			</div>
 			{c.action && (
-				<a
-					href="/design-system/proposals"
-					class="inline-flex min-h-11 shrink-0 items-center"
-				>
+				<a href="#p8-empty" class="inline-flex min-h-11 shrink-0 items-center">
 					{c.action}
 				</a>
 			)}

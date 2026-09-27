@@ -39,6 +39,14 @@ describe("GET /design-system/proposals", () => {
 		);
 	});
 
+	it("keeps P8's preview actions on the page", async () => {
+		const { html } = await get("/design-system/proposals");
+		const start = html.indexOf('id="p8-empty"');
+		const section = html.slice(start, html.indexOf("</section>", start));
+		expect(section).toContain('href="#p8-empty"');
+		expect(section).not.toContain('href="/design-system');
+	});
+
 	it("is linked from the catalog", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain('href="/design-system/proposals"');
