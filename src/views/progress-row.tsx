@@ -81,7 +81,13 @@ function Nudge({
 		: `${direction === "down" ? "Lower" : "Raise"} ${name} to ${whole(to)}`;
 	const href = `${nudge.href}/${direction}`;
 	return (
-		<form method="post" action={href} hx-post={href} {...nudge.attrs}>
+		<form
+			method="post"
+			action={href}
+			hx-post={href}
+			hx-disable="findAll button[type=submit]"
+			{...nudge.attrs}
+		>
 			<button
 				type="submit"
 				id={`${nudge.id}-${direction}`}

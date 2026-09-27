@@ -75,4 +75,19 @@ describe("Button", () => {
 			"disabled:opacity-40",
 		);
 	});
+
+	it("renders a stable busy label and hidden spinner when requested", () => {
+		const html = renderToString(<Button busyLabel="Saving…">Save</Button>);
+		expect(html).toContain("Saving…");
+		expect(html).toContain('aria-hidden="true"');
+		expect(html).toContain("button-spinner");
+		expect(html).toContain("[.htmx-request_&amp;]:invisible");
+		expect(html).toContain("[.htmx-request_&amp;]:visible");
+	});
+
+	it("does not render busy content unless requested", () => {
+		const html = renderToString(<Button>Save</Button>);
+		expect(html).not.toContain("button-spinner");
+		expect(html).not.toContain("Saving…");
+	});
 });

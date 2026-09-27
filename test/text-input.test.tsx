@@ -1,6 +1,7 @@
 /** @jsxImportSource hono/jsx */
 import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
+import css from "../src/styles/app.css?raw";
 import { TextInput } from "../src/views/text-input";
 
 describe("TextInput", () => {
@@ -35,6 +36,14 @@ describe("TextInput", () => {
 		expect(html).toContain('aria-invalid="true"');
 		expect(html).toContain('aria-describedby="name-error"');
 		expect(html).toContain('role="alert"');
+		expect(html).toContain("field-shake");
+	});
+
+	it("defines a reduced-motion-safe error shake", () => {
+		expect(css).toContain("@keyframes field-shake");
+		expect(css).toMatch(
+			/prefers-reduced-motion: reduce[\s\S]*\.field-shake[\s\S]*animation: none/,
+		);
 	});
 
 	it("passes disabled through", () => {

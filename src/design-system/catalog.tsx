@@ -532,14 +532,15 @@ const BUTTON_SPEC: UseSpecText = {
 	affordance:
 		"A filled, outlined, or terracotta label looks actionable without hover.",
 	states:
-		"Rest, focus, and disabled apply; hover and pressed use the browser defaults, while loading, done, and error belong to the action's feedback.",
+		"Rest, focus, disabled, and loading apply; hover and pressed use the browser defaults. Loading disables submit actions and replaces their label with a spinner and action-specific word; done and error appear in the result.",
 	feedback:
-		"The destination or form result appears, focus follows the changed content, and HTMX actions announce their result.",
+		"A form action immediately shows its busy label and cannot be submitted twice; then the destination or result appears, focus follows changed content, and HTMX announces the result.",
 	input:
 		"Every target is at least 44px; Tab focuses it, Enter or Space activates a button, and a screen reader announces its name, role, and disabled state.",
-	motion: "Nothing moves; reduced motion is unchanged.",
+	motion:
+		"The loading ring spins until the request ends; with reduced motion it stays still while the busy words remain visible.",
 	edges:
-		"Long labels may wrap. A slow request leaves the control available until loading behavior arrives in #69; links still navigate and forms still submit without JavaScript.",
+		"Long labels may wrap and loading keeps the button's size stable. A slow request stays disabled and busy; without JavaScript the form submits normally and no busy label shows.",
 	words:
 		"Use a short verb phrase such as Save, Cancel, Archive, Restore, or Add category. Place one primary button per screen or sheet, at the end of the form, with Cancel beside it.",
 };
@@ -549,14 +550,15 @@ const TEXT_INPUT_SPEC: UseSpecText = {
 	affordance:
 		"A labeled bordered field shows where to type without relying on hover.",
 	states:
-		"Rest, focus, filled, error, and disabled apply; hover, pressed, loading, and done are not separate field states.",
+		"Rest, focus, filled, error, and disabled apply; error shakes once when returned, while hover, pressed, loading, and done are not separate field states.",
 	feedback:
-		"Typing appears immediately; validation shows an error below the field and a screen reader hears it as an alert.",
+		"Typing appears immediately; validation shakes the invalid field once, shows an error below it, and a screen reader hears the error as an alert.",
 	input:
 		"The field is at least 44px high; tap or Tab focuses it, typing edits it, and a screen reader announces its label, value, and invalid or disabled state.",
-	motion: "Nothing moves; reduced motion is unchanged.",
+	motion:
+		"An invalid field shakes horizontally once for 300ms; with reduced motion it does not move and the error still appears.",
 	edges:
-		"Empty and long values use the form's validation and length limit; a disabled field cannot be edited; native form submission works without JavaScript.",
+		"Empty and long values use validation and the length limit; a disabled field cannot be edited; without JavaScript the form submits normally, errors still read clearly, and no busy label shows.",
 	words:
 		"The visible label names the value; errors say what to do, for example Give the category a name.",
 };
@@ -595,6 +597,13 @@ function Controls() {
 						</>
 					))}
 				</div>
+				<State label="primary, busy">
+					<div class="htmx-request">
+						<Button type="button" busyLabel="Saving…">
+							Save
+						</Button>
+					</div>
+				</State>
 				<UseSpec spec={BUTTON_SPEC} />
 			</Specimen>
 			<Specimen

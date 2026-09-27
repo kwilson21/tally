@@ -34,6 +34,7 @@ const swap = (url: string) => ({
 	method: "post" as const,
 	action: url,
 	"hx-post": url,
+	"hx-disable": "findAll button[type=submit]",
 	"hx-target": "#categories",
 	"hx-select": "#categories",
 	"hx-swap": "outerHTML",
@@ -152,7 +153,9 @@ function CategoryRow({
 						</a>
 					</p>
 					<div class="flex flex-wrap items-center gap-3">
-						<Button type="submit">Save</Button>
+						<Button type="submit" busyLabel="Saving…">
+							Save
+						</Button>
 						<Button
 							href="/settings"
 							kind="secondary"
@@ -168,6 +171,7 @@ function CategoryRow({
 							type="submit"
 							kind="text"
 							class="ml-auto"
+							busyLabel="Archiving…"
 							{...action(`${url}/archive`)}
 						>
 							Archive
@@ -180,6 +184,7 @@ function CategoryRow({
 									type="submit"
 									kind="secondary"
 									class="gap-2"
+									busyLabel="Moving…"
 									{...action(`${url}/move/up`)}
 								>
 									<Icon name="arrow-up" class="size-4" />
@@ -191,6 +196,7 @@ function CategoryRow({
 									type="submit"
 									kind="secondary"
 									class="gap-2"
+									busyLabel="Moving…"
 									{...action(`${url}/move/down`)}
 								>
 									<Icon name="arrow-down" class="size-4" />
@@ -259,7 +265,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 								errors={adding ? view.errors : undefined}
 							/>
 							<div>
-								<Button type="submit">Add category</Button>
+								<Button type="submit" busyLabel="Adding…">
+									Add category
+								</Button>
 							</div>
 						</form>
 					</details>
@@ -288,7 +296,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 											class="ml-auto"
 											{...swap(`/settings/categories/${a.id}/restore`)}
 										>
-											<Button type="submit" kind="text">
+											<Button type="submit" kind="text" busyLabel="Restoring…">
 												Restore
 											</Button>
 										</form>
