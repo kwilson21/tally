@@ -67,8 +67,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const needsAttention =
 		body.webhook_type === "ITEM" &&
 		((body.webhook_code === "ERROR" &&
-			typeof itemError === "string" &&
-			!transientErrors.has(itemError)) ||
+			!(typeof itemError === "string" && transientErrors.has(itemError))) ||
 			(typeof body.webhook_code === "string" &&
 				attentionCodes.has(body.webhook_code)));
 	if (needsAttention) {

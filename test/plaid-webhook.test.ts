@@ -201,7 +201,11 @@ describe("Plaid webhook route", () => {
 	it.each([
 		["ERROR", "ITEM_LOGIN_REQUIRED", "needs_attention"],
 		["ERROR", "PRODUCT_NOT_READY", "ok"],
+		["ERROR", undefined, "needs_attention"],
+		["ERROR", null, "needs_attention"],
 		["PENDING_EXPIRATION", undefined, "needs_attention"],
+		["PENDING_DISCONNECT", undefined, "needs_attention"],
+		["USER_PERMISSION_REVOKED", undefined, "needs_attention"],
 	] as const)("handles ITEM %s", async (webhookCode, errorCode, status) => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person')",
@@ -213,7 +217,7 @@ describe("Plaid webhook route", () => {
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: webhookCode,
-			...(errorCode ? { error: { error_code: errorCode } } : {}),
+			...(errorCode !== undefined ? { error: { error_code: errorCode } } : {}),
 		});
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(

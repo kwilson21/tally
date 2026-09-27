@@ -13,7 +13,7 @@ async function fixture(
 	overrides: {
 		header?: Record<string, unknown>;
 		claims?: Record<string, unknown>;
-		expiredAt?: string | null;
+		expiredAt?: number | null;
 		fetchStatus?: number;
 	} = {},
 ) {
@@ -85,7 +85,7 @@ describe("verifyPlaidWebhook", () => {
 			"iat 61 seconds ahead",
 			{ claims: { iat: Math.floor(Date.now() / 1000) + 61 } },
 		],
-		["expired key", { expiredAt: "2026-01-01T00:00:00Z" }],
+		["expired key", { expiredAt: 1_767_225_600 }],
 	] as const)("rejects %s", async (_name, overrides) => {
 		const value = await fixture(overrides);
 		expect(
@@ -168,6 +168,30 @@ describe("verifyPlaidWebhook", () => {
 		expect(
 			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
 		).toBe("unavailable");
+		expect(value.fetchImpl).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
+	});
+
+	it("coalesces concurrent lookups for the same new kid", async () => {
+		const value = await fixture();
+		const [first, second] = await Promise.all([
+			verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
+			verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
+		]);
+		expect([first, second]).toEqual(["valid", "valid"]);
+		expect(value.fetchImpl).toHaveBeenCalledOnce();
+	});
+
+	it("refetches a cached key after one hour", async () => {
+		vi.useFakeTimers();
+		const value = await fixture();
+		expect(
+			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
+		).toBe("valid");
+		vi.advanceTimersByTime(60 * 60 * 1000);
+		expect(
+			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
+		).toBe("invalid");
 		expect(value.fetchImpl).toHaveBeenCalledTimes(2);
 		vi.useRealTimers();
 	});

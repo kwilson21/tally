@@ -5,17 +5,21 @@ type Claims = { iat?: unknown; request_body_sha256?: unknown };
 type VerificationKey = JsonWebKey & { expired_at?: unknown };
 type CachedKey = { key: CryptoKey; fetchedAt: number };
 type FailedKey = { result: "invalid" | "unavailable"; failedAt: number };
+type KeyLookup =
+	| { result: "valid"; key: CryptoKey }
+	| { result: "invalid" | "unavailable" };
 export type PlaidWebhookVerification = "valid" | "invalid" | "unavailable";
 
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const LOWERCASE_SHA256 = /^[0-9a-f]{64}$/;
-const KEY_TTL_MS = 24 * 60 * 60 * 1000;
+const KEY_TTL_MS = 60 * 60 * 1000;
 const FAILED_KEY_TTL_MS = 60 * 1000;
 const MAX_CACHE_ENTRIES = 32;
 const MAX_AGE_SECONDS = 5 * 60;
 const MAX_FUTURE_SECONDS = 60;
 const keys = new Map<string, CachedKey>();
 const failedKeys = new Map<string, FailedKey>();
+const inFlightKeys = new Map<string, Promise<KeyLookup>>();
 
 function setBounded<K, V>(map: Map<K, V>, key: K, value: V): void {
 	if (!map.has(key) && map.size >= MAX_CACHE_ENTRIES) {
@@ -48,9 +52,7 @@ async function verificationKey(
 	env: PlaidEnv,
 	kid: string,
 	fetchImpl: typeof fetch,
-): Promise<
-	{ result: "valid"; key: CryptoKey } | { result: "invalid" | "unavailable" }
-> {
+): Promise<KeyLookup> {
 	const failed = failedKeys.get(kid);
 	if (failed && Date.now() - failed.failedAt < FAILED_KEY_TTL_MS) {
 		return { result: failed.result };
@@ -61,33 +63,46 @@ async function verificationKey(
 		return { result: "valid", key: cached.key };
 	}
 	if (cached) keys.delete(kid);
-	try {
-		const response = await plaidPost<{ key?: VerificationKey }>(
-			env,
-			"/webhook_verification_key/get",
-			{ key_id: kid },
-			fetchImpl,
-		);
-		if (!response.key) throw new Error("Missing Plaid verification key");
-		if (response.key.expired_at !== null) {
-			setBounded(failedKeys, kid, { result: "invalid", failedAt: Date.now() });
-			return { result: "invalid" };
+	const pending = inFlightKeys.get(kid);
+	if (pending) return pending;
+	const lookup: Promise<KeyLookup> = (async () => {
+		try {
+			const response = await plaidPost<{ key?: VerificationKey }>(
+				env,
+				"/webhook_verification_key/get",
+				{ key_id: kid },
+				fetchImpl,
+			);
+			if (!response.key) throw new Error("Missing Plaid verification key");
+			if (response.key.expired_at !== null) {
+				setBounded(failedKeys, kid, {
+					result: "invalid",
+					failedAt: Date.now(),
+				});
+				return { result: "invalid" };
+			}
+			const key = await crypto.subtle.importKey(
+				"jwk",
+				response.key,
+				{ name: "ECDSA", namedCurve: "P-256" },
+				false,
+				["verify"],
+			);
+			setBounded(keys, kid, { key, fetchedAt: Date.now() });
+			return { result: "valid", key };
+		} catch {
+			setBounded(failedKeys, kid, {
+				result: "unavailable",
+				failedAt: Date.now(),
+			});
+			return { result: "unavailable" };
 		}
-		const key = await crypto.subtle.importKey(
-			"jwk",
-			response.key,
-			{ name: "ECDSA", namedCurve: "P-256" },
-			false,
-			["verify"],
-		);
-		setBounded(keys, kid, { key, fetchedAt: Date.now() });
-		return { result: "valid", key };
-	} catch {
-		setBounded(failedKeys, kid, {
-			result: "unavailable",
-			failedAt: Date.now(),
-		});
-		return { result: "unavailable" };
+	})();
+	inFlightKeys.set(kid, lookup);
+	try {
+		return await lookup;
+	} finally {
+		if (inFlightKeys.get(kid) === lookup) inFlightKeys.delete(kid);
 	}
 }
 
