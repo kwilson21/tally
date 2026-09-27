@@ -383,6 +383,7 @@ function EditSheet({
 				action={`/transactions/${tx.id}`}
 				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
 				hx-post={`/transactions/${tx.id}`}
+				hx-disable="findAll button[type=submit]"
 				// The Needs category count sits in the filter form, outside #page, so update it too.
 				hx-select-oob="#needs-count:innerHTML"
 				hx-target="#page"
@@ -468,12 +469,12 @@ function EditSheet({
 							error={errors.merchant}
 						/>
 						<FormField id="note" label="Note" error={errors.note}>
-							{(a11y) => (
+							{({ class: errorClass, ...a11y }) => (
 								<textarea
 									id="note"
 									name="note"
 									rows={2}
-									class="rounded-control border border-rule bg-paper px-3 py-2 text-lg"
+									class={`rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
 									{...a11y}
 								>
 									{values.note ?? ""}
@@ -486,7 +487,7 @@ function EditSheet({
 					<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
 						Cancel
 					</Button>
-					<Button type="submit" class="w-full">
+					<Button type="submit" class="w-full" busyLabel="Saving…">
 						Save
 					</Button>
 				</div>

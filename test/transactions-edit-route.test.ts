@@ -69,7 +69,9 @@ describe("GET /transactions/:id", () => {
 		expect(html).toMatch(
 			/<a href="\/transactions\?uncategorized=1"[^>]*>Cancel<\/a>/,
 		);
-		expect(html).toMatch(/<button type="submit"[^>]*>Save<\/button>/);
+		expect(html).toMatch(
+			/<button type="submit"[^>]*>[\s\S]*?Save[\s\S]*?<\/button>/,
+		);
 	});
 
 	it("tidies an unnamed merchant's raw text for the heading, showing the raw text underneath and as the input placeholder", async () => {

@@ -273,6 +273,7 @@ function BudgetSheet({
 				action={`/budget/${category.id}`}
 				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
 				hx-post={`/budget/${category.id}`}
+				hx-disable="findAll button[type=submit]"
 				hx-target="#page"
 				hx-select="#page"
 				hx-swap="outerHTML"
@@ -290,7 +291,7 @@ function BudgetSheet({
 					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
 						Cancel
 					</Button>
-					<Button type="submit" class="w-full">
+					<Button type="submit" class="w-full" busyLabel="Saving…">
 						Save
 					</Button>
 				</div>

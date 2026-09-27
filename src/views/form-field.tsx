@@ -12,6 +12,7 @@ type Props = {
 	children: (a11y: {
 		"aria-describedby"?: string;
 		"aria-invalid"?: "true";
+		class?: "field-shake";
 	}) => Child;
 };
 
@@ -35,6 +36,7 @@ export function FormField({
 			{children({
 				...(describedBy ? { "aria-describedby": describedBy } : {}),
 				...(error ? { "aria-invalid": "true" as const } : {}),
+				...(error ? { class: "field-shake" as const } : {}),
 			})}
 			{hint && (
 				<p id={`${id}-hint`} class="text-sm text-muted">

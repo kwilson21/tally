@@ -25,7 +25,7 @@ The elements people don't consciously notice. Together they make Tally feel ligh
 | Category icons and colors | Recognition at a glance | Carry meaning about status (that's green/brick only) |
 | Bars | Show how much of a budget is used | Paint the page; a column of saturated bars is louder than the words it supports |
 | Voice | Plain, second person, calm; numbers first, then what they mean ("$120 left") | Shout (capitals, exclamation marks), blame ("you failed"), or use bank jargon (raw merchant strings, "debit", "posted"), except the small muted bank text under a name tidied from it (#93) |
-| Motion | Confirms that something happened (a bar fills, a row is highlighted) | Decorate, bounce, or delay; reduced motion always shows the end state |
+| Motion | Confirms that something happened (a bar fills, a row is highlighted, or a field with an error shakes once) | Decorate, bounce, or delay; reduced motion always shows the end state and doesn't move an invalid field |
 
 ### 2. Signage: what directs attention
 What a person should see first, second and third, and the one thing to do. Signs are few; each one is earned.
@@ -100,8 +100,8 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
-| Button | A primary, secondary, or quiet text action, rendered as a button or link. |
-| TextInput | A labeled single-line text field with accessible error and disabled states. |
+| Button | A primary, secondary, or quiet text action, rendered as a button or link; an HTMX submit can keep its size while showing a still-or-spinning ring and action-specific busy label, and is disabled for the request. |
+| TextInput | A labeled single-line text field with accessible error and disabled states; an invalid field shakes once, while reduced motion keeps it still. |
 | BottomSheet | A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop. |
 | ThingsToTry | The demo's bordered "New here? Things to try" block, below Home's Budget list until onboarding (#95) replaces it: three links to where each thing is done, plus How Tally works. |
 | HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
