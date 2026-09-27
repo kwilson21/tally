@@ -56,6 +56,7 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 
 	it("puts a − before the row and a + after it, each a form that posts without JavaScript", async () => {
 		const html = await adjusting(18600, 20000);
+		expect(html).not.toContain("hx-disable");
 		expect(html).toMatch(
 			/<form method="post" action="\/budget\/3\/nudge\/down"[^>]*>\s*<button type="submit" id="nudge-3-down"/,
 		);

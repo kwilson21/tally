@@ -28,21 +28,41 @@ describe("htmx posting forms", () => {
 
 		const adjust = await get("/?adjust=1");
 		for (const form of htmxForms(adjust)) {
-			expect(form).toContain('hx-disable="findAll button[type=submit]"');
+			expect(form).not.toContain("hx-disable");
 			expect(form).not.toContain("button-spinner");
 		}
 	});
 
-	it("disable every Settings submit button and show action-specific labels", async () => {
+	it("uses each Settings form's primary button as its busy indicator", async () => {
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE id = 5",
 		).run();
 		const html = await get("/settings");
 		const forms = htmxForms(html);
 		expect(forms.length).toBeGreaterThan(0);
-		for (const form of forms) {
-			expect(form).toContain('hx-disable="findAll button[type=submit]"');
+		expect(html).toMatch(
+			/<form[^>]*id="cat-1-form"[^>]*hx-indicator="#cat-1-save"[^>]*>[\s\S]*?<button[^>]*id="cat-1-save"/,
+		);
+		expect(html).toMatch(
+			/<form[^>]*hx-indicator="#new-category-save"[^>]*>[\s\S]*?<button[^>]*id="new-category-save"/,
+		);
+		expect(html).toMatch(
+			/<form[^>]*hx-indicator="#cat-5-restore"[^>]*>[\s\S]*?<button[^>]*id="cat-5-restore"/,
+		);
+		for (const actionId of [
+			"cat-1-archive",
+			"cat-2-move-up",
+			"cat-2-move-down",
+		]) {
+			expect(html).toMatch(
+				new RegExp(
+					`<button[^>]*id="${actionId}"[^>]*hx-disable="#cat-[0-9]+-form button\\[type=submit\\]"`,
+				),
+			);
 		}
+		expect(html).not.toMatch(
+			/id="cat-(?:1-archive|2-move-(?:up|down))"[^>]*hx-indicator/,
+		);
 		for (const label of [
 			"Saving…",
 			"Adding…",

@@ -469,12 +469,12 @@ function EditSheet({
 							error={errors.merchant}
 						/>
 						<FormField id="note" label="Note" error={errors.note}>
-							{(a11y) => (
+							{({ class: errorClass, ...a11y }) => (
 								<textarea
 									id="note"
 									name="note"
 									rows={2}
-									class="rounded-control border border-rule bg-paper px-3 py-2 text-lg"
+									class={`rounded-control border border-rule bg-paper px-3 py-2 text-lg${errorClass ? ` ${errorClass}` : ""}`}
 									{...a11y}
 								>
 									{values.note ?? ""}
