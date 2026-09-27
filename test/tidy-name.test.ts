@@ -21,19 +21,19 @@ const SEED_NAMES: [string, string][] = [
 	["YOUTH SOCCER LEAGUE", "Youth soccer league"],
 	["BARNES & NOBLE #2831", "Barnes & noble"],
 	["THE HOME DEPOT #6612", "The home depot"],
-	["AMAZON.COM*RT4K2", "Amazon.com*rt4k2"],
+	["AMAZON.COM*RT4K2", "Amazon.com"],
 	// Uncategorized merchants (src/demo/seed.ts UNCATEGORIZED), the issue's own examples among them.
 	["SQ *LOCAL BAKERY 4432", "Local bakery"],
 	["PAYPAL *XYZSHOP", "Xyzshop"],
 	["SQ *FARMERS MKT", "Farmers mkt"],
-	["VENMO *J RIVERA", "Venmo *j rivera"],
+	["VENMO *J RIVERA", "Venmo j rivera"],
 	["TST* CORNER DELI", "Corner deli"],
-	["AMZN MKTP US*2K4", "Amzn mktp"],
+	["AMZN MKTP US*2K4", "Amzn mktp us"],
 	["SP * CRAFTSUPPLY", "Craftsupply"],
 	["POS 4417 CITY PARKING", "City parking"],
 	["CHECKCARD 0921 CVS", "CVS"],
 	["APPLE.COM/BILL", "Apple.com/bill"],
-	["GOOGLE *YOUTUBE", "Google *youtube"],
+	["GOOGLE *YOUTUBE", "Google youtube"],
 	["DD *DOORDASH TACO", "Doordash taco"],
 	// Income, transfer and reimbursement merchants (src/demo/seed.ts).
 	["ACME CORP PAYROLL", "Acme corp payroll"],
@@ -68,6 +68,23 @@ describe("tidyName", () => {
 		expect(tidyName(raw)).toBe(`A${"a".repeat(499)}`);
 	});
 
+	it("keeps a number that's part of the name; drops a store number (# or 3+ digits)", () => {
+		expect(tidyName("PIER 39")).toBe("Pier 39");
+		expect(tidyName("MOTEL 6 #1234")).toBe("Motel 6");
+		expect(tidyName("7 ELEVEN")).toBe("7 eleven");
+		expect(tidyName("CVS/PHARMACY #01234")).toBe("CVS/pharmacy");
+	});
+
+	it("drops a code joined on with *, and reads any other * as a space", () => {
+		expect(tidyName("AMAZON.COM*RT4K2")).toBe("Amazon.com");
+		expect(tidyName("GOOGLE *YOUTUBE")).toBe("Google youtube");
+		expect(tidyName("*")).toBe("*");
+	});
+
+	it("leaves text with any lowercase letter alone, including non-ASCII ones", () => {
+		expect(tidyName("CAFÉ É é")).toBe("CAFÉ É é");
+	});
+
 	it("collapses leading, trailing and repeated spaces", () => {
 		expect(tidyName("  SQ *  LOCAL   BAKERY   4432  ")).toBe("Local bakery");
 	});
@@ -78,7 +95,7 @@ describe("tidyName", () => {
 		expect(tidyName("USPS PRIORITY MAIL")).toBe("USPS priority mail");
 		expect(tidyName("UPS STORE #1200")).toBe("UPS store");
 		expect(tidyName("AT&T BILL PAYMENT")).toBe("AT&T bill payment");
-		expect(tidyName("BP GAS STATION 55")).toBe("BP gas station");
+		expect(tidyName("BP GAS STATION 5512")).toBe("BP gas station");
 		expect(tidyName("KFC 4471")).toBe("KFC");
 		expect(tidyName("H&M 2210")).toBe("H&M");
 	});

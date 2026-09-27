@@ -116,6 +116,22 @@ describe("POST /transactions/:id", () => {
 		expect(html).toMatch(/<p id="result-count"[^>]*autofocus/);
 	});
 
+	it("names an unnamed merchant by its tidied text in the toast and announcement, never the raw bank text", async () => {
+		const paypal = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'PAYPAL *XYZSHOP'",
+			).first<{ id: number }>()
+		)?.id;
+		const { res } = await post(`/transactions/${paypal}`, {
+			...save,
+			merchant: "",
+		});
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Saved Xyzshop", type: "success" },
+			announce: "Saved. Xyzshop is now Eating Out.",
+		});
+	});
+
 	it("updates the Needs category count outside the swapped list after a save", async () => {
 		const { html: sheet } = await get(
 			`/transactions/${bakery}?uncategorized=1`,
