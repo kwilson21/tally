@@ -122,3 +122,20 @@ describe("GET / with no data", () => {
 		expect(html).toMatch(/<a href="\/budget\/1"/);
 	});
 });
+
+describe("GET / with no categories", () => {
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM categories"),
+		]);
+	});
+
+	it("shows an empty state where the Budget list would be", async () => {
+		const { html } = await home();
+		expect(html).toContain("No categories to budget yet.");
+		expect(html).toContain("Add a category in Settings to get started.");
+		expect(html).toMatch(/<a[^>]*href="\/settings"[^>]*>Open Settings<\/a>/);
+	});
+});

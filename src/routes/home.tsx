@@ -16,6 +16,7 @@ import { AdjustLink } from "../views/adjust-link";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { EmptyState } from "../views/empty-state";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
@@ -207,6 +208,14 @@ async function renderHome(
 									})}
 								</ul>
 							</>
+						)}
+						{summary.categories.length === 0 && notBudgeted.length === 0 && (
+							<EmptyState
+								kind="done"
+								sentence="No categories to budget yet."
+								hint="Add a category in Settings to get started."
+								action={{ href: "/settings", label: "Open Settings" }}
+							/>
 						)}
 					</section>
 					{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}

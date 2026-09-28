@@ -98,6 +98,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | HomeTop | Home's top (#92, decision 46): the month as a small serif heading, then Safe to spend (the one thing, on a phone's first screen), the status sentence, How this works (demo only) and the Band, which carries the uncategorized amount (decision 50). On desktop the top and the Budget list share one width. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
+| EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do), one sentence, a muted hint and at most one secondary button, centred (decision 54). |
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
 | Button | A primary, secondary, or quiet text action, rendered as a button or link; an HTMX submit can keep its size while showing a still-or-spinning ring and action-specific busy label, and is disabled for the request. |
@@ -110,6 +111,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | BudgetDiagram, TransactionsDiagram, ExclusionsDiagram, CategoriesDiagram | How Tally works' section diagrams (#61), drawn from the same numbers as each worked example: boxes and arrows for Budget, Transactions and Categories; one bar for Excluding. Ink, muted and rule only, plus ok (or over) on the safe-to-spend box, always with its words. A dashed outline means "not counted" or "not decided yet". |
 
 ## Patterns
+- Empty lists: every list that can be empty shows EmptyState, never a blank space or a lone muted line.
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.
 - Who picked a category: when Jev picked it, a muted `text-sm` line under the category chips says "Picked by Jev · N% sure". A person's choice and a merchant rule show nothing extra.
 - Edits: the form saves, the list swaps back with the toast and announcement, and focus returns to the row (or to the result count if the row left a filtered list). Without JavaScript the save redirects back to the list.

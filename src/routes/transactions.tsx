@@ -29,6 +29,7 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
+import { EmptyState } from "../views/empty-state";
 import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
@@ -115,6 +116,11 @@ async function renderList(
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	const focusCount =
 		focusId !== undefined && !rows.some((r) => r.id === focusId);
+	const allCategorized =
+		filters.uncategorized &&
+		filters.q === "" &&
+		filters.category === null &&
+		!filters.excluded;
 	const pageHref = (n: number) => {
 		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
 		return `/transactions${query ? `?${query}` : ""}`;
@@ -251,12 +257,20 @@ async function renderList(
 				</p>
 				<section id="results" class="mt-2" aria-label="Results">
 					{rows.length === 0 ? (
-						<p class="text-muted">
-							No transactions match.{" "}
-							<a href="/transactions" class="inline-flex min-h-11 items-center">
-								Clear filters
-							</a>
-						</p>
+						allCategorized ? (
+							<EmptyState
+								kind="done"
+								sentence="Every transaction has a category."
+								hint="New ones appear here as they come in."
+							/>
+						) : (
+							<EmptyState
+								kind="search"
+								sentence="No transactions match these filters."
+								hint="Try a wider month, or clear the search."
+								action={{ href: "/transactions", label: "Clear filters" }}
+							/>
+						)
 					) : (
 						byDay(rows).map(([date, dayRows]) => (
 							<>
