@@ -10,11 +10,24 @@ const get = async (path: string) => {
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 describe("GET /design-system/proposals", () => {
-	it("has no open proposals and lists P8 and P9 as decided", async () => {
+	it("shows P10–P14 open, each option on a phone, and lists P8 and P9 as decided", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
-		expect(html).toContain('<p class="mt-3 text-lg">No open proposals.</p>');
+		expect(html).not.toContain("No open proposals.");
+		for (const id of [
+			"p10-organize",
+			"p11-disconnect",
+			"p12-sync",
+			"p13-export",
+			"p14-feedback",
+		]) {
+			expect(html).toContain(`id="${id}"`);
+		}
+		// Every option is a picture of a phone screen: labelled, and nothing inside to Tab to.
+		expect(
+			html.match(/role="img" aria-label="[^"]*, on a phone"/g)?.length,
+		).toBe(11);
 		expect(html).toContain("P8 · Empty lists");
 		expect(html).toContain("P9 · Accounts before any bank is linked");
 		expect(html).toContain(
