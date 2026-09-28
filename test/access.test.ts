@@ -123,8 +123,9 @@ describe("verifiedEmail", () => {
 			}),
 		).toBe("family.member@example.com");
 		expect(fetch).toHaveBeenCalledTimes(1);
+		// Workers throws on redirect: "error", so a redirect is stopped and refused by status instead.
 		expect(fetch).toHaveBeenCalledWith(`https://${team}/cdn-cgi/access/certs`, {
-			redirect: "error",
+			redirect: "manual",
 		});
 	});
 
@@ -619,6 +620,29 @@ describe("verifiedEmail explains a refusal in the log", () => {
 			await refusal(env, await tokenWithPayload(privateKey, "not json")),
 		).toBe(
 			"Access sign-in refused: the token couldn't be checked (SyntaxError)",
+		);
+	});
+
+	it("refuses keys served through a redirect", async () => {
+		const team = "log-redirect.cloudflareaccess.com";
+		const { privateKey } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response(null, {
+						status: 302,
+						headers: { Location: "https://attacker.example/certs" },
+					}),
+			),
+		);
+		expect(
+			await refusal(
+				{ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" },
+				await token(privateKey, team),
+			),
+		).toBe(
+			"Access sign-in refused: couldn't fetch the signing keys from https://log-redirect.cloudflareaccess.com/cdn-cgi/access/certs (Error: Cloudflare Access certs were unavailable)",
 		);
 	});
 
