@@ -255,6 +255,11 @@ async function renderList(
 				>
 					{count}
 				</p>
+				{filters.uncategorized && (
+					<Button kind="text" href="/transactions/organize">
+						Organize by merchant
+					</Button>
+				)}
 				<section id="results" class="mt-2" aria-label="Results">
 					{rows.length === 0 ? (
 						allCategorized ? (
