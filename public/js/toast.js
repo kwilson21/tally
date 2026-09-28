@@ -25,16 +25,21 @@
 		});
 	});
 
-	// A normal form redirect carries the same feedback as an HTMX response.
+	// A normal form redirect carries a fixed, trusted confirmation key.
 	const query = new URLSearchParams(location.search);
-	const toast = query.get("toast");
-	const announce = query.get("announce");
-	if (toast)
+	if (query.get("sent") === "feedback") {
 		document.body.dispatchEvent(
-			new CustomEvent("toast", { detail: { message: toast } }),
+			new CustomEvent("toast", { detail: { message: "Thanks. Sent." } }),
 		);
-	if (announce)
 		document.body.dispatchEvent(
-			new CustomEvent("announce", { detail: { value: announce } }),
+			new CustomEvent("announce", { detail: { value: "Thanks. Sent." } }),
 		);
+		query.delete("sent");
+		const search = query.toString();
+		history.replaceState(
+			null,
+			"",
+			`${location.pathname}${search ? `?${search}` : ""}${location.hash}`,
+		);
+	}
 })();

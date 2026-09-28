@@ -767,7 +767,9 @@ function Feedback() {
 				<p class="text-muted">
 					The real component is fixed at the bottom-right of this catalog page.
 				</p>
-				<FeedbackButton from="/design-system" />
+				<div hx-ignore inert>
+					<FeedbackButton fixed={false} />
+				</div>
 			</Specimen>
 			<Specimen
 				id="feedback-form"
@@ -776,9 +778,11 @@ function Feedback() {
 				components={["FeedbackForm"]}
 				sentence="Two groups of radio chips and a labeled message give the builder a small, direct report."
 			>
-				<FeedbackForm
-					values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
-				/>
+				<div hx-ignore inert>
+					<FeedbackForm
+						values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
+					/>
+				</div>
 			</Specimen>
 			<Specimen
 				id="toast"

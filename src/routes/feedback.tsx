@@ -13,6 +13,7 @@ type FeedbackRow = {
 	message: string;
 	page: string;
 	device: string;
+	attempts: number;
 };
 
 const TYPES = new Set(["Bug", "Idea", "Question", "Other"]);
@@ -24,12 +25,13 @@ const FEELINGS = new Set([
 	"Delighted",
 ]);
 
-function safePath(value: string | null) {
-	if (!value?.startsWith("/") || value.startsWith("//")) return "/";
+export function safePath(value: string | null) {
+	if (!value) return "/";
 	try {
 		const url = new URL(value, "http://tally.invalid");
-		return url.origin === "http://tally.invalid"
-			? `${url.pathname}${url.search}${url.hash}`
+		const path = `${url.pathname}${url.search}${url.hash}`;
+		return url.origin === "http://tally.invalid" && /^\/[^/\\]/.test(path)
+			? path
 			: "/";
 	} catch {
 		return "/";
@@ -69,7 +71,17 @@ function view(values: FeedbackValues, demo: boolean, error?: string) {
 }
 
 feedback.get("/feedback", (c) => {
-	const from = safePath(c.req.query("from") ?? null);
+	let from = "/";
+	const referer = c.req.header("referer");
+	if (referer) {
+		try {
+			const url = new URL(referer);
+			if (url.origin === new URL(c.req.url).origin)
+				from = safePath(`${url.pathname}${url.search}${url.hash}`);
+		} catch {
+			// A malformed Referer is treated like no Referer.
+		}
+	}
 	return c.html(
 		view(
 			{ type: "Bug", feeling: "Okay", message: "", from },
@@ -80,15 +92,13 @@ feedback.get("/feedback", (c) => {
 
 feedback.post("/feedback", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
-	const origin = c.req.header("origin");
-	if (!origin || origin !== new URL(c.req.url).origin) return c.body(null, 403);
 	const data = await c.req.formData();
 	const rawType = String(data.get("type") ?? "");
 	const rawFeeling = String(data.get("feeling") ?? "");
 	const values = {
 		type: TYPES.has(rawType) ? rawType : "Other",
 		feeling: FEELINGS.has(rawFeeling) ? rawFeeling : "Okay",
-		message: String(data.get("message") ?? ""),
+		message: String(data.get("message") ?? "").replace(/\r\n/g, "\n"),
 		from: safePath(String(data.get("from") ?? "/")),
 	};
 	if (!values.message.trim() || values.message.length > 2000) {
@@ -104,12 +114,22 @@ feedback.post("/feedback", async (c) => {
 		);
 	}
 	const actor = c.get("actor");
-	const recent = await c.env.DB.prepare(
-		"SELECT COUNT(*) AS count FROM feedback WHERE actor = ? AND created_at >= datetime('now', '-1 hour')",
+	const result = await c.env.DB.prepare(
+		`INSERT INTO feedback (actor, type, feeling, message, page, device)
+		 SELECT ?, ?, ?, ?, ?, ? WHERE
+		 (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
 	)
-		.bind(actor)
-		.first<{ count: number }>();
-	if ((recent?.count ?? 0) >= 10) {
+		.bind(
+			actor,
+			values.type,
+			values.feeling,
+			values.message.trim(),
+			values.from,
+			summarizeDevice(c.req.header("user-agent") ?? ""),
+			actor,
+		)
+		.run();
+	if (!result.meta.changes) {
 		return c.html(
 			view(
 				values,
@@ -119,18 +139,6 @@ feedback.post("/feedback", async (c) => {
 			429,
 		);
 	}
-	const result = await c.env.DB.prepare(
-		"INSERT INTO feedback (actor, type, feeling, message, page, device) VALUES (?, ?, ?, ?, ?, ?)",
-	)
-		.bind(
-			actor,
-			values.type,
-			values.feeling,
-			values.message.trim(),
-			values.from,
-			summarizeDevice(c.req.header("user-agent") ?? ""),
-		)
-		.run();
 	if (c.env.FEEDBACK_GITHUB_TOKEN) {
 		const row = await c.env.DB.prepare("SELECT * FROM feedback WHERE id = ?")
 			.bind(result.meta.last_row_id)
@@ -143,8 +151,7 @@ feedback.post("/feedback", async (c) => {
 			);
 	}
 	const back = new URL(values.from, "http://tally.invalid");
-	back.searchParams.set("toast", "Thanks. Sent.");
-	back.searchParams.set("announce", "Thanks. Sent.");
+	back.searchParams.set("sent", "feedback");
 	return c.redirect(`${back.pathname}${back.search}${back.hash}`, 303);
 });
 
@@ -155,26 +162,52 @@ export async function fileFeedbackIssue(
 	fetchImpl: typeof fetch = fetch,
 ) {
 	const item = row as FeedbackRow;
-	const response = await fetchImpl(
-		"https://api.github.com/repos/kwilson21/tally-feedback/issues",
-		{
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${token}`,
-				Accept: "application/vnd.github+json",
-				"Content-Type": "application/json",
-				"User-Agent": "Tally feedback worker",
+	const claim = await db
+		.prepare(
+			"UPDATE feedback SET filing_at = CURRENT_TIMESTAMP, attempts = attempts + 1 WHERE id = ? AND github_issue_number IS NULL AND filing_at IS NULL AND attempts < 5",
+		)
+		.bind(item.id)
+		.run();
+	if (!claim.meta.changes) return;
+	let response: Response;
+	try {
+		response = await fetchImpl(
+			"https://api.github.com/repos/kwilson21/tally-feedback/issues",
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${token}`,
+					Accept: "application/vnd.github+json",
+					"Content-Type": "application/json",
+					"User-Agent": "Tally feedback worker",
+				},
+				body: JSON.stringify({
+					title: `${item.type}: ${Array.from(item.message.replace(/\s+/g, " ").trim()).slice(0, 60).join("")}`,
+					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${item.page}\nDevice: ${item.device}\n\n${item.message
+						.split("\n")
+						.map((line) => `> ${line}`)
+						.join("\n")}`,
+					labels: [item.type],
+				}),
 			},
-			body: JSON.stringify({
-				title: `${item.type}: ${item.message.slice(0, 60)}`,
-				body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${item.page}\nDevice: ${item.device}\n\n${item.message}`,
-				labels: [item.type],
-			}),
-		},
-	);
+		);
+	} catch (error) {
+		await db
+			.prepare("UPDATE feedback SET filing_at = NULL WHERE id = ?")
+			.bind(item.id)
+			.run();
+		throw error;
+	}
 	console.info(`Feedback GitHub status ${response.status}`);
-	if (!response.ok)
+	if (!response.ok) {
+		await db
+			.prepare(
+				"UPDATE feedback SET last_status = ?, filing_at = CASE WHEN ? = 422 OR attempts >= 5 THEN filing_at ELSE NULL END WHERE id = ?",
+			)
+			.bind(response.status, response.status, item.id)
+			.run();
 		throw new Error(`Feedback GitHub request failed (${response.status})`);
+	}
 	const issue = (await response.json()) as { number?: number };
 	if (!Number.isInteger(issue.number))
 		throw new Error("Feedback GitHub response had no issue number");
@@ -192,7 +225,7 @@ export async function retryFeedback(
 ) {
 	if (env.DEMO === "true" || !env.FEEDBACK_GITHUB_TOKEN) return;
 	const rows = await env.DB.prepare(
-		"SELECT * FROM feedback WHERE github_issue_number IS NULL ORDER BY id",
+		"SELECT * FROM feedback WHERE github_issue_number IS NULL AND filing_at IS NULL AND attempts < 5 AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20",
 	).all<FeedbackRow>();
 	for (const row of rows.results) {
 		try {
@@ -202,8 +235,9 @@ export async function retryFeedback(
 				row,
 				fetchImpl,
 			);
-		} catch {
+		} catch (error) {
 			// The status was logged without the feedback or token; the row stays ready for tomorrow.
+			if (/\((401|403)\)/.test(String(error))) break;
 		}
 	}
 }

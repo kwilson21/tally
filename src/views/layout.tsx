@@ -70,10 +70,10 @@ export function Layout({
 					</main>
 				</div>
 				<BottomTabs active={active} />
-				<FeedbackButton from={currentPath} />
+				{!currentPath.startsWith("/feedback") && <FeedbackButton />}
 				<div
 					id="toasts"
-					class="fixed inset-x-4 bottom-20 flex flex-col items-center gap-2 lg:bottom-6"
+					class="fixed inset-x-4 bottom-36 flex flex-col items-center gap-2 lg:bottom-6"
 				/>
 				<div
 					id="announcer"

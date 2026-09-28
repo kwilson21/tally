@@ -74,7 +74,7 @@ describe("feedback form", () => {
 		);
 		expect(response.status).toBe(303);
 		expect(response.headers.get("location")).toContain("/settings?open=3");
-		expect(response.headers.get("location")).toContain("toast=Thanks.+Sent.");
+		expect(response.headers.get("location")).toContain("sent=feedback");
 		expect(
 			await env.DB.prepare(
 				"SELECT actor, type, feeling, message, page, device FROM feedback",
@@ -120,7 +120,7 @@ describe("feedback form", () => {
 				from: "https://evil.example/steal",
 			}),
 		);
-		expect(response.headers.get("location")).toMatch(/^\/\?toast=/);
+		expect(response.headers.get("location")).toBe("/?sent=feedback");
 	});
 });
 
@@ -151,7 +151,7 @@ it("files the expected GitHub issue without logging the token or message", async
 	});
 	expect(JSON.parse(String(init?.body))).toEqual({
 		title: "Bug: This does not work at all",
-		body: "Type: Bug\nFeeling: Frustrated\nPage: /accounts\nDevice: iPhone Safari\n\nThis does not work at all",
+		body: "Type: Bug\nFeeling: Frustrated\nPage: /accounts\nDevice: iPhone Safari\n\n> This does not work at all",
 		labels: ["Bug"],
 	});
 	expect(JSON.stringify(log.mock.calls)).not.toContain("secret-token");
@@ -164,7 +164,7 @@ it("files the expected GitHub issue without logging the token or message", async
 
 it("retries unfiled feedback in the nightly job", async () => {
 	await env.DB.prepare(
-		"INSERT INTO feedback (actor, type, feeling, message, page, device) VALUES ('person', 'Question', 'Okay', 'Why?', '/', 'Desktop Chrome')",
+		"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', 'Why?', '/', 'Desktop Chrome')",
 	).run();
 	const fetchStub = vi.fn(
 		async () => new Response(JSON.stringify({ number: 22 }), { status: 201 }),
@@ -194,7 +194,7 @@ describe("demo", () => {
 	});
 });
 
-it("puts a feedback link to the current path on every app page", async () => {
+it("puts a plain feedback link on app pages but not the feedback page", async () => {
 	for (const path of [
 		"/",
 		"/transactions?uncategorized=1",
@@ -203,8 +203,8 @@ it("puts a feedback link to the current path on every app page", async () => {
 	]) {
 		const response = await exports.default.fetch(BASE + path);
 		const html = await response.text();
-		expect(html).toContain(
-			`href="/feedback?from=${encodeURIComponent(new URL(BASE + path).pathname + new URL(BASE + path).search)}"`,
+		expect(html.includes('href="/feedback"')).toBe(
+			!path.startsWith("/feedback"),
 		);
 	}
 });
