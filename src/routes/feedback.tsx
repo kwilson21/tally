@@ -158,6 +158,21 @@ class FilingError extends Error {
 	}
 }
 
+// Not filed, not given up (5 attempts), and not claimed in the last 10 minutes: a claim
+// older than that belongs to a run that was cut off, so the row is ready again.
+const READY =
+	"github_issue_number IS NULL AND attempts < 5 AND (filing_at IS NULL OR filing_at <= datetime('now', '-10 minutes'))";
+
+/** A fence longer than any run of backticks in the text, so the text can't close it. */
+function fenced(text: string): string {
+	const longest = Math.max(
+		0,
+		...(text.match(/`+/g) ?? []).map((run) => run.length),
+	);
+	const fence = "`".repeat(Math.max(3, longest + 1));
+	return `${fence}\n${text}\n${fence}`;
+}
+
 export async function fileFeedbackIssue(
 	db: D1Database,
 	token: string,
@@ -167,7 +182,7 @@ export async function fileFeedbackIssue(
 	const item = row as FeedbackRow;
 	const claim = await db
 		.prepare(
-			"UPDATE feedback SET filing_at = CURRENT_TIMESTAMP, attempts = attempts + 1 WHERE id = ? AND github_issue_number IS NULL AND filing_at IS NULL AND attempts < 5",
+			`UPDATE feedback SET filing_at = CURRENT_TIMESTAMP, attempts = attempts + 1 WHERE id = ? AND ${READY}`,
 		)
 		.bind(item.id)
 		.run();
@@ -187,18 +202,19 @@ export async function fileFeedbackIssue(
 					"Content-Type": "application/json",
 					"User-Agent": "Tally feedback worker",
 				},
+				// Workers rejects redirect: "error"; a 3xx isn't ok, so it's treated as a failure.
+				redirect: "manual",
 				body: JSON.stringify({
 					title: `${item.type}: ${titleMessage}`,
-					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${item.page}\nDevice: ${item.device}\n\n> ${item.message.replace(/\n/g, "\n> ")}`,
+					// Code formatting keeps #123 and @someone from becoming links or mentions.
+					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: \`${item.page}\`\nDevice: ${item.device}\n\n${fenced(item.message)}`,
 					labels: [item.type],
 				}),
 			},
 		);
 	} catch (error) {
 		await db
-			.prepare(
-				"UPDATE feedback SET filing_at = CASE WHEN attempts >= 5 THEN filing_at ELSE NULL END WHERE id = ?",
-			)
+			.prepare("UPDATE feedback SET filing_at = NULL WHERE id = ?")
 			.bind(item.id)
 			.run();
 		throw error;
@@ -207,9 +223,13 @@ export async function fileFeedbackIssue(
 	if (!response.ok) {
 		await db
 			.prepare(
-				`UPDATE feedback SET last_status = ?, filing_at = CASE WHEN ? = 422 OR attempts >= 5 THEN filing_at ELSE NULL END WHERE id = ?`,
+				// 422: GitHub will never accept it, so give up. 401/403: the token is wrong,
+				// not the row, so the attempt doesn't count.
+				`UPDATE feedback SET last_status = ?1, filing_at = NULL,
+					attempts = CASE WHEN ?1 = 422 THEN 5 WHEN ?1 IN (401, 403) THEN attempts - 1 ELSE attempts END
+				WHERE id = ?2`,
 			)
-			.bind(response.status, response.status, item.id)
+			.bind(response.status, item.id)
 			.run();
 		throw new FilingError(response.status);
 	}
@@ -230,8 +250,7 @@ export async function retryFeedback(
 ) {
 	if (env.DEMO === "true" || !env.FEEDBACK_GITHUB_TOKEN) return;
 	const rows = await env.DB.prepare(
-		`SELECT * FROM feedback WHERE github_issue_number IS NULL AND filing_at IS NULL
-		 AND attempts < 5 AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20`,
+		`SELECT * FROM feedback WHERE ${READY} AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20`,
 	).all<FeedbackRow>();
 	for (const row of rows.results) {
 		try {

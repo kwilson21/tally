@@ -149,9 +149,10 @@ it("files the expected GitHub issue without logging the token or message", async
 		Accept: "application/vnd.github+json",
 		"User-Agent": "Tally feedback worker",
 	});
+	expect(init?.redirect).toBe("manual");
 	expect(JSON.parse(String(init?.body))).toEqual({
 		title: "Bug: This does not work at all",
-		body: "Type: Bug\nFeeling: Frustrated\nPage: /accounts\nDevice: iPhone Safari\n\n> This does not work at all",
+		body: "Type: Bug\nFeeling: Frustrated\nPage: `/accounts`\nDevice: iPhone Safari\n\n```\nThis does not work at all\n```",
 		labels: ["Bug"],
 	});
 	expect(JSON.stringify(log.mock.calls)).not.toContain("secret-token");
@@ -292,7 +293,7 @@ describe("feedback filing safeguards", () => {
 		const calls = fetchStub.mock.calls as unknown as [string, RequestInit][];
 		const body = JSON.parse(String(calls[0]?.[1].body));
 		expect(body.title).toBe(`Bug: ${"x".repeat(59)}😀`);
-		expect(body.body).toContain("> ");
+		expect(body.body).toMatch(/```\n[^`]*\n```$/);
 	});
 
 	it("processes at most 20 eligible rows", async () => {
@@ -333,4 +334,78 @@ describe("feedback filing safeguards", () => {
 		);
 		expect(fetchStub).toHaveBeenCalledTimes(2);
 	});
+});
+
+async function insertFeedback(message = "Why?", extra = "") {
+	await env.DB.prepare(
+		`INSERT INTO feedback (created_at, actor, type, feeling, message, page, device${extra ? ", filing_at, attempts" : ""}) VALUES (datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', ?, '/', 'Desktop Chrome'${extra})`,
+	)
+		.bind(message)
+		.run();
+}
+
+const filed = (number: number) =>
+	vi.fn(async () => new Response(JSON.stringify({ number }), { status: 201 }));
+
+it("keeps #123, @someone and backticks in feedback from becoming links or breaking out", async () => {
+	await insertFeedback("See #123 and @someone ``` done");
+	const fetchStub = filed(7);
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
+	const { body } = JSON.parse(String(init.body));
+	expect(body).toContain("````\nSee #123 and @someone ``` done\n````");
+});
+
+it("files a row again when an earlier claim was left behind", async () => {
+	await insertFeedback("Stuck", ", datetime('now', '-11 minutes'), 1");
+	const fetchStub = filed(8);
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+	expect(fetchStub).toHaveBeenCalledOnce();
+});
+
+it("doesn't file a row another run claimed a moment ago", async () => {
+	await insertFeedback("Busy", ", datetime('now'), 1");
+	const fetchStub = filed(9);
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+	expect(fetchStub).not.toHaveBeenCalled();
+});
+
+it("gives up on a row GitHub rejects with 422", async () => {
+	await insertFeedback("Bad");
+	const reject = vi.fn(async () => new Response("{}", { status: 422 }));
+	vi.spyOn(console, "info").mockImplementation(() => {});
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, reject);
+	await env.DB.prepare(
+		"UPDATE feedback SET filing_at = datetime('now', '-1 day')",
+	).run();
+	const again = filed(10);
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, again);
+	expect(again).not.toHaveBeenCalled();
+	expect(
+		await env.DB.prepare("SELECT last_status FROM feedback").first(),
+	).toEqual({ last_status: 422 });
+});
+
+it("stops the run on a bad token without using up the rows' attempts", async () => {
+	await insertFeedback("One");
+	await insertFeedback("Two");
+	const denied = vi.fn(async () => new Response("{}", { status: 401 }));
+	vi.spyOn(console, "info").mockImplementation(() => {});
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, denied);
+	expect(denied).toHaveBeenCalledOnce();
+	expect(
+		(
+			await env.DB.prepare(
+				"SELECT attempts, filing_at FROM feedback ORDER BY id",
+			).all()
+		).results,
+	).toEqual([
+		{ attempts: 0, filing_at: null },
+		{ attempts: 0, filing_at: null },
+	]);
+});
+
+it("lets browsers send the page to /feedback as a same-origin Referer", async () => {
+	const res = await exports.default.fetch(`${BASE}/transactions`);
+	expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
 });
