@@ -108,7 +108,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | Button | A primary, secondary, or quiet text action, rendered as a button or link; an HTMX submit can keep its size while showing a still-or-spinning ring and action-specific busy label, and is disabled for the request. |
 | TextInput | A labeled single-line text field with accessible error and disabled states; an invalid field shakes once, while reduced motion keeps it still. |
 | BottomSheet | A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop. |
-| FeedbackButton | A small, fixed, shadowless pill at bottom-right links to the feedback form with the current path. |
+| FeedbackButton | A small, fixed, shadowless pill at bottom-right links to the feedback form, which records the page it came from (a same-origin Referer). |
 | FeedbackForm | Two groups of radio chips and a labeled message give the builder a small, direct report. |
 | ThingsToTry | The demo's bordered "New here? Things to try" block, below Home's Budget list until onboarding (#95) replaces it: three links to where each thing is done, plus How Tally works. |
 | HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
