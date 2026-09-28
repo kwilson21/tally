@@ -117,6 +117,20 @@ describe("BankGroup", () => {
 		expect(unreadable).not.toMatch(/synced yet|Synced|Invalid/);
 	});
 
+	it("gives a disconnected bank no Synced line, since it no longer syncs", async () => {
+		const html = await render(
+			BankGroup({
+				name: "Old Bank",
+				accounts: [],
+				disconnected: true,
+				lastSyncedAt: "2026-09-28 11:48:00",
+				now: new Date("2026-09-28T12:00:00Z"),
+			}),
+		);
+		expect(html).toContain("Disconnected");
+		expect(html).not.toMatch(/Synced/);
+	});
+
 	it("says when a bank's accounts haven't synced yet, with no empty list", async () => {
 		const html = await render(BankGroup({ name: "New Bank", accounts: [] }));
 		expect(html).toContain("Accounts appear after the first sync.");
@@ -156,5 +170,24 @@ describe("AccountsTop", () => {
 		const html = await render(AccountsTop({ netWorthCents: 0 }));
 		expect(html).toMatch(/<div data-chart-space[^>]*aria-hidden="true"/);
 		expect(html).toContain("Net worth over time arrives later");
+	});
+});
+
+describe("BankGroup, disconnected", () => {
+	it("says Disconnected and hides Needs attention, Fix connection and Manage", async () => {
+		const html = await render(
+			BankGroup({
+				name: "Old Bank",
+				accounts: [],
+				needsAttention: true,
+				disconnected: true,
+				manageHref: "/accounts/1/disconnect",
+				fixAttrs: { "data-fix-connection": "", "data-item-id": "1" },
+			}),
+		);
+		expect(html).toContain("Disconnected");
+		expect(html).not.toContain("Needs attention");
+		expect(html).not.toContain("Fix connection");
+		expect(html).not.toContain("Disconnect this bank");
 	});
 });

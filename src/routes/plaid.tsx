@@ -49,7 +49,7 @@ async function storedItem(db: D1Database, id: string) {
 	if (!/^\d+$/.test(id)) return null;
 	return db
 		.prepare(
-			"SELECT id, access_token_encrypted, institution_name FROM plaid_items WHERE id = ?",
+			"SELECT id, access_token_encrypted, institution_name FROM plaid_items WHERE id = ? AND disconnected_at IS NULL",
 		)
 		.bind(Number(id))
 		.first<{
@@ -127,9 +127,12 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 		if (result.item.error) {
 			return c.html(repairFailure(result.item.error), 502);
 		}
-		await c.env.DB.prepare("UPDATE plaid_items SET status = 'ok' WHERE id = ?")
+		const repaired = await c.env.DB.prepare(
+			"UPDATE plaid_items SET status = 'ok' WHERE id = ? AND disconnected_at IS NULL",
+		)
 			.bind(item.id)
 			.run();
+		if (repaired.meta.changes === 0) return c.notFound();
 		c.executionCtx.waitUntil(
 			syncItem(c.env, item.id).catch((error: unknown) => {
 				logPlaidRequestId(error);

@@ -54,7 +54,7 @@ export type SyncResult = SyncSummary | { skipped: true };
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
-	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ?)";
+	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
 
 function accountUpsert(
 	env: SyncEnv,
@@ -115,7 +115,7 @@ async function handlePlaidError(
 				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
 			) {
 				await env.DB.prepare(
-					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ? AND status = ?",
+					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ? AND status = ? AND disconnected_at IS NULL",
 				)
 					.bind(itemRowId, lockId, item.status)
 					.run();
@@ -134,7 +134,7 @@ export async function syncItem(
 	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
 		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes'), sync_lock_id = ?
-		 WHERE id = ? AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
+		 WHERE id = ? AND disconnected_at IS NULL AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
 	)
 		.bind(lockId, itemRowId)
 		.run();
@@ -246,7 +246,7 @@ export async function syncItem(
 			const statements: D1PreparedStatement[] = [
 				env.DB.prepare(
 					`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes')
-					 WHERE id = ? AND sync_lock_id = ?`,
+					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
 				).bind(itemRowId, lockId),
 			];
 			const existingTransactionIds = new Set<string>();
@@ -319,7 +319,7 @@ export async function syncItem(
 			statements.push(
 				env.DB.prepare(
 					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : ", last_synced_at = datetime('now')"}
-					 WHERE id = ? AND sync_lock_id = ?`,
+					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
 				).bind(page.next_cursor, itemRowId, lockId),
 			);
 			const results = await env.DB.batch(statements);

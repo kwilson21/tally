@@ -5,8 +5,10 @@ const EXPORT_COLUMNS = {
 	budget_amounts: "category_id, effective_month, amount_cents",
 	merchants:
 		"raw_name, suggested_name, display_name, default_category_id, suggestion_status",
-	accounts:
-		"id, plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents, updated_at",
+	// Each account names its bank and says whether it's disconnected, since bank rows carry no id.
+	accounts: `id, plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents, updated_at,
+		(SELECT institution_name FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank,
+		(SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank_disconnected`,
 	balance_history: "account_id, date, balance_cents",
 	transactions:
 		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, excluded, parent_id, is_split, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category",
@@ -91,7 +93,10 @@ export async function tallyExport(db: D1Database) {
 		...tables.map(([table, columns]) =>
 			db.prepare(`SELECT ${columns} FROM ${table}`),
 		),
-		db.prepare("SELECT institution_name, status FROM plaid_items ORDER BY id"),
+		// A disconnected bank keeps its old status column; its exported status says "disconnected".
+		db.prepare(
+			"SELECT institution_name, CASE WHEN disconnected_at IS NOT NULL THEN 'disconnected' ELSE status END AS status FROM plaid_items ORDER BY id",
+		),
 		db.prepare("SELECT filename, uploaded_at FROM documents ORDER BY id"),
 	]);
 	const [plaidItems, documents] = results.slice(tables.length);

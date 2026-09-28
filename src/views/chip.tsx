@@ -6,12 +6,22 @@ type Props = {
 	name: string;
 	value: string;
 	checked?: boolean;
+	/** The id of a hint that explains this choice (aria-describedby). */
+	describedBy?: string;
 	icon?: Child;
 	children?: Child;
 };
 
 /** A pill-shaped checkbox or radio: the real input is visually hidden but keyboard-reachable; the pill shows its state. */
-export function Chip({ type, name, value, checked, icon, children }: Props) {
+export function Chip({
+	type,
+	name,
+	value,
+	checked,
+	describedBy,
+	icon,
+	children,
+}: Props) {
 	return (
 		<label class="group inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-rule px-4 text-base text-ink has-[:checked]:border-ink has-[:checked]:bg-band has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
 			<input
@@ -19,6 +29,7 @@ export function Chip({ type, name, value, checked, icon, children }: Props) {
 				name={name}
 				value={value}
 				checked={checked}
+				aria-describedby={describedBy}
 				class="sr-only"
 			/>
 			{/* A switched-on toggle also shows a check mark, so its state isn't color alone (DESIGN.md). */}

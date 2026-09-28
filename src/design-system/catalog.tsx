@@ -948,6 +948,7 @@ function AccountsSketch({ syncId }: { syncId?: string }) {
 					needsAttention={b.needsAttention}
 					lastSyncedAt="2026-09-28 11:48:00"
 					now={new Date("2026-09-28T12:00:00Z")}
+					manageHref="/accounts/1/disconnect"
 				/>
 			))}
 			<Button type="button" class="mt-8">
@@ -965,7 +966,7 @@ function AccountsGroup() {
 				title="AccountsTop, SyncNow, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "SyncNow", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank, each with a muted Synced … line, and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button. Sync now, a secondary button under the title, syncs every healthy bank at most once a minute; while pending it says Syncing…, success shows a toast of what arrived (N new transactions, Nothing new, or Already synced a moment ago) and refreshes the banks, and failure puts one alert naming the bank above the summary. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
+				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank, each with a muted Synced … line, and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action; a disconnected bank keeps its accounts and says Disconnected in muted words, with no Synced line, Manage or Fix connection. Link a bank is the primary button. Sync now, a secondary button under the title, syncs every healthy bank at most once a minute; while pending it says Syncing…, success shows a toast of what arrived (N new transactions, Nothing new, or Already synced a moment ago) and refreshes the banks, and failure puts one alert naming the bank above the summary. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame
@@ -980,6 +981,16 @@ function AccountsGroup() {
 					>
 						<AccountsSketch />
 					</Picture>
+				</State>
+				<State label="A disconnected bank, its history kept">
+					<div class="max-w-xl">
+						<BankGroup
+							name="Old Harbor Bank"
+							accounts={[CHECKING]}
+							disconnected
+							manageHref="/accounts/1/disconnect"
+						/>
+					</div>
 				</State>
 				<State label="AccountRow on its own: a bank account, and a credit card whose debt shows negative">
 					<ul class="max-w-xl divide-y divide-rule">

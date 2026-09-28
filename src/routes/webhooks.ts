@@ -44,15 +44,17 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const body = parsed as Webhook;
 	if (typeof body.item_id !== "string") return c.body(null, 200);
 	const item = await c.env.DB.prepare(
-		"SELECT id, access_token_encrypted, status FROM plaid_items WHERE plaid_item_id = ?",
+		"SELECT id, access_token_encrypted, status, disconnected_at FROM plaid_items WHERE plaid_item_id = ?",
 	)
 		.bind(body.item_id)
 		.first<{
 			id: number;
 			access_token_encrypted: ArrayBuffer;
 			status: string;
+			disconnected_at: string | null;
 		}>();
 	if (!item) return c.body(null, 200);
+	if (item.disconnected_at !== null) return c.body(null, 200);
 
 	if (
 		body.webhook_type === "TRANSACTIONS" &&
@@ -79,7 +81,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		attentionCodes.has(body.webhook_code);
 	if (isAttentionWarning) {
 		await c.env.DB.prepare(
-			"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+			"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND disconnected_at IS NULL",
 		)
 			.bind(item.id)
 			.run();
@@ -89,7 +91,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 			(async () => {
 				if (await loginStillBroken(c.env, item.access_token_encrypted)) {
 					await c.env.DB.prepare(
-						"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND status = ?",
+						"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND status = ? AND disconnected_at IS NULL",
 					)
 						.bind(item.id, item.status)
 						.run();
