@@ -47,6 +47,7 @@ import {
 	TRANSACTIONS_EXAMPLE,
 } from "./mock";
 import {
+	PhoneFrame,
 	Specimen,
 	State,
 	TierPill,
@@ -338,36 +339,6 @@ const ADJUST_SPEC: UseSpecText = {
 	words:
 		"Adjust · Done · Lower {name} to {amount} · Raise {name} to {amount} · {name} is at $0 · {name} is at the largest budget · Toast: {name} is {amount} a month · Announced: {name} is {amount} a month from {month} on. · At a limit, toast and announced: {name} is already $0 · {name} is already the largest budget.",
 };
-
-/**
- * A phone's first screen: 390 wide inside its 1px border and 788 tall, which is 844 minus the 56px
- * tab bar. What's below its edge is what a person scrolls to see. On a narrower screen it scrolls
- * sideways in its column rather than shrinking, so the text wraps exactly as on a real phone.
- */
-function PhoneFrame({ label, children }: { label: string; children?: Child }) {
-	// A picture of a screen, not a working one: one labelled image with nothing inside to Tab to.
-	return (
-		<div class="overflow-x-auto">
-			<div
-				role="img"
-				aria-label={label}
-				class="h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
-			>
-				<div inert>
-					<p class="bg-band py-2 text-center text-sm text-muted">
-						Demo data. Nothing here is real.
-					</p>
-					<div class="px-5 pt-6">
-						<div class="mb-4">
-							<Wordmark />
-						</div>
-						{children}
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
 
 /**
  * A picture of part of a page: HomeTop draws the page's h1 and real links, so here it's one labelled

@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+import { Wordmark } from "../views/brand";
 
 export type Tier = "visual" | "interactive" | "flow";
 
@@ -106,6 +107,42 @@ export function UseSpec({ spec }: { spec: UseSpecText }) {
 					</div>
 				))}
 			</dl>
+		</div>
+	);
+}
+
+/**
+ * A phone's first screen: 390 wide inside its 1px border and 788 tall, which is 844 minus the 56px
+ * tab bar. What's below its edge is what a person scrolls to see. On a narrower screen it scrolls
+ * sideways in its column rather than shrinking, so the text wraps exactly as on a real phone.
+ */
+export function PhoneFrame({
+	label,
+	children,
+}: {
+	label: string;
+	children?: Child;
+}) {
+	// A picture of a screen, not a working one: one labelled image with nothing inside to Tab to.
+	return (
+		<div class="overflow-x-auto">
+			<div
+				role="img"
+				aria-label={label}
+				class="h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+			>
+				<div inert>
+					<p class="bg-band py-2 text-center text-sm text-muted">
+						Demo data. Nothing here is real.
+					</p>
+					<div class="px-5 pt-6">
+						<div class="mb-4">
+							<Wordmark />
+						</div>
+						{children}
+					</div>
+				</div>
+			</div>
 		</div>
 	);
 }
