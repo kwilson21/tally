@@ -28,6 +28,7 @@ function stripJsoncComments(text: string): string {
 
 const config = JSON.parse(stripJsoncComments(raw));
 const demo = config.env.demo;
+const production = config.env.production;
 
 describe("demo environment config", () => {
 	it("runs as the demo", () => {
@@ -61,6 +62,44 @@ describe("demo environment config", () => {
 
 	it("keeps crons out of local dev and other environments", () => {
 		expect(config.triggers).toBeUndefined();
+	});
+});
+
+describe("production environment config (#23)", () => {
+	it("is not the demo, so the nightly reset can never run here", () => {
+		expect(production.vars).toEqual({ DEMO: "false" });
+	});
+
+	it("binds its own database, never the demo's", () => {
+		expect(production.d1_databases).toHaveLength(1);
+		expect(production.d1_databases[0]).toMatchObject({
+			binding: "DB",
+			database_name: "tally-production",
+			database_id: "97a4d15e-58a4-4067-b74e-6101195c6493",
+			migrations_dir: "migrations",
+		});
+		expect(production.d1_databases[0].database_id).not.toBe(
+			demo.d1_databases[0].database_id,
+		);
+	});
+
+	it("is served only at tally.thesuperhuman.us, never finance.*", () => {
+		expect(production.routes).toEqual([
+			{ pattern: "tally.thesuperhuman.us", custom_domain: true },
+		]);
+		expect(production.workers_dev).toBe(false);
+		expect(production.preview_urls).toBe(false);
+		expect(JSON.stringify(production)).not.toContain("finance.");
+	});
+
+	it("syncs every bank daily at 09:00 UTC", () => {
+		expect(production.triggers).toEqual({ crons: ["0 9 * * *"] });
+	});
+
+	it("holds no secrets or Plaid settings; those go in with wrangler secret put", () => {
+		expect(JSON.stringify(production)).not.toMatch(
+			/plaid|secret|token|jev|access_aud|team_domain/i,
+		);
 	});
 });
 

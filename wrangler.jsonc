@@ -23,7 +23,7 @@
 			"migrations_dir": "migrations"
 		}
 	],
-	// "true" shows the demo banner and lets the nightly job reset the data. Production sets "false" in Phase 2.
+	// "true" shows the demo banner and lets the nightly job reset the data. Production sets "false" below.
 	"vars": {
 		"DEMO": "true"
 	},
@@ -49,6 +49,32 @@
 					"binding": "DB",
 					"database_name": "tally-demo",
 					"database_id": "ce0d954f-0f85-46bf-9a25-0890c589e383",
+					"migrations_dir": "migrations"
+				}
+			]
+		},
+		// The family's app (#23). Deploy with: npx wrangler deploy --env production (owner-approved only).
+		// Cloudflare Access guards every path but /webhooks/plaid. Secrets and Plaid settings are set with
+		// `wrangler secret put --env production`, never here.
+		"production": {
+			"routes": [
+				{ "pattern": "tally.thesuperhuman.us", "custom_domain": true }
+			],
+			"workers_dev": false,
+			"preview_urls": false,
+			// The daily catch-up sync (spec §4), at the demo's hour.
+			"triggers": {
+				"crons": ["0 9 * * *"]
+			},
+			// Not the demo: no banner, and the nightly reset can never run (decision 25).
+			"vars": {
+				"DEMO": "false"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "tally-production",
+					"database_id": "97a4d15e-58a4-4067-b74e-6101195c6493",
 					"migrations_dir": "migrations"
 				}
 			]
