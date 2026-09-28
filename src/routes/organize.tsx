@@ -184,16 +184,27 @@ organize.post("/transactions/organize", async (c) => {
 					.bind(categoryId)
 					.first<{ id: number; name: string }>()
 			: null;
+	const url = new URL(c.req.url);
+	const next = url.pathname + url.search;
+	// Another tab already finished this merchant: show the next one with a fresh form,
+	// so the stale choices can't carry over to it.
+	if (!group) {
+		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+		const message = "That merchant already has a category.";
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ toast: { message, type: "info" }, announce: message }),
+		);
+		return renderOrganize(c, undefined, 200, true);
+	}
 	const values: Values = { categoryId: categoryId || null, name, groupName };
 	if (!category) values.categoryError = "Pick a category from the list.";
 	if (name.length > 80)
 		values.nameError = "Name must be 80 characters or fewer.";
-	if (!group)
-		values.categoryError = "This merchant no longer needs a category.";
 	if (values.categoryError || values.nameError)
 		return renderOrganize(c, values, 422);
 
-	const currentGroup = group as NonNullable<typeof group>;
+	const currentGroup = group;
 	const selectedCategory = category as NonNullable<typeof category>;
 	const count = await saveOrganizeGroup(
 		c.env.DB,
@@ -203,8 +214,6 @@ organize.post("/transactions/organize", async (c) => {
 		actor(c),
 	);
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${selectedCategory.name}.`;
-	const url = new URL(c.req.url);
-	const next = url.pathname + url.search;
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	c.header(
 		"HX-Trigger",

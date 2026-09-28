@@ -177,6 +177,27 @@ describe("POST /transactions/organize", () => {
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
 	});
 
+	it("shows a fresh form for the next merchant when the submitted one is already done", async () => {
+		const { res, html } = await post(
+			{ category: "2", name: "Stale name", group: "Gone merchant" },
+			"/transactions/organize",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
+			toast: { type: "info" },
+		});
+		expect(html).not.toContain("Stale name");
+		expect(html).not.toMatch(/value="2"[^>]*checked|checked[^>]*value="2"/);
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+		const plain = await post({
+			category: "2",
+			name: "",
+			group: "Gone merchant",
+		});
+		expect(plain.res.status).toBe(303);
+	});
+
 	it("handles 150 raw names in one shown merchant without exceeding D1 limits", async () => {
 		const statements = [];
 		for (let i = 0; i < 150; i++) {
