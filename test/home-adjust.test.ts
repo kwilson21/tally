@@ -40,7 +40,7 @@ describe("Home day to day", () => {
 	it("offers Adjust beside the Budget heading, swapping Home in place", async () => {
 		const { html } = await get("/");
 		expect(html).toMatch(
-			/<a href="\/\?adjust=1"[^>]*id="adjust-link"[^>]*hx-get="\/\?adjust=1"[^>]*hx-target="#page"[^>]*hx-select="#page"/,
+			/<a href="\/\?adjust=1"[^>]*id="adjust-link"[^>]*hx-get="\/\?adjust=1"[^>]*hx-target="#home"[^>]*hx-select="#page"[^>]*hx-swap="innerHTML"[^>]*hx-sync="body:queue all"/,
 		);
 		expect(html).toContain('Adjust<span class="sr-only"> budgets</span>');
 		expect(html).not.toContain("/nudge/");
@@ -56,13 +56,18 @@ describe("Home day to day", () => {
 describe("GET /?adjust=1", () => {
 	it("puts − and + on every budgeted row, and says Done", async () => {
 		const { html } = await get("/?adjust=1");
-		expect(html).toMatch(/<a href="\/"[^>]*id="adjust-link"[^>]*hx-get="\/"/);
+		// Done joins the taps' queue, so a tap still saving can't bring Adjust mode back after it.
+		expect(html).toMatch(
+			/<a href="\/"[^>]*id="adjust-link"[^>]*hx-get="\/"[^>]*hx-target="#home"[^>]*hx-sync="body:queue all"/,
+		);
 		expect(html).toContain(
 			'Done<span class="sr-only"> adjusting budgets</span>',
 		);
+		// A queued tap swaps into #home, which is never replaced, so it can't land on a page that's gone.
 		expect(html).toMatch(
-			/<form method="post" action="\/budget\/1\/nudge\/down" hx-post="\/budget\/1\/nudge\/down"[^>]*hx-target="#page"[^>]*hx-select="#page"[^>]*hx-sync="body:queue all"/,
+			/<form method="post" action="\/budget\/1\/nudge\/down" hx-post="\/budget\/1\/nudge\/down"[^>]*hx-target="#home"[^>]*hx-select="#page"[^>]*hx-swap="innerHTML"[^>]*hx-sync="body:queue all"/,
 		);
+		expect(html).toMatch(/<div id="home"><div id="page">/);
 		expect(html).toContain('aria-label="Lower Groceries to $690"');
 		expect(html).toContain('aria-label="Raise Groceries to $710"');
 		expect(html).toContain('id="nudge-1-up"');

@@ -43,22 +43,23 @@ const openAttrs = (href: string) => ({
 	"hx-push-url": "true",
 });
 
-// Adjust mode (#94): Adjust, Done and each − or + swap Home in place. Taps queue on the body, which
-// is never swapped, so rapid taps apply one after another; focus stays on the tapped button by its id.
+// Adjust mode (#94): Adjust, Done and each − or + swap Home in place. They share one queue on the
+// body, so rapid taps apply one after another and Done waits for a tap still saving; focus stays on
+// the tapped button by its id. htmx picks a request's target when it's tapped, so they all swap into
+// #home, which is never replaced: a queued request would find the #page it picked already gone.
+const inPlace = {
+	"hx-target": "#home",
+	"hx-select": "#page",
+	"hx-swap": "innerHTML",
+	"hx-sync": "body:queue all",
+};
 const adjustAttrs = (href: string) => ({
 	id: "adjust-link",
 	"hx-get": href,
-	"hx-target": "#page",
-	"hx-select": "#page",
-	"hx-swap": "outerHTML",
 	"hx-push-url": "true",
+	...inPlace,
 });
-const nudgeAttrs = {
-	"hx-target": "#page",
-	"hx-select": "#page",
-	"hx-swap": "outerHTML",
-	"hx-sync": "body:queue all",
-};
+const nudgeAttrs = inPlace;
 
 type HomeOptions = {
 	/** The budget sheet over Home, drawn with this month's numbers. */
@@ -106,126 +107,128 @@ async function renderHome(
 
 	return c.html(
 		<Layout active="home" demo={demo}>
-			<div id="page">
-				{/* One width for the top and the Budget list on desktop (#92, H6). */}
-				<div class="lg:max-w-2xl">
-					<HomeTop
-						month={monthName(month)}
-						safeToSpendCents={summary.safeToSpendCents}
-						status={statusSentence(summary.categories)}
-						demo={demo}
-						band={
-							count > 0
-								? {
-										href: "/transactions?uncategorized=1",
-										text: needs,
-										// Home says "needs a category" once: the Band carries the amount (decision 50).
-										// Refunds can outweigh the spending; it says so, as the budget sheet does.
-										detail:
-											spentCents < 0
-												? `${bandAmount(-spentCents)} more refunded than spent`
-												: `${bandAmount(spentCents)} of this month's spending`,
-									}
-								: undefined
-						}
-					/>
+			<div id="home">
+				<div id="page">
+					{/* One width for the top and the Budget list on desktop (#92, H6). */}
+					<div class="lg:max-w-2xl">
+						<HomeTop
+							month={monthName(month)}
+							safeToSpendCents={summary.safeToSpendCents}
+							status={statusSentence(summary.categories)}
+							demo={demo}
+							band={
+								count > 0
+									? {
+											href: "/transactions?uncategorized=1",
+											text: needs,
+											// Home says "needs a category" once: the Band carries the amount (decision 50).
+											// Refunds can outweigh the spending; it says so, as the budget sheet does.
+											detail:
+												spentCents < 0
+													? `${bandAmount(-spentCents)} more refunded than spent`
+													: `${bandAmount(spentCents)} of this month's spending`,
+										}
+									: undefined
+							}
+						/>
 
-					<section class="mt-8" aria-labelledby="budget-title">
-						<div class="flex items-baseline justify-between gap-4">
-							<h2
-								id="budget-title"
-								class="font-serif text-3xl font-semibold"
-								tabindex={focusHeading ? -1 : undefined}
-								autofocus={focusHeading}
-							>
-								Budget
-							</h2>
-							{canAdjust && (
-								<AdjustLink
-									adjusting={adjusting === true}
-									attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
-								/>
-							)}
-						</div>
-						{summary.categories.length > 0 && (
-							<ul class="mt-2 divide-y divide-rule">
-								{summary.categories.map((cat) => {
-									// An archived category shows for a month it has spending in (spec §7), but it
-									// can't be budgeted, so its row isn't a link.
-									const href = looks.get(cat.id)?.archived
-										? undefined
-										: `/budget/${cat.id}`;
-									return (
-										<ProgressRow
-											name={cat.name}
-											icon={looks.get(cat.id)?.icon ?? "list"}
-											color={looks.get(cat.id)?.color ?? ""}
-											spentCents={cat.spentCents}
-											budgetCents={cat.budgetCents}
-											href={href}
-											attrs={href ? openAttrs(href) : undefined}
-											autofocus={cat.id === focusId}
-											nudge={
-												adjusting && href
-													? {
-															href: `${href}/nudge`,
-															id: `nudge-${cat.id}`,
-															attrs: nudgeAttrs,
-															focus:
-																nudgeFocus?.id === cat.id
-																	? nudgeFocus.direction
-																	: undefined,
-														}
-													: undefined
-											}
-										/>
-									);
-								})}
-							</ul>
-						)}
-						{notBudgeted.length > 0 && (
-							<>
-								<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
-								<ul class="divide-y divide-rule">
-									{notBudgeted.map((cat) => {
-										const href = `/budget/${cat.id}`;
+						<section class="mt-8" aria-labelledby="budget-title">
+							<div class="flex items-baseline justify-between gap-4">
+								<h2
+									id="budget-title"
+									class="font-serif text-3xl font-semibold"
+									tabindex={focusHeading ? -1 : undefined}
+									autofocus={focusHeading}
+								>
+									Budget
+								</h2>
+								{canAdjust && (
+									<AdjustLink
+										adjusting={adjusting === true}
+										attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
+									/>
+								)}
+							</div>
+							{summary.categories.length > 0 && (
+								<ul class="mt-2 divide-y divide-rule">
+									{summary.categories.map((cat) => {
+										// An archived category shows for a month it has spending in (spec §7), but it
+										// can't be budgeted, so its row isn't a link.
+										const href = looks.get(cat.id)?.archived
+											? undefined
+											: `/budget/${cat.id}`;
 										return (
-											<li>
-												<a
-													href={href}
-													autofocus={cat.id === focusId}
-													class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
-													{...openAttrs(href)}
-												>
-													<CategoryIcon icon={cat.icon} color={cat.color} />
-													<span class="min-w-0 flex-1 truncate text-lg">
-														{cat.name}
-													</span>
-													<span class="text-accent">Add a budget</span>
-												</a>
-											</li>
+											<ProgressRow
+												name={cat.name}
+												icon={looks.get(cat.id)?.icon ?? "list"}
+												color={looks.get(cat.id)?.color ?? ""}
+												spentCents={cat.spentCents}
+												budgetCents={cat.budgetCents}
+												href={href}
+												attrs={href ? openAttrs(href) : undefined}
+												autofocus={cat.id === focusId}
+												nudge={
+													adjusting && href
+														? {
+																href: `${href}/nudge`,
+																id: `nudge-${cat.id}`,
+																attrs: nudgeAttrs,
+																focus:
+																	nudgeFocus?.id === cat.id
+																		? nudgeFocus.direction
+																		: undefined,
+															}
+														: undefined
+												}
+											/>
 										);
 									})}
 								</ul>
-							</>
+							)}
+							{notBudgeted.length > 0 && (
+								<>
+									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
+									<ul class="divide-y divide-rule">
+										{notBudgeted.map((cat) => {
+											const href = `/budget/${cat.id}`;
+											return (
+												<li>
+													<a
+														href={href}
+														autofocus={cat.id === focusId}
+														class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
+														{...openAttrs(href)}
+													>
+														<CategoryIcon icon={cat.icon} color={cat.color} />
+														<span class="min-w-0 flex-1 truncate text-lg">
+															{cat.name}
+														</span>
+														<span class="text-accent">Add a budget</span>
+													</a>
+												</li>
+											);
+										})}
+									</ul>
+								</>
+							)}
+							{summary.categories.length === 0 && notBudgeted.length === 0 && (
+								<EmptyState
+									kind="done"
+									sentence="No categories to budget yet."
+									hint="Add a category in Settings to get started."
+									action={{ href: "/settings", label: "Open Settings" }}
+								/>
+							)}
+						</section>
+						{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
+						{demo && (
+							<div class="mt-8">
+								<ThingsToTry />
+							</div>
 						)}
-						{summary.categories.length === 0 && notBudgeted.length === 0 && (
-							<EmptyState
-								kind="done"
-								sentence="No categories to budget yet."
-								hint="Add a category in Settings to get started."
-								action={{ href: "/settings", label: "Open Settings" }}
-							/>
-						)}
-					</section>
-					{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
-					{demo && (
-						<div class="mt-8">
-							<ThingsToTry />
-						</div>
-					)}
+					</div>
+					<div id="sheet">{sheet?.(spent)}</div>
 				</div>
-				<div id="sheet">{sheet?.(spent)}</div>
 			</div>
 		</Layout>,
 		status,

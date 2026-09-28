@@ -95,15 +95,32 @@ assert.equal(
 );
 step("in Adjust mode, + saves Groceries at the next round $10, keeping focus");
 
-// Two quick taps queue rather than race, so both count.
+// Two quick taps queue rather than race, so both count and the page shows both. A slow network is
+// simulated, so the second tap always lands while the first is still saving (the case that used to
+// swap the second answer into the page the first one had already replaced).
+const slowNudge = async (route) => {
+	await new Promise((resolve) => setTimeout(resolve, 400));
+	await route.continue();
+};
+await page.route("**/nudge/**", slowNudge);
 const plus = page.locator("#nudge-1-up");
 await plus.click();
 await plus.click();
-await page.getByText(/of \$680/).waitFor();
+await page.getByText(/of \$680/).waitFor({ timeout: 5000 });
+step("two quick taps both count ($680)");
+
+// Done right after a tap waits for the tap, then puts the buttons away; the tap's late answer
+// can't bring Adjust mode back.
+await plus.click();
 await page.getByRole("link", { name: "Done adjusting budgets" }).click();
+await page.locator("#toasts").getByText("Groceries is $690 a month").waitFor();
 await page.getByRole("link", { name: "Adjust budgets" }).waitFor();
+await page.waitForLoadState("networkidle");
 assert.equal(await page.locator("#nudge-1-up").count(), 0);
-step("two quick taps both count ($680), and Done puts the buttons away");
+assert.equal(new URL(page.url()).search, "");
+await page.getByText(/of \$690/).waitFor();
+await page.unroute("**/nudge/**", slowNudge);
+step("Done right after a tap keeps the tap ($690) and puts the buttons away");
 
 // Reorder through htmx: the button inside the edit form must send its own direction.
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
