@@ -103,6 +103,19 @@ describe("BankGroup", () => {
 		);
 	});
 
+	it("says a bank hasn't synced yet, and leaves the line out when no time is given", async () => {
+		const never = await render(
+			BankGroup({ name: "New Bank", accounts: [], lastSyncedAt: null }),
+		);
+		expect(never).toContain("Not synced yet");
+		const omitted = await render(BankGroup({ name: "New Bank", accounts: [] }));
+		expect(omitted).not.toMatch(/synced yet|Synced/);
+		const unreadable = await render(
+			BankGroup({ name: "New Bank", accounts: [], lastSyncedAt: "garbage" }),
+		);
+		expect(unreadable).not.toMatch(/synced yet|Synced|Invalid/);
+	});
+
 	it("says when a bank's accounts haven't synced yet, with no empty list", async () => {
 		const html = await render(BankGroup({ name: "New Bank", accounts: [] }));
 		expect(html).toContain("Accounts appear after the first sync.");

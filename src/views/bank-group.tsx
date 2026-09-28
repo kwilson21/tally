@@ -13,6 +13,7 @@ type Props = {
 	needsAttention?: boolean;
 	/** Extra attributes for the Fix connection button (what opens Plaid Link, #21). */
 	fixAttrs?: Record<string, string>;
+	/** When it last synced (null: never). Left out, as in the demo, the line isn't shown. */
 	lastSyncedAt?: string | null;
 	/** Fixed only by catalog/tests; the app uses the current time. */
 	now?: Date;
@@ -27,15 +28,17 @@ export function BankGroup({
 	accounts,
 	needsAttention,
 	fixAttrs,
-	lastSyncedAt = null,
+	lastSyncedAt,
 	now,
 }: Props) {
+	const synced =
+		lastSyncedAt === undefined ? null : syncedAtLabel(lastSyncedAt, now);
 	return (
 		<section class="mt-8" data-bank-item-id={fixAttrs?.["data-item-id"]}>
 			<h2 class="text-muted" tabindex={-1}>
 				{name}
 			</h2>
-			<p class="mt-1 text-sm text-muted">{syncedAtLabel(lastSyncedAt, now)}</p>
+			{synced && <p class="mt-1 text-sm text-muted">{synced}</p>}
 			{accounts.length === 0 ? (
 				<p class="mt-2 text-muted">Accounts appear after the first sync.</p>
 			) : (

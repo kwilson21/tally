@@ -1,10 +1,11 @@
-/** Human wording for when a bank last completed a sync. Times are compared in UTC. */
+/** Human wording for when a bank last completed a sync, or null for a time it can't read. Times are compared in UTC. */
 export function syncedAtLabel(
 	lastSyncedAt: string | null,
 	now: Date = new Date(),
-): string {
+): string | null {
 	if (lastSyncedAt === null) return "Not synced yet";
 	const then = new Date(`${lastSyncedAt.replace(" ", "T")}Z`);
+	if (Number.isNaN(then.getTime())) return null;
 	const seconds = Math.max(
 		0,
 		Math.floor((now.getTime() - then.getTime()) / 1000),

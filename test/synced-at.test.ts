@@ -20,4 +20,8 @@ describe("syncedAtLabel", () => {
 	])("words %s as %s", (value, expected) => {
 		expect(syncedAtLabel(value, now)).toBe(expected);
 	});
+
+	it("says nothing for a time it can't read", () => {
+		expect(syncedAtLabel("not a time", now)).toBeNull();
+	});
 });

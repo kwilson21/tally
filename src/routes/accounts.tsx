@@ -1,7 +1,8 @@
 import { Hono } from "hono";
-import { accountsByBank, netWorthCents } from "../db/accounts";
+import { categorizePending } from "../categorize-pending";
+import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { applyMerchantRules } from "../db/transactions";
-import { syncAllItems } from "../plaid/sync-all";
+import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
 import { AccountsTop } from "../views/accounts-top";
 import { BankGroup } from "../views/bank-group";
 import { Button } from "../views/button";
@@ -114,45 +115,64 @@ accounts.get("/accounts", async (c) => {
 	);
 });
 
+/** What a manual sync did, in words, or an alert when a bank failed. */
+function syncOutcome(
+	result: SyncAllResult,
+	banks: Bank[],
+): { alert: string } | { message: string; type: "success" | "info" } {
+	if (result.failed > 0)
+		return {
+			alert: `Couldn't sync ${result.failedBanks.join(", ")}. Try again later.`,
+		};
+	if (result.synced === 0 && result.busy > 0)
+		return { message: "Already synced a moment ago.", type: "info" };
+	if (result.synced === 0 && banks.every((b) => b.needsAttention))
+		return { message: "Fix the connection first.", type: "info" };
+	if (result.added === 0) return { message: "Nothing new", type: "success" };
+	return {
+		message: `${result.added} new ${result.added === 1 ? "transaction" : "transactions"}`,
+		type: "success",
+	};
+}
+
+// Sync now (P12 A): every healthy bank, at most once a minute each. Merchant rules run before the
+// answer so the count and list are right; Jev, as at night, runs after it (decision 56's cap).
+// A failure is said once, in the summary's alert, like Fix connection; success is a toast plus announce.
 accounts.post("/accounts/sync", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
 	const isHtmx = c.req.header("HX-Request") === "true";
+	let alert: string | undefined;
 	try {
 		const result = await syncAllItems(c.env, undefined, Date.now, true);
 		await applyMerchantRules(c.env.DB);
-		const message =
-			result.failed > 0
-				? `Couldn't sync ${result.failedBanks.join(", ")}. Try again later.`
-				: result.synced === 0 && result.skipped > 0
-					? "Synced just now"
-					: result.added === 0
-						? "Nothing new"
-						: `${result.added} new ${result.added === 1 ? "transaction" : "transactions"}`;
+		if (result.synced > 0) {
+			c.executionCtx.waitUntil(
+				categorizePending(c.env).catch((error: unknown) => {
+					console.error(
+						"manual sync categorize failed",
+						error instanceof Error ? error.name : "unknown",
+					);
+				}),
+			);
+		}
+		const outcome = syncOutcome(result, await accountsByBank(c.env.DB));
 		if (!isHtmx) return c.redirect("/accounts", 303);
-		c.header(
-			"HX-Trigger",
-			JSON.stringify({
-				toast: { message, type: result.failed ? "error" : "success" },
-				announce: message,
-			}),
-		);
-		return c.html(
-			<AccountsSummary
-				env={c.env}
-				alert={result.failed ? message : undefined}
-			/>,
-		);
+		if ("alert" in outcome) alert = outcome.alert;
+		else
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({
+					toast: { message: outcome.message, type: outcome.type },
+					announce: outcome.message,
+				}),
+			);
 	} catch (error) {
 		console.error(
 			"manual sync failed",
 			error instanceof Error ? error.name : "unknown",
 		);
 		if (!isHtmx) return c.redirect("/accounts", 303);
-		const message = "Couldn't sync accounts. Try again later.";
-		c.header(
-			"HX-Trigger",
-			JSON.stringify({ toast: { message, type: "error" }, announce: message }),
-		);
-		return c.html(<AccountsSummary env={c.env} alert={message} />);
+		alert = "Couldn't sync accounts. Try again later.";
 	}
+	return c.html(<AccountsSummary env={c.env} alert={alert} />);
 });
