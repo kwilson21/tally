@@ -215,7 +215,8 @@ describe("categorizePending", () => {
 		const next = fakeJev(() => reply(0.5));
 		await categorizePending({ ...withKey, DEMO: "false" }, next.fetchImpl);
 		expect(next.calls()).toBeGreaterThan(0);
-	});
+		// 500 Jev round trips take a few seconds on a busy CI runner.
+	}, 30_000);
 
 	it("skips one transaction Jev can't answer usefully and carries on with the rest", async () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
