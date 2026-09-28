@@ -1,3 +1,4 @@
+import { syncedAtLabel } from "../synced-at";
 import { AccountRow } from "./account-row";
 import { Button } from "./button";
 import { Icon } from "./icons";
@@ -15,6 +16,10 @@ type Props = {
 	manageHref?: string;
 	/** Extra attributes for the Fix connection button (what opens Plaid Link, #21). */
 	fixAttrs?: Record<string, string>;
+	/** When it last synced (null: never). Left out, as in the demo, the line isn't shown. */
+	lastSyncedAt?: string | null;
+	/** Fixed only by catalog/tests; the app uses the current time. */
+	now?: Date;
 };
 
 /**
@@ -28,12 +33,20 @@ export function BankGroup({
 	disconnected,
 	fixAttrs,
 	manageHref,
+	lastSyncedAt,
+	now,
 }: Props) {
+	// A disconnected bank no longer syncs, so it has no "Synced …" line.
+	const synced =
+		disconnected || lastSyncedAt === undefined
+			? null
+			: syncedAtLabel(lastSyncedAt, now);
 	return (
 		<section class="mt-8" data-bank-item-id={fixAttrs?.["data-item-id"]}>
 			<h2 class="text-muted" tabindex={-1}>
 				{name}
 			</h2>
+			{synced && <p class="mt-1 text-sm text-muted">{synced}</p>}
 			{accounts.length === 0 && !disconnected ? (
 				<p class="mt-2 text-muted">Accounts appear after the first sync.</p>
 			) : accounts.length > 0 ? (

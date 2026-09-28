@@ -100,9 +100,12 @@ describe("syncAllItems", () => {
 			DB: undefined as unknown as D1Database,
 		};
 		expect(await syncAllItems(withoutDb, fetchImpl)).toEqual({
+			added: 0,
 			synced: 0,
 			skipped: 0,
+			busy: 0,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(log).toHaveBeenCalledOnce();
@@ -118,9 +121,12 @@ describe("syncAllItems", () => {
 		const fetchImpl = fakePlaid();
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			added: 2,
 			synced: 2,
 			skipped: 0,
+			busy: 0,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(4);
 		const { results } = await env.DB.prepare(
@@ -163,14 +169,69 @@ describe("syncAllItems", () => {
 		});
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			added: 0,
 			synced: 1,
 			skipped: 0,
+			busy: 0,
 			failed: 1,
+			failedBanks: ["Bank"],
 		});
 		expect(accountsCalls).toBe(2);
 	});
 
-	it("counts a live Item lock as skipped", async () => {
+	it("limits attempts per Item and records failed attempts", async () => {
+		const fresh = await addItem();
+		const stale = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_sync_attempt_at = datetime('now') WHERE id = ?",
+		)
+			.bind(fresh)
+			.run();
+		const fetchImpl = fakePlaid();
+		expect(
+			await syncAllItems(enabledEnv, fetchImpl, Date.now, true),
+		).toMatchObject({ synced: 1, skipped: 1, busy: 1 });
+		const staleAttempt = await env.DB.prepare(
+			"SELECT last_sync_attempt_at FROM plaid_items WHERE id = ?",
+		)
+			.bind(stale)
+			.first<{ last_sync_attempt_at: string | null }>();
+		expect(staleAttempt?.last_sync_attempt_at).not.toBeNull();
+	});
+
+	it("lets only one of two overlapping manual syncs claim a bank", async () => {
+		await addItem();
+		let statusChecks = 0;
+		const db = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "prepare") {
+					return (sql: string) => {
+						if (sql.startsWith("SELECT status FROM plaid_items"))
+							statusChecks += 1;
+						return target.prepare(sql);
+					};
+				}
+				const value = Reflect.get(target, prop);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const both = { ...enabledEnv, DB: db };
+		const fetchImpl = fakePlaid();
+
+		const [first, second] = await Promise.all([
+			syncAllItems(both, fetchImpl, Date.now, true),
+			syncAllItems(both, fetchImpl, Date.now, true),
+		]);
+
+		expect(first.synced + second.synced).toBe(1);
+		expect(first.busy + second.busy).toBe(1);
+		// The loser never got past the claim, so only one status check ran.
+		expect(statusChecks).toBe(1);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it("counts a live Item lock as skipped and busy", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes') WHERE id = ?",
@@ -179,9 +240,12 @@ describe("syncAllItems", () => {
 			.run();
 
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
+			added: 0,
 			synced: 0,
 			skipped: 1,
+			busy: 1,
 			failed: 0,
+			failedBanks: [],
 		});
 	});
 
@@ -194,9 +258,12 @@ describe("syncAllItems", () => {
 		expect(
 			await syncAllItems(enabledEnv, fetchImpl, () => times.shift() ?? 0),
 		).toEqual({
+			added: 1,
 			synced: 1,
 			skipped: 1,
+			busy: 0,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
@@ -219,9 +286,12 @@ describe("syncAllItems", () => {
 		});
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			added: 1,
 			synced: 1,
 			skipped: 1,
+			busy: 0,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
@@ -236,9 +306,12 @@ describe("syncAllItems", () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
+			added: 0,
 			synced: 0,
 			skipped: 0,
+			busy: 0,
 			failed: 1,
+			failedBanks: ["Bank"],
 		});
 		expect(error.mock.calls).toEqual([
 			[`plaid daily sync: item ${id} failed Error`],
@@ -310,9 +383,12 @@ describe("syncAllItems", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
 		expect(await syncAllItems({ ...enabledEnv, DB: db }, fakePlaid())).toEqual({
+			added: 1,
 			synced: 1,
 			skipped: 0,
+			busy: 0,
 			failed: 1,
+			failedBanks: ["Bank"],
 		});
 		expect(error).toHaveBeenCalledWith(
 			`plaid daily sync: item ${first} failed Error`,

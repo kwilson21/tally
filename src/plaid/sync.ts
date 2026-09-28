@@ -318,7 +318,8 @@ export async function syncItem(
 			}
 			statements.push(
 				env.DB.prepare(
-					"UPDATE plaid_items SET sync_cursor = ? WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL",
+					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : ", last_synced_at = datetime('now')"}
+					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
 				).bind(page.next_cursor, itemRowId, lockId),
 			);
 			const results = await env.DB.batch(statements);

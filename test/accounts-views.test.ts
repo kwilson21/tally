@@ -88,6 +88,49 @@ describe("BankGroup", () => {
 		expect(html).not.toContain("Fix connection");
 	});
 
+	it("shows when a bank last synced beneath its name", async () => {
+		const html = await render(
+			BankGroup({
+				name: "First Harbor Bank",
+				accounts: rows,
+				lastSyncedAt: "2026-09-28 11:48:00",
+				now: new Date("2026-09-28T12:00:00Z"),
+			}),
+		);
+		expect(html).toContain("Synced 12 minutes ago");
+		expect(html.indexOf("Synced 12 minutes ago")).toBeLessThan(
+			html.indexOf("Checking"),
+		);
+	});
+
+	it("leaves the line out when a bank has no sync time yet or none is given", async () => {
+		const never = await render(
+			BankGroup({ name: "New Bank", accounts: [], lastSyncedAt: null }),
+		);
+		// A bank linked before sync times were kept has none yet; it isn't "never synced".
+		expect(never).not.toMatch(/synced yet|Synced/);
+		const omitted = await render(BankGroup({ name: "New Bank", accounts: [] }));
+		expect(omitted).not.toMatch(/synced yet|Synced/);
+		const unreadable = await render(
+			BankGroup({ name: "New Bank", accounts: [], lastSyncedAt: "garbage" }),
+		);
+		expect(unreadable).not.toMatch(/synced yet|Synced|Invalid/);
+	});
+
+	it("gives a disconnected bank no Synced line, since it no longer syncs", async () => {
+		const html = await render(
+			BankGroup({
+				name: "Old Bank",
+				accounts: [],
+				disconnected: true,
+				lastSyncedAt: "2026-09-28 11:48:00",
+				now: new Date("2026-09-28T12:00:00Z"),
+			}),
+		);
+		expect(html).toContain("Disconnected");
+		expect(html).not.toMatch(/Synced/);
+	});
+
 	it("says when a bank's accounts haven't synced yet, with no empty list", async () => {
 		const html = await render(BankGroup({ name: "New Bank", accounts: [] }));
 		expect(html).toContain("Accounts appear after the first sync.");

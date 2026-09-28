@@ -903,9 +903,10 @@ function describeAccounts() {
 		"Accounts",
 		`Net worth ${whole(NET_WORTH_CENTS)}`,
 		"Net worth over time arrives later",
+		"Sync now",
 		...BANKS.map(
 			(b) =>
-				`${b.name}: ${b.accounts
+				`${b.name}, Synced 12 minutes ago: ${b.accounts
 					.map(
 						(a) =>
 							`${a.name} ending in ${a.mask} ${formatCents(a.isLiability ? -a.balanceCents : a.balanceCents)}`,
@@ -918,16 +919,35 @@ function describeAccounts() {
 	].join(". ");
 }
 
-/** The Accounts screen as the app will draw it (round 5 study, spec §8). */
-function AccountsSketch() {
+/**
+ * The Accounts screen as the app will draw it (round 5 study, spec §8).
+ * Sync now carries the app's id in one picture only, so the page has no duplicate id.
+ */
+function AccountsSketch({ syncId }: { syncId?: string }) {
 	return (
 		<>
-			<AccountsTop netWorthCents={NET_WORTH_CENTS} />
+			<AccountsTop
+				netWorthCents={NET_WORTH_CENTS}
+				action={
+					<div class="mt-4">
+						<Button
+							id={syncId}
+							kind="secondary"
+							type="button"
+							busyLabel="Syncing…"
+						>
+							Sync now
+						</Button>
+					</div>
+				}
+			/>
 			{BANKS.map((b) => (
 				<BankGroup
 					name={b.name}
 					accounts={b.accounts}
 					needsAttention={b.needsAttention}
+					lastSyncedAt="2026-09-28 11:48:00"
+					now={new Date("2026-09-28T12:00:00Z")}
 					manageHref="/accounts/1/disconnect"
 				/>
 			))}
@@ -943,16 +963,16 @@ function AccountsGroup() {
 		<Group id="accounts" title="Accounts">
 			<Specimen
 				id="accounts-screen"
-				title="AccountsTop, BankGroup and AccountRow"
+				title="AccountsTop, SyncNow, BankGroup and AccountRow"
 				tier="visual"
-				components={["AccountsTop", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen shows net worth and accounts grouped by bank. Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action. A bank whose login needs fixing says so in words and offers Fix connection; Link a bank is the primary button. A disconnected bank keeps its accounts and says Disconnected in muted words, with no Manage or Fix connection."
+				components={["AccountsTop", "SyncNow", "BankGroup", "AccountRow"]}
+				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank, each with a muted Synced … line, and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action; a disconnected bank keeps its accounts and says Disconnected in muted words, with no Synced line, Manage or Fix connection. Link a bank is the primary button. Sync now, a secondary button under the title, syncs every healthy bank at most once a minute; while pending it says Syncing…, success shows a toast of what arrived (N new transactions, Nothing new, or Already synced a moment ago) and refreshes the banks, and failure puts one alert naming the bank above the summary. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame
 						label={`Accounts on a phone, top to bottom: ${describeAccounts()}`}
 					>
-						<AccountsSketch />
+						<AccountsSketch syncId="sync-now" />
 					</PhoneFrame>
 				</State>
 				<State label="Desktop">

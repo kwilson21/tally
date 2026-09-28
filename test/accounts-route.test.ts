@@ -1,8 +1,10 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { JEV_URL } from "../src/ai/categorize";
 import { todayUtc } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
+import { encryptToken } from "../src/plaid/token-crypto";
 import { accounts } from "../src/routes/accounts";
 
 const BASE = "http://tally.test";
@@ -72,6 +74,7 @@ describe("accountsByBank", () => {
 			id: expect.any(Number),
 			name: "New Bank",
 			needsAttention: true,
+			lastSyncedAt: null,
 			accounts: [],
 		});
 	});
@@ -144,6 +147,254 @@ describe("GET /accounts", () => {
 	});
 });
 
+describe("POST /accounts/sync", () => {
+	it("returns 404 in the demo", async () => {
+		const response = await exports.default.fetch(
+			new Request(`${BASE}/accounts/sync`, {
+				method: "POST",
+				headers: { Origin: BASE },
+			}),
+		);
+		expect(response.status).toBe(404);
+	});
+
+	it("does not sync again within a minute and preserves the focus target", async () => {
+		await resetDemo(env.DB, todayUtc());
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+		const response = await accounts.request(
+			"/accounts/sync",
+			{ method: "POST", headers: { "HX-Request": "true" } },
+			plaidEnabled,
+		);
+		expect(response.status).toBe(200);
+		expect(fetchSpy).not.toHaveBeenCalled();
+		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Already synced a moment ago.", type: "info" },
+			announce: "Already synced a moment ago.",
+		});
+		const html = await response.text();
+		expect(html).toContain('id="accounts-summary"');
+		expect(html).toContain('id="sync-now"');
+		fetchSpy.mockRestore();
+	});
+
+	it("redirects a native form submission back to Accounts", async () => {
+		await resetDemo(env.DB, todayUtc());
+		const response = await accounts.request(
+			"/accounts/sync",
+			{ method: "POST" },
+			plaidEnabled,
+		);
+		expect(response.status).toBe(303);
+		expect(response.headers.get("location")).toBe("/accounts");
+	});
+
+	it("omits drifting sync times from the demo", async () => {
+		await resetDemo(env.DB, todayUtc());
+		const response = await accounts.request(
+			"/accounts",
+			{},
+			{ ...plaidEnabled, DEMO: "true" },
+		);
+		const html = await response.text();
+		expect(html).not.toMatch(/synced/i);
+	});
+});
+
+describe("POST /accounts/sync feedback", () => {
+	const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+	let waitUntil: ReturnType<typeof vi.fn<(promise: Promise<unknown>) => void>>;
+	const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
+
+	beforeEach(async () => {
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+		waitUntil = vi.fn<(promise: Promise<unknown>) => void>((promise) => {
+			void promise.catch(() => {});
+		});
+		// The demo's categories and merchants, but none of its banks.
+		await resetDemo(env.DB, todayUtc());
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+		]);
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	async function addBank(
+		name: string,
+		{ status = "ok", attemptedNow = false } = {},
+	) {
+		await env.DB.prepare(
+			`INSERT INTO plaid_items
+				(access_token_encrypted, institution_name, linked_by, plaid_item_id, status, last_sync_attempt_at)
+			 VALUES (?, ?, 'person@example.com', ?, ?, ${attemptedNow ? "datetime('now')" : "NULL"})`,
+		)
+			.bind(await encryptToken(`token-${name}`, KEY), name, name, status)
+			.run();
+	}
+
+	/** A fake Plaid: each bank's token gets these transaction names, or fails. */
+	function stubPlaid(added: Record<string, string[]>, failing: string[] = []) {
+		const fetchImpl = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				if (String(url) === JEV_URL) return new Response("{}", { status: 503 });
+				const { access_token } = JSON.parse(String(init?.body)) as {
+					access_token: string;
+				};
+				const bank = access_token.replace("token-", "");
+				if (failing.includes(bank))
+					return Response.json(
+						{ error_type: "API_ERROR", request_id: "request-safe" },
+						{ status: 500 },
+					);
+				if (String(url).endsWith("/accounts/get"))
+					return Response.json({
+						accounts: [
+							{
+								account_id: `account-${bank}`,
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					});
+				return Response.json({
+					added: (added[bank] ?? []).map((name, i) => ({
+						transaction_id: `tx-${bank}-${i}`,
+						account_id: `account-${bank}`,
+						date: "2026-09-27",
+						amount: 1,
+						name,
+						pending: false,
+					})),
+					modified: [],
+					removed: [],
+					next_cursor: "next",
+					has_more: false,
+				});
+			},
+		);
+		vi.stubGlobal("fetch", fetchImpl);
+		return fetchImpl;
+	}
+
+	async function sync(bindings: Record<string, unknown> = {}) {
+		const response = await accounts.request(
+			"/accounts/sync",
+			{ method: "POST", headers: { "HX-Request": "true" } },
+			{ ...plaidEnabled, ...bindings },
+			ctx(),
+		);
+		const trigger = response.headers.get("HX-Trigger");
+		return {
+			response,
+			trigger: trigger ? JSON.parse(trigger) : null,
+			html: await response.text(),
+		};
+	}
+
+	const said = (message: string, type = "success") => ({
+		toast: { message, type },
+		announce: message,
+	});
+
+	it.each([
+		[{ Chase: [] }, "Nothing new"],
+		[{ Chase: ["SHOP"] }, "1 new transaction"],
+		[{ Chase: ["SHOP", "CAFE"], Ally: ["GAS"] }, "3 new transactions"],
+	])("counts what arrived: %j", async (added, message) => {
+		for (const bank of Object.keys(added)) await addBank(bank);
+		stubPlaid(added);
+		const { response, trigger, html } = await sync();
+		expect(response.status).toBe(200);
+		expect(trigger).toEqual(said(message));
+		expect(html).not.toContain('role="alert"');
+	});
+
+	it("names the bank that failed once, in an alert, with no toast", async () => {
+		await addBank("Chase");
+		await addBank("Ally");
+		stubPlaid({ Ally: ["SHOP"] }, ["Chase"]);
+		const { response, trigger, html } = await sync();
+		expect(response.status).toBe(200);
+		expect(trigger).toBeNull();
+		expect(html.match(/role="alert"/g)).toHaveLength(1);
+		expect(html).toContain("Couldn&#39;t sync Chase. Try again later.");
+	});
+
+	it("shows the failure on the Accounts page when the form posts without htmx", async () => {
+		await addBank("Chase");
+		stubPlaid({}, ["Chase"]);
+		const response = await accounts.request(
+			"/accounts/sync",
+			{ method: "POST" },
+			plaidEnabled,
+			ctx(),
+		);
+		expect(response.status).toBe(200);
+		const html = await response.text();
+		expect(html).toContain("<html");
+		expect(html.match(/role="alert"/g)).toHaveLength(1);
+		expect(html).toContain("Couldn&#39;t sync Chase. Try again later.");
+	});
+
+	it("says it already synced when every bank was just tried", async () => {
+		await addBank("Chase", { attemptedNow: true });
+		const fetchImpl = stubPlaid({ Chase: ["SHOP"] });
+		const { trigger } = await sync();
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(trigger).toEqual(said("Already synced a moment ago.", "info"));
+	});
+
+	it("reports only what synced when other banks were just tried", async () => {
+		await addBank("Chase", { attemptedNow: true });
+		await addBank("Ally");
+		stubPlaid({ Ally: ["SHOP"] });
+		const { trigger } = await sync();
+		expect(trigger).toEqual(said("1 new transaction"));
+	});
+
+	it("asks for the connection to be fixed when every bank needs it", async () => {
+		await addBank("Chase", { status: "needs_attention" });
+		const fetchImpl = stubPlaid({});
+		const { trigger } = await sync();
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(trigger).toEqual(said("Fix the connection first.", "info"));
+	});
+
+	it("applies merchant rules before answering and leaves Jev to the nightly job (spec §8.1)", async () => {
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT OR REPLACE INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULED SHOP', 'Ruled Shop', ?)",
+		)
+			.bind(category?.id)
+			.run();
+		await addBank("Chase");
+		const fetchImpl = stubPlaid({ Chase: ["RULED SHOP", "UNKNOWN SHOP"] });
+
+		const { trigger } = await sync({ JEV_API_KEY: "jev-key" });
+		expect(trigger).toEqual(said("2 new transactions"));
+		const ruled = await env.DB.prepare(
+			"SELECT category_id, category_source FROM transactions WHERE raw_name = 'RULED SHOP'",
+		).first();
+		expect(ruled).toEqual({
+			category_id: category?.id,
+			category_source: "merchant_rule",
+		});
+
+		expect(waitUntil).not.toHaveBeenCalled();
+		const jevCalls = fetchImpl.mock.calls.filter(
+			([url]) => String(url) === JEV_URL,
+		);
+		expect(jevCalls).toHaveLength(0);
+	});
+});
+
 const PLAID_LINK_SCRIPT =
 	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
 const plaidEnabled = {
@@ -188,6 +439,8 @@ describe("Link a bank", () => {
 		const enabled = await accounts.request("/accounts", {}, plaidEnabled);
 		const enabledHtml = await enabled.text();
 		expect(enabledHtml).toContain('type="button"');
+		expect(enabledHtml).toContain("Sync now");
+		expect(enabledHtml).toContain("Syncing…");
 		expect(enabledHtml).toContain("Link a bank");
 		expect(enabledHtml).toContain(`src="${PLAID_LINK_SCRIPT}"`);
 		expect(enabledHtml).toContain('src="/js/plaid-link.js"');
@@ -199,6 +452,7 @@ describe("Link a bank", () => {
 			const response = await accounts.request("/accounts", {}, bindings);
 			const html = await response.text();
 			expect(html).not.toContain("Link a bank");
+			expect(html).not.toContain("Sync now");
 			expect(html).not.toContain(PLAID_LINK_SCRIPT);
 			expect(html).not.toContain("/js/plaid-link.js");
 		}

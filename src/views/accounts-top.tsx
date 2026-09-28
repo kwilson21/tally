@@ -1,13 +1,21 @@
+import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 
 /**
  * The Accounts screen's top (round 5 study): the title, Net worth in whole dollars as the serif headline,
  * and a ruled space where the net-worth chart goes in Phase 4.
  */
-export function AccountsTop({ netWorthCents }: { netWorthCents: number }) {
+export function AccountsTop({
+	netWorthCents,
+	action,
+}: {
+	netWorthCents: number;
+	action?: Child;
+}) {
 	return (
 		<>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Accounts</h1>
+			{action}
 			<p class="mt-3 text-lg text-muted">Net worth</p>
 			<p class="font-serif text-6xl font-semibold tracking-tight lg:text-7xl">
 				{formatCents(netWorthCents, { wholeDollars: true })}
