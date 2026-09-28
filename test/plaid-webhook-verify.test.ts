@@ -75,19 +75,19 @@ describe("verifyPlaidWebhook", () => {
 		expect(valid.fetchImpl).toHaveBeenCalledOnce();
 	});
 
+	// Each case builds its overrides when it runs: an iat made when the file loads would drift
+	// toward the window's edge as earlier tests take their time.
+	const nowSeconds = () => Math.floor(Date.now() / 1000);
 	it.each([
-		["HS256", { header: { alg: "HS256" } }],
-		["none", { header: { alg: "none" } }],
-		["missing kid", { header: { kid: undefined } }],
-		["crit", { header: { crit: ["anything"] } }],
-		["old iat", { claims: { iat: Math.floor(Date.now() / 1000) - 361 } }],
-		[
-			"iat 61 seconds ahead",
-			{ claims: { iat: Math.floor(Date.now() / 1000) + 61 } },
-		],
-		["expired key", { expiredAt: 1_767_225_600 }],
+		["HS256", () => ({ header: { alg: "HS256" } })],
+		["none", () => ({ header: { alg: "none" } })],
+		["missing kid", () => ({ header: { kid: undefined } })],
+		["crit", () => ({ header: { crit: ["anything"] } })],
+		["old iat", () => ({ claims: { iat: nowSeconds() - 361 } })],
+		["iat 61 seconds ahead", () => ({ claims: { iat: nowSeconds() + 61 } })],
+		["expired key", () => ({ expiredAt: 1_767_225_600 })],
 	] as const)("rejects %s", async (_name, overrides) => {
-		const value = await fixture(overrides);
+		const value = await fixture(overrides());
 		expect(
 			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
 		).toBe("invalid");
