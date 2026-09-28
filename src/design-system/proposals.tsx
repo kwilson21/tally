@@ -72,6 +72,18 @@ export const DECIDED = [
 			"Option A: a Sync now button under the Accounts title, and each bank says when it last synced (decision 59).",
 		issue: 132,
 	},
+	{
+		title: "P13 · Download your data",
+		outcome:
+			"As drawn: a Your data section at the end of Settings with two downloads, transactions as CSV and everything as JSON (decision 59).",
+		issue: 133,
+	},
+	{
+		title: "P14 · Send feedback",
+		outcome:
+			"Always visible: a small Feedback button pinned above the tab bar on every page, opening a form with a type, how it feels and a message (decision 59). Its icon is still open.",
+		issue: 136,
+	},
 ] as const;
 
 /** The proposals page body. */
