@@ -5,6 +5,7 @@ import { syncItem } from "./sync";
 type SyncAllEnv = PlaidEnv & { DB: D1Database; DEMO?: string };
 
 export type SyncAllResult = {
+	added: number;
 	synced: number;
 	skipped: number;
 	failed: number;
@@ -17,7 +18,7 @@ export async function syncAllItems(
 	now: () => number = Date.now,
 ): Promise<SyncAllResult> {
 	const startedAt = now();
-	const result: SyncAllResult = { synced: 0, skipped: 0, failed: 0 };
+	const result: SyncAllResult = { added: 0, synced: 0, skipped: 0, failed: 0 };
 	if (!enabled(env)) {
 		logResult(result);
 		return result;
@@ -45,7 +46,10 @@ export async function syncAllItems(
 			}
 			const synced = await syncItem(env, item.id, fetchImpl);
 			if ("skipped" in synced) result.skipped += 1;
-			else result.synced += 1;
+			else {
+				result.synced += 1;
+				result.added += synced.added;
+			}
 		} catch (error) {
 			result.failed += 1;
 			const kind =

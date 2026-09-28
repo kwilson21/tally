@@ -1,3 +1,4 @@
+import { syncedAtLabel } from "../synced-at";
 import { AccountRow } from "./account-row";
 import { Button } from "./button";
 import { Icon } from "./icons";
@@ -12,18 +13,29 @@ type Props = {
 	needsAttention?: boolean;
 	/** Extra attributes for the Fix connection button (what opens Plaid Link, #21). */
 	fixAttrs?: Record<string, string>;
+	lastSyncedAt?: string | null;
+	/** Fixed only by catalog/tests; the app uses the current time. */
+	now?: Date;
 };
 
 /**
  * One linked bank: its name, its accounts (or, before the first sync, a line saying they're coming), and, when its login needs fixing, the reason in words with
  * an alert icon (status is never color alone) and a Fix connection button.
  */
-export function BankGroup({ name, accounts, needsAttention, fixAttrs }: Props) {
+export function BankGroup({
+	name,
+	accounts,
+	needsAttention,
+	fixAttrs,
+	lastSyncedAt = null,
+	now,
+}: Props) {
 	return (
 		<section class="mt-8" data-bank-item-id={fixAttrs?.["data-item-id"]}>
 			<h2 class="text-muted" tabindex={-1}>
 				{name}
 			</h2>
+			<p class="mt-1 text-sm text-muted">{syncedAtLabel(lastSyncedAt, now)}</p>
 			{accounts.length === 0 ? (
 				<p class="mt-2 text-muted">Accounts appear after the first sync.</p>
 			) : (

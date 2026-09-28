@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { todayUtc } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
@@ -72,6 +72,7 @@ describe("accountsByBank", () => {
 			id: expect.any(Number),
 			name: "New Bank",
 			needsAttention: true,
+			lastSyncedAt: null,
 			accounts: [],
 		});
 	});
@@ -144,6 +145,36 @@ describe("GET /accounts", () => {
 	});
 });
 
+describe("POST /accounts/sync", () => {
+	it("returns 404 in the demo", async () => {
+		const response = await exports.default.fetch(
+			new Request(`${BASE}/accounts/sync`, {
+				method: "POST",
+				headers: { Origin: BASE },
+			}),
+		);
+		expect(response.status).toBe(404);
+	});
+
+	it("does not sync again within a minute and announces that it just synced", async () => {
+		await resetDemo(env.DB, todayUtc());
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+		const response = await accounts.request(
+			"/accounts/sync",
+			{ method: "POST" },
+			plaidEnabled,
+		);
+		expect(response.status).toBe(200);
+		expect(fetchSpy).not.toHaveBeenCalled();
+		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Synced just now.", type: "success" },
+			announce: "Synced just now.",
+		});
+		expect(await response.text()).toContain('id="accounts-summary"');
+		fetchSpy.mockRestore();
+	});
+});
+
 const PLAID_LINK_SCRIPT =
 	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
 const plaidEnabled = {
@@ -188,6 +219,8 @@ describe("Link a bank", () => {
 		const enabled = await accounts.request("/accounts", {}, plaidEnabled);
 		const enabledHtml = await enabled.text();
 		expect(enabledHtml).toContain('type="button"');
+		expect(enabledHtml).toContain("Sync now");
+		expect(enabledHtml).toContain("Syncing…");
 		expect(enabledHtml).toContain("Link a bank");
 		expect(enabledHtml).toContain(`src="${PLAID_LINK_SCRIPT}"`);
 		expect(enabledHtml).toContain('src="/js/plaid-link.js"');
@@ -199,6 +232,7 @@ describe("Link a bank", () => {
 			const response = await accounts.request("/accounts", {}, bindings);
 			const html = await response.text();
 			expect(html).not.toContain("Link a bank");
+			expect(html).not.toContain("Sync now");
 			expect(html).not.toContain(PLAID_LINK_SCRIPT);
 			expect(html).not.toContain("/js/plaid-link.js");
 		}

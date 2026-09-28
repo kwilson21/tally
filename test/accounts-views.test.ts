@@ -88,6 +88,21 @@ describe("BankGroup", () => {
 		expect(html).not.toContain("Fix connection");
 	});
 
+	it("shows when a bank last synced beneath its name", async () => {
+		const html = await render(
+			BankGroup({
+				name: "First Harbor Bank",
+				accounts: rows,
+				lastSyncedAt: "2026-09-28 11:48:00",
+				now: new Date("2026-09-28T12:00:00Z"),
+			}),
+		);
+		expect(html).toContain("Synced 12 minutes ago");
+		expect(html.indexOf("Synced 12 minutes ago")).toBeLessThan(
+			html.indexOf("Checking"),
+		);
+	});
+
 	it("says when a bank's accounts haven't synced yet, with no empty list", async () => {
 		const html = await render(BankGroup({ name: "New Bank", accounts: [] }));
 		expect(html).toContain("Accounts appear after the first sync.");

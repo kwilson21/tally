@@ -45,7 +45,7 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		...seed.banks.map((bank) =>
 			db
 				.prepare(
-					"INSERT INTO plaid_items (id, access_token_encrypted, institution_name, linked_by) VALUES (?, X'', ?, 'demo')",
+					"INSERT INTO plaid_items (id, access_token_encrypted, institution_name, linked_by, last_synced_at) VALUES (?, X'', ?, 'demo', datetime('now'))",
 				)
 				.bind(bank.id, bank.name),
 		),

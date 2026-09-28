@@ -893,12 +893,21 @@ function describeAccounts() {
 function AccountsSketch() {
 	return (
 		<>
-			<AccountsTop netWorthCents={NET_WORTH_CENTS} />
+			<AccountsTop
+				netWorthCents={NET_WORTH_CENTS}
+				action={
+					<Button kind="secondary" type="button" class="mt-4">
+						Sync now
+					</Button>
+				}
+			/>
 			{BANKS.map((b) => (
 				<BankGroup
 					name={b.name}
 					accounts={b.accounts}
 					needsAttention={b.needsAttention}
+					lastSyncedAt="2026-09-28 11:48:00"
+					now={new Date("2026-09-28T12:00:00Z")}
 				/>
 			))}
 			<Button type="button" class="mt-8">
@@ -916,7 +925,7 @@ function AccountsGroup() {
 				title="AccountsTop, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank with debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
+				sentence="The Accounts screen from the round 5 study: a secondary Sync now button under the title, Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank with a muted Synced … line and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame

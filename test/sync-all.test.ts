@@ -100,6 +100,7 @@ describe("syncAllItems", () => {
 			DB: undefined as unknown as D1Database,
 		};
 		expect(await syncAllItems(withoutDb, fetchImpl)).toEqual({
+			added: 0,
 			synced: 0,
 			skipped: 0,
 			failed: 0,
@@ -118,6 +119,7 @@ describe("syncAllItems", () => {
 		const fetchImpl = fakePlaid();
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			added: 2,
 			synced: 2,
 			skipped: 0,
 			failed: 0,
@@ -163,6 +165,7 @@ describe("syncAllItems", () => {
 		});
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			added: 0,
 			synced: 1,
 			skipped: 0,
 			failed: 1,
@@ -179,6 +182,7 @@ describe("syncAllItems", () => {
 			.run();
 
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
+			added: 0,
 			synced: 0,
 			skipped: 1,
 			failed: 0,
@@ -194,6 +198,7 @@ describe("syncAllItems", () => {
 		expect(
 			await syncAllItems(enabledEnv, fetchImpl, () => times.shift() ?? 0),
 		).toEqual({
+			added: 1,
 			synced: 1,
 			skipped: 1,
 			failed: 0,
@@ -219,6 +224,7 @@ describe("syncAllItems", () => {
 		});
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			added: 1,
 			synced: 1,
 			skipped: 1,
 			failed: 0,
@@ -236,6 +242,7 @@ describe("syncAllItems", () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
+			added: 0,
 			synced: 0,
 			skipped: 0,
 			failed: 1,
@@ -310,6 +317,7 @@ describe("syncAllItems", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
 		expect(await syncAllItems({ ...enabledEnv, DB: db }, fakePlaid())).toEqual({
+			added: 1,
 			synced: 1,
 			skipped: 0,
 			failed: 1,

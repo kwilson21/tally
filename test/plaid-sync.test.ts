@@ -62,7 +62,7 @@ const plaidFetch = (
 
 async function itemState(id: number) {
 	return env.DB.prepare(
-		"SELECT sync_cursor, sync_locked_until, sync_lock_id, status FROM plaid_items WHERE id = ?",
+		"SELECT sync_cursor, sync_locked_until, sync_lock_id, status, last_synced_at FROM plaid_items WHERE id = ?",
 	)
 		.bind(id)
 		.first();
@@ -75,6 +75,28 @@ describe("syncItem", () => {
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
 		]);
+	});
+
+	it("sets last_synced_at only after a successful sync", async () => {
+		const successful = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			successful,
+			plaidFetch(() => response(page())),
+		);
+		expect((await itemState(successful))?.last_synced_at).toEqual(
+			expect.any(String),
+		);
+
+		const failed = await addItem();
+		await expect(
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				failed,
+				plaidFetch(() => response({}, 500)),
+			),
+		).rejects.toThrow();
+		expect((await itemState(failed))?.last_synced_at).toBeNull();
 	});
 
 	it("gets and upserts accounts separately, stores raw names, and saves transactions", async () => {
