@@ -20,6 +20,7 @@ import { Band } from "../src/views/band";
 import { TallyMark, Wordmark } from "../src/views/brand";
 import { CategoryIcon } from "../src/views/category";
 import { Chip } from "../src/views/chip";
+import { EmptyState } from "../src/views/empty-state";
 import {
 	BudgetDiagram,
 	CategoriesDiagram,
@@ -98,6 +99,12 @@ describe("GET /design-system in the demo", () => {
 			AdjustLink({ adjusting: false, href: "#adjust-on" }),
 			AdjustLink({ adjusting: true, href: "#adjust-off" }),
 			...TRANSACTION_ROWS.map((s) => TransactionRow({ row: s.row })),
+			EmptyState({
+				kind: "search",
+				sentence: "No transactions match these filters.",
+				hint: "Try a wider month, or clear the search.",
+				action: { href: "/transactions", label: "Clear filters" },
+			}),
 			Band({ href: BAND.href, children: BAND.text }),
 			Chip({
 				type: "checkbox",

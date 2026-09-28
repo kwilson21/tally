@@ -9,6 +9,7 @@ import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
+import { EmptyState } from "../views/empty-state";
 import { HomeTop } from "../views/home-top";
 import {
 	BudgetDiagram,
@@ -501,6 +502,31 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="empty-state"
+				title="EmptyState"
+				tier="visual"
+				components={["EmptyState"]}
+				sentence="Where a list would be when it is empty: a small drawing, one sentence, a muted hint and at most one secondary button, centred."
+			>
+				<div class="grid gap-6 lg:grid-cols-2">
+					<State label="No results: one thing to do">
+						<EmptyState
+							kind="search"
+							sentence="No transactions match these filters."
+							hint="Try a wider month, or clear the search."
+							action={{ href: "/transactions", label: "Clear filters" }}
+						/>
+					</State>
+					<State label="Nothing to do: no button">
+						<EmptyState
+							kind="done"
+							sentence="Every transaction has a category."
+							hint="New ones appear here as they come in."
+						/>
+					</State>
+				</div>
 			</Specimen>
 			<Specimen
 				id="band"

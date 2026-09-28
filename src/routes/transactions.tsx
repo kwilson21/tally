@@ -29,6 +29,7 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
+import { EmptyState } from "../views/empty-state";
 import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
@@ -251,12 +252,20 @@ async function renderList(
 				</p>
 				<section id="results" class="mt-2" aria-label="Results">
 					{rows.length === 0 ? (
-						<p class="text-muted">
-							No transactions match.{" "}
-							<a href="/transactions" class="inline-flex min-h-11 items-center">
-								Clear filters
-							</a>
-						</p>
+						filters.uncategorized ? (
+							<EmptyState
+								kind="done"
+								sentence="Every transaction has a category."
+								hint="New ones appear here as they come in."
+							/>
+						) : (
+							<EmptyState
+								kind="search"
+								sentence="No transactions match these filters."
+								hint="Try a wider month, or clear the search."
+								action={{ href: "/transactions", label: "Clear filters" }}
+							/>
+						)
 					) : (
 						byDay(rows).map(([date, dayRows]) => (
 							<>
