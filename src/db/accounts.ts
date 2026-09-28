@@ -8,6 +8,8 @@ export type Account = {
 	/** Plaid's current balance in cents; for debt, the amount owed. */
 	balanceCents: number;
 	isLiability: boolean;
+	/** Disconnected accounts remain visible but no longer count toward net worth. */
+	connected?: boolean;
 };
 
 export type Bank = {
@@ -15,6 +17,7 @@ export type Bank = {
 	name: string;
 	/** The bank's login needs fixing (`plaid_items.status = needs_attention`). */
 	needsAttention: boolean;
+	disconnected?: boolean;
 	accounts: Account[];
 };
 
@@ -33,10 +36,17 @@ type Row = {
 
 /** What you have minus what you owe, in cents. */
 export function netWorthCents(
-	accounts: Pick<Account, "balanceCents" | "isLiability">[],
+	accounts: (Pick<Account, "balanceCents" | "isLiability"> &
+		Partial<Pick<Account, "connected">>)[],
 ): number {
 	return accounts.reduce(
-		(sum, a) => sum + (a.isLiability ? -a.balanceCents : a.balanceCents),
+		(sum, a) =>
+			sum +
+			(a.connected === false
+				? 0
+				: a.isLiability
+					? -a.balanceCents
+					: a.balanceCents),
 		0,
 	);
 }
@@ -62,6 +72,7 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 				id: row.bank_id,
 				name: row.bank_name,
 				needsAttention: row.status === "needs_attention",
+				...(row.status === "disconnected" ? { disconnected: true } : {}),
 				accounts: [],
 			};
 			banks.push(bank);
@@ -74,6 +85,7 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 			type: row.type ?? "",
 			balanceCents: row.balance_cents ?? 0,
 			isLiability: row.is_liability === 1,
+			...(row.status === "disconnected" ? { connected: false } : {}),
 		});
 	}
 	return banks;

@@ -53,6 +53,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 			status: string;
 		}>();
 	if (!item) return c.body(null, 200);
+	if (item.status === "disconnected") return c.body(null, 200);
 
 	if (
 		body.webhook_type === "TRANSACTIONS" &&

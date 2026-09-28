@@ -10,6 +10,9 @@ type Props = {
 	accounts: Account[];
 	/** The bank's login needs fixing (`plaid_items.status = needs_attention`). */
 	needsAttention?: boolean;
+	disconnected?: boolean;
+	/** The disconnect confirmation page for this item; absent in the demo. */
+	manageHref?: string;
 	/** Extra attributes for the Fix connection button (what opens Plaid Link, #21). */
 	fixAttrs?: Record<string, string>;
 };
@@ -18,7 +21,14 @@ type Props = {
  * One linked bank: its name, its accounts (or, before the first sync, a line saying they're coming), and, when its login needs fixing, the reason in words with
  * an alert icon (status is never color alone) and a Fix connection button.
  */
-export function BankGroup({ name, accounts, needsAttention, fixAttrs }: Props) {
+export function BankGroup({
+	name,
+	accounts,
+	needsAttention,
+	disconnected,
+	fixAttrs,
+	manageHref,
+}: Props) {
 	return (
 		<section class="mt-8" data-bank-item-id={fixAttrs?.["data-item-id"]}>
 			<h2 class="text-muted" tabindex={-1}>
@@ -50,6 +60,17 @@ export function BankGroup({ name, accounts, needsAttention, fixAttrs }: Props) {
 					</Button>
 					<div data-fix-error class="mt-3" />
 				</>
+			)}
+			{disconnected && <p class="mt-3 text-muted">Disconnected</p>}
+			{manageHref && !disconnected && (
+				<details class="mt-3">
+					<summary class="inline-flex min-h-11 cursor-pointer items-center text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+						Manage
+					</summary>
+					<Button kind="secondary" href={manageHref} class="mt-2">
+						Disconnect this bank
+					</Button>
+				</details>
 			)}
 		</section>
 	);
