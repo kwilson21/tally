@@ -199,6 +199,14 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toMatch(/data-ds-toast="error"/);
 	});
 
+	it("shows a disconnected bank, and DESIGN.md's BankGroup row mentions it", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain("A disconnected bank, its history kept");
+		expect(html).toContain("Fix connection");
+		expect(html).toContain("Link a bank");
+		expect(design).toMatch(/\| BankGroup \|[^\n]*disconnected/);
+	});
+
 	it("blocks every form from submitting", async () => {
 		const { res } = await get("/design-system");
 		const csp = res.headers.get("content-security-policy") ?? "";

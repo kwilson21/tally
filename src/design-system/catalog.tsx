@@ -917,7 +917,7 @@ function AccountsGroup() {
 				title="AccountsTop, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen shows net worth and accounts grouped by bank. Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action. A bank whose login needs fixing says so in words and offers Fix connection; Link a bank is the primary button."
+				sentence="The Accounts screen shows net worth and accounts grouped by bank. Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action. A bank whose login needs fixing says so in words and offers Fix connection; Link a bank is the primary button. A disconnected bank keeps its accounts and says Disconnected in muted words, with no Manage or Fix connection."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame
@@ -932,6 +932,16 @@ function AccountsGroup() {
 					>
 						<AccountsSketch />
 					</Picture>
+				</State>
+				<State label="A disconnected bank, its history kept">
+					<div class="max-w-xl">
+						<BankGroup
+							name="Old Harbor Bank"
+							accounts={[CHECKING]}
+							disconnected
+							manageHref="/accounts/1/disconnect"
+						/>
+					</div>
 				</State>
 				<State label="AccountRow on its own: a bank account, and a credit card whose debt shows negative">
 					<ul class="max-w-xl divide-y divide-rule">
