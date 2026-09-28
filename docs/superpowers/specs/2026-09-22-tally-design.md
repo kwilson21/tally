@@ -121,7 +121,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 **Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date.
 
-"Counted transactions" for a month means: date in that month, `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. Transactions flagged `income` are counted only toward **Income**. They're left out of Spent, Uncategorized, and Safe to spend.
+"Counted transactions" for a month means: date in that month (or, from Phase 3, a payment linked to an earlier month's bill occurrence counts in that occurrence's month instead, never both; decision 58, #26), `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. Transactions flagged `income` are counted only toward **Income**. They're left out of Spent, Uncategorized, and Safe to spend.
 
 | Number | Rule |
 |---|---|

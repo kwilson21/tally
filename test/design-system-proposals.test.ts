@@ -19,6 +19,7 @@ describe("GET /design-system/proposals", () => {
 		expect(DECIDED.length).toBe(14);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
+			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
 			expect(html).toContain(`/issues/${d.issue}"`);
 		}
 	});
