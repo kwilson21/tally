@@ -3,7 +3,7 @@
 // accepted one moves into the real component in its own PR, and a decided one leaves this page
 // for the Decided list.
 
-import { Phase2Proposals } from "./proposals-phase2";
+import { EmptyState } from "../views/empty-state";
 
 // What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50, 54, 55 and 59), and the issue each ships in.
 export const DECIDED = [
@@ -81,7 +81,7 @@ export const DECIDED = [
 	{
 		title: "P14 · Send feedback",
 		outcome:
-			"Always visible: a small Feedback button pinned above the tab bar on every page, opening a form with a type, how it feels and a message (decision 59). Its icon is still open.",
+			"Always visible: a small Feedback button with a round speech bubble, pinned above the tab bar on every page, opening a form with a type, how it feels and a message (decision 59).",
 		issue: 136,
 	},
 ] as const;
@@ -107,7 +107,11 @@ export function Proposals() {
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
 					Open
 				</h2>
-				<Phase2Proposals />
+				<EmptyState
+					kind="done"
+					sentence="No open proposals."
+					hint="Decided ones are listed below, with the issue each ships in."
+				/>
 			</section>
 
 			<section aria-labelledby="decided-title" class="mt-12">
