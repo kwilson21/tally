@@ -325,6 +325,22 @@ describe("POST /accounts/sync feedback", () => {
 		expect(html).toContain("Couldn&#39;t sync Chase. Try again later.");
 	});
 
+	it("shows the failure on the Accounts page when the form posts without htmx", async () => {
+		await addBank("Chase");
+		stubPlaid({}, ["Chase"]);
+		const response = await accounts.request(
+			"/accounts/sync",
+			{ method: "POST" },
+			plaidEnabled,
+			ctx(),
+		);
+		expect(response.status).toBe(200);
+		const html = await response.text();
+		expect(html).toContain("<html");
+		expect(html.match(/role="alert"/g)).toHaveLength(1);
+		expect(html).toContain("Couldn&#39;t sync Chase. Try again later.");
+	});
+
 	it("says it already synced when every bank was just tried", async () => {
 		await addBank("Chase", { attemptedNow: true });
 		const fetchImpl = stubPlaid({ Chase: ["SHOP"] });

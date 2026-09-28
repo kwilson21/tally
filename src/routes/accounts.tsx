@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { categorizePending } from "../categorize-pending";
 import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { applyMerchantRules } from "../db/transactions";
@@ -96,7 +96,8 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 
 // More → Accounts (spec §8): net worth, each linked bank, then the Plaid Link action when configured.
 // Before any bank is linked there's nothing to add up, so no $0: the add empty state instead (decision 55).
-accounts.get("/accounts", async (c) => {
+/** The whole Accounts page; `alert` is a failed no-JavaScript Sync now. */
+function accountsPage(c: Context<App>, alert?: string) {
 	const plaidEnabled = enabled(c.env);
 	return c.html(
 		<Layout
@@ -110,10 +111,12 @@ accounts.get("/accounts", async (c) => {
 			}
 			modules={plaidEnabled ? ["/js/plaid-link.js"] : []}
 		>
-			<AccountsSummary env={c.env} />
+			<AccountsSummary env={c.env} alert={alert} />
 		</Layout>,
 	);
-});
+}
+
+accounts.get("/accounts", (c) => accountsPage(c));
 
 /** What a manual sync did, in words, or an alert when a bank failed. */
 function syncOutcome(
@@ -156,8 +159,8 @@ accounts.post("/accounts/sync", async (c) => {
 			);
 		}
 		const outcome = syncOutcome(result, await accountsByBank(c.env.DB));
-		if (!isHtmx) return c.redirect("/accounts", 303);
 		if ("alert" in outcome) alert = outcome.alert;
+		else if (!isHtmx) return c.redirect("/accounts", 303);
 		else
 			c.header(
 				"HX-Trigger",
@@ -171,8 +174,9 @@ accounts.post("/accounts/sync", async (c) => {
 			"manual sync failed",
 			error instanceof Error ? error.name : "unknown",
 		);
-		if (!isHtmx) return c.redirect("/accounts", 303);
 		alert = "Couldn't sync accounts. Try again later.";
 	}
+	// Without htmx a failure can't ride a redirect, so the whole page carries the alert.
+	if (!isHtmx) return accountsPage(c, alert);
 	return c.html(<AccountsSummary env={c.env} alert={alert} />);
 });
