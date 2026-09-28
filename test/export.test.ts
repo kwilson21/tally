@@ -240,3 +240,16 @@ describe("data exports", () => {
 		);
 	});
 });
+
+it("exports a disconnected bank's status as disconnected", async () => {
+	await env.DB.prepare(
+		"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
+	).run();
+	const response = await exports.default.fetch(
+		`${BASE}/settings/export/tally.json`,
+	);
+	const data = (await response.json()) as {
+		plaid_items: { status: string }[];
+	};
+	expect(data.plaid_items[0]?.status).toBe("disconnected");
+});

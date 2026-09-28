@@ -91,7 +91,10 @@ export async function tallyExport(db: D1Database) {
 		...tables.map(([table, columns]) =>
 			db.prepare(`SELECT ${columns} FROM ${table}`),
 		),
-		db.prepare("SELECT institution_name, status FROM plaid_items ORDER BY id"),
+		// A disconnected bank keeps its old status column; its exported status says "disconnected".
+		db.prepare(
+			"SELECT institution_name, CASE WHEN disconnected_at IS NOT NULL THEN 'disconnected' ELSE status END AS status FROM plaid_items ORDER BY id",
+		),
 		db.prepare("SELECT filename, uploaded_at FROM documents ORDER BY id"),
 	]);
 	const [plaidItems, documents] = results.slice(tables.length);
