@@ -43,24 +43,23 @@ const openAttrs = (href: string) => ({
 	"hx-push-url": "true",
 });
 
-// Adjust mode (#94): Adjust, Done and each − or + swap Home in place. Taps queue on the body, which
-// is never swapped, so rapid taps apply one after another; focus stays on the tapped button by its id.
-const adjustAttrs = (href: string) => ({
-	id: "adjust-link",
-	"hx-get": href,
-	"hx-target": "#page",
-	"hx-select": "#page",
-	"hx-swap": "outerHTML",
-	"hx-push-url": "true",
-});
-// Taps queue, and htmx picks a request's target when it's tapped. #home is never replaced, so a tap
-// queued behind another still lands on the page; #page itself would already be gone.
-const nudgeAttrs = {
+// Adjust mode (#94): Adjust, Done and each − or + swap Home in place. They share one queue on the
+// body, so rapid taps apply one after another and Done waits for a tap still saving; focus stays on
+// the tapped button by its id. htmx picks a request's target when it's tapped, so they all swap into
+// #home, which is never replaced: a queued request would find the #page it picked already gone.
+const inPlace = {
 	"hx-target": "#home",
 	"hx-select": "#page",
 	"hx-swap": "innerHTML",
 	"hx-sync": "body:queue all",
 };
+const adjustAttrs = (href: string) => ({
+	id: "adjust-link",
+	"hx-get": href,
+	"hx-push-url": "true",
+	...inPlace,
+});
+const nudgeAttrs = inPlace;
 
 type HomeOptions = {
 	/** The budget sheet over Home, drawn with this month's numbers. */
