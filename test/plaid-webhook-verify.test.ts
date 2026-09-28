@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifyPlaidWebhook } from "../src/plaid/webhook-verify";
 
 const encoder = new TextEncoder();
@@ -75,28 +75,34 @@ describe("verifyPlaidWebhook", () => {
 		expect(valid.fetchImpl).toHaveBeenCalledOnce();
 	});
 
+	// The clock stands still at a whole second while an iat case runs, so "61 seconds ahead" stays 61
+	// however long signing or earlier tests take.
+	const freezeClock = () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(Math.floor(Date.now() / 1000) * 1000);
+		return Date.now() / 1000;
+	};
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it.each([
-		["HS256", { header: { alg: "HS256" } }],
-		["none", { header: { alg: "none" } }],
-		["missing kid", { header: { kid: undefined } }],
-		["crit", { header: { crit: ["anything"] } }],
-		["old iat", { claims: { iat: Math.floor(Date.now() / 1000) - 361 } }],
-		[
-			"iat 61 seconds ahead",
-			{ claims: { iat: Math.floor(Date.now() / 1000) + 61 } },
-		],
-		["expired key", { expiredAt: 1_767_225_600 }],
+		["HS256", () => ({ header: { alg: "HS256" } })],
+		["none", () => ({ header: { alg: "none" } })],
+		["missing kid", () => ({ header: { kid: undefined } })],
+		["crit", () => ({ header: { crit: ["anything"] } })],
+		["old iat", (now: number) => ({ claims: { iat: now - 361 } })],
+		["iat 61 seconds ahead", (now: number) => ({ claims: { iat: now + 61 } })],
+		["expired key", () => ({ expiredAt: 1_767_225_600 })],
 	] as const)("rejects %s", async (_name, overrides) => {
-		const value = await fixture(overrides);
+		const value = await fixture(overrides(freezeClock()));
 		expect(
 			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
 		).toBe("invalid");
 	});
 
 	it("accepts an iat 30 seconds ahead", async () => {
-		const value = await fixture({
-			claims: { iat: Math.floor(Date.now() / 1000) + 30 },
-		});
+		const value = await fixture({ claims: { iat: freezeClock() + 30 } });
 		expect(
 			await verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
 		).toBe("valid");
