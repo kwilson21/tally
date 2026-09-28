@@ -434,6 +434,7 @@ describe("Access middleware", () => {
 // setting from a Cloudflare problem. Never the token, its claims or the email.
 describe("verifiedEmail explains a refusal in the log", () => {
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 	});
@@ -593,7 +594,6 @@ describe("verifiedEmail explains a refusal in the log", () => {
 		).toBe(
 			"Access sign-in refused: couldn't fetch the signing keys from https://log-refresh.cloudflareaccess.com/cdn-cgi/access/certs (Error: Cloudflare Access certs were unavailable)",
 		);
-		vi.useRealTimers();
 	});
 
 	it("names a malformed token, a bad header, a missing email and an unreadable payload", async () => {
