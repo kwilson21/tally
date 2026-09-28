@@ -5,7 +5,7 @@
 
 import { EmptyState } from "../views/empty-state";
 
-// What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50 and 54), and the issue each ships in.
+// What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50, 54 and 55), and the issue each ships in.
 export const DECIDED = [
 	{
 		title: "P1 · The number on a phone's first screen",
@@ -46,6 +46,12 @@ export const DECIDED = [
 		title: "P8 · Empty lists",
 		outcome:
 			"Option B: a small drawing, one sentence and a hint, and at most one button, centred (decision 54).",
+		issue: 82,
+	},
+	{
+		title: "P9 · Accounts before any bank is linked",
+		outcome:
+			"Option B: no $0 headline yet; the drawing with an add sign, one sentence, a hint that Tally only reads, and Link a bank, centred (decision 55).",
 		issue: 82,
 	},
 ] as const;

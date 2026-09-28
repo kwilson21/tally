@@ -101,7 +101,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | AccountRow | One account: a bank or card line icon, its name, "••4521" (read as "ending in 4521"), and its balance, with debt shown negative. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
-| EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do), one sentence, a muted hint and at most one secondary button, centred (decision 54). |
+| EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do; add sign: one thing to start), one sentence, a muted hint and at most one button, centred (decisions 54, 55). The button is a secondary link, or, for an add, the screen's own primary control passed in. |
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
 | Button | A primary, secondary, or quiet text action, rendered as a button or link; an HTMX submit can keep its size while showing a still-or-spinning ring and action-specific busy label, and is disabled for the request. |

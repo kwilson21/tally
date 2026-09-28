@@ -47,6 +47,7 @@ import {
 	TRANSACTIONS_EXAMPLE,
 } from "./mock";
 import {
+	PhoneFrame,
 	Specimen,
 	State,
 	TierPill,
@@ -340,36 +341,6 @@ const ADJUST_SPEC: UseSpecText = {
 };
 
 /**
- * A phone's first screen: 390 wide inside its 1px border and 788 tall, which is 844 minus the 56px
- * tab bar. What's below its edge is what a person scrolls to see. On a narrower screen it scrolls
- * sideways in its column rather than shrinking, so the text wraps exactly as on a real phone.
- */
-function PhoneFrame({ label, children }: { label: string; children?: Child }) {
-	// A picture of a screen, not a working one: one labelled image with nothing inside to Tab to.
-	return (
-		<div class="overflow-x-auto">
-			<div
-				role="img"
-				aria-label={label}
-				class="h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
-			>
-				<div inert>
-					<p class="bg-band py-2 text-center text-sm text-muted">
-						Demo data. Nothing here is real.
-					</p>
-					<div class="px-5 pt-6">
-						<div class="mb-4">
-							<Wordmark />
-						</div>
-						{children}
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-/**
  * A picture of part of a page: HomeTop draws the page's h1 and real links, so here it's one labelled
  * image with nothing inside to Tab to, and the catalog keeps its own h1.
  */
@@ -516,7 +487,7 @@ function Rows() {
 				title="EmptyState"
 				tier="visual"
 				components={["EmptyState"]}
-				sentence="Where a list would be when it is empty: a small drawing, one sentence, a muted hint and at most one secondary button, centred."
+				sentence="Where a list would be when it is empty: a small drawing, one sentence, a muted hint and at most one button, centred. A magnifier means no results, a tick nothing to do, and an add sign one thing to start, where the screen's own button goes (decision 55)."
 			>
 				<div class="grid gap-6 lg:grid-cols-2">
 					<State label="No results: one thing to do">
@@ -533,6 +504,15 @@ function Rows() {
 							sentence="Every transaction has a category."
 							hint="New ones appear here as they come in."
 						/>
+					</State>
+					<State label="One thing to start: the screen's own button (decision 55)">
+						<EmptyState
+							kind="add"
+							sentence="No banks linked yet."
+							hint="Link your bank to see balances and net worth here. Tally can only read them; it can't move money."
+						>
+							<Button type="button">Link a bank</Button>
+						</EmptyState>
 					</State>
 				</div>
 			</Specimen>

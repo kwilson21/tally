@@ -1,3 +1,4 @@
+/** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
 import { EmptyState } from "../src/views/empty-state";
 
@@ -51,5 +52,37 @@ describe("EmptyState", () => {
 		});
 		expect(html).not.toContain("<button");
 		expect(html).not.toContain("<a");
+	});
+});
+
+describe("EmptyState, the add kind (decision 55)", () => {
+	it("draws the notebook with an add sign in the accent, decorative", () => {
+		const html = render({ kind: "add", sentence: "No banks linked yet." });
+		expect(html).toContain('aria-hidden="true"');
+		expect(html).toContain('<g class="stroke-accent fill-paper">');
+		expect(html).toContain('<circle cx="45" cy="44" r="10"');
+		expect(html).toContain('x1="45" y1="39" x2="45" y2="49"');
+		expect(html).not.toContain("M36 44 L42 50 L55 35");
+	});
+
+	it("puts the screen's own action, such as a script-driven button, where the button goes", () => {
+		const html = String(
+			EmptyState({
+				kind: "add",
+				sentence: "No banks linked yet.",
+				hint: "Link your bank to see balances and net worth here.",
+				children: (
+					<button type="button" data-link-bank>
+						Link a bank
+					</button>
+				),
+			}),
+		);
+		expect(html).toMatch(
+			/<div class="mt-6"><button type="button" data-link-bank[^>]*>Link a bank<\/button><\/div>/,
+		);
+		expect(html.indexOf("No banks linked yet.")).toBeLessThan(
+			html.indexOf("Link a bank"),
+		);
 	});
 });
