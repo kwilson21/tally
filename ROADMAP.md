@@ -6,7 +6,7 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 |---|---|---|---|
 | 0. Setup | Repo, rules, CI, skeleton | CI passes on the skeleton | [milestone](https://github.com/kwilson21/tally/milestone/1) |
 | 1. Core demo live | Home + Transactions on seed data at tally-demo.thesuperhuman.us | Demo live over HTTPS, all routes work, no console errors | [milestone](https://github.com/kwilson21/tally/milestone/2) |
-| 2. Family on the core | Plaid sync + Cloudflare Access for the family, plus Settings with default categories and exclusions, so the numbers are right from day one | Family uses it for a week | [milestone](https://github.com/kwilson21/tally/milestone/3) |
+| 2. Family on the core | Plaid sync + Cloudflare Access for the family, plus Settings with default categories and exclusions, so the numbers are right from day one | Family uses it Oct 1–7, then through October (decision 58) | [milestone](https://github.com/kwilson21/tally/milestone/3) |
 | 3. Bills and splits | In both environments | Shown in demo, used by family | [milestone](https://github.com/kwilson21/tally/milestone/4) |
 | 4. Trends, balances, documents, name suggestions | Remaining features, plus AI suggestions for merchant names and new categories | All 8 features live in both | [milestone](https://github.com/kwilson21/tally/milestone/5) |
 | Design system (track) | A catalog at `/design-system` built from the real components, the process every UI change follows, and the original app's components brought over one at a time ([#76](https://github.com/kwilson21/tally/issues/76)) | The catalog is live on the demo, every existing component is in it at its tier, and the owner has signed off MoneyInput and the first flows there | milestone to come |
