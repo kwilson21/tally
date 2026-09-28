@@ -68,6 +68,14 @@ describe("GET /settings", () => {
 		// Every row starts closed.
 		expect(html).not.toMatch(/<details[^>]*data-row[^>]*\bopen/);
 	});
+
+	it("shows an empty state when there are no active categories", async () => {
+		await env.DB.prepare("UPDATE categories SET archived = 1").run();
+		const { html } = await get("/settings");
+		expect(html).toContain("No active categories.");
+		expect(html).toContain("Add one below, or restore an archived category.");
+		expect(html).toContain("Archived (5)");
+	});
 });
 
 describe("GET /settings?open=<id>", () => {

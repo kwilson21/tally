@@ -116,6 +116,11 @@ async function renderList(
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	const focusCount =
 		focusId !== undefined && !rows.some((r) => r.id === focusId);
+	const allCategorized =
+		filters.uncategorized &&
+		filters.q === "" &&
+		filters.category === null &&
+		!filters.excluded;
 	const pageHref = (n: number) => {
 		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
 		return `/transactions${query ? `?${query}` : ""}`;
@@ -252,7 +257,7 @@ async function renderList(
 				</p>
 				<section id="results" class="mt-2" aria-label="Results">
 					{rows.length === 0 ? (
-						filters.uncategorized ? (
+						allCategorized ? (
 							<EmptyState
 								kind="done"
 								sentence="Every transaction has a category."

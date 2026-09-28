@@ -59,6 +59,15 @@ describe("GET /transactions", () => {
 		);
 	});
 
+	it("keeps the search empty state when needs category is combined with search", async () => {
+		const { html } = await get("/transactions?uncategorized=1&q=zzz");
+		expect(html).toContain("No transactions match these filters.");
+		expect(html).toMatch(
+			/<a[^>]*href="\/transactions"[^>]*>Clear filters<\/a>/,
+		);
+		expect(html).not.toContain("Every transaction has a category.");
+	});
+
 	it("shows the done empty state when no transaction needs a category", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
