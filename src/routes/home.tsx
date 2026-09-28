@@ -106,7 +106,11 @@ async function renderHome(
 			.reduce((sum, t) => sum + t.amountCents, 0);
 
 	return c.html(
-		<Layout active="home" demo={demo}>
+		<Layout
+			active="home"
+			demo={demo}
+			currentPath={c.req.path + new URL(c.req.url).search}
+		>
 			<div id="home">
 				<div id="page">
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}

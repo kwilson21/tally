@@ -68,21 +68,25 @@ step "7. Plaid webhook address" \
 	"Tells Plaid where to send \"new transactions\" notices. Nothing to type." \
 	put_value PLAID_WEBHOOK_URL "https://$HOST/webhooks/plaid"
 
-step "8. Access team domain" \
+step "8. Feedback GitHub token" \
+	"Paste the fine-grained token for filing Issues in kwilson21/tally-feedback." \
+	npx wrangler secret put FEEDBACK_GITHUB_TOKEN --env "$ENV"
+
+step "9. Access team domain" \
 	"Paste the team domain Claude sent you (it looks like yourname.cloudflareaccess.com)." \
 	npx wrangler secret put ACCESS_TEAM_DOMAIN --env "$ENV"
 
-step "9. Access AUD tag" \
+step "10. Access AUD tag" \
 	"Paste the AUD tag Claude sent you: the long string that identifies Tally's Access application." \
 	npx wrangler secret put ACCESS_AUD --env "$ENV"
 
-step "10. Build the database tables" \
+step "11. Build the database tables" \
 	"Creates Tally's tables in the empty tally-production database. Safe to repeat: finished migrations are skipped." \
 	npx wrangler d1 migrations apply DB --env "$ENV" --remote
 
-# Deploys only once every setting from steps 2–9 is set and step 10 left nothing to apply,
+# Deploys only once every setting from steps 2–10 is set and step 11 left nothing to apply,
 # so a skipped step can't put Tally live without its sign-in check or its tables.
-REQUIRED="PLAID_CLIENT_ID PLAID_SECRET TOKEN_ENCRYPTION_KEY JEV_API_KEY PLAID_ENV PLAID_WEBHOOK_URL ACCESS_TEAM_DOMAIN ACCESS_AUD"
+REQUIRED="PLAID_CLIENT_ID PLAID_SECRET TOKEN_ENCRYPTION_KEY JEV_API_KEY PLAID_ENV PLAID_WEBHOOK_URL FEEDBACK_GITHUB_TOKEN ACCESS_TEAM_DOMAIN ACCESS_AUD"
 deploy_when_ready() {
 	local secrets migrations missing=""
 	secrets=$(npx wrangler secret list --env "$ENV" --format json) || return 1
@@ -95,13 +99,13 @@ deploy_when_ready() {
 	fi
 	migrations=$(npx wrangler d1 migrations list DB --env "$ENV" --remote) || return 1
 	if ! grep -q "No migrations to apply" <<<"$migrations"; then
-		echo "Not deploying: the database tables aren't built yet. Run step 10 first."
+		echo "Not deploying: the database tables aren't built yet. Run step 11 first."
 		return 1
 	fi
 	npx wrangler deploy --env "$ENV"
 }
 
-step "11. Deploy" \
+step "12. Deploy" \
 	"Checks every setting is set and the tables are built, then puts Tally live at https://$HOST. The first deploy also creates its DNS record and certificate." \
 	deploy_when_ready
 
