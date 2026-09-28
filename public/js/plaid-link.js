@@ -77,6 +77,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						});
 					} catch (error) {
 						repairAlert(repairError, responseText(error));
+						setRepairBusy(repairButton, false);
 						return;
 					} finally {
 						repairButton.removeEventListener("htmx:after:request", finished);
@@ -117,7 +118,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					if (!newSummary) {
 						repairAlert(
 							repairError,
-							"The connection was fixed, but the list didn't refresh. Reload the page to see it.",
+							'<p role="alert">The connection was fixed, but the list didn\'t refresh. Reload the page to see it.</p>',
 						);
 						setRepairBusy(repairButton, false);
 						return;

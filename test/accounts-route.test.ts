@@ -147,6 +147,35 @@ const plaidEnabled = {
 } as unknown as Env;
 
 describe("Link a bank", () => {
+	it("adds repair hooks and a busy label only when Plaid is enabled", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await env.DB.prepare(
+			"UPDATE plaid_items SET status = 'needs_attention' WHERE institution_name = 'Northline Card Services'",
+		).run();
+
+		const enabledResponse = await accounts.request(
+			"/accounts",
+			{},
+			plaidEnabled,
+		);
+		const enabledHtml = await enabledResponse.text();
+		expect(enabledHtml).toContain("data-fix-connection");
+		expect(enabledHtml).toMatch(/data-item-id="\d+"/);
+		expect(enabledHtml).toContain("Fix connection");
+		expect(enabledHtml).toContain("Fixing…");
+
+		const demoResponse = await accounts.request(
+			"/accounts",
+			{},
+			{ ...plaidEnabled, DEMO: "true" },
+		);
+		const demoHtml = await demoResponse.text();
+		expect(demoHtml).toContain("Fix connection");
+		expect(demoHtml).toContain("Fixing…");
+		expect(demoHtml).not.toContain("data-fix-connection");
+		expect(demoHtml).not.toContain("data-item-id");
+	});
+
 	it("shows the button and Plaid scripts only when Plaid is enabled", async () => {
 		const enabled = await accounts.request("/accounts", {}, plaidEnabled);
 		const enabledHtml = await enabled.text();

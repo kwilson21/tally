@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decryptToken } from "../src/plaid/token-crypto";
+import { decryptToken, encryptToken } from "../src/plaid/token-crypto";
+import { plaid } from "../src/routes/plaid";
 
 const BASE = "http://tally.test";
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -93,6 +94,129 @@ describe("Plaid routes", () => {
 		});
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
+	});
+
+	it("creates an update-mode token from the decrypted item token without products or email", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'family.member@example.com', 'needs_attention') RETURNING id",
+		)
+			.bind(await encryptToken("access-private", KEY))
+			.first<{ id: number }>();
+		const requests: Array<Record<string, unknown>> = [];
+		vi.stubGlobal(
+			"fetch",
+			async (input: string | URL | Request, init?: RequestInit) => {
+				if (String(input).includes("cloudflareaccess.com"))
+					return Response.json({ keys: [jwk] });
+				requests.push(
+					JSON.parse(String(init?.body)) as Record<string, unknown>,
+				);
+				return Response.json({ link_token: "update-link" });
+			},
+		);
+
+		const response = await post(`/plaid/items/${inserted?.id}/link-token`, jwt);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ link_token: "update-link" });
+		expect(requests).toHaveLength(1);
+		expect(requests[0]).toMatchObject({ access_token: "access-private" });
+		expect(requests[0]).not.toHaveProperty("products");
+		expect(JSON.stringify(requests[0])).not.toContain(
+			"family.member@example.com",
+		);
+	});
+
+	it.each(["link-token", "repaired"])(
+		"returns 404 from the %s item route for invalid ids and disabled Plaid",
+		async (route) => {
+			const { jwt, jwk } = await accessIdentity();
+			vi.stubGlobal("fetch", async () => Response.json({ keys: [jwk] }));
+			for (const id of ["999999", "not-a-number"]) {
+				expect((await post(`/plaid/items/${id}/${route}`, jwt)).status).toBe(
+					404,
+				);
+			}
+			Object.assign(env, { DEMO: "true" });
+			expect((await post(`/plaid/items/1/${route}`, jwt)).status).toBe(404);
+			Object.assign(env, { DEMO: "false", PLAID_SECRET: undefined });
+			expect((await post(`/plaid/items/1/${route}`, jwt)).status).toBe(404);
+		},
+	);
+
+	it.each(["link-token", "repaired"])(
+		"rejects a cross-site POST to the %s item route",
+		async (route) => {
+			const response = await exports.default.fetch(
+				`${BASE}/plaid/items/1/${route}`,
+				{ method: "POST", headers: { Origin: "https://evil.example" } },
+			);
+			expect(response.status).toBe(403);
+		},
+	);
+
+	it("marks an item repaired, starts its sync, and returns only its announcement", async () => {
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",
+		)
+			.bind(await encryptToken("never-return-this", KEY))
+			.first<{ id: number }>();
+		const waitUntil = vi.fn((promise: Promise<unknown>) => {
+			void promise.catch(() => {});
+		});
+		const response = await plaid.request(
+			`http://tally.test/plaid/items/${inserted?.id}/repaired`,
+			{ method: "POST", headers: { Origin: BASE } },
+			env,
+			{ waitUntil, passThroughOnException() {}, props: {} },
+		);
+
+		expect(response.status).toBe(204);
+		expect(waitUntil).toHaveBeenCalledOnce();
+		expect(
+			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
+				.bind(inserted?.id)
+				.first(),
+		).toEqual({ status: "ok" });
+		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Fixed First Bank.", type: "success" },
+			announce: "Fixed First Bank.",
+		});
+		expect(JSON.stringify([...response.headers])).not.toContain(
+			"never-return-this",
+		);
+		expect(await response.text()).not.toContain("never-return-this");
+	});
+
+	it("shows a generic update-token failure and never logs its token", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (?, 'First Bank', 'member@example.com') RETURNING id",
+		)
+			.bind(await encryptToken("never-log-update-token", KEY))
+			.first<{ id: number }>();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.stubGlobal("fetch", async (input: string | URL | Request) =>
+			String(input).includes("cloudflareaccess.com")
+				? Response.json({ keys: [jwk] })
+				: Response.json(
+						{ error_code: "BAD", request_id: "req-update" },
+						{ status: 400 },
+					),
+		);
+
+		const response = await post(`/plaid/items/${inserted?.id}/link-token`, jwt);
+		expect(response.status).toBe(502);
+		expect(await response.text()).toContain(
+			"Couldn&#39;t fix the connection. Try again.",
+		);
+		expect(errors).toHaveBeenCalledWith("Plaid request failed", {
+			request_id: "req-update",
+		});
+		expect(JSON.stringify(errors.mock.calls)).not.toContain(
+			"never-log-update-token",
+		);
 	});
 
 	it("creates a Link token with a stable non-email user id", async () => {

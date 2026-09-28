@@ -39,7 +39,13 @@ export function BankGroup({ name, accounts, needsAttention, fixAttrs }: Props) {
 						<Icon name="alert" class="size-5 shrink-0" />
 						Needs attention: sign in again
 					</p>
-					<Button kind="secondary" type="button" class="mt-3" {...fixAttrs}>
+					<Button
+						kind="secondary"
+						type="button"
+						class="mt-3"
+						busyLabel="Fixing…"
+						{...fixAttrs}
+					>
 						Fix connection
 					</Button>
 					<div data-fix-error class="mt-3" />
