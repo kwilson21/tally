@@ -50,6 +50,7 @@ export function Specimen({
 			data-ds-tier={tier}
 			data-ds-components={components.join(" ")}
 			hx-ignore={tier === "visual" ? "" : undefined}
+			inert={tier === "visual" ? true : undefined}
 			class="border-t border-rule py-8"
 		>
 			<div class="flex flex-wrap items-center gap-x-3 gap-y-1">

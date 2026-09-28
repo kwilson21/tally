@@ -765,11 +765,10 @@ function Feedback() {
 				sentence="A fixed, shadowless pill links to the feedback form and carries the current page with it."
 			>
 				<p class="text-muted">
-					The real component is fixed at the bottom-right of this catalog page.
+					The real component is fixed at the bottom-right of this catalog page;
+					this specimen is shown in place.
 				</p>
-				<div hx-ignore inert>
-					<FeedbackButton fixed={false} />
-				</div>
+				<FeedbackButton fixed={false} />
 			</Specimen>
 			<Specimen
 				id="feedback-form"
@@ -778,11 +777,9 @@ function Feedback() {
 				components={["FeedbackForm"]}
 				sentence="Two groups of radio chips and a labeled message give the builder a small, direct report."
 			>
-				<div hx-ignore inert>
-					<FeedbackForm
-						values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
-					/>
-				</div>
+				<FeedbackForm
+					values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
+				/>
 			</Specimen>
 			<Specimen
 				id="toast"

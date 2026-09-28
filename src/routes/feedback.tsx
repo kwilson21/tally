@@ -25,13 +25,12 @@ const FEELINGS = new Set([
 	"Delighted",
 ]);
 
-export function safePath(value: string | null) {
-	if (!value) return "/";
+function safePath(value: string | null) {
 	try {
-		const url = new URL(value, "http://tally.invalid");
-		const path = `${url.pathname}${url.search}${url.hash}`;
-		return url.origin === "http://tally.invalid" && /^\/[^/\\]/.test(path)
-			? path
+		const url = new URL(value ?? "/", "http://tally.invalid");
+		const normalized = `${url.pathname}${url.search}${url.hash}`;
+		return url.origin === "http://tally.invalid" && /^\/[^/\\]/.test(normalized)
+			? normalized
 			: "/";
 	} catch {
 		return "/";
@@ -78,9 +77,7 @@ feedback.get("/feedback", (c) => {
 			const url = new URL(referer);
 			if (url.origin === new URL(c.req.url).origin)
 				from = safePath(`${url.pathname}${url.search}${url.hash}`);
-		} catch {
-			// A malformed Referer is treated like no Referer.
-		}
+		} catch {}
 	}
 	return c.html(
 		view(
@@ -116,8 +113,8 @@ feedback.post("/feedback", async (c) => {
 	const actor = c.get("actor");
 	const result = await c.env.DB.prepare(
 		`INSERT INTO feedback (actor, type, feeling, message, page, device)
-		 SELECT ?, ?, ?, ?, ?, ? WHERE
-		 (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
+		 SELECT ?, ?, ?, ?, ?, ?
+		 WHERE (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
 	)
 		.bind(
 			actor,
@@ -129,7 +126,7 @@ feedback.post("/feedback", async (c) => {
 			actor,
 		)
 		.run();
-	if (!result.meta.changes) {
+	if (result.meta.changes === 0) {
 		return c.html(
 			view(
 				values,
@@ -155,6 +152,12 @@ feedback.post("/feedback", async (c) => {
 	return c.redirect(`${back.pathname}${back.search}${back.hash}`, 303);
 });
 
+class FilingError extends Error {
+	constructor(readonly status: number) {
+		super(`Feedback GitHub request failed (${status})`);
+	}
+}
+
 export async function fileFeedbackIssue(
 	db: D1Database,
 	token: string,
@@ -168,7 +171,10 @@ export async function fileFeedbackIssue(
 		)
 		.bind(item.id)
 		.run();
-	if (!claim.meta.changes) return;
+	if (claim.meta.changes === 0) return;
+	const titleMessage = Array.from(item.message.replace(/\s+/g, " ").trim())
+		.slice(0, 60)
+		.join("");
 	let response: Response;
 	try {
 		response = await fetchImpl(
@@ -182,18 +188,17 @@ export async function fileFeedbackIssue(
 					"User-Agent": "Tally feedback worker",
 				},
 				body: JSON.stringify({
-					title: `${item.type}: ${Array.from(item.message.replace(/\s+/g, " ").trim()).slice(0, 60).join("")}`,
-					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${item.page}\nDevice: ${item.device}\n\n${item.message
-						.split("\n")
-						.map((line) => `> ${line}`)
-						.join("\n")}`,
+					title: `${item.type}: ${titleMessage}`,
+					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${item.page}\nDevice: ${item.device}\n\n> ${item.message.replace(/\n/g, "\n> ")}`,
 					labels: [item.type],
 				}),
 			},
 		);
 	} catch (error) {
 		await db
-			.prepare("UPDATE feedback SET filing_at = NULL WHERE id = ?")
+			.prepare(
+				"UPDATE feedback SET filing_at = CASE WHEN attempts >= 5 THEN filing_at ELSE NULL END WHERE id = ?",
+			)
 			.bind(item.id)
 			.run();
 		throw error;
@@ -202,20 +207,20 @@ export async function fileFeedbackIssue(
 	if (!response.ok) {
 		await db
 			.prepare(
-				"UPDATE feedback SET last_status = ?, filing_at = CASE WHEN ? = 422 OR attempts >= 5 THEN filing_at ELSE NULL END WHERE id = ?",
+				`UPDATE feedback SET last_status = ?, filing_at = CASE WHEN ? = 422 OR attempts >= 5 THEN filing_at ELSE NULL END WHERE id = ?`,
 			)
 			.bind(response.status, response.status, item.id)
 			.run();
-		throw new Error(`Feedback GitHub request failed (${response.status})`);
+		throw new FilingError(response.status);
 	}
 	const issue = (await response.json()) as { number?: number };
 	if (!Number.isInteger(issue.number))
 		throw new Error("Feedback GitHub response had no issue number");
 	await db
 		.prepare(
-			"UPDATE feedback SET github_issue_number = ?, filed_at = CURRENT_TIMESTAMP WHERE id = ?",
+			"UPDATE feedback SET github_issue_number = ?, filed_at = CURRENT_TIMESTAMP, last_status = ? WHERE id = ?",
 		)
-		.bind(issue.number, item.id)
+		.bind(issue.number, response.status, item.id)
 		.run();
 }
 
@@ -225,7 +230,8 @@ export async function retryFeedback(
 ) {
 	if (env.DEMO === "true" || !env.FEEDBACK_GITHUB_TOKEN) return;
 	const rows = await env.DB.prepare(
-		"SELECT * FROM feedback WHERE github_issue_number IS NULL AND filing_at IS NULL AND attempts < 5 AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20",
+		`SELECT * FROM feedback WHERE github_issue_number IS NULL AND filing_at IS NULL
+		 AND attempts < 5 AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20`,
 	).all<FeedbackRow>();
 	for (const row of rows.results) {
 		try {
@@ -236,8 +242,11 @@ export async function retryFeedback(
 				fetchImpl,
 			);
 		} catch (error) {
-			// The status was logged without the feedback or token; the row stays ready for tomorrow.
-			if (/\((401|403)\)/.test(String(error))) break;
+			if (
+				error instanceof FilingError &&
+				(error.status === 401 || error.status === 403)
+			)
+				break;
 		}
 	}
 }
