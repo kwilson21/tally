@@ -365,7 +365,7 @@ describe("POST /accounts/sync feedback", () => {
 		expect(trigger).toEqual(said("Fix the connection first.", "info"));
 	});
 
-	it("applies merchant rules before answering, then leaves the rest to Jev in the background", async () => {
+	it("applies merchant rules before answering and leaves Jev to the nightly job (spec §8.1)", async () => {
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
 		).first<{ id: number }>();
@@ -387,12 +387,11 @@ describe("POST /accounts/sync feedback", () => {
 			category_source: "merchant_rule",
 		});
 
-		expect(waitUntil).toHaveBeenCalledOnce();
-		await waitUntil.mock.calls[0]?.[0];
+		expect(waitUntil).not.toHaveBeenCalled();
 		const jevCalls = fetchImpl.mock.calls.filter(
 			([url]) => String(url) === JEV_URL,
 		);
-		expect(jevCalls).toHaveLength(1);
+		expect(jevCalls).toHaveLength(0);
 	});
 });
 

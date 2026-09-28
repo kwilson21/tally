@@ -5,7 +5,7 @@ const now = new Date("2026-09-28T12:00:00Z");
 
 describe("syncedAtLabel", () => {
 	it.each([
-		[null, "Not synced yet"],
+		[null, null],
 		["2026-09-28 11:59:01", "Synced just now"],
 		["2026-09-28 11:59:00", "Synced 1 minute ago"],
 		["2026-09-28 11:01:00", "Synced 59 minutes ago"],

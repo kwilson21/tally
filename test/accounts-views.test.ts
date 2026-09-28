@@ -103,11 +103,12 @@ describe("BankGroup", () => {
 		);
 	});
 
-	it("says a bank hasn't synced yet, and leaves the line out when no time is given", async () => {
+	it("leaves the line out when a bank has no sync time yet or none is given", async () => {
 		const never = await render(
 			BankGroup({ name: "New Bank", accounts: [], lastSyncedAt: null }),
 		);
-		expect(never).toContain("Not synced yet");
+		// A bank linked before sync times were kept has none yet; it isn't "never synced".
+		expect(never).not.toMatch(/synced yet|Synced/);
 		const omitted = await render(BankGroup({ name: "New Bank", accounts: [] }));
 		expect(omitted).not.toMatch(/synced yet|Synced/);
 		const unreadable = await render(

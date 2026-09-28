@@ -1,5 +1,4 @@
 import { type Context, Hono } from "hono";
-import { categorizePending } from "../categorize-pending";
 import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { applyMerchantRules } from "../db/transactions";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
@@ -139,7 +138,7 @@ function syncOutcome(
 }
 
 // Sync now (P12 A): every healthy bank, at most once a minute each. Merchant rules run before the
-// answer so the count and list are right; Jev, as at night, runs after it (decision 56's cap).
+// answer so the count and list are right; Jev is left to the nightly job (spec §8.1).
 // A failure is said once, in the summary's alert, like Fix connection; success is a toast plus announce.
 accounts.post("/accounts/sync", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
@@ -148,16 +147,6 @@ accounts.post("/accounts/sync", async (c) => {
 	try {
 		const result = await syncAllItems(c.env, undefined, Date.now, true);
 		await applyMerchantRules(c.env.DB);
-		if (result.synced > 0) {
-			c.executionCtx.waitUntil(
-				categorizePending(c.env).catch((error: unknown) => {
-					console.error(
-						"manual sync categorize failed",
-						error instanceof Error ? error.name : "unknown",
-					);
-				}),
-			);
-		}
 		const outcome = syncOutcome(result, await accountsByBank(c.env.DB));
 		if ("alert" in outcome) alert = outcome.alert;
 		else if (!isHtmx) return c.redirect("/accounts", 303);
