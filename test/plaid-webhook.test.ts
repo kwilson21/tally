@@ -199,10 +199,7 @@ describe("Plaid webhook route", () => {
 	);
 
 	it.each([
-		["ERROR", "ITEM_LOGIN_REQUIRED", "needs_attention"],
 		["ERROR", "PRODUCT_NOT_READY", "ok"],
-		["ERROR", undefined, "needs_attention"],
-		["ERROR", null, "needs_attention"],
 		["PENDING_EXPIRATION", undefined, "needs_attention"],
 		["PENDING_DISCONNECT", undefined, "needs_attention"],
 		["USER_PERMISSION_REVOKED", undefined, "needs_attention"],
@@ -243,7 +240,62 @@ describe("Plaid webhook route", () => {
 		expect(
 			await env.DB.prepare("SELECT status FROM plaid_items").first(),
 		).toEqual({ status });
+		if (webhookCode !== "ERROR") {
+			expect(fetch).toHaveBeenCalledTimes(1);
+		}
 	});
+
+	it.each([
+		[null, "ok"],
+		[{ error_code: "ITEM_LOGIN_REQUIRED" }, "needs_attention"],
+	] as const)(
+		"confirms an ITEM error with Plaid before setting status: %o",
+		async (currentError, status) => {
+			await env.DB.prepare(
+				"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person')",
+			)
+				.bind(await encryptToken("access-token", KEY))
+				.run();
+			const sign = await signer();
+			const body = JSON.stringify({
+				item_id: "item-1",
+				webhook_type: "ITEM",
+				webhook_code: "ERROR",
+				error: { error_code: "ITEM_LOGIN_REQUIRED" },
+			});
+			const { token, jwk } = await sign(body);
+			const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+				String(input).endsWith("/webhook_verification_key/get")
+					? Response.json({ key: { ...jwk, expired_at: null } })
+					: Response.json({ item: { error: currentError } }),
+			);
+			vi.stubGlobal("fetch", fetchMock);
+			expect(
+				(
+					await app.request(
+						"http://tally.test/webhooks/plaid",
+						{
+							method: "POST",
+							body,
+							headers: {
+								"content-type": "application/json",
+								"Plaid-Verification": token,
+							},
+						},
+						env,
+					)
+				).status,
+			).toBe(200);
+			expect(
+				await env.DB.prepare("SELECT status FROM plaid_items").first(),
+			).toEqual({ status });
+			expect(
+				fetchMock.mock.calls.filter(([input]) =>
+					String(input).endsWith("/item/get"),
+				),
+			).toHaveLength(1);
+		},
+	);
 
 	it("syncs the matching Item in waitUntil without logging secrets", async () => {
 		await env.DB.prepare(

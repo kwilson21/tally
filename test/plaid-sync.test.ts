@@ -632,6 +632,45 @@ describe("syncItem", () => {
 		});
 	});
 
+	it.each([
+		["the login was repaired", response({ item: { error: null } }), "ok"],
+		[
+			"Plaid still reports the login error",
+			response({ item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } } }),
+			"needs_attention",
+		],
+		["the confirmation request fails", response({}, 500), "needs_attention"],
+	] as const)(
+		"rethrows a login error and leaves the right status when %s",
+		async (_case, itemResponse, expectedStatus) => {
+			const id = await addItem();
+			const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+				if (String(url).endsWith("/accounts/get"))
+					return response({ accounts: [account()] });
+				if (String(url).endsWith("/item/get")) return itemResponse;
+				return response(
+					{
+						error_type: "ITEM_ERROR",
+						error_code: "ITEM_LOGIN_REQUIRED",
+						request_id: "safe-request-id",
+					},
+					400,
+				);
+			});
+			const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+			await expect(
+				syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+			).rejects.toThrow("Plaid request failed");
+			spy.mockRestore();
+			expect((await itemState(id))?.status).toBe(expectedStatus);
+			expect(
+				fetchImpl.mock.calls.filter(([url]) =>
+					String(url).endsWith("/item/get"),
+				),
+			).toHaveLength(1);
+		},
+	);
+
 	it("flags every Item error except temporary ones, and always rethrows", async () => {
 		expect(TRANSIENT_ITEM_ERROR_CODES).toEqual([
 			"PRODUCT_NOT_READY",

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { type PlaidEnv, PlaidError } from "../plaid/client";
+import { loginStillBroken } from "../plaid/login-broken";
 import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../plaid/sync";
 import { verifyPlaidWebhook } from "../plaid/webhook-verify";
 import { enabled } from "./plaid";
@@ -43,10 +44,10 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const body = parsed as Webhook;
 	if (typeof body.item_id !== "string") return c.body(null, 200);
 	const item = await c.env.DB.prepare(
-		"SELECT id FROM plaid_items WHERE plaid_item_id = ?",
+		"SELECT id, access_token_encrypted FROM plaid_items WHERE plaid_item_id = ?",
 	)
 		.bind(body.item_id)
-		.first<{ id: number }>();
+		.first<{ id: number; access_token_encrypted: ArrayBuffer }>();
 	if (!item) return c.body(null, 200);
 
 	if (
@@ -64,12 +65,18 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	}
 
 	const itemError = body.error?.error_code;
-	const needsAttention =
+	const isItemError =
 		body.webhook_type === "ITEM" &&
-		((body.webhook_code === "ERROR" &&
-			!(typeof itemError === "string" && transientErrors.has(itemError))) ||
-			(typeof body.webhook_code === "string" &&
-				attentionCodes.has(body.webhook_code)));
+		body.webhook_code === "ERROR" &&
+		!(typeof itemError === "string" && transientErrors.has(itemError));
+	const isAttentionWarning =
+		body.webhook_type === "ITEM" &&
+		typeof body.webhook_code === "string" &&
+		attentionCodes.has(body.webhook_code);
+	const needsAttention =
+		isAttentionWarning ||
+		(isItemError &&
+			(await loginStillBroken(c.env, item.access_token_encrypted)));
 	if (needsAttention) {
 		await c.env.DB.prepare(
 			"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
