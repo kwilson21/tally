@@ -5,16 +5,28 @@ import { secureHeaders } from "hono/secure-headers";
 const inCatalog = (path: string) =>
 	path === "/design-system" || path.startsWith("/design-system/");
 
-// Everything is served from our own origin; Plaid's CDN is added on the Accounts page in Phase 2.
+// Plaid Link is the one third-party script, and its hosts are allowed only on Accounts.
 export const security = secureHeaders({
 	xFrameOptions: "DENY",
 	contentSecurityPolicy: {
 		defaultSrc: ["'self'"],
-		scriptSrc: ["'self'"],
+		scriptSrc: [
+			(c) =>
+				c.req.path === "/accounts" ? "'self' https://cdn.plaid.com" : "'self'",
+		],
 		styleSrc: ["'self'"],
 		fontSrc: ["'self'"],
 		imgSrc: ["'self'", "data:"],
-		connectSrc: ["'self'"],
+		connectSrc: [
+			(c) =>
+				c.req.path === "/accounts"
+					? "'self' https://production.plaid.com"
+					: "'self'",
+		],
+		frameSrc: [
+			(c) =>
+				c.req.path === "/accounts" ? "'self' https://cdn.plaid.com" : "'self'",
+		],
 		objectSrc: ["'none'"],
 		frameAncestors: ["'none'"],
 		baseUri: ["'self'"],

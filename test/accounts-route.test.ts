@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { todayUtc } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
+import { accounts } from "../src/routes/accounts";
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -132,5 +133,53 @@ describe("GET /accounts", () => {
 	it("marks Accounts as the current page", async () => {
 		const { html } = await get("/accounts");
 		expect(html).toMatch(/href="\/accounts"[^>]*aria-current="page"/);
+	});
+});
+
+const PLAID_LINK_SCRIPT =
+	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+const plaidEnabled = {
+	...env,
+	DEMO: "false",
+	PLAID_CLIENT_ID: "client",
+	PLAID_SECRET: "secret",
+	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+} as unknown as Env;
+
+describe("Link a bank", () => {
+	it("shows the button and Plaid scripts only when Plaid is enabled", async () => {
+		const enabled = await accounts.request("/accounts", {}, plaidEnabled);
+		const enabledHtml = await enabled.text();
+		expect(enabledHtml).toContain('type="button"');
+		expect(enabledHtml).toContain("Link a bank");
+		expect(enabledHtml).toContain(`src="${PLAID_LINK_SCRIPT}"`);
+		expect(enabledHtml).toContain('src="/js/plaid-link.js"');
+
+		for (const bindings of [
+			{ ...plaidEnabled, DEMO: "true" },
+			{ ...plaidEnabled, PLAID_SECRET: undefined },
+		]) {
+			const response = await accounts.request("/accounts", {}, bindings);
+			const html = await response.text();
+			expect(html).not.toContain("Link a bank");
+			expect(html).not.toContain(PLAID_LINK_SCRIPT);
+			expect(html).not.toContain("/js/plaid-link.js");
+		}
+	});
+
+	it("refreshes the account heading and banks without replacing the link action", async () => {
+		const response = await accounts.request("/accounts", {}, plaidEnabled);
+		const html = await response.text();
+		const summaryStart = html.indexOf('<div id="accounts-summary">');
+		const heading = html.indexOf("Net worth");
+		const banks = html.indexOf('<div id="accounts-banks">');
+		const button = html.indexOf("data-link-bank");
+		const buttonStart = html.lastIndexOf("<button", button);
+
+		expect(summaryStart).toBeGreaterThan(-1);
+		expect(heading).toBeGreaterThan(summaryStart);
+		expect(banks).toBeGreaterThan(heading);
+		expect(button).toBeGreaterThan(banks);
+		expect(html.slice(summaryStart, buttonStart)).toMatch(/<\/div><\/div>$/);
 	});
 });
