@@ -253,7 +253,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						<EmptyState
 							kind="done"
 							sentence="No active categories."
-							hint="Add one below, or restore an archived category."
+							hint={
+								archived.length > 0
+									? "Add one below, or restore an archived category."
+									: "Add one below."
+							}
 						/>
 					)}
 					{active.map((category, i) => (

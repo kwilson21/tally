@@ -76,6 +76,15 @@ describe("GET /settings", () => {
 		expect(html).toContain("Add one below, or restore an archived category.");
 		expect(html).toContain("Archived (5)");
 	});
+
+	it("does not suggest restoring when there are no archived categories", async () => {
+		await env.DB.prepare("DELETE FROM categories").run();
+		const { html } = await get("/settings");
+		expect(html).toContain("No active categories.");
+		expect(html).toContain("Add one below.");
+		expect(html).not.toContain("restore an archived category");
+		expect(html).not.toContain("Archived (");
+	});
 });
 
 describe("GET /settings?open=<id>", () => {

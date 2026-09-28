@@ -18,6 +18,13 @@ describe("EmptyState", () => {
 			expect(html).toContain("Try later.");
 			expect(html).toContain('<p class="mt-3 text-lg">');
 			expect(html).toContain('class="mt-1 max-w-xs text-muted"');
+			if (kind === "search") {
+				expect(html).toContain("<circle");
+				expect(html).not.toContain("M36 44 L42 50 L55 35");
+			} else {
+				expect(html).toContain("M36 44 L42 50 L55 35");
+				expect(html).not.toContain("<circle");
+			}
 		},
 	);
 
