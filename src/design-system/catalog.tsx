@@ -487,7 +487,7 @@ function Rows() {
 				title="EmptyState"
 				tier="visual"
 				components={["EmptyState"]}
-				sentence="Where a list would be when it is empty: a small drawing, one sentence, a muted hint and at most one secondary button, centred."
+				sentence="Where a list would be when it is empty: a small drawing, one sentence, a muted hint and at most one button, centred. A magnifier means no results, a tick nothing to do, and an add sign one thing to start, where the screen's own button goes (decision 55)."
 			>
 				<div class="grid gap-6 lg:grid-cols-2">
 					<State label="No results: one thing to do">
@@ -504,6 +504,15 @@ function Rows() {
 							sentence="Every transaction has a category."
 							hint="New ones appear here as they come in."
 						/>
+					</State>
+					<State label="One thing to start: the screen's own button (decision 55)">
+						<EmptyState
+							kind="add"
+							sentence="No banks linked yet."
+							hint="Link your bank to see balances and net worth here. Tally can only read them; it can't move money."
+						>
+							<Button type="button">Link a bank</Button>
+						</EmptyState>
 					</State>
 				</div>
 			</Specimen>
