@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { categorizePending, MAX_JEV_CALLS } from "../src/categorize-pending";
+import { categorizePending, jevCallLimit } from "../src/categorize-pending";
 import { needsCategoryCount, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -157,9 +157,14 @@ describe("categorizePending", () => {
 		expect(await countWhere("category_source = 'merchant_rule'")).toBe(1);
 	});
 
-	it("makes at most MAX_JEV_CALLS calls a run", async () => {
+	it("caps a run at 40 calls in the demo and 500 in production (decision 56)", () => {
+		expect(jevCallLimit({ DEMO: "true" })).toBe(40);
+		expect(jevCallLimit({})).toBe(40);
+		expect(jevCallLimit({ DEMO: "false" })).toBe(500);
+	});
+
+	it("stops the demo's run at its cap", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		expect(MAX_JEV_CALLS).toBe(40);
 		// Make 50 more transactions that need a category.
 		for (let i = 0; i < 50; i++) {
 			await db
@@ -170,8 +175,46 @@ describe("categorizePending", () => {
 				.run();
 		}
 		const jev = fakeJev(() => reply(0.5));
-		await categorizePending(withKey, jev.fetchImpl);
+		await categorizePending({ ...withKey, DEMO: "true" }, jev.fetchImpl);
 		expect(jev.calls()).toBe(40);
+	});
+
+	it("goes past the demo's cap in production, so a new bank's backfill is sorted in a night", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		for (let i = 0; i < 50; i++) {
+			await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 100, ?)",
+				)
+				.bind(`${MONTH}-01`, `EXTRA ${i}`)
+				.run();
+		}
+		const jev = fakeJev(() => reply(0.5));
+		await categorizePending({ ...withKey, DEMO: "false" }, jev.fetchImpl);
+		expect(jev.calls()).toBeGreaterThan(50);
+		// Nothing is left for the next night.
+		const again = fakeJev(() => reply(0.5));
+		await categorizePending({ ...withKey, DEMO: "false" }, again.fetchImpl);
+		expect(again.calls()).toBe(0);
+	});
+
+	it("stops production's run at 500, leaving the rest for the next night", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		// 510 more transactions that need a category, in one statement.
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 510)
+				 INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+				 SELECT 1, ?, 100, 'EXTRA ' || i FROM n`,
+			)
+			.bind(`${MONTH}-01`)
+			.run();
+		const jev = fakeJev(() => reply(0.5));
+		await categorizePending({ ...withKey, DEMO: "false" }, jev.fetchImpl);
+		expect(jev.calls()).toBe(500);
+		const next = fakeJev(() => reply(0.5));
+		await categorizePending({ ...withKey, DEMO: "false" }, next.fetchImpl);
+		expect(next.calls()).toBeGreaterThan(0);
 	});
 
 	it("skips one transaction Jev can't answer usefully and carries on with the rest", async () => {
