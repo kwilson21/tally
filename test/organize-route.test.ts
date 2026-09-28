@@ -10,18 +10,23 @@ async function get(path = "/transactions/organize") {
 	return { res, html: await res.text() };
 }
 
-async function post(fields: Record<string, string | string[]>) {
+async function post(
+	fields: Record<string, string | string[]>,
+	path = "/transactions/organize",
+	htmx = false,
+) {
 	const form = new URLSearchParams();
 	for (const [key, value] of Object.entries(fields)) {
 		for (const item of Array.isArray(value) ? value : [value])
 			form.append(key, item);
 	}
-	const res = await exports.default.fetch(`${BASE}/transactions/organize`, {
+	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
 		headers: {
 			Origin: BASE,
 			"content-type": "application/x-www-form-urlencoded",
+			...(htmx ? { "HX-Request": "true" } : {}),
 		},
 		body: form.toString(),
 	});
@@ -51,7 +56,7 @@ describe("GET /transactions/organize", () => {
 		const { res, html } = await get();
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Organize · Tally</title>");
-		expect(html).toMatch(/1 of \d+ · \d+ transactions left/);
+		expect(html).toMatch(/1 of \d+ · \d+ left, all months/);
 		expect(html).toMatch(/Target[\s\S]*2 transactions · \$900\.00/);
 		expect(html).toContain("From RAW ONE, RAW TWO");
 		expect(html).toMatch(
@@ -80,6 +85,27 @@ describe("GET /transactions/organize", () => {
 		const { html } = await get();
 		expect(html).toContain("Every transaction has a category.");
 	});
+
+	it("distinguishes skipping every current group from finishing", async () => {
+		const first = await get();
+		const names = [...first.html.matchAll(/<h2[^>]*>([^<]+)<\/h2>/g)].map(
+			(m) => m[1],
+		);
+		let path = "/transactions/organize";
+		for (;;) {
+			const page = await get(path);
+			const name = page.html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1];
+			if (!name) {
+				expect(page.html).toContain("You skipped the rest.");
+				expect(page.html).toContain(">Start over</a>");
+				break;
+			}
+			const url = new URL(BASE + path);
+			url.searchParams.append("skip", name);
+			path = url.pathname + url.search;
+		}
+		expect(names.length).toBeGreaterThan(0);
+	});
 });
 
 describe("POST /transactions/organize", () => {
@@ -93,18 +119,12 @@ describe("POST /transactions/organize", () => {
 		const { res } = await post({
 			category: "2",
 			name: "The Bakery",
-			raw_name: rawNames,
+			group: "Local Bakery",
+			raw_name: ["FORGED MERCHANT", ...rawNames],
 		});
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/transactions/organize");
-		const noun = before?.n === 1 ? "transaction" : "transactions";
-		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
-			toast: {
-				message: `${before?.n} ${noun} set to Eating Out.`,
-				type: "success",
-			},
-			announce: `${before?.n} ${noun} set to Eating Out.`,
-		});
+		expect(res.headers.get("HX-Trigger")).toBeNull();
 		const saved = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = ? AND category_id = 2 AND category_source = 'user' AND updated_by = 'demo'",
 		)
@@ -123,12 +143,104 @@ describe("POST /transactions/organize", () => {
 	it("returns 422 with a fieldset alert when category is missing", async () => {
 		const { res, html } = await post({
 			name: "Local Bakery",
-			raw_name: "SQ *LOCAL BAKERY 4432",
+			group: "Local Bakery",
 		});
 		expect(res.status).toBe(422);
 		expect(html).toMatch(
 			/role="alert"[^>]*>Pick a category from the list\.<\/p>/,
 		);
+	});
+
+	it("rejects a name over 80 characters with an alert and keeps the group", async () => {
+		const { res, html } = await post({
+			category: "2",
+			name: "x".repeat(81),
+			group: "Local Bakery",
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain("Local Bakery");
+		expect(html).toMatch(
+			/role="alert"[^>]*>Name must be 80 characters or fewer\.<\/p>/,
+		);
+	});
+
+	it("returns the next page and feedback for htmx", async () => {
+		const { res, html } = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			"/transactions/organize",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
+			toast: { type: "success" },
+		});
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+	});
+
+	it("handles 150 raw names in one shown merchant without exceeding D1 limits", async () => {
+		const statements = [];
+		for (let i = 0; i < 150; i++) {
+			const raw = `BULK MERCHANT*CODE${i}`;
+			statements.push(
+				env.DB.prepare(
+					"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Bulk merchant')",
+				).bind(raw),
+				env.DB.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 100000, ?)",
+				).bind(todayUtc(), raw),
+			);
+		}
+		await env.DB.batch(statements);
+		const page = await get();
+		expect(page.html).toMatch(/From BULK MERCHANT[^<]+ and 147 more/);
+		const { res } = await post({
+			category: "2",
+			name: "",
+			group: "Bulk merchant",
+		});
+		expect(res.status).toBe(303);
+		const count = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'BULK MERCHANT%' AND category_id = 2",
+		).first<{ n: number }>();
+		expect(count?.n).toBe(150);
+	});
+
+	it("does not show excluded, split-parent, income, or already categorized rows", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, excluded) VALUES (1, ?, 1, 'HIDDEN EXCLUDED', 1)",
+			).bind(todayUtc()),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, is_split) VALUES (1, ?, 1, 'HIDDEN SPLIT', 1)",
+			).bind(todayUtc()),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, flag_income) VALUES (1, ?, 1, 'HIDDEN INCOME', 1)",
+			).bind(todayUtc()),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1, 'HIDDEN CATEGORIZED', 2, 'user')",
+			).bind(todayUtc()),
+		]);
+		const { html } = await get();
+		expect(html).not.toMatch(/HIDDEN (EXCLUDED|SPLIT|INCOME|CATEGORIZED)/);
+	});
+
+	it("preserves skips through save and only counts skips that still exist", async () => {
+		const page = await get();
+		const first = page.html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1] ?? "";
+		const secondPage = await get(
+			`/transactions/organize?skip=${encodeURIComponent(first)}&skip=missing`,
+		);
+		const second = secondPage.html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1] ?? "";
+		expect(secondPage.html).toMatch(/2 of \d+/);
+		const { res: saved } = await post(
+			{ category: "2", name: "", group: second },
+			`/transactions/organize?skip=${encodeURIComponent(first)}`,
+		);
+		expect(saved.headers.get("Location")).toContain(
+			`skip=${encodeURIComponent(first)}`,
+		);
+		const after = await get(saved.headers.get("Location") ?? "");
+		expect(after.html).not.toMatch(new RegExp(`<h2[^>]*>${first}</h2>`));
 	});
 });
 

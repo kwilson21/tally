@@ -256,12 +256,9 @@ async function renderList(
 					{count}
 				</p>
 				{filters.uncategorized && (
-					<a
-						href="/transactions/organize"
-						class="inline-flex min-h-11 items-center"
-					>
+					<Button kind="text" href="/transactions/organize">
 						Organize by merchant
-					</a>
+					</Button>
 				)}
 				<section id="results" class="mt-2" aria-label="Results">
 					{rows.length === 0 ? (

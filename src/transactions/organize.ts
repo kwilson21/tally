@@ -4,6 +4,7 @@ const NEEDS_CATEGORY =
 	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0";
 const NEEDS_CATEGORY_UPDATE =
 	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0";
+const CHUNK_SIZE = 90;
 
 export type OrganizeGroup = {
 	name: string;
@@ -12,17 +13,20 @@ export type OrganizeGroup = {
 	rawNames: string[];
 };
 
-/** Groups every transaction needing a category by the merchant name shown in the list. */
+/** Aggregates transactions in SQL, then combines raw merchants that share a shown name. */
 export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.raw_name AS rawName, t.amount_cents AS amountCents, m.display_name AS displayName
+			`SELECT t.raw_name AS rawName, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
+				m.display_name AS displayName
 			FROM transactions t LEFT JOIN merchants m ON m.raw_name = t.raw_name
-			WHERE ${NEEDS_CATEGORY}`,
+			WHERE ${NEEDS_CATEGORY}
+			GROUP BY t.raw_name, m.display_name`,
 		)
 		.all<{
 			rawName: string;
-			amountCents: number;
+			count: number;
+			totalCents: number;
 			displayName: string | null;
 		}>();
 	const groups = new Map<string, OrganizeGroup>();
@@ -34,9 +38,9 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			totalCents: 0,
 			rawNames: [],
 		};
-		group.count += 1;
-		group.totalCents += row.amountCents;
-		if (!group.rawNames.includes(row.rawName)) group.rawNames.push(row.rawName);
+		group.count += row.count;
+		group.totalCents += row.totalCents;
+		group.rawNames.push(row.rawName);
 		groups.set(name, group);
 	}
 	return [...groups.values()].sort(
@@ -47,7 +51,7 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	);
 }
 
-/** Categorizes a merchant group and creates the rules that categorize future transactions. */
+/** Categorizes a current merchant group and creates rules for future transactions. */
 export async function saveOrganizeGroup(
 	db: D1Database,
 	rawNames: string[],
@@ -57,22 +61,35 @@ export async function saveOrganizeGroup(
 ): Promise<number> {
 	const names = [...new Set(rawNames)];
 	if (names.length === 0) return 0;
-	const marks = names.map(() => "?").join(", ");
-	const count = await db
-		.prepare(
-			`SELECT COUNT(*) AS n FROM transactions t WHERE ${NEEDS_CATEGORY} AND t.raw_name IN (${marks})`,
-		)
-		.bind(...names)
-		.first<{ n: number }>();
-	const statements = [
-		db
+	let saved = 0;
+	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
+		const chunk = names.slice(offset, offset + CHUNK_SIZE);
+		const marks = chunk.map(() => "?").join(", ");
+		const count = await db
 			.prepare(
-				`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
-					updated_by = ?, updated_at = datetime('now')
-				WHERE ${NEEDS_CATEGORY_UPDATE} AND raw_name IN (${marks})`,
+				`SELECT COUNT(*) AS n FROM transactions t WHERE ${NEEDS_CATEGORY} AND t.raw_name IN (${marks})`,
 			)
-			.bind(categoryId, updatedBy, ...names),
-	];
+			.bind(...chunk)
+			.first<{ n: number }>();
+		saved += count?.n ?? 0;
+	}
+	// A stale form must not alter rules after another request categorized the group.
+	if (saved === 0) return 0;
+
+	const statements: D1PreparedStatement[] = [];
+	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
+		const chunk = names.slice(offset, offset + CHUNK_SIZE);
+		const marks = chunk.map(() => "?").join(", ");
+		statements.push(
+			db
+				.prepare(
+					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
+						updated_by = ?, updated_at = datetime('now')
+					WHERE ${NEEDS_CATEGORY_UPDATE} AND raw_name IN (${marks})`,
+				)
+				.bind(categoryId, updatedBy, ...chunk),
+		);
+	}
 	for (const rawName of names) {
 		statements.push(
 			db
@@ -85,5 +102,5 @@ export async function saveOrganizeGroup(
 		);
 	}
 	await db.batch(statements);
-	return count?.n ?? 0;
+	return saved;
 }
