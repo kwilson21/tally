@@ -103,14 +103,23 @@ async function handlePlaidError(
 		console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
 		if (
 			error.error_type === "ITEM_ERROR" &&
-			!transient.has(error.error_code ?? "") &&
-			(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
+			!transient.has(error.error_code ?? "")
 		) {
-			await env.DB.prepare(
-				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ?",
+			const item = await env.DB.prepare(
+				"SELECT status FROM plaid_items WHERE id = ?",
 			)
-				.bind(itemRowId, lockId)
-				.run();
+				.bind(itemRowId)
+				.first<{ status: string }>();
+			if (
+				item &&
+				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
+			) {
+				await env.DB.prepare(
+					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ? AND status = ?",
+				)
+					.bind(itemRowId, lockId, item.status)
+					.run();
+			}
 		}
 	}
 	throw error;

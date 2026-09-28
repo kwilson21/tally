@@ -314,6 +314,63 @@ describe("Plaid webhook route", () => {
 		},
 	);
 
+	it("doesn't overwrite a repair completed while confirming an ITEM error", async () => {
+		const encryptedToken = await encryptToken("access-token", KEY);
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by, status) VALUES ('item-1', ?, 'Bank', 'person', 'needs_attention')",
+		)
+			.bind(encryptedToken)
+			.run();
+		const sign = await signer();
+		const body = JSON.stringify({
+			item_id: "item-1",
+			webhook_type: "ITEM",
+			webhook_code: "ERROR",
+			error: { error_code: "ITEM_LOGIN_REQUIRED" },
+		});
+		const { token, jwk } = await sign(body);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				if (String(input).endsWith("/webhook_verification_key/get")) {
+					return Response.json({ key: { ...jwk, expired_at: null } });
+				}
+				await env.DB.prepare("UPDATE plaid_items SET status = 'ok'").run();
+				return Response.json({
+					item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
+				});
+			}),
+		);
+		const promises: Promise<unknown>[] = [];
+		const ctx = {
+			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+			passThroughOnException() {},
+			props: {},
+		} as unknown as ExecutionContext;
+
+		expect(
+			(
+				await app.request(
+					"http://tally.test/webhooks/plaid",
+					{
+						method: "POST",
+						body,
+						headers: {
+							"content-type": "application/json",
+							"Plaid-Verification": token,
+						},
+					},
+					env,
+					ctx,
+				)
+			).status,
+		).toBe(200);
+		await Promise.all(promises);
+		expect(
+			await env.DB.prepare("SELECT status FROM plaid_items").first(),
+		).toEqual({ status: "ok" });
+	});
+
 	it("syncs the matching Item in waitUntil without logging secrets", async () => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-secret', ?, 'Bank', 'person')",

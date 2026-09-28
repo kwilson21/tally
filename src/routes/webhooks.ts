@@ -44,10 +44,14 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const body = parsed as Webhook;
 	if (typeof body.item_id !== "string") return c.body(null, 200);
 	const item = await c.env.DB.prepare(
-		"SELECT id, access_token_encrypted FROM plaid_items WHERE plaid_item_id = ?",
+		"SELECT id, access_token_encrypted, status FROM plaid_items WHERE plaid_item_id = ?",
 	)
 		.bind(body.item_id)
-		.first<{ id: number; access_token_encrypted: ArrayBuffer }>();
+		.first<{
+			id: number;
+			access_token_encrypted: ArrayBuffer;
+			status: string;
+		}>();
 	if (!item) return c.body(null, 200);
 
 	if (
@@ -85,9 +89,9 @@ webhooks.post("/webhooks/plaid", async (c) => {
 			(async () => {
 				if (await loginStillBroken(c.env, item.access_token_encrypted)) {
 					await c.env.DB.prepare(
-						"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+						"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND status = ?",
 					)
-						.bind(item.id)
+						.bind(item.id, item.status)
 						.run();
 				}
 			})().catch((error: unknown) => {

@@ -632,6 +632,41 @@ describe("syncItem", () => {
 		});
 	});
 
+	it("doesn't overwrite a repair completed while confirming a login error", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+			if (String(url).endsWith("/accounts/get")) {
+				return response({ accounts: [account()] });
+			}
+			if (String(url).endsWith("/item/get")) {
+				await env.DB.prepare(
+					"UPDATE plaid_items SET status = 'ok' WHERE id = ?",
+				)
+					.bind(id)
+					.run();
+				return response({
+					item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
+				});
+			}
+			return response(
+				{ error_type: "ITEM_ERROR", error_code: "ITEM_LOGIN_REQUIRED" },
+				400,
+			);
+		});
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await expect(
+			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
+		).rejects.toThrow("Plaid request failed");
+		spy.mockRestore();
+		expect((await itemState(id))?.status).toBe("ok");
+	});
+
 	it.each([
 		["the login was repaired", response({ item: { error: null } }), "ok"],
 		["the error field is missing", response({ item: {} }), "needs_attention"],
