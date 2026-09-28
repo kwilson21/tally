@@ -255,6 +255,14 @@ async function renderList(
 				>
 					{count}
 				</p>
+				{filters.uncategorized && (
+					<a
+						href="/transactions/organize"
+						class="inline-flex min-h-11 items-center"
+					>
+						Organize by merchant
+					</a>
+				)}
 				<section id="results" class="mt-2" aria-label="Results">
 					{rows.length === 0 ? (
 						allCategorized ? (
