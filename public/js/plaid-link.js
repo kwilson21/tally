@@ -6,6 +6,12 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	if (!button || !errorRegion) return;
 
 	const genericFailure = "Couldn't link the bank. Try again.";
+	const showAlert = (message) => {
+		const alert = document.createElement("p");
+		alert.setAttribute("role", "alert");
+		alert.textContent = message;
+		errorRegion.replaceChildren(alert);
+	};
 	const busy = (value) => {
 		button.disabled = value;
 		button.setAttribute("aria-busy", String(value));
@@ -17,10 +23,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					.parseFromString(responseText, "text/html")
 					.querySelector('[role="alert"]')?.textContent
 			: undefined;
-		const alert = document.createElement("p");
-		alert.setAttribute("role", "alert");
-		alert.textContent = serverAlert?.trim() || genericFailure;
-		errorRegion.replaceChildren(alert);
+		showAlert(serverAlert?.trim() || genericFailure);
 	};
 	const responseText = (error) =>
 		error && typeof error === "object" && "xhr" in error
@@ -67,17 +70,20 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						};
 						button.addEventListener("htmx:after:request", finished);
 						button.addEventListener("htmx:finally:request", finished);
-						await htmx.ajax("POST", "/plaid/exchange", {
-							source: button,
-							target: errorRegion,
-							swap: "none",
-							headers: {
-								"Content-Type": "application/x-www-form-urlencoded",
-							},
-							values: { public_token: publicToken },
-						});
-						button.removeEventListener("htmx:after:request", finished);
-						button.removeEventListener("htmx:finally:request", finished);
+						try {
+							await htmx.ajax("POST", "/plaid/exchange", {
+								source: button,
+								target: errorRegion,
+								swap: "none",
+								headers: {
+									"Content-Type": "application/x-www-form-urlencoded",
+								},
+								values: { public_token: publicToken },
+							});
+						} finally {
+							button.removeEventListener("htmx:after:request", finished);
+							button.removeEventListener("htmx:finally:request", finished);
+						}
 						if (
 							!exchangeContext?.response ||
 							exchangeContext.response.status >= 400
@@ -87,17 +93,37 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						}
 						// The POST's completion removes htmx-request from its source.
 						busy(true);
-						await htmx.ajax("GET", "/accounts", {
-							target: "#accounts-summary",
-							select: "#accounts-summary",
-							swap: "outerHTML",
-						});
+						let refreshContext;
+						const refreshed = (event) => {
+							refreshContext = event.detail?.ctx;
+						};
+						button.addEventListener("htmx:finally:request", refreshed);
+						try {
+							await htmx.ajax("GET", "/accounts", {
+								source: button,
+								target: "#accounts-summary",
+								select: "#accounts-summary",
+								swap: "outerHTML",
+							});
+						} finally {
+							button.removeEventListener("htmx:finally:request", refreshed);
+						}
 						if (announcement) {
 							document.body.dispatchEvent(
 								new CustomEvent("announce", {
 									detail: { value: announcement },
 								}),
 							);
+						}
+						if (
+							!refreshContext?.response ||
+							refreshContext.response.status >= 400
+						) {
+							const bank = announcement?.replace(/[.!?]$/, "") || "Bank linked";
+							showAlert(
+								`${bank}, but the list didn't refresh. Reload the page to see it.`,
+							);
+							return;
 						}
 						button.focus();
 					} catch (error) {

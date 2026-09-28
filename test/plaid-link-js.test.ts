@@ -24,10 +24,8 @@ function harness({
 				onExit: (error?: unknown) => void;
 		  }
 		| undefined;
-	const listeners = new Map<
-		string,
-		(event: { detail?: { ctx?: unknown } }) => void
-	>();
+	type RequestListener = (event: { detail?: { ctx?: unknown } }) => void;
+	const listeners = new Map<string, Set<RequestListener>>();
 	const button = {
 		disabled: false,
 		focus: vi.fn(),
@@ -35,9 +33,20 @@ function harness({
 		classList: { toggle: vi.fn() },
 		addEventListener: (name: string, listener: never) => {
 			if (name === "click") click = listener;
-			else listeners.set(name, listener);
+			else {
+				const requestListeners = listeners.get(name) ?? new Set();
+				requestListeners.add(listener);
+				listeners.set(name, requestListeners);
+			}
 		},
-		removeEventListener: vi.fn(),
+		removeEventListener: vi.fn((name: string, listener: RequestListener) => {
+			listeners.get(name)?.delete(listener);
+		}),
+		dispatchRequest: (name: string, ctx: unknown) => {
+			for (const listener of listeners.get(name) ?? []) {
+				listener({ detail: { ctx } });
+			}
+		},
 	};
 	const children: Array<{ textContent?: string; role?: string }> = [];
 	const errorRegion = {
@@ -109,14 +118,17 @@ describe("plaid-link.js", () => {
 						}),
 					},
 				};
-				h.listeners.get("htmx:after:request")?.({ detail: { ctx } });
+				h.button.dispatchRequest("htmx:after:request", ctx);
 				const earlyTriggers = JSON.parse(ctx.hx.trigger);
 				for (const [type, detail] of Object.entries(earlyTriggers)) {
 					h.document.body.dispatchEvent(new CustomEvent(type, { detail }));
 				}
-				h.listeners.get("htmx:finally:request")?.({ detail: { ctx } });
+				h.button.dispatchRequest("htmx:finally:request", ctx);
 			} else {
 				await refresh;
+				h.button.dispatchRequest("htmx:finally:request", {
+					response: { status: 200 },
+				});
 			}
 		});
 		const h = harness({ ajax });
@@ -141,6 +153,7 @@ describe("plaid-link.js", () => {
 			}),
 		);
 		expect(ajax).toHaveBeenNthCalledWith(2, "GET", "/accounts", {
+			source: h.button,
 			target: "#accounts-summary",
 			select: "#accounts-summary",
 			swap: "outerHTML",
@@ -176,13 +189,9 @@ describe("plaid-link.js", () => {
 
 	it("shows one alert when the exchange returns 502", async () => {
 		const ajax = vi.fn(async () =>
-			h.listeners.get("htmx:finally:request")?.({
-				detail: {
-					ctx: {
-						response: { status: 502 },
-						text: '<p role="alert">Exchange failed.</p>',
-					},
-				},
+			h.button.dispatchRequest("htmx:finally:request", {
+				response: { status: 502 },
+				text: '<p role="alert">Exchange failed.</p>',
 			}),
 		);
 		const h = harness({ ajax });
@@ -213,5 +222,78 @@ describe("plaid-link.js", () => {
 		await h.linkOptions?.onSuccess("public-secret");
 		expect(h.children[0]?.textContent).toBe(genericFailure);
 		expect(h.button.disabled).toBe(false);
+	});
+
+	it("cleans up exchange listeners after a rejection so a retry announces once", async () => {
+		let exchangeAttempt = 0;
+		const ajax = vi.fn(async (method: string) => {
+			if (method !== "POST") return;
+			exchangeAttempt += 1;
+			if (exchangeAttempt === 1) throw new TypeError("network");
+			const ctx = {
+				response: { status: 204 },
+				text: "",
+				hx: {
+					trigger: JSON.stringify({ announce: "Linked Retry Bank." }),
+				},
+			};
+			h.button.dispatchRequest("htmx:after:request", ctx);
+			h.button.dispatchRequest("htmx:finally:request", ctx);
+		});
+		const h = harness({ ajax });
+
+		await h.click();
+		await h.linkOptions?.onSuccess("first-public-secret");
+		expect(h.listeners.get("htmx:after:request")?.size ?? 0).toBe(0);
+		expect(h.listeners.get("htmx:finally:request")?.size ?? 0).toBe(0);
+
+		await h.click();
+		await h.linkOptions?.onSuccess("retry-public-secret");
+		const announcements = h.document.body.dispatchEvent.mock.calls.filter(
+			([event]) => event.type === "announce",
+		);
+		expect(announcements).toHaveLength(1);
+		expect(announcements[0]?.[0].detail).toEqual({
+			value: "Linked Retry Bank.",
+		});
+		expect(h.listeners.get("htmx:after:request")?.size ?? 0).toBe(0);
+		expect(h.listeners.get("htmx:finally:request")?.size ?? 0).toBe(0);
+	});
+
+	it("reports a linked bank without confirming a failed summary refresh", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			const ctx =
+				method === "POST"
+					? {
+							response: { status: 204 },
+							text: "",
+							hx: {
+								trigger: JSON.stringify({ announce: "Linked First Bank." }),
+							},
+						}
+					: { response: { status: 500 }, text: "Refresh failed." };
+			h.button.dispatchRequest("htmx:finally:request", ctx);
+		});
+		const h = harness({ ajax });
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.children).toEqual([
+			expect.objectContaining({
+				role: "alert",
+				textContent:
+					"Linked First Bank, but the list didn't refresh. Reload the page to see it.",
+			}),
+		]);
+		const announcements = h.document.body.dispatchEvent.mock.calls.filter(
+			([event]) => event.type === "announce",
+		);
+		expect(announcements).toHaveLength(1);
+		expect(announcements[0]?.[0].detail).toEqual({
+			value: "Linked First Bank.",
+		});
+		expect(h.button.disabled).toBe(false);
+		expect(h.button.focus).not.toHaveBeenCalled();
 	});
 });
