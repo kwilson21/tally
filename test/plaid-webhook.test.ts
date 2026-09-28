@@ -246,11 +246,17 @@ describe("Plaid webhook route", () => {
 	});
 
 	it.each([
-		[null, "ok"],
-		[{ error_code: "ITEM_LOGIN_REQUIRED" }, "needs_attention"],
+		["ITEM_LOGIN_REQUIRED", null, "ok"],
+		[
+			"ITEM_LOGIN_REQUIRED",
+			{ error_code: "ITEM_LOGIN_REQUIRED" },
+			"needs_attention",
+		],
+		[undefined, { error_code: "ITEM_LOGIN_REQUIRED" }, "needs_attention"],
+		[null, { error_code: "ITEM_LOGIN_REQUIRED" }, "needs_attention"],
 	] as const)(
-		"confirms an ITEM error with Plaid before setting status: %o",
-		async (currentError, status) => {
+		"confirms an ITEM error with Plaid before setting status: webhook error %o, current error %o",
+		async (webhookError, currentError, status) => {
 			await env.DB.prepare(
 				"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person')",
 			)
@@ -261,7 +267,9 @@ describe("Plaid webhook route", () => {
 				item_id: "item-1",
 				webhook_type: "ITEM",
 				webhook_code: "ERROR",
-				error: { error_code: "ITEM_LOGIN_REQUIRED" },
+				...(webhookError !== undefined
+					? { error: { error_code: webhookError } }
+					: {}),
 			});
 			const { token, jwk } = await sign(body);
 			const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
@@ -270,6 +278,12 @@ describe("Plaid webhook route", () => {
 					: Response.json({ item: { error: currentError } }),
 			);
 			vi.stubGlobal("fetch", fetchMock);
+			const promises: Promise<unknown>[] = [];
+			const ctx = {
+				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+				passThroughOnException() {},
+				props: {},
+			} as unknown as ExecutionContext;
 			expect(
 				(
 					await app.request(
@@ -283,9 +297,12 @@ describe("Plaid webhook route", () => {
 							},
 						},
 						env,
+						ctx,
 					)
 				).status,
 			).toBe(200);
+			expect(promises).toHaveLength(1);
+			await Promise.all(promises);
 			expect(
 				await env.DB.prepare("SELECT status FROM plaid_items").first(),
 			).toEqual({ status });

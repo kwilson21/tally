@@ -14,7 +14,7 @@ export async function loginStillBroken(
 			env.TOKEN_ENCRYPTION_KEY,
 		);
 		const result = await getItem(env, accessToken, fetchImpl);
-		return result.item.error != null;
+		return result.item?.error !== null;
 	} catch {
 		return true;
 	}

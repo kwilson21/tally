@@ -73,16 +73,29 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		body.webhook_type === "ITEM" &&
 		typeof body.webhook_code === "string" &&
 		attentionCodes.has(body.webhook_code);
-	const needsAttention =
-		isAttentionWarning ||
-		(isItemError &&
-			(await loginStillBroken(c.env, item.access_token_encrypted)));
-	if (needsAttention) {
+	if (isAttentionWarning) {
 		await c.env.DB.prepare(
 			"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
 		)
 			.bind(item.id)
 			.run();
+	}
+	if (isItemError) {
+		c.executionCtx.waitUntil(
+			(async () => {
+				if (await loginStillBroken(c.env, item.access_token_encrypted)) {
+					await c.env.DB.prepare(
+						"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+					)
+						.bind(item.id)
+						.run();
+				}
+			})().catch((error: unknown) => {
+				const requestId =
+					error instanceof PlaidError ? error.request_id : undefined;
+				console.error(`plaid webhook item error ${requestId ?? ""}`.trim());
+			}),
+		);
 	}
 	return c.body(null, 200);
 });

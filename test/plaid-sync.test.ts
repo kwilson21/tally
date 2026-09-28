@@ -634,6 +634,7 @@ describe("syncItem", () => {
 
 	it.each([
 		["the login was repaired", response({ item: { error: null } }), "ok"],
+		["the error field is missing", response({ item: {} }), "needs_attention"],
 		[
 			"Plaid still reports the login error",
 			response({ item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } } }),
