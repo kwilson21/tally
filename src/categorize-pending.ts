@@ -8,13 +8,18 @@ import {
 	saveJevResult,
 } from "./db/transactions";
 
-/** Enough for a day of family transactions; the rest wait for the next night. */
-export const MAX_JEV_CALLS = 40;
+/**
+ * How many transactions one night asks Jev about (decision 56). The demo's reset needs few.
+ * Production sorts a new bank's backfill in a night; each answer is saved as it arrives,
+ * so a run cut short keeps its work, and the rest wait for the next night.
+ */
+export const jevCallLimit = (env: { DEMO?: string }) =>
+	env.DEMO === "false" ? 500 : 40;
 
 /** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
 const MAX_FAILURES_IN_A_ROW = 3;
 
-type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string };
+type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
 
 export async function categorizePending(
 	env: CategorizeEnv,
@@ -33,7 +38,7 @@ export async function categorizePending(
 	const names = categories.map((c) => c.name);
 
 	let failuresInARow = 0;
-	for (const tx of await pendingForJev(env.DB, MAX_JEV_CALLS)) {
+	for (const tx of await pendingForJev(env.DB, jevCallLimit(env))) {
 		done.asked += 1;
 		const result = await askJev(tx, names, env.JEV_API_KEY, fetchImpl);
 		if (!result.ok) {
