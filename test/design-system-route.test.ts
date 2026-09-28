@@ -132,6 +132,23 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('id="announcer"');
 	});
 
+	it("describes every Accounts action's states, and shows Sync now as the app does", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="accounts-screen"')[1]?.split("</section>")[0] ?? "";
+		for (const words of [
+			"while pending it is disabled and says Fixing…, success shows a Fixed bank toast",
+			"while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast",
+			"says Syncing…",
+		]) {
+			expect(section).toContain(words);
+		}
+		// The app's id, once on the page (the phone picture), not in both pictures.
+		expect(html.match(/id="sync-now"/g)).toHaveLength(1);
+		expect(section).toContain("Syncing…");
+		expect(design).toMatch(/\| SyncNow \|.*Syncing…/);
+	});
+
 	it("shows Adjust mode with its whole use spec, for sign-off (#94)", async () => {
 		const { html } = await get("/design-system");
 		const section =
