@@ -762,13 +762,16 @@ function Feedback() {
 				title="FeedbackButton"
 				tier="visual"
 				components={["FeedbackButton"]}
-				sentence="A fixed, shadowless pill links to the feedback form and carries the current page with it."
+				sentence="A fixed, shadowless pill links to the feedback form, which records the page it came from."
 			>
 				<p class="text-muted">
 					The real component is fixed at the bottom-right of this catalog page;
 					this specimen is shown in place.
 				</p>
-				<FeedbackButton fixed={false} />
+				{/* Only a picture here: the working button is the fixed one. */}
+				<div inert>
+					<FeedbackButton fixed={false} />
+				</div>
 			</Specimen>
 			<Specimen
 				id="feedback-form"
