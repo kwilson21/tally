@@ -219,6 +219,23 @@ const PATHS = {
 			<path d="m19 12-7 7-7-7" />
 		</>
 	),
+	bank: (
+		<>
+			<path d="M10 18v-7" />
+			<path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" />
+			<path d="M14 18v-7" />
+			<path d="M18 18v-7" />
+			<path d="M3 22h18" />
+			<path d="M6 18v-7" />
+		</>
+	),
+	card: (
+		<>
+			<rect width="20" height="14" x="2" y="5" rx="2" />
+			<line x1="2" x2="22" y1="10" y2="10" />
+			<path d="M6 14h2" />
+		</>
+	),
 	"circle-dashed": (
 		<>
 			<path d="M10.1 2.182a10 10 0 0 1 3.8 0" />
@@ -249,6 +266,7 @@ export function Icon({ name, class: className = "size-6" }: IconProps) {
 			stroke-linecap="round"
 			stroke-linejoin="round"
 			aria-hidden="true"
+			data-icon={name}
 		>
 			{PATHS[name]}
 		</svg>
