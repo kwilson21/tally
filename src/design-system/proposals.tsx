@@ -5,7 +5,7 @@
 
 import { EmptyState } from "../views/empty-state";
 
-// What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50, 54 and 55), and the issue each ships in.
+// What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50, 54, 55 and 59), and the issue each ships in.
 export const DECIDED = [
 	{
 		title: "P1 · The number on a phone's first screen",
@@ -53,6 +53,36 @@ export const DECIDED = [
 		outcome:
 			"Option B: no $0 headline yet; the drawing with an add sign, one sentence, a hint that Tally only reads, and Link a bank, centred (decision 55).",
 		issue: 82,
+	},
+	{
+		title: "P10 · Organize",
+		outcome:
+			"Option B: one group at a time, largest first, with its category, an optional rename, and Save and next (decision 59).",
+		issue: 130,
+	},
+	{
+		title: "P11 · Disconnect a bank",
+		outcome:
+			"Option B: behind Manage under each bank, then a confirm step that keeps history unless told to delete (decisions 58 and 59).",
+		issue: 131,
+	},
+	{
+		title: "P12 · Sync now",
+		outcome:
+			"Option A: a Sync now button under the Accounts title, and each bank says when it last synced (decision 59).",
+		issue: 132,
+	},
+	{
+		title: "P13 · Download your data",
+		outcome:
+			"As drawn: a Your data section at the end of Settings with two downloads, transactions as CSV and everything as JSON (decision 59).",
+		issue: 133,
+	},
+	{
+		title: "P14 · Send feedback",
+		outcome:
+			"Always visible: a small Feedback button with a round speech bubble, pinned above the tab bar on every page, opening a form with a type, how it feels and a message (decision 59).",
+		issue: 136,
 	},
 ] as const;
 
