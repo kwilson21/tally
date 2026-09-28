@@ -80,9 +80,30 @@ step "10. Build the database tables" \
 	"Creates Tally's tables in the empty tally-production database. Safe to repeat: finished migrations are skipped." \
 	npx wrangler d1 migrations apply DB --env "$ENV" --remote
 
-step "11. Deploy" \
-	"Puts Tally live at https://$HOST. The first deploy also creates its DNS record and certificate." \
+# Deploys only once every setting from steps 2–9 is set and step 10 left nothing to apply,
+# so a skipped step can't put Tally live without its sign-in check or its tables.
+REQUIRED="PLAID_CLIENT_ID PLAID_SECRET TOKEN_ENCRYPTION_KEY JEV_API_KEY PLAID_ENV PLAID_WEBHOOK_URL ACCESS_TEAM_DOMAIN ACCESS_AUD"
+deploy_when_ready() {
+	local secrets migrations missing=""
+	secrets=$(npx wrangler secret list --env "$ENV" --format json) || return 1
+	for name in $REQUIRED; do
+		grep -q "\"$name\"" <<<"$secrets" || missing="$missing $name"
+	done
+	if [ -n "$missing" ]; then
+		echo "Not deploying: these settings aren't set yet:$missing. Run their steps first."
+		return 1
+	fi
+	migrations=$(npx wrangler d1 migrations list DB --env "$ENV" --remote) || return 1
+	if ! grep -q "No migrations to apply" <<<"$migrations"; then
+		echo "Not deploying: the database tables aren't built yet. Run step 10 first."
+		return 1
+	fi
 	npx wrangler deploy --env "$ENV"
+}
+
+step "11. Deploy" \
+	"Checks every setting is set and the tables are built, then puts Tally live at https://$HOST. The first deploy also creates its DNS record and certificate." \
+	deploy_when_ready
 
 bold "Done"
 echo "Open https://$HOST: Cloudflare Access should ask you to sign in, then show Home."
