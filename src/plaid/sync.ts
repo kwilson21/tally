@@ -1,5 +1,6 @@
 import { plaidAmountToCents } from "../money";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
+import { loginStillBroken } from "./login-broken";
 import { decryptToken } from "./token-crypto";
 
 type SyncEnv = PlaidEnv & {
@@ -94,7 +95,9 @@ async function handlePlaidError(
 	env: SyncEnv,
 	itemRowId: number,
 	lockId: string,
+	accessTokenEncrypted: ArrayBuffer,
 	error: unknown,
+	fetchImpl?: typeof fetch,
 ): Promise<never> {
 	if (error instanceof PlaidError) {
 		console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
@@ -102,11 +105,21 @@ async function handlePlaidError(
 			error.error_type === "ITEM_ERROR" &&
 			!transient.has(error.error_code ?? "")
 		) {
-			await env.DB.prepare(
-				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ?",
+			const item = await env.DB.prepare(
+				"SELECT status FROM plaid_items WHERE id = ?",
 			)
-				.bind(itemRowId, lockId)
-				.run();
+				.bind(itemRowId)
+				.first<{ status: string }>();
+			if (
+				item &&
+				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
+			) {
+				await env.DB.prepare(
+					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ? AND status = ?",
+				)
+					.bind(itemRowId, lockId, item.status)
+					.run();
+			}
 		}
 	}
 	throw error;
@@ -158,7 +171,14 @@ export async function syncItem(
 				fetchImpl,
 			));
 		} catch (error) {
-			return await handlePlaidError(env, itemRowId, lockId, error);
+			return await handlePlaidError(
+				env,
+				itemRowId,
+				lockId,
+				item.access_token_encrypted,
+				error,
+				fetchImpl,
+			);
 		}
 		const stored = await env.DB.prepare(
 			"SELECT plaid_account_id FROM accounts WHERE plaid_item_id = ?",
@@ -204,7 +224,14 @@ export async function syncItem(
 					summary = { added: 0, modified: 0, removed: 0 };
 					continue;
 				}
-				return await handlePlaidError(env, itemRowId, lockId, error);
+				return await handlePlaidError(
+					env,
+					itemRowId,
+					lockId,
+					item.access_token_encrypted,
+					error,
+					fetchImpl,
+				);
 			}
 
 			const posted = page.added.filter((transaction) => !transaction.pending);
