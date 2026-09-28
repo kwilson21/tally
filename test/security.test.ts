@@ -33,7 +33,12 @@ describe("Plaid Content Security Policy", () => {
 			"connect-src 'self' https://production.plaid.com",
 		);
 
-		for (const path of ["/", "/transactions", "/settings"]) {
+		// The disconnect page swaps Accounts in, so Link a bank must still load there.
+		expect(await cspFor("/accounts/1/disconnect")).toContain(
+			"script-src 'self' https://cdn.plaid.com",
+		);
+
+		for (const path of ["/", "/transactions", "/settings", "/accountsx"]) {
 			expect(await cspFor(path)).not.toContain("plaid.com");
 		}
 	});

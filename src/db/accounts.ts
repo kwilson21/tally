@@ -8,6 +8,8 @@ export type Account = {
 	/** Plaid's current balance in cents; for debt, the amount owed. */
 	balanceCents: number;
 	isLiability: boolean;
+	/** Disconnected accounts remain visible but no longer count toward net worth. */
+	connected?: boolean;
 };
 
 export type Bank = {
@@ -15,6 +17,7 @@ export type Bank = {
 	name: string;
 	/** The bank's login needs fixing (`plaid_items.status = needs_attention`). */
 	needsAttention: boolean;
+	disconnected?: boolean;
 	accounts: Account[];
 };
 
@@ -22,6 +25,7 @@ type Row = {
 	bank_id: number;
 	bank_name: string;
 	status: string;
+	disconnected_at: string | null;
 	/** The account's columns are null for a bank linked but not yet synced. */
 	id: number | null;
 	name: string | null;
@@ -33,10 +37,17 @@ type Row = {
 
 /** What you have minus what you owe, in cents. */
 export function netWorthCents(
-	accounts: Pick<Account, "balanceCents" | "isLiability">[],
+	accounts: (Pick<Account, "balanceCents" | "isLiability"> &
+		Partial<Pick<Account, "connected">>)[],
 ): number {
 	return accounts.reduce(
-		(sum, a) => sum + (a.isLiability ? -a.balanceCents : a.balanceCents),
+		(sum, a) =>
+			sum +
+			(a.connected === false
+				? 0
+				: a.isLiability
+					? -a.balanceCents
+					: a.balanceCents),
 		0,
 	);
 }
@@ -48,7 +59,7 @@ export function netWorthCents(
 export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status,
+			`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status, p.disconnected_at,
 				a.id, a.name, a.mask, a.type, a.balance_cents, a.is_liability
 			FROM plaid_items p LEFT JOIN accounts a ON a.plaid_item_id = p.id
 			ORDER BY p.id, a.id`,
@@ -62,6 +73,7 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 				id: row.bank_id,
 				name: row.bank_name,
 				needsAttention: row.status === "needs_attention",
+				...(row.disconnected_at !== null ? { disconnected: true } : {}),
 				accounts: [],
 			};
 			banks.push(bank);
@@ -74,6 +86,7 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 			type: row.type ?? "",
 			balanceCents: row.balance_cents ?? 0,
 			isLiability: row.is_liability === 1,
+			...(row.disconnected_at !== null ? { connected: false } : {}),
 		});
 	}
 	return banks;

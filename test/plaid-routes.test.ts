@@ -146,6 +146,22 @@ describe("Plaid routes", () => {
 	);
 
 	it.each(["link-token", "repaired"])(
+		"returns 404 from the %s route for a disconnected item",
+		async (route) => {
+			const { jwt, jwk } = await accessIdentity();
+			const item = await env.DB.prepare(
+				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, disconnected_at) VALUES (?, 'Old Bank', 'person', datetime('now')) RETURNING id",
+			)
+				.bind(await encryptToken("token", KEY))
+				.first<{ id: number }>();
+			vi.stubGlobal("fetch", async () => Response.json({ keys: [jwk] }));
+			expect(
+				(await post(`/plaid/items/${item?.id}/${route}`, jwt)).status,
+			).toBe(404);
+		},
+	);
+
+	it.each(["link-token", "repaired"])(
 		"rejects a cross-site POST to the %s item route",
 		async (route) => {
 			const response = await exports.default.fetch(

@@ -928,6 +928,7 @@ function AccountsSketch() {
 					name={b.name}
 					accounts={b.accounts}
 					needsAttention={b.needsAttention}
+					manageHref="/accounts/1/disconnect"
 				/>
 			))}
 			<Button type="button" class="mt-8">
@@ -945,7 +946,7 @@ function AccountsGroup() {
 				title="AccountsTop, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank with debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
+				sentence="The Accounts screen shows net worth and accounts grouped by bank. Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action. A bank whose login needs fixing says so in words and offers Fix connection; Link a bank is the primary button. A disconnected bank keeps its accounts and says Disconnected in muted words, with no Manage or Fix connection."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame
@@ -960,6 +961,16 @@ function AccountsGroup() {
 					>
 						<AccountsSketch />
 					</Picture>
+				</State>
+				<State label="A disconnected bank, its history kept">
+					<div class="max-w-xl">
+						<BankGroup
+							name="Old Harbor Bank"
+							accounts={[CHECKING]}
+							disconnected
+							manageHref="/accounts/1/disconnect"
+						/>
+					</div>
 				</State>
 				<State label="AccountRow on its own: a bank account, and a credit card whose debt shows negative">
 					<ul class="max-w-xl divide-y divide-rule">
