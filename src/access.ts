@@ -112,18 +112,15 @@ export async function verifiedEmail(
 			return refuse("the token's header isn't RS256 with a key id");
 		}
 
-		let keys: AccessKey[];
+		// Either fetch can fail: the first, or the refresh for a key id the cache doesn't have.
+		let jwk: AccessKey | undefined;
 		try {
-			keys = await certs(domain);
+			jwk = matchingKey(await certs(domain), header.kid);
+			jwk ??= matchingKey(await certs(domain, true), header.kid);
 		} catch (error) {
 			return refuse(
 				`couldn't fetch the signing keys from https://${domain}/cdn-cgi/access/certs (${error instanceof Error ? `${error.name}: ${error.message}` : "unknown error"})`,
 			);
-		}
-		let jwk = matchingKey(keys, header.kid);
-		if (!jwk) {
-			keys = await certs(domain, true);
-			jwk = matchingKey(keys, header.kid);
 		}
 		if (!jwk) return refuse("no signing key matches the token's key id");
 

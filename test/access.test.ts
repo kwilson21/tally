@@ -575,6 +575,53 @@ describe("verifiedEmail explains a refusal in the log", () => {
 		).toBe("Access sign-in refused: the token has expired or isn't valid yet");
 	});
 
+	it("says the refresh for an unknown key id couldn't fetch the keys", async () => {
+		const team = "log-refresh.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(Response.json({ keys: [{ ...jwk, kid: "old" }] }))
+			.mockResolvedValueOnce(new Response("down", { status: 503 }));
+		vi.stubGlobal("fetch", fetch);
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const jwt = await token(privateKey, team);
+		// Warm the cache, then step past the 30-second refresh cooldown.
+		await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt);
+		vi.setSystemTime(Date.now() + 31_000);
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
+		).toBe(
+			"Access sign-in refused: couldn't fetch the signing keys from https://log-refresh.cloudflareaccess.com/cdn-cgi/access/certs (Error: Cloudflare Access certs were unavailable)",
+		);
+		vi.useRealTimers();
+	});
+
+	it("names a malformed token, a bad header, a missing email and an unreadable payload", async () => {
+		const team = "log-shape.cloudflareaccess.com";
+		const env = { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" };
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		expect(await refusal(env, "hdrpart.claimpart")).toBe(
+			"Access sign-in refused: the token isn't a well-formed JWT",
+		);
+		expect(
+			await refusal(env, await token(privateKey, team, {}, { alg: "none" })),
+		).toBe(
+			"Access sign-in refused: the token's header isn't RS256 with a key id",
+		);
+		expect(
+			await refusal(env, await token(privateKey, team, { email: "" })),
+		).toBe("Access sign-in refused: the token has no email");
+		expect(
+			await refusal(env, await tokenWithPayload(privateKey, "not json")),
+		).toBe(
+			"Access sign-in refused: the token couldn't be checked (SyntaxError)",
+		);
+	});
+
 	it("logs nothing when the sign-in is good", async () => {
 		const team = "log-ok.cloudflareaccess.com";
 		const { privateKey, jwk } = await keys();
