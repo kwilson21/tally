@@ -95,6 +95,7 @@ type DisconnectItem = {
 	institution_name: string;
 	access_token_encrypted: ArrayBuffer;
 	status: string;
+	disconnected_at: string | null;
 	account_count: number;
 	transaction_count: number;
 };
@@ -102,8 +103,8 @@ type DisconnectItem = {
 async function disconnectItem(db: D1Database, id: number) {
 	return db
 		.prepare(
-			`SELECT p.id, p.institution_name, p.access_token_encrypted, p.status,
-				COUNT(DISTINCT a.id) AS account_count, COUNT(t.id) AS transaction_count
+			`SELECT p.id, p.institution_name, p.access_token_encrypted, p.status, p.disconnected_at,
+				COUNT(DISTINCT a.id) AS account_count, COUNT(CASE WHEN t.is_split = 0 THEN 1 END) AS transaction_count
 			FROM plaid_items p
 			LEFT JOIN accounts a ON a.plaid_item_id = p.id
 			LEFT JOIN transactions t ON t.account_id = a.id
@@ -130,8 +131,11 @@ function DisconnectPage({
 				Disconnect {item.institution_name}?
 			</h1>
 			<p class="mt-4 max-w-xl text-muted">
-				Tally stops syncing it. Its {item.account_count} accounts and{" "}
-				{item.transaction_count} transactions stay, so past months still add up.
+				Tally stops syncing it. Its {item.account_count}{" "}
+				{item.account_count === 1 ? "account" : "accounts"} and{" "}
+				{item.transaction_count}{" "}
+				{item.transaction_count === 1 ? "transaction" : "transactions"} stay, so
+				past months still add up, unless you tick the box below.
 			</p>
 			{error && (
 				<p role="alert" class="mt-4 text-over">
@@ -142,6 +146,7 @@ function DisconnectPage({
 				<Chip type="checkbox" name="delete" value="yes">
 					Also delete its accounts and transactions
 				</Chip>
+				<p class="mt-2 text-muted">This deletes them for good.</p>
 				<div class="mt-6 flex items-center gap-3">
 					<Button type="submit">Disconnect</Button>
 					<Button kind="text" href="/accounts">
@@ -156,14 +161,14 @@ function DisconnectPage({
 accounts.get("/accounts/:itemId/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
 	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
-	if (!item || item.status === "disconnected") return c.notFound();
+	if (!item || item.disconnected_at !== null) return c.notFound();
 	return c.html(<DisconnectPage item={item} />);
 });
 
 accounts.post("/accounts/:itemId/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
 	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
-	if (!item || item.status === "disconnected") return c.notFound();
+	if (!item || item.disconnected_at !== null) return c.notFound();
 	const plaidEnv = c.env as Env & PlaidEnv;
 	try {
 		const token = await decryptToken(
@@ -205,7 +210,7 @@ accounts.post("/accounts/:itemId/disconnect", async (c) => {
 	}
 	statements.push(
 		c.env.DB.prepare(
-			"UPDATE plaid_items SET status = 'disconnected', access_token_encrypted = X'' WHERE id = ?",
+			"UPDATE plaid_items SET disconnected_at = datetime('now'), access_token_encrypted = X'', sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND disconnected_at IS NULL",
 		).bind(item.id),
 	);
 	await c.env.DB.batch(statements);

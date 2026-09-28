@@ -25,6 +25,7 @@ type Row = {
 	bank_id: number;
 	bank_name: string;
 	status: string;
+	disconnected_at: string | null;
 	/** The account's columns are null for a bank linked but not yet synced. */
 	id: number | null;
 	name: string | null;
@@ -58,7 +59,7 @@ export function netWorthCents(
 export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status,
+			`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status, p.disconnected_at,
 				a.id, a.name, a.mask, a.type, a.balance_cents, a.is_liability
 			FROM plaid_items p LEFT JOIN accounts a ON a.plaid_item_id = p.id
 			ORDER BY p.id, a.id`,
@@ -72,7 +73,7 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 				id: row.bank_id,
 				name: row.bank_name,
 				needsAttention: row.status === "needs_attention",
-				...(row.status === "disconnected" ? { disconnected: true } : {}),
+				...(row.disconnected_at !== null ? { disconnected: true } : {}),
 				accounts: [],
 			};
 			banks.push(bank);
@@ -85,7 +86,7 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 			type: row.type ?? "",
 			balanceCents: row.balance_cents ?? 0,
 			isLiability: row.is_liability === 1,
-			...(row.status === "disconnected" ? { connected: false } : {}),
+			...(row.disconnected_at !== null ? { connected: false } : {}),
 		});
 	}
 	return banks;

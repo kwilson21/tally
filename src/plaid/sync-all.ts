@@ -24,7 +24,7 @@ export async function syncAllItems(
 	}
 
 	const { results: items } = await env.DB.prepare(
-		"SELECT id FROM plaid_items WHERE status = 'ok' ORDER BY id",
+		"SELECT id FROM plaid_items WHERE status = 'ok' AND disconnected_at IS NULL ORDER BY id",
 	).all<{ id: number }>();
 
 	for (const [index, item] of items.entries()) {
@@ -35,7 +35,7 @@ export async function syncAllItems(
 
 		try {
 			const current = await env.DB.prepare(
-				"SELECT status FROM plaid_items WHERE id = ?",
+				"SELECT status FROM plaid_items WHERE id = ? AND disconnected_at IS NULL",
 			)
 				.bind(item.id)
 				.first<{ status: string }>();

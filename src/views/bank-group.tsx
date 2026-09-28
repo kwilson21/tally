@@ -34,15 +34,15 @@ export function BankGroup({
 			<h2 class="text-muted" tabindex={-1}>
 				{name}
 			</h2>
-			{accounts.length === 0 ? (
+			{accounts.length === 0 && !disconnected ? (
 				<p class="mt-2 text-muted">Accounts appear after the first sync.</p>
-			) : (
+			) : accounts.length > 0 ? (
 				<ul class="mt-2 divide-y divide-rule border-y border-rule">
 					{accounts.map(({ id: _, ...account }) => (
 						<AccountRow {...account} />
 					))}
 				</ul>
-			)}
+			) : null}
 			{needsAttention && (
 				<>
 					<p class="mt-3 flex items-center gap-2 text-over">

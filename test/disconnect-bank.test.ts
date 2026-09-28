@@ -56,6 +56,8 @@ describe("disconnect bank", () => {
 		const html = await response.text();
 		expect(html).toContain("Disconnect First Harbor Bank?");
 		expect(html).toContain("Also delete its accounts and transactions");
+		expect(html).toContain("unless you tick the box below");
+		expect(html).toContain("This deletes them for good.");
 		expect(
 			(
 				await accounts.request(
@@ -89,7 +91,7 @@ describe("disconnect bank", () => {
 		)
 			.bind(id)
 			.first();
-		expect(row).toEqual({ status: "disconnected", token_length: 0 });
+		expect(row).toMatchObject({ status: "ok", token_length: 0 });
 		expect(
 			await env.DB.prepare(
 				"SELECT COUNT(*) count FROM accounts WHERE plaid_item_id = ?",
@@ -160,6 +162,6 @@ describe("disconnect bank", () => {
 			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
 				.bind(id)
 				.first(),
-		).toEqual({ status: "disconnected" });
+		).toEqual({ status: "ok" });
 	});
 });
