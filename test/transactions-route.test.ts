@@ -51,12 +51,31 @@ describe("GET /transactions", () => {
 		expect(html).toContain("Reimbursement, doctor&#39;s office");
 	});
 
-	it("shows an empty state with a way back", async () => {
+	it("shows the search empty state with a way back", async () => {
 		const { html } = await get("/transactions?q=zzz");
-		expect(html).toContain("No transactions match.");
+		expect(html).toContain("No transactions match these filters.");
 		expect(html).toMatch(
 			/<a[^>]*href="\/transactions"[^>]*>Clear filters<\/a>/,
 		);
+	});
+
+	it("keeps the search empty state when needs category is combined with search", async () => {
+		const { html } = await get("/transactions?uncategorized=1&q=zzz");
+		expect(html).toContain("No transactions match these filters.");
+		expect(html).toMatch(
+			/<a[^>]*href="\/transactions"[^>]*>Clear filters<\/a>/,
+		);
+		expect(html).not.toContain("Every transaction has a category.");
+	});
+
+	it("shows the done empty state when no transaction needs a category", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
+		).run();
+		const { html } = await get("/transactions?uncategorized=1");
+		expect(html).toContain("Every transaction has a category.");
+		expect(html).toContain("New ones appear here as they come in.");
+		expect(html).not.toContain("Clear filters");
 	});
 
 	it("shows the result count in a stable live region that htmx updates in place", async () => {
@@ -154,7 +173,7 @@ describe("GET /transactions", () => {
 		expect(html).toMatch(
 			/<option value="2020-01" selected[^>]*>January 2020<\/option>/,
 		);
-		expect(html).toContain("No transactions match.");
+		expect(html).toContain("No transactions match these filters.");
 	});
 
 	it("is where Home's band link lands", async () => {

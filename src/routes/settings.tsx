@@ -18,6 +18,7 @@ import {
 } from "../settings/category-form";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { EmptyState } from "../views/empty-state";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { TextInput } from "../views/text-input";
@@ -248,6 +249,17 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					</p>
 				)}
 				<div class="mt-3 border-t border-rule">
+					{active.length === 0 && (
+						<EmptyState
+							kind="done"
+							sentence="No active categories."
+							hint={
+								archived.length > 0
+									? "Add one below, or restore an archived category."
+									: "Add one below."
+							}
+						/>
+					)}
 					{active.map((category, i) => (
 						<CategoryRow
 							category={category}
