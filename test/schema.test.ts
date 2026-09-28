@@ -51,6 +51,7 @@ describe("schema", () => {
 			"budget_amounts",
 			"categories",
 			"documents",
+			"feedback",
 			"merchants",
 			"plaid_items",
 			"transactions",

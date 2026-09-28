@@ -209,6 +209,20 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("renders one fixed Feedback button and makes the visual form inert", async () => {
+		const { html } = await get("/design-system");
+		expect(html.match(/fixed bottom-20 right-4/g)).toHaveLength(1);
+		const formSpecimen = specimens(html).find((tag) =>
+			tag.includes('id="feedback-form"'),
+		);
+		// The form is inert, but the specimen's title and sentence aren't.
+		expect(formSpecimen).not.toContain("inert");
+		const body = html.slice(html.indexOf('id="feedback-form"'));
+		expect(body.slice(0, body.indexOf("<section"))).toMatch(
+			/<div inert[^>]*>[\s\S]*<form/,
+		);
+	});
+
 	it("loads the catalog's own script, which fires sample toasts", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain('src="/js/ds.js"');

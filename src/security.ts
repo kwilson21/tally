@@ -8,6 +8,8 @@ const inCatalog = (path: string) =>
 // Plaid Link is the one third-party script, and its hosts are allowed only on Accounts.
 export const security = secureHeaders({
 	xFrameOptions: "DENY",
+	// Feedback records the page it came from; the Referer never leaves Tally.
+	referrerPolicy: "same-origin",
 	contentSecurityPolicy: {
 		defaultSrc: ["'self'"],
 		scriptSrc: [

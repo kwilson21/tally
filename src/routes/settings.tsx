@@ -233,6 +233,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		<Layout
 			title="Settings · Tally"
 			active="settings"
+			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>
