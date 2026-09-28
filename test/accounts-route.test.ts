@@ -62,12 +62,17 @@ describe("accountsByBank", () => {
 		expect(banks.map((b) => b.needsAttention)).toEqual([false, true]);
 	});
 
-	it("leaves out a linked bank that has no accounts yet", async () => {
+	it("keeps a just-linked bank whose accounts haven't synced yet, so it can still be fixed", async () => {
 		await env.DB.prepare(
-			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (X'00', 'Empty Bank', 'demo')",
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (X'00', 'New Bank', 'demo', 'needs_attention')",
 		).run();
 		const banks = await accountsByBank(env.DB);
-		expect(banks.map((b) => b.name)).not.toContain("Empty Bank");
+		expect(banks.at(-1)).toEqual({
+			id: expect.any(Number),
+			name: "New Bank",
+			needsAttention: true,
+			accounts: [],
+		});
 	});
 });
 
@@ -102,10 +107,22 @@ describe("GET /accounts", () => {
 		);
 	});
 
-	it("says no bank is linked yet when there are no accounts", async () => {
+	it("shows a linked bank before its first sync, not the no-banks message", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
+		]);
+		const text = textOf((await get("/accounts")).html);
+		expect(text).toContain("First Harbor Bank");
+		expect(text).toContain("Accounts appear after the first sync.");
+		expect(text).not.toContain("No banks linked yet.");
+	});
+
+	it("says no bank is linked yet when there are none", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
 		]);
 		const text = textOf((await get("/accounts")).html);
 		expect(text).toContain("$0");
