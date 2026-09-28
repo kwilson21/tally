@@ -56,9 +56,12 @@ describe("GET /design-system/proposals", () => {
 			const next = section.indexOf("option ", start + 10);
 			return section.slice(start, next === -1 ? undefined : next);
 		};
-		expect(option("A")).toContain("Net worth");
+		for (const letter of ["A", "C"]) {
+			expect(option(letter)).toContain("Net worth");
+			expect(option(letter)).toMatch(/>\$0</);
+		}
 		expect(option("B")).not.toContain("Net worth");
-		expect(option("C")).toContain("Net worth");
+		expect(option("B")).not.toMatch(/>\$0</);
 	});
 
 	it("is linked from the catalog", async () => {
