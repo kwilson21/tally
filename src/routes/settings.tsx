@@ -348,7 +348,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				aria-labelledby="your-data-title"
 				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
 			>
-				<h2 id="your-data-title" class="text-2xl">
+				<h2 id="your-data-title" class="font-serif text-3xl font-semibold">
 					Your data
 				</h2>
 				<p class="mt-1 text-muted">

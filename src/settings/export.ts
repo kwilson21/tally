@@ -84,25 +84,24 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 	return `${rows.map((row) => row.map(csvField).join(",")).join("\r\n")}\r\n`;
 }
 
-/** Build an allowlisted export: sensitive bank and document columns are never selected. */
+/** Build an allowlisted export in one batch, so every table comes from the same moment. Bank logins and document contents are never selected. */
 export async function tallyExport(db: D1Database) {
-	const tableRows = await Promise.all(
-		Object.entries(EXPORT_COLUMNS).map(async ([table, columns]) => [
-			table,
-			(await db.prepare(`SELECT ${columns} FROM ${table}`).all()).results,
-		]),
-	);
-	const [plaidItems, documents] = await Promise.all([
-		db
-			.prepare("SELECT institution_name, status FROM plaid_items ORDER BY id")
-			.all(),
-		db.prepare("SELECT filename, uploaded_at FROM documents ORDER BY id").all(),
+	const tables = Object.entries(EXPORT_COLUMNS);
+	const results = await db.batch([
+		...tables.map(([table, columns]) =>
+			db.prepare(`SELECT ${columns} FROM ${table}`),
+		),
+		db.prepare("SELECT institution_name, status FROM plaid_items ORDER BY id"),
+		db.prepare("SELECT filename, uploaded_at FROM documents ORDER BY id"),
 	]);
+	const [plaidItems, documents] = results.slice(tables.length);
 	return {
 		schema_version: 1,
 		exported_at: new Date().toISOString(),
-		...Object.fromEntries(tableRows),
-		plaid_items: plaidItems.results,
-		documents: documents.results,
+		...Object.fromEntries(
+			tables.map(([table], index) => [table, results[index]?.results]),
+		),
+		plaid_items: plaidItems?.results,
+		documents: documents?.results,
 	};
 }
