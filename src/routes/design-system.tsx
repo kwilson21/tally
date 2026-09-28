@@ -14,7 +14,12 @@ designSystem.use("/design-system/*", async (c, next) => {
 
 designSystem.get("/design-system", (c) =>
 	c.html(
-		<Layout title="Design system · Tally" demo scripts={["/js/ds.js"]}>
+		<Layout
+			title="Design system · Tally"
+			demo
+			scripts={["/js/ds.js"]}
+			currentPath={c.req.path}
+		>
 			<Catalog />
 		</Layout>,
 	),
@@ -22,7 +27,11 @@ designSystem.get("/design-system", (c) =>
 
 designSystem.get("/design-system/bottom-sheet", (c) =>
 	c.html(
-		<Layout title="BottomSheet · Design system · Tally" demo>
+		<Layout
+			title="BottomSheet · Design system · Tally"
+			demo
+			currentPath={c.req.path}
+		>
 			<SheetSpecimen />
 		</Layout>,
 	),
@@ -30,7 +39,11 @@ designSystem.get("/design-system/bottom-sheet", (c) =>
 
 designSystem.get("/design-system/proposals", (c) =>
 	c.html(
-		<Layout title="Proposals · Design system · Tally" demo>
+		<Layout
+			title="Proposals · Design system · Tally"
+			demo
+			currentPath={c.req.path}
+		>
 			<Proposals />
 		</Layout>,
 	),

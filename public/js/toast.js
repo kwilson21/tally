@@ -24,4 +24,17 @@
 			region.textContent = message;
 		});
 	});
+
+	// A normal form redirect carries the same feedback as an HTMX response.
+	const query = new URLSearchParams(location.search);
+	const toast = query.get("toast");
+	const announce = query.get("announce");
+	if (toast)
+		document.body.dispatchEvent(
+			new CustomEvent("toast", { detail: { message: toast } }),
+		);
+	if (announce)
+		document.body.dispatchEvent(
+			new CustomEvent("announce", { detail: { value: announce } }),
+		);
 })();

@@ -147,6 +147,7 @@ async function renderList(
 		<Layout
 			title={sheet ? "Edit transaction · Tally" : "Transactions · Tally"}
 			active="transactions"
+			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">
@@ -527,6 +528,7 @@ async function notFound(c: Context<App>) {
 		<Layout
 			title="Not found · Tally"
 			active="transactions"
+			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">

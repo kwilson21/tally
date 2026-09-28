@@ -13,6 +13,8 @@ import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
+import { FeedbackButton } from "../views/feedback-button";
+import { FeedbackForm } from "../views/feedback-form";
 import { HomeTop } from "../views/home-top";
 import {
 	BudgetDiagram,
@@ -755,6 +757,29 @@ function Controls() {
 function Feedback() {
 	return (
 		<Group id="feedback" title="Feedback and sheets">
+			<Specimen
+				id="feedback-button"
+				title="FeedbackButton"
+				tier="visual"
+				components={["FeedbackButton"]}
+				sentence="A fixed, shadowless pill links to the feedback form and carries the current page with it."
+			>
+				<p class="text-muted">
+					The real component is fixed at the bottom-right of this catalog page.
+				</p>
+				<FeedbackButton from="/design-system" />
+			</Specimen>
+			<Specimen
+				id="feedback-form"
+				title="FeedbackForm"
+				tier="visual"
+				components={["FeedbackForm"]}
+				sentence="Two groups of radio chips and a labeled message give the builder a small, direct report."
+			>
+				<FeedbackForm
+					values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
+				/>
+			</Specimen>
 			<Specimen
 				id="toast"
 				title="Toast"

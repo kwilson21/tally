@@ -29,6 +29,7 @@ accounts.get("/accounts", async (c) => {
 		<Layout
 			title="Accounts · Tally"
 			active="accounts"
+			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 			scripts={
 				plaidEnabled

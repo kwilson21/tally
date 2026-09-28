@@ -129,6 +129,7 @@ const PATHS = {
 	),
 	"chevron-right": <path d="m9 18 6-6-6-6" />,
 	check: <path d="M20 6 9 17l-5-5" />,
+	message: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
 	// Default categories (spec §7, decision 32).
 	car: (
 		<>

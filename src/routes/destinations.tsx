@@ -19,6 +19,7 @@ for (const item of SIDEBAR_ITEMS.filter(
 			<Layout
 				title={`${item.label} · Tally`}
 				active={item.key}
+				currentPath={c.req.path + new URL(c.req.url).search}
 				demo={c.env.DEMO === "true"}
 			>
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
@@ -37,7 +38,12 @@ destinations.get("/more", (c) => {
 			? [...MORE_ITEMS, { label: "How Tally works", href: "/how-it-works" }]
 			: MORE_ITEMS;
 	return c.html(
-		<Layout title="More · Tally" active="more" demo={c.env.DEMO === "true"}>
+		<Layout
+			title="More · Tally"
+			active="more"
+			demo={c.env.DEMO === "true"}
+			currentPath={c.req.path + new URL(c.req.url).search}
+		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
 			<ul class="mt-6 divide-y divide-rule border-y border-rule">
 				{items.map((item) => (

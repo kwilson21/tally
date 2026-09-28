@@ -1,5 +1,6 @@
 import type { Child } from "hono/jsx";
 import { Wordmark } from "./brand";
+import { FeedbackButton } from "./feedback-button";
 import { BottomTabs, type NavKey, Sidebar } from "./nav";
 
 type LayoutProps = {
@@ -10,6 +11,7 @@ type LayoutProps = {
 	scripts?: string[];
 	/** Extra ES module scripts for this page only. */
 	modules?: string[];
+	currentPath?: string;
 	children?: Child;
 };
 
@@ -19,6 +21,7 @@ export function Layout({
 	demo,
 	scripts = [],
 	modules = [],
+	currentPath = "/",
 	children,
 }: LayoutProps) {
 	return (
@@ -59,7 +62,7 @@ export function Layout({
 						</div>
 						<Sidebar active={active} />
 					</aside>
-					<main id="main" class="min-w-0 flex-1 pb-24 pt-6 lg:pb-12 lg:pt-8">
+					<main id="main" class="min-w-0 flex-1 pb-40 pt-6 lg:pb-24 lg:pt-8">
 						<div class="mb-4 lg:hidden">
 							<Wordmark />
 						</div>
@@ -67,6 +70,7 @@ export function Layout({
 					</main>
 				</div>
 				<BottomTabs active={active} />
+				<FeedbackButton from={currentPath} />
 				<div
 					id="toasts"
 					class="fixed inset-x-4 bottom-20 flex flex-col items-center gap-2 lg:bottom-6"
