@@ -9,9 +9,10 @@ const MORE_ITEMS = SIDEBAR_ITEMS.filter((item) =>
 	["accounts", "documents", "settings"].includes(item.key),
 );
 
-// Home, Transactions and Settings have their own routes.
+// Home, Transactions, Accounts and Settings have their own routes.
 for (const item of SIDEBAR_ITEMS.filter(
-	(item) => !["home", "transactions", "settings"].includes(item.key),
+	(item) =>
+		!["home", "transactions", "accounts", "settings"].includes(item.key),
 )) {
 	destinations.get(item.href, (c) =>
 		c.html(

@@ -10,8 +10,14 @@ export type SeedCategory = {
 	color: string;
 	sortOrder: number;
 };
+/** A linked bank as Plaid would name it. The demo's are made up and hold no token. */
+export type SeedBank = {
+	id: number;
+	name: string;
+};
 export type SeedAccount = {
 	id: number;
+	bankId: number;
 	name: string;
 	mask: string;
 	type: string;
@@ -40,6 +46,7 @@ export type SeedTransaction = {
 };
 export type Seed = {
 	categories: SeedCategory[];
+	banks: SeedBank[];
 	accounts: SeedAccount[];
 	merchants: SeedMerchant[];
 	budgetAmounts: BudgetAmount[];
@@ -81,9 +88,18 @@ const CATEGORIES: SeedCategory[] = [
 	},
 ];
 
+const HARBOR = 1;
+const NORTHLINE = 2;
+
+const BANKS: SeedBank[] = [
+	{ id: HARBOR, name: "First Harbor Bank" },
+	{ id: NORTHLINE, name: "Northline Card Services" },
+];
+
 const ACCOUNTS: SeedAccount[] = [
 	{
 		id: CHECKING,
+		bankId: HARBOR,
 		name: "Checking",
 		mask: "1234",
 		type: "depository",
@@ -93,6 +109,7 @@ const ACCOUNTS: SeedAccount[] = [
 	},
 	{
 		id: SAVINGS,
+		bankId: HARBOR,
 		name: "Savings",
 		mask: "5678",
 		type: "depository",
@@ -102,6 +119,7 @@ const ACCOUNTS: SeedAccount[] = [
 	},
 	{
 		id: CARD,
+		bankId: NORTHLINE,
 		name: "Credit card",
 		mask: "9012",
 		type: "credit",
@@ -318,6 +336,7 @@ export function buildSeed(today: string): Seed {
 
 	return {
 		categories: CATEGORIES,
+		banks: BANKS,
 		accounts: ACCOUNTS,
 		merchants,
 		budgetAmounts,

@@ -41,13 +41,22 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 				)
 				.bind(c.id, c.name, c.icon, c.color, c.sortOrder),
 		),
+		// An empty token: the demo has no Plaid credentials, so nothing ever tries to use it.
+		...seed.banks.map((bank) =>
+			db
+				.prepare(
+					"INSERT INTO plaid_items (id, access_token_encrypted, institution_name, linked_by) VALUES (?, X'', ?, 'demo')",
+				)
+				.bind(bank.id, bank.name),
+		),
 		...seed.accounts.map((a) =>
 			db
 				.prepare(
-					"INSERT INTO accounts (id, name, mask, type, subtype, is_liability, balance_cents) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					"INSERT INTO accounts (id, plaid_item_id, name, mask, type, subtype, is_liability, balance_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 				)
 				.bind(
 					a.id,
+					a.bankId,
 					a.name,
 					a.mask,
 					a.type,

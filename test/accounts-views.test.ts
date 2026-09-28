@@ -88,6 +88,12 @@ describe("BankGroup", () => {
 		expect(html).not.toContain("Fix connection");
 	});
 
+	it("says when a bank's accounts haven't synced yet, with no empty list", async () => {
+		const html = await render(BankGroup({ name: "New Bank", accounts: [] }));
+		expect(html).toContain("Accounts appear after the first sync.");
+		expect(html).not.toContain("<ul");
+	});
+
 	it("says a connection needs attention in words with an icon, and offers Fix connection", async () => {
 		const html = await render(
 			BankGroup({
