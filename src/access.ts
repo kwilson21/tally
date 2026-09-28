@@ -50,8 +50,9 @@ async function certs(domain: string, force = false): Promise<AccessKey[]> {
 	if (inFlight) return inFlight;
 
 	const fetchPromise = (async () => {
+		// Workers rejects redirect: "error", so stop at a redirect and refuse it: a 3xx isn't ok.
 		const response = await fetch(`https://${domain}/cdn-cgi/access/certs`, {
-			redirect: "error",
+			redirect: "manual",
 		});
 		if (!response.ok)
 			throw new Error("Cloudflare Access certs were unavailable");
