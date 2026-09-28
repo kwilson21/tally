@@ -73,7 +73,9 @@ export async function plaidPost<T>(
 export type LinkTokenRequest = {
 	user: { client_user_id: string };
 	client_name: string;
-	products: ["transactions"];
+	/** New-item Link uses products; update mode identifies the existing item instead. */
+	products?: ["transactions"];
+	access_token?: string;
 	country_codes: ["US"];
 	language: "en";
 	webhook?: string;
