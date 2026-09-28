@@ -198,6 +198,25 @@ describe("categorizePending", () => {
 		expect(again.calls()).toBe(0);
 	});
 
+	it("stops production's run at 500, leaving the rest for the next night", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		// 510 more transactions that need a category, in one statement.
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 510)
+				 INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+				 SELECT 1, ?, 100, 'EXTRA ' || i FROM n`,
+			)
+			.bind(`${MONTH}-01`)
+			.run();
+		const jev = fakeJev(() => reply(0.5));
+		await categorizePending({ ...withKey, DEMO: "false" }, jev.fetchImpl);
+		expect(jev.calls()).toBe(500);
+		const next = fakeJev(() => reply(0.5));
+		await categorizePending({ ...withKey, DEMO: "false" }, next.fetchImpl);
+		expect(next.calls()).toBeGreaterThan(0);
+	});
+
 	it("skips one transaction Jev can't answer usefully and carries on with the rest", async () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
