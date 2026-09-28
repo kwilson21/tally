@@ -5,27 +5,31 @@ import { secureHeaders } from "hono/secure-headers";
 const inCatalog = (path: string) =>
 	path === "/design-system" || path.startsWith("/design-system/");
 
-// Plaid Link is the one third-party script, and its hosts are allowed only on Accounts.
+// Plaid Link is the one third-party script, and its hosts are allowed only on Accounts
+// and its sub-pages (the disconnect page swaps Accounts in, Link a bank included).
+const onAccounts = (path: string) =>
+	path === "/accounts" || path.startsWith("/accounts/");
+
 export const security = secureHeaders({
 	xFrameOptions: "DENY",
 	contentSecurityPolicy: {
 		defaultSrc: ["'self'"],
 		scriptSrc: [
 			(c) =>
-				c.req.path === "/accounts" ? "'self' https://cdn.plaid.com" : "'self'",
+				onAccounts(c.req.path) ? "'self' https://cdn.plaid.com" : "'self'",
 		],
 		styleSrc: ["'self'"],
 		fontSrc: ["'self'"],
 		imgSrc: ["'self'", "data:"],
 		connectSrc: [
 			(c) =>
-				c.req.path === "/accounts"
+				onAccounts(c.req.path)
 					? "'self' https://production.plaid.com"
 					: "'self'",
 		],
 		frameSrc: [
 			(c) =>
-				c.req.path === "/accounts" ? "'self' https://cdn.plaid.com" : "'self'",
+				onAccounts(c.req.path) ? "'self' https://cdn.plaid.com" : "'self'",
 		],
 		objectSrc: ["'none'"],
 		frameAncestors: ["'none'"],
