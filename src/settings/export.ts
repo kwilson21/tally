@@ -1,15 +1,20 @@
 import { tidyName } from "../transactions/tidy-name";
 
-const COMPLETE_TABLES = [
-	"categories",
-	"budget_amounts",
-	"merchants",
-	"accounts",
-	"balance_history",
-	"transactions",
-	"bills",
-	"bill_payments",
-] as const;
+const EXPORT_COLUMNS = {
+	categories: "id, name, icon, color, sort_order, archived",
+	budget_amounts: "category_id, effective_month, amount_cents",
+	merchants:
+		"raw_name, suggested_name, display_name, default_category_id, suggestion_status",
+	accounts:
+		"id, plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents, updated_at",
+	balance_history: "account_id, date, balance_cents",
+	transactions:
+		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, excluded, parent_id, is_split, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category",
+	bills:
+		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active",
+	bill_payments:
+		"id, bill_id, period, transaction_id, matched_by, status, created_at",
+} as const;
 
 /** A dollar value for a spreadsheet, calculated without turning stored money into a float. */
 export function exportDollars(cents: number): string {
@@ -22,6 +27,12 @@ export function exportDollars(cents: number): string {
 export function csvField(value: unknown): string {
 	const text = value === null || value === undefined ? "" : String(value);
 	return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+/** Prevent spreadsheet programs from interpreting an exported text cell as a formula. */
+function csvText(value: string | null): string {
+	if (value === null) return "";
+	return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
 type CsvRow = {
@@ -44,6 +55,7 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			LEFT JOIN categories c ON c.id = t.category_id
+			WHERE t.is_split = 0
 			ORDER BY t.date DESC, t.id DESC`,
 		)
 		.all<CsvRow>();
@@ -60,13 +72,13 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 		],
 		...results.map((row) => [
 			row.date,
-			row.raw_name,
-			row.merchant_name ?? tidyName(row.raw_name),
+			csvText(row.raw_name),
+			csvText(row.merchant_name ?? tidyName(row.raw_name)),
 			exportDollars(row.amount_cents),
-			row.category,
+			csvText(row.category),
 			row.excluded === 1,
-			row.note,
-			row.account,
+			csvText(row.note),
+			csvText(row.account),
 		]),
 	];
 	return `${rows.map((row) => row.map(csvField).join(",")).join("\r\n")}\r\n`;
@@ -75,16 +87,14 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 /** Build an allowlisted export: sensitive bank and document columns are never selected. */
 export async function tallyExport(db: D1Database) {
 	const tableRows = await Promise.all(
-		COMPLETE_TABLES.map(async (table) => [
+		Object.entries(EXPORT_COLUMNS).map(async ([table, columns]) => [
 			table,
-			(await db.prepare(`SELECT * FROM ${table}`).all()).results,
+			(await db.prepare(`SELECT ${columns} FROM ${table}`).all()).results,
 		]),
 	);
 	const [plaidItems, documents] = await Promise.all([
 		db
-			.prepare(
-				"SELECT id, institution_name, status FROM plaid_items ORDER BY id",
-			)
+			.prepare("SELECT institution_name, status FROM plaid_items ORDER BY id")
 			.all(),
 		db.prepare("SELECT filename, uploaded_at FROM documents ORDER BY id").all(),
 	]);

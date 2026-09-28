@@ -433,6 +433,7 @@ settings.get("/settings", (c) => {
 
 settings.get("/settings/export/transactions.csv", async (c) => {
 	c.header("Content-Type", "text/csv; charset=utf-8");
+	c.header("Cache-Control", "no-store");
 	c.header(
 		"Content-Disposition",
 		`attachment; filename="tally-transactions-${todayUtc()}.csv"`,
@@ -441,6 +442,7 @@ settings.get("/settings/export/transactions.csv", async (c) => {
 });
 
 settings.get("/settings/export/tally.json", async (c) => {
+	c.header("Cache-Control", "no-store");
 	c.header(
 		"Content-Disposition",
 		`attachment; filename="tally-${todayUtc()}.json"`,
