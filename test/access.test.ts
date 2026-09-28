@@ -429,3 +429,213 @@ describe("Access middleware", () => {
 		}
 	});
 });
+
+// A refused sign-in logs which check failed, so `wrangler tail` can tell a pasted-wrong
+// setting from a Cloudflare problem. Never the token, its claims or the email.
+describe("verifiedEmail explains a refusal in the log", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+	});
+
+	const refusal = async (
+		env: { ACCESS_TEAM_DOMAIN?: string; ACCESS_AUD?: string },
+		jwt?: string,
+	) => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		warn.mockClear();
+		expect(await verifiedEmail(request(jwt), env)).toBeNull();
+		expect(warn).toHaveBeenCalledTimes(1);
+		const logged = String(warn.mock.calls[0]?.join(" "));
+		if (jwt) {
+			for (const part of jwt.split(".")) expect(logged).not.toContain(part);
+		}
+		expect(logged).not.toMatch(/family\.member/i);
+		return logged;
+	};
+
+	it("names a missing token or setting", async () => {
+		expect(
+			await refusal({
+				ACCESS_TEAM_DOMAIN: "a.cloudflareaccess.com",
+				ACCESS_AUD: "x",
+			}),
+		).toBe("Access sign-in refused: no Cf-Access-Jwt-Assertion header");
+		expect(
+			await refusal({ ACCESS_AUD: "x" }, "hdrpart.claimpart.sigpart"),
+		).toBe("Access sign-in refused: ACCESS_TEAM_DOMAIN isn't set");
+		expect(
+			await refusal(
+				{ ACCESS_TEAM_DOMAIN: "a.cloudflareaccess.com" },
+				"hdrpart.claimpart.sigpart",
+			),
+		).toBe("Access sign-in refused: ACCESS_AUD isn't set");
+		expect(
+			await refusal(
+				{
+					ACCESS_TEAM_DOMAIN: "https://a.cloudflareaccess.com",
+					ACCESS_AUD: "x",
+				},
+				"hdrpart.claimpart.sigpart",
+			),
+		).toBe(
+			"Access sign-in refused: ACCESS_TEAM_DOMAIN should look like team.cloudflareaccess.com (30 characters set)",
+		);
+	});
+
+	it("says the audience is wrong, with the length of what's set", async () => {
+		const team = "log-aud.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		const jwt = await token(privateKey, team);
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud " }, jwt),
+		).toBe(
+			"Access sign-in refused: the token's audience doesn't match ACCESS_AUD (9 characters set)",
+		);
+	});
+
+	it("says the issuer is wrong", async () => {
+		const team = "log-iss.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		const jwt = await token(privateKey, team, {
+			iss: "https://elsewhere.cloudflareaccess.com",
+		});
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
+		).toBe(
+			"Access sign-in refused: the token's issuer isn't https://log-iss.cloudflareaccess.com",
+		);
+	});
+
+	it("says the signing keys couldn't be fetched", async () => {
+		const team = "log-certs.cloudflareaccess.com";
+		const { privateKey } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new TypeError("Network connection lost.");
+			}),
+		);
+		const jwt = await token(privateKey, team);
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
+		).toBe(
+			"Access sign-in refused: couldn't fetch the signing keys from https://log-certs.cloudflareaccess.com/cdn-cgi/access/certs (TypeError: Network connection lost.)",
+		);
+	});
+
+	it("says no key matched and the signature failed", async () => {
+		const team = "log-kid.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [{ ...jwk, kid: "other" }] })),
+		);
+		expect(
+			await refusal(
+				{ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" },
+				await token(privateKey, team),
+			),
+		).toBe("Access sign-in refused: no signing key matches the token's key id");
+
+		const signedElsewhere = await keys();
+		const other = "log-sig.cloudflareaccess.com";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		expect(
+			await refusal(
+				{ ACCESS_TEAM_DOMAIN: other, ACCESS_AUD: "test-aud" },
+				await token(signedElsewhere.privateKey, other),
+			),
+		).toBe("Access sign-in refused: the token's signature doesn't verify");
+	});
+
+	it("says a token has expired", async () => {
+		const team = "log-exp.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		const jwt = await token(privateKey, team, {
+			exp: Math.floor(Date.now() / 1000) - 120,
+		});
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
+		).toBe("Access sign-in refused: the token has expired or isn't valid yet");
+	});
+
+	it("says the refresh for an unknown key id couldn't fetch the keys", async () => {
+		const team = "log-refresh.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(Response.json({ keys: [{ ...jwk, kid: "old" }] }))
+			.mockResolvedValueOnce(new Response("down", { status: 503 }));
+		vi.stubGlobal("fetch", fetch);
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const jwt = await token(privateKey, team);
+		// Warm the cache, then step past the 30-second refresh cooldown.
+		await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt);
+		vi.setSystemTime(Date.now() + 31_000);
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
+		).toBe(
+			"Access sign-in refused: couldn't fetch the signing keys from https://log-refresh.cloudflareaccess.com/cdn-cgi/access/certs (Error: Cloudflare Access certs were unavailable)",
+		);
+	});
+
+	it("names a malformed token, a bad header, a missing email and an unreadable payload", async () => {
+		const team = "log-shape.cloudflareaccess.com";
+		const env = { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" };
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		expect(await refusal(env, "hdrpart.claimpart")).toBe(
+			"Access sign-in refused: the token isn't a well-formed JWT",
+		);
+		expect(
+			await refusal(env, await token(privateKey, team, {}, { alg: "none" })),
+		).toBe(
+			"Access sign-in refused: the token's header isn't RS256 with a key id",
+		);
+		expect(
+			await refusal(env, await token(privateKey, team, { email: "" })),
+		).toBe("Access sign-in refused: the token has no email");
+		expect(
+			await refusal(env, await tokenWithPayload(privateKey, "not json")),
+		).toBe(
+			"Access sign-in refused: the token couldn't be checked (SyntaxError)",
+		);
+	});
+
+	it("logs nothing when the sign-in is good", async () => {
+		const team = "log-ok.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		expect(
+			await verifiedEmail(request(await token(privateKey, team)), {
+				ACCESS_TEAM_DOMAIN: team,
+				ACCESS_AUD: "test-aud",
+			}),
+		).toBe("family.member@example.com");
+		expect(warn).not.toHaveBeenCalled();
+	});
+});

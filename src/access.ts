@@ -73,6 +73,12 @@ function matchingKey(keys: AccessKey[], kid: string) {
 	return keys.find((key) => key.kid === kid);
 }
 
+/** Logs which check refused a sign-in, so `wrangler tail` shows it. Never the token, its claims or the email. */
+function refuse(reason: string): null {
+	console.warn(`Access sign-in refused: ${reason}`);
+	return null;
+}
+
 /** Returns the email from a valid Cloudflare Access application token, or null. */
 export async function verifiedEmail(
 	request: Request,
@@ -81,14 +87,19 @@ export async function verifiedEmail(
 	const token = request.headers.get("Cf-Access-Jwt-Assertion");
 	const domain = env.ACCESS_TEAM_DOMAIN;
 	const expectedAudience = env.ACCESS_AUD;
-	if (!token || !domain || !expectedAudience || !TEAM_DOMAIN.test(domain)) {
-		return null;
+	if (!token) return refuse("no Cf-Access-Jwt-Assertion header");
+	if (!domain) return refuse("ACCESS_TEAM_DOMAIN isn't set");
+	if (!expectedAudience) return refuse("ACCESS_AUD isn't set");
+	if (!TEAM_DOMAIN.test(domain)) {
+		return refuse(
+			`ACCESS_TEAM_DOMAIN should look like team.cloudflareaccess.com (${domain.length} characters set)`,
+		);
 	}
 
 	try {
 		const parts = token.split(".");
 		if (parts.length !== 3 || parts.some((part) => !BASE64URL.test(part))) {
-			return null;
+			return refuse("the token isn't a well-formed JWT");
 		}
 		const [encodedHeader = "", encodedClaims = "", encodedSignature = ""] =
 			parts;
@@ -98,16 +109,20 @@ export async function verifiedEmail(
 			typeof header.kid !== "string" ||
 			header.crit !== undefined
 		) {
-			return null;
+			return refuse("the token's header isn't RS256 with a key id");
 		}
 
-		let keys = await certs(domain);
-		let jwk = matchingKey(keys, header.kid);
-		if (!jwk) {
-			keys = await certs(domain, true);
-			jwk = matchingKey(keys, header.kid);
+		// Either fetch can fail: the first, or the refresh for a key id the cache doesn't have.
+		let jwk: AccessKey | undefined;
+		try {
+			jwk = matchingKey(await certs(domain), header.kid);
+			jwk ??= matchingKey(await certs(domain, true), header.kid);
+		} catch (error) {
+			return refuse(
+				`couldn't fetch the signing keys from https://${domain}/cdn-cgi/access/certs (${error instanceof Error ? `${error.name}: ${error.message}` : "unknown error"})`,
+			);
 		}
-		if (!jwk) return null;
+		if (!jwk) return refuse("no signing key matches the token's key id");
 
 		const key = await crypto.subtle.importKey(
 			"jwk",
@@ -122,29 +137,38 @@ export async function verifiedEmail(
 			decode(encodedSignature),
 			new TextEncoder().encode(`${encodedHeader}.${encodedClaims}`),
 		);
-		if (!validSignature) return null;
+		if (!validSignature) return refuse("the token's signature doesn't verify");
 
 		const claims = json<Claims>(encodedClaims);
 		const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
 		const now = Math.floor(Date.now() / 1000);
+		if (!audiences.includes(expectedAudience)) {
+			return refuse(
+				`the token's audience doesn't match ACCESS_AUD (${expectedAudience.length} characters set)`,
+			);
+		}
+		if (claims.iss !== `https://${domain}`) {
+			return refuse(`the token's issuer isn't https://${domain}`);
+		}
 		if (
-			!audiences.includes(expectedAudience) ||
-			claims.iss !== `https://${domain}` ||
 			typeof claims.exp !== "number" ||
 			!Number.isFinite(claims.exp) ||
 			claims.exp < now - LEEWAY_SECONDS ||
 			(claims.nbf !== undefined &&
 				(typeof claims.nbf !== "number" ||
 					!Number.isFinite(claims.nbf) ||
-					claims.nbf > now + LEEWAY_SECONDS)) ||
-			typeof claims.email !== "string" ||
-			claims.email.length === 0
+					claims.nbf > now + LEEWAY_SECONDS))
 		) {
-			return null;
+			return refuse("the token has expired or isn't valid yet");
+		}
+		if (typeof claims.email !== "string" || claims.email.length === 0) {
+			return refuse("the token has no email");
 		}
 		return claims.email.toLowerCase();
-	} catch {
-		// Authentication failures are deliberately indistinguishable and never expose the token.
-		return null;
+	} catch (error) {
+		// Only the error's kind: a parse error's message could quote part of the token.
+		return refuse(
+			`the token couldn't be checked (${error instanceof Error ? error.name : "unknown error"})`,
+		);
 	}
 }
