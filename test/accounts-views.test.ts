@@ -104,9 +104,9 @@ describe("BankGroup", () => {
 		);
 		expect(html).toContain("Needs attention: sign in again");
 		expect(html).toContain('data-icon="alert"');
-		expect(html).toMatch(
-			/<button[^>]*type="button"[^>]*>Fix connection<\/button>/,
-		);
+		expect(html).toMatch(/<button[^>]*type="button"[^>]*>/);
+		expect(html).toContain("Fix connection");
+		expect(html).toContain("Fixing…");
 	});
 });
 

@@ -73,7 +73,9 @@ export async function plaidPost<T>(
 export type LinkTokenRequest = {
 	user: { client_user_id: string };
 	client_name: string;
-	products: ["transactions"];
+	/** New-item Link uses products; update mode identifies the existing item instead. */
+	products?: ["transactions"];
+	access_token?: string;
 	country_codes: ["US"];
 	language: "en";
 	webhook?: string;
@@ -103,12 +105,12 @@ export const getItem = (
 	accessToken: string,
 	fetchImpl?: typeof fetch,
 ) =>
-	plaidPost<{ item: { institution_id?: string | null } }>(
-		env,
-		"/item/get",
-		{ access_token: accessToken },
-		fetchImpl,
-	);
+	plaidPost<{
+		item: {
+			institution_id?: string | null;
+			error?: Record<string, unknown> | null;
+		};
+	}>(env, "/item/get", { access_token: accessToken }, fetchImpl);
 
 export const removeItem = (
 	env: PlaidEnv,

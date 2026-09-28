@@ -4,6 +4,7 @@ import { setupPlaidLink } from "../public/js/plaid-link.js";
 const genericFailure = "Couldn't link the bank. Try again.";
 
 function harness({
+	linkBank = true,
 	tokenResponse = {
 		ok: true,
 		json: async () => ({ link_token: "link-secret" }),
@@ -15,6 +16,7 @@ function harness({
 			'<section id="accounts-summary" data-version="new"></section>',
 	},
 }: {
+	linkBank?: boolean;
 	tokenResponse?: {
 		ok: boolean;
 		json?: () => Promise<{ link_token: string }>;
@@ -27,6 +29,7 @@ function harness({
 	};
 } = {}) {
 	let click: () => Promise<void> = async () => {};
+	let delegatedClick: (event: unknown) => Promise<void> = async () => {};
 	let linkOptions:
 		| {
 				onSuccess: (token: string) => Promise<void>;
@@ -63,6 +66,29 @@ function harness({
 			children.splice(0, children.length, ...nodes),
 		),
 	};
+	const repairChildren: Array<{ textContent?: string; role?: string }> = [];
+	const repairError = {
+		replaceChildren: vi.fn((...nodes) =>
+			repairChildren.splice(0, repairChildren.length, ...nodes),
+		),
+	};
+	let liveRepairError = repairError;
+	const repairedHeading = { focus: vi.fn() };
+	const section = {
+		querySelector: (selector: string) =>
+			selector === "[data-fix-error]" ? repairError : undefined,
+	};
+	const repairButton = {
+		disabled: false,
+		setAttribute: vi.fn(),
+		classList: { toggle: vi.fn() },
+		getAttribute: (name: string) => (name === "data-item-id" ? "42" : null),
+		closest: (selector: string) =>
+			selector === "[data-bank-item-id]" ? section : undefined,
+		addEventListener: button.addEventListener,
+		removeEventListener: button.removeEventListener,
+		dispatchRequest: button.dispatchRequest,
+	};
 	const currentSummary = {
 		version: "old",
 		replaceWith: vi.fn(),
@@ -70,10 +96,15 @@ function harness({
 	const parsedSummaries: Array<{ version: string }> = [];
 	const document = {
 		body: { dispatchEvent: vi.fn() },
+		addEventListener: (name: string, listener: never) => {
+			if (name === "click") delegatedClick = listener;
+		},
 		querySelector: (selector: string) => {
-			if (selector === "[data-link-bank]") return button;
+			if (selector === "[data-link-bank]") return linkBank ? button : undefined;
 			if (selector === "[data-link-bank-error]") return errorRegion;
 			if (selector === "#accounts-summary") return currentSummary;
+			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
+				return liveRepairError;
 		},
 		createElement: () => ({
 			role: undefined as string | undefined,
@@ -97,7 +128,16 @@ function harness({
 				/id=["']accounts-summary["'][^>]*data-version=["']([^"']*)/,
 			);
 			const summary = summaryMatch?.[1]
-				? { version: summaryMatch[1] }
+				? {
+						version: summaryMatch[1],
+						querySelector: (selector: string) =>
+							selector === '[data-bank-item-id="42"]'
+								? {
+										querySelector: (childSelector: string) =>
+											childSelector === "h2" ? repairedHeading : undefined,
+									}
+								: undefined,
+					}
 				: undefined;
 			if (summary) parsedSummaries.push(summary);
 			return {
@@ -116,8 +156,19 @@ function harness({
 	return {
 		ajax,
 		button,
+		repairButton,
+		repairChildren,
+		repairError,
+		repairedHeading,
 		children,
 		click: () => click(),
+		repairClick: (target: unknown = repairButton) =>
+			delegatedClick({
+				target: {
+					closest: (selector: string) =>
+						selector === "[data-fix-connection]" ? target : undefined,
+				},
+			}),
 		create,
 		fetch,
 		get linkOptions() {
@@ -128,6 +179,9 @@ function harness({
 		currentSummary,
 		parsedSummaries,
 		process,
+		replaceRepairError(region: typeof repairError) {
+			liveRepairError = region;
+		},
 	};
 }
 
@@ -136,6 +190,190 @@ afterEach(() => {
 });
 
 describe("plaid-link.js", () => {
+	describe("Fix connection", () => {
+		it("handles Fix connection when Link a bank is absent", async () => {
+			const h = harness({ linkBank: false });
+			await h.repairClick();
+			expect(h.fetch).toHaveBeenCalledWith("/plaid/items/42/link-token", {
+				method: "POST",
+			});
+		});
+
+		function repairedAjax(status = 204) {
+			return vi.fn(
+				async (
+					_method: string,
+					_url: string,
+					options: {
+						source: { dispatchRequest: (name: string, ctx: unknown) => void };
+					},
+				) => {
+					const ctx = {
+						response: { status },
+						text: status >= 400 ? '<p role="alert">Repair failed.</p>' : "",
+						hx: {
+							trigger: JSON.stringify({
+								toast: { message: "Fixed First Bank.", type: "success" },
+								announce: "Fixed First Bank.",
+							}),
+						},
+					};
+					options.source.dispatchRequest("htmx:after:request", ctx);
+					options.source.dispatchRequest("htmx:finally:request", ctx);
+				},
+			);
+		}
+
+		it("repairs, refreshes, announces once, and focuses that bank heading", async () => {
+			const ajax = repairedAjax();
+			const h = harness({ ajax });
+			await h.repairClick();
+			expect(h.create).toHaveBeenCalledWith(
+				expect.objectContaining({ token: "link-secret" }),
+			);
+			await h.linkOptions?.onSuccess("unused-public-token");
+			expect(ajax).toHaveBeenCalledWith(
+				"POST",
+				"/plaid/items/42/repaired",
+				expect.objectContaining({ source: h.repairButton, swap: "none" }),
+			);
+			expect(h.currentSummary.replaceWith).toHaveBeenCalledWith(
+				h.parsedSummaries[0],
+			);
+			const announcements = h.document.body.dispatchEvent.mock.calls.filter(
+				([event]) => event.type === "announce",
+			);
+			expect(announcements).toHaveLength(1);
+			expect(announcements[0]?.[0].detail).toEqual({
+				value: "Fixed First Bank.",
+			});
+			expect(h.repairedHeading.focus).toHaveBeenCalledOnce();
+		});
+
+		it("shows the link-token error and enables the repair button", async () => {
+			const h = harness({
+				tokenResponse: {
+					ok: false,
+					text: async () => '<p role="alert">Token failed.</p>',
+				},
+			});
+			await h.repairClick();
+			expect(h.repairChildren[0]?.textContent).toBe("Token failed.");
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("shows one alert and enables the button when Plaid exits with an error", async () => {
+			const h = harness();
+			await h.repairClick();
+			h.linkOptions?.onExit(new Error("exit"));
+			expect(h.repairChildren).toHaveLength(1);
+			expect(h.repairChildren[0]?.textContent).toBe(
+				"Couldn't fix the connection. Try again.",
+			);
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("shows one server alert and enables the button when repaired returns 502", async () => {
+			const ajax = repairedAjax(502);
+			const h = harness({ ajax });
+			await h.repairClick();
+			await h.linkOptions?.onSuccess("unused");
+			expect(h.repairChildren).toHaveLength(1);
+			expect(h.repairChildren[0]?.textContent).toBe("Repair failed.");
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("shows one alert and enables the button when finally has no response", async () => {
+			const ajax = vi.fn(
+				async (
+					_method: string,
+					_url: string,
+					options: {
+						source: { dispatchRequest: (name: string, ctx: unknown) => void };
+					},
+				) => {
+					options.source.dispatchRequest("htmx:finally:request", {});
+				},
+			);
+			const h = harness({ ajax });
+			await h.repairClick();
+			await h.linkOptions?.onSuccess("unused");
+			expect(h.repairChildren).toHaveLength(1);
+			expect(h.repairChildren[0]?.textContent).toBe(
+				"Couldn't fix the connection. Try again.",
+			);
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("shows one alert and enables the button when repaired rejects", async () => {
+			const h = harness({
+				ajax: vi.fn(async () => {
+					throw new TypeError("network");
+				}),
+			});
+			await h.repairClick();
+			await h.linkOptions?.onSuccess("unused");
+			expect(h.repairChildren).toHaveLength(1);
+			expect(h.repairChildren[0]?.textContent).toBe(
+				"Couldn't fix the connection. Try again.",
+			);
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("shows a repaired failure in the live region after the summary is replaced", async () => {
+			const h = harness({ ajax: repairedAjax(502) });
+			const liveChildren: Array<{ textContent?: string; role?: string }> = [];
+			const liveRegion = {
+				replaceChildren: vi.fn((...nodes) =>
+					liveChildren.splice(0, liveChildren.length, ...nodes),
+				),
+			};
+			await h.repairClick();
+			h.replaceRepairError(liveRegion);
+			await h.linkOptions?.onSuccess("unused");
+			expect(liveChildren).toHaveLength(1);
+			expect(liveChildren[0]?.textContent).toBe("Repair failed.");
+		});
+
+		it("shows an alert and leaves the repair button enabled when Plaid is missing", async () => {
+			const h = harness();
+			delete (globalThis as { Plaid?: unknown }).Plaid;
+			await h.repairClick();
+			expect(h.repairChildren).toHaveLength(1);
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("keeps the summary and shows one alert when refresh returns 500", async () => {
+			const ajax = repairedAjax();
+			const h = harness({
+				ajax,
+				refreshResponse: { ok: false, text: async () => "failed" },
+			});
+			await h.repairClick();
+			await h.linkOptions?.onSuccess("unused");
+			expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
+			expect(h.repairChildren).toHaveLength(1);
+			expect(h.repairChildren[0]?.textContent).toContain(
+				"the list didn't refresh",
+			);
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("handles a replacement Fix button through delegated clicks", async () => {
+			const h = harness();
+			await h.repairClick();
+			const replacement = {
+				...h.repairButton,
+				disabled: false,
+				setAttribute: vi.fn(),
+				classList: { toggle: vi.fn() },
+			};
+			await h.repairClick(replacement);
+			expect(h.fetch).toHaveBeenCalledTimes(2);
+			expect(replacement.disabled).toBe(true);
+		});
+	});
+
 	it("refreshes the whole account summary, then announces the linked bank once", async () => {
 		const ajax = vi.fn(async (method: string) => {
 			if (method === "POST") {

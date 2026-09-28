@@ -38,6 +38,14 @@ accounts.get("/accounts", async (c) => {
 								name={b.name}
 								accounts={b.accounts}
 								needsAttention={b.needsAttention}
+								fixAttrs={
+									plaidEnabled
+										? {
+												"data-fix-connection": "",
+												"data-item-id": String(b.id),
+											}
+										: undefined
+								}
 							/>
 						))
 					)}

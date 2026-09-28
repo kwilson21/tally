@@ -20,8 +20,10 @@ type Props = {
  */
 export function BankGroup({ name, accounts, needsAttention, fixAttrs }: Props) {
 	return (
-		<section class="mt-8">
-			<h2 class="text-muted">{name}</h2>
+		<section class="mt-8" data-bank-item-id={fixAttrs?.["data-item-id"]}>
+			<h2 class="text-muted" tabindex={-1}>
+				{name}
+			</h2>
 			{accounts.length === 0 ? (
 				<p class="mt-2 text-muted">Accounts appear after the first sync.</p>
 			) : (
@@ -37,9 +39,16 @@ export function BankGroup({ name, accounts, needsAttention, fixAttrs }: Props) {
 						<Icon name="alert" class="size-5 shrink-0" />
 						Needs attention: sign in again
 					</p>
-					<Button kind="secondary" type="button" class="mt-3" {...fixAttrs}>
+					<Button
+						kind="secondary"
+						type="button"
+						class="mt-3"
+						busyLabel="Fixing…"
+						{...fixAttrs}
+					>
 						Fix connection
 					</Button>
+					<div data-fix-error class="mt-3" />
 				</>
 			)}
 		</section>
