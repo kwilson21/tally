@@ -212,8 +212,9 @@ describe("GET /design-system in the demo", () => {
 	it("renders one fixed Feedback button and makes the visual form inert", async () => {
 		const { html } = await get("/design-system");
 		const button = html.slice(html.indexOf('id="feedback-button"'));
+		// The link sits inside the inert wrapper: no </div> between the wrapper and the link.
 		expect(button.slice(0, button.indexOf("<section"))).toMatch(
-			/<div inert[^>]*>[\s\S]*href="\/feedback"/,
+			/<div inert[^>]*>(?:(?!<\/div>)[\s\S])*href="\/feedback"/,
 		);
 		expect(html.match(/fixed bottom-20 right-4/g)).toHaveLength(1);
 		const formSpecimen = specimens(html).find((tag) =>
