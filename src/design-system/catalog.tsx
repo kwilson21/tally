@@ -874,9 +874,10 @@ function describeAccounts() {
 		"Accounts",
 		`Net worth ${whole(NET_WORTH_CENTS)}`,
 		"Net worth over time arrives later",
+		"Sync now",
 		...BANKS.map(
 			(b) =>
-				`${b.name}: ${b.accounts
+				`${b.name}, Synced 12 minutes ago: ${b.accounts
 					.map(
 						(a) =>
 							`${a.name} ending in ${a.mask} ${formatCents(a.isLiability ? -a.balanceCents : a.balanceCents)}`,
@@ -925,7 +926,7 @@ function AccountsGroup() {
 				title="AccountsTop, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen from the round 5 study: a secondary Sync now button under the title, Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank with a muted Synced … line and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button."
+				sentence="The Accounts screen from the round 5 study: a secondary Sync now button under the title, with resting “Sync now”, busy “Syncing…”, completed, and failed feedback states. Net worth is the serif headline over a ruled space for the Phase 4 chart, then accounts are grouped by bank with a muted Synced … line and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame

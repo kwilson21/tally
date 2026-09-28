@@ -31,17 +31,22 @@ const SyncNow = () => (
 		hx-swap="outerHTML"
 		class="mt-4"
 	>
-		<Button kind="secondary" type="submit" busyLabel="Syncing…">
+		<Button id="sync-now" kind="secondary" type="submit" busyLabel="Syncing…">
 			Sync now
 		</Button>
 	</form>
 );
 
-async function AccountsSummary({ env }: { env: Env }) {
+async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 	const banks = await accountsByBank(env.DB);
 	const plaidEnabled = enabled(env);
 	return (
 		<div id="accounts-summary">
+			{alert && (
+				<p role="alert" class="mb-4 text-negative">
+					{alert}
+				</p>
+			)}
 			{banks.length === 0 ? (
 				<>
 					<h1 class="font-serif text-5xl font-semibold tracking-tight">
@@ -69,7 +74,7 @@ async function AccountsSummary({ env }: { env: Env }) {
 								name={b.name}
 								accounts={b.accounts}
 								needsAttention={b.needsAttention}
-								lastSyncedAt={b.lastSyncedAt}
+								lastSyncedAt={env.DEMO === "true" ? undefined : b.lastSyncedAt}
 								fixAttrs={
 									plaidEnabled
 										? {
@@ -111,23 +116,43 @@ accounts.get("/accounts", async (c) => {
 
 accounts.post("/accounts/sync", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
-	const recent = await c.env.DB.prepare(
-		"SELECT 1 AS recent FROM plaid_items WHERE last_synced_at > datetime('now', '-60 seconds') LIMIT 1",
-	).first();
-	let message: string;
-	if (recent) {
-		message = "Synced just now.";
-	} else {
-		const result = await syncAllItems(c.env);
+	const isHtmx = c.req.header("HX-Request") === "true";
+	try {
+		const result = await syncAllItems(c.env, undefined, Date.now, true);
 		await applyMerchantRules(c.env.DB);
-		message =
-			result.added === 0
-				? "Nothing new"
-				: `${result.added} new ${result.added === 1 ? "transaction" : "transactions"}`;
+		const message =
+			result.failed > 0
+				? `Couldn't sync ${result.failedBanks.join(", ")}. Try again later.`
+				: result.synced === 0 && result.skipped > 0
+					? "Synced just now"
+					: result.added === 0
+						? "Nothing new"
+						: `${result.added} new ${result.added === 1 ? "transaction" : "transactions"}`;
+		if (!isHtmx) return c.redirect("/accounts", 303);
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: result.failed ? "error" : "success" },
+				announce: message,
+			}),
+		);
+		return c.html(
+			<AccountsSummary
+				env={c.env}
+				alert={result.failed ? message : undefined}
+			/>,
+		);
+	} catch (error) {
+		console.error(
+			"manual sync failed",
+			error instanceof Error ? error.name : "unknown",
+		);
+		if (!isHtmx) return c.redirect("/accounts", 303);
+		const message = "Couldn't sync accounts. Try again later.";
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ toast: { message, type: "error" }, announce: message }),
+		);
+		return c.html(<AccountsSummary env={c.env} alert={message} />);
 	}
-	c.header(
-		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
-	);
-	return c.html(<AccountsSummary env={c.env} />);
 });

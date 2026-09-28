@@ -156,22 +156,45 @@ describe("POST /accounts/sync", () => {
 		expect(response.status).toBe(404);
 	});
 
-	it("does not sync again within a minute and announces that it just synced", async () => {
+	it("does not sync again within a minute and preserves the focus target", async () => {
 		await resetDemo(env.DB, todayUtc());
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
 		const response = await accounts.request(
 			"/accounts/sync",
-			{ method: "POST" },
+			{ method: "POST", headers: { "HX-Request": "true" } },
 			plaidEnabled,
 		);
 		expect(response.status).toBe(200);
 		expect(fetchSpy).not.toHaveBeenCalled();
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
-			toast: { message: "Synced just now.", type: "success" },
-			announce: "Synced just now.",
+			toast: { message: "Synced just now", type: "success" },
+			announce: "Synced just now",
 		});
-		expect(await response.text()).toContain('id="accounts-summary"');
+		const html = await response.text();
+		expect(html).toContain('id="accounts-summary"');
+		expect(html).toContain('id="sync-now"');
 		fetchSpy.mockRestore();
+	});
+
+	it("redirects a native form submission back to Accounts", async () => {
+		await resetDemo(env.DB, todayUtc());
+		const response = await accounts.request(
+			"/accounts/sync",
+			{ method: "POST" },
+			plaidEnabled,
+		);
+		expect(response.status).toBe(303);
+		expect(response.headers.get("location")).toBe("/accounts");
+	});
+
+	it("omits drifting sync times from the demo", async () => {
+		await resetDemo(env.DB, todayUtc());
+		const response = await accounts.request(
+			"/accounts",
+			{},
+			{ ...plaidEnabled, DEMO: "true" },
+		);
+		expect(await response.text()).not.toContain("Synced ");
 	});
 });
 

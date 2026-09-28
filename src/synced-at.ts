@@ -16,7 +16,7 @@ export function syncedAtLabel(
 	const hours = Math.floor(minutes / 60);
 	if (hours < 24)
 		return `Synced ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
-	if (hours < 48) return "Synced yesterday";
+	if (hours < 48) return "Synced 1 day ago";
 	return `Synced ${then.toLocaleDateString("en-US", {
 		month: "short",
 		day: "numeric",

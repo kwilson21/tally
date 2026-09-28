@@ -104,6 +104,7 @@ describe("syncAllItems", () => {
 			synced: 0,
 			skipped: 0,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(log).toHaveBeenCalledOnce();
@@ -123,6 +124,7 @@ describe("syncAllItems", () => {
 			synced: 2,
 			skipped: 0,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(4);
 		const { results } = await env.DB.prepare(
@@ -169,8 +171,29 @@ describe("syncAllItems", () => {
 			synced: 1,
 			skipped: 0,
 			failed: 1,
+			failedBanks: ["Bank"],
 		});
 		expect(accountsCalls).toBe(2);
+	});
+
+	it("limits attempts per Item and records failed attempts", async () => {
+		const fresh = await addItem();
+		const stale = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_sync_attempt_at = datetime('now') WHERE id = ?",
+		)
+			.bind(fresh)
+			.run();
+		const fetchImpl = fakePlaid();
+		expect(
+			await syncAllItems(enabledEnv, fetchImpl, Date.now, true),
+		).toMatchObject({ synced: 1, skipped: 1 });
+		const staleAttempt = await env.DB.prepare(
+			"SELECT last_sync_attempt_at FROM plaid_items WHERE id = ?",
+		)
+			.bind(stale)
+			.first<{ last_sync_attempt_at: string | null }>();
+		expect(staleAttempt?.last_sync_attempt_at).not.toBeNull();
 	});
 
 	it("counts a live Item lock as skipped", async () => {
@@ -186,6 +209,7 @@ describe("syncAllItems", () => {
 			synced: 0,
 			skipped: 1,
 			failed: 0,
+			failedBanks: [],
 		});
 	});
 
@@ -202,6 +226,7 @@ describe("syncAllItems", () => {
 			synced: 1,
 			skipped: 1,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
@@ -228,6 +253,7 @@ describe("syncAllItems", () => {
 			synced: 1,
 			skipped: 1,
 			failed: 0,
+			failedBanks: [],
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
@@ -246,6 +272,7 @@ describe("syncAllItems", () => {
 			synced: 0,
 			skipped: 0,
 			failed: 1,
+			failedBanks: ["Bank"],
 		});
 		expect(error.mock.calls).toEqual([
 			[`plaid daily sync: item ${id} failed Error`],
@@ -321,6 +348,7 @@ describe("syncAllItems", () => {
 			synced: 1,
 			skipped: 0,
 			failed: 1,
+			failedBanks: ["Bank"],
 		});
 		expect(error).toHaveBeenCalledWith(
 			`plaid daily sync: item ${first} failed Error`,
