@@ -12,6 +12,8 @@ const onAccounts = (path: string) =>
 
 export const security = secureHeaders({
 	xFrameOptions: "DENY",
+	// Feedback records the page it came from; the Referer never leaves Tally.
+	referrerPolicy: "same-origin",
 	contentSecurityPolicy: {
 		defaultSrc: ["'self'"],
 		scriptSrc: [

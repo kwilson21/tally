@@ -8,6 +8,7 @@ import { syncAllItems } from "./plaid/sync-all";
 import { accounts } from "./routes/accounts";
 import { designSystem } from "./routes/design-system";
 import { destinations } from "./routes/destinations";
+import { feedback, retryFeedback } from "./routes/feedback";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
 import { howItWorks } from "./routes/how-it-works";
@@ -23,6 +24,7 @@ type ScheduledEnv = PlaidEnv & {
 	DB: D1Database;
 	DEMO?: string;
 	JEV_API_KEY?: string;
+	FEEDBACK_GITHUB_TOKEN?: string;
 };
 export const app = new Hono<App>();
 
@@ -37,6 +39,7 @@ export async function runScheduled(
 	await syncAllItems(env, fetchImpl);
 	// Merchant rules and Jev run after sync so newly fetched transactions are sorted tonight.
 	await categorizePending(env, fetchImpl);
+	await retryFeedback(env, fetchImpl);
 }
 
 app.use("*", security);
@@ -76,6 +79,7 @@ app.route("/", transactions);
 app.route("/", settings);
 app.route("/", accounts);
 app.route("/", destinations);
+app.route("/", feedback);
 app.route("/", designSystem);
 app.route("/", webhooks);
 

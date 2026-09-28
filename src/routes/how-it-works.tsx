@@ -116,7 +116,11 @@ howItWorks.get("/how-it-works", async (c) => {
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 
 	return c.html(
-		<Layout title="How Tally works · Tally" demo>
+		<Layout
+			title="How Tally works · Tally"
+			demo
+			currentPath={c.req.path + new URL(c.req.url).search}
+		>
 			<div class="lg:max-w-3xl">
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					How Tally works

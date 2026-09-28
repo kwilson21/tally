@@ -5,6 +5,7 @@ interface __BaseEnv_Env {
 	DB: D1Database;
 	ASSETS: Fetcher;
 	DEMO: "true";
+	FEEDBACK_GITHUB_TOKEN?: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
