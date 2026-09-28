@@ -193,10 +193,20 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 | **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note. "Needs category" counts the same transactions as Home. The Excluded filter shows only excluded transactions. Search matches the merchant name, raw name, and note. The list shows 25 transactions per page. | 3, 4, 5 |
 | **Bills** | Each bill with its status, plus add, edit, and deactivate | 2 |
 | **Trends** | Spending by category over the last 6 months, and this month vs. last month | 6 |
-| **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, and Fix connection for items that need attention | 7 |
+| **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, Fix connection for items that need attention, Disconnect a bank, and Sync now with when each bank last synced (§8.1) | 7 |
 | **More → Documents** | Upload, list, download, and delete PDFs | 8 |
-| **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review | — |
+| **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review; Download your data (§8.1) | — |
+| **Transactions → Organize** | Transactions that need a category, grouped by merchant, each group categorized in one go (§8.1) | 3 |
 | **Demo only** | A banner on every page ("Demo data. Nothing here is real."), a "Things to try" list, and a "How it works" page | — |
+
+### 8.1 Brought back from the original app (decision 57)
+
+Four things the owner's earlier app had, added to Phase 2 so the family's first weeks with real bank data go smoothly:
+
+- **Organize.** Transactions that need a category, grouped by merchant (its tidied or chosen name), each group showing its count and total, largest first. One category choice applies to every transaction in the group (`category_source = user`) and becomes the merchant's rule (`default_category_id`), so later ones follow; an optional rename sets the merchant's display name. A group leaves the list once it's done, and the page says how many are left. Reached from the Band on Home and from the "Needs category" filter.
+- **Disconnect a bank.** From Accounts, a confirm step that names the bank and how many accounts and transactions it has. Disconnecting calls Plaid's `/item/remove` and deletes the stored access token, so it can never sync again. By default its accounts and transactions stay, so past months still add up, and its accounts are marked "Disconnected" and left out of net worth; "Also delete its accounts and transactions" removes them too, for a bank linked by mistake.
+- **Sync now.** One button on Accounts that syncs every healthy bank now, then runs merchant rules (not Jev, which stays nightly), and says what came in ("12 new transactions"). Each bank shows when it last synced. It can run at most once a minute, and a sync already running is left to finish.
+- **Download your data.** From Settings: every transaction as CSV (date, bank's name, merchant, amount in dollars, category, excluded, note, account), and everything else (categories, budgets, merchants, rules, accounts) with the transactions as JSON. Access tokens and secrets are never included.
 
 **How the pages behave:**
 - **Edits:** an edit returns the updated fragment, plus an `HX-Trigger` header with `toast` and `announce` keys for the confirmation toast and screen-reader announcement.
@@ -261,8 +271,8 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 |---|---|---|
 | **0. Setup** | Public repo, this spec, `docs/decisions.md`, `CLAUDE.md` (short, rules taken from this spec), `ROADMAP.md`, milestones and issues, Hono Worker skeleton, CI (type-check + tests), and doc checks for §13 | CI passes on the skeleton |
 | **1. Core demo live** | Wireframes; D1 schema; seed household; Home; Transactions (recategorize, merchant rules, rename); Jev categorization; demo banner, Things to try, How it works; nightly reset; `demo` deploy | `https://tally-demo.thesuperhuman.us` loads over HTTPS, all Phase 1 routes work, and there are no console errors. DNS records are shown to the owner and approved before they're created. |
-| **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection, Settings for categories and budget amounts with the default categories (decision 32), and exclusions (decision 33), so the family's numbers are right from the first week | The family uses it for a week. Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
-| **3. Bills and splits** | In both environments, with seed data for each (exclusions moved to Phase 2, decision 33) | Shown in the demo, used by the family |
+| **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection, Settings for categories and budget amounts with the default categories (decision 32), and exclusions (decision 33), so the family's numbers are right from the first week; Organize, Disconnect a bank, Sync now and Download your data (decision 57, §8.1) | The family uses it for a week. Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
+| **3. Bills and splits** | In both environments, with seed data for each (exclusions moved to Phase 2, decision 33). Weighed at the start of the phase (decision 57): finding bills from recurring charges, linking a refund to its purchase, selecting several transactions at once, and adding a cash transaction by hand | Shown in the demo, used by the family |
 | **4. Trends, balances, documents, name suggestions** | Trends, net-worth history, R2 documents, Workers AI name suggestions (merchant names and new categories) | All 8 features live in both environments |
 
 ### Testing
