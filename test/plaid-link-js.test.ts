@@ -9,6 +9,11 @@ function harness({
 		json: async () => ({ link_token: "link-secret" }),
 	},
 	ajax = vi.fn(),
+	refreshResponse = {
+		ok: true,
+		text: async () =>
+			'<section id="accounts-summary" data-version="new"></section>',
+	},
 }: {
 	tokenResponse?: {
 		ok: boolean;
@@ -16,6 +21,10 @@ function harness({
 		text?: () => Promise<string>;
 	};
 	ajax?: ReturnType<typeof vi.fn>;
+	refreshResponse?: {
+		ok: boolean;
+		text: () => Promise<string>;
+	};
 } = {}) {
 	let click: () => Promise<void> = async () => {};
 	let linkOptions:
@@ -54,10 +63,18 @@ function harness({
 			children.splice(0, children.length, ...nodes),
 		),
 	};
+	const currentSummary = {
+		version: "old",
+		replaceWith: vi.fn(),
+	};
+	const parsedSummaries: Array<{ version: string }> = [];
 	const document = {
 		body: { dispatchEvent: vi.fn() },
-		querySelector: (selector: string) =>
-			selector === "[data-link-bank]" ? button : errorRegion,
+		querySelector: (selector: string) => {
+			if (selector === "[data-link-bank]") return button;
+			if (selector === "[data-link-bank-error]") return errorRegion;
+			if (selector === "#accounts-summary") return currentSummary;
+		},
 		createElement: () => ({
 			role: undefined as string | undefined,
 			setAttribute(name: string, value: string) {
@@ -66,7 +83,9 @@ function harness({
 			textContent: "",
 		}),
 	};
-	const fetch = vi.fn(async () => tokenResponse);
+	const fetch = vi.fn(async (url: string) =>
+		url === "/accounts" ? refreshResponse : tokenResponse,
+	);
 	const create = vi.fn((options) => {
 		linkOptions = options;
 		return { open: vi.fn() };
@@ -74,13 +93,26 @@ function harness({
 	class DOMParser {
 		parseFromString(text: string) {
 			const match = text.match(/role=["']alert["'][^>]*>([^<]*)/);
+			const summaryMatch = text.match(
+				/id=["']accounts-summary["'][^>]*data-version=["']([^"']*)/,
+			);
+			const summary = summaryMatch?.[1]
+				? { version: summaryMatch[1] }
+				: undefined;
+			if (summary) parsedSummaries.push(summary);
 			return {
-				querySelector: () => (match ? { textContent: match[1] } : undefined),
+				querySelector: (selector: string) =>
+					selector === "#accounts-summary"
+						? summary
+						: match
+							? { textContent: match[1] }
+							: undefined,
 			};
 		}
 	}
 	(globalThis as { Plaid?: unknown }).Plaid = { create };
-	setupPlaidLink({ document, fetch, htmx: { ajax }, DOMParser });
+	const process = vi.fn();
+	setupPlaidLink({ document, fetch, htmx: { ajax, process }, DOMParser });
 	return {
 		ajax,
 		button,
@@ -93,6 +125,9 @@ function harness({
 		},
 		listeners,
 		document,
+		currentSummary,
+		parsedSummaries,
+		process,
 	};
 }
 
@@ -102,10 +137,6 @@ afterEach(() => {
 
 describe("plaid-link.js", () => {
 	it("refreshes the whole account summary, then announces the linked bank once", async () => {
-		let finishRefresh = () => {};
-		const refresh = new Promise<void>((resolve) => {
-			finishRefresh = resolve;
-		});
 		const ajax = vi.fn(async (method: string) => {
 			if (method === "POST") {
 				const ctx = {
@@ -124,25 +155,16 @@ describe("plaid-link.js", () => {
 					h.document.body.dispatchEvent(new CustomEvent(type, { detail }));
 				}
 				h.button.dispatchRequest("htmx:finally:request", ctx);
-			} else {
-				await refresh;
-				h.button.dispatchRequest("htmx:finally:request", {
-					response: { status: 200 },
-				});
 			}
 		});
 		const h = harness({ ajax });
 		await h.click();
-		const success = h.linkOptions?.onSuccess("public-secret");
-		await vi.waitFor(() => expect(ajax).toHaveBeenCalledTimes(2));
+		await h.linkOptions?.onSuccess("public-secret");
 		const announced = () =>
 			h.document.body.dispatchEvent.mock.calls.filter(
 				([event]) => event.type === "announce",
 			);
-		expect(announced()).toHaveLength(0);
 		expect(h.document.body.dispatchEvent.mock.calls[0]?.[0].type).toBe("toast");
-		finishRefresh();
-		await success;
 		expect(ajax).toHaveBeenNthCalledWith(
 			1,
 			"POST",
@@ -152,12 +174,11 @@ describe("plaid-link.js", () => {
 				values: { public_token: "public-secret" },
 			}),
 		);
-		expect(ajax).toHaveBeenNthCalledWith(2, "GET", "/accounts", {
-			source: h.button,
-			target: "#accounts-summary",
-			select: "#accounts-summary",
-			swap: "outerHTML",
-		});
+		expect(h.fetch).toHaveBeenCalledWith("/accounts");
+		expect(h.currentSummary.replaceWith).toHaveBeenCalledWith(
+			h.parsedSummaries[0],
+		);
+		expect(h.process).toHaveBeenCalledWith(h.parsedSummaries[0]);
 		expect(announced()).toHaveLength(1);
 		const event = announced()[0]?.[0];
 		expect(event.type).toBe("announce");
@@ -261,20 +282,20 @@ describe("plaid-link.js", () => {
 	});
 
 	it("reports a linked bank without confirming a failed summary refresh", async () => {
-		const ajax = vi.fn(async (method: string) => {
-			const ctx =
-				method === "POST"
-					? {
-							response: { status: 204 },
-							text: "",
-							hx: {
-								trigger: JSON.stringify({ announce: "Linked First Bank." }),
-							},
-						}
-					: { response: { status: 500 }, text: "Refresh failed." };
+		const ajax = vi.fn(async () => {
+			const ctx = {
+				response: { status: 204 },
+				text: "",
+				hx: {
+					trigger: JSON.stringify({ announce: "Linked First Bank." }),
+				},
+			};
 			h.button.dispatchRequest("htmx:finally:request", ctx);
 		});
-		const h = harness({ ajax });
+		const h = harness({
+			ajax,
+			refreshResponse: { ok: false, text: async () => "Refresh failed." },
+		});
 
 		await h.click();
 		await h.linkOptions?.onSuccess("public-secret");
@@ -295,5 +316,29 @@ describe("plaid-link.js", () => {
 		});
 		expect(h.button.disabled).toBe(false);
 		expect(h.button.focus).not.toHaveBeenCalled();
+		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
+	});
+
+	it("leaves the summary unchanged and reports a refresh network error", async () => {
+		const ajax = vi.fn(async () => {
+			h.button.dispatchRequest("htmx:finally:request", {
+				response: { status: 204 },
+				hx: { trigger: JSON.stringify({ announce: "Linked First Bank." }) },
+			});
+		});
+		const h = harness({ ajax });
+		h.fetch.mockImplementationOnce(async () => ({
+			ok: true,
+			json: async () => ({ link_token: "link-secret" }),
+		}));
+		h.fetch.mockRejectedValueOnce(new TypeError("network"));
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
+		expect(h.children[0]?.textContent).toBe(
+			"Linked First Bank, but the list didn't refresh. Reload the page to see it.",
+		);
 	});
 });

@@ -93,20 +93,25 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						}
 						// The POST's completion removes htmx-request from its source.
 						busy(true);
-						let refreshContext;
-						const refreshed = (event) => {
-							refreshContext = event.detail?.ctx;
-						};
-						button.addEventListener("htmx:finally:request", refreshed);
+						let refreshed = false;
 						try {
-							await htmx.ajax("GET", "/accounts", {
-								source: button,
-								target: "#accounts-summary",
-								select: "#accounts-summary",
-								swap: "outerHTML",
-							});
-						} finally {
-							button.removeEventListener("htmx:finally:request", refreshed);
+							const refreshResponse = await fetch("/accounts");
+							if (refreshResponse.ok) {
+								const parsed = new DOMParser().parseFromString(
+									await refreshResponse.text(),
+									"text/html",
+								);
+								const newSummary = parsed.querySelector("#accounts-summary");
+								const currentSummary =
+									document.querySelector("#accounts-summary");
+								if (newSummary && currentSummary) {
+									currentSummary.replaceWith(newSummary);
+									htmx.process(newSummary);
+									refreshed = true;
+								}
+							}
+						} catch {
+							// The exchange succeeded, so report the stale summary below.
 						}
 						if (announcement) {
 							document.body.dispatchEvent(
@@ -115,10 +120,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 								}),
 							);
 						}
-						if (
-							!refreshContext?.response ||
-							refreshContext.response.status >= 400
-						) {
+						if (!refreshed) {
 							const bank = announcement?.replace(/[.!?]$/, "") || "Bank linked";
 							showAlert(
 								`${bank}, but the list didn't refresh. Reload the page to see it.`,
