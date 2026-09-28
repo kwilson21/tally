@@ -152,6 +152,8 @@ describe("data exports", () => {
 			],
 			accounts: [
 				"balance_cents",
+				"bank",
+				"bank_disconnected",
 				"id",
 				"is_liability",
 				"mask",
@@ -252,4 +254,25 @@ it("exports a disconnected bank's status as disconnected", async () => {
 		plaid_items: { status: string }[];
 	};
 	expect(data.plaid_items[0]?.status).toBe("disconnected");
+});
+
+it("marks the accounts of a disconnected bank, so kept balances can be told apart", async () => {
+	await env.DB.prepare(
+		"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
+	).run();
+	const response = await exports.default.fetch(
+		`${BASE}/settings/export/tally.json`,
+	);
+	const data = (await response.json()) as {
+		accounts: {
+			plaid_item_id: number;
+			bank: string;
+			bank_disconnected: number;
+		}[];
+	};
+	const first = data.accounts.find((a) => a.plaid_item_id === 1);
+	const other = data.accounts.find((a) => a.plaid_item_id !== 1);
+	expect(first?.bank_disconnected).toBe(1);
+	expect(typeof first?.bank).toBe("string");
+	if (other) expect(other.bank_disconnected).toBe(0);
 });
