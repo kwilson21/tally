@@ -1,6 +1,6 @@
 // Opens Plaid Link, exchanges its one-time token, then refreshes the bank list.
 // Tokens stay only in memory and are never logged or stored by this script.
-export function setupPlaidLink({ document, fetch, Plaid, htmx, DOMParser }) {
+export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	const button = document.querySelector("[data-link-bank]");
 	const errorRegion = document.querySelector("[data-link-bank-error]");
 	if (!button || !errorRegion) return;
@@ -28,6 +28,12 @@ export function setupPlaidLink({ document, fetch, Plaid, htmx, DOMParser }) {
 			: undefined;
 
 	button.addEventListener("click", async () => {
+		const Plaid = globalThis.Plaid;
+		if (!Plaid) {
+			showFailure();
+			busy(false);
+			return;
+		}
 		busy(true);
 		errorRegion.replaceChildren();
 		try {
@@ -50,6 +56,7 @@ export function setupPlaidLink({ document, fetch, Plaid, htmx, DOMParser }) {
 						await htmx.ajax("POST", "/plaid/exchange", {
 							source: button,
 							target: errorRegion,
+							swap: "none",
 							headers: {
 								"Content-Type": "application/x-www-form-urlencoded",
 							},
@@ -63,11 +70,14 @@ export function setupPlaidLink({ document, fetch, Plaid, htmx, DOMParser }) {
 							showFailure(exchangeContext?.text);
 							return;
 						}
+						// The POST's completion removes htmx-request from its source.
+						busy(true);
 						await htmx.ajax("GET", "/accounts", {
 							target: "#accounts-banks",
 							select: "#accounts-banks",
 							swap: "outerHTML",
 						});
+						button.focus();
 					} catch (error) {
 						showFailure(responseText(error));
 					} finally {
@@ -88,5 +98,5 @@ export function setupPlaidLink({ document, fetch, Plaid, htmx, DOMParser }) {
 }
 
 if (typeof document !== "undefined") {
-	setupPlaidLink({ document, fetch, Plaid, htmx, DOMParser });
+	setupPlaidLink({ document, fetch, htmx, DOMParser });
 }

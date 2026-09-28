@@ -20,12 +20,10 @@ accounts.get("/accounts", async (c) => {
 			demo={c.env.DEMO === "true"}
 			scripts={
 				plaidEnabled
-					? [
-							"https://cdn.plaid.com/link/v2/stable/link-initialize.js",
-							"/js/plaid-link.js",
-						]
+					? ["https://cdn.plaid.com/link/v2/stable/link-initialize.js"]
 					: []
 			}
+			modules={plaidEnabled ? ["/js/plaid-link.js"] : []}
 		>
 			<AccountsTop
 				netWorthCents={netWorthCents(banks.flatMap((b) => b.accounts))}
@@ -42,20 +40,20 @@ accounts.get("/accounts", async (c) => {
 						/>
 					))
 				)}
-				{plaidEnabled && (
-					<>
-						<Button
-							type="button"
-							class="mt-8"
-							busyLabel="Linking…"
-							data-link-bank
-						>
-							Link a bank
-						</Button>
-						<div data-link-bank-error class="mt-3" />
-					</>
-				)}
 			</div>
+			{plaidEnabled && (
+				<>
+					<Button
+						type="button"
+						class="mt-8"
+						busyLabel="Linking…"
+						data-link-bank
+					>
+						Link a bank
+					</Button>
+					<div data-link-bank-error class="mt-3" />
+				</>
+			)}
 		</Layout>,
 	);
 });

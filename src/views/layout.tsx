@@ -8,6 +8,8 @@ type LayoutProps = {
 	demo: boolean;
 	/** Extra scripts for this page only (the catalog's ds.js, decision 44). */
 	scripts?: string[];
+	/** Extra ES module scripts for this page only. */
+	modules?: string[];
 	children?: Child;
 };
 
@@ -16,6 +18,7 @@ export function Layout({
 	active,
 	demo,
 	scripts = [],
+	modules = [],
 	children,
 }: LayoutProps) {
 	return (
@@ -31,11 +34,10 @@ export function Layout({
 				{/* The money input's nudges and chips (decision 39); module scripts are deferred. */}
 				<script src="/js/money.js" type="module"></script>
 				{scripts.map((src) => (
-					<script
-						src={src}
-						defer
-						type={src === "/js/plaid-link.js" ? "module" : undefined}
-					></script>
+					<script src={src} defer></script>
+				))}
+				{modules.map((src) => (
+					<script src={src} type="module"></script>
 				))}
 			</head>
 			<body class="min-h-screen">

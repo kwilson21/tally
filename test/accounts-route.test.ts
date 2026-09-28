@@ -166,4 +166,15 @@ describe("Link a bank", () => {
 			expect(html).not.toContain("/js/plaid-link.js");
 		}
 	});
+
+	it("keeps the link action outside the bank list that refreshes", async () => {
+		const response = await accounts.request("/accounts", {}, plaidEnabled);
+		const html = await response.text();
+		const banksStart = html.indexOf('<div id="accounts-banks">');
+		const banksEnd = html.indexOf("</div>", banksStart);
+		const button = html.indexOf("data-link-bank");
+
+		expect(banksStart).toBeGreaterThan(-1);
+		expect(button).toBeGreaterThan(banksEnd);
+	});
 });

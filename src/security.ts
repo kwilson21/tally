@@ -19,10 +19,13 @@ export const security = secureHeaders({
 		imgSrc: ["'self'", "data:"],
 		connectSrc: [
 			(c) =>
-				c.req.path === "/accounts" ? "'self' https://*.plaid.com" : "'self'",
+				c.req.path === "/accounts"
+					? "'self' https://production.plaid.com"
+					: "'self'",
 		],
 		frameSrc: [
-			(c) => (c.req.path === "/accounts" ? "https://cdn.plaid.com" : "'none'"),
+			(c) =>
+				c.req.path === "/accounts" ? "'self' https://cdn.plaid.com" : "'self'",
 		],
 		objectSrc: ["'none'"],
 		frameAncestors: ["'none'"],
