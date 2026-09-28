@@ -8,6 +8,8 @@ export type SyncAllResult = {
 	added: number;
 	synced: number;
 	skipped: number;
+	/** Of the skipped: banks attempted within the last minute, or locked by a sync already running. */
+	busy: number;
 	failed: number;
 	failedBanks: string[];
 };
@@ -24,6 +26,7 @@ export async function syncAllItems(
 		added: 0,
 		synced: 0,
 		skipped: 0,
+		busy: 0,
 		failed: 0,
 		failedBanks: [],
 	};
@@ -33,35 +36,31 @@ export async function syncAllItems(
 	}
 
 	const { results: items } = await env.DB.prepare(
-		"SELECT id, institution_name, last_sync_attempt_at FROM plaid_items WHERE status = 'ok' ORDER BY id",
-	).all<{
-		id: number;
-		institution_name: string;
-		last_sync_attempt_at: string | null;
-	}>();
+		"SELECT id, institution_name FROM plaid_items WHERE status = 'ok' ORDER BY id",
+	).all<{ id: number; institution_name: string }>();
 
 	for (const [index, item] of items.entries()) {
-		if (
-			respectCooldown &&
-			item.last_sync_attempt_at &&
-			Date.now() -
-				new Date(`${item.last_sync_attempt_at.replace(" ", "T")}Z`).getTime() <
-				60_000
-		) {
-			result.skipped += 1;
-			continue;
-		}
 		if (now() - startedAt >= 12 * 60 * 1000) {
 			result.skipped += items.length - index;
 			break;
 		}
 
 		try {
-			await env.DB.prepare(
-				"UPDATE plaid_items SET last_sync_attempt_at = datetime('now') WHERE id = ?",
+			// Claiming the attempt is one statement, so two overlapping manual syncs can't both win.
+			// The attempt is recorded before syncing, so a failed attempt still counts toward the minute.
+			const claim = await env.DB.prepare(
+				respectCooldown
+					? `UPDATE plaid_items SET last_sync_attempt_at = datetime('now')
+						WHERE id = ? AND (last_sync_attempt_at IS NULL OR last_sync_attempt_at <= datetime('now', '-60 seconds'))`
+					: "UPDATE plaid_items SET last_sync_attempt_at = datetime('now') WHERE id = ?",
 			)
 				.bind(item.id)
 				.run();
+			if (claim.meta.changes !== 1) {
+				result.skipped += 1;
+				result.busy += 1;
+				continue;
+			}
 			const current = await env.DB.prepare(
 				"SELECT status FROM plaid_items WHERE id = ?",
 			)
@@ -72,8 +71,10 @@ export async function syncAllItems(
 				continue;
 			}
 			const synced = await syncItem(env, item.id, fetchImpl);
-			if ("skipped" in synced) result.skipped += 1;
-			else {
+			if ("skipped" in synced) {
+				result.skipped += 1;
+				result.busy += 1;
+			} else {
 				result.synced += 1;
 				result.added += synced.added;
 			}
