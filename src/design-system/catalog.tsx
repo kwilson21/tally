@@ -777,9 +777,12 @@ function Feedback() {
 				components={["FeedbackForm"]}
 				sentence="Two groups of radio chips and a labeled message give the builder a small, direct report."
 			>
-				<FeedbackForm
-					values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
-				/>
+				{/* Only the form is inert: its title and sentence stay readable to screen readers. */}
+				<div inert>
+					<FeedbackForm
+						values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
+					/>
+				</div>
 			</Specimen>
 			<Specimen
 				id="toast"

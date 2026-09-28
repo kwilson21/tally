@@ -152,7 +152,7 @@ it("files the expected GitHub issue without logging the token or message", async
 	expect(init?.redirect).toBe("manual");
 	expect(JSON.parse(String(init?.body))).toEqual({
 		title: "Bug: This does not work at all",
-		body: "Type: Bug\nFeeling: Frustrated\nPage: `/accounts`\nDevice: iPhone Safari\n\n```\nThis does not work at all\n```",
+		body: "Type: Bug\nFeeling: Frustrated\nPage: ` /accounts `\nDevice: iPhone Safari\n\n```\nThis does not work at all\n```",
 		labels: ["Bug"],
 	});
 	expect(JSON.stringify(log.mock.calls)).not.toContain("secret-token");
@@ -408,4 +408,20 @@ it("stops the run on a bad token without using up the rows' attempts", async () 
 it("lets browsers send the page to /feedback as a same-origin Referer", async () => {
 	const res = await exports.default.fetch(`${BASE}/transactions`);
 	expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
+});
+
+it("keeps a backtick in the page from closing its code span", async () => {
+	await env.DB.prepare(
+		"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Bug', 'Okay', 'Hi', ?, 'Desktop Chrome')",
+	)
+		.bind("/accounts?x=`@someone")
+		.run();
+	const fetchStub = vi.fn(
+		async () => new Response(JSON.stringify({ number: 3 }), { status: 201 }),
+	);
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
+	expect(JSON.parse(String(init.body)).body).toContain(
+		"Page: `` /accounts?x=`@someone ``",
+	);
 });

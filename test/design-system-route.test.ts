@@ -198,7 +198,12 @@ describe("GET /design-system in the demo", () => {
 		const formSpecimen = specimens(html).find((tag) =>
 			tag.includes('id="feedback-form"'),
 		);
-		expect(formSpecimen).toContain("inert");
+		// The form is inert, but the specimen's title and sentence aren't.
+		expect(formSpecimen).not.toContain("inert");
+		const body = html.slice(html.indexOf('id="feedback-form"'));
+		expect(body.slice(0, body.indexOf("<section"))).toMatch(
+			/<div inert[^>]*>[\s\S]*<form/,
+		);
 	});
 
 	it("loads the catalog's own script, which fires sample toasts", async () => {

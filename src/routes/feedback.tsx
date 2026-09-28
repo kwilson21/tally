@@ -163,6 +163,16 @@ class FilingError extends Error {
 const READY =
 	"github_issue_number IS NULL AND attempts < 5 AND (filing_at IS NULL OR filing_at <= datetime('now', '-10 minutes'))";
 
+/** A code span the text can't close: more backticks than its longest run, padded with spaces. */
+function codeSpan(text: string): string {
+	const longest = Math.max(
+		0,
+		...(text.match(/`+/g) ?? []).map((run) => run.length),
+	);
+	const ticks = "`".repeat(longest + 1);
+	return `${ticks} ${text} ${ticks}`;
+}
+
 /** A fence longer than any run of backticks in the text, so the text can't close it. */
 function fenced(text: string): string {
 	const longest = Math.max(
@@ -207,7 +217,7 @@ export async function fileFeedbackIssue(
 				body: JSON.stringify({
 					title: `${item.type}: ${titleMessage}`,
 					// Code formatting keeps #123 and @someone from becoming links or mentions.
-					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: \`${item.page}\`\nDevice: ${item.device}\n\n${fenced(item.message)}`,
+					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${codeSpan(item.page)}\nDevice: ${item.device}\n\n${fenced(item.message)}`,
 					labels: [item.type],
 				}),
 			},
