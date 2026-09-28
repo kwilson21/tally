@@ -125,9 +125,17 @@ describe("GET /accounts", () => {
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
 		]);
-		const text = textOf((await get("/accounts")).html);
-		expect(text).toContain("$0");
+		const { html } = await get("/accounts");
+		const text = textOf(html);
+		// Decision 55: no $0 headline before there's anything to add up; the add drawing instead.
+		expect(html).toMatch(/<h1[^>]*>Accounts<\/h1>/);
+		expect(text).not.toContain("Net worth");
+		expect(text).not.toContain("$0");
 		expect(text).toContain("No banks linked yet.");
+		expect(text).toContain(
+			"Link your bank to see balances and net worth here. Tally can only read them; it can't move money.",
+		);
+		expect(html).toContain('<circle cx="45" cy="44" r="10"');
 	});
 
 	it("marks Accounts as the current page", async () => {
@@ -196,19 +204,45 @@ describe("Link a bank", () => {
 		}
 	});
 
-	it("refreshes the account heading and banks without replacing the link action", async () => {
+	it("keeps Link a bank inside the refreshed summary, after the banks", async () => {
+		await resetDemo(env.DB, todayUtc());
 		const response = await accounts.request("/accounts", {}, plaidEnabled);
 		const html = await response.text();
 		const summaryStart = html.indexOf('<div id="accounts-summary">');
 		const heading = html.indexOf("Net worth");
 		const banks = html.indexOf('<div id="accounts-banks">');
 		const button = html.indexOf("data-link-bank");
-		const buttonStart = html.lastIndexOf("<button", button);
+		const errorRegion = html.indexOf("data-link-bank-error");
 
 		expect(summaryStart).toBeGreaterThan(-1);
 		expect(heading).toBeGreaterThan(summaryStart);
 		expect(banks).toBeGreaterThan(heading);
 		expect(button).toBeGreaterThan(banks);
-		expect(html.slice(summaryStart, buttonStart)).toMatch(/<\/div><\/div>$/);
+		expect(errorRegion).toBeGreaterThan(button);
+		// Both sit inside the summary, so a refresh redraws them where they belong.
+		const summaryEnd = html.indexOf("</main>");
+		expect(html.slice(summaryStart, summaryEnd)).toMatch(
+			/data-link-bank-error[^>]*><\/div><\/div>\s*$/,
+		);
+	});
+
+	it("puts Link a bank inside the add empty state when no bank is linked (decision 55)", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+		]);
+		const response = await accounts.request("/accounts", {}, plaidEnabled);
+		const html = await response.text();
+		const summaryStart = html.indexOf('<div id="accounts-summary">');
+		const sentence = html.indexOf("No banks linked yet.");
+		const button = html.indexOf("data-link-bank");
+		expect(summaryStart).toBeGreaterThan(-1);
+		expect(sentence).toBeGreaterThan(summaryStart);
+		expect(button).toBeGreaterThan(sentence);
+		expect(html).toMatch(
+			/<div class="mt-6"><button[^>]*data-link-bank[^>]*>[\s\S]*?Link a bank[\s\S]*?<\/button><div data-link-bank-error/,
+		);
+		expect(html).not.toContain("Net worth");
 	});
 });

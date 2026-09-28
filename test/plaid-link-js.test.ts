@@ -73,6 +73,8 @@ function harness({
 		),
 	};
 	let liveRepairError = repairError;
+	let liveLinkButton: typeof button | undefined;
+	let liveErrorRegion = errorRegion;
 	const repairedHeading = { focus: vi.fn() };
 	const section = {
 		querySelector: (selector: string) =>
@@ -100,8 +102,9 @@ function harness({
 			if (name === "click") delegatedClick = listener;
 		},
 		querySelector: (selector: string) => {
-			if (selector === "[data-link-bank]") return linkBank ? button : undefined;
-			if (selector === "[data-link-bank-error]") return errorRegion;
+			if (selector === "[data-link-bank]")
+				return liveLinkButton ?? (linkBank ? button : undefined);
+			if (selector === "[data-link-bank-error]") return liveErrorRegion;
 			if (selector === "#accounts-summary") return currentSummary;
 			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
 				return liveRepairError;
@@ -161,7 +164,14 @@ function harness({
 		repairError,
 		repairedHeading,
 		children,
-		click: () => click(),
+		click: (target: unknown = button) =>
+			delegatedClick({
+				target: {
+					closest: (selector: string) =>
+						selector === "[data-link-bank]" ? target : undefined,
+				},
+			}),
+		directClick: () => click(),
 		repairClick: (target: unknown = repairButton) =>
 			delegatedClick({
 				target: {
@@ -181,6 +191,11 @@ function harness({
 		process,
 		replaceRepairError(region: typeof repairError) {
 			liveRepairError = region;
+		},
+		/** A summary refresh re-renders Link a bank and its error region (decision 55). */
+		replaceLinkButton(next: typeof button, region?: typeof errorRegion) {
+			liveLinkButton = next;
+			if (region) liveErrorRegion = region;
 		},
 	};
 }
@@ -578,5 +593,85 @@ describe("plaid-link.js", () => {
 		expect(h.children[0]?.textContent).toBe(
 			"Linked First Bank, but the list didn't refresh. Reload the page to see it.",
 		);
+	});
+	describe("Link a bank inside the summary (decision 55)", () => {
+		function linkedAjax() {
+			return vi.fn(
+				async (
+					_method: string,
+					_url: string,
+					options: {
+						source: { dispatchRequest: (name: string, ctx: unknown) => void };
+					},
+				) => {
+					const ctx = {
+						response: { status: 204 },
+						text: "",
+						hx: {
+							trigger: JSON.stringify({
+								toast: { message: "Linked First Bank.", type: "success" },
+								announce: "Linked First Bank.",
+							}),
+						},
+					};
+					options.source.dispatchRequest("htmx:after:request", ctx);
+					options.source.dispatchRequest("htmx:finally:request", ctx);
+				},
+			);
+		}
+
+		it("installs no listener on the button itself; clicks arrive through the document", async () => {
+			const h = harness();
+			await h.directClick();
+			expect(h.fetch).not.toHaveBeenCalled();
+			await h.click();
+			expect(h.fetch).toHaveBeenCalledWith("/plaid/link-token", {
+				method: "POST",
+			});
+		});
+
+		it("still works when a refresh replaced the button", async () => {
+			const h = harness();
+			const replacement = { ...h.button, focus: vi.fn() };
+			h.replaceLinkButton(replacement);
+			await h.click(replacement);
+			expect(h.fetch).toHaveBeenCalledWith("/plaid/link-token", {
+				method: "POST",
+			});
+		});
+
+		it("focuses the live Link a bank button after the summary refresh", async () => {
+			const ajax = linkedAjax();
+			const h = harness({ ajax });
+			await h.click();
+			const refreshed = { ...h.button, focus: vi.fn() };
+			h.currentSummary.replaceWith.mockImplementation(() =>
+				h.replaceLinkButton(refreshed),
+			);
+			await h.linkOptions?.onSuccess("public-token");
+			expect(refreshed.focus).toHaveBeenCalled();
+			expect(h.button.focus).not.toHaveBeenCalled();
+		});
+
+		it("writes a failure into the live error region after a refresh replaced it", async () => {
+			const h = harness({
+				tokenResponse: {
+					ok: false,
+					text: async () => '<p role="alert">Server said no.</p>',
+				},
+			});
+			const liveChildren: Array<{ textContent?: string }> = [];
+			const liveRegion = {
+				replaceChildren: vi.fn((...nodes) =>
+					liveChildren.splice(0, liveChildren.length, ...nodes),
+				),
+			};
+			h.replaceLinkButton(h.button, liveRegion);
+			await h.click();
+			expect(liveChildren.map((c) => c.textContent)).toEqual([
+				"Server said no.",
+			]);
+			expect(h.children).toHaveLength(0);
+		});
 	});
 });

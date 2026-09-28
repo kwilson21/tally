@@ -1,9 +1,6 @@
 // Opens Plaid Link, exchanges its one-time token, then refreshes the bank list.
 // Tokens stay only in memory and are never logged or stored by this script.
 export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
-	const button = document.querySelector("[data-link-bank]");
-	const errorRegion = document.querySelector("[data-link-bank-error]");
-
 	const repairFailure = "Couldn't fix the connection. Try again.";
 	const repairAlert = (region, responseBody, itemId) => {
 		const liveRegion = itemId
@@ -148,21 +145,17 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			setRepairBusy(repairButton, false);
 		}
 	};
-	if (document.addEventListener)
-		document.addEventListener("click", repairClick);
-	if (!button || !errorRegion) return;
 
 	const genericFailure = "Couldn't link the bank. Try again.";
+	// Link a bank lives inside #accounts-summary, which a refresh replaces (decision 55), so its
+	// button and error region are looked up when needed rather than kept from page load.
+	const linkErrorRegion = () =>
+		document.querySelector("[data-link-bank-error]");
 	const showAlert = (message) => {
 		const alert = document.createElement("p");
 		alert.setAttribute("role", "alert");
 		alert.textContent = message;
-		errorRegion.replaceChildren(alert);
-	};
-	const busy = (value) => {
-		button.disabled = value;
-		button.setAttribute("aria-busy", String(value));
-		button.classList.toggle("htmx-request", value);
+		linkErrorRegion()?.replaceChildren(alert);
 	};
 	const showFailure = (responseText) => {
 		const serverAlert = responseText
@@ -172,7 +165,12 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			: undefined;
 		showAlert(serverAlert?.trim() || genericFailure);
 	};
-	button.addEventListener("click", async () => {
+	const linkClick = async (button) => {
+		const busy = (value) => {
+			button.disabled = value;
+			button.setAttribute("aria-busy", String(value));
+			button.classList.toggle("htmx-request", value);
+		};
 		const Plaid = globalThis.Plaid;
 		if (!Plaid) {
 			showFailure();
@@ -180,7 +178,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			return;
 		}
 		busy(true);
-		errorRegion.replaceChildren();
+		linkErrorRegion()?.replaceChildren();
 		try {
 			const response = await fetch("/plaid/link-token", { method: "POST" });
 			if (!response.ok) {
@@ -215,7 +213,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						try {
 							await htmx.ajax("POST", "/plaid/exchange", {
 								source: button,
-								target: errorRegion,
+								target: linkErrorRegion() ?? button,
 								swap: "none",
 								headers: {
 									"Content-Type": "application/x-www-form-urlencoded",
@@ -269,7 +267,8 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							);
 							return;
 						}
-						button.focus();
+						// The refresh drew a new button; focus that one, not the one clicked.
+						document.querySelector("[data-link-bank]")?.focus();
 					} catch {
 						showFailure();
 					} finally {
@@ -286,7 +285,15 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			showFailure();
 			busy(false);
 		}
-	});
+	};
+
+	// One delegated listener for both buttons, so a button a refresh replaced still works.
+	if (document.addEventListener)
+		document.addEventListener("click", (event) => {
+			const linkButton = event.target?.closest?.("[data-link-bank]");
+			if (linkButton) return linkClick(linkButton);
+			return repairClick(event);
+		});
 }
 
 if (typeof document !== "undefined") {
