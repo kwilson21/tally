@@ -4,6 +4,7 @@ import { setupPlaidLink } from "../public/js/plaid-link.js";
 const genericFailure = "Couldn't link the bank. Try again.";
 
 function harness({
+	linkBank = true,
 	tokenResponse = {
 		ok: true,
 		json: async () => ({ link_token: "link-secret" }),
@@ -15,6 +16,7 @@ function harness({
 			'<section id="accounts-summary" data-version="new"></section>',
 	},
 }: {
+	linkBank?: boolean;
 	tokenResponse?: {
 		ok: boolean;
 		json?: () => Promise<{ link_token: string }>;
@@ -70,6 +72,7 @@ function harness({
 			repairChildren.splice(0, repairChildren.length, ...nodes),
 		),
 	};
+	let liveRepairError = repairError;
 	const repairedHeading = { focus: vi.fn() };
 	const section = {
 		querySelector: (selector: string) =>
@@ -97,9 +100,11 @@ function harness({
 			if (name === "click") delegatedClick = listener;
 		},
 		querySelector: (selector: string) => {
-			if (selector === "[data-link-bank]") return button;
+			if (selector === "[data-link-bank]") return linkBank ? button : undefined;
 			if (selector === "[data-link-bank-error]") return errorRegion;
 			if (selector === "#accounts-summary") return currentSummary;
+			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
+				return liveRepairError;
 		},
 		createElement: () => ({
 			role: undefined as string | undefined,
@@ -174,6 +179,9 @@ function harness({
 		currentSummary,
 		parsedSummaries,
 		process,
+		replaceRepairError(region: typeof repairError) {
+			liveRepairError = region;
+		},
 	};
 }
 
@@ -183,6 +191,14 @@ afterEach(() => {
 
 describe("plaid-link.js", () => {
 	describe("Fix connection", () => {
+		it("handles Fix connection when Link a bank is absent", async () => {
+			const h = harness({ linkBank: false });
+			await h.repairClick();
+			expect(h.fetch).toHaveBeenCalledWith("/plaid/items/42/link-token", {
+				method: "POST",
+			});
+		});
+
 		function repairedAjax(status = 204) {
 			return vi.fn(
 				async (
@@ -267,6 +283,28 @@ describe("plaid-link.js", () => {
 			expect(h.repairButton.disabled).toBe(false);
 		});
 
+		it("shows one alert and enables the button when finally has no response", async () => {
+			const ajax = vi.fn(
+				async (
+					_method: string,
+					_url: string,
+					options: {
+						source: { dispatchRequest: (name: string, ctx: unknown) => void };
+					},
+				) => {
+					options.source.dispatchRequest("htmx:finally:request", {});
+				},
+			);
+			const h = harness({ ajax });
+			await h.repairClick();
+			await h.linkOptions?.onSuccess("unused");
+			expect(h.repairChildren).toHaveLength(1);
+			expect(h.repairChildren[0]?.textContent).toBe(
+				"Couldn't fix the connection. Try again.",
+			);
+			expect(h.repairButton.disabled).toBe(false);
+		});
+
 		it("shows one alert and enables the button when repaired rejects", async () => {
 			const h = harness({
 				ajax: vi.fn(async () => {
@@ -280,6 +318,21 @@ describe("plaid-link.js", () => {
 				"Couldn't fix the connection. Try again.",
 			);
 			expect(h.repairButton.disabled).toBe(false);
+		});
+
+		it("shows a repaired failure in the live region after the summary is replaced", async () => {
+			const h = harness({ ajax: repairedAjax(502) });
+			const liveChildren: Array<{ textContent?: string; role?: string }> = [];
+			const liveRegion = {
+				replaceChildren: vi.fn((...nodes) =>
+					liveChildren.splice(0, liveChildren.length, ...nodes),
+				),
+			};
+			await h.repairClick();
+			h.replaceRepairError(liveRegion);
+			await h.linkOptions?.onSuccess("unused");
+			expect(liveChildren).toHaveLength(1);
+			expect(liveChildren[0]?.textContent).toBe("Repair failed.");
 		});
 
 		it("shows an alert and leaves the repair button enabled when Plaid is missing", async () => {

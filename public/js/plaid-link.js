@@ -3,10 +3,14 @@
 export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	const button = document.querySelector("[data-link-bank]");
 	const errorRegion = document.querySelector("[data-link-bank-error]");
-	if (!button || !errorRegion) return;
 
 	const repairFailure = "Couldn't fix the connection. Try again.";
-	const repairAlert = (region, responseBody) => {
+	const repairAlert = (region, responseBody, itemId) => {
+		const liveRegion = itemId
+			? document.querySelector(
+					`[data-bank-item-id="${itemId}"] [data-fix-error]`,
+				)
+			: undefined;
 		const serverAlert = responseBody
 			? new DOMParser()
 					.parseFromString(responseBody, "text/html")
@@ -15,7 +19,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 		const alert = document.createElement("p");
 		alert.setAttribute("role", "alert");
 		alert.textContent = serverAlert?.trim() || repairFailure;
-		region.replaceChildren(alert);
+		(liveRegion || region).replaceChildren(alert);
 	};
 	const setRepairBusy = (repairButton, value) => {
 		repairButton.disabled = value;
@@ -31,7 +35,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 		if (!itemId || !repairError) return;
 		const Plaid = globalThis.Plaid;
 		if (!Plaid) {
-			repairAlert(repairError);
+			repairAlert(repairError, undefined, itemId);
 			setRepairBusy(repairButton, false);
 			return;
 		}
@@ -42,7 +46,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 				method: "POST",
 			});
 			if (!response.ok) {
-				repairAlert(repairError, await response.text());
+				repairAlert(repairError, await response.text(), itemId);
 				setRepairBusy(repairButton, false);
 				return;
 			}
@@ -75,8 +79,8 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							target: repairError,
 							swap: "none",
 						});
-					} catch (error) {
-						repairAlert(repairError, responseText(error));
+					} catch {
+						repairAlert(repairError, undefined, itemId);
 						setRepairBusy(repairButton, false);
 						return;
 					} finally {
@@ -87,7 +91,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						!requestContext?.response ||
 						requestContext.response.status >= 400
 					) {
-						repairAlert(repairError, requestContext?.text);
+						repairAlert(repairError, requestContext?.text, itemId);
 						setRepairBusy(repairButton, false);
 						return;
 					}
@@ -119,6 +123,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						repairAlert(
 							repairError,
 							'<p role="alert">The connection was fixed, but the list didn\'t refresh. Reload the page to see it.</p>',
+							itemId,
 						);
 						setRepairBusy(repairButton, false);
 						return;
@@ -133,18 +138,19 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					setRepairBusy(repairButton, false);
 				},
 				onExit: (error) => {
-					if (error) repairAlert(repairError);
+					if (error) repairAlert(repairError, undefined, itemId);
 					setRepairBusy(repairButton, false);
 				},
 			});
 			link.open();
 		} catch {
-			repairAlert(repairError);
+			repairAlert(repairError, undefined, itemId);
 			setRepairBusy(repairButton, false);
 		}
 	};
 	if (document.addEventListener)
 		document.addEventListener("click", repairClick);
+	if (!button || !errorRegion) return;
 
 	const genericFailure = "Couldn't link the bank. Try again.";
 	const showAlert = (message) => {
@@ -166,11 +172,6 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			: undefined;
 		showAlert(serverAlert?.trim() || genericFailure);
 	};
-	const responseText = (error) =>
-		error && typeof error === "object" && "xhr" in error
-			? error.xhr?.responseText
-			: undefined;
-
 	button.addEventListener("click", async () => {
 		const Plaid = globalThis.Plaid;
 		if (!Plaid) {
@@ -269,8 +270,8 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							return;
 						}
 						button.focus();
-					} catch (error) {
-						showFailure(responseText(error));
+					} catch {
+						showFailure();
 					} finally {
 						busy(false);
 					}

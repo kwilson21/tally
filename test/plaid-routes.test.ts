@@ -192,6 +192,35 @@ describe("Plaid routes", () => {
 		expect(await response.text()).not.toContain("never-return-this");
 	});
 
+	it("treats an item response without an error field as healthy", async () => {
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",
+		)
+			.bind(await encryptToken("healthy-private-token", KEY))
+			.first<{ id: number }>();
+		const waitUntil = vi.fn((promise: Promise<unknown>) => {
+			void promise.catch(() => {});
+		});
+		vi.stubGlobal("fetch", async () =>
+			Response.json({ item: { institution_id: "ins-1" } }),
+		);
+
+		const response = await plaid.request(
+			`http://tally.test/plaid/items/${inserted?.id}/repaired`,
+			{ method: "POST", headers: { Origin: BASE } },
+			env,
+			{ waitUntil, passThroughOnException() {}, props: {} },
+		);
+
+		expect(response.status).toBe(204);
+		expect(waitUntil).toHaveBeenCalledOnce();
+		expect(
+			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
+				.bind(inserted?.id)
+				.first(),
+		).toEqual({ status: "ok" });
+	});
+
 	it("leaves an item needing attention when Plaid still reports an error", async () => {
 		const inserted = await env.DB.prepare(
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",

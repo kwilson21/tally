@@ -124,7 +124,7 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 			c.env.TOKEN_ENCRYPTION_KEY as string,
 		);
 		const result = await getItem(c.env, accessToken);
-		if (result.item.error !== null) {
+		if (result.item.error) {
 			return c.html(repairFailure(result.item.error), 502);
 		}
 		await c.env.DB.prepare("UPDATE plaid_items SET status = 'ok' WHERE id = ?")
