@@ -25,21 +25,23 @@ accounts.get("/accounts", async (c) => {
 			}
 			modules={plaidEnabled ? ["/js/plaid-link.js"] : []}
 		>
-			<AccountsTop
-				netWorthCents={netWorthCents(banks.flatMap((b) => b.accounts))}
-			/>
-			<div id="accounts-banks">
-				{banks.length === 0 ? (
-					<p class="mt-8 text-lg">No banks linked yet.</p>
-				) : (
-					banks.map((b) => (
-						<BankGroup
-							name={b.name}
-							accounts={b.accounts}
-							needsAttention={b.needsAttention}
-						/>
-					))
-				)}
+			<div id="accounts-summary">
+				<AccountsTop
+					netWorthCents={netWorthCents(banks.flatMap((b) => b.accounts))}
+				/>
+				<div id="accounts-banks">
+					{banks.length === 0 ? (
+						<p class="mt-8 text-lg">No banks linked yet.</p>
+					) : (
+						banks.map((b) => (
+							<BankGroup
+								name={b.name}
+								accounts={b.accounts}
+								needsAttention={b.needsAttention}
+							/>
+						))
+					)}
+				</div>
 			</div>
 			{plaidEnabled && (
 				<>

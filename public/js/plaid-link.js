@@ -47,11 +47,25 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			const link = Plaid.create({
 				token,
 				onSuccess: async (publicToken) => {
+					let announcement;
 					try {
 						let exchangeContext;
 						const finished = (event) => {
 							exchangeContext = event.detail?.ctx;
+							const trigger = exchangeContext?.hx?.trigger;
+							if (typeof trigger !== "string") return;
+							try {
+								const events = JSON.parse(trigger);
+								if (Object.hasOwn(events, "announce")) {
+									announcement = events.announce;
+									delete events.announce;
+									exchangeContext.hx.trigger = JSON.stringify(events);
+								}
+							} catch {
+								// Leave malformed headers to htmx's normal handling.
+							}
 						};
+						button.addEventListener("htmx:after:request", finished);
 						button.addEventListener("htmx:finally:request", finished);
 						await htmx.ajax("POST", "/plaid/exchange", {
 							source: button,
@@ -62,6 +76,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							},
 							values: { public_token: publicToken },
 						});
+						button.removeEventListener("htmx:after:request", finished);
 						button.removeEventListener("htmx:finally:request", finished);
 						if (
 							!exchangeContext?.response ||
@@ -73,10 +88,17 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						// The POST's completion removes htmx-request from its source.
 						busy(true);
 						await htmx.ajax("GET", "/accounts", {
-							target: "#accounts-banks",
-							select: "#accounts-banks",
+							target: "#accounts-summary",
+							select: "#accounts-summary",
 							swap: "outerHTML",
 						});
+						if (announcement) {
+							document.body.dispatchEvent(
+								new CustomEvent("announce", {
+									detail: { value: announcement },
+								}),
+							);
+						}
 						button.focus();
 					} catch (error) {
 						showFailure(responseText(error));

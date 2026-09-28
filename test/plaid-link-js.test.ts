@@ -46,6 +46,7 @@ function harness({
 		),
 	};
 	const document = {
+		body: { dispatchEvent: vi.fn() },
 		querySelector: (selector: string) =>
 			selector === "[data-link-bank]" ? button : errorRegion,
 		createElement: () => ({
@@ -82,6 +83,7 @@ function harness({
 			return linkOptions;
 		},
 		listeners,
+		document,
 	};
 }
 
@@ -90,16 +92,45 @@ afterEach(() => {
 });
 
 describe("plaid-link.js", () => {
-	it("exchanges the public token without swapping and refreshes only the bank list", async () => {
+	it("refreshes the whole account summary, then announces the linked bank once", async () => {
+		let finishRefresh = () => {};
+		const refresh = new Promise<void>((resolve) => {
+			finishRefresh = resolve;
+		});
 		const ajax = vi.fn(async (method: string) => {
-			if (method === "POST")
-				h.listeners.get("htmx:finally:request")?.({
-					detail: { ctx: { response: { status: 204 }, text: "" } },
-				});
+			if (method === "POST") {
+				const ctx = {
+					response: { status: 204 },
+					text: "",
+					hx: {
+						trigger: JSON.stringify({
+							toast: { message: "Linked First Bank.", type: "success" },
+							announce: "Linked First Bank.",
+						}),
+					},
+				};
+				h.listeners.get("htmx:after:request")?.({ detail: { ctx } });
+				const earlyTriggers = JSON.parse(ctx.hx.trigger);
+				for (const [type, detail] of Object.entries(earlyTriggers)) {
+					h.document.body.dispatchEvent(new CustomEvent(type, { detail }));
+				}
+				h.listeners.get("htmx:finally:request")?.({ detail: { ctx } });
+			} else {
+				await refresh;
+			}
 		});
 		const h = harness({ ajax });
 		await h.click();
-		await h.linkOptions?.onSuccess("public-secret");
+		const success = h.linkOptions?.onSuccess("public-secret");
+		await vi.waitFor(() => expect(ajax).toHaveBeenCalledTimes(2));
+		const announced = () =>
+			h.document.body.dispatchEvent.mock.calls.filter(
+				([event]) => event.type === "announce",
+			);
+		expect(announced()).toHaveLength(0);
+		expect(h.document.body.dispatchEvent.mock.calls[0]?.[0].type).toBe("toast");
+		finishRefresh();
+		await success;
 		expect(ajax).toHaveBeenNthCalledWith(
 			1,
 			"POST",
@@ -110,10 +141,14 @@ describe("plaid-link.js", () => {
 			}),
 		);
 		expect(ajax).toHaveBeenNthCalledWith(2, "GET", "/accounts", {
-			target: "#accounts-banks",
-			select: "#accounts-banks",
+			target: "#accounts-summary",
+			select: "#accounts-summary",
 			swap: "outerHTML",
 		});
+		expect(announced()).toHaveLength(1);
+		const event = announced()[0]?.[0];
+		expect(event.type).toBe("announce");
+		expect(event.detail).toEqual({ value: "Linked First Bank." });
 		expect(h.button.focus).toHaveBeenCalledOnce();
 	});
 

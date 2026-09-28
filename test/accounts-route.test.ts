@@ -167,14 +167,19 @@ describe("Link a bank", () => {
 		}
 	});
 
-	it("keeps the link action outside the bank list that refreshes", async () => {
+	it("refreshes the account heading and banks without replacing the link action", async () => {
 		const response = await accounts.request("/accounts", {}, plaidEnabled);
 		const html = await response.text();
-		const banksStart = html.indexOf('<div id="accounts-banks">');
-		const banksEnd = html.indexOf("</div>", banksStart);
+		const summaryStart = html.indexOf('<div id="accounts-summary">');
+		const heading = html.indexOf("Net worth");
+		const banks = html.indexOf('<div id="accounts-banks">');
 		const button = html.indexOf("data-link-bank");
+		const buttonStart = html.lastIndexOf("<button", button);
 
-		expect(banksStart).toBeGreaterThan(-1);
-		expect(button).toBeGreaterThan(banksEnd);
+		expect(summaryStart).toBeGreaterThan(-1);
+		expect(heading).toBeGreaterThan(summaryStart);
+		expect(banks).toBeGreaterThan(heading);
+		expect(button).toBeGreaterThan(banks);
+		expect(html.slice(summaryStart, buttonStart)).toMatch(/<\/div><\/div>$/);
 	});
 });
