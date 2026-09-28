@@ -23,9 +23,15 @@ await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
 	.getByRole("link", { name: /12 transactions need a category/ })
 	.click();
-await page.waitForURL(/\/transactions\?uncategorized=1$/);
+await page.waitForURL(/\/transactions\/organize$/);
+await page.getByRole("heading", { name: "Organize", level: 1 }).waitFor();
+step("Home's band opens Organize");
+
+await page.goto(`${BASE}/transactions?uncategorized=1`, {
+	waitUntil: "networkidle",
+});
 assert.equal(await rows(), 12);
-step("Home's band opens the 12 transactions that need a category");
+step("the Needs category filter lists the 12 transactions");
 
 await page.getByRole("link", { name: /Local Bakery/ }).click();
 await page.locator('[role="dialog"]').waitFor();

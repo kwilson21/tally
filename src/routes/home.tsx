@@ -123,7 +123,7 @@ async function renderHome(
 							band={
 								count > 0
 									? {
-											href: "/transactions?uncategorized=1",
+											href: "/transactions/organize",
 											text: needs,
 											// Home says "needs a category" once: the Band carries the amount (decision 50).
 											// Refunds can outweigh the spending; it says so, as the budget sheet does.
