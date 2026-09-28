@@ -53,10 +53,12 @@ const adjustAttrs = (href: string) => ({
 	"hx-swap": "outerHTML",
 	"hx-push-url": "true",
 });
+// Taps queue, and htmx picks a request's target when it's tapped. #home is never replaced, so a tap
+// queued behind another still lands on the page; #page itself would already be gone.
 const nudgeAttrs = {
-	"hx-target": "#page",
+	"hx-target": "#home",
 	"hx-select": "#page",
-	"hx-swap": "outerHTML",
+	"hx-swap": "innerHTML",
 	"hx-sync": "body:queue all",
 };
 
@@ -106,126 +108,128 @@ async function renderHome(
 
 	return c.html(
 		<Layout active="home" demo={demo}>
-			<div id="page">
-				{/* One width for the top and the Budget list on desktop (#92, H6). */}
-				<div class="lg:max-w-2xl">
-					<HomeTop
-						month={monthName(month)}
-						safeToSpendCents={summary.safeToSpendCents}
-						status={statusSentence(summary.categories)}
-						demo={demo}
-						band={
-							count > 0
-								? {
-										href: "/transactions?uncategorized=1",
-										text: needs,
-										// Home says "needs a category" once: the Band carries the amount (decision 50).
-										// Refunds can outweigh the spending; it says so, as the budget sheet does.
-										detail:
-											spentCents < 0
-												? `${bandAmount(-spentCents)} more refunded than spent`
-												: `${bandAmount(spentCents)} of this month's spending`,
-									}
-								: undefined
-						}
-					/>
+			<div id="home">
+				<div id="page">
+					{/* One width for the top and the Budget list on desktop (#92, H6). */}
+					<div class="lg:max-w-2xl">
+						<HomeTop
+							month={monthName(month)}
+							safeToSpendCents={summary.safeToSpendCents}
+							status={statusSentence(summary.categories)}
+							demo={demo}
+							band={
+								count > 0
+									? {
+											href: "/transactions?uncategorized=1",
+											text: needs,
+											// Home says "needs a category" once: the Band carries the amount (decision 50).
+											// Refunds can outweigh the spending; it says so, as the budget sheet does.
+											detail:
+												spentCents < 0
+													? `${bandAmount(-spentCents)} more refunded than spent`
+													: `${bandAmount(spentCents)} of this month's spending`,
+										}
+									: undefined
+							}
+						/>
 
-					<section class="mt-8" aria-labelledby="budget-title">
-						<div class="flex items-baseline justify-between gap-4">
-							<h2
-								id="budget-title"
-								class="font-serif text-3xl font-semibold"
-								tabindex={focusHeading ? -1 : undefined}
-								autofocus={focusHeading}
-							>
-								Budget
-							</h2>
-							{canAdjust && (
-								<AdjustLink
-									adjusting={adjusting === true}
-									attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
-								/>
-							)}
-						</div>
-						{summary.categories.length > 0 && (
-							<ul class="mt-2 divide-y divide-rule">
-								{summary.categories.map((cat) => {
-									// An archived category shows for a month it has spending in (spec §7), but it
-									// can't be budgeted, so its row isn't a link.
-									const href = looks.get(cat.id)?.archived
-										? undefined
-										: `/budget/${cat.id}`;
-									return (
-										<ProgressRow
-											name={cat.name}
-											icon={looks.get(cat.id)?.icon ?? "list"}
-											color={looks.get(cat.id)?.color ?? ""}
-											spentCents={cat.spentCents}
-											budgetCents={cat.budgetCents}
-											href={href}
-											attrs={href ? openAttrs(href) : undefined}
-											autofocus={cat.id === focusId}
-											nudge={
-												adjusting && href
-													? {
-															href: `${href}/nudge`,
-															id: `nudge-${cat.id}`,
-															attrs: nudgeAttrs,
-															focus:
-																nudgeFocus?.id === cat.id
-																	? nudgeFocus.direction
-																	: undefined,
-														}
-													: undefined
-											}
-										/>
-									);
-								})}
-							</ul>
-						)}
-						{notBudgeted.length > 0 && (
-							<>
-								<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
-								<ul class="divide-y divide-rule">
-									{notBudgeted.map((cat) => {
-										const href = `/budget/${cat.id}`;
+						<section class="mt-8" aria-labelledby="budget-title">
+							<div class="flex items-baseline justify-between gap-4">
+								<h2
+									id="budget-title"
+									class="font-serif text-3xl font-semibold"
+									tabindex={focusHeading ? -1 : undefined}
+									autofocus={focusHeading}
+								>
+									Budget
+								</h2>
+								{canAdjust && (
+									<AdjustLink
+										adjusting={adjusting === true}
+										attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
+									/>
+								)}
+							</div>
+							{summary.categories.length > 0 && (
+								<ul class="mt-2 divide-y divide-rule">
+									{summary.categories.map((cat) => {
+										// An archived category shows for a month it has spending in (spec §7), but it
+										// can't be budgeted, so its row isn't a link.
+										const href = looks.get(cat.id)?.archived
+											? undefined
+											: `/budget/${cat.id}`;
 										return (
-											<li>
-												<a
-													href={href}
-													autofocus={cat.id === focusId}
-													class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
-													{...openAttrs(href)}
-												>
-													<CategoryIcon icon={cat.icon} color={cat.color} />
-													<span class="min-w-0 flex-1 truncate text-lg">
-														{cat.name}
-													</span>
-													<span class="text-accent">Add a budget</span>
-												</a>
-											</li>
+											<ProgressRow
+												name={cat.name}
+												icon={looks.get(cat.id)?.icon ?? "list"}
+												color={looks.get(cat.id)?.color ?? ""}
+												spentCents={cat.spentCents}
+												budgetCents={cat.budgetCents}
+												href={href}
+												attrs={href ? openAttrs(href) : undefined}
+												autofocus={cat.id === focusId}
+												nudge={
+													adjusting && href
+														? {
+																href: `${href}/nudge`,
+																id: `nudge-${cat.id}`,
+																attrs: nudgeAttrs,
+																focus:
+																	nudgeFocus?.id === cat.id
+																		? nudgeFocus.direction
+																		: undefined,
+															}
+														: undefined
+												}
+											/>
 										);
 									})}
 								</ul>
-							</>
+							)}
+							{notBudgeted.length > 0 && (
+								<>
+									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
+									<ul class="divide-y divide-rule">
+										{notBudgeted.map((cat) => {
+											const href = `/budget/${cat.id}`;
+											return (
+												<li>
+													<a
+														href={href}
+														autofocus={cat.id === focusId}
+														class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
+														{...openAttrs(href)}
+													>
+														<CategoryIcon icon={cat.icon} color={cat.color} />
+														<span class="min-w-0 flex-1 truncate text-lg">
+															{cat.name}
+														</span>
+														<span class="text-accent">Add a budget</span>
+													</a>
+												</li>
+											);
+										})}
+									</ul>
+								</>
+							)}
+							{summary.categories.length === 0 && notBudgeted.length === 0 && (
+								<EmptyState
+									kind="done"
+									sentence="No categories to budget yet."
+									hint="Add a category in Settings to get started."
+									action={{ href: "/settings", label: "Open Settings" }}
+								/>
+							)}
+						</section>
+						{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
+						{demo && (
+							<div class="mt-8">
+								<ThingsToTry />
+							</div>
 						)}
-						{summary.categories.length === 0 && notBudgeted.length === 0 && (
-							<EmptyState
-								kind="done"
-								sentence="No categories to budget yet."
-								hint="Add a category in Settings to get started."
-								action={{ href: "/settings", label: "Open Settings" }}
-							/>
-						)}
-					</section>
-					{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
-					{demo && (
-						<div class="mt-8">
-							<ThingsToTry />
-						</div>
-					)}
+					</div>
+					<div id="sheet">{sheet?.(spent)}</div>
 				</div>
-				<div id="sheet">{sheet?.(spent)}</div>
 			</div>
 		</Layout>,
 		status,

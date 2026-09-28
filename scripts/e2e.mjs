@@ -95,11 +95,19 @@ assert.equal(
 );
 step("in Adjust mode, + saves Groceries at the next round $10, keeping focus");
 
-// Two quick taps queue rather than race, so both count.
+// Two quick taps queue rather than race, so both count and the page shows both. A slow network is
+// simulated, so the second tap always lands while the first is still saving (the case that used to
+// swap the second answer into the page the first one had already replaced).
+const slowNudge = async (route) => {
+	await new Promise((resolve) => setTimeout(resolve, 400));
+	await route.continue();
+};
+await page.route("**/nudge/**", slowNudge);
 const plus = page.locator("#nudge-1-up");
 await plus.click();
 await plus.click();
-await page.getByText(/of \$680/).waitFor();
+await page.getByText(/of \$680/).waitFor({ timeout: 5000 });
+await page.unroute("**/nudge/**", slowNudge);
 await page.getByRole("link", { name: "Done adjusting budgets" }).click();
 await page.getByRole("link", { name: "Adjust budgets" }).waitFor();
 assert.equal(await page.locator("#nudge-1-up").count(), 0);
