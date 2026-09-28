@@ -16,6 +16,7 @@ import {
 	parseCategory,
 	restoreProblem,
 } from "../settings/category-form";
+import { tallyExport, transactionsCsv } from "../settings/export";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
@@ -343,6 +344,26 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					)}
 				</div>
 			</section>
+			<section
+				aria-labelledby="your-data-title"
+				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
+			>
+				<h2 id="your-data-title" class="font-serif text-3xl font-semibold">
+					Your data
+				</h2>
+				<p class="mt-1 text-muted">
+					Everything Tally has stored, to keep or open elsewhere. Bank logins
+					are never included.
+				</p>
+				<div class="mt-4 flex flex-col items-start gap-3">
+					<Button kind="secondary" href="/settings/export/transactions.csv">
+						Download transactions (CSV)
+					</Button>
+					<Button kind="secondary" href="/settings/export/tally.json">
+						Download everything (JSON)
+					</Button>
+				</div>
+			</section>
 		</Layout>,
 		view.status ?? 200,
 	);
@@ -408,6 +429,25 @@ settings.get("/settings", (c) => {
 		return Number.isInteger(n) && n > 0 ? n : undefined;
 	};
 	return renderSettings(c, { open: id("open"), focus: id("focus") });
+});
+
+settings.get("/settings/export/transactions.csv", async (c) => {
+	c.header("Content-Type", "text/csv; charset=utf-8");
+	c.header("Cache-Control", "no-store");
+	c.header(
+		"Content-Disposition",
+		`attachment; filename="tally-transactions-${todayUtc()}.csv"`,
+	);
+	return c.body(await transactionsCsv(c.env.DB));
+});
+
+settings.get("/settings/export/tally.json", async (c) => {
+	c.header("Cache-Control", "no-store");
+	c.header(
+		"Content-Disposition",
+		`attachment; filename="tally-${todayUtc()}.json"`,
+	);
+	return c.json(await tallyExport(c.env.DB));
 });
 
 settings.post("/settings/categories", async (c) => {
