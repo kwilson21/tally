@@ -163,22 +163,24 @@ class FilingError extends Error {
 const READY =
 	"github_issue_number IS NULL AND attempts < 5 AND (filing_at IS NULL OR filing_at <= datetime('now', '-10 minutes'))";
 
+/** The longest run of backticks, counted without spreading, so any length of text is safe. */
+function longestBacktickRun(text: string): number {
+	let longest = 0;
+	for (const run of text.match(/`+/g) ?? [])
+		longest = Math.max(longest, run.length);
+	return longest;
+}
+
 /** A code span the text can't close: more backticks than its longest run, padded with spaces. */
 function codeSpan(text: string): string {
-	const longest = Math.max(
-		0,
-		...(text.match(/`+/g) ?? []).map((run) => run.length),
-	);
+	const longest = longestBacktickRun(text);
 	const ticks = "`".repeat(longest + 1);
 	return `${ticks} ${text} ${ticks}`;
 }
 
 /** A fence longer than any run of backticks in the text, so the text can't close it. */
 function fenced(text: string): string {
-	const longest = Math.max(
-		0,
-		...(text.match(/`+/g) ?? []).map((run) => run.length),
-	);
+	const longest = longestBacktickRun(text);
 	const fence = "`".repeat(Math.max(3, longest + 1));
 	return `${fence}\n${text}\n${fence}`;
 }

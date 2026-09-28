@@ -425,3 +425,16 @@ it("keeps a backtick in the page from closing its code span", async () => {
 		"Page: `` /accounts?x=`@someone ``",
 	);
 });
+
+it("files a report whose page has a huge number of backtick runs", async () => {
+	await env.DB.prepare(
+		"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Bug', 'Okay', 'Hi', ?, 'Desktop Chrome')",
+	)
+		.bind(`/accounts?x=${"`a".repeat(200_000)}`)
+		.run();
+	const fetchStub = vi.fn(
+		async () => new Response(JSON.stringify({ number: 4 }), { status: 201 }),
+	);
+	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+	expect(fetchStub).toHaveBeenCalledOnce();
+});
