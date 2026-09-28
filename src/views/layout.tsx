@@ -31,7 +31,11 @@ export function Layout({
 				{/* The money input's nudges and chips (decision 39); module scripts are deferred. */}
 				<script src="/js/money.js" type="module"></script>
 				{scripts.map((src) => (
-					<script src={src} defer></script>
+					<script
+						src={src}
+						defer
+						type={src === "/js/plaid-link.js" ? "module" : undefined}
+					></script>
 				))}
 			</head>
 			<body class="min-h-screen">

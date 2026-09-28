@@ -936,7 +936,7 @@ function AccountsGroup() {
 				title="AccountsTop, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank with debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button. Fix connection and Link a bank open Plaid Link, so here they do nothing; their use specs come with #21 and #16."
+				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank with debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button. Fix connection does nothing here; its use spec comes with #21. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame
