@@ -261,3 +261,47 @@ export const CATEGORIES_EXAMPLE = {
 	income: 3,
 	threshold: "80%",
 };
+
+/** The Accounts screen (round 5 study): two banks, the second needing its login fixed. Net worth is their sum. */
+export const CHECKING = {
+	id: 1,
+	name: "Checking",
+	mask: "4521",
+	type: "depository",
+	balanceCents: 390412,
+	isLiability: false,
+};
+export const CREDIT_CARD = {
+	id: 3,
+	name: "Credit card",
+	mask: "9012",
+	type: "credit",
+	balanceCents: 212240,
+	isLiability: true,
+};
+export const BANKS = [
+	{
+		name: "First Harbor Bank",
+		needsAttention: false,
+		accounts: [
+			CHECKING,
+			{
+				id: 2,
+				name: "Savings",
+				mask: "5678",
+				type: "depository",
+				balanceCents: 1260000,
+				isLiability: false,
+			},
+		],
+	},
+	{
+		name: "Northline Card Services",
+		needsAttention: true,
+		accounts: [CREDIT_CARD],
+	},
+];
+export const NET_WORTH_CENTS = BANKS.flatMap((b) => b.accounts).reduce(
+	(sum, a) => sum + (a.isLiability ? -a.balanceCents : a.balanceCents),
+	0,
+);

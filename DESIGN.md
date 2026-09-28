@@ -96,6 +96,9 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | AdjustLink | "Adjust" beside Home's Budget heading, a terracotta text link that shows − and + on every budgeted row; in Adjust mode it says "Done". |
 | Band | The one tinted row per screen that links to the thing to do next, with an optional quiet second line (Home's "$228 of this month's spending", decision 50). |
 | HomeTop | Home's top (#92, decision 46): the month as a small serif heading, then Safe to spend (the one thing, on a phone's first screen), the status sentence, How this works (demo only) and the Band, which carries the uncategorized amount (decision 50). On desktop the top and the Budget list share one width. |
+| AccountsTop | The Accounts screen's top (round 5 study): the title, Net worth in whole dollars as the serif headline, and a ruled space, hidden from screen readers, for the Phase 4 net-worth chart, with "Net worth over time arrives later". |
+| BankGroup | One linked bank: its name in muted sans, its AccountRows between rules, and, when its login needs fixing, "Needs attention: sign in again" with an alert icon (never color alone) and a secondary "Fix connection" button. |
+| AccountRow | One account: a bank or card line icon, its name, "••4521" (read as "ending in 4521"), and its balance, with debt shown negative. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
 | EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do), one sentence, a muted hint and at most one secondary button, centred (decision 54). |

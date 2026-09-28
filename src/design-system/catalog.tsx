@@ -2,8 +2,11 @@
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
+import { AccountRow } from "../views/account-row";
+import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
+import { BankGroup } from "../views/bank-group";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
@@ -29,12 +32,16 @@ import { TransactionRow } from "../views/transaction-row";
 import {
 	ADJUST_ROWS,
 	BAND,
+	BANKS,
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
+	CHECKING,
+	CREDIT_CARD,
 	EXCLUSIONS_EXAMPLE,
 	HOME_ROWS,
 	HOME_TOP,
 	MONEY_STATES,
+	NET_WORTH_CENTS,
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
@@ -53,6 +60,7 @@ const SECTIONS = [
 	["brand", "Brand and icons"],
 	["shell", "Page shell"],
 	["home", "Home's top"],
+	["accounts", "Accounts"],
 	["rows", "Rows"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
@@ -880,6 +888,81 @@ function Diagrams() {
 	);
 }
 
+/** What a picture of Accounts shows, in words, from the same data it draws. */
+function describeAccounts() {
+	return [
+		"Accounts",
+		`Net worth ${whole(NET_WORTH_CENTS)}`,
+		"Net worth over time arrives later",
+		...BANKS.map(
+			(b) =>
+				`${b.name}: ${b.accounts
+					.map(
+						(a) =>
+							`${a.name} ending in ${a.mask} ${formatCents(a.isLiability ? -a.balanceCents : a.balanceCents)}`,
+					)
+					.join(
+						", ",
+					)}${b.needsAttention ? ". Needs attention: sign in again. Fix connection" : ""}`,
+		),
+		"Link a bank",
+	].join(". ");
+}
+
+/** The Accounts screen as the app will draw it (round 5 study, spec §8). */
+function AccountsSketch() {
+	return (
+		<>
+			<AccountsTop netWorthCents={NET_WORTH_CENTS} />
+			{BANKS.map((b) => (
+				<BankGroup
+					name={b.name}
+					accounts={b.accounts}
+					needsAttention={b.needsAttention}
+				/>
+			))}
+			<Button type="button" class="mt-8">
+				Link a bank
+			</Button>
+		</>
+	);
+}
+
+function AccountsGroup() {
+	return (
+		<Group id="accounts" title="Accounts">
+			<Specimen
+				id="accounts-screen"
+				title="AccountsTop, BankGroup and AccountRow"
+				tier="visual"
+				components={["AccountsTop", "BankGroup", "AccountRow"]}
+				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank with debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Link a bank is the primary button. Fix connection and Link a bank open Plaid Link, so here they do nothing; their use specs come with #21 and #16."
+			>
+				<State label="A phone's first screen (390×844, less the tab bar)">
+					<PhoneFrame
+						label={`Accounts on a phone, top to bottom: ${describeAccounts()}`}
+					>
+						<AccountsSketch />
+					</PhoneFrame>
+				</State>
+				<State label="Desktop">
+					<Picture
+						label={`Accounts on desktop, top to bottom: ${describeAccounts()}`}
+					>
+						<AccountsSketch />
+					</Picture>
+				</State>
+				<State label="AccountRow on its own: a bank account, and a credit card whose debt shows negative">
+					<ul class="max-w-xl divide-y divide-rule">
+						<AccountRow {...CHECKING} />
+						<AccountRow {...CREDIT_CARD} />
+					</ul>
+				</State>
+			</Specimen>
+		</Group>
+	);
+}
+
 /** The whole catalog page body. */
 export function Catalog() {
 	return (
@@ -889,6 +972,7 @@ export function Catalog() {
 			<Brand />
 			<Shell />
 			<HomeTopGroup />
+			<AccountsGroup />
 			<Rows />
 			<Controls />
 			<Feedback />
