@@ -43,7 +43,7 @@ export function BankGroup({
 					))}
 				</ul>
 			) : null}
-			{needsAttention && (
+			{needsAttention && !disconnected && (
 				<>
 					<p class="mt-3 flex items-center gap-2 text-over">
 						<Icon name="alert" class="size-5 shrink-0" />

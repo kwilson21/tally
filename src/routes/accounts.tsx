@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { accountsByBank, netWorthCents } from "../db/accounts";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { decryptToken } from "../plaid/token-crypto";
@@ -25,7 +25,17 @@ const LinkBank = ({ class: layout }: { class?: string }) => (
 
 // More → Accounts (spec §8): net worth, each linked bank, then the Plaid Link action when configured.
 // Before any bank is linked there's nothing to add up, so no $0: the add empty state instead (decision 55).
-accounts.get("/accounts", async (c) => {
+accounts.get("/accounts", (c) => renderAccounts(c));
+
+/** Plaid Link's scripts, on every page that can show Link a bank (the disconnect page swaps Accounts in). */
+const plaidScripts = (on: boolean) => ({
+	scripts: on
+		? ["https://cdn.plaid.com/link/v2/stable/link-initialize.js"]
+		: [],
+	modules: on ? ["/js/plaid-link.js"] : [],
+});
+
+async function renderAccounts(c: Context<App>) {
 	const banks = await accountsByBank(c.env.DB);
 	const plaidEnabled = enabled(c.env);
 	return c.html(
@@ -33,12 +43,7 @@ accounts.get("/accounts", async (c) => {
 			title="Accounts · Tally"
 			active="accounts"
 			demo={c.env.DEMO === "true"}
-			scripts={
-				plaidEnabled
-					? ["https://cdn.plaid.com/link/v2/stable/link-initialize.js"]
-					: []
-			}
-			modules={plaidEnabled ? ["/js/plaid-link.js"] : []}
+			{...plaidScripts(plaidEnabled)}
 		>
 			<div id="accounts-summary">
 				{banks.length === 0 ? (
@@ -88,7 +93,7 @@ accounts.get("/accounts", async (c) => {
 			</div>
 		</Layout>,
 	);
-});
+}
 
 type DisconnectItem = {
 	id: number;
@@ -117,15 +122,19 @@ async function disconnectItem(db: D1Database, id: number) {
 function DisconnectPage({
 	item,
 	error,
+	deleteHistory = false,
 }: {
 	item: DisconnectItem;
 	error?: string;
+	deleteHistory?: boolean;
 }) {
+	const url = `/accounts/${item.id}/disconnect`;
 	return (
 		<Layout
 			title={`Disconnect ${item.institution_name}? · Tally`}
 			active="accounts"
 			demo={false}
+			{...plaidScripts(true)}
 		>
 			<h1 class="font-serif text-4xl font-semibold tracking-tight">
 				Disconnect {item.institution_name}?
@@ -142,11 +151,29 @@ function DisconnectPage({
 					{error}
 				</p>
 			)}
-			<form method="post" class="mt-8">
-				<Chip type="checkbox" name="delete" value="yes">
+			{/* htmx swaps Accounts in with a toast; without JavaScript it posts and is redirected there. */}
+			<form
+				method="post"
+				action={url}
+				class="mt-8"
+				hx-post={url}
+				hx-disable="findAll button[type=submit]"
+				hx-target="#main"
+				hx-select="#main"
+				hx-swap="outerHTML"
+			>
+				<Chip
+					type="checkbox"
+					name="delete"
+					value="yes"
+					checked={deleteHistory}
+					describedBy="delete-hint"
+				>
 					Also delete its accounts and transactions
 				</Chip>
-				<p class="mt-2 text-muted">This deletes them for good.</p>
+				<p id="delete-hint" class="mt-2 text-muted">
+					This deletes them for good.
+				</p>
 				<div class="mt-6 flex items-center gap-3">
 					<Button type="submit">Disconnect</Button>
 					<Button kind="text" href="/accounts">
@@ -158,17 +185,31 @@ function DisconnectPage({
 	);
 }
 
-accounts.get("/accounts/:itemId/disconnect", async (c) => {
+accounts.get("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
 	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
 	if (!item || item.disconnected_at !== null) return c.notFound();
 	return c.html(<DisconnectPage item={item} />);
 });
 
-accounts.post("/accounts/:itemId/disconnect", async (c) => {
+/** Back to Accounts: htmx gets the page with a toast and an announcement; plain browsers are redirected. */
+async function backToAccounts(c: Context<App>, message: string) {
+	if (!c.req.header("HX-Request")) return c.redirect("/accounts", 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	);
+	c.header("HX-Push-Url", "/accounts");
+	return renderAccounts(c);
+}
+
+accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
 	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
-	if (!item || item.disconnected_at !== null) return c.notFound();
+	if (!item) return c.notFound();
+	const already = `${item.institution_name} is already disconnected.`;
+	if (item.disconnected_at !== null) return backToAccounts(c, already);
+	const deleteHistory = (await c.req.formData()).get("delete") === "yes";
 	const plaidEnv = c.env as Env & PlaidEnv;
 	try {
 		const token = await decryptToken(
@@ -188,36 +229,53 @@ accounts.post("/accounts/:itemId/disconnect", async (c) => {
 		return c.html(
 			<DisconnectPage
 				item={item}
+				deleteHistory={deleteHistory}
 				error="Couldn't disconnect this bank. Try again."
 			/>,
 			502,
 		);
 	}
-	const form = await c.req.formData();
-	const statements = [];
-	if (form.get("delete") === "yes") {
-		statements.push(
-			c.env.DB.prepare(
-				"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id = ?)",
-			).bind(item.id),
-			c.env.DB.prepare(
-				"DELETE FROM balance_history WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id = ?)",
-			).bind(item.id),
-			c.env.DB.prepare("DELETE FROM accounts WHERE plaid_item_id = ?").bind(
-				item.id,
-			),
-		);
-	}
+	// One batch is one transaction. Each delete runs only while the bank is still connected, and the
+	// disconnect comes last, so a second submit (another tab kept the history) deletes nothing.
+	const stillConnected =
+		"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND disconnected_at IS NULL)";
+	const statements = deleteHistory
+		? [
+				c.env.DB.prepare(
+					`DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id = ?) AND ${stillConnected}`,
+				).bind(item.id, item.id),
+				c.env.DB.prepare(
+					`DELETE FROM balance_history WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id = ?) AND ${stillConnected}`,
+				).bind(item.id, item.id),
+				c.env.DB.prepare(
+					`DELETE FROM accounts WHERE plaid_item_id = ? AND ${stillConnected}`,
+				).bind(item.id, item.id),
+			]
+		: [];
 	statements.push(
 		c.env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now'), access_token_encrypted = X'', sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND disconnected_at IS NULL",
 		).bind(item.id),
 	);
-	await c.env.DB.batch(statements);
-	const message = `Disconnected ${item.institution_name}.`;
-	c.header(
-		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	let results: D1Result[];
+	try {
+		results = await c.env.DB.batch(statements);
+	} catch {
+		// Plaid has let go; a retry finishes, since Plaid then answers ITEM_NOT_FOUND.
+		return c.html(
+			<DisconnectPage
+				item={item}
+				deleteHistory={deleteHistory}
+				error="Your bank was disconnected at Plaid, but Tally couldn't finish. Try again."
+			/>,
+			502,
+		);
+	}
+	if (results.at(-1)?.meta.changes === 0) return backToAccounts(c, already);
+	return backToAccounts(
+		c,
+		deleteHistory
+			? `Disconnected ${item.institution_name} and deleted its history.`
+			: `Disconnected ${item.institution_name}.`,
 	);
-	return c.redirect("/accounts", 303);
 });

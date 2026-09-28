@@ -129,3 +129,22 @@ describe("AccountsTop", () => {
 		expect(html).toContain("Net worth over time arrives later");
 	});
 });
+
+describe("BankGroup, disconnected", () => {
+	it("says Disconnected and hides Needs attention, Fix connection and Manage", async () => {
+		const html = await render(
+			BankGroup({
+				name: "Old Bank",
+				accounts: [],
+				needsAttention: true,
+				disconnected: true,
+				manageHref: "/accounts/1/disconnect",
+				fixAttrs: { "data-fix-connection": "", "data-item-id": "1" },
+			}),
+		);
+		expect(html).toContain("Disconnected");
+		expect(html).not.toContain("Needs attention");
+		expect(html).not.toContain("Fix connection");
+		expect(html).not.toContain("Disconnect this bank");
+	});
+});
