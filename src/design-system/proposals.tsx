@@ -3,6 +3,8 @@
 // accepted one moves into the real component in its own PR, and a decided one leaves this page
 // for the Decided list.
 
+import { EmptyState } from "../views/empty-state";
+
 // What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50 and 54), and the issue each ships in.
 export const DECIDED = [
 	{
@@ -69,7 +71,11 @@ export function Proposals() {
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
 					Open
 				</h2>
-				<p class="mt-3 text-muted">No open proposals.</p>
+				<EmptyState
+					kind="done"
+					sentence="No open proposals."
+					hint="Decided ones are listed below, with the issue each ships in."
+				/>
 			</section>
 
 			<section aria-labelledby="decided-title" class="mt-12">

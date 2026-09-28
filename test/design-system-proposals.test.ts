@@ -14,7 +14,10 @@ describe("GET /design-system/proposals", () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
-		expect(html).toContain("No open proposals.");
+		expect(html).toContain('<p class="mt-3 text-lg">No open proposals.</p>');
+		expect(html).toContain(
+			"Decided ones are listed below, with the issue each ships in.",
+		);
 		expect(html).toContain("P8 · Empty lists");
 		expect(html).toContain(
 			"Option B: a small drawing, one sentence and a hint, and at most one button, centred (decision 54).",
