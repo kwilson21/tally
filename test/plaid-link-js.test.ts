@@ -377,6 +377,8 @@ describe("plaid-link.js", () => {
 		it("handles a replacement Fix button through delegated clicks", async () => {
 			const h = harness();
 			await h.repairClick();
+			// The first fix ends (Link closed) before the redrawn button is clicked.
+			h.linkOptions?.onExit();
 			const replacement = {
 				...h.repairButton,
 				disabled: false,
@@ -672,6 +674,49 @@ describe("plaid-link.js", () => {
 				"Server said no.",
 			]);
 			expect(h.children).toHaveLength(0);
+		});
+	});
+
+	describe("one flow at a time, whichever button is on screen", () => {
+		it("ignores a click on a redrawn Link a bank while a link is still running", async () => {
+			const h = harness();
+			await h.click();
+			expect(h.create).toHaveBeenCalledTimes(1);
+			const redrawn = { ...h.button, disabled: false, focus: vi.fn() };
+			h.replaceLinkButton(redrawn);
+			await h.click(redrawn);
+			expect(h.fetch).toHaveBeenCalledTimes(1);
+			expect(h.create).toHaveBeenCalledTimes(1);
+		});
+
+		it("keeps a redrawn Link a bank busy until the running link ends, then frees it", async () => {
+			const h = harness();
+			await h.click();
+			const redrawn = {
+				...h.button,
+				disabled: false,
+				setAttribute: vi.fn(),
+				classList: { toggle: vi.fn() },
+				focus: vi.fn(),
+			};
+			h.replaceLinkButton(redrawn);
+			// The end of the running link reaches the button now on screen.
+			h.linkOptions?.onExit();
+			expect(redrawn.disabled).toBe(false);
+			expect(redrawn.setAttribute).toHaveBeenCalledWith("aria-busy", "false");
+			await h.click(redrawn);
+			expect(h.create).toHaveBeenCalledTimes(2);
+		});
+
+		it("ignores a second Fix connection click for the same bank while its fix is running", async () => {
+			const h = harness();
+			await h.repairClick();
+			await h.repairClick({ ...h.repairButton, disabled: false });
+			expect(
+				h.fetch.mock.calls.filter(
+					([url]) => url === "/plaid/items/42/link-token",
+				),
+			).toHaveLength(1);
 		});
 	});
 });

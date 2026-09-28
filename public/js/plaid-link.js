@@ -23,20 +23,33 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 		repairButton.setAttribute("aria-busy", String(value));
 		repairButton.classList.toggle("htmx-request", value);
 	};
+	// The banks with a fix running. A refresh can redraw a bank's button mid-fix, so a second click
+	// is refused by id, and the busy state reaches whichever button is on screen.
+	const repairing = new Set();
 	const repairClick = async (event) => {
 		const repairButton = event.target?.closest?.("[data-fix-connection]");
 		if (!repairButton) return;
 		const itemId = repairButton.getAttribute("data-item-id");
 		const section = repairButton.closest("[data-bank-item-id]");
 		const repairError = section?.querySelector("[data-fix-error]");
-		if (!itemId || !repairError) return;
+		if (!itemId || !repairError || repairing.has(itemId)) return;
+		const setBusy = (value) => {
+			if (value) repairing.add(itemId);
+			else repairing.delete(itemId);
+			const live = document.querySelector(
+				`[data-bank-item-id="${itemId}"] [data-fix-connection]`,
+			);
+			for (const button of new Set([repairButton, live])) {
+				if (button) setRepairBusy(button, value);
+			}
+		};
 		const Plaid = globalThis.Plaid;
 		if (!Plaid) {
 			repairAlert(repairError, undefined, itemId);
-			setRepairBusy(repairButton, false);
+			setBusy(false);
 			return;
 		}
-		setRepairBusy(repairButton, true);
+		setBusy(true);
 		repairError.replaceChildren();
 		try {
 			const response = await fetch(`/plaid/items/${itemId}/link-token`, {
@@ -44,7 +57,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			});
 			if (!response.ok) {
 				repairAlert(repairError, await response.text(), itemId);
-				setRepairBusy(repairButton, false);
+				setBusy(false);
 				return;
 			}
 			const { link_token: token } = await response.json();
@@ -78,7 +91,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						});
 					} catch {
 						repairAlert(repairError, undefined, itemId);
-						setRepairBusy(repairButton, false);
+						setBusy(false);
 						return;
 					} finally {
 						repairButton.removeEventListener("htmx:after:request", finished);
@@ -89,10 +102,10 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						requestContext.response.status >= 400
 					) {
 						repairAlert(repairError, requestContext?.text, itemId);
-						setRepairBusy(repairButton, false);
+						setBusy(false);
 						return;
 					}
-					setRepairBusy(repairButton, true);
+					setBusy(true);
 					let newSummary;
 					try {
 						const refresh = await fetch("/accounts");
@@ -122,7 +135,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							'<p role="alert">The connection was fixed, but the list didn\'t refresh. Reload the page to see it.</p>',
 							itemId,
 						);
-						setRepairBusy(repairButton, false);
+						setBusy(false);
 						return;
 					}
 					const refreshedBank = newSummary.querySelector?.(
@@ -132,17 +145,17 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						refreshedBank?.querySelector?.("h2") ??
 						document.querySelector("[data-link-bank]");
 					focusTarget?.focus();
-					setRepairBusy(repairButton, false);
+					setBusy(false);
 				},
 				onExit: (error) => {
 					if (error) repairAlert(repairError, undefined, itemId);
-					setRepairBusy(repairButton, false);
+					setBusy(false);
 				},
 			});
 			link.open();
 		} catch {
 			repairAlert(repairError, undefined, itemId);
-			setRepairBusy(repairButton, false);
+			setBusy(false);
 		}
 	};
 
@@ -165,11 +178,20 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			: undefined;
 		showAlert(serverAlert?.trim() || genericFailure);
 	};
+	// One link at a time: a refresh (a fix finishing, say) can redraw Link a bank mid-link, so a
+	// second click is refused, and the busy state reaches whichever button is on screen.
+	let linking = false;
 	const linkClick = async (button) => {
+		if (linking) return;
 		const busy = (value) => {
-			button.disabled = value;
-			button.setAttribute("aria-busy", String(value));
-			button.classList.toggle("htmx-request", value);
+			linking = value;
+			const live = document.querySelector("[data-link-bank]");
+			for (const target of new Set([button, live])) {
+				if (!target) continue;
+				target.disabled = value;
+				target.setAttribute("aria-busy", String(value));
+				target.classList.toggle("htmx-request", value);
+			}
 		};
 		const Plaid = globalThis.Plaid;
 		if (!Plaid) {
