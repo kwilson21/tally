@@ -105,12 +105,12 @@ export const getItem = (
 	accessToken: string,
 	fetchImpl?: typeof fetch,
 ) =>
-	plaidPost<{ item: { institution_id?: string | null } }>(
-		env,
-		"/item/get",
-		{ access_token: accessToken },
-		fetchImpl,
-	);
+	plaidPost<{
+		item: {
+			institution_id?: string | null;
+			error?: Record<string, unknown> | null;
+		};
+	}>(env, "/item/get", { access_token: accessToken }, fetchImpl);
 
 export const removeItem = (
 	env: PlaidEnv,

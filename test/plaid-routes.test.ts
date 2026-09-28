@@ -165,6 +165,9 @@ describe("Plaid routes", () => {
 		const waitUntil = vi.fn((promise: Promise<unknown>) => {
 			void promise.catch(() => {});
 		});
+		vi.stubGlobal("fetch", async () =>
+			Response.json({ item: { institution_id: "ins-1", error: null } }),
+		);
 		const response = await plaid.request(
 			`http://tally.test/plaid/items/${inserted?.id}/repaired`,
 			{ method: "POST", headers: { Origin: BASE } },
@@ -187,6 +190,78 @@ describe("Plaid routes", () => {
 			"never-return-this",
 		);
 		expect(await response.text()).not.toContain("never-return-this");
+	});
+
+	it("leaves an item needing attention when Plaid still reports an error", async () => {
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",
+		)
+			.bind(await encryptToken("unhealthy-private-token", KEY))
+			.first<{ id: number }>();
+		const waitUntil = vi.fn();
+		vi.stubGlobal("fetch", async () =>
+			Response.json({
+				item: {
+					institution_id: "ins-1",
+					error: { error_code: "ITEM_LOGIN_REQUIRED" },
+				},
+			}),
+		);
+
+		const response = await plaid.request(
+			`http://tally.test/plaid/items/${inserted?.id}/repaired`,
+			{ method: "POST", headers: { Origin: BASE } },
+			env,
+			{ waitUntil, passThroughOnException() {}, props: {} },
+		);
+
+		expect(response.status).toBe(502);
+		expect(await response.text()).toContain(
+			"Couldn&#39;t fix the connection. Try again.",
+		);
+		expect(waitUntil).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
+				.bind(inserted?.id)
+				.first(),
+		).toEqual({ status: "needs_attention" });
+	});
+
+	it("handles a Plaid item lookup failure without exposing the token", async () => {
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",
+		)
+			.bind(await encryptToken("never-log-or-return-this", KEY))
+			.first<{ id: number }>();
+		const waitUntil = vi.fn();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.stubGlobal("fetch", async () =>
+			Response.json(
+				{ error_code: "ITEM_LOGIN_REQUIRED", request_id: "req-repair" },
+				{ status: 400 },
+			),
+		);
+
+		const response = await plaid.request(
+			`http://tally.test/plaid/items/${inserted?.id}/repaired`,
+			{ method: "POST", headers: { Origin: BASE } },
+			env,
+			{ waitUntil, passThroughOnException() {}, props: {} },
+		);
+		const body = await response.text();
+
+		expect(response.status).toBe(502);
+		expect(body).toContain("Couldn&#39;t fix the connection. Try again.");
+		expect(waitUntil).not.toHaveBeenCalled();
+		expect(errors).toHaveBeenCalledWith("Plaid request failed", {
+			request_id: "req-repair",
+		});
+		expect(JSON.stringify(errors.mock.calls)).not.toContain(
+			"never-log-or-return-this",
+		);
+		expect(JSON.stringify([...response.headers]) + body).not.toContain(
+			"never-log-or-return-this",
+		);
 	});
 
 	it("shows a generic update-token failure and never logs its token", async () => {

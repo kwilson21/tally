@@ -118,23 +118,35 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
 	const item = await storedItem(c.env.DB, c.req.param("id"));
 	if (!item) return c.notFound();
-	await c.env.DB.prepare("UPDATE plaid_items SET status = 'ok' WHERE id = ?")
-		.bind(item.id)
-		.run();
-	c.executionCtx.waitUntil(
-		syncItem(c.env, item.id).catch((error: unknown) => {
-			logPlaidRequestId(error);
-		}),
-	);
-	const message = `Fixed ${item.institution_name}.`;
-	c.header(
-		"HX-Trigger",
-		JSON.stringify({
-			toast: { message, type: "success" },
-			announce: message,
-		}),
-	);
-	return c.body(null, 204);
+	try {
+		const accessToken = await decryptToken(
+			item.access_token_encrypted,
+			c.env.TOKEN_ENCRYPTION_KEY as string,
+		);
+		const result = await getItem(c.env, accessToken);
+		if (result.item.error !== null) {
+			return c.html(repairFailure(result.item.error), 502);
+		}
+		await c.env.DB.prepare("UPDATE plaid_items SET status = 'ok' WHERE id = ?")
+			.bind(item.id)
+			.run();
+		c.executionCtx.waitUntil(
+			syncItem(c.env, item.id).catch((error: unknown) => {
+				logPlaidRequestId(error);
+			}),
+		);
+		const message = `Fixed ${item.institution_name}.`;
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: message,
+			}),
+		);
+		return c.body(null, 204);
+	} catch (error) {
+		return c.html(repairFailure(error), 502);
+	}
 });
 
 plaid.post("/plaid/exchange", async (c) => {
