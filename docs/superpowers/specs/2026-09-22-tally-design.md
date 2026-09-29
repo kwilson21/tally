@@ -298,6 +298,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - Choosing a category's icon and color in Settings (new categories get the tag icon and the next color)
 - Removing a category's budget (for now the budget sheet requires an amount)
 - The raw bank text under a categorized row's tidied name in the Transactions list (#93 shows it under rows that need a category and in the edit panel; categorized rows would need a third line, a TransactionRow shape change for the catalog)
+- Session replay (e.g. PostHog) linked from each feedback issue. It needs a new script on every page and masking of every amount and merchant name. Weigh it at the month-end review (decision 58) if notes turn out too vague to act on.
 
 ## 13. Checked against docs before writing code (Phase 0)
 
