@@ -3,7 +3,7 @@
 // accepted one moves into the real component in its own PR, and a decided one leaves this page
 // for the Decided list.
 
-import { EmptyState } from "../views/empty-state";
+import { Phase3Proposals } from "./proposals-phase3";
 
 // What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50, 54, 55 and 59), and the issue each ships in.
 export const DECIDED = [
@@ -105,13 +105,14 @@ export function Proposals() {
 
 			<section aria-labelledby="open-title" class="mt-10">
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
-					Open
+					Picked, to build in Phase 3
 				</h2>
-				<EmptyState
-					kind="done"
-					sentence="No open proposals."
-					hint="Decided ones are listed below, with the issue each ships in."
-				/>
+				<p class="mt-2 max-w-prose text-muted">
+					The owner picked the Recommended option of each, and Banner 1 for
+					P18's Band (decision 60). The drawings stay here as the build
+					reference until each ships.
+				</p>
+				<Phase3Proposals />
 			</section>
 
 			<section aria-labelledby="decided-title" class="mt-12">
