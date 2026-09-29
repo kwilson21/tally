@@ -10,12 +10,33 @@ const get = async (path: string) => {
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 describe("GET /design-system/proposals", () => {
-	it("has no open proposals and lists P8–P14 as decided", async () => {
+	it("shows P15–P22 open with two options each, and lists P1–P14 as decided", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
-		expect(html).toContain('<p class="mt-3 text-lg">No open proposals.</p>');
+		expect(html).not.toContain("No open proposals.");
 		expect(html).not.toContain('id="p14-feedback"');
+		const open = [
+			"p15-bills",
+			"p16-bill",
+			"p17-split",
+			"p18-found",
+			"p19-refund",
+			"p20-select",
+			"p21-cash",
+			"p22-counts",
+		];
+		for (const id of open) expect(html).toContain(`id="${id}"`);
+		// Each proposal marks exactly one option Recommended, with its reason.
+		expect(html.match(/>Recommended</g)?.length).toBe(open.length);
+		expect(html.match(/Why: /g)?.length).toBe(open.length);
+		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.
+		expect(
+			html.match(/role="img" aria-label="[^"]*, on a phone"/g)?.length,
+		).toBe(20);
+		expect(
+			html.match(/role="img" aria-label="[^"]*, on desktop"/g)?.length,
+		).toBe(1);
 		expect(DECIDED.length).toBe(14);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
