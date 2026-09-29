@@ -153,7 +153,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 The amount tolerance (10%) and date window (±5 days) are single config values. The demo seed exercises all the cases: a bill paid on time, one paid 3 days late, and a lookalike charge outside the window that correctly doesn't match.
 
-**Splits:** splitting creates child transactions (`parent_id` set) and marks the parent `is_split = true`. The children must add up exactly to the parent's `amount_cents`, or the split is rejected. Removing a split deletes the children and clears `is_split`.
+**Splits:** splitting creates child transactions (`parent_id` set) and marks the parent `is_split = true`. The children must add up exactly to the parent's `amount_cents`, or the split is rejected. Removing a split deletes the children and clears `is_split`; a refund linked to one of the children is unlinked (`refund_of_id` is set to null) and counts on its own date and category again, and the toast says so (decision 60).
 
 **Exclusions:** transactions flagged `transfer` or `reimbursement` start with `excluded = true`. A person can always toggle it.
 
@@ -229,7 +229,7 @@ Picked on `/design-system/proposals` (P15–P22), where the drawings stay as the
 - **A bill's page (P16):** its own page with each month's occurrence and the payment linked to it, Link a payment (the picker in §6.1) and Not this one (records a dismissal).
 - **Split (P17):** in the edit panel, parts of category plus amount with a live "$X left to assign" line and Add a part. The line is computed by the server as you type (htmx), so it needs no new script; a save that doesn't add up exactly is rejected with a field error.
 - **Finding bills (P18):** Tally suggests merchants that charge about the same amount about monthly. On Bills, a stronger Band (a terracotta rule on its left edge, the bills icon, the count in semibold, "From repeat charges in the last 3 months") opens a review list with Add (opens the bill form filled in) or Not a bill per row. Not a bill is remembered for that merchant for good; nothing becomes a bill until a person adds it.
-- **Refunds (P19):** in a refund's edit panel, "This refunds…" lists purchases from the same merchant; linking makes the refund count in the purchase's month and category (§6). A split purchase is listed by its parts, never the parent, so a refund always links to one part and takes that part's category. Both rows then say so on their caption line.
+- **Refunds (P19):** in a refund's edit panel, "This refunds…" lists purchases from the same merchant; linking makes the refund count in the purchase's month and category (§6). A split purchase is listed by its parts, never the parent, so a refund always links to one part and takes that part's category. Removing that split unlinks the refund (§6.1). Both rows then say so on their caption line.
 - **Select several (P20):** a Select button on Transactions turns rows into checkboxes with an action bar pinned at the bottom (set category, exclude).
 - **Cash (P21):** an "Add cash" button on Transactions opens the edit-panel form (date, amount, merchant, category, note) and saves to the Cash account.
 - **A late bill payment (P22):** the month is chosen when linking the payment on the bill's page; the transaction row then shows a muted "Counts in April" on its caption line.
