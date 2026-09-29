@@ -121,7 +121,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 **Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date.
 
-"Counted transactions" for a month means: date in that month (or, from Phase 3, a payment linked to an earlier month's bill occurrence counts in that occurrence's month instead, never both; decision 58, #26; and a refund linked to its purchase counts in the purchase's month and category instead of its own, never both; decision 60), `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. Transactions flagged `income` are counted only toward **Income**. They're left out of Spent, Uncategorized, and Safe to spend.
+"Counted transactions" for a month means: date in that month (or, from Phase 3, a payment linked to an earlier month's bill occurrence counts in that occurrence's month instead, never both; decision 58, #26; and a refund linked to its purchase counts in the purchase's month and category instead of its own, never both; a refund of a split purchase links to one of its parts, decision 60), `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. Transactions flagged `income` are counted only toward **Income**. They're left out of Spent, Uncategorized, and Safe to spend.
 
 | Number | Rule |
 |---|---|
@@ -229,7 +229,7 @@ Picked on `/design-system/proposals` (P15–P22), where the drawings stay as the
 - **A bill's page (P16):** its own page with each month's occurrence and the payment linked to it, Link a payment (the picker in §6.1) and Not this one (records a dismissal).
 - **Split (P17):** in the edit panel, parts of category plus amount with a live "$X left to assign" line and Add a part. The line is computed by the server as you type (htmx), so it needs no new script; a save that doesn't add up exactly is rejected with a field error.
 - **Finding bills (P18):** Tally suggests merchants that charge about the same amount about monthly. On Bills, a stronger Band (a terracotta rule on its left edge, the bills icon, the count in semibold, "From repeat charges in the last 3 months") opens a review list with Add (opens the bill form filled in) or Not a bill per row. Not a bill is remembered for that merchant for good; nothing becomes a bill until a person adds it.
-- **Refunds (P19):** in a refund's edit panel, "This refunds…" lists purchases from the same merchant; linking makes the refund count in the purchase's month and category (§6). Both rows then say so on their caption line.
+- **Refunds (P19):** in a refund's edit panel, "This refunds…" lists purchases from the same merchant; linking makes the refund count in the purchase's month and category (§6). A split purchase is listed by its parts, never the parent, so a refund always links to one part and takes that part's category. Both rows then say so on their caption line.
 - **Select several (P20):** a Select button on Transactions turns rows into checkboxes with an action bar pinned at the bottom (set category, exclude).
 - **Cash (P21):** an "Add cash" button on Transactions opens the edit-panel form (date, amount, merchant, category, note) and saves to the Cash account.
 - **A late bill payment (P22):** the month is chosen when linking the payment on the bill's page; the transaction row then shows a muted "Counts in April" on its caption line.

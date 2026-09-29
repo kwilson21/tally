@@ -124,7 +124,7 @@ function Sheet({
 			<div class="px-5">{behind}</div>
 			<div class="absolute inset-0 bg-ink/30" />
 			<div
-				class={`absolute inset-x-0 bottom-0 ${top} flex flex-col gap-3 overflow-hidden rounded-t-sheet bg-paper p-5`}
+				class={`absolute inset-x-0 bottom-0 ${top} flex flex-col gap-3 overflow-y-auto rounded-t-sheet bg-paper p-5`}
 			>
 				{children}
 			</div>
@@ -612,7 +612,7 @@ const linkPicker = (
 		<Title>Link a payment</Title>
 		<p class="mt-2 text-lg">To September's Electric, $142.00.</p>
 		<p class="mt-1 text-muted">
-			Payments not linked to another bill, closest to Sep 24 first.
+			Within 30 days of Sep 24, same merchant first, then closest amount.
 		</p>
 		<fieldset class="mt-4 flex flex-col gap-2">
 			<legend class="sr-only">Payment</legend>
@@ -1261,9 +1261,9 @@ export function Phase3Proposals() {
 				<Fixed>
 					unlinking records a dismissal, so the matcher never picks that payment
 					for that month again (§6.1); one payment per month and one bill per
-					payment. The spec doesn't yet say which transactions the hand picker
-					lists; drawn here as unlinked payments nearest the due date, which
-					would need a line in §6.1.
+					payment. The hand picker lists unclaimed transactions within 30 days
+					of that month's due date, same merchant first, then closest amount
+					(§6.1, decision 60).
 				</Fixed>
 				<Options
 					options={[
