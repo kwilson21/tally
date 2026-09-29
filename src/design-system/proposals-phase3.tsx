@@ -783,6 +783,49 @@ const foundBand = (
 	</>
 );
 
+const BANNER_LINE = "From repeat charges in the last 3 months";
+
+/** P18 Banner 1: still the Band (one tinted row, one link), made stronger with an accent rule, an icon and a semibold count. */
+const banner1 = (
+	<>
+		<BillsTop />
+		<a
+			href="#p18-found"
+			class="mt-4 flex min-h-11 items-center justify-between gap-3 border-l-4 border-accent bg-band px-4 py-3 text-ink no-underline"
+		>
+			<Icon name="bills" class="size-7 shrink-0" />
+			<span class="min-w-0 flex-1">
+				<span class="block text-lg font-semibold">3 possible bills found</span>
+				<span class="block text-base text-muted">{BANNER_LINE}</span>
+			</span>
+			<Icon name="chevron-right" />
+		</a>
+		<BillsGrouped only={["overdue", "due"]} />
+	</>
+);
+
+/** P18 Banner 2: an untinted outlined block with a small serif headline and a Review button. */
+const banner2 = (
+	<>
+		<BillsTop />
+		<div class="mt-4 flex gap-3 rounded-control border border-ink p-4">
+			<Icon name="bills" class="size-7 shrink-0" />
+			<div class="min-w-0 flex-1">
+				<p class="font-serif text-2xl font-semibold">3 possible bills</p>
+				<p class="mt-1 text-muted">
+					{BANNER_LINE}. Nothing is added until you say so.
+				</p>
+				<div class="mt-3">
+					<Button kind="secondary" href="#p18-found">
+						Review
+					</Button>
+				</div>
+			</div>
+		</div>
+		<BillsGrouped only={["overdue", "due"]} />
+	</>
+);
+
 /** P18 A: the review list the Band opens. */
 const foundReview = (
 	<>
@@ -1302,8 +1345,6 @@ export function Phase3Proposals() {
 							name: "Option A · A Band, then a review list",
 							note: "“3 possible bills found” is the Band on Bills; it opens a list with Add and Not a bill on each.",
 							tradeoff: "one more tap to see them, and a second page.",
-							recommended:
-								"the Band is already the one next action on a screen, and the bills list stays only real bills.",
 							screen: foundBand,
 						},
 						{
@@ -1317,6 +1358,35 @@ export function Phase3Proposals() {
 							name: "Option A, next · The review list",
 							note: "Where A's Band leads: what each one is, how often it was seen, and the two choices.",
 							screen: foundReview,
+						},
+					]}
+				/>
+				<p class="font-medium">
+					The owner picked A and asked for a banner that stands out more. Pick
+					one:
+				</p>
+				<Options
+					options={[
+						{
+							name: "Current Band",
+							note: "Today's Band, for comparison: one tinted row with a quiet second line.",
+							tradeoff: "calm, but it can read as just another row.",
+							screen: foundBand,
+						},
+						{
+							name: "Banner 1 · A stronger Band",
+							note: "Still the Band and one link, with a terracotta rule at its left edge, the bills icon and the count in semibold.",
+							tradeoff: "a clear change, but a quieter one than a boxed block.",
+							recommended:
+								"it stands out while staying the one tinted row and one tap target, with no new pattern.",
+							screen: banner1,
+						},
+						{
+							name: "Banner 2 · An outlined block",
+							note: "An ink-bordered block with the icon, a small serif headline and a secondary Review button.",
+							tradeoff:
+								"the loudest, but it's a card (DESIGN.md keeps paper from turning into cards) and a second serif line under the title.",
+							screen: banner2,
 						},
 					]}
 				/>

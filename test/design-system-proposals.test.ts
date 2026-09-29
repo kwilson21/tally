@@ -33,7 +33,7 @@ describe("GET /design-system/proposals", () => {
 		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.
 		expect(
 			html.match(/role="img" aria-label="[^"]*, on a phone"/g)?.length,
-		).toBe(20);
+		).toBe(23);
 		expect(
 			html.match(/role="img" aria-label="[^"]*, on desktop"/g)?.length,
 		).toBe(1);
