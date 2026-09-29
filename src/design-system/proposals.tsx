@@ -105,8 +105,13 @@ export function Proposals() {
 
 			<section aria-labelledby="open-title" class="mt-10">
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
-					Open
+					Picked, to build in Phase 3
 				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					The owner picked the Recommended option of each, and Banner 1 for
+					P18's Band (decision 60). The drawings stay here as the build
+					reference until each ships.
+				</p>
 				<Phase3Proposals />
 			</section>
 
