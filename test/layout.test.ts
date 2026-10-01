@@ -32,6 +32,16 @@ describe("app shell", () => {
 		expect(html).toMatch(/<a[^>]*aria-current="page"[^>]*>[\s\S]*?Home/);
 	});
 
+	it("keeps phone tabs above the iPhone home-indicator area", async () => {
+		const html = await home();
+		expect(html).toContain(
+			'<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"',
+		);
+		expect(html).toMatch(
+			/<nav aria-label="Tabs" class="[^"]*pb-\[env\(safe-area-inset-bottom\)\][^"]*">/,
+		);
+	});
+
 	it("has a polite live region and a toast container for HTMX feedback", async () => {
 		const html = await home();
 		expect(html).toContain('id="announcer"');

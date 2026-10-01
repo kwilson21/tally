@@ -71,7 +71,7 @@ export function BottomTabs({ active }: { active?: NavKey }) {
 	return (
 		<nav
 			aria-label="Tabs"
-			class="fixed inset-x-0 bottom-0 border-t border-rule bg-paper lg:hidden"
+			class="fixed inset-x-0 bottom-0 border-t border-rule bg-paper pb-[env(safe-area-inset-bottom)] lg:hidden"
 		>
 			<ul class="grid grid-cols-5">
 				{TAB_ITEMS.map((item) => (
