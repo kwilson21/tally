@@ -216,7 +216,11 @@ describe("GET /design-system in the demo", () => {
 		expect(button.slice(0, button.indexOf("<section"))).toMatch(
 			/<div inert[^>]*>(?:(?!<\/div>)[\s\S])*href="\/feedback"/,
 		);
-		expect(html.match(/fixed bottom-20 right-4/g)).toHaveLength(1);
+		expect(
+			html.match(
+				/fixed bottom-\[calc\(6\.5rem\+var\(--safe-area-bottom\)\)\] right-\[calc\(1rem\+var\(--safe-area-right\)\)\]/g,
+			),
+		).toHaveLength(1);
 		const formSpecimen = specimens(html).find((tag) =>
 			tag.includes('id="feedback-form"'),
 		);

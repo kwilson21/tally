@@ -32,7 +32,7 @@ export function BottomSheet({
 			<section
 				role="dialog"
 				aria-labelledby={labelledBy}
-				class="fixed inset-x-0 bottom-0 z-50 max-h-[90vh] overflow-y-auto rounded-t-sheet bg-paper p-5 lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet"
+				class="fixed inset-x-0 bottom-0 z-50 max-h-[90vh] overflow-y-auto rounded-t-sheet bg-paper p-5 pb-[calc(1.25rem+var(--safe-area-bottom))] pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet"
 			>
 				{children}
 			</section>

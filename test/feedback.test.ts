@@ -201,7 +201,9 @@ it("uses the Referer for the return page and omits the button on feedback", asyn
 	});
 	const html = await response.text();
 	expect(html).toContain('name="from" value="/transactions?uncategorized=1"');
-	expect(html).not.toContain('class="fixed bottom-20 right-4');
+	expect(html).not.toContain(
+		"fixed bottom-[calc(6.5rem+var(--safe-area-bottom))]",
+	);
 });
 
 it("renders a plain feedback link on app pages", async () => {

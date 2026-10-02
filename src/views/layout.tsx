@@ -46,7 +46,7 @@ export function Layout({
 					<script src={src} type="module"></script>
 				))}
 			</head>
-			<body class="min-h-screen">
+			<body class="min-h-screen pt-[var(--safe-area-top)]">
 				<a
 					href="#main"
 					class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:bg-paper focus:p-2"
@@ -58,7 +58,7 @@ export function Layout({
 						Demo data. Nothing here is real.
 					</p>
 				)}
-				<div class="mx-auto flex max-w-6xl gap-10 px-5 lg:px-8">
+				<div class="mx-auto flex max-w-6xl gap-10 px-5 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:px-8">
 					<aside class="hidden w-56 shrink-0 py-8 lg:block">
 						<div class="mb-8">
 							<Wordmark />

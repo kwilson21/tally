@@ -19,7 +19,49 @@ page.on("pageerror", (e) => errors.push(e.message));
 const step = (text) => console.log(`✓ ${text}`);
 const rows = () => page.locator("#results li[data-transaction]").count();
 
+// Inject simulated insets into the app's same-origin stylesheet to respect its CSP.
+await page.route("**/assets/app.css", async (route) => {
+	const response = await route.fetch();
+	const css = await response.text();
+	await route.fulfill({
+		response,
+		body: `${css}\n:root { --safe-area-top: 59px; --safe-area-right: 44px; --safe-area-bottom: 34px; --safe-area-left: 44px; }`,
+	});
+});
+
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+const shellInsets = await page.evaluate(() => {
+	const style = (selector) =>
+		getComputedStyle(document.querySelector(selector));
+	const rect = (selector) =>
+		document.querySelector(selector).getBoundingClientRect();
+	return {
+		bodyTop: style("body").paddingTop,
+		page: {
+			left: getComputedStyle(document.querySelector("main").parentElement)
+				.paddingLeft,
+			right: getComputedStyle(document.querySelector("main").parentElement)
+				.paddingRight,
+		},
+		tabs: {
+			bottom: style('nav[aria-label="Tabs"]').paddingBottom,
+			left: style('nav[aria-label="Tabs"]').paddingLeft,
+			right: style('nav[aria-label="Tabs"]').paddingRight,
+			rect: rect('nav[aria-label="Tabs"]'),
+		},
+		feedback: rect('a[href="/feedback"]'),
+	};
+});
+assert.equal(shellInsets.bodyTop, "59px");
+assert.equal(shellInsets.page.left, "64px");
+assert.equal(shellInsets.page.right, "64px");
+assert.equal(shellInsets.tabs.bottom, "34px");
+assert.equal(shellInsets.tabs.left, "44px");
+assert.equal(shellInsets.tabs.right, "44px");
+assert(shellInsets.feedback.bottom <= shellInsets.tabs.rect.top - 16);
+assert(shellInsets.feedback.right <= 390 - 44);
+step("phone shell controls stay clear of simulated safe areas");
+
 await page
 	.getByRole("link", { name: /12 transactions need a category/ })
 	.click();
@@ -66,6 +108,25 @@ step("Home now says 10 transactions need a category");
 // Change a budget amount (spec §11): Home → Groceries → 650, nudged up $1 and 1¢ → Home shows it.
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.locator('a[href="/budget/1"]').first().click();
+const sheetInsets = await page.locator('[role="dialog"]').evaluate((sheet) => {
+	const style = getComputedStyle(sheet);
+	const rect = sheet.getBoundingClientRect();
+	const buttons = [
+		...sheet.querySelectorAll('button[type="submit"], button'),
+	].map((button) => button.getBoundingClientRect().bottom);
+	return {
+		paddingBottom: style.paddingBottom,
+		paddingLeft: style.paddingLeft,
+		paddingRight: style.paddingRight,
+		contentBottom: rect.bottom - Number.parseFloat(style.paddingBottom),
+		buttonBottom: Math.max(...buttons),
+	};
+});
+assert.equal(sheetInsets.paddingBottom, "54px");
+assert.equal(sheetInsets.paddingLeft, "64px");
+assert.equal(sheetInsets.paddingRight, "64px");
+assert(sheetInsets.buttonBottom <= sheetInsets.contentBottom);
+step("bottom-sheet controls stay clear of simulated safe areas");
 const budget = page.getByLabel(/^Budget from /);
 await budget.waitFor();
 await budget.fill("650");
