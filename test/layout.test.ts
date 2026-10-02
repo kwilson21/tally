@@ -42,6 +42,9 @@ describe("app shell", () => {
 		);
 		expect(html).toContain("pt-[var(--safe-area-top)]");
 		expect(html).toContain(
+			"focus:left-[calc(1rem+var(--safe-area-left))] focus:top-[calc(1rem+var(--safe-area-top))]",
+		);
+		expect(html).toContain(
 			"pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))]",
 		);
 		expect(html).toContain("bottom-[calc(6.5rem+var(--safe-area-bottom))]");

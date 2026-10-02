@@ -30,6 +30,11 @@ await page.route("**/assets/app.css", async (route) => {
 });
 
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+await page.keyboard.press("Tab");
+const skipLink = await page.locator('a[href="#main"]').boundingBox();
+assert(skipLink);
+assert(skipLink.x >= 44);
+assert(skipLink.y >= 59);
 const shellInsets = await page.evaluate(() => {
 	const style = (selector) =>
 		getComputedStyle(document.querySelector(selector));

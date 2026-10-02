@@ -49,7 +49,7 @@ export function Layout({
 			<body class="min-h-screen pt-[var(--safe-area-top)]">
 				<a
 					href="#main"
-					class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:bg-paper focus:p-2"
+					class="sr-only focus:not-sr-only focus:absolute focus:left-[calc(1rem+var(--safe-area-left))] focus:top-[calc(1rem+var(--safe-area-top))] focus:bg-paper focus:p-2"
 				>
 					Skip to content
 				</a>
