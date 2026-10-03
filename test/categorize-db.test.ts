@@ -298,11 +298,15 @@ describe("saveJevResult", () => {
 	it("preserves a legacy income choice without a recorded source", async () => {
 		const id = await idOf("VENMO *J RIVERA");
 		await db
-			.prepare("UPDATE transactions SET flag_income = 1, income_source = NULL WHERE id = ?")
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = NULL WHERE id = ?",
+			)
 			.bind(id)
 			.run();
 		await db
-			.prepare("UPDATE transactions SET category_confidence = NULL WHERE id = ?")
+			.prepare(
+				"UPDATE transactions SET category_confidence = NULL WHERE id = ?",
+			)
 			.bind(id)
 			.run();
 		await saveJevResult(
