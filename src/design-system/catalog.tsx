@@ -778,7 +778,7 @@ function Feedback() {
 				title="FeedbackForm"
 				tier="visual"
 				components={["FeedbackForm"]}
-				sentence="Feedback stores a verified email, submission time, and report details in Cloudflare D1; configured private GitHub filing omits the email and submission time."
+				sentence="New feedback stores a random one-hour limiter token, report details and submission time in Cloudflare D1; it does not store the verified sign-in email. Private GitHub filing omits the token and submission time. Replay is absent, and the layout preview is hard-disabled."
 			>
 				{/* Only the form is inert: its title and sentence stay readable to screen readers. */}
 				<div inert>
