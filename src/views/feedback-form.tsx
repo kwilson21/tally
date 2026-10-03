@@ -157,17 +157,19 @@ export function FeedbackForm({
 							role="status"
 							hidden
 						/>
-						{reviewRequired && (
-							<label class="mt-3 flex items-start gap-2">
-								<input
-									type="checkbox"
-									name="confirm_review"
-									value="yes"
-									required
-								/>
-								<span>I reviewed the cleaned message above.</span>
-							</label>
-						)}
+						<label
+							class="mt-3 flex min-h-11 w-full items-start gap-2 rounded-control px-2 py-2"
+							hidden={!reviewRequired}
+							data-feedback-confirm-label
+						>
+							<input
+								type="checkbox"
+								name="confirm_review"
+								value="yes"
+								required={reviewRequired}
+							/>
+							<span>I reviewed the cleaned message above.</span>
+						</label>
 					</div>
 					<div>
 						<Button type="submit">Send</Button>

@@ -63,6 +63,7 @@ function postFields(fields: Record<string, string>, headers = {}) {
 		body: new URLSearchParams({
 			device_category: "Mobile browser",
 			message_reviewed: sanitizeFeedbackMessage(fields.message ?? "").trim(),
+			confirm_review: "yes",
 			...fields,
 		}),
 		redirect: "manual" as const,
@@ -349,6 +350,7 @@ describe("feedback form", () => {
 				message: "Contact person@example.com",
 				from: "/",
 				message_reviewed: "",
+				confirm_review: "",
 			}),
 		);
 		expect(first.status).toBe(200);
@@ -376,6 +378,20 @@ describe("feedback form", () => {
 			"Contact [email removed], new [email removed]",
 		);
 		expect(changedHtml).toContain('name="confirm_review"');
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
+		).toEqual({ count: 0 });
+		const skipped = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Contact [email removed], new [email removed]",
+				from: "/",
+				confirm_review: "",
+			}),
+		);
+		expect(skipped.status).toBe(200);
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
 		).toEqual({ count: 0 });

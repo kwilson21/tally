@@ -298,17 +298,22 @@ export function installFeedbackMessageReview(doc = document) {
 	const message = form.querySelector('[name="message"]');
 	const reviewedMarker = form.querySelector('[name="message_reviewed"]');
 	const confirmReview = form.querySelector('[name="confirm_review"]');
+	const confirmLabel = form.querySelector("[data-feedback-confirm-label]");
 	const category = form.querySelector('[name="device_category"]');
 	const categoryMarker = form.querySelector("[data-feedback-device-category]");
 	const review = doc.querySelector("#feedback-redaction-review");
 	if (category && categoryMarker && typeof navigator !== "undefined")
 		category.value = coarseDeviceCategory(navigator.userAgent);
-	confirmReview?.removeAttribute("required");
+	if (confirmReview) confirmReview.required = false;
 	if (!message || !review) return;
 	let reviewed = false;
 	message.addEventListener("input", () => {
 		reviewed = false;
 		if (reviewedMarker) reviewedMarker.value = "";
+		if (confirmReview) {
+			confirmReview.checked = false;
+			confirmReview.required = false;
+		}
 	});
 	form.addEventListener("submit", (event) => {
 		const cleaned = sanitizeFeedbackMessage(message.value).trim();
@@ -316,6 +321,11 @@ export function installFeedbackMessageReview(doc = document) {
 			event.preventDefault();
 			message.value = cleaned;
 			if (reviewedMarker) reviewedMarker.value = cleaned;
+			if (confirmLabel) confirmLabel.hidden = false;
+			if (confirmReview) {
+				confirmReview.checked = false;
+				confirmReview.required = true;
+			}
 			review.replaceChildren();
 			const heading = doc.createElement("strong");
 			heading.textContent = "Review the cleaned message before sending";
@@ -326,6 +336,10 @@ export function installFeedbackMessageReview(doc = document) {
 			reviewed = true;
 			message.focus();
 			return;
+		}
+		if (confirmReview && !confirmReview.checked) {
+			event.preventDefault();
+			confirmReview.focus();
 		}
 	});
 }

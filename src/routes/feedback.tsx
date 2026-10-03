@@ -173,7 +173,10 @@ feedback.post("/feedback", async (c) => {
 			422,
 		);
 	}
-	if (String(data.get("message_reviewed") ?? "") !== values.message) {
+	if (
+		String(data.get("message_reviewed") ?? "") !== values.message ||
+		data.get("confirm_review") !== "yes"
+	) {
 		return c.html(
 			view(values, false, {
 				error: "Review the cleaned message, confirm below, and send again.",

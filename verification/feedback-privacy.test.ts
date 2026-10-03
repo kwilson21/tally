@@ -105,7 +105,12 @@ describe("cleaned-message confirmation", () => {
 			focus: () => {},
 		};
 		const reviewedMarker = { value: "" };
-		const confirmReview = { removeAttribute: () => {} };
+		const confirmReview = {
+			checked: false,
+			required: false,
+			focus: () => {},
+		};
+		const confirmLabel = { hidden: true };
 		const review = {
 			hidden: true,
 			replaceChildren: () => {
@@ -119,6 +124,7 @@ describe("cleaned-message confirmation", () => {
 				if (selector === '[name="message"]') return message;
 				if (selector === '[name="message_reviewed"]') return reviewedMarker;
 				if (selector === '[name="confirm_review"]') return confirmReview;
+				if (selector === "[data-feedback-confirm-label]") return confirmLabel;
 				return null;
 			},
 			addEventListener: (
@@ -144,6 +150,16 @@ describe("cleaned-message confirmation", () => {
 		expect(reviewedMarker.value).toBe(message.value);
 		expect(review.hidden).toBe(false);
 		expect(children[1]?.textContent).toBe(message.value);
+		expect(confirmLabel.hidden).toBe(false);
+		expect(confirmReview.required).toBe(true);
+		prevented = false;
+		listeners.get("submit")?.({
+			preventDefault: () => {
+				prevented = true;
+			},
+		});
+		expect(prevented).toBe(true);
+		confirmReview.checked = true;
 		prevented = false;
 		listeners.get("submit")?.({
 			preventDefault: () => {
@@ -153,6 +169,8 @@ describe("cleaned-message confirmation", () => {
 		expect(prevented).toBe(false);
 		inputListeners.get("input")?.();
 		expect(reviewedMarker.value).toBe("");
+		expect(confirmReview.checked).toBe(false);
+		expect(confirmReview.required).toBe(false);
 		prevented = false;
 		listeners.get("submit")?.({
 			preventDefault: () => {

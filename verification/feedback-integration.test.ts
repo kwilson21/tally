@@ -112,6 +112,7 @@ describe("feedback route privacy", () => {
 					"User-Agent": "Riley Example riley@example.test account 123456789",
 				},
 				body: new URLSearchParams({
+					confirm_review: "yes",
 					message_reviewed:
 						"Contact [email removed] at [address removed], [account detail removed], charge [amount removed]. [possible name removed] saw it.",
 					type: "Bug",
@@ -237,6 +238,7 @@ describe("feedback route privacy", () => {
 							"__Host-tally-feedback-limit=123e4567-e89b-12d3-a456-426614174000",
 					},
 					body: new URLSearchParams({
+						confirm_review: "yes",
 						message_reviewed: "Fixture",
 						type: "Bug",
 						feeling: "Okay",
@@ -288,6 +290,7 @@ it("uses only legacy columns when diagnostics are disabled", async () => {
 					"__Host-tally-feedback-limit=123e4567-e89b-12d3-a456-426614174000",
 			},
 			body: new URLSearchParams({
+				confirm_review: "yes",
 				message_reviewed: "Fixture",
 				type: "Bug",
 				feeling: "Okay",
@@ -312,6 +315,7 @@ for (const consent of [false, true])
 						"__Host-tally-feedback-limit=123e4567-e89b-12d3-a456-426614174000",
 				},
 				body: new URLSearchParams({
+					confirm_review: "yes",
 					message_reviewed: "Fixture",
 					type: "Bug",
 					feeling: "Okay",
