@@ -18,11 +18,13 @@ export function FeedbackForm({
 	error,
 	demo = false,
 	diagnosticsEnabled = false,
+	reviewRequired = false,
 }: {
 	values: FeedbackValues;
 	error?: string;
 	demo?: boolean;
 	diagnosticsEnabled?: boolean;
+	reviewRequired?: boolean;
 }) {
 	return (
 		<div class="max-w-2xl">
@@ -63,6 +65,11 @@ export function FeedbackForm({
 						name="return_to"
 						value={values.returnTo ?? values.from}
 					/>
+					<input
+						type="hidden"
+						name="message_reviewed"
+						value={reviewRequired ? values.message : ""}
+					/>
 					{diagnosticsEnabled && (
 						<fieldset class="rounded-control border border-rule bg-band p-4">
 							<label class="flex items-start gap-3">
@@ -77,10 +84,11 @@ export function FeedbackForm({
 										Attach technical details
 									</span>
 									<span class="mt-1 block text-sm text-muted">
-										Optional: approved route category, coarse device category,
-										and a generic allowlisted browser-error type. It excludes
-										raw user-agent text, screen dimensions, versions, error
-										text, stacks, screen contents, and financial values.
+										Optional: generic allowlisted browser-error type. The
+										approved route and coarse device category are included with
+										every report. It excludes raw user-agent text, screen
+										dimensions, versions, error text, stacks, screen contents,
+										and financial values.
 									</span>
 								</span>
 							</label>
@@ -149,6 +157,17 @@ export function FeedbackForm({
 							role="status"
 							hidden
 						/>
+						{reviewRequired && (
+							<label class="mt-3 flex items-start gap-2">
+								<input
+									type="checkbox"
+									name="confirm_review"
+									value="yes"
+									required
+								/>
+								<span>I reviewed the cleaned message above.</span>
+							</label>
+						)}
 					</div>
 					<div>
 						<Button type="submit">Send</Button>

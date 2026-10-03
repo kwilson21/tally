@@ -83,6 +83,7 @@ function view(
 	options: {
 		error?: string;
 		diagnosticsEnabled?: boolean;
+		reviewRequired?: boolean;
 	} = {},
 ) {
 	return (
@@ -97,6 +98,7 @@ function view(
 				demo={demo}
 				error={options.error}
 				diagnosticsEnabled={options.diagnosticsEnabled}
+				reviewRequired={options.reviewRequired}
 			/>
 		</Layout>
 	);
@@ -125,6 +127,7 @@ feedback.get("/feedback", async (c) => {
 			},
 		),
 	);
+	if (c.env.DEMO === "true") return response;
 	return existingToken
 		? response
 		: setFeedbackLimitCookie(await response, crypto.randomUUID());
@@ -148,12 +151,15 @@ feedback.post("/feedback", async (c) => {
 	};
 	const limitId = feedbackLimitId(c.req.header("cookie"));
 	if (!limitId) {
-		return c.html(
+		const response = await c.html(
 			view(values, false, {
-				error: "Reload the feedback form before sending.",
+				error: "Your form expired. Review the cleaned message and send again.",
+				diagnosticsEnabled: diagnosticsEnabled(c.env),
+				reviewRequired: true,
 			}),
 			400,
 		);
+		return setFeedbackLimitCookie(response, crypto.randomUUID());
 	}
 	if (!rawMessage.trim() || rawMessage.length > 2000 || !values.message) {
 		return c.html(
@@ -165,6 +171,15 @@ feedback.post("/feedback", async (c) => {
 				diagnosticsEnabled: diagnosticsEnabled(c.env),
 			}),
 			422,
+		);
+	}
+	if (String(data.get("message_reviewed") ?? "") !== values.message) {
+		return c.html(
+			view(values, false, {
+				error: "Review the cleaned message, confirm below, and send again.",
+				diagnosticsEnabled: diagnosticsEnabled(c.env),
+				reviewRequired: true,
+			}),
 		);
 	}
 	const diagnosticsOn = diagnosticsEnabled(c.env);

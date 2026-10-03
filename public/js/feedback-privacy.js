@@ -58,7 +58,9 @@ export function sanitizeFeedbackRoute(value) {
 		const pathname = new URL(value, "https://tally.invalid").pathname;
 		if (ROUTES.has(pathname)) return pathname;
 		if (/^\/transactions\/[^/]+\/?$/.test(pathname)) return "/transactions";
-		if (/^\/accounts\/[^/]+\/?$/.test(pathname)) return "/accounts";
+		if (/^\/accounts\/[^/]+(?:\/disconnect)?\/?$/.test(pathname))
+			return "/accounts";
+		if (/^\/budget(?:\/[^/]+)?\/?$/.test(pathname)) return "/budget";
 		return "/other";
 	} catch {
 		return "/other";
@@ -84,7 +86,8 @@ export function safeFeedbackReturnPath(value) {
 
 export function coarseDeviceCategory(userAgent) {
 	if (typeof userAgent !== "string") return "Unknown";
-	if (/iPad|Tablet/i.test(userAgent)) return "Tablet browser";
+	if (/iPad|Tablet|Android(?!.*Mobile)/i.test(userAgent))
+		return "Tablet browser";
 	if (/iPhone|Android|Mobile/i.test(userAgent)) return "Mobile browser";
 	return "Desktop browser";
 }
@@ -293,21 +296,26 @@ export function installFeedbackMessageReview(doc = document) {
 	const form = doc.querySelector('form[action="/feedback"]');
 	if (!form) return;
 	const message = form.querySelector('[name="message"]');
+	const reviewedMarker = form.querySelector('[name="message_reviewed"]');
+	const confirmReview = form.querySelector('[name="confirm_review"]');
 	const category = form.querySelector('[name="device_category"]');
 	const categoryMarker = form.querySelector("[data-feedback-device-category]");
 	const review = doc.querySelector("#feedback-redaction-review");
 	if (category && categoryMarker && typeof navigator !== "undefined")
 		category.value = coarseDeviceCategory(navigator.userAgent);
+	confirmReview?.removeAttribute("required");
 	if (!message || !review) return;
 	let reviewed = false;
 	message.addEventListener("input", () => {
 		reviewed = false;
+		if (reviewedMarker) reviewedMarker.value = "";
 	});
 	form.addEventListener("submit", (event) => {
-		const cleaned = sanitizeFeedbackMessage(message.value);
+		const cleaned = sanitizeFeedbackMessage(message.value).trim();
 		if (!reviewed || message.value !== cleaned) {
 			event.preventDefault();
 			message.value = cleaned;
+			if (reviewedMarker) reviewedMarker.value = cleaned;
 			review.replaceChildren();
 			const heading = doc.createElement("strong");
 			heading.textContent = "Review the cleaned message before sending";
@@ -317,6 +325,7 @@ export function installFeedbackMessageReview(doc = document) {
 			review.hidden = false;
 			reviewed = true;
 			message.focus();
+			return;
 		}
 	});
 }

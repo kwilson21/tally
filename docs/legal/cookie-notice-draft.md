@@ -3,7 +3,7 @@
 
 # Tally Cookie Notice
 
-> This working draft follows General Legal's Cookie Notice template, pinned at commit `6d6805425eabd41bed86fc1e2ec51612760f716c`. It distinguishes current-main source behavior from proposed PR 148 behavior. The feedback limiter cookie is proposed code; confirm deployment before publication. Complete the shared [publication checklist](publication-checklist.md) before publication.
+> This working draft follows General Legal's Cookie Notice template, pinned at commit `6d6805425eabd41bed86fc1e2ec51612760f716c`. It distinguishes current-main source behavior from merged PR 148 behavior. The feedback limiter cookie is present in merged source; confirm deployment before publication. Complete the shared [publication checklist](publication-checklist.md) before publication.
 
 ## What are cookies?
 
@@ -14,21 +14,21 @@ Cookies are small data files a service can place in a browser. Similar browser s
 | Technology | Provider and purpose | Where it appears | Duration and control |
 | --- | --- | --- | --- |
 | `CF_Authorization` authentication cookie | Cloudflare Access uses this cookie to authenticate access to a protected application. Cloudflare documents it as an Access JWT cookie. | Production is configured behind Cloudflare Access. | Exact expiration and domain settings depend on deployment configuration; see the publication checklist. Browser cookie controls can remove it, but doing so may require signing in again. [Cloudflare Access authorization-cookie documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/). |
-| `__Host-tally-feedback-limit` proposed feedback cookie | Tally's proposed feedback form uses a random token as a best-effort per-browser hourly limiter, without storing the verified Access email in new feedback rows. It is not a person-level identity or security boundary. | Set when the feedback form is opened; submitted with feedback. | One hour. `Secure`, `HttpOnly`, `SameSite=Strict`, host-only and path `/`. Reopening the form with a valid cookie reuses it without refreshing its expiry. Clearing it resets the browser's limiter identity. |
+| `__Host-tally-feedback-limit` feedback cookie | Tally's feedback form uses a random token as a best-effort per-browser hourly limiter, without storing the verified Access email in new feedback rows. It is not a person-level identity or security boundary. | Set when the feedback form is opened; submitted with feedback. | One hour. `Secure`, `HttpOnly`, `SameSite=Strict`, host-only and path `/`. Reopening the form with a valid cookie reuses it without refreshing its expiry. Clearing it resets the browser's limiter identity. |
 | Cloudflare Access binding cookie, if enabled | Cloudflare documents an optional binding cookie; this draft does not assert it is enabled. | Depends on deployment configuration. | See the publication checklist for enabled cookies and settings. |
 | Plaid Link and provider storage | When Plaid is configured, the Accounts page loads Plaid Link's script from `cdn.plaid.com` and uses it to connect or repair a bank. Application source does not establish what cookies or other identifiers Plaid may use in that flow. | Accounts flow when Plaid is configured. | See the publication checklist for provider behavior and controls. |
 
-The proposed feedback cookie is distinct from Cloudflare Access authentication. This source-code review does not establish cookies or logs set by Cloudflare's deployed edge configuration, Cloudflare Access, or third-party integrations. PostHog recording is not implemented; see the [future replay design](posthog-replay-design.md).
+The feedback cookie is distinct from Cloudflare Access authentication. This source-code review does not establish cookies or logs set by Cloudflare's deployed edge configuration, Cloudflare Access, or third-party integrations. PostHog recording is not implemented; see the [future replay design](posthog-replay-design.md).
 
 ## Other technologies
 
-### Current main
+### Pre-PR 148 baseline
 
-Current main uses the referring page when a person opens feedback. Its page value can include that same-origin URL's query string or fragment, which may contain search or filter state. This is a URL value, not a cookie.
+Before PR 148, feedback used the referring page when a person opens feedback. Its page value can include that same-origin URL's query string or fragment, which may contain search or filter state. This is a URL value, not a cookie.
 
-### Proposed PR 148 feedback features
+### Merged PR 148 feedback features
 
-PR 148 proposes optional generic error context and a browser-only layout preview. The proposed diagnostics selection attaches an approved route category, coarse device category, and generic allowlisted error name. The browser and Worker apply pattern-based message redaction before storage and filing and show the cleaned message for review; the patterns cover labeled credentials as well as contact, account-like, URL and amount patterns, but can miss arbitrary names, unlabeled credentials, and other sensitive prose. The optional preview is hard-disabled pending synthetic pixel/OCR acceptance. Live deployment settings are not established by this notice.
+PR 148 adds optional generic error context and browser-only layout-preview code. The diagnostics selection attaches an approved route category, coarse device category, and generic allowlisted error name. The browser and Worker apply pattern-based message redaction before storage and filing and show the cleaned message for review; the patterns cover labeled credentials as well as contact, account-like, URL and amount patterns, but can miss arbitrary names, unlabeled credentials, and other sensitive prose. The optional preview is hard-disabled pending synthetic pixel/OCR acceptance. Live deployment settings are not established by this notice.
 
 If the diagnostics feature is enabled, its first-party script runs on application HTML pages and may store an allowlisted generic client-error name in browser `sessionStorage`; the entry is removed when the script runs on the feedback form. The optional diagnostics selection attaches only the approved route category, coarse device category, and generic error name. The browser script reads `navigator.userAgent` locally only to derive a coarse category; the raw value is not submitted in feedback or stored by the Worker. The HTTP request still includes a standard `User-Agent` header to network services. There is no replay-link choice or recorder in this implementation.
 
@@ -36,7 +36,7 @@ The intended layout preview is created only from marked static labels and allowl
 
 ## Your choices
 
-The proposed PR 148 form provides an optional generic error-context control. The preview is currently disabled. Browser settings let people inspect or clear site storage and cookies; clearing Cloudflare Access cookies may require signing in again. Provider-specific choices and deployment settings remain to be confirmed in the publication checklist.
+The PR 148 form provides an optional generic error-context control. The preview is currently disabled. Browser settings let people inspect or clear site storage and cookies; clearing Cloudflare Access cookies may require signing in again. Provider-specific choices and deployment settings remain to be confirmed in the publication checklist.
 
 ## Changes
 
