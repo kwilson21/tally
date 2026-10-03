@@ -484,7 +484,7 @@ it("uses the Referer for the return page and omits the button on feedback", asyn
 		headers: { Referer: `${BASE}/transactions?uncategorized=1` },
 	});
 	const html = await response.text();
-	expect(html).toContain('name="from" value="/transactions?uncategorized=1"');
+	expect(html).toContain('name="from" value="/transactions"');
 	expect(html).not.toContain(
 		"fixed bottom-[calc(6.5rem+var(--safe-area-bottom))]",
 	);

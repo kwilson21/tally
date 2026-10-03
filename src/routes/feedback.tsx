@@ -42,9 +42,9 @@ const FEELINGS = new Set([
 function safePath(value: string | null) {
 	try {
 		const url = new URL(value ?? "/", "http://tally.invalid");
-		const normalized = `${url.pathname}${url.search}${url.hash}`;
+		const normalized = url.pathname;
 		return url.origin === "http://tally.invalid" && /^\/[^/\\]/.test(normalized)
-			? normalized
+			? normalized.slice(0, 160)
 			: "/";
 	} catch {
 		return "/";
@@ -106,7 +106,7 @@ feedback.get("/feedback", (c) => {
 		try {
 			const url = new URL(referer);
 			if (url.origin === new URL(c.req.url).origin)
-				from = safePath(`${url.pathname}${url.search}${url.hash}`);
+				from = safePath(url.pathname);
 		} catch {}
 	}
 	return c.html(
@@ -265,7 +265,7 @@ function diagnosticLines(item: FeedbackRow) {
 				width?: unknown;
 				height?: unknown;
 			} | null;
-			lines.push(`Route: ${codeSpan(String(context.route ?? "/"))}`);
+			lines.push(`Route: ${codeSpan(safePath(String(context.route ?? "/")))}`);
 			lines.push(
 				`Browser: ${String(context.browser ?? "Unknown")}${context.browserVersion ? ` ${String(context.browserVersion)}` : ""}; ${String(context.os ?? "Unknown")}${context.osVersion ? ` ${String(context.osVersion)}` : ""}`,
 			);
@@ -345,7 +345,7 @@ export async function fileFeedbackIssue(
 					title: `${item.type}: ${titleMessage}`,
 					// Code formatting keeps #123 and @someone from becoming links or mentions.
 					body: [
-						`Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${codeSpan(item.page)}\nDevice: ${item.device}\n\n${fenced(item.message)}`,
+						`Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${codeSpan(safePath(item.page))}\nDevice: ${item.device}\n\n${fenced(item.message)}`,
 						...diagnosticLines(item),
 					].join("\n"),
 					labels: [item.type],

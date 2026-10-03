@@ -94,13 +94,15 @@ app.use("*", async (c, next) => {
 	const html = await response.text();
 	const headers = new Headers(response.headers);
 	headers.delete("content-length");
-	if (!html.includes("</body>"))
-		return new Response(html, {
+	if (!html.includes("</body>")) {
+		c.res = new Response(html, {
 			status: response.status,
 			statusText: response.statusText,
 			headers,
 		});
-	return new Response(
+		return;
+	}
+	c.res = new Response(
 		injectDiagnosticsScript(
 			html,
 			true,

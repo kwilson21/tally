@@ -28,4 +28,5 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run test:feedback-integration
       - run: npm test
