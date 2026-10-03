@@ -21,5 +21,5 @@ Internal working checklist for the unpublished [Privacy Policy draft](privacy-po
 | Retention and user choices | Privacy draft states the implemented CSV/JSON exports and bank-disconnect choices; no general retention period or feedback/provider deletion promise is made. Unverified retention, backup, and log details remain in this checklist. |
 | State rights, other sites, security, location/transfers, children, changes, and contact | Privacy draft preserves these template areas but defers unresolved law, geography, age, contact, cross-border flow, and provider facts to this checklist. |
 | Cookie definitions and cookie/provider table | Cookie draft defines cookies and browser storage and describes the Access cookie, one-hour feedback limiter cookie, and unverified/conditional providers. |
-| Other technologies and choices | Cookie draft separates current-main URL behavior from the PR 148 proposal, and states preview age-check behavior without claiming automatic deletion. |
+| Other technologies and choices | Cookie draft separates pre-PR 148 URL behavior from the merged PR 148 implementation, and states preview age-check behavior without claiming automatic deletion. |
 | Changes and questions | Cookie draft retains both template sections; process and contact details are listed above. |
