@@ -16,10 +16,16 @@ export function FeedbackForm({
 	values,
 	error,
 	demo = false,
+	diagnosticsEnabled = false,
+	replayLinksEnabled = false,
+	appVersion,
 }: {
 	values: FeedbackValues;
 	error?: string;
 	demo?: boolean;
+	diagnosticsEnabled?: boolean;
+	replayLinksEnabled?: boolean;
+	appVersion?: string;
 }) {
 	return (
 		<div class="max-w-2xl">
@@ -32,8 +38,40 @@ export function FeedbackForm({
 					Feedback is off in the demo. Sign in to your Tally to send it.
 				</p>
 			) : (
-				<form method="post" action="/feedback" class="mt-8 grid gap-7">
+				<form
+					method="post"
+					action="/feedback"
+					class="mt-8 grid gap-7"
+					data-app-version={appVersion ?? ""}
+				>
 					<input type="hidden" name="from" value={values.from} />
+					{diagnosticsEnabled && (
+						<fieldset class="rounded-control border border-rule bg-band p-4">
+							<label class="flex items-start gap-3">
+								<input
+									type="checkbox"
+									name="include_diagnostics"
+									value="yes"
+									class="mt-1 size-4 accent-ink"
+								/>
+								<span>
+									<span class="block font-medium">
+										Attach technical details
+									</span>
+									<span class="mt-1 block text-sm text-muted">
+										Optional: route, browser and OS versions, screen size, app
+										build, and the type of a recent browser error. It excludes
+										screen contents, amounts, account details, notes, and error
+										text.
+									</span>
+								</span>
+							</label>
+							<input type="hidden" name="client_context" value="" />
+							{replayLinksEnabled && (
+								<input type="hidden" name="posthog_session_id" value="" />
+							)}
+						</fieldset>
+					)}
 					{error && (
 						<p
 							role="alert"

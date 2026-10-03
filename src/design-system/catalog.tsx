@@ -783,6 +783,7 @@ function Feedback() {
 				{/* Only the form is inert: its title and sentence stay readable to screen readers. */}
 				<div inert>
 					<FeedbackForm
+						diagnosticsEnabled
 						values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
 					/>
 				</div>

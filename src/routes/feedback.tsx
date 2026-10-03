@@ -1,8 +1,20 @@
 import { Hono } from "hono";
+import {
+	diagnosticsEnabled,
+	normalizeFeedbackContext,
+	replayLinksEnabled,
+	safeReplayUrl,
+} from "../feedback/diagnostics";
 import { FeedbackForm, type FeedbackValues } from "../views/feedback-form";
 import { Layout } from "../views/layout";
 
-type FeedbackEnv = Env & { FEEDBACK_GITHUB_TOKEN?: string };
+type FeedbackEnv = Env & {
+	FEEDBACK_GITHUB_TOKEN?: string;
+	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
+	FEEDBACK_REPLAY_LINKS_ENABLED?: string;
+	POSTHOG_HOST?: string;
+	APP_VERSION?: string;
+};
 type App = { Bindings: FeedbackEnv; Variables: { actor: string } };
 export const feedback = new Hono<App>();
 
@@ -13,6 +25,8 @@ type FeedbackRow = {
 	message: string;
 	page: string;
 	device: string;
+	client_context: string | null;
+	replay_url: string | null;
 	attempts: number;
 };
 
@@ -57,14 +71,30 @@ export function summarizeDevice(userAgent: string) {
 	return `${device} ${browser}`;
 }
 
-function view(values: FeedbackValues, demo: boolean, error?: string) {
+function view(
+	values: FeedbackValues,
+	demo: boolean,
+	options: {
+		error?: string;
+		diagnosticsEnabled?: boolean;
+		replayLinksEnabled?: boolean;
+		appVersion?: string;
+	} = {},
+) {
 	return (
 		<Layout
 			title="Send feedback · Tally"
 			demo={demo}
 			currentPath={`/feedback?from=${values.from}`}
 		>
-			<FeedbackForm values={values} demo={demo} error={error} />
+			<FeedbackForm
+				values={values}
+				demo={demo}
+				error={options.error}
+				diagnosticsEnabled={options.diagnosticsEnabled}
+				replayLinksEnabled={options.replayLinksEnabled}
+				appVersion={options.appVersion}
+			/>
 		</Layout>
 	);
 }
@@ -83,6 +113,12 @@ feedback.get("/feedback", (c) => {
 		view(
 			{ type: "Bug", feeling: "Okay", message: "", from },
 			c.env.DEMO === "true",
+			{
+				diagnosticsEnabled: diagnosticsEnabled(c.env),
+				replayLinksEnabled:
+					diagnosticsEnabled(c.env) && replayLinksEnabled(c.env),
+				appVersion: c.env.APP_VERSION,
+			},
 		),
 	);
 });
@@ -100,20 +136,42 @@ feedback.post("/feedback", async (c) => {
 	};
 	if (!values.message.trim() || values.message.length > 2000) {
 		return c.html(
-			view(
-				values,
-				false,
-				values.message.length > 2000
-					? "Keep the message to 2,000 characters."
-					: "Write a message before sending.",
-			),
+			view(values, false, {
+				error:
+					values.message.length > 2000
+						? "Keep the message to 2,000 characters."
+						: "Write a message before sending.",
+				diagnosticsEnabled: diagnosticsEnabled(c.env),
+				replayLinksEnabled:
+					diagnosticsEnabled(c.env) && replayLinksEnabled(c.env),
+				appVersion: c.env.APP_VERSION,
+			}),
 			422,
 		);
 	}
 	const actor = c.get("actor");
+	const diagnosticsOn = diagnosticsEnabled(c.env);
+	let clientContext: ReturnType<typeof normalizeFeedbackContext> = null;
+	if (diagnosticsOn && data.get("include_diagnostics") === "yes") {
+		try {
+			clientContext = normalizeFeedbackContext(
+				JSON.parse(String(data.get("client_context") ?? "")),
+				values.from,
+				c.env.APP_VERSION,
+			);
+		} catch {
+			clientContext = null;
+		}
+	}
+	const replayUrl =
+		diagnosticsOn &&
+		data.get("include_diagnostics") === "yes" &&
+		replayLinksEnabled(c.env)
+			? safeReplayUrl(data.get("posthog_session_id"), c.env.POSTHOG_HOST)
+			: null;
 	const result = await c.env.DB.prepare(
-		`INSERT INTO feedback (actor, type, feeling, message, page, device)
-		 SELECT ?, ?, ?, ?, ?, ?
+		`INSERT INTO feedback (actor, type, feeling, message, page, device, client_context, replay_url)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?
 		 WHERE (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
 	)
 		.bind(
@@ -123,16 +181,22 @@ feedback.post("/feedback", async (c) => {
 			values.message.trim(),
 			values.from,
 			summarizeDevice(c.req.header("user-agent") ?? ""),
+			clientContext ? JSON.stringify(clientContext) : null,
+			replayUrl,
 			actor,
 		)
 		.run();
 	if (result.meta.changes === 0) {
 		return c.html(
-			view(
-				values,
-				false,
-				"You've sent 10 messages this hour. Try again later.",
-			),
+			view(values, false, {
+				error: "You've sent 10 messages this hour. Try again later.",
+				diagnosticsEnabled: diagnosticsOn,
+				replayLinksEnabled:
+					diagnosticsOn &&
+					data.get("include_diagnostics") === "yes" &&
+					replayLinksEnabled(c.env),
+				appVersion: c.env.APP_VERSION,
+			}),
 			429,
 		);
 	}
@@ -185,6 +249,67 @@ function fenced(text: string): string {
 	return `${fence}\n${text}\n${fence}`;
 }
 
+function diagnosticLines(item: FeedbackRow) {
+	const lines: string[] = [];
+	if (item.client_context) {
+		try {
+			const context = JSON.parse(item.client_context) as Record<
+				string,
+				unknown
+			>;
+			const viewport = context.viewport as {
+				width?: unknown;
+				height?: unknown;
+			} | null;
+			const screen = context.screen as {
+				width?: unknown;
+				height?: unknown;
+			} | null;
+			lines.push(`Route: ${codeSpan(String(context.route ?? "/"))}`);
+			lines.push(
+				`Browser: ${String(context.browser ?? "Unknown")}${context.browserVersion ? ` ${String(context.browserVersion)}` : ""}; ${String(context.os ?? "Unknown")}${context.osVersion ? ` ${String(context.osVersion)}` : ""}`,
+			);
+			if (
+				viewport &&
+				Number.isInteger(viewport.width) &&
+				Number.isInteger(viewport.height)
+			)
+				lines.push(`Viewport: ${viewport.width}x${viewport.height}`);
+			if (
+				screen &&
+				Number.isInteger(screen.width) &&
+				Number.isInteger(screen.height)
+			)
+				lines.push(`Screen: ${screen.width}x${screen.height}`);
+			if (typeof context.pixelRatio === "number")
+				lines.push(`Pixel ratio: ${context.pixelRatio}`);
+			if (typeof context.build === "string")
+				lines.push(`Build: ${context.build}`);
+			if (typeof context.error === "string")
+				lines.push(`Recent client error type: ${context.error}`);
+		} catch {
+			// Ignore malformed or legacy context; never log its raw contents.
+		}
+	}
+	if (item.replay_url) {
+		try {
+			const url = new URL(item.replay_url);
+			if (
+				url.protocol === "https:" &&
+				!url.username &&
+				!url.password &&
+				/^\/replay\/[A-Za-z0-9_-]{1,128}$/.test(url.pathname) &&
+				!url.search &&
+				!url.hash
+			)
+				lines.push(`Session replay: ${url.toString()}`);
+		} catch {
+			// Ignore malformed replay links rather than filing untrusted link text.
+		}
+	}
+	return lines;
+}
+
 export async function fileFeedbackIssue(
 	db: D1Database,
 	token: string,
@@ -219,7 +344,10 @@ export async function fileFeedbackIssue(
 				body: JSON.stringify({
 					title: `${item.type}: ${titleMessage}`,
 					// Code formatting keeps #123 and @someone from becoming links or mentions.
-					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${codeSpan(item.page)}\nDevice: ${item.device}\n\n${fenced(item.message)}`,
+					body: [
+						`Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${codeSpan(item.page)}\nDevice: ${item.device}\n\n${fenced(item.message)}`,
+						...diagnosticLines(item),
+					].join("\n"),
 					labels: [item.type],
 				}),
 			},

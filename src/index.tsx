@@ -3,6 +3,7 @@ import { verifiedEmail } from "./access";
 import { categorizePending } from "./categorize-pending";
 import { todayUtc } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
+import { injectDiagnosticsScript } from "./feedback/diagnostics";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
 import { accounts } from "./routes/accounts";
@@ -19,12 +20,22 @@ import { transactions } from "./routes/transactions";
 import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
 
-type App = { Bindings: Env; Variables: { actor: string } };
+type AppEnv = Env & {
+	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
+	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
+	APP_VERSION?: string;
+};
+type App = { Bindings: AppEnv; Variables: { actor: string } };
 type ScheduledEnv = PlaidEnv & {
 	DB: D1Database;
 	DEMO?: string;
 	JEV_API_KEY?: string;
 	FEEDBACK_GITHUB_TOKEN?: string;
+	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
+	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
+	FEEDBACK_REPLAY_LINKS_ENABLED?: string;
+	POSTHOG_HOST?: string;
+	APP_VERSION?: string;
 };
 export const app = new Hono<App>();
 
@@ -68,6 +79,39 @@ app.use("*", async (c, next) => {
 	if (!email) return c.text("Sign in through Cloudflare Access.", 403);
 	c.set("actor", email);
 	return next();
+});
+// Only inject the first-party, opt-in diagnostics collector when an operator enables it.
+// It performs no network requests and stores only a generic error name in sessionStorage.
+app.use("*", async (c, next) => {
+	await next();
+	if (
+		c.env.DEMO === "true" ||
+		c.env.FEEDBACK_DIAGNOSTICS_ENABLED !== "true" ||
+		!c.res.headers.get("content-type")?.includes("text/html")
+	)
+		return;
+	const response = c.res;
+	const html = await response.text();
+	const headers = new Headers(response.headers);
+	headers.delete("content-length");
+	if (!html.includes("</body>"))
+		return new Response(html, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+	return new Response(
+		injectDiagnosticsScript(
+			html,
+			true,
+			c.env.FEEDBACK_SCREENSHOT_PREVIEW_ENABLED === "true",
+		),
+		{
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		},
+	);
 });
 
 app.route("/", health);

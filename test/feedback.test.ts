@@ -2,6 +2,13 @@ import { env, exports } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	diagnosticsEnabled,
+	injectDiagnosticsScript,
+	normalizeFeedbackContext,
+	replayLinksEnabled,
+	safeReplayUrl,
+} from "../src/feedback/diagnostics";
+import {
 	feedback,
 	fileFeedbackIssue,
 	retryFeedback,
@@ -9,7 +16,14 @@ import {
 
 const BASE = "http://tally.test";
 
-function productionApp(token?: string) {
+function productionApp(
+	token?: string,
+	options: {
+		diagnostics?: boolean;
+		replayLinks?: boolean;
+		appVersion?: string;
+	} = {},
+) {
 	const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
 	app.use("*", async (c, next) => {
 		c.set("actor", "person@example.com");
@@ -24,6 +38,10 @@ function productionApp(token?: string) {
 					...env,
 					DEMO: "false",
 					FEEDBACK_GITHUB_TOKEN: token,
+					FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
+					FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
+					POSTHOG_HOST: "https://us.i.posthog.com",
+					APP_VERSION: options.appVersion,
 				} as unknown as Env,
 				{ waitUntil, passThroughOnException() {}, props: {} },
 			);
@@ -45,6 +63,88 @@ function postFields(fields: Record<string, string>, headers = {}) {
 		redirect: "manual" as const,
 	};
 }
+
+describe("feedback diagnostic safeguards", () => {
+	const userAgent =
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Version/18.2 Mobile Safari/604.1";
+
+	it("keeps only allowlisted metadata and excludes query strings and error text", () => {
+		const context = normalizeFeedbackContext(
+			{
+				userAgent,
+				viewport: { width: 390, height: 844 },
+				screen: { width: 393, height: 852 },
+				pixelRatio: 99,
+				errorName: "TypeError",
+				message: "PRIVATE MERCHANT AND AMOUNT",
+			},
+			"/accounts?private=1",
+			"build-abc123",
+		);
+		expect(context).toMatchObject({
+			route: "/accounts",
+			browser: "Safari",
+			browserVersion: "18.2",
+			os: "iOS",
+			osVersion: "18.2",
+			viewport: { width: 390, height: 844 },
+			screen: { width: 393, height: 852 },
+			pixelRatio: 4,
+			build: "build-abc123",
+			error: "TypeError",
+		});
+		expect(JSON.stringify(context)).not.toContain("PRIVATE");
+		expect(JSON.stringify(context)).not.toContain("Safari/604.1");
+		expect(JSON.stringify(context)).not.toContain("private=1");
+	});
+
+	it("rejects malformed dimensions and unrecognized error types", () => {
+		const context = normalizeFeedbackContext(
+			{
+				userAgent,
+				viewport: { width: 90000, height: 0 },
+				errorName: "Error",
+			},
+			"/accounts",
+		);
+		expect(context).toMatchObject({ viewport: null, error: null });
+	});
+
+	it("keeps diagnostics and replay links disabled unless their flags are valid", () => {
+		expect(diagnosticsEnabled({})).toBe(false);
+		expect(
+			diagnosticsEnabled({
+				DEMO: "true",
+				FEEDBACK_DIAGNOSTICS_ENABLED: "true",
+			}),
+		).toBe(false);
+		expect(
+			diagnosticsEnabled({
+				DEMO: "false",
+				FEEDBACK_DIAGNOSTICS_ENABLED: "true",
+			}),
+		).toBe(true);
+		expect(
+			replayLinksEnabled({ POSTHOG_HOST: "https://us.i.posthog.com" }),
+		).toBe(false);
+		expect(
+			replayLinksEnabled({
+				FEEDBACK_REPLAY_LINKS_ENABLED: "true",
+				POSTHOG_HOST: "http://us.i.posthog.com",
+			}),
+		).toBe(false);
+		expect(
+			replayLinksEnabled({
+				FEEDBACK_REPLAY_LINKS_ENABLED: "true",
+				POSTHOG_HOST: "https://us.i.posthog.com",
+			}),
+		).toBe(true);
+		expect(safeReplayUrl("abc/../../x", "https://us.i.posthog.com")).toBeNull();
+		expect(safeReplayUrl("session_123-abc", "https://us.i.posthog.com")).toBe(
+			"https://us.i.posthog.com/replay/session_123-abc",
+		);
+	});
+});
 
 beforeEach(async () => {
 	await env.DB.prepare("DELETE FROM feedback").run();
@@ -87,6 +187,153 @@ describe("feedback form", () => {
 			page: "/settings?open=3",
 			device: "iPhone Safari",
 		});
+	});
+
+	it("stores allowlisted technical context only after the user opts in", async () => {
+		const context = {
+			userAgent:
+				"Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Version/18.2 Mobile/15E148 Safari/604.1",
+			viewport: { width: 390, height: 844 },
+			screen: { width: 393, height: 852 },
+			pixelRatio: 3,
+			errorName: "TypeError",
+			secret: "BALANCE 987654",
+		};
+		const response = await productionApp(undefined, {
+			diagnostics: true,
+			appVersion: "test-build-abc123",
+		}).fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Confused",
+				message: "A fake diagnostic fixture",
+				from: "/accounts?private=1",
+				include_diagnostics: "yes",
+				client_context: JSON.stringify(context),
+			}),
+		);
+		expect(response.status).toBe(303);
+		const row = await env.DB.prepare(
+			"SELECT client_context, replay_url FROM feedback",
+		).first<{ client_context: string | null; replay_url: string | null }>();
+		expect(JSON.parse(row?.client_context ?? "null")).toEqual({
+			route: "/accounts",
+			browser: "Safari",
+			browserVersion: "18.2",
+			os: "iOS",
+			osVersion: "18.2",
+			viewport: { width: 390, height: 844 },
+			screen: { width: 393, height: 852 },
+			pixelRatio: 3,
+			build: "test-build-abc123",
+			error: "TypeError",
+		});
+		expect(row?.client_context).not.toContain("987654");
+		expect(row?.replay_url).toBeNull();
+	});
+
+	it("does not store client context or replay IDs when disabled or not opted in", async () => {
+		const context = JSON.stringify({
+			userAgent: "fake",
+			viewport: { width: 390, height: 844 },
+		});
+		await productionApp(undefined, {
+			diagnostics: false,
+			replayLinks: true,
+		}).fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Fixture only",
+				from: "/accounts",
+				include_diagnostics: "yes",
+				client_context: context,
+				posthog_session_id: "fake-session-id",
+			}),
+		);
+		const row = await env.DB.prepare(
+			"SELECT client_context, replay_url FROM feedback",
+		).first();
+		expect(row).toEqual({ client_context: null, replay_url: null });
+	});
+
+	it("requires a separate user choice before storing client context", async () => {
+		await productionApp(undefined, { diagnostics: true }).fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Fixture only",
+				from: "/accounts",
+				client_context: JSON.stringify({
+					userAgent:
+						"Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Version/18.2 Safari/604.1",
+				}),
+			}),
+		);
+		expect(
+			await env.DB.prepare("SELECT client_context FROM feedback").first(),
+		).toEqual({ client_context: null });
+	});
+
+	it("stores a replay link only when diagnostics and replay links are both enabled", async () => {
+		await productionApp(undefined, {
+			diagnostics: true,
+			replayLinks: true,
+		}).fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Fixture only",
+				from: "/accounts",
+				include_diagnostics: "yes",
+				client_context: JSON.stringify({
+					userAgent:
+						"Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Version/18.2 Mobile Safari/604.1",
+				}),
+				posthog_session_id: "session_123-abc",
+			}),
+		);
+		expect(
+			await env.DB.prepare("SELECT replay_url FROM feedback").first(),
+		).toEqual({
+			replay_url: "https://us.i.posthog.com/replay/session_123-abc",
+		});
+	});
+
+	it("does not render the diagnostics script or opt-in when disabled", async () => {
+		const response = await productionApp().fetch("/feedback");
+		const html = await response.text();
+		expect(html).not.toContain("feedback-diagnostics.js");
+		expect(html).not.toContain("Attach technical details");
+	});
+
+	it("adds the opt-in diagnostics UI only when enabled", async () => {
+		const html = await (
+			await productionApp(undefined, {
+				diagnostics: true,
+				appVersion: "build-abc123",
+			}).fetch("/feedback")
+		).text();
+		expect(html).toContain("Attach technical details");
+		expect(html).toContain('data-app-version="build-abc123"');
+		expect(html).toContain(
+			"It excludes screen contents, amounts, account details, notes, and error text.",
+		);
+	});
+
+	it("injects only a first-party diagnostics script when explicitly enabled", () => {
+		const html = "<html><body>fixture</body></html>";
+		expect(injectDiagnosticsScript(html, false)).toBe(html);
+		expect(injectDiagnosticsScript(html, true)).toContain(
+			'<script src="/js/feedback-diagnostics.js" defer></script>',
+		);
+		expect(injectDiagnosticsScript("<html><body>fragment", true)).toBe(
+			"<html><body>fragment",
+		);
 	});
 
 	it("limits an actor to ten messages in an hour", async () => {
@@ -161,6 +408,43 @@ it("files the expected GitHub issue without logging the token or message", async
 		await env.DB.prepare("SELECT github_issue_number FROM feedback").first(),
 	).toEqual({ github_issue_number: 136 });
 	log.mockRestore();
+});
+
+it("adds only normalized technical fields and a guarded replay link to the private issue", async () => {
+	await env.DB.prepare(
+		"INSERT INTO feedback (actor, type, feeling, message, page, device, client_context, replay_url) VALUES ('fixture', 'Bug', 'Confused', 'Synthetic report', '/accounts', 'iPhone Safari', ?, ?)",
+	)
+		.bind(
+			JSON.stringify({
+				route: "/accounts",
+				browser: "Safari",
+				browserVersion: "18.2",
+				os: "iOS",
+				osVersion: "18.2",
+				viewport: { width: 390, height: 844 },
+				screen: { width: 393, height: 852 },
+				pixelRatio: 3,
+				build: "fixture-build",
+				error: "TypeError",
+			}),
+			"https://us.i.posthog.com/replay/fake-session-123",
+		)
+		.run();
+	const row = await env.DB.prepare("SELECT * FROM feedback").first();
+	if (!row) throw new Error("feedback fixture was not inserted");
+	const fetchStub = vi.fn(
+		async () => new Response(JSON.stringify({ number: 147 }), { status: 201 }),
+	);
+	await fileFeedbackIssue(env.DB, "fixture-token", row, fetchStub);
+	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
+	const body = JSON.parse(String(init?.body)).body as string;
+	expect(body).toContain("Browser: Safari 18.2; iOS 18.2");
+	expect(body).toContain("Viewport: 390x844");
+	expect(body).toContain("Build: fixture-build");
+	expect(body).toContain("Recent client error type: TypeError");
+	expect(body).toContain("https://us.i.posthog.com/replay/fake-session-123");
+	expect(body).not.toContain("userAgent");
+	expect(body).not.toContain("stack");
 });
 
 it("retries unfiled feedback in the nightly job", async () => {
