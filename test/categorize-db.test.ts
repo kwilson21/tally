@@ -194,6 +194,98 @@ describe("saveJevResult", () => {
 		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
 	});
 
+	it("accepts Jev's confident income classification for a negative payroll credit", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare("UPDATE transactions SET amount_cents = -1200 WHERE id = ?")
+			.bind(id)
+			.run();
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: false, reimbursement: false, income: true },
+			}),
+		);
+		expect(await row(id)).toMatchObject({ flag_income: 1 });
+		expect(
+			await db
+				.prepare("SELECT income_source FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ income_source: "jev" });
+	});
+
+	it("preserves a legacy income choice without a recorded source", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: false, reimbursement: false, income: false },
+			}),
+		);
+		expect(await row(id)).toMatchObject({ flag_income: 1 });
+		expect(
+			await db
+				.prepare("SELECT income_source FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ income_source: "user" });
+	});
+
+	it("keeps the income flag and Jev source consistent when an answer is explicitly cleared", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: false, reimbursement: false, income: true },
+			}),
+		);
+		expect(await row(id)).toMatchObject({ flag_income: 1 });
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.4,
+				flags: { transfer: false, reimbursement: false, income: false },
+			}),
+		);
+		expect(await row(id)).toMatchObject({ flag_income: 0 });
+		expect(
+			await db
+				.prepare("SELECT income_source FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ income_source: null });
+	});
+
 	it("leaves a transaction counted when Jev flags neither transfer nor reimbursement", async () => {
 		const id = await idOf("TST* CORNER DELI");
 		await saveJevResult(db, id, decision());
