@@ -35,6 +35,17 @@
 	const previewEnabled =
 		document.currentScript?.dataset.screenshotPreview === "true";
 
+	let capturing = false;
+	let interrupted = false;
+	window.addEventListener("pagehide", () => {
+		interrupted = true;
+	});
+
+	window.addEventListener("pageshow", () => {
+		interrupted = false;
+		capturing = false;
+	});
+
 	// Only geometry crosses this boundary. Never clone the application DOM into
 	// html2canvas: text, values, CSS, images and attributes may contain finances.
 	async function captureLayout() {
@@ -86,17 +97,27 @@
 				block.style.cssText = `position:absolute;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;box-sizing:border-box;border:1px solid #bbb;background:#eee;`;
 				doc.body.append(block);
 			}
-			const canvas = await window.html2canvas(doc.body, {
-				width,
-				height,
-				scale: 1,
-				logging: false,
-				useCORS: false,
-				allowTaint: false,
-				backgroundColor: "#fff",
-			});
+			let renderTimer;
+			const canvas = await Promise.race([
+				window.html2canvas(doc.body, {
+					width,
+					height,
+					scale: 1,
+					logging: false,
+					useCORS: false,
+					allowTaint: false,
+					backgroundColor: "#fff",
+				}),
+				new Promise((_, reject) => {
+					renderTimer = setTimeout(
+						() => reject(new Error("Renderer timeout")),
+						10000,
+					);
+				}),
+			]).finally(() => clearTimeout(renderTimer));
 			const image = canvas.toDataURL("image/jpeg", 0.7);
 			if (image.length > 680000) throw new Error("Preview too large");
+			if (interrupted) return;
 			sessionStorage.setItem(
 				screenshotKey,
 				JSON.stringify({ image, at: Date.now() }),
@@ -122,6 +143,8 @@
 			)
 				return;
 			event.preventDefault();
+			if (capturing) return;
+			capturing = true;
 			try {
 				sessionStorage.removeItem(screenshotKey);
 			} catch {
@@ -140,7 +163,8 @@
 					);
 				}
 			}
-			window.location.assign(link.href);
+			if (!interrupted) window.location.assign(link.href);
+			capturing = false;
 		});
 	}
 
@@ -174,6 +198,13 @@
 			remove.textContent = "Remove preview";
 			remove.addEventListener("click", () => preview.remove());
 			preview.append(caption, image, remove);
+			const from = form.querySelector('[name="from"]')?.value;
+			if (from?.startsWith("/") && !from.startsWith("//")) {
+				const retake = document.createElement("a");
+				retake.href = from;
+				retake.textContent = "Retake from original page";
+				preview.append(retake);
+			}
 			form.prepend(preview);
 		}
 	} catch {

@@ -16,7 +16,8 @@
 		"format": "biome check --write .",
 		"test": "vitest run",
 		"screenshots": "node scripts/screenshots.mjs",
-		"e2e": "node scripts/e2e.mjs"
+		"e2e": "node scripts/e2e.mjs",
+		"test:feedback-preview": "node scripts/feedback-preview-test.mjs"
 	},
 	"dependencies": {
 		"hono": "^4.13.8",

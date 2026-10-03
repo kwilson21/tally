@@ -27,6 +27,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run test:feedback-preview
       - run: npm run db:migrate:local
       - name: Start the app and seed the demo
         run: |
