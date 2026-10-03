@@ -8,6 +8,7 @@ const DEVICE_CATEGORIES = new Set([
 ]);
 const ERROR_NAMES = new Set([
 	"AbortError",
+	"Error",
 	"NetworkError",
 	"NotAllowedError",
 	"ReferenceError",

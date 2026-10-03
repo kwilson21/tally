@@ -8,6 +8,7 @@ import {
 (() => {
 	const allowedErrors = new Set([
 		"AbortError",
+		"Error",
 		"NetworkError",
 		"NotAllowedError",
 		"ReferenceError",

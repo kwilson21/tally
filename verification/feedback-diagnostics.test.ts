@@ -6,14 +6,13 @@ const source = await readFile(
 	new URL("../public/js/feedback-diagnostics.js", import.meta.url),
 	"utf8",
 );
-const moduleSource = source
-	.replace(/^import[\s\S]*?;\s*/, "")
-	.replace(
-		"const screenshotEnabled = false;",
-		"const screenshotEnabled = true;",
-	);
-
 function runClient({ preview = false, previewValue = null } = {}) {
+	const moduleSource = source
+		.replace(/^import[\s\S]*?;\s*/, "")
+		.replace(
+			"const screenshotEnabled = false;",
+			`const screenshotEnabled = ${preview};`,
+		);
 	const fields: Record<string, { value?: string; checked?: boolean }> = {
 		from: { value: "/source" },
 		return_to: { value: "/source?adjust=1" },
@@ -21,6 +20,7 @@ function runClient({ preview = false, previewValue = null } = {}) {
 		include_diagnostics: { checked: false },
 	};
 	const formHandlers: Record<string, (event?: unknown) => void> = {};
+	const windowHandlers: Record<string, (event?: unknown) => void> = {};
 	const form: Record<string, unknown> = {
 		querySelector(selector: string) {
 			const name = selector.match(/name="([^"]+)"/)?.[1];
@@ -62,7 +62,9 @@ function runClient({ preview = false, previewValue = null } = {}) {
 		removeItem: (key: string) => values.delete(key),
 	};
 	const window = {
-		addEventListener() {},
+		addEventListener(name: string, handler: (event?: unknown) => void) {
+			windowHandlers[name] = handler;
+		},
 		html2canvas: async () => ({
 			toDataURL: () => "data:image/jpeg;base64,AA==",
 		}),
@@ -81,12 +83,26 @@ function runClient({ preview = false, previewValue = null } = {}) {
 		sanitizeFeedbackRoute: (value: string) => value,
 		buildSafeScreenshotTree: () => [{ tagName: "BODY", children: [] }],
 	});
-	return { fields, form, formHandlers, values };
+	return { fields, form, formHandlers, values, windowHandlers };
 }
 
 describe("feedback diagnostics browser behavior", () => {
+	it("retains ordinary Error events for the optional error category", () => {
+		const f = runClient();
+		f.windowHandlers.error?.({ error: { name: "Error" } });
+		expect(f.values.get("tally-last-client-error")).toBe(
+			JSON.stringify({ name: "Error" }),
+		);
+	});
+	it("does not display a stored preview while the gate is disabled", () => {
+		const f = runClient({
+			previewValue: { image: "data:image/jpeg;base64,AA==", at: Date.now() },
+		});
+		expect(f.form.preview).toBeUndefined();
+	});
 	it("shows a stored preview only when its feature gate is enabled", () => {
 		const f = runClient({
+			preview: true,
 			previewValue: {
 				image: "data:image/jpeg;base64,AA==",
 				at: Date.now(),

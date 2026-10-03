@@ -8,6 +8,7 @@ import {
 	replayLinksEnabled,
 	screenshotPreviewEnabled,
 } from "../src/feedback/diagnostics";
+import { sanitizeFeedbackMessage } from "../src/feedback/privacy";
 import {
 	feedback,
 	fileFeedbackIssue,
@@ -21,6 +22,7 @@ function productionApp(
 	options: {
 		diagnostics?: boolean;
 		replayLinks?: boolean;
+		demo?: boolean;
 	} = {},
 ) {
 	const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
@@ -35,7 +37,7 @@ function productionApp(
 				new Request(BASE + path, init),
 				{
 					...env,
-					DEMO: "false",
+					DEMO: options.demo ? "true" : "false",
 					FEEDBACK_GITHUB_TOKEN: token,
 					FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
 					FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
@@ -58,7 +60,12 @@ function postFields(fields: Record<string, string>, headers = {}) {
 				"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1",
 			...headers,
 		},
-		body: new URLSearchParams({ device_category: "Mobile browser", ...fields }),
+		body: new URLSearchParams({
+			device_category: "Mobile browser",
+			message_reviewed: sanitizeFeedbackMessage(fields.message ?? "").trim(),
+			confirm_review: "yes",
+			...fields,
+		}),
 		redirect: "manual" as const,
 	};
 }
@@ -87,7 +94,7 @@ describe("feedback diagnostic safeguards", () => {
 		expect(JSON.stringify(context)).not.toContain("private=1");
 	});
 
-	it("rejects malformed dimensions and unrecognized error types", () => {
+	it("rejects malformed dimensions while retaining the generic Error category", () => {
 		const context = normalizeFeedbackContext(
 			{
 				userAgent,
@@ -100,7 +107,17 @@ describe("feedback diagnostic safeguards", () => {
 		expect(context).toEqual({
 			route: "/accounts",
 			deviceCategory: "Unknown",
-			errorName: null,
+			errorName: "Error",
+		});
+	});
+
+	it("keeps the generic Error category when diagnostics are enabled", () => {
+		expect(
+			normalizeFeedbackContext({ errorName: "Error" }, "/settings"),
+		).toEqual({
+			route: "/settings",
+			deviceCategory: "Unknown",
+			errorName: "Error",
 		});
 	});
 
@@ -278,6 +295,119 @@ describe("feedback form", () => {
 		expect(html).not.toContain("Attach technical details");
 	});
 
+	it("does not issue a feedback limiter cookie in the demo", async () => {
+		const response = await productionApp(undefined, { demo: true }).fetch(
+			"/feedback",
+		);
+		expect(response.headers.get("set-cookie")).toBeNull();
+	});
+
+	it("renews an expired limiter and preserves the cleaned draft for resubmission", async () => {
+		const expired = await productionApp().fetch(
+			"/feedback",
+			postFields(
+				{
+					type: "Bug",
+					feeling: "Okay",
+					message: "Email me at person@example.com",
+					from: "/accounts/3/disconnect",
+				},
+				{ Cookie: "" },
+			),
+		);
+		expect(expired.status).toBe(400);
+		const html = await expired.text();
+		expect(html).toContain("Email me at [email removed]");
+		expect(html).not.toContain("person@example.com");
+		const token = expired.headers
+			.get("set-cookie")
+			?.match(/__Host-tally-feedback-limit=([^;]+)/)?.[1];
+		expect(token).toMatch(/^[0-9a-f-]{36}$/i);
+		const resent = await productionApp().fetch(
+			"/feedback",
+			postFields(
+				{
+					type: "Bug",
+					feeling: "Okay",
+					message: "Email me at [email removed]",
+					from: "/accounts/3/disconnect",
+				},
+				{ Cookie: `__Host-tally-feedback-limit=${token}` },
+			),
+		);
+		expect(resent.status).toBe(303);
+		expect(
+			await env.DB.prepare("SELECT message, page FROM feedback").first(),
+		).toEqual({ message: "Email me at [email removed]", page: "/accounts" });
+	});
+
+	it("requires a no-script user to confirm the cleaned text before storage", async () => {
+		const first = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Contact person@example.com",
+				from: "/",
+				message_reviewed: "",
+				confirm_review: "",
+			}),
+		);
+		expect(first.status).toBe(200);
+		const html = await first.text();
+		expect(html).toContain("I reviewed the cleaned message above.");
+		expect(html).toContain('name="confirm_review"');
+		expect(html).toContain("Contact [email removed]");
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
+		).toEqual({ count: 0 });
+		const edited = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Contact [email removed], new person@example.com",
+				from: "/",
+				message_reviewed: "Contact [email removed]",
+				confirm_review: "yes",
+			}),
+		);
+		expect(edited.status).toBe(200);
+		const changedHtml = await edited.text();
+		expect(changedHtml).toContain(
+			"Contact [email removed], new [email removed]",
+		);
+		expect(changedHtml).toContain('name="confirm_review"');
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
+		).toEqual({ count: 0 });
+		const skipped = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Contact [email removed], new [email removed]",
+				from: "/",
+				confirm_review: "",
+			}),
+		);
+		expect(skipped.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
+		).toEqual({ count: 0 });
+		const confirmed = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Contact [email removed], new [email removed]",
+				from: "/",
+				confirm_review: "yes",
+			}),
+		);
+		expect(confirmed.status).toBe(303);
+	});
+
 	it("adds the opt-in diagnostics UI only when enabled", async () => {
 		const html = await (
 			await productionApp(undefined, {
@@ -376,6 +506,20 @@ describe("feedback form", () => {
 			}),
 		);
 		expect(response.headers.get("location")).toBe("/?sent=feedback");
+	});
+
+	it("preserves root-page query parameters when returning after feedback", async () => {
+		const response = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Idea",
+				feeling: "Okay",
+				message: "Synthetic feedback",
+				from: "/",
+				return_to: "/?adjust=1",
+			}),
+		);
+		expect(response.headers.get("location")).toBe("/?adjust=1&sent=feedback");
 	});
 });
 

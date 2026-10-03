@@ -62,6 +62,18 @@ describe("feedback minimization", () => {
 			"/transactions",
 		);
 		expect(sanitizeFeedbackRoute("/private/household/42")).toBe("/other");
+		expect(sanitizeFeedbackRoute("/budget/12")).toBe("/budget");
+		expect(sanitizeFeedbackRoute("/accounts/3/disconnect")).toBe("/accounts");
+	});
+
+	it("classifies Android tablets separately from phones", async () => {
+		const { coarseDeviceCategory } = await import("../src/feedback/privacy");
+		expect(
+			coarseDeviceCategory("Mozilla/5.0 (Linux; Android 13; SM-X700)"),
+		).toBe("Tablet browser");
+		expect(
+			coarseDeviceCategory("Mozilla/5.0 (Linux; Android 13; Mobile)"),
+		).toBe("Mobile browser");
 	});
 
 	it("preserves a validated same-origin return query while dropping fragments", () => {
@@ -92,6 +104,13 @@ describe("cleaned-message confirmation", () => {
 				inputListeners.set(name, callback),
 			focus: () => {},
 		};
+		const reviewedMarker = { value: "" };
+		const confirmReview = {
+			checked: false,
+			required: false,
+			focus: () => {},
+		};
+		const confirmLabel = { hidden: true };
 		const review = {
 			hidden: true,
 			replaceChildren: () => {
@@ -101,8 +120,13 @@ describe("cleaned-message confirmation", () => {
 				children.push(...items),
 		};
 		const form = {
-			querySelector: (selector: string) =>
-				selector.includes("message") ? message : null,
+			querySelector: (selector: string) => {
+				if (selector === '[name="message"]') return message;
+				if (selector === '[name="message_reviewed"]') return reviewedMarker;
+				if (selector === '[name="confirm_review"]') return confirmReview;
+				if (selector === "[data-feedback-confirm-label]") return confirmLabel;
+				return null;
+			},
 			addEventListener: (
 				name: string,
 				callback: (event: { preventDefault(): void }) => void,
@@ -123,8 +147,19 @@ describe("cleaned-message confirmation", () => {
 		expect(prevented).toBe(true);
 		expect(message.value).toContain("[account detail removed]");
 		expect(message.value).toContain("Card failed");
+		expect(reviewedMarker.value).toBe(message.value);
 		expect(review.hidden).toBe(false);
 		expect(children[1]?.textContent).toBe(message.value);
+		expect(confirmLabel.hidden).toBe(false);
+		expect(confirmReview.required).toBe(true);
+		prevented = false;
+		listeners.get("submit")?.({
+			preventDefault: () => {
+				prevented = true;
+			},
+		});
+		expect(prevented).toBe(true);
+		confirmReview.checked = true;
 		prevented = false;
 		listeners.get("submit")?.({
 			preventDefault: () => {
@@ -133,6 +168,9 @@ describe("cleaned-message confirmation", () => {
 		});
 		expect(prevented).toBe(false);
 		inputListeners.get("input")?.();
+		expect(reviewedMarker.value).toBe("");
+		expect(confirmReview.checked).toBe(false);
+		expect(confirmReview.required).toBe(false);
 		prevented = false;
 		listeners.get("submit")?.({
 			preventDefault: () => {
