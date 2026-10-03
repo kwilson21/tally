@@ -6,6 +6,7 @@ export type FeedbackValues = {
 	feeling: string;
 	message: string;
 	from: string;
+	returnTo?: string;
 };
 
 const TYPES = ["Bug", "Idea", "Question", "Other"];
@@ -18,6 +19,7 @@ export function FeedbackForm({
 	demo = false,
 	diagnosticsEnabled = false,
 	replayLinksEnabled = false,
+	replayOrigin,
 	appVersion,
 }: {
 	values: FeedbackValues;
@@ -25,6 +27,7 @@ export function FeedbackForm({
 	demo?: boolean;
 	diagnosticsEnabled?: boolean;
 	replayLinksEnabled?: boolean;
+	replayOrigin?: string;
 	appVersion?: string;
 }) {
 	return (
@@ -45,6 +48,11 @@ export function FeedbackForm({
 					data-app-version={appVersion ?? ""}
 				>
 					<input type="hidden" name="from" value={values.from} />
+					<input
+						type="hidden"
+						name="return_to"
+						value={values.returnTo ?? values.from}
+					/>
 					{diagnosticsEnabled && (
 						<fieldset class="rounded-control border border-rule bg-band p-4">
 							<label class="flex items-start gap-3">
@@ -68,7 +76,18 @@ export function FeedbackForm({
 							</label>
 							<input type="hidden" name="client_context" value="" />
 							{replayLinksEnabled && (
-								<input type="hidden" name="posthog_session_id" value="" />
+								<label class="mt-4 block text-sm">
+									<input
+										type="checkbox"
+										name="include_replay"
+										value="yes"
+										class="mr-2 size-4 accent-ink"
+									/>
+									Attach a replay link at {replayOrigin}. A separately recorded
+									replay may include screen contents and interactions. This does
+									not start recording.
+									<input type="hidden" name="posthog_session_id" value="" />
+								</label>
 							)}
 						</fieldset>
 					)}

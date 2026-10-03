@@ -13,6 +13,7 @@ type FeedbackEnv = Env & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
 	FEEDBACK_REPLAY_LINKS_ENABLED?: string;
 	POSTHOG_HOST?: string;
+	FEEDBACK_APPROVED_REPLAY_ORIGIN?: string;
 	APP_VERSION?: string;
 };
 type App = { Bindings: FeedbackEnv; Variables: { actor: string } };
@@ -39,12 +40,14 @@ const FEELINGS = new Set([
 	"Delighted",
 ]);
 
-function safePath(value: string | null) {
+function safePath(value: string | null, navigation = false) {
 	try {
 		const url = new URL(value ?? "/", "http://tally.invalid");
 		const normalized = url.pathname;
 		return url.origin === "http://tally.invalid" && /^\/[^/\\]/.test(normalized)
-			? normalized.slice(0, 160)
+			? navigation
+				? `${normalized}${url.search}`
+				: normalized.slice(0, 160)
 			: "/";
 	} catch {
 		return "/";
@@ -78,6 +81,7 @@ function view(
 		error?: string;
 		diagnosticsEnabled?: boolean;
 		replayLinksEnabled?: boolean;
+		replayOrigin?: string;
 		appVersion?: string;
 	} = {},
 ) {
@@ -93,6 +97,7 @@ function view(
 				error={options.error}
 				diagnosticsEnabled={options.diagnosticsEnabled}
 				replayLinksEnabled={options.replayLinksEnabled}
+				replayOrigin={options.replayOrigin}
 				appVersion={options.appVersion}
 			/>
 		</Layout>
@@ -101,23 +106,27 @@ function view(
 
 feedback.get("/feedback", (c) => {
 	let from = "/";
+	let returnTo = "/";
 	const referer = c.req.header("referer");
 	if (referer) {
 		try {
 			const url = new URL(referer);
-			if (url.origin === new URL(c.req.url).origin)
+			if (url.origin === new URL(c.req.url).origin) {
 				from = safePath(url.pathname);
+				returnTo = safePath(`${url.pathname}${url.search}`, true);
+			}
 		} catch {}
 	}
 	return c.html(
 		view(
-			{ type: "Bug", feeling: "Okay", message: "", from },
+			{ type: "Bug", feeling: "Okay", message: "", from, returnTo },
 			c.env.DEMO === "true",
 			{
 				diagnosticsEnabled: diagnosticsEnabled(c.env),
 				replayLinksEnabled:
 					diagnosticsEnabled(c.env) && replayLinksEnabled(c.env),
 				appVersion: c.env.APP_VERSION,
+				replayOrigin: c.env.FEEDBACK_APPROVED_REPLAY_ORIGIN,
 			},
 		),
 	);
@@ -133,6 +142,10 @@ feedback.post("/feedback", async (c) => {
 		feeling: FEELINGS.has(rawFeeling) ? rawFeeling : "Okay",
 		message: String(data.get("message") ?? "").replace(/\r\n/g, "\n"),
 		from: safePath(String(data.get("from") ?? "/")),
+		returnTo: safePath(
+			String(data.get("return_to") ?? data.get("from") ?? "/"),
+			true,
+		),
 	};
 	if (!values.message.trim() || values.message.length > 2000) {
 		return c.html(
@@ -145,6 +158,7 @@ feedback.post("/feedback", async (c) => {
 				replayLinksEnabled:
 					diagnosticsEnabled(c.env) && replayLinksEnabled(c.env),
 				appVersion: c.env.APP_VERSION,
+				replayOrigin: c.env.FEEDBACK_APPROVED_REPLAY_ORIGIN,
 			}),
 			422,
 		);
@@ -165,37 +179,42 @@ feedback.post("/feedback", async (c) => {
 	}
 	const replayUrl =
 		diagnosticsOn &&
-		data.get("include_diagnostics") === "yes" &&
+		data.get("include_replay") === "yes" &&
 		replayLinksEnabled(c.env)
 			? safeReplayUrl(data.get("posthog_session_id"), c.env.POSTHOG_HOST)
 			: null;
-	const result = await c.env.DB.prepare(
-		`INSERT INTO feedback (actor, type, feeling, message, page, device, client_context, replay_url)
-		 SELECT ?, ?, ?, ?, ?, ?, ?, ?
-		 WHERE (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
-	)
-		.bind(
-			actor,
-			values.type,
-			values.feeling,
-			values.message.trim(),
-			values.from,
-			summarizeDevice(c.req.header("user-agent") ?? ""),
+	// With all diagnostics disabled, the original schema remains sufficient.
+	const columns = diagnosticsOn ? ", client_context, replay_url" : "";
+	const placeholders = diagnosticsOn ? ", ?, ?" : "";
+	const params: (string | null)[] = [
+		actor,
+		values.type,
+		values.feeling,
+		values.message.trim(),
+		values.from,
+		summarizeDevice(c.req.header("user-agent") ?? ""),
+	];
+	if (diagnosticsOn)
+		params.push(
 			clientContext ? JSON.stringify(clientContext) : null,
 			replayUrl,
-			actor,
-		)
+		);
+	params.push(actor);
+	const result = await c.env.DB.prepare(
+		`INSERT INTO feedback (actor, type, feeling, message, page, device${columns})
+		 SELECT ?, ?, ?, ?, ?, ?${placeholders}
+		 WHERE (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
+	)
+		.bind(...params)
 		.run();
 	if (result.meta.changes === 0) {
 		return c.html(
 			view(values, false, {
 				error: "You've sent 10 messages this hour. Try again later.",
 				diagnosticsEnabled: diagnosticsOn,
-				replayLinksEnabled:
-					diagnosticsOn &&
-					data.get("include_diagnostics") === "yes" &&
-					replayLinksEnabled(c.env),
+				replayLinksEnabled: diagnosticsOn && replayLinksEnabled(c.env),
 				appVersion: c.env.APP_VERSION,
+				replayOrigin: c.env.FEEDBACK_APPROVED_REPLAY_ORIGIN,
 			}),
 			429,
 		);
@@ -211,7 +230,7 @@ feedback.post("/feedback", async (c) => {
 				),
 			);
 	}
-	const back = new URL(values.from, "http://tally.invalid");
+	const back = new URL(values.returnTo, "http://tally.invalid");
 	back.searchParams.set("sent", "feedback");
 	return c.redirect(`${back.pathname}${back.search}${back.hash}`, 303);
 });

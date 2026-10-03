@@ -35,6 +35,7 @@ type ScheduledEnv = PlaidEnv & {
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
 	FEEDBACK_REPLAY_LINKS_ENABLED?: string;
 	POSTHOG_HOST?: string;
+	FEEDBACK_APPROVED_REPLAY_ORIGIN?: string;
 	APP_VERSION?: string;
 };
 export const app = new Hono<App>();

@@ -37,18 +37,30 @@
 
 	let capturing = false;
 	let interrupted = false;
+	let generation = 0;
+	let activeFrame;
+	function cancelCapture() {
+		generation++;
+		capturing = false;
+		activeFrame?.remove();
+		activeFrame = undefined;
+	}
 	window.addEventListener("pagehide", () => {
 		interrupted = true;
+		cancelCapture();
 	});
-
 	window.addEventListener("pageshow", () => {
 		interrupted = false;
-		capturing = false;
+	});
+	document.addEventListener("htmx:beforeSwap", cancelCapture);
+	document.addEventListener("close", cancelCapture, true);
+	document.addEventListener("keydown", (event) => {
+		if (event.key === "Escape") cancelCapture();
 	});
 
 	// Only geometry crosses this boundary. Never clone the application DOM into
 	// html2canvas: text, values, CSS, images and attributes may contain finances.
-	async function captureLayout() {
+	async function captureLayout(attempt) {
 		const width = Math.min(innerWidth, 4096);
 		const height = Math.min(innerHeight, 4096);
 		const boxes = [];
@@ -83,7 +95,9 @@
 				document.head.append(script);
 			});
 		}
+		if (interrupted || attempt !== generation) return;
 		const frame = document.createElement("iframe");
+		activeFrame = frame;
 		frame.title = "Redacted layout renderer";
 		frame.setAttribute("aria-hidden", "true");
 		frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;height:${height}px;border:0;`;
@@ -117,13 +131,14 @@
 			]).finally(() => clearTimeout(renderTimer));
 			const image = canvas.toDataURL("image/jpeg", 0.7);
 			if (image.length > 680000) throw new Error("Preview too large");
-			if (interrupted) return;
+			if (interrupted || attempt !== generation) return;
 			sessionStorage.setItem(
 				screenshotKey,
 				JSON.stringify({ image, at: Date.now() }),
 			);
 		} finally {
 			frame.remove();
+			if (activeFrame === frame) activeFrame = undefined;
 		}
 	}
 
@@ -145,6 +160,7 @@
 			event.preventDefault();
 			if (capturing) return;
 			capturing = true;
+			const attempt = ++generation;
 			try {
 				sessionStorage.removeItem(screenshotKey);
 			} catch {
@@ -156,15 +172,17 @@
 				)
 			) {
 				try {
-					await captureLayout();
+					await captureLayout(attempt);
 				} catch {
-					window.alert(
-						"The layout preview could not be created. You can still send feedback.",
-					);
+					if (attempt === generation && !interrupted)
+						window.alert(
+							"The layout preview could not be created. You can still send feedback.",
+						);
 				}
 			}
-			if (!interrupted) window.location.assign(link.href);
-			capturing = false;
+			if (!interrupted && attempt === generation)
+				window.location.assign(link.href);
+			if (attempt === generation) capturing = false;
 		});
 	}
 
@@ -212,6 +230,7 @@
 	}
 	const details = form.querySelector('[name="client_context"]');
 	const include = form.querySelector('[name="include_diagnostics"]');
+	const replayConsent = form.querySelector('[name="include_replay"]');
 	const replay = form.querySelector('[name="posthog_session_id"]');
 	let lastError = "";
 	try {
@@ -240,7 +259,7 @@
 		}
 		if (
 			replay &&
-			include?.checked &&
+			replayConsent?.checked &&
 			typeof window.posthog?.get_session_id === "function"
 		) {
 			const sessionId = window.posthog.get_session_id();

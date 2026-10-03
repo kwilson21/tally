@@ -41,6 +41,7 @@ function productionApp(
 					FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
 					FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
 					POSTHOG_HOST: "https://us.i.posthog.com",
+					FEEDBACK_APPROVED_REPLAY_ORIGIN: "https://us.i.posthog.com",
 					APP_VERSION: options.appVersion,
 				} as unknown as Env,
 				{ waitUntil, passThroughOnException() {}, props: {} },
@@ -137,6 +138,7 @@ describe("feedback diagnostic safeguards", () => {
 			replayLinksEnabled({
 				FEEDBACK_REPLAY_LINKS_ENABLED: "true",
 				POSTHOG_HOST: "https://us.i.posthog.com",
+				FEEDBACK_APPROVED_REPLAY_ORIGIN: "https://us.i.posthog.com",
 			}),
 		).toBe(true);
 		expect(safeReplayUrl("abc/../../x", "https://us.i.posthog.com")).toBeNull();
@@ -184,7 +186,7 @@ describe("feedback form", () => {
 			type: "Idea",
 			feeling: "Happy",
 			message: "A useful thought",
-			page: "/settings?open=3",
+			page: "/settings",
 			device: "iPhone Safari",
 		});
 	});
@@ -210,6 +212,7 @@ describe("feedback form", () => {
 				message: "A fake diagnostic fixture",
 				from: "/accounts?private=1",
 				include_diagnostics: "yes",
+				include_replay: "yes",
 				client_context: JSON.stringify(context),
 			}),
 		);
@@ -249,6 +252,7 @@ describe("feedback form", () => {
 				message: "Fixture only",
 				from: "/accounts",
 				include_diagnostics: "yes",
+				include_replay: "yes",
 				client_context: context,
 				posthog_session_id: "fake-session-id",
 			}),
@@ -290,6 +294,7 @@ describe("feedback form", () => {
 				message: "Fixture only",
 				from: "/accounts",
 				include_diagnostics: "yes",
+				include_replay: "yes",
 				client_context: JSON.stringify({
 					userAgent:
 						"Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Version/18.2 Mobile Safari/604.1",
@@ -696,7 +701,7 @@ it("lets browsers send the page to /feedback as a same-origin Referer", async ()
 	expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
 });
 
-it("keeps a backtick in the page from closing its code span", async () => {
+it("strips legacy query strings before filing feedback", async () => {
 	await env.DB.prepare(
 		"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Bug', 'Okay', 'Hi', ?, 'Desktop Chrome')",
 	)
@@ -707,9 +712,7 @@ it("keeps a backtick in the page from closing its code span", async () => {
 	);
 	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
 	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
-	expect(JSON.parse(String(init.body)).body).toContain(
-		"Page: `` /accounts?x=`@someone ``",
-	);
+	expect(JSON.parse(String(init.body)).body).toContain("Page: ` /accounts `");
 });
 
 it("files a report whose page has a huge number of backtick runs", async () => {

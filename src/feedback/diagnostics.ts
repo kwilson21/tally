@@ -127,8 +127,13 @@ export function injectDiagnosticsScript(
 export function replayLinksEnabled(env: {
 	FEEDBACK_REPLAY_LINKS_ENABLED?: string;
 	POSTHOG_HOST?: string;
+	FEEDBACK_APPROVED_REPLAY_ORIGIN?: string;
 }) {
-	if (env.FEEDBACK_REPLAY_LINKS_ENABLED !== "true" || !env.POSTHOG_HOST)
+	if (
+		env.FEEDBACK_REPLAY_LINKS_ENABLED !== "true" ||
+		!env.POSTHOG_HOST ||
+		!env.FEEDBACK_APPROVED_REPLAY_ORIGIN
+	)
 		return false;
 	try {
 		const host = new URL(env.POSTHOG_HOST);
@@ -138,7 +143,8 @@ export function replayLinksEnabled(env: {
 			!host.password &&
 			!host.search &&
 			!host.hash &&
-			host.pathname === "/"
+			host.pathname === "/" &&
+			host.origin === env.FEEDBACK_APPROVED_REPLAY_ORIGIN
 		);
 	} catch {
 		return false;

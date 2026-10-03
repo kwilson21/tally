@@ -51,7 +51,7 @@ async function fixture({
 			});
 		const feedback = url.pathname === "/feedback";
 		const body = feedback
-			? '<form action="/feedback"><input name="from" value="/source"><textarea name="message">Synthetic</textarea></form>'
+			? '<form action="/feedback"><input name="from" value="/source"><input type="checkbox" name="include_diagnostics"><input name="client_context" type="hidden"><input type="checkbox" name="include_replay"><input name="posthog_session_id" type="hidden"><textarea name="message">Synthetic</textarea></form>'
 			: '<main><p>FAKE Merchant SECRET 123456789 $987.65 note</p><input value="FAKE SECRET typed"><img alt="SECRET image"><svg><text>SECRET chart</text></svg><div id="modal">SECRET modal</div></main><a href="/feedback?from=/source">Feedback</a>';
 		return route.fulfill({
 			contentType: "text/html",
@@ -223,6 +223,48 @@ try {
 			null,
 		);
 		assert.equal(await f.page.locator("iframe").count(), 0);
+		await f.context.close();
+	});
+	for (const event of ["htmx:beforeSwap", "close", "Escape"])
+		await test(`cancel pending capture: ${event}`, async () => {
+			const f = await fixture({ mode: "delay" });
+			await f.page.evaluate((event) => {
+				document.querySelector("a").click();
+				if (event === "Escape")
+					document.dispatchEvent(
+						new KeyboardEvent("keydown", { key: "Escape" }),
+					);
+				else document.dispatchEvent(new Event(event));
+			}, event);
+			await f.page.waitForTimeout(500);
+			assert.ok(f.page.url().endsWith("/source"));
+			assert.equal(
+				await f.page.evaluate(() =>
+					sessionStorage.getItem("tally-feedback-layout-preview"),
+				),
+				null,
+			);
+			assert.equal(await f.page.locator("iframe").count(), 0);
+			await f.page.getByRole("link", { name: "Feedback", exact: true }).click();
+			await f.page.waitForURL(/\/feedback\?/);
+			await f.page.getByRole("button", { name: "Remove preview" }).waitFor();
+			await f.context.close();
+		});
+	await test("client requires replay consent independently of technical details", async () => {
+		const f = await fixture({ enabled: false });
+		await f.page.goto("http://fixture.test/feedback");
+		const result = await f.page.evaluate(() => {
+			window.posthog = { get_session_id: () => "fake-session" };
+			const form = document.querySelector("form");
+			form.querySelector('[name="include_diagnostics"]').checked = true;
+			form.dispatchEvent(new Event("submit"));
+			const before = form.querySelector('[name="posthog_session_id"]').value;
+			form.querySelector('[name="include_diagnostics"]').checked = false;
+			form.querySelector('[name="include_replay"]').checked = true;
+			form.dispatchEvent(new Event("submit"));
+			return [before, form.querySelector('[name="posthog_session_id"]').value];
+		});
+		assert.deepEqual(result, ["", "fake-session"]);
 		await f.context.close();
 	});
 	console.log(`${passed} synthetic browser checks passed`);

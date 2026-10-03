@@ -51,15 +51,21 @@ describe("actual app diagnostics middleware", () => {
 });
 function fakeDb() {
 	const binds: unknown[][] = [];
+	const statements: string[] = [];
 	const db = {
-		prepare: (_sql: string) => ({
-			bind: (...args: unknown[]) => {
-				binds.push(args);
-				return { run: async () => ({ meta: { changes: 1, last_row_id: 1 } }) };
-			},
-		}),
+		prepare: (_sql: string) => {
+			statements.push(_sql);
+			return {
+				bind: (...args: unknown[]) => {
+					binds.push(args);
+					return {
+						run: async () => ({ meta: { changes: 1, last_row_id: 1 } }),
+					};
+				},
+			};
+		},
 	};
-	return { db: db as unknown as D1Database, binds };
+	return { db: db as unknown as D1Database, binds, statements };
 }
 describe("feedback route privacy", () => {
 	it("drops sensitive Referer query and fragment before rendering", async () => {
@@ -73,8 +79,10 @@ describe("feedback route privacy", () => {
 		);
 		const html = await response.text();
 		expect(html).toContain('name="from" value="/transactions"');
-		expect(html).not.toContain("SECRET");
-		expect(html).not.toContain("12345");
+		expect(html).toContain(
+			'name="return_to" value="/transactions?q=SECRET-merchant&amp;amount=12345"',
+		);
+		expect(html).not.toContain("#SECRET-note");
 	});
 	it("rejects cross-origin Referer", async () => {
 		const response = await app.fetch(
@@ -110,7 +118,7 @@ describe("feedback route privacy", () => {
 				from.startsWith("/transactions") ? "/transactions" : "/",
 			);
 			expect(JSON.stringify(binds)).not.toContain("SECRET");
-			expect(response.headers.get("location")).not.toContain("SECRET");
+			expect(response.headers.get("location")).not.toContain("#SECRET");
 		});
 	it("scrubs legacy page queries before filing the issue", async () => {
 		const { db } = fakeDb();
@@ -134,4 +142,84 @@ describe("feedback route privacy", () => {
 		expect(body).toContain("transactions");
 		expect(body).not.toContain("SECRET");
 	});
+});
+
+it("uses only legacy columns when diagnostics are disabled", async () => {
+	const { db, statements } = fakeDb();
+	await app.fetch(
+		new Request(`${base}/feedback`, {
+			method: "POST",
+			headers: { Origin: base },
+			body: new URLSearchParams({
+				type: "Bug",
+				feeling: "Okay",
+				message: "Fixture",
+				from: "/",
+			}),
+		}),
+		{ ...bindings(), DB: db },
+	);
+	expect(statements[0]).not.toContain("client_context");
+	expect(statements[0]).not.toContain("replay_url");
+});
+for (const consent of [false, true])
+	it(`requires separate replay consent: ${consent}`, async () => {
+		const { db, binds } = fakeDb();
+		await app.fetch(
+			new Request(`${base}/feedback`, {
+				method: "POST",
+				headers: { Origin: base },
+				body: new URLSearchParams({
+					type: "Bug",
+					feeling: "Okay",
+					message: "Fixture",
+					from: "/",
+					include_diagnostics: "yes",
+					include_replay: consent ? "yes" : "",
+					posthog_session_id: "fake-session",
+				}),
+			}),
+			{
+				...bindings({
+					FEEDBACK_DIAGNOSTICS_ENABLED: "true",
+					FEEDBACK_REPLAY_LINKS_ENABLED: "true",
+					POSTHOG_HOST: "https://replay.example.test",
+					FEEDBACK_APPROVED_REPLAY_ORIGIN: "https://replay.example.test",
+				}),
+				DB: db,
+			},
+		);
+		expect(binds[0]?.[7]).toBe(
+			consent ? "https://replay.example.test/replay/fake-session" : null,
+		);
+	});
+it("does not offer replay for an unapproved host", async () => {
+	const response = await app.fetch(
+		new Request(`${base}/feedback`),
+		bindings({
+			FEEDBACK_DIAGNOSTICS_ENABLED: "true",
+			FEEDBACK_REPLAY_LINKS_ENABLED: "true",
+			POSTHOG_HOST: "https://other.example.test",
+			FEEDBACK_APPROVED_REPLAY_ORIGIN: "https://replay.example.test",
+		}),
+	);
+	expect(await response.text()).not.toContain('name="include_replay"');
+});
+it("discloses the approved replay destination with independent unchecked consent", async () => {
+	const response = await app.fetch(
+		new Request(`${base}/feedback`),
+		bindings({
+			FEEDBACK_DIAGNOSTICS_ENABLED: "true",
+			FEEDBACK_REPLAY_LINKS_ENABLED: "true",
+			POSTHOG_HOST: "https://replay.example.test",
+			FEEDBACK_APPROVED_REPLAY_ORIGIN: "https://replay.example.test",
+		}),
+	);
+	const html = await response.text();
+	expect(html).toContain(
+		"A separately recorded replay may include screen contents",
+	);
+	expect(html).toContain("replay.example.test");
+	expect(html).toMatch(/name="include_replay"[^>]*>/);
+	expect(html).not.toMatch(/name="include_replay"[^>]*checked/);
 });
