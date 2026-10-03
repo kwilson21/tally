@@ -778,7 +778,7 @@ function Feedback() {
 				title="FeedbackForm"
 				tier="visual"
 				components={["FeedbackForm"]}
-				sentence="Two groups of radio chips and a labeled message give the builder a small, direct report."
+				sentence="Feedback stores a verified email, submission time, and report details in Cloudflare D1; configured private GitHub filing omits the email and submission time."
 			>
 				{/* Only the form is inert: its title and sentence stay readable to screen readers. */}
 				<div inert>

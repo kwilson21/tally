@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
 import { fileFeedbackIssue } from "../src/routes/feedback";
@@ -5,7 +6,22 @@ import { fileFeedbackIssue } from "../src/routes/feedback";
 vi.mock("../src/access", () => ({
 	verifiedEmail: async () => "fixture@example.test",
 }));
+vi.mock("../src/routes/feedback", async (importOriginal) => {
+	const original =
+		await importOriginal<typeof import("../src/routes/feedback")>();
+	return original;
+});
 const base = "http://fixture.test";
+it("keeps Worker discovery out of the separate Node verification suite", async () => {
+	const config = await readFile(
+		new URL("../vitest.config.ts", import.meta.url),
+		"utf8",
+	);
+	expect(config).toContain(
+		'include: ["test/**/*.test.ts", "test/**/*.test.tsx"]',
+	);
+	expect(config).toContain("verification tests use the separate Node config");
+});
 app.get("/__feedback-fragment-fixture", (c) =>
 	c.html("<p>synthetic fragment</p>", 202),
 );
@@ -25,6 +41,10 @@ describe("actual app diagnostics middleware", () => {
 			);
 			const html = await response.text();
 			expect(html).toContain("Send feedback");
+			expect(html).toContain("deterministic pattern redaction");
+			expect(html).toContain("cannot reliably identify arbitrary names");
+			expect(html).toContain("GitHub filing receives");
+			expect(html).toContain("without the sign-in email");
 			expect(html).toContain("</body>");
 			expect(html.includes("/js/feedback-diagnostics.js")).toBe(enabled);
 		});
@@ -68,6 +88,101 @@ function fakeDb() {
 	return { db: db as unknown as D1Database, binds, statements };
 }
 describe("feedback route privacy", () => {
+	it("issues an opaque hourly feedback limiter cookie", async () => {
+		const response = await app.fetch(
+			new Request(`${base}/feedback`),
+			bindings(),
+		);
+		const cookie = response.headers.get("set-cookie") ?? "";
+		expect(cookie).toMatch(/__Host-tally-feedback-limit=[0-9a-f-]{36}/i);
+		expect(cookie).toContain("HttpOnly");
+		expect(cookie).toContain("Secure");
+		expect(cookie).toContain("Max-Age=3600");
+		expect(cookie).not.toContain("fixture@example.test");
+	});
+	it("stores sanitized text, route and coarse device under the random limiter ID", async () => {
+		const { db, binds, statements } = fakeDb();
+		const limiter = "123e4567-e89b-12d3-a456-426614174000";
+		const response = await app.fetch(
+			new Request(`${base}/feedback`, {
+				method: "POST",
+				headers: {
+					Origin: base,
+					Cookie: `__Host-tally-feedback-limit=${limiter}`,
+					"User-Agent": "Riley Example riley@example.test account 123456789",
+				},
+				body: new URLSearchParams({
+					type: "Bug",
+					feeling: "Okay",
+					message:
+						"Contact riley@example.test at 42 Oak Street, account 123456789, charge $842.19. Riley Example saw it.",
+					from: "/transactions/tx_123?merchant=Riley#secret",
+					device_category: "phone",
+					client_context: JSON.stringify({ userAgent: "riley@example.test" }),
+					posthog_session_id: "fake-session",
+				}),
+			}),
+			{
+				...bindings({
+					FEEDBACK_DIAGNOSTICS_ENABLED: "true",
+					FEEDBACK_REPLAY_LINKS_ENABLED: "true",
+				}),
+				DB: db,
+			},
+		);
+		expect(response.status).toBe(303);
+		expect(statements[0]).not.toContain("replay_url");
+		expect(binds[0]?.[0]).toBe(limiter);
+		expect(binds[0]?.[3]).toContain("[email removed]");
+		expect(binds[0]?.[3]).toContain("[address removed]");
+		expect(binds[0]?.[3]).toContain("[account detail removed]");
+		expect(binds[0]?.[3]).toContain("[amount removed]");
+		expect(binds[0]?.[3]).not.toContain("Riley Example");
+		expect(binds[0]?.[4]).toBe("/transactions");
+		expect(binds[0]?.[5]).toBe("Unknown");
+		expect(JSON.stringify(binds)).not.toContain("riley@example.test");
+		expect(JSON.stringify(binds)).not.toContain("123456789");
+		expect(JSON.stringify(binds)).not.toContain("fake-session");
+	});
+	it("sanitizes legacy D1 feedback again before GitHub retry/file", async () => {
+		const { db } = fakeDb();
+		let body = "";
+		await fileFeedbackIssue(
+			db,
+			"fixture-token",
+			{
+				id: 2,
+				type: "Bug",
+				feeling: "Okay",
+				message:
+					"Riley Example riley@example.test +1 (415) 555-0137, 42 Oak Street, account 123456789, charge $842.19 https://private.test/?token=secret",
+				page: "/transactions/record-123?merchant=Riley#secret",
+				device: "Riley Example riley@example.test",
+				client_context: JSON.stringify({
+					error: "riley@example.test",
+					browserVersion: "Riley Example",
+				}),
+				replay_url: "https://replay.example/replay/private-session",
+				attempts: 0,
+			},
+			(async (_url, init) => {
+				body = String(init?.body);
+				return new Response(JSON.stringify({ number: 2 }), { status: 201 });
+			}) as typeof fetch,
+		);
+		for (const secret of [
+			"Riley",
+			"riley@example.test",
+			"555-0137",
+			"Oak Street",
+			"123456789",
+			"842.19",
+			"record-123",
+			"token=secret",
+			"private-session",
+		])
+			expect(body).not.toContain(secret);
+	});
 	it("drops sensitive Referer query and fragment before rendering", async () => {
 		const response = await app.fetch(
 			new Request(`${base}/feedback`, {
@@ -83,6 +198,17 @@ describe("feedback route privacy", () => {
 			'name="return_to" value="/transactions?q=SECRET-merchant&amp;amount=12345"',
 		);
 		expect(html).not.toContain("#SECRET-note");
+	});
+	it("preserves the root route query for return navigation", async () => {
+		const response = await app.fetch(
+			new Request(`${base}/feedback`, {
+				headers: { Referer: `${base}/?adjust=1` },
+			}),
+			bindings(),
+		);
+		const html = await response.text();
+		expect(html).toContain('name="from" value="/"');
+		expect(html).toContain('name="return_to" value="/?adjust=1"');
 	});
 	it("rejects cross-origin Referer", async () => {
 		const response = await app.fetch(
@@ -103,7 +229,11 @@ describe("feedback route privacy", () => {
 			const response = await app.fetch(
 				new Request(`${base}/feedback`, {
 					method: "POST",
-					headers: { Origin: base },
+					headers: {
+						Origin: base,
+						Cookie:
+							"__Host-tally-feedback-limit=123e4567-e89b-12d3-a456-426614174000",
+					},
 					body: new URLSearchParams({
 						type: "Bug",
 						feeling: "Okay",
@@ -115,7 +245,7 @@ describe("feedback route privacy", () => {
 			);
 			expect(response.status).toBe(303);
 			expect(binds[0]?.[4]).toBe(
-				from.startsWith("/transactions") ? "/transactions" : "/",
+				from.startsWith("/transactions") ? "/transactions" : "/other",
 			);
 			expect(JSON.stringify(binds)).not.toContain("SECRET");
 			expect(response.headers.get("location")).not.toContain("#SECRET");
@@ -149,7 +279,11 @@ it("uses only legacy columns when diagnostics are disabled", async () => {
 	await app.fetch(
 		new Request(`${base}/feedback`, {
 			method: "POST",
-			headers: { Origin: base },
+			headers: {
+				Origin: base,
+				Cookie:
+					"__Host-tally-feedback-limit=123e4567-e89b-12d3-a456-426614174000",
+			},
 			body: new URLSearchParams({
 				type: "Bug",
 				feeling: "Okay",
@@ -163,12 +297,16 @@ it("uses only legacy columns when diagnostics are disabled", async () => {
 	expect(statements[0]).not.toContain("replay_url");
 });
 for (const consent of [false, true])
-	it(`requires separate replay consent: ${consent}`, async () => {
-		const { db, binds } = fakeDb();
+	it(`ignores replay identifiers regardless of checkbox: ${consent}`, async () => {
+		const { db, binds, statements } = fakeDb();
 		await app.fetch(
 			new Request(`${base}/feedback`, {
 				method: "POST",
-				headers: { Origin: base },
+				headers: {
+					Origin: base,
+					Cookie:
+						"__Host-tally-feedback-limit=123e4567-e89b-12d3-a456-426614174000",
+				},
 				body: new URLSearchParams({
 					type: "Bug",
 					feeling: "Okay",
@@ -189,11 +327,10 @@ for (const consent of [false, true])
 				DB: db,
 			},
 		);
-		expect(binds[0]?.[7]).toBe(
-			consent ? "https://replay.example.test/replay/fake-session" : null,
-		);
+		expect(statements[0]).not.toContain("replay_url");
+		expect(JSON.stringify(binds)).not.toContain("fake-session");
 	});
-it("does not offer replay for an unapproved host", async () => {
+it("does not offer replay while no pinned SDK and payload proof exist", async () => {
 	const response = await app.fetch(
 		new Request(`${base}/feedback`),
 		bindings({
@@ -205,7 +342,7 @@ it("does not offer replay for an unapproved host", async () => {
 	);
 	expect(await response.text()).not.toContain('name="include_replay"');
 });
-it("discloses the approved replay destination with independent unchecked consent", async () => {
+it("keeps recorder consent and session identifiers out of the form", async () => {
 	const response = await app.fetch(
 		new Request(`${base}/feedback`),
 		bindings({
@@ -216,10 +353,7 @@ it("discloses the approved replay destination with independent unchecked consent
 		}),
 	);
 	const html = await response.text();
-	expect(html).toContain(
-		"A separately recorded replay may include screen contents",
-	);
-	expect(html).toContain("replay.example.test");
-	expect(html).toMatch(/name="include_replay"[^>]*>/);
-	expect(html).not.toMatch(/name="include_replay"[^>]*checked/);
+	expect(html).not.toContain('name="include_replay"');
+	expect(html).not.toContain('name="posthog_session_id"');
+	expect(html).not.toContain("replay.example.test");
 });

@@ -18,36 +18,46 @@ export function FeedbackForm({
 	error,
 	demo = false,
 	diagnosticsEnabled = false,
-	replayLinksEnabled = false,
-	replayOrigin,
-	appVersion,
 }: {
 	values: FeedbackValues;
 	error?: string;
 	demo?: boolean;
 	diagnosticsEnabled?: boolean;
-	replayLinksEnabled?: boolean;
-	replayOrigin?: string;
-	appVersion?: string;
 }) {
 	return (
 		<div class="max-w-2xl">
 			<h1 class="font-serif text-4xl font-semibold">Send feedback</h1>
 			<p class="mt-2 text-muted">
-				Goes straight to the person who builds Tally.
+				Before a new report is sent, Tally applies deterministic pattern
+				redaction to recognizable links, email addresses, phone numbers, labeled
+				passwords, tokens, API keys, authorization values, street addresses,
+				account-like numbers, currency amounts, IPv4-formatted addresses, and
+				some title-case name patterns, then asks you to review the cleaned text.
+				It cannot reliably identify arbitrary names or every sensitive detail in
+				prose; inspect the text and remove anything you do not want to send. The
+				Worker repeats redaction before storage and private GitHub filing. New
+				feedback records do not include your sign-in email. A random one-hour
+				limiter cookie provides a best-effort per-browser rate limit; it can be
+				cleared and is not a person-level identity or security boundary. Tally
+				stores the report type, feeling, cleaned message, approved route
+				category, coarse device category, and submission time in Cloudflare D1.
+				Private GitHub filing receives the cleaned report fields without the
+				sign-in email or submission time. This is best-effort redaction, not a
+				guarantee that a report contains no personal information.
 			</p>
 			{demo ? (
 				<p class="mt-8 rounded-control border border-rule bg-band p-4">
 					Feedback is off in the demo. Sign in to your Tally to send it.
 				</p>
 			) : (
-				<form
-					method="post"
-					action="/feedback"
-					class="mt-8 grid gap-7"
-					data-app-version={appVersion ?? ""}
-				>
+				<form method="post" action="/feedback" class="mt-8 grid gap-7">
 					<input type="hidden" name="from" value={values.from} />
+					<input
+						type="hidden"
+						name="device_category"
+						value="Unknown"
+						data-feedback-device-category
+					/>
 					<input
 						type="hidden"
 						name="return_to"
@@ -67,28 +77,14 @@ export function FeedbackForm({
 										Attach technical details
 									</span>
 									<span class="mt-1 block text-sm text-muted">
-										Optional: route, browser and OS versions, screen size, app
-										build, and the type of a recent browser error. It excludes
-										screen contents, amounts, account details, notes, and error
-										text.
+										Optional: approved route category, coarse device category,
+										and a generic allowlisted browser-error type. It excludes
+										raw user-agent text, screen dimensions, versions, error
+										text, stacks, screen contents, and financial values.
 									</span>
 								</span>
 							</label>
 							<input type="hidden" name="client_context" value="" />
-							{replayLinksEnabled && (
-								<label class="mt-4 block text-sm">
-									<input
-										type="checkbox"
-										name="include_replay"
-										value="yes"
-										class="mr-2 size-4 accent-ink"
-									/>
-									Attach a replay link at {replayOrigin}. A separately recorded
-									replay may include screen contents and interactions. This does
-									not start recording.
-									<input type="hidden" name="posthog_session_id" value="" />
-								</label>
-							)}
 						</fieldset>
 					)}
 					{error && (
@@ -143,6 +139,16 @@ export function FeedbackForm({
 						>
 							{values.message}
 						</textarea>
+						<p class="mt-2 text-sm text-muted">
+							Automatic redaction can miss names and identifying details in
+							ordinary prose. Review the cleaned text before sending.
+						</p>
+						<div
+							id="feedback-redaction-review"
+							class="mt-3 rounded-control border border-rule bg-band p-3"
+							role="status"
+							hidden
+						/>
 					</div>
 					<div>
 						<Button type="submit">Send</Button>

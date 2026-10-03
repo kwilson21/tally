@@ -33,10 +33,6 @@ type ScheduledEnv = PlaidEnv & {
 	FEEDBACK_GITHUB_TOKEN?: string;
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
-	FEEDBACK_REPLAY_LINKS_ENABLED?: string;
-	POSTHOG_HOST?: string;
-	FEEDBACK_APPROVED_REPLAY_ORIGIN?: string;
-	APP_VERSION?: string;
 };
 export const app = new Hono<App>();
 
@@ -85,6 +81,7 @@ app.use("*", async (c, next) => {
 // It performs no network requests and stores only a generic error name in sessionStorage.
 app.use("*", async (c, next) => {
 	await next();
+	if (!c.res) return;
 	if (
 		c.env.DEMO === "true" ||
 		c.env.FEEDBACK_DIAGNOSTICS_ENABLED !== "true" ||
@@ -103,18 +100,11 @@ app.use("*", async (c, next) => {
 		});
 		return;
 	}
-	c.res = new Response(
-		injectDiagnosticsScript(
-			html,
-			true,
-			c.env.FEEDBACK_SCREENSHOT_PREVIEW_ENABLED === "true",
-		),
-		{
-			status: response.status,
-			statusText: response.statusText,
-			headers,
-		},
-	);
+	c.res = new Response(injectDiagnosticsScript(html, true), {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
 });
 
 app.route("/", health);

@@ -1,3 +1,10 @@
+import {
+	buildSafeScreenshotTree,
+	SAFE_COPY,
+	safeFeedbackReturnPath,
+	sanitizeFeedbackRoute,
+} from "./feedback-privacy.js";
+
 (() => {
 	const allowedErrors = new Set([
 		"AbortError",
@@ -11,263 +18,240 @@
 		"UnknownError",
 	]);
 	const errorKey = "tally-last-client-error";
+	const screenshotKey = "tally-feedback-layout-preview";
+	// Pixel/OCR acceptance has not run. A markup attribute or Wrangler flag cannot bypass this gate.
+	const screenshotEnabled = false;
+	let lastError = "";
 
 	function rememberError(name) {
 		if (!allowedErrors.has(name)) return;
 		try {
-			sessionStorage.setItem(
-				errorKey,
-				JSON.stringify({ name, at: Date.now() }),
-			);
+			sessionStorage.setItem(errorKey, JSON.stringify({ name }));
 		} catch {
-			// Storage can be unavailable in private browsing; diagnostics remain optional.
+			// Optional and local only.
 		}
 	}
+	window.addEventListener("error", (event) =>
+		rememberError(event.error?.name ?? ""),
+	);
+	window.addEventListener("unhandledrejection", (event) =>
+		rememberError(event.reason?.name ?? ""),
+	);
 
-	window.addEventListener("error", (event) => {
-		rememberError(event.error?.name ?? "");
-	});
-	window.addEventListener("unhandledrejection", (event) => {
-		rememberError(event.reason?.name ?? "");
-	});
-
-	const screenshotKey = "tally-feedback-layout-preview";
-	const previewEnabled =
-		document.currentScript?.dataset.screenshotPreview === "true";
-
-	let capturing = false;
-	let interrupted = false;
-	let generation = 0;
-	let activeFrame;
-	function cancelCapture() {
-		generation++;
-		capturing = false;
-		activeFrame?.remove();
-		activeFrame = undefined;
+	function captureInput(node) {
+		const attrs = {};
+		for (const key of [
+			"data-feedback-capture-layout",
+			"data-feedback-capture-copy",
+			"data-feedback-private",
+			"data-private",
+		]) {
+			if (node.hasAttribute(key)) attrs[key] = node.getAttribute(key) ?? "";
+		}
+		// Class is inspected only for the block marker and is never serialized.
+		attrs.class = typeof node.className === "string" ? node.className : "";
+		const input = { tagName: node.tagName, attributes: attrs };
+		const copyId = attrs["data-feedback-capture-copy"];
+		if (copyId !== undefined) {
+			input.textContent = SAFE_COPY[copyId] ?? "";
+			input.children = Array.from(node.children, (child) => ({
+				tagName: child.tagName,
+			}));
+		} else if (attrs["data-feedback-capture-layout"] !== undefined) {
+			input.children = Array.from(node.children)
+				.filter(
+					(child) =>
+						child.hasAttribute("data-feedback-capture-layout") ||
+						child.hasAttribute("data-feedback-capture-copy"),
+				)
+				.map(captureInput);
+		}
+		if (
+			attrs["data-feedback-capture-copy"] !== undefined ||
+			attrs["data-feedback-capture-layout"] !== undefined
+		) {
+			const style = getComputedStyle(node);
+			input.styles = {};
+			for (const name of [
+				"display",
+				"position",
+				"color",
+				"background-color",
+				"font-family",
+				"font-size",
+				"font-weight",
+				"font-style",
+				"line-height",
+				"text-align",
+				"white-space",
+				"border-color",
+				"border-width",
+				"border-style",
+				"border-radius",
+				"gap",
+				"flex-direction",
+				"align-items",
+				"justify-content",
+				"grid-template-columns",
+				"padding-top",
+				"padding-right",
+				"padding-bottom",
+				"padding-left",
+				"margin-top",
+				"margin-right",
+				"margin-bottom",
+				"margin-left",
+			])
+				input.styles[name] = style.getPropertyValue(name);
+			const rect = node.getBoundingClientRect();
+			input.rect = {
+				x: rect.x,
+				y: rect.y,
+				width: rect.width,
+				height: rect.height,
+			};
+		}
+		return input;
 	}
-	window.addEventListener("pagehide", () => {
-		interrupted = true;
-		cancelCapture();
-	});
-	window.addEventListener("pageshow", () => {
-		interrupted = false;
-	});
-	document.addEventListener("htmx:beforeSwap", cancelCapture);
-	document.addEventListener("close", cancelCapture, true);
-	document.addEventListener("keydown", (event) => {
-		if (event.key === "Escape") cancelCapture();
-	});
 
-	// Only geometry crosses this boundary. Never clone the application DOM into
-	// html2canvas: text, values, CSS, images and attributes may contain finances.
-	async function captureLayout(attempt) {
+	async function captureReviewedShell(attempt, generation, interrupted) {
+		if (!screenshotEnabled || !window.html2canvas)
+			throw new Error("Preview capture is disabled");
 		const width = Math.min(innerWidth, 4096);
 		const height = Math.min(innerHeight, 4096);
-		const boxes = [];
-		for (const node of document.body.querySelectorAll("*")) {
-			if (boxes.length >= 3000) break;
-			const style = getComputedStyle(node);
-			if (style.display === "none" || style.visibility === "hidden") continue;
-			const rect = node.getBoundingClientRect();
-			const left = Math.max(0, rect.left);
-			const top = Math.max(0, rect.top);
-			const right = Math.min(width, rect.right);
-			const bottom = Math.min(height, rect.bottom);
-			if (right > left && bottom > top)
-				boxes.push({ left, top, width: right - left, height: bottom - top });
-		}
-		if (!window.html2canvas) {
-			await new Promise((resolve, reject) => {
-				const script = document.createElement("script");
-				script.src = "/vendor/html2canvas.min.js";
-				const timer = setTimeout(
-					() => reject(new Error("Renderer timeout")),
-					10000,
-				);
-				script.onload = () => {
-					clearTimeout(timer);
-					resolve();
-				};
-				script.onerror = () => {
-					clearTimeout(timer);
-					reject(new Error("Renderer unavailable"));
-				};
-				document.head.append(script);
-			});
-		}
-		if (interrupted || attempt !== generation) return;
+		const safeTree = buildSafeScreenshotTree(captureInput(document.body));
+		if (safeTree.length !== 1 || safeTree[0].tagName !== "BODY")
+			throw new Error("Safe screenshot root unavailable");
+		if (interrupted.value || attempt !== generation.value) return;
 		const frame = document.createElement("iframe");
-		activeFrame = frame;
-		frame.title = "Redacted layout renderer";
+		frame.title = "Sanitized static interface preview";
 		frame.setAttribute("aria-hidden", "true");
+		frame.setAttribute("sandbox", "allow-same-origin");
 		frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;height:${height}px;border:0;`;
 		document.body.append(frame);
 		try {
 			const doc = frame.contentDocument;
-			if (!doc) throw new Error("Renderer unavailable");
-			doc.body.style.cssText = `margin:0;background:#fff;width:${width}px;height:${height}px;`;
-			for (const box of boxes) {
-				const block = doc.createElement("div");
-				block.style.cssText = `position:absolute;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;box-sizing:border-box;border:1px solid #bbb;background:#eee;`;
-				doc.body.append(block);
+			if (!doc?.body) throw new Error("Isolated renderer unavailable");
+			doc.body.style.cssText = `position:relative;margin:0;overflow:hidden;background:#fff;width:${width}px;height:${height}px;`;
+			function render(node, parent) {
+				if (node.tagName === "BODY") {
+					for (const child of node.children) render(child, parent);
+					return;
+				}
+				const element = doc.createElement(node.tagName.toLowerCase());
+				for (const [name, value] of Object.entries(node.styles))
+					element.style.setProperty(name, value);
+				if (node.rect) {
+					element.style.position = "absolute";
+					element.style.left = `${node.rect.x}px`;
+					element.style.top = `${node.rect.y}px`;
+					element.style.width = `${node.rect.width}px`;
+					element.style.height = `${node.rect.height}px`;
+				}
+				if (node.text) element.textContent = node.text;
+				parent.append(element);
+				for (const child of node.children) render(child, element);
 			}
-			let renderTimer;
-			const canvas = await Promise.race([
-				window.html2canvas(doc.body, {
-					width,
-					height,
-					scale: 1,
-					logging: false,
-					useCORS: false,
-					allowTaint: false,
-					backgroundColor: "#fff",
-				}),
-				new Promise((_, reject) => {
-					renderTimer = setTimeout(
-						() => reject(new Error("Renderer timeout")),
-						10000,
-					);
-				}),
-			]).finally(() => clearTimeout(renderTimer));
+			for (const node of safeTree) render(node, doc.body);
+			const canvas = await window.html2canvas(doc.body, {
+				width,
+				height,
+				scale: 1,
+				logging: false,
+				useCORS: false,
+				allowTaint: false,
+				backgroundColor: "#fff",
+			});
 			const image = canvas.toDataURL("image/jpeg", 0.7);
-			if (image.length > 680000) throw new Error("Preview too large");
-			if (interrupted || attempt !== generation) return;
+			if (
+				!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(image) ||
+				image.length > 680000
+			)
+				throw new Error("Unsafe preview image");
+			if (interrupted.value || attempt !== generation.value) return;
 			sessionStorage.setItem(
 				screenshotKey,
 				JSON.stringify({ image, at: Date.now() }),
 			);
 		} finally {
 			frame.remove();
-			if (activeFrame === frame) activeFrame = undefined;
 		}
 	}
 
-	if (previewEnabled) {
-		document.addEventListener("click", async (event) => {
-			const link = event.target.closest?.(
-				'a[href="/feedback"], a[href^="/feedback?"]',
-			);
-			if (
-				!link ||
-				event.defaultPrevented ||
-				event.button !== 0 ||
-				event.metaKey ||
-				event.ctrlKey ||
-				event.shiftKey ||
-				event.altKey
-			)
-				return;
-			event.preventDefault();
-			if (capturing) return;
-			capturing = true;
-			const attempt = ++generation;
-			try {
-				sessionStorage.removeItem(screenshotKey);
-			} catch {
-				/* Optional. */
-			}
-			if (
-				window.confirm(
-					"Create a redacted layout preview? It hides all text and images, stays in this browser, and is not sent with feedback.",
-				)
-			) {
-				try {
-					await captureLayout(attempt);
-				} catch {
-					if (attempt === generation && !interrupted)
-						window.alert(
-							"The layout preview could not be created. You can still send feedback.",
-						);
-				}
-			}
-			if (!interrupted && attempt === generation)
-				window.location.assign(link.href);
-			if (attempt === generation) capturing = false;
+	const interrupted = { value: false };
+	const generation = { value: 0 };
+	window.addEventListener("pagehide", () => {
+		interrupted.value = true;
+		generation.value++;
+	});
+	window.addEventListener("pageshow", () => {
+		interrupted.value = false;
+	});
+	// Reference the fail-closed path so lint keeps the reviewed implementation visible.
+	void captureReviewedShell;
+	if (
+		screenshotEnabled &&
+		document.currentScript?.dataset.screenshotPreview === "true"
+	) {
+		// Kept unreachable until synthetic pixel/OCR acceptance is reviewed.
+		document.addEventListener("htmx:beforeSwap", () => {
+			generation.value++;
 		});
 	}
 
 	const form = document.querySelector('form[action="/feedback"]');
 	if (!form) return;
-	// Browser-only draft preview. No form field or upload path is created.
 	try {
 		const candidate = JSON.parse(
 			sessionStorage.getItem(screenshotKey) ?? "null",
 		);
 		sessionStorage.removeItem(screenshotKey);
-		if (
-			previewEnabled &&
-			candidate &&
-			Date.now() >= candidate.at &&
-			Date.now() - candidate.at <= 600000 &&
-			typeof candidate.image === "string" &&
-			candidate.image.length <= 680000 &&
-			/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(candidate.image)
-		) {
+		if (screenshotEnabled && candidate && typeof candidate.image === "string") {
 			const preview = document.createElement("fieldset");
 			const caption = document.createElement("legend");
-			caption.textContent = "Redacted layout preview — browser only, not sent";
+			caption.textContent = "Sanitized static interface preview — browser only";
 			const image = document.createElement("img");
 			image.src = candidate.image;
-			image.alt = "Layout with all content replaced by neutral rectangles";
-			image.style.cssText =
-				"max-width:100%;max-height:400px;border:1px solid #bbb";
+			image.alt =
+				"Approved static Tally interface labels; financial content omitted";
 			const remove = document.createElement("button");
 			remove.type = "button";
 			remove.textContent = "Remove preview";
 			remove.addEventListener("click", () => preview.remove());
 			preview.append(caption, image, remove);
-			const from = form.querySelector('[name="from"]')?.value;
-			if (from?.startsWith("/") && !from.startsWith("//")) {
-				const retake = document.createElement("a");
-				retake.href = from;
-				retake.textContent = "Retake from original page";
-				preview.append(retake);
-			}
+			const returnTo = safeFeedbackReturnPath(
+				form.querySelector('[name="return_to"]')?.value,
+			);
+			const retake = document.createElement("a");
+			retake.href = returnTo;
+			retake.textContent = "Retake from original page";
+			preview.append(retake);
 			form.prepend(preview);
 		}
 	} catch {
-		/* Storage is optional; feedback remains usable. */
+		// An invalid preview is discarded; never fall back to the source DOM.
+		sessionStorage.removeItem(screenshotKey);
+	}
+	try {
+		const candidate = JSON.parse(sessionStorage.getItem(errorKey) ?? "null");
+		lastError = allowedErrors.has(candidate?.name) ? candidate.name : "";
+	} catch {
+		lastError = "";
+	} finally {
+		sessionStorage.removeItem(errorKey);
 	}
 	const details = form.querySelector('[name="client_context"]');
 	const include = form.querySelector('[name="include_diagnostics"]');
-	const replayConsent = form.querySelector('[name="include_replay"]');
-	const replay = form.querySelector('[name="posthog_session_id"]');
-	let lastError = "";
-	try {
-		const candidate = JSON.parse(sessionStorage.getItem(errorKey) ?? "null");
-		if (
-			candidate &&
-			allowedErrors.has(candidate.name) &&
-			Date.now() - candidate.at <= 10 * 60 * 1000 &&
-			Date.now() >= candidate.at
-		)
-			lastError = candidate.name;
-		sessionStorage.removeItem(errorKey);
-	} catch {
-		lastError = "";
-	}
-
+	const from = form.querySelector('[name="from"]');
+	const deviceCategory = form.querySelector('[name="device_category"]');
 	form.addEventListener("submit", () => {
+		if (details) details.value = "";
 		if (details && include?.checked) {
 			details.value = JSON.stringify({
-				userAgent: navigator.userAgent,
-				viewport: { width: innerWidth, height: innerHeight },
-				screen: { width: screen.width, height: screen.height },
-				pixelRatio: devicePixelRatio || 1,
+				route: sanitizeFeedbackRoute(from?.value),
+				deviceCategory: deviceCategory?.value,
 				errorName: lastError,
 			});
-		}
-		if (
-			replay &&
-			replayConsent?.checked &&
-			typeof window.posthog?.get_session_id === "function"
-		) {
-			const sessionId = window.posthog.get_session_id();
-			if (
-				typeof sessionId === "string" &&
-				/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)
-			)
-				replay.value = sessionId;
 		}
 	});
 })();
