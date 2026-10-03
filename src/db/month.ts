@@ -33,6 +33,7 @@ export async function loadMonth(
 				 WHERE archived = 0 OR EXISTS (
 					SELECT 1 FROM transactions t
 					WHERE t.category_id = c.id AND substr(t.date, 1, 7) = ?1 AND t.excluded = 0 AND t.is_split = 0
+						AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1)
 						AND t.flag_income = 0
 				 )
 				 ORDER BY sort_order, name`,
@@ -45,7 +46,8 @@ export async function loadMonth(
 			.prepare(
 				`SELECT category_id AS categoryId, amount_cents AS amountCents, flag_income AS income
 				 FROM transactions
-				 WHERE substr(date, 1, 7) = ?1 AND excluded = 0 AND is_split = 0`,
+					WHERE substr(date, 1, 7) = ?1 AND excluded = 0 AND is_split = 0
+						AND (amount_cents >= 0 OR credit_reviewed = 1 OR flag_income = 1)`,
 			)
 			.bind(month),
 	])) as [D1Result, D1Result, D1Result];

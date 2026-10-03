@@ -83,8 +83,8 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 			db
 				.prepare(
 					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence,
-					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, updated_by)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo')`,
+					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, updated_by, credit_reviewed)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo', 1)`,
 				)
 				.bind(
 					t.accountId,

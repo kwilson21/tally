@@ -112,7 +112,8 @@ export async function lastMonthSpentCents(
 	const row = await db
 		.prepare(
 			`SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions
-			 WHERE category_id = ? AND substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND flag_income = 0`,
+			 WHERE category_id = ? AND substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND flag_income = 0
+				AND (amount_cents >= 0 OR credit_reviewed = 1)`,
 		)
 		.bind(categoryId, previousMonth(month))
 		.first<{ cents: number }>();
