@@ -316,8 +316,14 @@ export async function saveJevResult(
 				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
 				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
-				updated_at = datetime('now')
-			WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
+			updated_at = datetime('now')
+			WHERE id = ? AND category_confidence IS NULL
+				AND excluded = 0 AND is_split = 0
+				AND (
+					(category_id IS NULL AND category_source IS NULL)
+					OR (amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0
+						AND credit_reviewed_by IS NULL AND COALESCE(income_source, '') != 'user')
+				)`,
 		)
 		.bind(
 			d.categoryId,
