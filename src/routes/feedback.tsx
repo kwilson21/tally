@@ -1,8 +1,19 @@
 import { Hono } from "hono";
+import {
+	diagnosticsEnabled,
+	normalizeFeedbackContext,
+} from "../feedback/diagnostics";
+import {
+	sanitizeFeedbackMessage,
+	sanitizeFeedbackRoute,
+} from "../feedback/privacy";
 import { FeedbackForm, type FeedbackValues } from "../views/feedback-form";
 import { Layout } from "../views/layout";
 
-type FeedbackEnv = Env & { FEEDBACK_GITHUB_TOKEN?: string };
+type FeedbackEnv = Env & {
+	FEEDBACK_GITHUB_TOKEN?: string;
+	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
+};
 type App = { Bindings: FeedbackEnv; Variables: { actor: string } };
 export const feedback = new Hono<App>();
 
@@ -13,6 +24,7 @@ type FeedbackRow = {
 	message: string;
 	page: string;
 	device: string;
+	client_context: string | null;
 	attempts: number;
 };
 
@@ -25,66 +37,97 @@ const FEELINGS = new Set([
 	"Delighted",
 ]);
 
-function safePath(value: string | null) {
+function safePath(value: string | null, navigation = false) {
 	try {
 		const url = new URL(value ?? "/", "http://tally.invalid");
-		const normalized = `${url.pathname}${url.search}${url.hash}`;
-		return url.origin === "http://tally.invalid" && /^\/[^/\\]/.test(normalized)
-			? normalized
+		const normalized = url.pathname;
+		return url.origin === "http://tally.invalid" &&
+			(normalized === "/" || /^\/[^/\\]/.test(normalized))
+			? navigation
+				? `${normalized}${url.search}`
+				: normalized.slice(0, 160)
 			: "/";
 	} catch {
 		return "/";
 	}
 }
 
-export function summarizeDevice(userAgent: string) {
-	const browser = /Edg\//.test(userAgent)
-		? "Edge"
-		: /Firefox\//.test(userAgent)
-			? "Firefox"
-			: /(?:Chrome|CriOS)\//.test(userAgent)
-				? "Chrome"
-				: /Safari\//.test(userAgent)
-					? "Safari"
-					: "browser";
-	const device = /iPhone/.test(userAgent)
-		? "iPhone"
-		: /iPad/.test(userAgent)
-			? "iPad"
-			: /Android/.test(userAgent)
-				? "Android"
-				: "Desktop";
-	return `${device} ${browser}`;
+const FEEDBACK_LIMIT_COOKIE = "__Host-tally-feedback-limit";
+const UUID =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function feedbackLimitId(cookieHeader: string | undefined) {
+	const pair = cookieHeader
+		?.split(";")
+		.map((part) => part.trim())
+		.find((part) => part.startsWith(`${FEEDBACK_LIMIT_COOKIE}=`));
+	const token = pair?.slice(FEEDBACK_LIMIT_COOKIE.length + 1) ?? "";
+	return UUID.test(token) ? token : null;
 }
 
-function view(values: FeedbackValues, demo: boolean, error?: string) {
+function setFeedbackLimitCookie(response: Response, token: string) {
+	const headers = new Headers(response.headers);
+	headers.append(
+		"Set-Cookie",
+		`${FEEDBACK_LIMIT_COOKIE}=${token}; Max-Age=3600; Path=/; Secure; HttpOnly; SameSite=Strict`,
+	);
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
+}
+
+function view(
+	values: FeedbackValues,
+	demo: boolean,
+	options: {
+		error?: string;
+		diagnosticsEnabled?: boolean;
+	} = {},
+) {
 	return (
 		<Layout
 			title="Send feedback · Tally"
 			demo={demo}
 			currentPath={`/feedback?from=${values.from}`}
+			modules={["/js/feedback-privacy.js"]}
 		>
-			<FeedbackForm values={values} demo={demo} error={error} />
+			<FeedbackForm
+				values={values}
+				demo={demo}
+				error={options.error}
+				diagnosticsEnabled={options.diagnosticsEnabled}
+			/>
 		</Layout>
 	);
 }
 
-feedback.get("/feedback", (c) => {
+feedback.get("/feedback", async (c) => {
 	let from = "/";
+	let returnTo = "/";
 	const referer = c.req.header("referer");
 	if (referer) {
 		try {
 			const url = new URL(referer);
-			if (url.origin === new URL(c.req.url).origin)
-				from = safePath(`${url.pathname}${url.search}${url.hash}`);
+			if (url.origin === new URL(c.req.url).origin) {
+				from = sanitizeFeedbackRoute(url.pathname);
+				returnTo = safePath(`${url.pathname}${url.search}`, true);
+			}
 		} catch {}
 	}
-	return c.html(
+	const existingToken = feedbackLimitId(c.req.header("cookie"));
+	const response = c.html(
 		view(
-			{ type: "Bug", feeling: "Okay", message: "", from },
+			{ type: "Bug", feeling: "Okay", message: "", from, returnTo },
 			c.env.DEMO === "true",
+			{
+				diagnosticsEnabled: diagnosticsEnabled(c.env),
+			},
 		),
 	);
+	return existingToken
+		? response
+		: setFeedbackLimitCookie(await response, crypto.randomUUID());
 });
 
 feedback.post("/feedback", async (c) => {
@@ -92,47 +135,84 @@ feedback.post("/feedback", async (c) => {
 	const data = await c.req.formData();
 	const rawType = String(data.get("type") ?? "");
 	const rawFeeling = String(data.get("feeling") ?? "");
+	const rawMessage = String(data.get("message") ?? "").replace(/\r\n/g, "\n");
 	const values = {
 		type: TYPES.has(rawType) ? rawType : "Other",
 		feeling: FEELINGS.has(rawFeeling) ? rawFeeling : "Okay",
-		message: String(data.get("message") ?? "").replace(/\r\n/g, "\n"),
-		from: safePath(String(data.get("from") ?? "/")),
+		message: sanitizeFeedbackMessage(rawMessage).trim(),
+		from: sanitizeFeedbackRoute(String(data.get("from") ?? "/")),
+		returnTo: safePath(
+			String(data.get("return_to") ?? data.get("from") ?? "/"),
+			true,
+		),
 	};
-	if (!values.message.trim() || values.message.length > 2000) {
+	const limitId = feedbackLimitId(c.req.header("cookie"));
+	if (!limitId) {
 		return c.html(
-			view(
-				values,
-				false,
-				values.message.length > 2000
-					? "Keep the message to 2,000 characters."
-					: "Write a message before sending.",
-			),
+			view(values, false, {
+				error: "Reload the feedback form before sending.",
+			}),
+			400,
+		);
+	}
+	if (!rawMessage.trim() || rawMessage.length > 2000 || !values.message) {
+		return c.html(
+			view(values, false, {
+				error:
+					rawMessage.length > 2000
+						? "Keep the message to 2,000 characters."
+						: "Write a message before sending.",
+				diagnosticsEnabled: diagnosticsEnabled(c.env),
+			}),
 			422,
 		);
 	}
-	const actor = c.get("actor");
+	const diagnosticsOn = diagnosticsEnabled(c.env);
+	let clientContext: ReturnType<typeof normalizeFeedbackContext> = null;
+	if (diagnosticsOn && data.get("include_diagnostics") === "yes") {
+		try {
+			clientContext = normalizeFeedbackContext(
+				JSON.parse(String(data.get("client_context") ?? "")),
+				values.from,
+			);
+		} catch {
+			clientContext = null;
+		}
+	}
+	const columns = diagnosticsOn ? ", client_context" : "";
+	const placeholders = diagnosticsOn ? ", ?" : "";
+	const device =
+		String(data.get("device_category")) === "Mobile browser"
+			? "Mobile browser"
+			: String(data.get("device_category")) === "Tablet browser"
+				? "Tablet browser"
+				: String(data.get("device_category")) === "Desktop browser"
+					? "Desktop browser"
+					: "Unknown";
+	const params: (string | null)[] = [
+		limitId,
+		values.type,
+		values.feeling,
+		values.message.trim(),
+		values.from,
+		device,
+	];
+	if (diagnosticsOn)
+		params.push(clientContext ? JSON.stringify(clientContext) : null);
+	params.push(limitId);
 	const result = await c.env.DB.prepare(
-		`INSERT INTO feedback (actor, type, feeling, message, page, device)
-		 SELECT ?, ?, ?, ?, ?, ?
+		`INSERT INTO feedback (actor, type, feeling, message, page, device${columns})
+		 SELECT ?, ?, ?, ?, ?, ?${placeholders}
 		 WHERE (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
 	)
-		.bind(
-			actor,
-			values.type,
-			values.feeling,
-			values.message.trim(),
-			values.from,
-			summarizeDevice(c.req.header("user-agent") ?? ""),
-			actor,
-		)
+		.bind(...params)
 		.run();
 	if (result.meta.changes === 0) {
 		return c.html(
-			view(
-				values,
-				false,
-				"You've sent 10 messages this hour. Try again later.",
-			),
+			view(values, false, {
+				error: "You've sent 10 messages this hour. Try again later.",
+				diagnosticsEnabled: diagnosticsOn,
+			}),
 			429,
 		);
 	}
@@ -147,7 +227,7 @@ feedback.post("/feedback", async (c) => {
 				),
 			);
 	}
-	const back = new URL(values.from, "http://tally.invalid");
+	const back = new URL(values.returnTo, "http://tally.invalid");
 	back.searchParams.set("sent", "feedback");
 	return c.redirect(`${back.pathname}${back.search}${back.hash}`, 303);
 });
@@ -185,6 +265,25 @@ function fenced(text: string): string {
 	return `${fence}\n${text}\n${fence}`;
 }
 
+function diagnosticLines(item: FeedbackRow) {
+	const lines: string[] = [];
+	if (item.client_context) {
+		try {
+			const context = normalizeFeedbackContext(
+				JSON.parse(item.client_context),
+				item.page,
+			);
+			if (context)
+				lines.push(
+					`Route: ${codeSpan(context.route)}\nDevice category: ${context.deviceCategory}${context.errorName ? `\nRecent error category: ${context.errorName}` : ""}`,
+				);
+		} catch {
+			// Ignore malformed or legacy context; never file its raw contents.
+		}
+	}
+	return lines;
+}
+
 export async function fileFeedbackIssue(
 	db: D1Database,
 	token: string,
@@ -199,7 +298,18 @@ export async function fileFeedbackIssue(
 		.bind(item.id)
 		.run();
 	if (claim.meta.changes === 0) return;
-	const titleMessage = Array.from(item.message.replace(/\s+/g, " ").trim())
+	const safeMessage = sanitizeFeedbackMessage(item.message).trim();
+	const safeType = TYPES.has(item.type) ? item.type : "Other";
+	const safeFeeling = FEELINGS.has(item.feeling) ? item.feeling : "Okay";
+	const safePage = sanitizeFeedbackRoute(item.page);
+	const safeDevice = [
+		"Desktop browser",
+		"Mobile browser",
+		"Tablet browser",
+	].includes(item.device)
+		? item.device
+		: "Unknown";
+	const titleMessage = Array.from(safeMessage.replace(/\s+/g, " ").trim())
 		.slice(0, 60)
 		.join("");
 	let response: Response;
@@ -217,10 +327,13 @@ export async function fileFeedbackIssue(
 				// Workers rejects redirect: "error"; a 3xx isn't ok, so it's treated as a failure.
 				redirect: "manual",
 				body: JSON.stringify({
-					title: `${item.type}: ${titleMessage}`,
+					title: `${safeType}: ${titleMessage}`,
 					// Code formatting keeps #123 and @someone from becoming links or mentions.
-					body: `Type: ${item.type}\nFeeling: ${item.feeling}\nPage: ${codeSpan(item.page)}\nDevice: ${item.device}\n\n${fenced(item.message)}`,
-					labels: [item.type],
+					body: [
+						`Type: ${safeType}\nFeeling: ${safeFeeling}\nPage: ${codeSpan(safePage)}\nDevice category: ${safeDevice}\n\n${fenced(safeMessage)}`,
+						...diagnosticLines(item),
+					].join("\n"),
+					labels: [safeType],
 				}),
 			},
 		);

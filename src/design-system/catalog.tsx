@@ -778,11 +778,12 @@ function Feedback() {
 				title="FeedbackForm"
 				tier="visual"
 				components={["FeedbackForm"]}
-				sentence="Two groups of radio chips and a labeled message give the builder a small, direct report."
+				sentence="New feedback stores a random one-hour limiter token, report details and submission time in Cloudflare D1; it does not store the verified sign-in email. Private GitHub filing omits the token and submission time. Replay is absent, and the layout preview is hard-disabled."
 			>
 				{/* Only the form is inert: its title and sentence stay readable to screen readers. */}
 				<div inert>
 					<FeedbackForm
+						diagnosticsEnabled
 						values={{ type: "Bug", feeling: "Okay", message: "", from: "/" }}
 					/>
 				</div>

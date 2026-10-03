@@ -17,6 +17,8 @@ export default defineConfig({
 		})),
 	],
 	test: {
+		// Worker tests live under test/; verification tests use the separate Node config.
+		include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
 		// Vitest empties CSS imports by default; the token test reads app.css as text.
 		css: { include: [/app\.css/] },
 		setupFiles: ["./test/apply-migrations.ts"],
