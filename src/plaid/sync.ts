@@ -271,14 +271,19 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category)
-						 SELECT ?, id, ?, ?, ?, ? FROM accounts
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category, credit_reviewed)
+						 SELECT ?, id, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
-						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
+							ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
 							amount_cents = excluded.amount_cents,
 							raw_name = excluded.raw_name,
 							plaid_category = excluded.plaid_category,
+							flag_income = transactions.flag_income,
+							income_source = transactions.income_source,
+							credit_reviewed = CASE
+								WHEN transactions.credit_reviewed_by = 'user' THEN transactions.credit_reviewed
+								WHEN excluded.amount_cents < 0 THEN 0 ELSE 1 END,
 							updated_at = datetime('now')`,
 					).bind(
 						transaction.transaction_id,
@@ -286,6 +291,7 @@ export async function syncItem(
 						plaidAmountToCents(transaction.amount),
 						transaction.name,
 						transaction.personal_finance_category?.primary ?? null,
+						plaidAmountToCents(transaction.amount),
 						transaction.account_id,
 						itemRowId,
 						lockId,
@@ -296,13 +302,19 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?, amount_cents = ?, raw_name = ?,
-							plaid_category = ?, updated_at = datetime('now')
+							plaid_category = ?,
+							flag_income = flag_income,
+							income_source = income_source,
+							credit_reviewed = CASE
+								WHEN credit_reviewed_by = 'user' THEN credit_reviewed
+								WHEN ? < 0 THEN 0 ELSE 1 END, updated_at = datetime('now')
 						 WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
 					).bind(
 						transaction.date,
 						plaidAmountToCents(transaction.amount),
 						transaction.name,
 						transaction.personal_finance_category?.primary ?? null,
+						plaidAmountToCents(transaction.amount),
 						transaction.transaction_id,
 						itemRowId,
 						lockId,

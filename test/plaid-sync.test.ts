@@ -1,5 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { summarizeMonth } from "../src/budget";
+import { categorizePending } from "../src/categorize-pending";
+import { loadMonth } from "../src/db/month";
+import { saveEdit, saveJevResult } from "../src/db/transactions";
 import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -363,6 +367,198 @@ describe("syncItem", () => {
 			excluded: 1,
 		});
 		expect(row?.category_id).not.toBeNull();
+	});
+
+	it("preserves a person's income correction when Plaid updates the transaction", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: -1200 })] })),
+			),
+		);
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE plaid_transaction_id = 'transaction-1'",
+		).run();
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ modified: [transaction({ amount: -1250 })] })),
+			),
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first(),
+		).toEqual({
+			amount_cents: -125000,
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+		});
+	});
+
+	it("keeps Jev's negative-credit income decision through added replays and modifications", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: -3000 })] })),
+			),
+		);
+		const tx = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number }>();
+		await saveJevResult(env.DB, tx?.id as number, {
+			categoryId: null,
+			suggestedCategoryId: null,
+			confidence: 0.4,
+			flags: { transfer: false, reimbursement: false, income: true },
+		});
+		for (const amount of [-3000, -3000]) {
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(page({ added: [transaction({ amount })] })),
+				),
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT flag_income, income_source FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first(),
+			).toEqual({ flag_income: 1, income_source: "jev" });
+		}
+		for (const amount of [-3100, -3200]) {
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(page({ modified: [transaction({ amount })] })),
+				),
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT flag_income, income_source FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first(),
+			).toEqual({ flag_income: 1, income_source: "jev" });
+		}
+	});
+
+	it("reclassifies an updated non-reviewed purchase as a pending credit when Plaid changes its sign", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: 12 })] })),
+			),
+		);
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ modified: [transaction({ amount: -5 })] })),
+			),
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT credit_reviewed FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first(),
+		).toEqual({ credit_reviewed: 0 });
+	});
+
+	it("holds raw Plaid credits out of remaining budget without Jev or on Jev failure, until a person reviews a refund", async () => {
+		const id = await addItem();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM categories"),
+		]);
+		const category = await env.DB.prepare(
+			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Synthetic', 'groceries', 'cat-blue', 1) RETURNING id",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO budget_amounts VALUES (?, '2026-09', 100000)",
+		)
+			.bind(category?.id)
+			.run();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								transaction_id: "purchase",
+								amount: 200,
+								name: "PURCHASE",
+							}),
+							transaction({
+								transaction_id: "payroll",
+								amount: -3000,
+								name: "PAYROLL",
+							}),
+							transaction({
+								transaction_id: "refund",
+								amount: -5,
+								name: "REFUND",
+							}),
+						],
+					}),
+				),
+			),
+		);
+		const monthSummary = async () =>
+			summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(env.DB, "2026-09")),
+				unpaidDueBillsCents: 0,
+			});
+		const unclassified = await monthSummary();
+		expect(unclassified.totalSpentCents).toBe(20000);
+		expect(unclassified.safeToSpendCents).toBe(80000);
+		expect(
+			await env.DB.prepare(
+				"SELECT credit_reviewed, flag_income FROM transactions WHERE plaid_transaction_id = 'payroll'",
+			).first(),
+		).toEqual({ credit_reviewed: 0, flag_income: 0 });
+
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const failedJev = await categorizePending(
+			{ DB: env.DB, JEV_API_KEY: "synthetic-key" },
+			async () => response({}, 429),
+		);
+		expect(failedJev.asked).toBe(1);
+		expect((await monthSummary()).safeToSpendCents).toBe(80000);
+
+		const refund = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+		).first<{ id: number }>();
+		await saveEdit(
+			env.DB,
+			refund?.id as number,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: true,
+			},
+			"synthetic-person",
+		);
+		const reviewedRefund = await monthSummary();
+		expect(reviewedRefund.totalSpentCents).toBe(19500);
+		expect(reviewedRefund.safeToSpendCents).toBe(80500);
 	});
 
 	it("skips a concurrent run and releases the lock after success", async () => {

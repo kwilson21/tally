@@ -64,6 +64,7 @@ describe("GET /transactions/:id", () => {
 			(html.match(/<input type="radio" name="category"/g) ?? []).length,
 		).toBe(5);
 		expect(html).toContain("Always for this merchant");
+		expect(html).toContain("Count as income");
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value="Local Bakery"/);
 		expect(html).toMatch(/<label for="note"[^>]*>Note<\/label>/);
 		expect(html).toMatch(
@@ -100,6 +101,8 @@ describe("POST /transactions/:id", () => {
 		merchant: "Local Bakery",
 		note: "",
 		back: "/transactions?uncategorized=1",
+		income: "0",
+		creditReviewed: "0",
 	};
 
 	it("saves, closes the sheet, and confirms with a toast and announcement (htmx)", async () => {
@@ -143,6 +146,21 @@ describe("POST /transactions/:id", () => {
 		);
 		const { html } = await post(`/transactions/${bakery}`, save);
 		expect(html).toMatch(/<span id="needs-count">11<\/span>/);
+	});
+
+	it("saves a person's income choice and preserves it when Jev runs again", async () => {
+		const { res } = await post(`/transactions/${bakery}`, {
+			...save,
+			income: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT flag_income, income_source FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({ flag_income: 1, income_source: "user" });
 	});
 
 	it("returns focus to the saved row when it's still in the list", async () => {

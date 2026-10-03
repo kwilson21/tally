@@ -30,9 +30,13 @@ export function HomeTop({
 			<h1 class="font-serif text-2xl font-semibold tracking-tight">{month}</h1>
 			<div class="mt-2 flex items-center justify-between gap-6">
 				<div>
-					<p class="text-lg text-muted">Safe to spend</p>
+					<p class="text-lg text-muted">Budget remaining this month</p>
 					<p class="font-serif text-6xl font-semibold tracking-tight lg:text-7xl">
 						{formatCents(safeToSpendCents, { wholeDollars: true })}
+					</p>
+					<p class="mt-1 max-w-sm text-sm text-muted">
+						Based on posted spending; pending purchases and upcoming bills
+						aren't included.
 					</p>
 				</div>
 				<LedgerIllustration />

@@ -7,6 +7,7 @@ import {
 	listTransactions,
 	needsCategoryCount,
 	saveEdit,
+	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
@@ -40,6 +41,8 @@ const edit = (over: Partial<Parameters<typeof saveEdit>[2]> = {}) => ({
 	displayName: null,
 	note: null,
 	excluded: false,
+	income: false,
+	creditReviewed: true,
 	...over,
 });
 
@@ -65,6 +68,53 @@ describe("getTransaction", () => {
 });
 
 describe("saveEdit", () => {
+	it("records and can reverse a person's income choice", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await saveEdit(db, id, edit({ income: true }), "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income, income_source FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({ flag_income: 1, income_source: "user" });
+		await saveEdit(db, id, edit(), "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income, income_source FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({ flag_income: 0, income_source: "user" });
+	});
+
+	it("preserves a person's non-income refund review when Jev later flags income", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare("UPDATE transactions SET amount_cents = -1200, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?")
+			.bind(id)
+			.run();
+		await saveEdit(db, id, edit({ creditReviewed: true }), "demo");
+		expect(
+			await db.prepare(
+				"SELECT flag_income, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
+			).bind(id).first(),
+		).toEqual({ flag_income: 0, income_source: "user", credit_reviewed_by: "user" });
+		await saveJevResult(db, id, {
+			categoryId: null,
+			suggestedCategoryId: null,
+			confidence: 0.4,
+			flags: { transfer: false, reimbursement: false, income: true },
+		});
+		expect(
+			await db.prepare(
+				"SELECT flag_income, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
+			).bind(id).first(),
+		).toEqual({ flag_income: 0, income_source: "user", credit_reviewed_by: "user" });
+	});
+
 	it("marks a changed category as a person's choice, and Home follows", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 		await saveEdit(
