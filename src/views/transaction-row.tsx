@@ -13,6 +13,8 @@ type Caption = {
 export function rowCaption(row: ListRow): Caption {
 	if (row.excluded)
 		return { kind: "excluded", caption: "Excluded", tag: false };
+	if (!row.creditReviewed && row.amountCents < 0 && !row.income)
+		return { kind: "needs", caption: "Review credit", tag: true };
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
 	if (row.categoryName)
 		return { kind: "category", caption: row.categoryName, tag: false };

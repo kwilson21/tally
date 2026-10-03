@@ -18,12 +18,15 @@ const top = async (overrides: Partial<Parameters<typeof HomeTop>[0]> = {}) =>
 
 // Home's top (#92, decision 46 P1): the number first on a phone's first screen.
 describe("HomeTop", () => {
-	it("puts the month, the number, the sentence, How this works and the Band in that order", async () => {
+	it("labels the number as budget remaining and explains the calculation scope", async () => {
 		const html = await top();
 		const at = (s: string) => html.indexOf(s);
 		expect(at("September")).toBeGreaterThan(-1);
-		expect(at("September")).toBeLessThan(at("Safe to spend"));
-		expect(at("Safe to spend")).toBeLessThan(at("$283"));
+		expect(at("September")).toBeLessThan(at("Budget remaining this month"));
+		expect(at("Budget remaining this month")).toBeLessThan(at("$283"));
+		expect(html).toContain(
+			"Based on posted spending; pending purchases and upcoming bills aren&#39;t included.",
+		);
 		expect(at("$283")).toBeLessThan(at("Eating Out is $36 over"));
 		expect(at("Eating Out is $36 over")).toBeLessThan(at("How this works"));
 		expect(at("How this works")).toBeLessThan(

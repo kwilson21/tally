@@ -38,6 +38,8 @@ const personEdit = {
 	displayName: null,
 	note: null,
 	excluded: false,
+	income: false,
+	creditReviewed: true,
 };
 
 const decision = (over = {}) => ({
@@ -81,9 +83,76 @@ describe("pendingForJev", () => {
 		expect(pending).toHaveLength(11);
 		expect(pending.map((p) => p.id)).not.toContain(id);
 	});
+
+	it("queues an unreviewed credit for Jev without counting it as an uncategorized purchase", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		expect(await pendingForJev(db, 40)).toContainEqual(
+			expect.objectContaining({ id, amountCents: -1200 }),
+		);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+	});
 });
 
 describe("applyMerchantRules", () => {
+	it("keeps merchant-rule credits queued for Jev's separate income classification", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db.batch([
+			db.prepare("UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?").bind(id),
+			db.prepare("UPDATE merchants SET default_category_id = ? WHERE raw_name = 'SQ *LOCAL BAKERY 4432'").bind(GROCERIES),
+		]);
+		await applyMerchantRules(db);
+		expect(await pendingForJev(db, 40)).toContainEqual(
+			expect.objectContaining({ id, amountCents: -1200 }),
+		);
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: EATING_OUT,
+				suggestedCategoryId: EATING_OUT,
+				flags: { transfer: false, reimbursement: false, income: true },
+			}),
+		);
+		expect(await row(id)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "merchant_rule",
+			flag_income: 1,
+		});
+	});
+
+	it("classifies a pending credit even if Organize previously assigned a category", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0, category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(GROCERIES, id)
+			.run();
+		expect(await pendingForJev(db, 40)).toContainEqual(
+			expect.objectContaining({ id, amountCents: -1200 }),
+		);
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: EATING_OUT,
+				suggestedCategoryId: EATING_OUT,
+				flags: { transfer: false, reimbursement: false, income: true },
+			}),
+		);
+		expect(await row(id)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "user",
+			flag_income: 1,
+		});
+	});
+
 	it("categorizes uncategorized transactions from a merchant with a default category", async () => {
 		const id = await idOf("SQ *FARMERS MKT");
 		await db
@@ -174,7 +243,7 @@ describe("saveJevResult", () => {
 		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
 	});
 
-	it("doesn't apply Jev's income answer, since a person can't undo a flag yet (decision 28)", async () => {
+	it("stores Jev's confident income answer so it is excluded from spending", async () => {
 		const id = await idOf("VENMO *J RIVERA");
 		await saveJevResult(
 			db,
@@ -185,10 +254,10 @@ describe("saveJevResult", () => {
 				flags: { transfer: true, reimbursement: false, income: true },
 			}),
 		);
-		// The transfer flag excludes it (spec §6), so it leaves the list; income isn't stored.
+		// The transfer flag excludes it (spec §6), while the income flag is retained.
 		expect(await row(id)).toMatchObject({
 			flag_transfer: 1,
-			flag_income: 0,
+			flag_income: 1,
 			excluded: 1,
 		});
 		expect(await needsCategoryCount(db, "2026-09")).toBe(11);

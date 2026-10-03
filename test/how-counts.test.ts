@@ -64,6 +64,8 @@ describe("monthCounts", () => {
 				displayName: null,
 				note: null,
 				excluded: false,
+				creditReviewed: true,
+				income: false,
 			},
 			"demo",
 		);

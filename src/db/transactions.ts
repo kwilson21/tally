@@ -14,6 +14,7 @@ export type ListRow = {
 	note: string | null;
 	excluded: boolean;
 	income: boolean;
+	creditReviewed: boolean;
 	categoryId: number | null;
 	categoryName: string | null;
 	categoryIcon: string | null;
@@ -24,7 +25,10 @@ export const PAGE_SIZE = 25;
 
 // "Needs category" is the same set Home counts as uncategorized (spec §6): counted, not income, no category.
 const NEEDS_CATEGORY =
-	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0";
+	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)";
+// Jev must be allowed to classify a new credit as income or another known kind of credit.
+const NEEDS_JEV_CLASSIFICATION =
+	"t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.credit_reviewed_by IS NULL AND COALESCE(t.income_source, '') != 'user'))";
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -70,7 +74,7 @@ export async function listTransactions(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note,
-				t.excluded, t.flag_income AS income,
+				t.excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor
 			${from}
 			ORDER BY t.date DESC, t.id DESC
@@ -78,10 +82,14 @@ export async function listTransactions(
 		)
 		.bind(...args)
 		.all<
-			Omit<ListRow, "excluded" | "income" | "displayName"> & {
+			Omit<
+				ListRow,
+				"excluded" | "income" | "creditReviewed" | "displayName"
+			> & {
 				merchantName: string | null;
 				excluded: number;
 				income: number;
+				creditReviewed: number;
 			}
 		>();
 
@@ -90,6 +98,7 @@ export async function listTransactions(
 		...r,
 		excluded: r.excluded === 1,
 		income: r.income === 1,
+		creditReviewed: r.creditReviewed === 1,
 		displayName: merchantName ?? tidyName(r.rawName),
 	}));
 	return { rows, total, page, pages };
@@ -145,6 +154,7 @@ export async function getTransaction(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note,
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				a.name AS accountName, a.mask AS accountMask
 			FROM transactions t
@@ -155,9 +165,13 @@ export async function getTransaction(
 		)
 		.bind(id)
 		.first<
-			Omit<TransactionDetail, "excluded" | "income" | "displayName"> & {
+			Omit<
+				TransactionDetail,
+				"excluded" | "income" | "creditReviewed" | "displayName"
+			> & {
 				excluded: number;
 				income: number;
+				creditReviewed: number;
 			}
 		>();
 	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
@@ -166,6 +180,7 @@ export async function getTransaction(
 				...r,
 				excluded: r.excluded === 1,
 				income: r.income === 1,
+				creditReviewed: r.creditReviewed === 1,
 				displayName: r.merchantName ?? tidyName(r.rawName),
 			}
 		: null;
@@ -188,10 +203,16 @@ export async function saveEdit(
 ): Promise<void> {
 	const current = await db
 		.prepare(
-			"SELECT raw_name AS rawName, category_id AS categoryId FROM transactions WHERE id = ?",
+			"SELECT raw_name AS rawName, category_id AS categoryId, flag_income AS income, amount_cents AS amountCents, credit_reviewed AS creditReviewed FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first<{ rawName: string; categoryId: number | null }>();
+		.first<{
+			rawName: string;
+			categoryId: number | null;
+			income: number;
+			amountCents: number;
+			creditReviewed: number | null;
+		}>();
 	if (!current) throw new Error(`No transaction ${id}`);
 
 	const changed =
@@ -205,14 +226,57 @@ export async function saveEdit(
 			? db
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
-							note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+							note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (? < 0 AND ? = 1 AND ? = 0) THEN 'user' ELSE income_source END,
+							credit_reviewed = CASE WHEN ? < 0 THEN CASE WHEN ? = 1 THEN 1 ELSE ? END ELSE credit_reviewed END,
+							credit_reviewed_by = CASE WHEN ? < 0 AND ((? = 1 AND ? = 0) OR flag_income IS NOT ? OR credit_reviewed IS NOT ?) THEN 'user' ELSE credit_reviewed_by END,
+							updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
-					.bind(edit.categoryId, edit.note, ...excludeArgs, actor, id)
+					.bind(
+						edit.categoryId,
+						edit.note,
+						...excludeArgs,
+						edit.income ? 1 : 0,
+						edit.income ? 1 : 0,
+						current.amountCents,
+						edit.creditReviewed ? 1 : 0,
+						edit.income ? 1 : 0,
+						current.amountCents,
+						edit.creditReviewed ? 1 : 0,
+						edit.income ? 1 : 0,
+						current.amountCents,
+						edit.creditReviewed ? 1 : 0,
+						edit.income ? 1 : 0,
+						edit.income ? 1 : 0,
+						edit.creditReviewed ? 1 : 0,
+						actor,
+						id,
+					)
 			: db
 					.prepare(
-						`UPDATE transactions SET note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+						`UPDATE transactions SET note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (? < 0 AND ? = 1 AND ? = 0) THEN 'user' ELSE income_source END,
+						credit_reviewed = CASE WHEN ? < 0 THEN CASE WHEN ? = 1 THEN 1 ELSE ? END ELSE credit_reviewed END,
+						credit_reviewed_by = CASE WHEN ? < 0 AND ((? = 1 AND ? = 0) OR flag_income IS NOT ? OR credit_reviewed IS NOT ?) THEN 'user' ELSE credit_reviewed_by END,
+						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
-					.bind(edit.note, ...excludeArgs, actor, id),
+					.bind(
+						edit.note,
+						...excludeArgs,
+						edit.income ? 1 : 0,
+						edit.income ? 1 : 0,
+						current.amountCents,
+						edit.creditReviewed ? 1 : 0,
+						edit.income ? 1 : 0,
+						current.amountCents,
+						edit.creditReviewed ? 1 : 0,
+						edit.income ? 1 : 0,
+						current.amountCents,
+						edit.creditReviewed ? 1 : 0,
+						edit.income ? 1 : 0,
+						edit.income ? 1 : 0,
+						edit.creditReviewed ? 1 : 0,
+						actor,
+						id,
+					),
 		db
 			.prepare(
 				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
@@ -259,8 +323,8 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 }
 
 /**
- * Transactions to ask Jev about, newest first: the ones that need a category (the same set
- * Home counts), with no category source and no stored confidence. A stored confidence means
+ * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
+ * unreviewed negative credits, even when a category was selected already. A stored confidence means
  * Jev already looked and wasn't sure (decision 27).
  */
 export async function pendingForJev(
@@ -275,7 +339,7 @@ export async function pendingForJev(
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
-			WHERE ${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL
+			WHERE ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
 			LIMIT ?`,
@@ -299,8 +363,7 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
- * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion choice. Jev's income answer isn't stored: it changes the budget
- * math, and the edit panel has no income control (decision 28). Returns whether it wrote the row.
+ * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice. Returns whether it wrote the row.
  */
 export async function saveJevResult(
 	db: D1Database,
@@ -312,8 +375,14 @@ export async function saveJevResult(
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET
-				category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
+				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_id END,
+				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_source END,
+			category_confidence = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_confidence END,
+			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL THEN 1 ELSE credit_reviewed END,
+				jev_category_id = ?,
 				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
+				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
+				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
@@ -332,6 +401,8 @@ export async function saveJevResult(
 			d.suggestedCategoryId,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
+			d.flags.income ? 1 : 0,
+			d.flags.income ? 1 : 0,
 			excludes,
 			excludes,
 			id,

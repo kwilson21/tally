@@ -245,6 +245,14 @@ describe("POST /transactions/organize", () => {
 		expect(html).not.toMatch(/HIDDEN (EXCLUDED|SPLIT|INCOME|CATEGORIZED)/);
 	});
 
+	it("keeps unreviewed credits out of merchant organization until reviewed", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, credit_reviewed) VALUES (1, ?, -1200, 'PENDING CREDIT', 0)",
+		).bind(todayUtc()).run();
+		const { html } = await get();
+		expect(html).not.toContain("PENDING CREDIT");
+	});
+
 	it("preserves skips through save and only counts skips that still exist", async () => {
 		const page = await get();
 		const first = page.html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1] ?? "";
