@@ -208,11 +208,17 @@ describe("finding bills", () => {
 
 	it("prefills every Add value", async () => {
 		await resetDemo(env.DB, todayUtc());
+		// The seeded charge dates follow today, so the due day is its latest charge's day.
+		const latest = await env.DB.prepare(
+			"SELECT MAX(date) AS date FROM transactions WHERE raw_name='CITY GYM MEMBERSHIP' AND date<=?",
+		)
+			.bind(todayUtc())
+			.first<string>("date");
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
 		expect(html).toContain(
-			"/bills/new?name=City+Gym&amp;amount=42.50&amp;due_day=4&amp;frequency=monthly&amp;category_id=5&amp;merchant_raw_name=CITY+GYM+MEMBERSHIP",
+			`/bills/new?name=City+Gym&amp;amount=42.50&amp;due_day=${Number(latest?.slice(8))}&amp;frequency=monthly&amp;category_id=5&amp;merchant_raw_name=CITY+GYM+MEMBERSHIP`,
 		);
 	});
 
