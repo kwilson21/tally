@@ -939,7 +939,7 @@ function Controls() {
 				title="Add cash"
 				tier="visual"
 				components={["CashForm"]}
-				sentence="P21 A's secondary button and edit-panel-shaped form add cash money in or out."
+				sentence="P21's secondary button and edit-panel-shaped form add cash spending."
 			>
 				<div
 					inert
@@ -957,7 +957,6 @@ function Controls() {
 						values={{
 							date: "2026-09-29",
 							amount: "20.00",
-							direction: "out",
 							merchant: "Farmers market",
 							category: "1",
 							note: "Peaches and eggs",

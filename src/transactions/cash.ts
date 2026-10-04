@@ -3,7 +3,6 @@ import { toCents } from "../money";
 export type CashValues = {
 	date: string;
 	amount: string;
-	direction: "out" | "in";
 	merchant: string;
 	category: string;
 	note: string;
@@ -16,7 +15,13 @@ export function parseCash(
 	categoryIds: number[],
 ) {
 	const errors: CashErrors = {};
-	if (!/^\d{4}-\d{2}-\d{2}$/.test(values.date) || values.date > today)
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(values.date);
+	const realDate =
+		match !== null &&
+		new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+			.toISOString()
+			.slice(0, 10) === values.date;
+	if (!realDate || values.date > today)
 		errors.date = "Choose today or an earlier date.";
 	let cents = 0;
 	try {
@@ -24,7 +29,9 @@ export function parseCash(
 	} catch {
 		errors.amount = "Enter an amount in dollars and cents.";
 	}
-	if (cents <= 0) errors.amount = "Enter an amount greater than zero.";
+	if (!Number.isSafeInteger(cents))
+		errors.amount = "Enter a smaller amount in dollars and cents.";
+	else if (cents <= 0) errors.amount = "Enter an amount greater than zero.";
 	const merchant = values.merchant.trim();
 	if (!merchant) errors.merchant = "Enter a merchant name.";
 	else if (merchant.length > 120)
@@ -33,15 +40,13 @@ export function parseCash(
 	if (!categoryIds.includes(categoryId))
 		errors.category = "Pick a category from the list.";
 	if (values.note.length > 500) errors.note = "Use 500 characters or fewer.";
-	if (values.direction !== "out" && values.direction !== "in")
-		errors.direction = "Choose money out or money in.";
 	return Object.keys(errors).length
 		? { ok: false as const, errors }
 		: {
 				ok: true as const,
 				value: {
 					date: values.date,
-					amountCents: values.direction === "in" ? -cents : cents,
+					amountCents: cents,
 					merchant,
 					categoryId,
 					note: values.note.trim() || null,
@@ -73,7 +78,7 @@ export async function saveCash(
 				value.amountCents,
 				value.merchant,
 				value.categoryId,
-				value.amountCents < 0 ? 1 : 0,
+				0,
 				value.note,
 				by,
 			),

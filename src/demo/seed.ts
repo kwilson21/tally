@@ -19,7 +19,7 @@ export type SeedAccount = {
 	id: number;
 	bankId: number | null;
 	name: string;
-	mask: string;
+	mask: string | null;
 	type: string;
 	subtype: string;
 	isLiability: boolean;
@@ -134,7 +134,7 @@ const ACCOUNTS: SeedAccount[] = [
 		id: CASH,
 		bankId: null,
 		name: "Cash",
-		mask: "",
+		mask: null,
 		type: "cash",
 		subtype: "cash",
 		isLiability: false,

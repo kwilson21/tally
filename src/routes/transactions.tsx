@@ -68,6 +68,7 @@ type ListOptions = {
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
 	status?: 200 | 404 | 422;
+	pageTitle?: string;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -80,7 +81,7 @@ function listHref(filters: Filters, thisMonth: string) {
 async function renderList(
 	c: Context<App>,
 	filters: Filters,
-	{ sheet, focusId, status = 200 }: ListOptions = {},
+	{ sheet, focusId, status = 200, pageTitle }: ListOptions = {},
 ) {
 	const today = todayUtc();
 	const [{ rows, total, page, pages }, months, needs, categories] =
@@ -148,10 +149,15 @@ async function renderList(
 			{label}
 		</a>
 	);
+	const back = listHref(filters, today.slice(0, 7));
+	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
 	return c.html(
 		<Layout
-			title={sheet ? "Edit transaction · Tally" : "Transactions · Tally"}
+			title={
+				pageTitle ??
+				(sheet ? "Edit transaction · Tally" : "Transactions · Tally")
+			}
 			active="transactions"
 			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
@@ -162,9 +168,9 @@ async function renderList(
 			<div class="mt-3">
 				<Button
 					kind="secondary"
-					href="/transactions/cash/new"
+					href={cashHref}
 					class="gap-2"
-					hx-get="/transactions/cash/new"
+					hx-get={cashHref}
 					hx-target="#sheet"
 					hx-select="#sheet"
 					hx-swap="outerHTML"
@@ -361,6 +367,7 @@ type SheetProps = {
 	values: Edit;
 	errors?: EditErrors;
 	demo: boolean;
+	deleteConfirm?: boolean;
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -371,6 +378,7 @@ function EditSheet({
 	values,
 	errors = {},
 	demo,
+	deleteConfirm = false,
 }: SheetProps) {
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
 	const closeAttrs = {
@@ -580,7 +588,7 @@ function EditSheet({
 					</Button>
 				</div>
 			</form>
-			{tx.accountType === "cash" && (
+			{tx.accountType === "cash" && tx.parentId === null && (
 				<form
 					method="post"
 					action={`/transactions/${tx.id}/delete`}
@@ -591,9 +599,21 @@ function EditSheet({
 					hx-swap="outerHTML"
 				>
 					<input type="hidden" name="back" value={back} />
-					<Button kind="text" type="submit">
-						Delete cash transaction
-					</Button>
+					{deleteConfirm ? (
+						<div class="flex items-center gap-3">
+							<input type="hidden" name="confirm" value="1" />
+							<Button type="submit" class="bg-over">
+								Delete this cash entry?
+							</Button>
+							<Button href={back} kind="text">
+								Cancel
+							</Button>
+						</div>
+					) : (
+						<Button kind="text" type="submit">
+							Delete cash transaction
+						</Button>
+					)}
 				</form>
 			)}
 		</BottomSheet>
@@ -609,7 +629,6 @@ const filtersFrom = (url: string) =>
 const cashValues = (form?: FormData): CashValues => ({
 	date: form?.get("date")?.toString() ?? todayUtc(),
 	amount: form?.get("amount")?.toString() ?? "20.00",
-	direction: form?.get("direction") === "in" ? "in" : "out",
 	merchant: form?.get("merchant")?.toString() ?? "",
 	category: form?.get("category")?.toString() ?? "",
 	note: form?.get("note")?.toString() ?? "",
@@ -619,13 +638,15 @@ function CashSheet({
 	categories,
 	values,
 	errors,
+	back,
 }: {
 	categories: Category[];
 	values: CashValues;
 	errors?: import("../transactions/cash").CashErrors;
+	back: string;
 }) {
 	return (
-		<BottomSheet labelledBy="cash-title" closeHref="/transactions">
+		<BottomSheet labelledBy="cash-title" closeHref={back}>
 			<h2
 				id="cash-title"
 				tabindex={-1}
@@ -639,25 +660,27 @@ function CashSheet({
 				values={values}
 				errors={errors}
 				today={todayUtc()}
+				back={back}
 			/>
 		</BottomSheet>
 	);
 }
 
-transactions.get("/transactions/cash/new", (c) =>
-	renderList(
-		c,
-		parseFilters(new URL(c.req.url).searchParams, todayUtc().slice(0, 7)),
-		{
-			sheet: (categories) => (
-				<CashSheet categories={categories} values={cashValues()} />
-			),
-		},
-	),
-);
+transactions.get("/transactions/cash/new", (c) => {
+	const back = safeBack(
+		new URL(c.req.url).searchParams.get("back") ?? undefined,
+	);
+	return renderList(c, filtersFrom(back), {
+		pageTitle: "Add cash · Tally",
+		sheet: (categories) => (
+			<CashSheet categories={categories} values={cashValues()} back={back} />
+		),
+	});
+});
 
 transactions.post("/transactions/cash", async (c) => {
 	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
 	const values = cashValues(form);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id,name,icon,color FROM categories WHERE archived=0 ORDER BY sort_order,name",
@@ -668,34 +691,29 @@ transactions.post("/transactions/cash", async (c) => {
 		categories.map((x) => x.id),
 	);
 	if (!parsed.ok)
-		return renderList(
-			c,
-			parseFilters(new URL(c.req.url).searchParams, todayUtc().slice(0, 7)),
-			{
-				status: 422,
-				sheet: () => (
-					<CashSheet
-						categories={categories}
-						values={values}
-						errors={parsed.errors}
-					/>
-				),
-			},
-		);
+		return renderList(c, filtersFrom(back), {
+			pageTitle: "Add cash · Tally",
+			status: 422,
+			sheet: () => (
+				<CashSheet
+					categories={categories}
+					values={values}
+					errors={parsed.errors}
+					back={back}
+				/>
+			),
+		});
 	await saveCash(c.env.DB, parsed.value, actor(c));
-	if (!c.req.header("HX-Request")) return c.redirect("/transactions", 303);
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: { message: `Added ${parsed.value.merchant}`, type: "success" },
-			announce: `Added ${formatCents(Math.abs(parsed.value.amountCents))} cash ${parsed.value.amountCents < 0 ? "income" : "spending"} at ${parsed.value.merchant}.`,
+			announce: `Added ${formatCents(parsed.value.amountCents)} cash spending at ${parsed.value.merchant}.`,
 		}),
 	);
-	c.header("HX-Push-Url", "/transactions");
-	return renderList(
-		c,
-		parseFilters(new URL(c.req.url).searchParams, todayUtc().slice(0, 7)),
-	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, filtersFrom(back));
 });
 
 async function notFound(c: Context<App>) {
@@ -993,11 +1011,32 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
-	if (tx?.accountType !== "cash") return notFound(c);
+	if (tx?.accountType !== "cash" || tx.parentId !== null) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	if (form.get("confirm") !== "1") {
+		const values: Edit = {
+			categoryId: tx.categoryId,
+			alwaysForMerchant: false,
+			displayName: tx.merchantName,
+			note: tx.note,
+			excluded: tx.excluded,
+		};
+		return renderList(c, filtersFrom(back), {
+			sheet: (categories) => (
+				<EditSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					demo={c.env.DEMO === "true"}
+					deleteConfirm
+				/>
+			),
+		});
+	}
 	await c.env.DB.prepare(
-		"DELETE FROM transactions WHERE id=? AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
+		"DELETE FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
 	)
 		.bind(tx.id)
 		.run();

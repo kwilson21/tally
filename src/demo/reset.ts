@@ -68,7 +68,7 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					a.id,
 					a.bankId,
 					a.name,
-					a.mask || null,
+					a.mask,
 					a.type,
 					a.subtype,
 					b(a.isLiability),
