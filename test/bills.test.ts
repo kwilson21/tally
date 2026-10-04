@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { loadBillSuggestions } from "../src/bills/find";
 import { todayUtc } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { loadBillRows } from "../src/routes/bills";
@@ -168,6 +169,9 @@ describe("Bills", () => {
 	])("keeps every demo status available on %s", async (date) => {
 		await resetDemo(env.DB, date);
 		const { rows } = await loadBillRows(env.DB, date);
+		expect(
+			(await loadBillSuggestions(env.DB, date)).length,
+		).toBeGreaterThanOrEqual(2);
 		expect(
 			new Set(rows.filter((row) => row.active).map((row) => row.status)),
 		).toEqual(new Set(["overdue", "due", "upcoming", "paid"]));

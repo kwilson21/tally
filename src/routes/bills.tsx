@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { matchBillPayments } from "../bills/match";
 import {
 	type BillStatus,
@@ -8,6 +9,7 @@ import {
 import { todayUtc } from "../dates";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
+import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import {
 	BillMonthExplanation,
@@ -132,6 +134,7 @@ async function page(
 	sheet?: { bill?: DbBill; values?: Values; errors?: Record<string, string> },
 ) {
 	const { today, rows } = await loadBillRows(c.env.DB);
+	const suggestions = await loadBillSuggestions(c.env.DB, today);
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
 	const soon = active.filter(
@@ -150,6 +153,7 @@ async function page(
 					{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
 					{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
 				</p>
+				<BillFindingBand count={suggestions.length} />
 				<div class="mt-3">
 					<Button
 						kind="secondary"
@@ -398,7 +402,75 @@ function BillSheet({
 }
 
 bills.get("/bills", (c) => page(c));
-bills.get("/bills/new", (c) => page(c, {}));
+bills.get("/bills/new", (c) => {
+	const q = c.req.query();
+	const values = q.name
+		? {
+				name: q.name,
+				amount: q.amount ?? "",
+				due_day: q.due_day ?? "",
+				frequency: "monthly" as const,
+				anchor_month: "1",
+				category_id: q.category_id ?? "",
+				merchant_raw_name: q.merchant_raw_name ?? "",
+			}
+		: undefined;
+	return page(c, { values });
+});
+bills.get("/bills/find", async (c) => {
+	const suggestions = await loadBillSuggestions(c.env.DB, todayUtc());
+	return c.html(
+		<Layout
+			title="Possible bills · Tally"
+			active="bills"
+			demo={c.env.DEMO === "true"}
+			currentPath={c.req.path}
+		>
+			<div class="max-w-2xl">
+				<a href="/bills" class="inline-flex min-h-11 items-center">
+					Bills
+				</a>
+				<h1 class="font-serif text-4xl font-semibold tracking-tight">
+					Possible bills
+				</h1>
+				<p class="mt-2 text-muted">
+					About the same amount, about a month apart. Nothing becomes a bill
+					until you add it.
+				</p>
+				{suggestions.length ? (
+					<ul class="mt-4 divide-y divide-rule border-y border-rule">
+						{suggestions.map((suggestion: BillSuggestion) => (
+							<BillFindingRow suggestion={suggestion} />
+						))}
+					</ul>
+				) : (
+					<EmptyState
+						kind="done"
+						sentence="No possible bills to review."
+						hint="New repeat charges will appear here."
+					/>
+				)}
+			</div>
+		</Layout>,
+	);
+});
+bills.post("/bills/find/:merchant/dismiss", async (c) => {
+	const merchant = decodeURIComponent(c.req.param("merchant"));
+	const result = await c.env.DB.prepare(
+		"UPDATE merchants SET not_a_bill=1 WHERE raw_name=?",
+	)
+		.bind(merchant)
+		.run();
+	if (!result.meta.changes) return c.notFound();
+	const headers = {
+		"HX-Trigger": JSON.stringify({
+			toast: { message: "Marked as not a bill", type: "success" },
+			announce: "Suggestion removed",
+		}),
+	};
+	if (c.req.header("HX-Request")) return c.body("", 200, headers);
+	return c.redirect("/bills/find", 303);
+});
 bills.get("/bills/:id", async (c) => billPage(c, Number(c.req.param("id"))));
 bills.get("/bills/:id/edit", async (c) => {
 	const bill = await dbBill(c, Number(c.req.param("id")));

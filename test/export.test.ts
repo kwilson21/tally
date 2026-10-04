@@ -153,6 +153,7 @@ describe("data exports", () => {
 				"raw_name",
 				"suggested_name",
 				"suggestion_status",
+				"not_a_bill",
 			],
 			accounts: [
 				"balance_cents",
