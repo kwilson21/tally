@@ -171,7 +171,7 @@ describe("categorizePending", () => {
 		).toBe(8);
 	});
 
-	it("keeps an uncertain, non-income credit held and out of budget", async () => {
+	it("remembers an uncertain answer for an already-categorized credit and retries after Plaid changes it", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await db
 			.prepare(
@@ -181,7 +181,7 @@ describe("categorizePending", () => {
 		const heldBefore = (await monthCounts(db, MONTH)).heldForReview;
 		const inserted = await db
 			.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_income, income_source, credit_reviewed, credit_reviewed_by) VALUES (1, ?, -777, 'SYNTHETIC UNCERTAIN CREDIT', NULL, NULL, NULL, 0, NULL, 0, NULL) RETURNING id",
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_income, income_source, credit_reviewed, credit_reviewed_by) VALUES (1, ?, -777, 'SYNTHETIC UNCERTAIN CREDIT', 1, 'merchant_rule', NULL, 0, NULL, 0, NULL) RETURNING id",
 			)
 			.bind(`${MONTH}-20`)
 			.first<{ id: number }>();
@@ -195,7 +195,7 @@ describe("categorizePending", () => {
 		expect(
 			await db
 				.prepare(
-					"SELECT flag_income, income_source, credit_reviewed, category_confidence FROM transactions WHERE id = ?",
+					"SELECT flag_income, income_source, credit_reviewed, category_confidence, category_id, category_source FROM transactions WHERE id = ?",
 				)
 				.bind(id)
 				.first(),
@@ -204,6 +204,8 @@ describe("categorizePending", () => {
 			income_source: null,
 			credit_reviewed: 0,
 			category_confidence: 0.5,
+			category_id: 1,
+			category_source: "merchant_rule",
 		});
 		expect((await monthCounts(db, MONTH)).heldForReview).toBe(heldBefore + 1);
 		expect(
@@ -217,6 +219,24 @@ describe("categorizePending", () => {
 			applied: 0,
 		});
 		expect(next.calls()).toBe(0);
+
+		// Plaid amount corrections clear Jev's saved confidence and make the transaction eligible again.
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -888, category_confidence = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		expect(
+			(await pendingForJev(db, 40)).map((transaction) => transaction.id),
+		).toContain(id);
+		const changed = fakeJev(() => reply(0.95));
+		expect(await categorizePending(withKey, changed.fetchImpl)).toEqual({
+			asked: 1,
+			applied: 1,
+		});
+		expect(changed.calls()).toBe(1);
+		expect((await monthCounts(db, MONTH)).heldForReview).toBe(heldBefore);
 	});
 
 	it("doesn't ask again about transactions it already looked at", async () => {

@@ -579,6 +579,69 @@ describe("syncItem", () => {
 		}
 	});
 
+	it("keeps Jev ownership after a note-only save so a Plaid amount change reopens review", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: -12 })] })),
+			),
+		);
+		const tx = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number }>();
+		await saveJevResult(env.DB, tx?.id as number, {
+			categoryId: 1,
+			suggestedCategoryId: 1,
+			confidence: 0.95,
+			flags: { transfer: false, reimbursement: false, income: false },
+		});
+		await saveEdit(
+			env.DB,
+			tx?.id as number,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: "synthetic note",
+				excluded: false,
+				income: false,
+				creditReviewed: true,
+			},
+			"synthetic",
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first(),
+		).toEqual({
+			income_source: null,
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+		});
+
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ modified: [transaction({ amount: -12.75 })] })),
+			),
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, income_source, credit_reviewed, credit_reviewed_by, category_confidence FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first(),
+		).toEqual({
+			amount_cents: -1275,
+			income_source: null,
+			credit_reviewed: 0,
+			credit_reviewed_by: null,
+			category_confidence: null,
+		});
+	});
+
 	it("reclassifies an updated non-reviewed purchase as a pending credit when Plaid changes its sign", async () => {
 		const id = await addItem();
 		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
