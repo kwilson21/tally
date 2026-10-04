@@ -28,6 +28,9 @@ describe("transaction splits", () => {
 		expect(html).toContain("$12.00 left to assign");
 		expect(html.match(/name="part_category"/g)).toHaveLength(2);
 		expect(html).toContain('hx-trigger="input changed delay:300ms"');
+		// The amount request is nested inside a form that selects #page. Override that inherited
+		// selector so its partial response can update the live total.
+		expect(html).toContain('hx-select="#split-line"');
 	});
 
 	it("rejects a mismatch, then saves children and removes them atomically", async () => {

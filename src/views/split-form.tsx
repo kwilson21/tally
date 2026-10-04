@@ -92,6 +92,7 @@ export function SplitForm({
 						hx-post={`/transactions/${id}/split/line`}
 						hx-trigger="input changed delay:300ms"
 						hx-target="#split-line"
+						hx-select="#split-line"
 						hx-swap="outerHTML"
 						hx-include="closest form"
 					>
