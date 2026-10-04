@@ -14,7 +14,7 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.excluded)
 		return { kind: "excluded", caption: "Excluded", tag: false };
 	if (!row.creditReviewed && row.amountCents < 0 && !row.income)
-		return { kind: "needs", caption: "Review credit", tag: true };
+		return { kind: "needs", caption: "Review credit", tag: false };
 	if (row.parentId)
 		return {
 			kind: "category",

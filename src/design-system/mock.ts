@@ -245,13 +245,16 @@ export const BUDGET_EXAMPLE = {
 export const TRANSACTIONS_EXAMPLE = {
 	counted: 88,
 	excluded: 6,
+	heldForReview: 2,
 	needsCategory: 12,
 };
 export const EXCLUSIONS_EXAMPLE: {
 	counted: number;
+	heldForReview: number;
 	breakdown: ExcludedBreakdown;
 } = {
 	counted: 88,
+	heldForReview: 2,
 	breakdown: { transfer: 3, reimbursement: 1, byPerson: 2 },
 };
 export const CATEGORIES_EXAMPLE = {

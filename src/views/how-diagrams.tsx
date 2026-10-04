@@ -245,17 +245,20 @@ function Step({
 export function TransactionsDiagram(c: {
 	counted: number;
 	excluded: number;
+	heldForReview: number;
 	needsCategory: number;
 }) {
-	const total = c.counted + c.excluded;
+	const total = c.counted + c.excluded + c.heldForReview;
 	const needs =
 		c.needsCategory === 0
 			? "None need a category."
 			: `${c.needsCategory} of those ${c.needsCategory === 1 ? "needs" : "need"} a category.`;
-	const counts =
-		c.excluded === 0
-			? `${plural(total, "transaction", "transactions")} this month, and ${total === 1 ? "it counts" : "they all count"}.`
-			: `${plural(total, "transaction", "transactions")} this month. ${c.excluded} ${c.excluded === 1 ? "is" : "are"} excluded, so ${c.counted} ${c.counted === 1 ? "counts" : "count"}.`;
+	const states = [
+		c.counted > 0 && `${c.counted} count toward spending`,
+		c.heldForReview > 0 && `${c.heldForReview} held for review`,
+		c.excluded > 0 && `${c.excluded} excluded`,
+	].filter(Boolean);
+	const counts = `${plural(total, "transaction", "transactions")} this month: ${states.join(", ") || "none to count"}.`;
 	return (
 		<Figure
 			id="transactions-diagram"
@@ -264,10 +267,15 @@ export function TransactionsDiagram(c: {
 			height={218}
 		>
 			<Step y={4} label="This month" count={total} />
-			<path d={down(40, 48, 84)} class="stroke-ink" />
+			<path d={down(40, 48, 88)} class="stroke-ink" />
 			{c.excluded > 0 && (
-				<text x="56" y="71" font-size="13" class="fill-muted">
+				<text x="56" y="64" font-size="12" class="fill-muted">
 					− {c.excluded} excluded
+				</text>
+			)}
+			{c.heldForReview > 0 && (
+				<text x="56" y="80" font-size="12" class="fill-muted">
+					− {c.heldForReview} held for review
 				</text>
 			)}
 			<Step y={88} label="Counted" count={c.counted} />
@@ -280,15 +288,18 @@ export function TransactionsDiagram(c: {
 /** This month's transactions as one bar: the counted part solid, each kind of exclusion a dashed slice. */
 export function ExclusionsDiagram({
 	counted,
+	heldForReview,
 	breakdown,
 }: {
 	counted: number;
+	heldForReview: number;
 	breakdown: ExcludedBreakdown;
 }) {
 	const excluded = excludedTotal(breakdown);
-	const total = counted + excluded;
+	const total = counted + excluded + heldForReview;
 	const kinds: [number, string, string][] = (
 		[
+			[heldForReview, "held for review", "held for review"],
 			[breakdown.transfer, "transfer", "transfers"],
 			[breakdown.reimbursement, "reimbursement", "reimbursements"],
 			[breakdown.byPerson, "by a person", "by a person"],
@@ -312,17 +323,18 @@ export function ExclusionsDiagram({
 		x += w + gap;
 		return at;
 	});
-	const said = kinds.map(([n, one, many]) =>
-		one === "by a person" ? `${n} excluded by a person` : plural(n, one, many),
-	);
+	const said = kinds
+		.filter(([, one]) => one !== "held for review")
+		.map(([n, one, many]) =>
+			one === "by a person"
+				? `${n} excluded by a person`
+				: plural(n, one, many),
+		);
 	const sentence =
 		said.length < 2
 			? said.join("")
 			: `${said.slice(0, -1).join(", ")} and ${said.at(-1)}`;
-	const desc =
-		excluded === 0
-			? `All ${plural(counted, "transaction", "transactions")} this month count toward the budget. Nothing is excluded.`
-			: `Of ${total} transactions this month, ${counted} count toward the budget and ${excluded} ${excluded === 1 ? "is" : "are"} excluded: ${sentence}.`;
+	const desc = `${plural(total, "transaction", "transactions")} this month: ${counted} count toward spending, ${heldForReview} held for review, and ${excluded} excluded${sentence ? ` (${sentence})` : ""}.`;
 	return (
 		<Figure
 			id="exclusions-diagram"
@@ -375,11 +387,13 @@ export function ExclusionsDiagram({
 				text-anchor="end"
 				class="fill-ink"
 			>
+				{heldForReview > 0 && `${heldForReview} held · `}
 				{excluded === 0 ? "Nothing excluded" : `${excluded} excluded`}
 			</text>
-			{excluded > 0 && (
+			{(excluded > 0 || heldForReview > 0) && (
 				<text x={W} y="74" font-size="12" text-anchor="end" class="fill-muted">
 					{kinds
+						.filter(([n]) => n > 0)
 						.map(([n, one, many]) =>
 							one === "by a person" ? `${n} ${one}` : plural(n, one, many),
 						)

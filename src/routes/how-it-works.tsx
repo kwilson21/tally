@@ -228,6 +228,7 @@ howItWorks.get("/how-it-works", async (c) => {
 						<TransactionsDiagram
 							counted={counts.counted}
 							excluded={excludedTotal(excluded)}
+							heldForReview={counts.heldForReview}
 							needsCategory={counts.needsCategory}
 						/>
 					</Diagram>
@@ -256,7 +257,11 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>
 					<Diagram>
-						<ExclusionsDiagram counted={counts.counted} breakdown={excluded} />
+						<ExclusionsDiagram
+							counted={counts.counted}
+							heldForReview={counts.heldForReview}
+							breakdown={excluded}
+						/>
 					</Diagram>
 					<Example>{exclusionsExample(excluded)}</Example>
 				</Section>
