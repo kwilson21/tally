@@ -188,9 +188,9 @@ const THIS_MONTH: [number, string, number, number][] = [
 	[11, "CHEVRON 0098812", GAS, 5210],
 	[17, "SHELL OIL 57442", GAS, 3770],
 	[20, "CHEVRON 0098812", GAS, 4800],
-	[5, "TARGET T-1432", KIDS, 8499],
+	[5, "TARGET T-1432", KIDS, 7000],
 	[8, "YOUTH SOCCER LEAGUE", KIDS, 9000],
-	[18, "BARNES & NOBLE #2831", KIDS, 3501],
+	[18, "BARNES & NOBLE #2831", KIDS, 5000],
 	[7, "THE HOME DEPOT #6612", HOUSEHOLD, 6125],
 	[13, "AMAZON.COM*RT4K2", HOUSEHOLD, 3375],
 ];
@@ -329,6 +329,25 @@ export function buildSeed(today: string): Seed {
 		reimbursement(clamp(10)),
 	);
 
+	// Repeat services intentionally not represented by bills, for the bill finder.
+	const subscriptions = [
+		["GOOGLE *YOUTUBE PREMIUM", 1399],
+		["PROCREATE DREAMS", 499],
+		["CITY GYM MEMBERSHIP", 4250],
+	] as const;
+	const subscriptionDay = Math.min(todayDay, 12);
+	for (const [rawName, amount] of subscriptions)
+		for (const monthsAgo of [2, 1])
+			transactions.push(
+				spend(
+					CARD,
+					day(monthOffset(today, monthsAgo), subscriptionDay),
+					rawName,
+					HOUSEHOLD,
+					amount,
+				),
+			);
+
 	// Spec §9 row 4: the warehouse purchase is already split across two categories.
 	const costcoIndex = transactions.findIndex(
 		(t) => t.rawName === "COSTCO WHSE #0431" && t.date.startsWith(thisMonth),
@@ -411,6 +430,16 @@ export function buildSeed(today: string): Seed {
 			displayName: "Reimbursement, doctor's office",
 			defaultCategoryId: null,
 		},
+		...subscriptions.map(([rawName]) => ({
+			rawName,
+			displayName:
+				rawName === "GOOGLE *YOUTUBE PREMIUM"
+					? "YouTube Premium"
+					: rawName === "PROCREATE DREAMS"
+						? "Procreate Dreams"
+						: "City Gym",
+			defaultCategoryId: HOUSEHOLD,
+		})),
 	];
 
 	return {

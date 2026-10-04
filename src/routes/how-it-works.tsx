@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { JEV_THRESHOLD } from "../ai/categorize";
+import {
+	BILL_FIND_AMOUNT_PERCENT,
+	BILL_FIND_MAX_DAYS,
+	BILL_FIND_MIN_DAYS,
+	BILL_FIND_MONTHS,
+} from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
 import { todayUtc } from "../dates";
@@ -296,6 +302,12 @@ howItWorks.get("/how-it-works", async (c) => {
 							A match has the same merchant, is within{" "}
 							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% of the bill amount, and
 							is within {BILL_DATE_WINDOW_DAYS} days of its due date.
+						</li>
+						<li>
+							Tally suggests a possible bill when at least two money-out charges
+							in the last {BILL_FIND_MONTHS} months are {BILL_FIND_MIN_DAYS}–
+							{BILL_FIND_MAX_DAYS} days apart and within{" "}
+							{BILL_FIND_AMOUNT_PERCENT}% in amount.
 						</li>
 						<li>A payment can pay only one bill occurrence.</li>
 						<li>
