@@ -21,6 +21,15 @@ export function rowCaption(row: ListRow): Caption {
 		};
 	if (row.isSplit)
 		return { kind: "category", caption: "Split transaction", tag: false };
+	if (
+		row.splitRemovedFromCents !== null &&
+		row.splitRemovedFromCents !== undefined
+	)
+		return {
+			kind: "needs",
+			caption: `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.`,
+			tag: true,
+		};
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
 	if (row.categoryName)
 		return { kind: "category", caption: row.categoryName, tag: false };
