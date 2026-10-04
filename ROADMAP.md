@@ -16,7 +16,7 @@ Phase 1 finished on 2026-09-25: the demo is live. Review: [docs/reviews/phase-1.
 
 The design system track runs alongside Phase 2 and comes before the audit details [#67](https://github.com/kwilson21/tally/issues/67)–[#74](https://github.com/kwilson21/tally/issues/74), which are built through its catalog. Non-UI Phase 2 work (Plaid, sync, Access) isn't blocked by it. [#92](https://github.com/kwilson21/tally/issues/92) moves Things to try, the demo's only onboarding today, from the top of Home to below the Budget list; #95 is where a proper onboarding replaces it.
 
-## Where Phase 3 stands (Oct 4)
+## Where Phase 3 stands (Oct 4: all on `main`)
 
 | Part | Issue | State |
 |---|---|---|
@@ -25,9 +25,9 @@ The design system track runs alongside Phase 2 and comes before the audit detail
 | Bill matching, the bill's page, a late payment's month (P16, P22) | [#26](https://github.com/kwilson21/tally/issues/26) | Merged ([#155](https://github.com/kwilson21/tally/pull/155)) |
 | Find bills (P18) | [#156](https://github.com/kwilson21/tally/issues/156) | Merged ([#161](https://github.com/kwilson21/tally/pull/161)) |
 | Add cash (P21) | [#159](https://github.com/kwilson21/tally/issues/159) | Merged ([#162](https://github.com/kwilson21/tally/pull/162)) |
-| Refunds (P19) | [#157](https://github.com/kwilson21/tally/issues/157) | Briefed to Codex (Oct 4) |
-| Select several (P20) | [#158](https://github.com/kwilson21/tally/issues/158) | Briefed to Codex (Oct 4) |
+| Refunds (P19) | [#157](https://github.com/kwilson21/tally/issues/157) | Merged ([#165](https://github.com/kwilson21/tally/pull/165)) |
+| Select several (P20) | [#158](https://github.com/kwilson21/tally/issues/158) | Merged ([#166](https://github.com/kwilson21/tally/pull/166)) |
 
-Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's paid or the next one is due; a bank change to a split purchase's amount removes the split. Phase 3 stays on `main` and the demo until the one production deploy after Oct 7 (decision 60). The other session's income work ([#149](https://github.com/kwilson21/tally/pull/149), [#153](https://github.com/kwilson21/tally/pull/153), [#160](https://github.com/kwilson21/tally/pull/160)) is separate; [#153](https://github.com/kwilson21/tally/pull/153) needs its migration renumbered after `0014`, which `main` now uses; refunds take `0015`.
+Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's paid or the next one is due; a bank change to a split purchase's amount removes the split. Phase 3 is complete on `main` and the demo; it reaches production in the one owner-approved deploy after Oct 7 (decision 60). A linked refund follows its purchase's month and category only while the purchase counts; its purchase carries the Needs category prompt. The other session's income work ([#149](https://github.com/kwilson21/tally/pull/149), [#153](https://github.com/kwilson21/tally/pull/153), [#160](https://github.com/kwilson21/tally/pull/160)) is separate; [#153](https://github.com/kwilson21/tally/pull/153) needs its migration renumbered after `0015`, which `main` now uses.
 
 Later list (not scheduled): see spec §12.
