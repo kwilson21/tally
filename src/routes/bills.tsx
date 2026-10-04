@@ -455,7 +455,7 @@ bills.get("/bills/find", async (c) => {
 	);
 });
 bills.post("/bills/find/:merchant/dismiss", async (c) => {
-	const merchant = decodeURIComponent(c.req.param("merchant"));
+	const merchant = c.req.param("merchant");
 	const result = await c.env.DB.prepare(
 		"UPDATE merchants SET not_a_bill=1 WHERE raw_name=?",
 	)

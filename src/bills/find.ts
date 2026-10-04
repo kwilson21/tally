@@ -34,23 +34,24 @@ export function findBillSuggestions(
 	const suggestions: BillSuggestion[] = [];
 	for (const list of groups.values()) {
 		list.sort((a, b) => a.date.localeCompare(b.date));
+		const latest = list[list.length - 1] as BillFindingCharge;
 		let qualifies = false;
-		for (let i = 1; i < list.length; i++) {
-			const previous = list[i - 1] as BillFindingCharge,
-				current = list[i] as BillFindingCharge;
-			const days = epochDay(current.date) - epochDay(previous.date);
+		for (let i = 0; i < list.length - 1; i++) {
+			const previous = list[i] as BillFindingCharge;
+			const days = epochDay(latest.date) - epochDay(previous.date);
 			const withinAmount =
-				Math.abs(current.amountCents - previous.amountCents) * 100 <=
-				previous.amountCents * BILL_FIND_AMOUNT_PERCENT;
+				Math.abs(latest.amountCents - previous.amountCents) * 100 <=
+				latest.amountCents * BILL_FIND_AMOUNT_PERCENT;
 			if (
 				days >= BILL_FIND_MIN_DAYS &&
 				days <= BILL_FIND_MAX_DAYS &&
 				withinAmount
-			)
+			) {
 				qualifies = true;
+				break;
+			}
 		}
 		if (!qualifies) continue;
-		const latest = list[list.length - 1] as BillFindingCharge;
 		const counts = new Map<number, number>();
 		for (const row of list)
 			if (row.categoryId != null)

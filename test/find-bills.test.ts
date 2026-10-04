@@ -18,13 +18,13 @@ describe("finding bills", () => {
 			findBillSuggestions([charge("2026-08-01"), charge("2026-09-01", 1100)]),
 		).toHaveLength(1);
 		expect(
-			findBillSuggestions([charge("2026-08-01"), charge("2026-08-26", 900)]),
+			findBillSuggestions([charge("2026-08-01"), charge("2026-08-26", 910)]),
 		).toHaveLength(1);
 		for (const rows of [
 			[charge("2026-08-01")],
 			[charge("2026-08-01"), charge("2026-08-25")],
 			[charge("2026-08-01"), charge("2026-09-06")],
-			[charge("2026-08-01"), charge("2026-09-01", 1101)],
+			[charge("2026-08-01"), charge("2026-09-01", 1112)],
 		])
 			expect(findBillSuggestions(rows)).toHaveLength(0);
 	});
@@ -40,6 +40,26 @@ describe("finding bills", () => {
 			dueDay: 1,
 			categoryId: 3,
 		});
+	});
+
+	it("anchors the match on the latest charge while allowing intervening purchases", () => {
+		const found = findBillSuggestions([
+			charge("2026-08-01", 1000),
+			charge("2026-08-15", 5000),
+			charge("2026-09-01", 1000),
+		]);
+		expect(found).toHaveLength(1);
+		expect(found[0]).toMatchObject({ amountCents: 1000, dueDay: 1 });
+	});
+
+	it("does not qualify when only earlier charges form a monthly pair", () => {
+		expect(
+			findBillSuggestions([
+				charge("2026-08-23", 8000),
+				charge("2026-09-23", 8000),
+				charge("2026-10-04", 9630),
+			]),
+		).toHaveLength(0);
 	});
 
 	it("filters income, exclusions, split parents and children in the database", async () => {
@@ -67,6 +87,28 @@ describe("finding bills", () => {
 		expect(
 			await env.DB.prepare("SELECT not_a_bill FROM merchants WHERE raw_name=?")
 				.bind(raw)
+				.first("not_a_bill"),
+		).toBe(1);
+	});
+
+	it("dismisses a raw merchant name containing a percent sign", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)",
+		)
+			.bind("100% PURE", "100% PURE")
+			.run();
+		const response = await exports.default.fetch(
+			`http://tally.test/bills/find/${encodeURIComponent("100% PURE")}/dismiss`,
+			{
+				method: "POST",
+				headers: { Origin: "http://tally.test", "HX-Request": "true" },
+			},
+		);
+		expect(response.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT not_a_bill FROM merchants WHERE raw_name=?")
+				.bind("100% PURE")
 				.first("not_a_bill"),
 		).toBe(1);
 	});
