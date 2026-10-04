@@ -385,7 +385,7 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
-			{tx.countsInMonth && (
+			{tx.countsInMonth && !tx.excluded && (
 				<p class="text-muted">
 					Counts in{" "}
 					{new Intl.DateTimeFormat("en-US", {

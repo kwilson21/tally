@@ -308,6 +308,11 @@ function BillSheet({
 								Yearly
 							</Chip>
 						</div>
+						{errors.frequency && (
+							<p role="alert" class="mt-1 text-sm text-over">
+								{errors.frequency}
+							</p>
+						)}
 					</fieldset>
 				</div>
 				<label class="bill-month flex-col gap-1">
@@ -440,6 +445,17 @@ async function save(c: Context<App>, id?: number) {
 		errors.anchor_month = "Choose a month.";
 	const bill = id ? await dbBill(c, id) : undefined;
 	if (id && !bill) return c.notFound();
+	// Linked payments are budget history, so a bill that has them keeps its schedule.
+	if (bill && bill.frequency !== values.frequency) {
+		const linked = await c.env.DB.prepare(
+			"SELECT 1 FROM bill_payments WHERE bill_id=? AND status='linked' LIMIT 1",
+		)
+			.bind(id)
+			.first();
+		if (linked)
+			errors.frequency =
+				"This bill has payments linked. To change how often it's due, deactivate it and add a new bill.";
+	}
 	if (Object.keys(errors).length)
 		return page(c, { bill: bill ?? undefined, values, errors });
 	const args = [
@@ -456,8 +472,8 @@ async function save(c: Context<App>, id?: number) {
 			"UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,merchant_raw_name=? WHERE id=?",
 		).bind(...args, id);
 		if (bill && bill.frequency !== values.frequency)
-			// Period keys have different shapes (YYYY-MM vs YYYY), so neither links nor
-			// dismissals remain meaningful after this schedule change.
+			// Period keys have different shapes (YYYY-MM vs YYYY), so old dismissals
+			// no longer apply; links can't exist here (checked above).
 			await c.env.DB.batch([
 				update,
 				c.env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=?").bind(id),
@@ -475,7 +491,10 @@ async function save(c: Context<App>, id?: number) {
 		const res = await page(c);
 		res.headers.set(
 			"HX-Trigger",
-			JSON.stringify({ toast: { message }, announce: message }),
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: message,
+			}),
 		);
 		res.headers.set("HX-Push-Url", "/bills");
 		return res;
@@ -498,7 +517,10 @@ for (const action of ["deactivate", "reactivate"] as const)
 			const res = await page(c);
 			res.headers.set(
 				"HX-Trigger",
-				JSON.stringify({ toast: { message }, announce: message }),
+				JSON.stringify({
+					toast: { message, type: "success" },
+					announce: message,
+				}),
 			);
 			res.headers.set("HX-Push-Url", "/bills");
 			return res;

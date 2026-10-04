@@ -41,6 +41,12 @@ describe("GET /transactions", () => {
 			expect((await get("/transactions/905")).html).toContain(
 				"Counts in August",
 			);
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded=1 WHERE id=905",
+			).run();
+			expect((await get("/transactions/905")).html).not.toContain(
+				"Counts in August",
+			);
 		},
 	);
 	it("renders the list with labeled search, filters, and day groups", async () => {

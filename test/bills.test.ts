@@ -289,34 +289,52 @@ describe("Bills", () => {
 		expect(html).toContain("Overdue");
 	});
 
-	it("clears links and dismissals when frequency changes", async () => {
-		await env.DB.prepare(
-			"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,'old-dismissal',id,'user','dismissed' FROM transactions LIMIT 1",
-		).run();
-		const response = await exports.default.fetch("http://tally.test/bills/1", {
-			method: "POST",
-			headers: {
-				"content-type": "application/x-www-form-urlencoded",
-				Origin: "http://tally.test",
-			},
-			body: new URLSearchParams({
-				name: "Movies",
-				amount: "3.99",
-				due_day: "4",
-				frequency: "yearly",
-				anchor_month: "1",
-				category_id: "5",
-				merchant_raw_name: "NO AUTOMATIC REMATCH",
-			}),
-		});
-		expect(response.status).toBe(200);
-		expect(
+	it("keeps a bill's schedule while it has linked payments, and clears old dismissals otherwise", async () => {
+		const change = () =>
+			exports.default.fetch("http://tally.test/bills/1", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					name: "Movies",
+					amount: "3.99",
+					due_day: "4",
+					frequency: "yearly",
+					anchor_month: "1",
+					category_id: "5",
+					merchant_raw_name: "NO AUTOMATIC REMATCH",
+				}),
+			});
+		const count = async () =>
 			(
 				await env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=1",
 				).first<{ n: number }>()
-			)?.n,
-		).toBe(0);
+			)?.n;
+		const before = await count();
+		expect(before).toBeGreaterThan(0);
+		const refused = await change();
+		expect(refused.status).toBe(200);
+		expect(await refused.text()).toContain("This bill has payments linked");
+		expect(await count()).toBe(before);
+		expect(
+			(
+				await env.DB.prepare("SELECT frequency FROM bills WHERE id=1").first<{
+					frequency: string;
+				}>()
+			)?.frequency,
+		).toBe("monthly");
+
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,'2026-01',id,'user','dismissed' FROM transactions LIMIT 1",
+			),
+		]);
+		expect((await change()).status).toBe(200);
+		expect(await count()).toBe(0);
 	});
 
 	it("lists only unpaid month choices and captions monthly payments", async () => {
