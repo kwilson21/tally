@@ -723,12 +723,14 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		);
 		const saved =
 			parsed.ok && (await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c)));
-		if (parsed.ok && !saved)
+		if (parsed.ok && !saved) {
+			// Show the bank's new amount, so the next save checks against it.
+			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 			return renderList(c, filtersFrom(back), {
 				status: 422,
 				sheet: () => (
 					<SplitSheet
-						tx={tx}
+						tx={fresh}
 						back={back}
 						categories={categories}
 						values={values}
@@ -736,6 +738,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					/>
 				),
 			});
+		}
 		if (parsed.ok) {
 			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 			c.header(

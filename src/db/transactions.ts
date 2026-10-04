@@ -288,16 +288,9 @@ export async function saveSplit(
 	by: string,
 ) {
 	const parent = await db
-		.prepare(
-			"SELECT account_id AS accountId, date, raw_name AS rawName, excluded FROM transactions WHERE id = ? AND parent_id IS NULL",
-		)
+		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
 		.bind(parentId)
-		.first<{
-			accountId: number;
-			date: string;
-			rawName: string;
-			excluded: number;
-		}>();
+		.first();
 	if (!parent) throw new Error(`No transaction ${parentId}`);
 	// Every write checks, inside the same batch, that the parent still has the amount
 	// the parts were validated against, so a bank correction mid-save writes nothing.
@@ -308,23 +301,14 @@ export async function saveSplit(
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
 			.bind(parentId, parentId, total),
+		// Parts copy the parent's current date, name and exclusion in the same statement.
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
 			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, parent_id, plaid_transaction_id, updated_by)
-			SELECT ?, ?, ?, ?, ?, 'user', ?, ?, NULL, ? WHERE ${unchanged}`)
-				.bind(
-					parent.accountId,
-					parent.date,
-					part.amountCents,
-					parent.rawName,
-					part.categoryId,
-					parent.excluded,
-					parentId,
-					by,
-					parentId,
-					total,
-				),
+			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, id, NULL, ?
+			FROM transactions WHERE id = ? AND amount_cents = ?`)
+				.bind(part.amountCents, part.categoryId, by, parentId, total),
 		),
 		db
 			.prepare(
