@@ -82,10 +82,10 @@ step("the Needs category filter lists the 12 transactions");
 
 await page.goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
 await page.getByRole("link", { name: "Add cash" }).click();
-await page.getByLabel("Amount").fill("12.00");
+await page.getByRole("textbox", { name: "Amount" }).fill("12.00");
 await page.getByLabel("Where").fill("Corner stand");
-await page.getByText("Groceries", { exact: true }).click();
-await page.getByRole("button", { name: "Add" }).click();
+await page.locator("#sheet").getByText("Groceries", { exact: true }).click();
+await page.getByRole("button", { name: "Add", exact: true }).click();
 await page.locator("#toasts").getByText("Added Corner stand").waitFor();
 await page.getByRole("link", { name: /Corner stand/ }).waitFor();
 step("adding $12 cash shows its toast and row");

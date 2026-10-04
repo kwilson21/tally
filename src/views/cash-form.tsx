@@ -85,7 +85,7 @@ export function CashForm({
 					</p>
 				)}
 			</fieldset>
-			<FormField id="cash-note" label="Note" error={errors.note}>
+			<FormField id="cash-note" label="Note (optional)" error={errors.note}>
 				{({ class: errorClass, ...a11y }) => (
 					<input
 						id="cash-note"

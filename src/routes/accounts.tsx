@@ -99,11 +99,6 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 							/>
 						))}
 					</div>
-					{cash && (
-						<p class="mt-8 border-y border-rule py-4 text-muted">
-							Cash · not in net worth
-						</p>
-					)}
 					{plaidEnabled && <LinkBank class="mt-8" />}
 				</>
 			)}

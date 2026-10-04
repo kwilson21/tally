@@ -380,6 +380,7 @@ function EditSheet({
 	demo,
 	deleteConfirm = false,
 }: SheetProps) {
+	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
 	const closeAttrs = {
 		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${tx.id}`,
@@ -602,10 +603,16 @@ function EditSheet({
 					{deleteConfirm ? (
 						<div class="flex items-center gap-3">
 							<input type="hidden" name="confirm" value="1" />
-							<Button type="submit" class="bg-over">
-								Delete this cash entry?
-							</Button>
-							<Button href={back} kind="text">
+							<Button type="submit">Delete this cash entry?</Button>
+							{/* Cancel goes back to this entry's edit sheet, not the list. */}
+							<Button
+								href={editHref}
+								kind="text"
+								hx-get={editHref}
+								hx-target="#page"
+								hx-select="#page"
+								hx-swap="outerHTML"
+							>
 								Cancel
 							</Button>
 						</div>

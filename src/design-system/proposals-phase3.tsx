@@ -1116,7 +1116,7 @@ const cashForm = (
 		</fieldset>
 		<TextInput
 			id="p21-note"
-			label="Note"
+			label="Note (optional)"
 			value="Peaches and eggs"
 			surface="paper"
 		/>

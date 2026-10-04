@@ -26,14 +26,14 @@ export function parseCash(
 	let cents = 0;
 	try {
 		cents = toCents(values.amount);
+		if (!Number.isSafeInteger(cents))
+			errors.amount = "Enter a smaller amount in dollars and cents.";
+		else if (cents <= 0) errors.amount = "Enter an amount greater than zero.";
 	} catch {
 		errors.amount = "Enter an amount in dollars and cents.";
 	}
-	if (!Number.isSafeInteger(cents))
-		errors.amount = "Enter a smaller amount in dollars and cents.";
-	else if (cents <= 0) errors.amount = "Enter an amount greater than zero.";
 	const merchant = values.merchant.trim();
-	if (!merchant) errors.merchant = "Enter a merchant name.";
+	if (!merchant) errors.merchant = "Enter where you spent it.";
 	else if (merchant.length > 120)
 		errors.merchant = "Use 120 characters or fewer.";
 	const categoryId = Number(values.category);

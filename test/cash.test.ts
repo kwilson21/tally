@@ -115,6 +115,21 @@ describe("adding cash", () => {
 		expect(html).toContain("Enter a smaller amount in dollars and cents.");
 	});
 
+	it("says why a non-number amount and an empty Where are wrong", async () => {
+		const { html } = await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "date=2026-01-02&amount=abc&merchant=&category=1",
+		});
+		expect(html).toContain("Enter an amount in dollars and cents.");
+		expect(html).not.toContain("Enter an amount greater than zero.");
+		expect(html).toContain("Enter where you spent it.");
+	});
+
 	it("returns to the filtered list after save, close, and cancel", async () => {
 		const back = "/transactions?category=1&amp;month=all";
 		const sheet = await request(
@@ -174,17 +189,14 @@ describe("adding cash", () => {
 });
 
 describe("cash lifecycle", () => {
-	it("is shown outside banks and excluded from net worth", async () => {
+	it("is left out of Accounts and net worth", async () => {
 		await env.DB.prepare(
 			"UPDATE accounts SET balance_cents=99999999 WHERE type='cash'",
 		).run();
 		const { html } = await request("/accounts");
 		expect(html).toContain("$15,768");
 		expect(html).not.toContain("$1,015,768");
-		expect(html).toContain("Cash · not in net worth");
-		expect(html.indexOf("Cash · not in net worth")).toBeGreaterThan(
-			html.lastIndexOf("Northline Card Services"),
-		);
+		expect(html).not.toContain("$999,999.99");
 	});
 
 	it("can be edited, excluded, and split", async () => {
