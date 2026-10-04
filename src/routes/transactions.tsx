@@ -39,6 +39,7 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { ABOVE_TABS } from "../views/nav";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
@@ -71,6 +72,8 @@ type ListOptions = {
 	status?: 200 | 404 | 422;
 	pageTitle?: string;
 	selecting?: boolean;
+	/** In select mode: the rows to show ticked (back from the Set category sheet, or kept across a list change). */
+	checkedIds?: Set<number>;
 	selectionError?: string;
 	focusHeading?: boolean;
 };
@@ -91,6 +94,7 @@ async function renderList(
 		status = 200,
 		pageTitle,
 		selecting = false,
+		checkedIds = new Set<number>(),
 		selectionError,
 		focusHeading = false,
 	}: ListOptions = {},
@@ -146,6 +150,10 @@ async function renderList(
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
+	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked.
+	const includeTicked = selecting
+		? { "hx-include": "#selection-form input[name=ids]:checked" }
+		: {};
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
 		<a
@@ -156,28 +164,34 @@ async function renderList(
 			hx-sync="#filters:replace"
 			hx-target="#results"
 			hx-select="#results > *"
-			hx-select-oob="#result-count:innerHTML, #add-cash:outerHTML"
+			hx-select-oob={LIST_OOB}
 			hx-swap="innerHTML show:top"
 			hx-push-url="true"
+			{...includeTicked}
 		>
 			{label}
 		</a>
 	);
-	const back = listHref(filters, today.slice(0, 7));
-	const modeParams = new URLSearchParams(
-		filtersToQuery({ ...filters, page }, today.slice(0, 7)),
+	const pageNav = pages > 1 && (
+		<nav
+			aria-label="Pages"
+			class="mt-4 flex items-center justify-between border-t border-rule pt-2"
+		>
+			<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
+			<span class="text-sm text-muted">
+				Page {page} of {pages}
+			</span>
+			<span>{page < pages && pageLink(page + 1, "next", "Older")}</span>
+		</nav>
 	);
-	if (selecting) modeParams.set("select", "1");
-	const currentParams =
-		c.req.path === "/transactions"
-			? new URL(c.req.url).searchParams
-			: modeParams;
-	const selectParams = new URLSearchParams(currentParams);
-	selectParams.set("select", "1");
-	const selectHref = `/transactions?${selectParams}`;
-	const doneParams = new URLSearchParams(currentParams);
-	doneParams.delete("select");
-	const doneHref = `/transactions${doneParams.size ? `?${doneParams}` : ""}`;
+	const back = listHref(filters, today.slice(0, 7));
+	// Select and Done keep every filter and the page; Done drops only select mode.
+	const doneHref = `/transactions${listQuery ? `?${listQuery}` : ""}`;
+	const selectHref = `/transactions?${listQuery ? `${listQuery}&` : ""}select=1`;
+	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
+	// shows the no-JS hint, and htmx re-counts on load.
+	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	const htmx = c.req.header("HX-Request") === "true";
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
 	return c.html(
@@ -199,7 +213,12 @@ async function renderList(
 				>
 					Transactions
 				</h1>
-				<Button kind="text" href={selecting ? doneHref : selectHref}>
+				{/* Swapped out-of-band on filter and page changes, so it keeps the current filters. */}
+				<Button
+					id="select-toggle"
+					kind="text"
+					href={selecting ? doneHref : selectHref}
+				>
 					{selecting ? "Done" : "Select"}
 				</Button>
 			</div>
@@ -236,9 +255,10 @@ async function renderList(
 				hx-sync="replace"
 				hx-target="#results"
 				hx-select="#results > *"
-				hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #add-cash:outerHTML"
+				hx-select-oob={`#needs-count:innerHTML, ${LIST_OOB}`}
 				hx-swap="innerHTML"
 				hx-push-url="true"
+				{...includeTicked}
 			>
 				{selecting && <input type="hidden" name="select" value="1" />}
 				<FormField id="q" label="Search transactions" hideLabel>
@@ -340,9 +360,9 @@ async function renderList(
 						hx-get="/transactions/select/count"
 						hx-trigger="load, change"
 						hx-target="#selected-count"
-						hx-swap="outerHTML"
+						hx-swap="innerHTML"
 					>
-						<input type="hidden" name="back" value={back} />
+						<input id="selection-back" type="hidden" name="back" value={back} />
 						<section id="results" class="mt-2" aria-label="Results">
 							{selectionError && (
 								<p role="alert" class="my-3 text-sm text-over">
@@ -367,24 +387,37 @@ async function renderList(
 												row.isSplit ? (
 													<TransactionRow row={row} />
 												) : (
-													<SelectableTransactionRow row={row} />
+													<SelectableTransactionRow
+														row={row}
+														checked={checkedIds.has(row.id)}
+													/>
 												),
 											)}
 										</ul>
 									</>
 								))
 							)}
+							{pageNav}
 						</section>
-						<div class="fixed inset-x-0 bottom-[calc(5rem+var(--safe-area-bottom))] z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:bottom-0">
-							<div class="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
+						{/* On phones it sits on the tab bar. On desktop it pins to the bottom of the content column:
+						    left comes from its place in the page, and the width is the column's (the layout's
+						    max-w-6xl less its px-8 sides, w-56 sidebar and gap-10 = 20.5rem, up to max-w-3xl). */}
+						<div
+							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
+						>
+							<div class="flex flex-wrap items-center gap-2">
 								<span
 									id="selected-count"
 									aria-live="polite"
 									class="mr-auto text-lg"
 								>
-									Choose rows, then an action
+									{htmx
+										? selectedLabel(ticked.length)
+										: "Choose rows, then an action"}
 								</span>
-								<SelectionActionButtons />
+								<SelectionActionButtons
+									disabled={htmx && ticked.length === 0}
+								/>
 							</div>
 						</div>
 					</form>
@@ -434,20 +467,7 @@ async function renderList(
 								</>
 							))
 						)}
-						{pages > 1 && (
-							<nav
-								aria-label="Pages"
-								class="mt-4 flex items-center justify-between border-t border-rule pt-2"
-							>
-								<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
-								<span class="text-sm text-muted">
-									Page {page} of {pages}
-								</span>
-								<span>
-									{page < pages && pageLink(page + 1, "next", "Older")}
-								</span>
-							</nav>
-						)}
+						{pageNav}
 					</section>
 				)}
 				<div id="sheet">{sheet?.(categories.results)}</div>
@@ -462,11 +482,46 @@ async function renderList(
 transactions.get("/transactions", (c) => {
 	const params = new URL(c.req.url).searchParams;
 	const focus = Number(params.get("focus"));
+	const selecting = params.get("select") === "1";
 	return renderList(c, parseFilters(params, todayUtc().slice(0, 7)), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
-		selecting: params.get("select") === "1",
+		selecting,
+		checkedIds: selecting
+			? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
+			: undefined,
 	});
 });
+
+/** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
+const LIST_OOB = [
+	"#result-count:innerHTML",
+	"#add-cash:outerHTML",
+	"#select-toggle:outerHTML",
+	"#selection-back:outerHTML",
+	"#selected-count:innerHTML",
+	"#set-category-selection:outerHTML",
+	"#exclude-selection:outerHTML",
+].join(", ");
+
+/** Most ids one bulk action takes (D1 binds at most 100 parameters per statement). */
+const MAX_SELECTED = 100;
+const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
+const NONE_SELECTED = "Select at least one transaction.";
+
+const selectedLabel = (count: number) => `${count} selected`;
+
+/** Positive whole-number ids, once each; each value may be one id or "1,2,3". */
+function parseIds(values: (string | File)[]) {
+	const ids = new Set<number>();
+	for (const value of values) {
+		if (typeof value !== "string") continue;
+		for (const part of value.split(",")) {
+			const id = /^\d{1,15}$/.test(part.trim()) ? Number(part) : 0;
+			if (id > 0) ids.add(id);
+		}
+	}
+	return [...ids];
+}
 
 function SelectionActionButtons({
 	disabled = false,
@@ -475,21 +530,24 @@ function SelectionActionButtons({
 	disabled?: boolean;
 	oob?: boolean;
 }) {
-	const swap = oob ? "outerHTML" : undefined;
+	// Only the count fragment's copy swaps itself in out of band; each button's own request
+	// keeps its normal swap.
+	const oobSwap = oob ? "outerHTML" : undefined;
 	return (
 		<>
 			<Button
 				id="set-category-selection"
 				kind="secondary"
 				type="submit"
+				class="px-3"
 				formaction="/transactions/select/category"
 				formmethod="post"
 				disabled={disabled}
 				hx-post="/transactions/select/category"
 				hx-target="#sheet"
 				hx-select="#sheet"
-				hx-swap={swap ?? "outerHTML"}
-				hx-swap-oob={swap}
+				hx-swap="outerHTML"
+				hx-swap-oob={oobSwap}
 			>
 				Set category
 			</Button>
@@ -497,14 +555,15 @@ function SelectionActionButtons({
 				id="exclude-selection"
 				kind="secondary"
 				type="submit"
+				class="px-3"
 				formaction="/transactions/select/exclude"
 				formmethod="post"
 				disabled={disabled}
 				hx-post="/transactions/select/exclude"
 				hx-target="#main"
 				hx-select="#main > *"
-				hx-swap={swap ?? "innerHTML"}
-				hx-swap-oob={swap}
+				hx-swap="innerHTML"
+				hx-swap-oob={oobSwap}
 			>
 				Exclude
 			</Button>
@@ -512,17 +571,8 @@ function SelectionActionButtons({
 	);
 }
 
-const selectedIds = (form: FormData) => [
-	...new Set(
-		form
-			.getAll("ids")
-			.map(Number)
-			.filter((id) => Number.isInteger(id) && id > 0),
-	),
-];
-
 async function selectableIds(db: D1Database, ids: number[]) {
-	if (ids.length === 0) return [];
+	if (ids.length === 0 || ids.length > MAX_SELECTED) return [];
 	const marks = ids.map(() => "?").join(",");
 	const rows = await db
 		.prepare(
@@ -533,17 +583,28 @@ async function selectableIds(db: D1Database, ids: number[]) {
 	return rows.results.map((row) => row.id);
 }
 
+/** The bar's count (swapped into the live region's text) and its buttons, out of band. */
 transactions.get("/transactions/select/count", (c) => {
-	const count = new URL(c.req.url).searchParams.getAll("ids").length;
+	const count = parseIds(new URL(c.req.url).searchParams.getAll("ids")).length;
 	return c.html(
 		<>
-			<span id="selected-count" aria-live="polite" class="mr-auto text-lg">
-				{count} selected
-			</span>
+			{selectedLabel(count)}
 			<SelectionActionButtons disabled={count === 0} oob />
 		</>,
 	);
 });
+
+/** The posted ids, or why they can't be acted on. */
+async function postedSelection(c: Context<App>, form: FormData) {
+	const posted = parseIds(form.getAll("ids"));
+	if (posted.length > MAX_SELECTED) return { ids: [], error: TOO_MANY };
+	const ids = await selectableIds(c.env.DB, posted);
+	return { ids, error: ids.length === 0 ? NONE_SELECTED : undefined };
+}
+
+/** The select-mode list with these rows ticked (Cancel and close on the sheet). */
+const selectModeHref = (back: string, ids: number[]) =>
+	`${back}${back.includes("?") ? "&" : "?"}select=1${ids.length ? `&ids=${ids.join(",")}` : ""}`;
 
 function SelectCategorySheet({
 	ids,
@@ -556,93 +617,105 @@ function SelectCategorySheet({
 	categories: Category[];
 	error?: string;
 }) {
+	const cancelHref = selectModeHref(back, ids);
+	const alert = error && (
+		<p id="select-category-error" role="alert" class="text-sm text-over">
+			{error}
+		</p>
+	);
 	return (
-		<BottomSheet
-			labelledBy="select-category-title"
-			closeHref={`${back}${back.includes("?") ? "&" : "?"}select=1`}
-		>
+		<BottomSheet labelledBy="select-category-title" closeHref={cancelHref}>
 			<h2
 				id="select-category-title"
 				tabindex={-1}
 				autofocus
 				class="font-serif text-4xl font-semibold tracking-tight outline-none"
 			>
-				Set category for {ids.length}
+				{ids.length ? `Set category for ${ids.length}` : "Set category"}
 			</h2>
-			<form
-				method="post"
-				action="/transactions/select/category/save"
-				class="mt-4 flex flex-col gap-4"
-				hx-post="/transactions/select/category/save"
-				hx-target="#main"
-				hx-select="#main > *"
-				hx-swap="innerHTML"
-			>
-				{ids.map((id) => (
-					<input type="hidden" name="ids" value={id} />
-				))}
-				<input type="hidden" name="back" value={back} />
-				<fieldset
-					aria-describedby={error ? "select-category-error" : undefined}
-				>
-					<legend class="mb-2">Category</legend>
-					<div class="flex flex-wrap gap-2">
-						{categories.map((cat, index) => (
-							<Chip
-								type="radio"
-								name="category"
-								value={String(cat.id)}
-								required={index === 0}
-								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
-							>
-								{cat.name}
-							</Chip>
-						))}
-					</div>
-					{error && (
-						<p
-							id="select-category-error"
-							role="alert"
-							class="mt-2 text-sm text-over"
-						>
-							{error}
-						</p>
-					)}
-				</fieldset>
-				<div class="grid grid-cols-2 gap-3">
-					<Button
-						kind="secondary"
-						href={`${back}${back.includes("?") ? "&" : "?"}select=1`}
-						class="w-full"
-					>
+			{ids.length === 0 ? (
+				// Nothing to save: say why, and go back to choosing rows.
+				<div class="mt-4 flex flex-col gap-4">
+					{alert}
+					<Button kind="secondary" href={cancelHref} class="w-full">
 						Cancel
 					</Button>
-					<Button type="submit" class="w-full">
-						Save
-					</Button>
 				</div>
-			</form>
+			) : (
+				<form
+					method="post"
+					action="/transactions/select/category/save"
+					class="mt-4 flex flex-col gap-4"
+					hx-post="/transactions/select/category/save"
+					hx-target="#main"
+					hx-select="#main > *"
+					hx-swap="innerHTML"
+				>
+					{ids.map((id) => (
+						<input type="hidden" name="ids" value={id} />
+					))}
+					<input type="hidden" name="back" value={back} />
+					<fieldset
+						aria-describedby={error ? "select-category-error" : undefined}
+					>
+						<legend class="mb-2">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							{categories.map((cat, index) => (
+								<Chip
+									type="radio"
+									name="category"
+									value={String(cat.id)}
+									required={index === 0}
+									icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
+								>
+									{cat.name}
+								</Chip>
+							))}
+						</div>
+						{alert && <div class="mt-2">{alert}</div>}
+					</fieldset>
+					<div class="grid grid-cols-2 gap-3">
+						<Button kind="secondary" href={cancelHref} class="w-full">
+							Cancel
+						</Button>
+						<Button type="submit" class="w-full">
+							Save
+						</Button>
+					</div>
+				</form>
+			)}
 		</BottomSheet>
 	);
 }
 
-transactions.post("/transactions/select/category", async (c) => {
-	const form = await c.req.formData();
-	const ids = await selectableIds(c.env.DB, selectedIds(form));
-	const back = safeBack(form.get("back")?.toString());
-	if (ids.length === 0)
-		return renderList(c, filtersFrom(back), {
-			selecting: true,
-			status: 422,
-			selectionError: "Select at least one transaction.",
-		});
+/** The select-mode list with the Set category sheet over it; a problem shows inside the sheet. */
+function categorySheet(
+	c: Context<App>,
+	back: string,
+	ids: number[],
+	error?: string,
+) {
 	return renderList(c, filtersFrom(back), {
 		selecting: true,
+		checkedIds: new Set(ids),
+		status: error ? 422 : 200,
 		pageTitle: "Set category · Tally",
 		sheet: (categories) => (
-			<SelectCategorySheet ids={ids} back={back} categories={categories} />
+			<SelectCategorySheet
+				ids={ids}
+				back={back}
+				categories={categories}
+				error={error}
+			/>
 		),
 	});
+}
+
+transactions.post("/transactions/select/category", async (c) => {
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const { ids, error } = await postedSelection(c, form);
+	return categorySheet(c, back, ids, error);
 });
 
 async function finishSelection(c: Context<App>, back: string, message: string) {
@@ -651,13 +724,16 @@ async function finishSelection(c: Context<App>, back: string, message: string) {
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
+	// The list is out of select mode, so the address bar is too.
+	c.header("HX-Push-Url", back);
 	return renderList(c, filtersFrom(back), { focusHeading: true });
 }
 
 transactions.post("/transactions/select/category/save", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const ids = await selectableIds(c.env.DB, selectedIds(form));
+	const { ids, error } = await postedSelection(c, form);
+	if (error) return categorySheet(c, back, ids, error);
 	const category = Number(form.get("category"));
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
@@ -666,28 +742,13 @@ transactions.post("/transactions/select/category/save", async (c) => {
 				.bind(category)
 				.first<{ id: number; name: string }>()
 		: null;
-	if (ids.length === 0 || !cat) {
-		const error =
-			ids.length === 0
-				? "Select at least one transaction."
-				: "Pick a category from the list.";
-		return renderList(c, filtersFrom(back), {
-			selecting: true,
-			status: 422,
-			sheet: (categories) => (
-				<SelectCategorySheet
-					ids={ids}
-					back={back}
-					categories={categories}
-					error={error}
-				/>
-			),
-		});
-	}
+	if (!cat)
+		return categorySheet(c, back, ids, "Pick a category from the list.");
+	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
 			c.env.DB.prepare(
-				"UPDATE transactions SET category_id=?, category_source='user', updated_by=?, updated_at=datetime('now') WHERE id=?",
+				"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, updated_by=?, updated_at=datetime('now') WHERE id=?",
 			).bind(cat.id, actor(c), id),
 		),
 	);
@@ -698,18 +759,27 @@ transactions.post("/transactions/select/category/save", async (c) => {
 transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const ids = await selectableIds(c.env.DB, selectedIds(form));
-	if (ids.length === 0)
+	const { ids, error } = await postedSelection(c, form);
+	if (error)
 		return renderList(c, filtersFrom(back), {
 			selecting: true,
+			checkedIds: new Set(ids),
 			status: 422,
-			selectionError: "Select at least one transaction.",
+			selectionError: error,
 		});
+	// As in the edit panel (saveEdit): a split is one bank transaction, so excluding a part
+	// excludes the purchase and all its parts. Rows already excluded keep who excluded them.
 	await c.env.DB.batch(
 		ids.map((id) =>
 			c.env.DB.prepare(
-				"UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?, updated_at=datetime('now') WHERE id=?",
-			).bind(actor(c), id),
+				`UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
+				WHERE excluded=0 AND (
+					id=?1
+					OR parent_id=?1
+					OR id=(SELECT parent_id FROM transactions WHERE id=?1)
+					OR parent_id=(SELECT parent_id FROM transactions WHERE id=?1)
+				)`,
+			).bind(id, actor(c)),
 		),
 	);
 	return finishSelection(

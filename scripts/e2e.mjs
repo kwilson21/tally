@@ -267,9 +267,14 @@ await page.goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
 await page.getByRole("link", { name: "Select" }).click();
-const selections = page.locator('#selection-form input[name="ids"]');
-await selections.nth(0).check();
-await selections.nth(1).check();
+// The checkbox is visually hidden, so tap the row (its label) as a person would.
+const selections = page.locator("#selection-form label:has(input[name=ids])");
+await selections.nth(0).click();
+await selections.nth(1).click();
+assert.equal(
+	await page.locator("#selection-form input[name=ids]:checked").count(),
+	2,
+);
 await page.getByText("2 selected", { exact: true }).waitFor();
 await page.getByRole("button", { name: "Set category" }).click();
 await page

@@ -724,6 +724,13 @@ function Rows() {
 						))}
 					</ul>
 				</State>
+				<State label="Selected">
+					<ul class="max-w-xl">
+						{TRANSACTION_ROWS.slice(1, 2).map((state) => (
+							<SelectableTransactionRow row={state.row} checked />
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="empty-state"

@@ -67,6 +67,12 @@ export function Sidebar({ active }: { active?: NavKey }) {
 	);
 }
 
+/**
+ * Sits a fixed bar directly on the phone tab bar: the tabs' 3.5rem links (min-h-14), their 1px
+ * top rule and the bottom safe area. Change it with BottomTabs.
+ */
+export const ABOVE_TABS = "bottom-[calc(3.5rem+1px+var(--safe-area-bottom))]";
+
 export function BottomTabs({ active }: { active?: NavKey }) {
 	return (
 		<nav
