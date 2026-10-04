@@ -254,7 +254,7 @@ export function TransactionsDiagram(c: {
 			? "None need a category."
 			: `${c.needsCategory} of those ${c.needsCategory === 1 ? "needs" : "need"} a category.`;
 	const states = [
-		c.counted > 0 && `${c.counted} count toward spending`,
+		c.counted > 0 && `${c.counted} counted`,
 		c.heldForReview > 0 && `${c.heldForReview} held for review`,
 		c.excluded > 0 && `${c.excluded} excluded`,
 	].filter(Boolean);
@@ -334,13 +334,13 @@ export function ExclusionsDiagram({
 		said.length < 2
 			? said.join("")
 			: `${said.slice(0, -1).join(", ")} and ${said.at(-1)}`;
-	const desc = `${plural(total, "transaction", "transactions")} this month: ${counted} count toward spending, ${heldForReview} held for review, and ${excluded} excluded${sentence ? ` (${sentence})` : ""}.`;
+	const desc = `${plural(total, "transaction", "transactions")} this month: ${counted} counted, ${heldForReview} held for review, and ${excluded} excluded${sentence ? ` (${sentence})` : ""}.`;
 	return (
 		<Figure
 			id="exclusions-diagram"
 			title="What counts and what's excluded"
 			desc={desc}
-			height={excluded > 0 ? 84 : 62}
+			height={excluded > 0 || heldForReview > 0 ? 84 : 62}
 		>
 			<rect
 				x="0"

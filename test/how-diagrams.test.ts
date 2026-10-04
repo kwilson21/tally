@@ -88,8 +88,9 @@ describe("TransactionsDiagram", () => {
 			"This month 37 − 3 excluded − 2 held for review Counted 32 Needs a category 10",
 		);
 		expect(desc(html)).toBe(
-			"37 transactions this month: 32 count toward spending, 2 held for review, 3 excluded. 10 of those need a category.",
+			"37 transactions this month: 32 counted, 2 held for review, 3 excluded. 10 of those need a category.",
 		);
+		expect(desc(html)).not.toContain("spending");
 	});
 
 	it("leaves out the excluded step when nothing is excluded", async () => {
@@ -104,7 +105,7 @@ describe("TransactionsDiagram", () => {
 		expect(words(html)).toContain("This month 1 Counted 1 Needs a category 0");
 		expect(words(html)).not.toContain("excluded");
 		expect(desc(html)).toBe(
-			"1 transaction this month: 1 count toward spending. None need a category.",
+			"1 transaction this month: 1 counted. None need a category.",
 		);
 	});
 });
@@ -123,7 +124,7 @@ describe("ExclusionsDiagram", () => {
 			"32 counted 2 held · 3 excluded 2 held for review · 1 transfer · 1 reimbursement · 1 by a person",
 		);
 		expect(desc(html)).toBe(
-			"37 transactions this month: 32 count toward spending, 2 held for review, and 3 excluded (1 transfer, 1 reimbursement and 1 excluded by a person).",
+			"37 transactions this month: 32 counted, 2 held for review, and 3 excluded (1 transfer, 1 reimbursement and 1 excluded by a person).",
 		);
 		// One dashed slice per kind of exclusion.
 		expect(html.match(/stroke-dasharray/g)).toHaveLength(4);
@@ -157,8 +158,20 @@ describe("ExclusionsDiagram", () => {
 		expect(words(html)).toContain("5 counted Nothing excluded");
 		expect(html).not.toContain("stroke-dasharray");
 		expect(desc(html)).toBe(
-			"5 transactions this month: 5 count toward spending, 0 held for review, and 0 excluded.",
+			"5 transactions this month: 5 counted, 0 held for review, and 0 excluded.",
 		);
+	});
+
+	it("leaves room for the held-credit detail when nothing is excluded", async () => {
+		const html = await render(
+			ExclusionsDiagram({
+				counted: 5,
+				heldForReview: 2,
+				breakdown: { transfer: 0, reimbursement: 0, byPerson: 0 },
+			}),
+		);
+		expect(html).toContain('viewBox="0 0 360 84"');
+		expect(words(html)).toContain("2 held for review");
 	});
 });
 
