@@ -317,8 +317,8 @@ export async function saveSplit(
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded${reviewColumns}, parent_id, plaid_transaction_id, updated_by)
-			SELECT account_id, date, ?, raw_name, ?, 'user', excluded${reviewValues}, id, NULL, ?
+			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, excluded_source${reviewColumns}, parent_id, plaid_transaction_id, updated_by)
+			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, excluded_source${reviewValues}, id, NULL, ?
 			FROM transactions WHERE id = ? AND amount_cents = ?`)
 				.bind(
 					part.amountCents,

@@ -7,6 +7,30 @@ import { resetDemo } from "../src/demo/reset";
 const BASE = "http://tally.test";
 beforeEach(() => resetDemo(env.DB, "2026-09-22"));
 
+async function ensureIncomeReviewColumns() {
+	const columns = await env.DB.prepare("PRAGMA table_info(transactions)").all<{
+		name: string;
+	}>();
+	const existing = new Set(columns.results.map((column) => column.name));
+	if (!existing.has("income_source"))
+		await env.DB.prepare(
+			"ALTER TABLE transactions ADD COLUMN income_source TEXT CHECK (income_source IN ('user', 'jev'))",
+		).run();
+	if (!existing.has("credit_reviewed"))
+		await env.DB.prepare(
+			"ALTER TABLE transactions ADD COLUMN credit_reviewed INTEGER CHECK (credit_reviewed IN (0, 1))",
+		).run();
+	if (!existing.has("credit_reviewed_by"))
+		await env.DB.prepare(
+			"ALTER TABLE transactions ADD COLUMN credit_reviewed_by TEXT CHECK (credit_reviewed_by IN ('user'))",
+		).run();
+	const installed = await env.DB.prepare(
+		"PRAGMA table_info(transactions)",
+	).all<{ name: string }>();
+	for (const name of ["income_source", "credit_reviewed", "credit_reviewed_by"])
+		expect(installed.results.some((column) => column.name === name)).toBe(true);
+}
+
 async function post(path: string, fields: [string, string][]) {
 	return exports.default.fetch(BASE + path, {
 		method: "POST",
@@ -20,23 +44,38 @@ async function post(path: string, fields: [string, string][]) {
 }
 
 describe("transaction splits", () => {
-	it("works with the current main schema before the income review migration", async () => {
-		const columns = await env.DB.prepare(
-			"PRAGMA table_info(transactions)",
-		).all<{ name: string }>();
-		expect(
-			columns.results.some((column) => column.name === "income_source"),
-		).toBe(false);
-		expect(
-			columns.results.some((column) => column.name === "credit_reviewed_by"),
-		).toBe(false);
+	it("uses the legacy split insert shape with isolated legacy schema metadata", async () => {
 		const refund = await env.DB.prepare(
 			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
 		).first<{ id: number; amountCents: number }>();
 		const half = Math.trunc((refund?.amountCents as number) / 2);
 		expect(
 			await saveSplit(
-				env.DB,
+				{
+					prepare(query: string) {
+						if (query !== "PRAGMA table_info(transactions)")
+							return env.DB.prepare(query);
+						return {
+							all: async () => {
+								const columns = await env.DB.prepare(query).all<{
+									name: string;
+								}>();
+								return {
+									...columns,
+									results: columns.results.filter(
+										(column) =>
+											!new Set([
+												"income_source",
+												"credit_reviewed",
+												"credit_reviewed_by",
+											]).has(column.name),
+									),
+								};
+							},
+						} as unknown as D1PreparedStatement;
+					},
+					batch: env.DB.batch.bind(env.DB),
+				} as unknown as D1Database,
 				refund?.id as number,
 				[
 					{ categoryId: 1, amountCents: half },
@@ -88,6 +127,68 @@ describe("transaction splits", () => {
 			["back", "/transactions"],
 		]);
 		expect(response.status).toBe(400);
+	});
+
+	it("copies current parent date, exclusion and credit review from inside the batch", async () => {
+		await ensureIncomeReviewColumns();
+		const bakery = await env.DB.prepare(
+			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).first<{ id: number; cents: number }>();
+		const id = bakery?.id as number;
+		const first = Math.trunc((bakery?.cents as number) / 2);
+		const second = (bakery?.cents as number) - first;
+		let raced = false;
+		const db = {
+			prepare: (query: string) => env.DB.prepare(query),
+			batch: async (statements: D1PreparedStatement[]) => {
+				if (!raced) {
+					raced = true;
+					await env.DB.prepare(
+						"UPDATE transactions SET date = '2026-09-30', excluded = 1, excluded_source = 'user', income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+					)
+						.bind(id)
+						.run();
+				}
+				return env.DB.batch(statements);
+			},
+		} as unknown as D1Database;
+		expect(
+			await saveSplit(
+				db,
+				id,
+				[
+					{ categoryId: 1, amountCents: first },
+					{ categoryId: 5, amountCents: second },
+				],
+				"synthetic-test",
+			),
+		).toBe(true);
+		expect(
+			await env.DB.prepare(
+				"SELECT date, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+				.bind(id)
+				.all(),
+		).toMatchObject({
+			results: [
+				{
+					date: "2026-09-30",
+					excluded: 1,
+					excluded_source: "user",
+					income_source: "user",
+					credit_reviewed: 1,
+					credit_reviewed_by: "user",
+				},
+				{
+					date: "2026-09-30",
+					excluded: 1,
+					excluded_source: "user",
+					income_source: "user",
+					credit_reviewed: 1,
+					credit_reviewed_by: "user",
+				},
+			],
+		});
 	});
 
 	it("rejects a mismatch, then saves children and removes them atomically", async () => {
@@ -179,35 +280,7 @@ describe("transaction splits", () => {
 	});
 
 	it("preserves reviewed credit metadata when income review columns are installed", async () => {
-		const columns = await env.DB.prepare(
-			"PRAGMA table_info(transactions)",
-		).all<{
-			name: string;
-		}>();
-		const existing = new Set(columns.results.map((column) => column.name));
-		if (!existing.has("income_source"))
-			await env.DB.prepare(
-				"ALTER TABLE transactions ADD COLUMN income_source TEXT CHECK (income_source IN ('user', 'jev'))",
-			).run();
-		if (!existing.has("credit_reviewed"))
-			await env.DB.prepare(
-				"ALTER TABLE transactions ADD COLUMN credit_reviewed INTEGER CHECK (credit_reviewed IN (0, 1))",
-			).run();
-		if (!existing.has("credit_reviewed_by"))
-			await env.DB.prepare(
-				"ALTER TABLE transactions ADD COLUMN credit_reviewed_by TEXT CHECK (credit_reviewed_by IN ('user'))",
-			).run();
-		const installed = await env.DB.prepare(
-			"PRAGMA table_info(transactions)",
-		).all<{ name: string }>();
-		for (const name of [
-			"income_source",
-			"credit_reviewed",
-			"credit_reviewed_by",
-		])
-			expect(installed.results.some((column) => column.name === name)).toBe(
-				true,
-			);
+		await ensureIncomeReviewColumns();
 
 		const refund = await env.DB.prepare(
 			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
