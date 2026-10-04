@@ -16,7 +16,7 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.parentId)
 		return {
 			kind: "category",
-			caption: `Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
+			caption: `${row.categoryName ? `${row.categoryName} · ` : ""}Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
 			tag: false,
 		};
 	if (row.isSplit)

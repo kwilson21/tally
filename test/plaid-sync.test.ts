@@ -228,12 +228,18 @@ describe("syncItem", () => {
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			id,
 			plaidFetch(() =>
-				response(page({ modified: [transaction({ date: "2026-09-28" })] })),
+				response(
+					page({
+						modified: [
+							transaction({ date: "2026-09-28", name: "RENAMED BY BANK" }),
+						],
+					}),
+				),
 			),
 		);
 		expect(
 			await env.DB.prepare(
-				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ? AND date = '2026-09-28'",
+				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ? AND date = '2026-09-28' AND raw_name = 'RENAMED BY BANK'",
 			)
 				.bind(parent?.id)
 				.first(),

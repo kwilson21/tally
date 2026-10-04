@@ -246,12 +246,18 @@ export async function saveEdit(
 			)
 			.bind(current.rawName, edit.displayName),
 	];
-	// A split is one bank transaction. Do not rewrite child audit fields for unrelated edits.
+	// A split is one bank transaction: excluding any part of it excludes the purchase and
+	// all its parts. Child audit fields change only when the choice does.
 	if (excluded !== current.excluded)
 		statements.push(
 			db
 				.prepare(
-					"UPDATE transactions SET excluded = ?, excluded_source = 'user', updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
+					`UPDATE transactions SET excluded = ?1, excluded_source = 'user', updated_by = ?2, updated_at = datetime('now')
+					WHERE id != ?3 AND (
+						parent_id = ?3
+						OR id = (SELECT parent_id FROM transactions WHERE id = ?3)
+						OR parent_id = (SELECT parent_id FROM transactions WHERE id = ?3)
+					)`,
 				)
 				.bind(excluded, actor, id),
 		);
@@ -293,13 +299,20 @@ export async function saveSplit(
 			excluded: number;
 		}>();
 	if (!parent) throw new Error(`No transaction ${parentId}`);
-	await db.batch([
-		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
+	// Every write checks, inside the same batch, that the parent still has the amount
+	// the parts were validated against, so a bank correction mid-save writes nothing.
+	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
+	const unchanged =
+		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	const results = await db.batch([
+		db
+			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
+			.bind(parentId, parentId, total),
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
 			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, parent_id, plaid_transaction_id, updated_by)
-			VALUES (?, ?, ?, ?, ?, 'user', ?, ?, NULL, ?)`)
+			SELECT ?, ?, ?, ?, ?, 'user', ?, ?, NULL, ? WHERE ${unchanged}`)
 				.bind(
 					parent.accountId,
 					parent.date,
@@ -309,14 +322,17 @@ export async function saveSplit(
 					parent.excluded,
 					parentId,
 					by,
+					parentId,
+					total,
 				),
 		),
 		db
 			.prepare(
-				"UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+				"UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
 			)
-			.bind(by, parentId),
+			.bind(by, parentId, total),
 	]);
+	return (results.at(-1)?.meta.changes ?? 0) > 0;
 }
 
 /** Deletes a split and restores its parent atomically. */

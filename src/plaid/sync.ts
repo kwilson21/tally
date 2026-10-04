@@ -281,10 +281,11 @@ export async function syncItem(
 					),
 				);
 				statements.push(
-					env.DB.prepare(`UPDATE transactions SET date = ? WHERE parent_id = (
+					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ? WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents = ?
 				) AND ${OWNS_LOCK}`).bind(
 						transaction.date,
+						transaction.name,
 						transaction.transaction_id,
 						cents,
 						itemRowId,
@@ -301,6 +302,8 @@ export async function syncItem(
 							date = excluded.date,
 							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
 							category_id = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_id END,
+							category_source = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_source END,
+							category_confidence = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_confidence END,
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
 							raw_name = excluded.raw_name,
@@ -331,10 +334,11 @@ export async function syncItem(
 					),
 				);
 				statements.push(
-					env.DB.prepare(`UPDATE transactions SET date = ? WHERE parent_id = (
+					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ? WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents = ?
 				) AND ${OWNS_LOCK}`).bind(
 						transaction.date,
+						transaction.name,
 						transaction.transaction_id,
 						cents,
 						itemRowId,
@@ -346,12 +350,16 @@ export async function syncItem(
 						`UPDATE transactions SET date = ?,
 							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
 							category_id = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_id END,
+							category_source = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_source END,
+							category_confidence = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_confidence END,
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?,
 							plaid_category = ?, updated_at = datetime('now')
 						 WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
 					).bind(
 						transaction.date,
+						cents,
+						cents,
 						cents,
 						cents,
 						cents,

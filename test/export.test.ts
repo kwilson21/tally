@@ -190,6 +190,7 @@ describe("data exports", () => {
 				"plaid_category",
 				"plaid_transaction_id",
 				"raw_name",
+				"split_removed_from_cents",
 				"updated_at",
 				"updated_by",
 			],

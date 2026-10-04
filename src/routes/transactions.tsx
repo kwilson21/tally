@@ -721,8 +721,22 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			tx.amountCents,
 			categories.map((cat) => cat.id),
 		);
+		const saved =
+			parsed.ok && (await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c)));
+		if (parsed.ok && !saved)
+			return renderList(c, filtersFrom(back), {
+				status: 422,
+				sheet: () => (
+					<SplitSheet
+						tx={tx}
+						back={back}
+						categories={categories}
+						values={values}
+						error="The bank just changed this amount. Check the parts and save again."
+					/>
+				),
+			});
 		if (parsed.ok) {
-			await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c));
 			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 			c.header(
 				"HX-Trigger",

@@ -175,6 +175,31 @@ describe("saveEdit", () => {
 		).toEqual([{ updated_by: "changed" }]);
 	});
 
+	it("excludes the whole split when one part is excluded, and includes it back", async () => {
+		const parent = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
+			)
+			.first<{ id: number }>();
+		const child = await db
+			.prepare("SELECT id FROM transactions WHERE parent_id = ? LIMIT 1")
+			.bind(parent?.id)
+			.first<{ id: number }>();
+		const states = async () =>
+			(
+				await db
+					.prepare(
+						"SELECT DISTINCT excluded FROM transactions WHERE id = ?1 OR parent_id = ?1",
+					)
+					.bind(parent?.id)
+					.all<{ excluded: number }>()
+			).results;
+		await saveEdit(db, child?.id as number, edit({ excluded: true }), "part");
+		expect(await states()).toEqual([{ excluded: 1 }]);
+		await saveEdit(db, child?.id as number, edit({ excluded: false }), "part");
+		expect(await states()).toEqual([{ excluded: 0 }]);
+	});
+
 	it("leaves the source alone when only the note changes", async () => {
 		const id = await idOf("CHIPOTLE 2291");
 		await saveEdit(

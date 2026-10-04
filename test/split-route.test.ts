@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -118,5 +119,24 @@ describe("transaction splits", () => {
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(2);
+	});
+
+	it("writes nothing when the bank changed the amount after the parts were checked", async () => {
+		const bakery = await env.DB.prepare(
+			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).first<{ id: number; cents: number }>();
+		const id = bakery?.id as number;
+		const stale = [
+			{ categoryId: 1, amountCents: 500 },
+			{ categoryId: 5, amountCents: (bakery?.cents as number) - 400 },
+		];
+		expect(await saveSplit(env.DB, id, stale, "test")).toBe(false);
+		expect(
+			await env.DB.prepare(
+				"SELECT is_split AS split, (SELECT COUNT(*) FROM transactions WHERE parent_id = ?1) AS parts FROM transactions WHERE id = ?1",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ split: 0, parts: 0 });
 	});
 });
