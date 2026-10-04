@@ -30,19 +30,16 @@ describe("buildSeed", () => {
 			const spent = Object.fromEntries(
 				summary.categories.map((c) => [c.name, c.spentCents]),
 			);
-			const hasCurrentSubscriptions = Number(today.slice(8)) >= 18;
 			expect(spent).toEqual({
 				Groceries: 37458,
 				"Eating Out": 28600,
 				Gas: 18600,
-				Kids: 21000 + (hasCurrentSubscriptions ? 4250 : 0),
-				Household: 13242 + (hasCurrentSubscriptions ? 2698 : 0),
+				Kids: 21000,
+				Household: 13242,
 			});
 			expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
 			expect(summary.incomeCents).toBe(490000);
-			expect(summary.safeToSpendCents).toBe(
-				28299 - (hasCurrentSubscriptions ? 6948 : 0),
-			);
+			expect(summary.safeToSpendCents).toBe(28299);
 		},
 	);
 
@@ -120,7 +117,7 @@ describe("resetDemo", () => {
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		expect(summary.safeToSpendCents).toBe(21351);
+		expect(summary.safeToSpendCents).toBe(28299);
 		expect(summary.uncategorized.count).toBe(12);
 
 		const { results } = await env.DB.prepare(

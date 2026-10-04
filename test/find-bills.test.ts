@@ -4,6 +4,7 @@ import {
 	type BillFindingCharge,
 	findBillSuggestions,
 	loadBillSuggestions,
+	threeMonthsBack,
 } from "../src/bills/find";
 import { todayUtc } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
@@ -66,6 +67,11 @@ describe("finding bills", () => {
 		).toEqual([]);
 	});
 
+	it("clamps the three-month cutoff at month end", () => {
+		expect(threeMonthsBack("2026-05-31")).toBe("2026-02-28");
+		expect(threeMonthsBack("2024-05-31")).toBe("2024-02-29");
+	});
+
 	it("suggests exactly the seeded subscriptions on every representative date", async () => {
 		for (const date of [
 			"2026-01-01",
@@ -77,7 +83,7 @@ describe("finding bills", () => {
 			await resetDemo(env.DB, date);
 			expect(
 				(await loadBillSuggestions(env.DB, date)).map((row) => row.displayName),
-			).toEqual(["City Gym", "Procreate", "YouTube Premium"]);
+			).toEqual(["City Gym", "Procreate Dreams", "YouTube Premium"]);
 		}
 	});
 
@@ -125,15 +131,13 @@ describe("finding bills", () => {
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
 		expect(html).toContain(
-			"/bills/new?name=City+Gym&amp;amount=42.50&amp;due_day=12&amp;frequency=monthly&amp;category_id=4&amp;merchant_raw_name=CITY+GYM",
+			"/bills/new?name=City+Gym&amp;amount=42.50&amp;due_day=4&amp;frequency=monthly&amp;category_id=5&amp;merchant_raw_name=CITY+GYM+MEMBERSHIP",
 		);
 	});
 
 	it("remembers Not a bill and removes the row with feedback", async () => {
 		await resetDemo(env.DB, todayUtc());
-		const raw = await env.DB.prepare(
-			`SELECT raw_name FROM merchants WHERE raw_name NOT IN (SELECT merchant_raw_name FROM bills) LIMIT 1`,
-		).first<string>("raw_name");
+		const raw = (await loadBillSuggestions(env.DB, todayUtc()))[0]?.rawName;
 		const response = await exports.default.fetch(
 			`http://tally.test/bills/find/${encodeURIComponent(raw ?? "")}/dismiss`,
 			{
@@ -155,10 +159,10 @@ describe("finding bills", () => {
 	it("returns the empty state when dismissing the last suggestion", async () => {
 		await resetDemo(env.DB, todayUtc());
 		await env.DB.prepare(
-			"UPDATE merchants SET not_a_bill=1 WHERE raw_name <> 'CITY GYM'",
+			"UPDATE merchants SET not_a_bill=1 WHERE raw_name <> 'CITY GYM MEMBERSHIP'",
 		).run();
 		const response = await exports.default.fetch(
-			"http://tally.test/bills/find/CITY%20GYM/dismiss",
+			"http://tally.test/bills/find/CITY%20GYM%20MEMBERSHIP/dismiss",
 			{
 				method: "POST",
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },

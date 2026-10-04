@@ -171,7 +171,7 @@ describe("Bills", () => {
 		const { rows } = await loadBillRows(env.DB, date);
 		expect(
 			(await loadBillSuggestions(env.DB, date)).map((row) => row.displayName),
-		).toEqual(["City Gym", "Procreate", "YouTube Premium"]);
+		).toEqual(["City Gym", "Procreate Dreams", "YouTube Premium"]);
 		expect(
 			new Set(rows.filter((row) => row.active).map((row) => row.status)),
 		).toEqual(new Set(["overdue", "due", "upcoming", "paid"]));

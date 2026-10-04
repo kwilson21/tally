@@ -177,9 +177,9 @@ const THIS_MONTH: [number, string, number, number][] = [
 	[11, "CHEVRON 0098812", GAS, 5210],
 	[17, "SHELL OIL 57442", GAS, 3770],
 	[20, "CHEVRON 0098812", GAS, 4800],
-	[5, "TARGET T-1432", KIDS, 8499],
+	[5, "TARGET T-1432", KIDS, 7000],
 	[8, "YOUTH SOCCER LEAGUE", KIDS, 9000],
-	[18, "BARNES & NOBLE #2831", KIDS, 3501],
+	[18, "BARNES & NOBLE #2831", KIDS, 5000],
 	[7, "THE HOME DEPOT #6612", HOUSEHOLD, 6125],
 	[13, "AMAZON.COM*RT4K2", HOUSEHOLD, 3375],
 ];
@@ -198,13 +198,6 @@ const UNCATEGORIZED: [number, string, number, string | null][] = [
 	[16, "APPLE.COM/BILL", 299, null],
 	[18, "GOOGLE *YOUTUBE", 1399, null],
 	[20, "DD *DOORDASH TACO", 3107, null],
-];
-
-// Genuine recurring charges which have not been turned into bills yet.
-const UNBILLED_SUBSCRIPTIONS: [number, string, string, number, number][] = [
-	[12, "CITY GYM", "City Gym", 4250, KIDS],
-	[7, "APPLE *PROCREATE", "Procreate", 1299, HOUSEHOLD],
-	[18, "YOUTUBE PREMIUM", "YouTube Premium", 1399, HOUSEHOLD],
 ];
 
 // Previous months' category totals in cents, oldest first (5 months ago → 1 month ago).
@@ -264,12 +257,7 @@ export function buildSeed(today: string): Seed {
 			const merchants = MERCHANTS[category.id] ?? [];
 			const third = Math.floor(total / 3);
 			[third, third, total - 2 * third].forEach((cents, i) => {
-				// Rotate ordinary merchants so a weekly shopping pattern is not
-				// mistaken for one merchant charging on a monthly subscription day.
-				const [rawName] = merchants[(i + monthsAgo) % merchants.length] as [
-					string,
-					string,
-				];
+				const [rawName] = merchants[i % merchants.length] as [string, string];
 				transactions.push(
 					spend(
 						i === 2 ? CARD : CHECKING,
@@ -296,22 +284,6 @@ export function buildSeed(today: string): Seed {
 	}
 	for (const [target, rawName, cents] of UNCATEGORIZED) {
 		transactions.push(spend(CARD, clamp(target), rawName, null, cents));
-	}
-	for (const [target, rawName, , cents, categoryId] of UNBILLED_SUBSCRIPTIONS) {
-		for (const monthsAgo of [2, 1])
-			transactions.push(
-				spend(
-					CARD,
-					day(monthOffset(today, monthsAgo), target),
-					rawName,
-					categoryId,
-					cents,
-				),
-			);
-		if (todayDay >= target)
-			transactions.push(
-				spend(CARD, day(thisMonth, target), rawName, categoryId, cents),
-			);
 	}
 	// A plausible Streaming charge that is deliberately outside the five-day
 	// matching window. It makes the demo show why merchant and amount alone are
@@ -340,6 +312,25 @@ export function buildSeed(today: string): Seed {
 		transfer(clamp(2)),
 		reimbursement(clamp(10)),
 	);
+
+	// Repeat services intentionally not represented by bills, for the bill finder.
+	const subscriptions = [
+		["GOOGLE *YOUTUBE PREMIUM", 1399],
+		["PROCREATE DREAMS", 499],
+		["CITY GYM MEMBERSHIP", 4250],
+	] as const;
+	const subscriptionDay = Math.min(todayDay, 12);
+	for (const [rawName, amount] of subscriptions)
+		for (const monthsAgo of [2, 1])
+			transactions.push(
+				spend(
+					CARD,
+					day(monthOffset(today, monthsAgo), subscriptionDay),
+					rawName,
+					HOUSEHOLD,
+					amount,
+				),
+			);
 
 	// Spec §9 row 4: the warehouse purchase is already split across two categories.
 	const costcoIndex = transactions.findIndex(
@@ -403,11 +394,6 @@ export function buildSeed(today: string): Seed {
 			displayName,
 			defaultCategoryId: null,
 		})),
-		...UNBILLED_SUBSCRIPTIONS.map(([, rawName, displayName, , categoryId]) => ({
-			rawName,
-			displayName,
-			defaultCategoryId: categoryId,
-		})),
 		{
 			rawName: "ACME CORP PAYROLL",
 			displayName: "Paycheck, Acme Corp",
@@ -423,6 +409,16 @@ export function buildSeed(today: string): Seed {
 			displayName: "Reimbursement, doctor's office",
 			defaultCategoryId: null,
 		},
+		...subscriptions.map(([rawName]) => ({
+			rawName,
+			displayName:
+				rawName === "GOOGLE *YOUTUBE PREMIUM"
+					? "YouTube Premium"
+					: rawName === "PROCREATE DREAMS"
+						? "Procreate Dreams"
+						: "City Gym",
+			defaultCategoryId: HOUSEHOLD,
+		})),
 	];
 
 	return {
