@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import { matchBillPayments } from "../bills/match";
 import { type BillStatus, billOccurrence } from "../bills/status";
 import { todayUtc } from "../dates";
 import { centsToAmount, formatCents, toCents } from "../money";
@@ -167,7 +168,7 @@ async function page(
 											<BillRow
 												bill={bill}
 												today={today}
-												href={`/bills/${bill.id}/edit`}
+												href={`/bills/${bill.id}`}
 											/>
 										))}
 									</ul>
@@ -183,11 +184,7 @@ async function page(
 						</summary>
 						<ul class="divide-y divide-rule">
 							{inactive.map((bill) => (
-								<BillRow
-									bill={bill}
-									today={today}
-									href={`/bills/${bill.id}/edit`}
-								/>
+								<BillRow bill={bill} today={today} href={`/bills/${bill.id}`} />
 							))}
 						</ul>
 					</details>
@@ -387,6 +384,7 @@ function BillSheet({
 
 bills.get("/bills", (c) => page(c));
 bills.get("/bills/new", (c) => page(c, {}));
+bills.get("/bills/:id", async (c) => billPage(c, Number(c.req.param("id"))));
 bills.get("/bills/:id/edit", async (c) => {
 	const bill = await dbBill(c, Number(c.req.param("id")));
 	return bill ? page(c, { bill }) : c.notFound();
@@ -458,6 +456,7 @@ async function save(c: Context<App>, id?: number) {
 		)
 			.bind(...args)
 			.run();
+	await matchBillPayments(c.env.DB);
 	const message = id ? "Bill saved" : "Bill added";
 	if (c.req.header("HX-Request")) {
 		const res = await page(c);
@@ -493,3 +492,287 @@ for (const action of ["deactivate", "reactivate"] as const)
 		}
 		return c.redirect("/bills", 303);
 	});
+
+type LinkedPayment = {
+	period: string;
+	transaction_id: number;
+	matched_by: "auto" | "user";
+	date: string;
+	amount_cents: number;
+	raw_name: string;
+};
+const monthName = (period: string) =>
+	new Intl.DateTimeFormat("en-US", {
+		month: "long",
+		year: "numeric",
+		timeZone: "UTC",
+	}).format(new Date(`${period}-01T00:00:00Z`));
+const addMonths = (period: string, amount: number) => {
+	const date = new Date(`${period}-01T00:00:00Z`);
+	date.setUTCMonth(date.getUTCMonth() + amount);
+	return date.toISOString().slice(0, 7);
+};
+const occurrenceDate = (bill: DbBill, period: string) => {
+	const month =
+		bill.frequency === "monthly"
+			? period
+			: `${period}-${String(bill.anchor_month).padStart(2, "0")}`;
+	const date = new Date(`${month}-01T00:00:00Z`);
+	const last = new Date(
+		Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0),
+	).getUTCDate();
+	return `${month}-${String(Math.min(bill.due_day, last)).padStart(2, "0")}`;
+};
+async function billPeriods(db: D1Database, bill: DbBill, today: string) {
+	const first = await db
+		.prepare(
+			`SELECT MIN(t.date) AS date FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked'`,
+		)
+		.bind(bill.id)
+		.first<{ date: string | null }>();
+	const sixBack = addMonths(today.slice(0, 7), -6);
+	let start = first?.date?.slice(0, 7) ?? sixBack;
+	if (start < sixBack) start = sixBack;
+	const end = billOccurrence(
+		{
+			frequency: bill.frequency,
+			dueDay: bill.due_day,
+			anchorMonth: bill.anchor_month,
+		},
+		today,
+		new Set<string>(),
+	).period;
+	if (bill.frequency === "yearly")
+		return Array.from(
+			{ length: Math.max(0, Number(end) - Number(start.slice(0, 4)) + 1) },
+			(_, i) => String(Number(end) - i),
+		);
+	const result: string[] = [];
+	for (let period = end; period >= start; period = addMonths(period, -1))
+		result.push(period);
+	return result;
+}
+
+async function billPage(
+	c: Context<App>,
+	id: number,
+	pickerPeriod?: string,
+	error?: string,
+) {
+	const bill = await dbBill(c, id);
+	if (!bill) return c.notFound();
+	const today = todayUtc();
+	const periods = await billPeriods(c.env.DB, bill, today);
+	const payments = (
+		await c.env.DB.prepare(
+			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked'`,
+		)
+			.bind(id)
+			.all<LinkedPayment>()
+	).results;
+	const byPeriod = new Map(
+		payments.map((payment) => [payment.period, payment]),
+	);
+	let candidates: (LinkedPayment & { sameMerchant: number })[] = [];
+	if (pickerPeriod) {
+		const due = occurrenceDate(bill, pickerPeriod);
+		candidates = (
+			await c.env.DB.prepare(
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,CASE WHEN t.raw_name=? THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.excluded=0 AND t.is_split=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+			)
+				.bind(bill.merchant_raw_name, due, bill.amount_cents, due)
+				.all<LinkedPayment & { sameMerchant: number }>()
+		).results;
+	}
+	return c.html(
+		<Layout
+			title={`${bill.name} · Tally`}
+			active="bills"
+			demo={c.env.DEMO === "true"}
+			currentPath={c.req.path}
+		>
+			<div class="max-w-2xl">
+				<a href="/bills" class="inline-flex min-h-11 items-center">
+					Bills
+				</a>
+				<p class="text-sm text-muted">{bill.merchant_raw_name}</p>
+				<h1 class="font-serif text-5xl font-semibold tracking-tight">
+					{bill.name}
+				</h1>
+				<p class="text-lg">
+					{formatCents(bill.amount_cents)}{" "}
+					{bill.frequency === "monthly" ? "a month" : "a year"}, due the{" "}
+					{bill.due_day}
+				</p>
+				{error && (
+					<p role="alert" class="mt-3 text-over">
+						{error}
+					</p>
+				)}
+				<h2 class="mt-6 text-sm text-muted">Payments</h2>
+				<ul class="divide-y divide-rule border-y border-rule">
+					{periods.map((period) => {
+						const payment = byPeriod.get(period);
+						const due = occurrenceDate(bill, period);
+						const status = payment
+							? "Paid"
+							: due < today
+								? "Overdue"
+								: "Upcoming";
+						return (
+							<li class="py-2">
+								<p class="flex justify-between gap-3">
+									<span class="text-lg">
+										{bill.frequency === "monthly" ? monthName(period) : period}
+									</span>
+									<span>{status}</span>
+								</p>
+								<p class="text-muted">
+									{payment
+										? `${payment.raw_name} · ${payment.date} · ${formatCents(payment.amount_cents)} · ${payment.matched_by === "user" ? "linked by you" : "matched"}`
+										: "No payment linked yet"}
+								</p>
+								{payment ? (
+									<form
+										method="post"
+										action={`/bills/${id}/occurrences/${period}/unlink`}
+									>
+										<Button kind="text" type="submit">
+											Not this one
+										</Button>
+									</form>
+								) : (
+									<Button
+										kind="text"
+										href={`/bills/${id}/occurrences/${period}/link`}
+									>
+										Link a payment
+									</Button>
+								)}
+							</li>
+						);
+					})}
+				</ul>
+				<div class="mt-3">
+					<Button
+						kind="secondary"
+						href={`/bills/${id}/edit`}
+						{...sheetAttrs(`/bills/${id}/edit`)}
+					>
+						Edit bill
+					</Button>
+				</div>
+				{pickerPeriod && (
+					<section id="payment-picker" class="mt-6 border-t border-rule pt-4">
+						<h2 class="font-serif text-3xl font-semibold">Link a payment</h2>
+						<p class="mt-2">
+							Within 30 days, same merchant first, then closest amount.
+						</p>
+						<form
+							method="post"
+							action={`/bills/${id}/link`}
+							class="mt-4 flex flex-col gap-3"
+						>
+							<input type="hidden" name="opened_period" value={pickerPeriod} />
+							<fieldset>
+								<legend>Payment</legend>
+								<div class="mt-1 flex flex-col gap-2">
+									{candidates.map((t, index) => (
+										<Chip
+											type="radio"
+											name="transaction_id"
+											value={String(t.transaction_id)}
+											checked={index === 0}
+										>
+											{t.raw_name} · {t.date} · {formatCents(t.amount_cents)}
+										</Chip>
+									))}
+								</div>
+								{!candidates.length && (
+									<p>No unclaimed payments within 30 days.</p>
+								)}
+							</fieldset>
+							<label class="flex flex-col gap-1">
+								<span>Counts in</span>
+								<select
+									name="period"
+									class="min-h-11 rounded-control border border-rule bg-paper px-3"
+								>
+									{periods.map((period) => (
+										<option value={period} selected={period === pickerPeriod}>
+											{bill.frequency === "monthly"
+												? monthName(period)
+												: period}
+										</option>
+									))}
+								</select>
+							</label>
+							<div class="flex gap-3">
+								<Button type="submit">Link</Button>
+								<Button kind="text" href={`/bills/${id}`}>
+									Cancel
+								</Button>
+							</div>
+						</form>
+					</section>
+				)}
+			</div>
+			<div id="sheet" />
+		</Layout>,
+	);
+}
+
+bills.get("/bills/:id/occurrences/:period/link", (c) =>
+	billPage(c, Number(c.req.param("id")), c.req.param("period")),
+);
+bills.post("/bills/:id/link", async (c) => {
+	const id = Number(c.req.param("id"));
+	const form = await c.req.parseBody();
+	const transaction = Number(form.transaction_id);
+	const period = String(form.period ?? "");
+	const opened = String(form.opened_period ?? period);
+	const bill = await dbBill(c, id);
+	if (!bill) return c.notFound();
+	if (
+		!Number.isInteger(transaction) ||
+		!(await billPeriods(c.env.DB, bill, todayUtc())).includes(period)
+	)
+		return billPage(c, id, opened, "Choose a payment and month.");
+	const due = occurrenceDate(bill, period);
+	const result = await c.env.DB.prepare(
+		`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND excluded=0 AND is_split=0 AND abs(julianday(date)-julianday(?))<=30)`,
+	)
+		.bind(id, period, transaction, transaction, due)
+		.run();
+	if (!result.meta.changes)
+		return billPage(c, id, opened, "That payment is already linked.");
+	return feedbackRedirect(c, `/bills/${id}`, "Payment linked");
+});
+bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
+	const id = Number(c.req.param("id"));
+	const period = c.req.param("period");
+	const linked = await c.env.DB.prepare(
+		"SELECT transaction_id FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
+	)
+		.bind(id, period)
+		.first<{ transaction_id: number }>();
+	if (!linked) return c.notFound();
+	await c.env.DB.batch([
+		c.env.DB.prepare(
+			"DELETE FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
+		).bind(id, period),
+		c.env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','dismissed')",
+		).bind(id, period, linked.transaction_id),
+	]);
+	return feedbackRedirect(c, `/bills/${id}`, "Payment unlinked");
+});
+function feedbackRedirect(c: Context<App>, location: string, message: string) {
+	const response = c.redirect(location, 303);
+	if (c.req.header("HX-Request"))
+		response.headers.set(
+			"HX-Trigger",
+			JSON.stringify({ toast: { message }, announce: message }),
+		);
+	return response;
+}

@@ -233,4 +233,38 @@ describe("Bills", () => {
 		);
 		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
 	});
+
+	it("shows a bill page and lets a person unlink and hand-link a chosen month", async () => {
+		let html = await (
+			await exports.default.fetch("http://tally.test/bills/1")
+		).text();
+		expect(html).toContain("Payments");
+		expect(html).toContain("Not this one");
+		const linked = await env.DB.prepare(
+			"SELECT period FROM bill_payments WHERE bill_id=1 AND status='linked'",
+		).first<{ period: string }>();
+		const unlink = await exports.default.fetch(
+			`http://tally.test/bills/1/occurrences/${linked?.period}/unlink`,
+			{
+				method: "POST",
+				redirect: "manual",
+				headers: { Origin: "http://tally.test", "HX-Request": "true" },
+			},
+		);
+		expect(unlink.headers.get("HX-Trigger")).toContain("Payment unlinked");
+		expect(
+			await env.DB.prepare(
+				"SELECT status FROM bill_payments WHERE bill_id=1 AND period=?",
+			)
+				.bind(linked?.period)
+				.first("status"),
+		).toBe("dismissed");
+		html = await (
+			await exports.default.fetch(
+				`http://tally.test/bills/1/occurrences/${linked?.period}/link`,
+			)
+		).text();
+		expect(html).toContain("Counts in");
+		expect(html).toContain("same merchant first, then closest amount");
+	});
 });

@@ -119,6 +119,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | BudgetDiagram, TransactionsDiagram, ExclusionsDiagram, CategoriesDiagram | How Tally works' section diagrams (#61), drawn from the same numbers as each worked example: boxes and arrows for Budget, Transactions and Categories; one bar for Excluding. Ink, muted and rule only, plus ok (or over) on the safe-to-spend box, always with its words. A dashed outline means "not counted" or "not decided yet". |
 
 ## Patterns
+- Bill page (P16 A/P22): newest occurrence first, with its status and linked payment; “Link a payment” opens the 30-day picker and month choice in the page, while “Not this one” rejects a match.
 - Organize screen (owner's P10 option B): one uncategorized merchant group at a time, largest total first, with category chips, an optional shared name, and Save or Skip actions.
 - Empty lists: every list that can be empty shows EmptyState, never a blank space or a lone muted line.
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.

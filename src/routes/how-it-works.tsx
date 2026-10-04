@@ -274,6 +274,32 @@ howItWorks.get("/how-it-works", async (c) => {
 					<Example>{categorizationExample(counts)}</Example>
 				</Section>
 
+				<Section id="bills" title="Bills">
+					<p class="mt-2">
+						Tally matches each bill occurrence to at most one payment, while you
+						stay in control of every link.
+					</p>
+					<ul class="mt-3 list-disc space-y-1 pl-5">
+						<li>
+							A match has the same merchant, is within 10% of the bill amount,
+							and is within 5 days of its due date.
+						</li>
+						<li>A payment can pay only one bill occurrence.</li>
+						<li>
+							A late payment counts in the month it paid, instead of the month
+							when it appeared at the bank.
+						</li>
+						<li>
+							You can link a payment to a chosen month, or reject a wrong match
+							so Tally will not suggest it again.
+						</li>
+					</ul>
+					<Example>
+						Streaming was matched on its due date, and Water was matched three
+						days late.
+					</Example>
+				</Section>
+
 				<div class="mt-10">
 					<TallyMark class="size-9" />
 				</div>

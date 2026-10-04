@@ -1,3 +1,4 @@
+import { matchBillPayments } from "../bills/match";
 import { buildSeed, monthOffset } from "./seed";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
@@ -121,19 +122,8 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 				)
 				.bind(...bill),
 		),
-		db
-			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
-			SELECT 1, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='APPLE.COM/BILL' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
-			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
-		db
-			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
-			SELECT 6, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='YOUTH SOCCER LEAGUE' AND date = ? ORDER BY id LIMIT 1`)
-			.bind(monthOffset(today, 3).slice(0, 4), `${monthOffset(today, 3)}-14`),
-		db
-			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
-			SELECT 2, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='GOOGLE *YOUTUBE' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
-			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 	]);
+	await matchBillPayments(db, today);
 }
 
 function demoBills(

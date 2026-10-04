@@ -18,6 +18,7 @@ export type ListRow = {
 	categoryName: string | null;
 	categoryIcon: string | null;
 	categoryColor: string | null;
+	countsInMonth?: string | null;
 };
 
 export const PAGE_SIZE = 25;
@@ -56,6 +57,8 @@ export async function listTransactions(
 	const from = `FROM transactions t
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+			LEFT JOIN bills b ON b.id=bp.bill_id
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
 	const counted = await db
@@ -71,7 +74,8 @@ export async function listTransactions(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note,
 				t.excluded, t.flag_income AS income,
-				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor
+				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				CASE WHEN bp.period IS NOT NULL AND b.frequency='monthly' AND bp.period != substr(t.date,1,7) THEN bp.period END AS countsInMonth
 			${from}
 			ORDER BY t.date DESC, t.id DESC
 			LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`,
@@ -145,7 +149,7 @@ export async function getTransaction(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note,
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
-				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor, NULL AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
