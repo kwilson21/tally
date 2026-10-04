@@ -521,6 +521,7 @@ function EditSheet({
 				</div>
 				{tx.amountCents < 0 && !tx.income && (
 					<div class="flex flex-col gap-2 border-t border-rule pt-3">
+						<input type="hidden" name="creditReviewedVisible" value="1" />
 						{!tx.creditReviewed && (
 							<p class="text-sm text-muted">
 								This bank credit is held out of spending until you identify it.
@@ -857,6 +858,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			excluded: form.get("excluded") === "1",
 			income: form.get("income") === "1",
 			creditReviewed: form.get("creditReviewed") === "1",
+			creditReviewedProvided:
+				form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
 		};
 		return renderList(c, filters, {
 			status: 422,

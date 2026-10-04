@@ -13,6 +13,8 @@ export type Edit = {
 	income: boolean;
 	/** Whether a bank credit was reviewed as a refund or other non-income credit. */
 	creditReviewed: boolean;
+	/** False when the edit form omitted the credit-review control for an income credit. */
+	creditReviewedProvided?: boolean;
 };
 
 export type EditErrors = Partial<
@@ -39,6 +41,8 @@ export function parseEdit(
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
 	const creditReviewed = form.get("creditReviewed") === "1";
+	const creditReviewedProvided =
+		form.get("creditReviewedVisible") === "1" || form.has("creditReviewed");
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
 		errors.category = "Pick a category from the list.";
@@ -61,6 +65,7 @@ export function parseEdit(
 			excluded,
 			income,
 			creditReviewed,
+			creditReviewedProvided,
 		},
 	};
 }

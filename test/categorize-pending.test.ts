@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending, jevCallLimit } from "../src/categorize-pending";
-import { needsCategoryCount, pendingForJev } from "../src/db/transactions";
+import { loadMonth } from "../src/db/month";
+import {
+	monthCounts,
+	needsCategoryCount,
+	pendingForJev,
+} from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const db = env.DB;
@@ -164,6 +169,54 @@ describe("categorizePending", () => {
 				"category_source IS NULL AND category_id IS NULL AND category_confidence = 0.5",
 			),
 		).toBe(8);
+	});
+
+	it("keeps an uncertain, non-income credit held and out of budget", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = 0.5 WHERE category_confidence IS NULL",
+			)
+			.run();
+		const heldBefore = (await monthCounts(db, MONTH)).heldForReview;
+		const inserted = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_income, income_source, credit_reviewed, credit_reviewed_by) VALUES (1, ?, -777, 'SYNTHETIC UNCERTAIN CREDIT', NULL, NULL, NULL, 0, NULL, 0, NULL) RETURNING id",
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		const id = inserted?.id as number;
+		const jev = fakeJev(() => reply(0.5));
+		expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
+			asked: 1,
+			applied: 0,
+		});
+		expect(jev.calls()).toBe(1);
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income, income_source, credit_reviewed, category_confidence FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: 0,
+			category_confidence: 0.5,
+		});
+		expect((await monthCounts(db, MONTH)).heldForReview).toBe(heldBefore + 1);
+		expect(
+			(await loadMonth(db, MONTH)).transactions.some(
+				(transaction) => transaction.amountCents === -777,
+			),
+		).toBe(false);
+		const next = fakeJev(() => reply(0.95));
+		expect(await categorizePending(withKey, next.fetchImpl)).toEqual({
+			asked: 0,
+			applied: 0,
+		});
+		expect(next.calls()).toBe(0);
 	});
 
 	it("doesn't ask again about transactions it already looked at", async () => {

@@ -105,6 +105,37 @@ describe("POST /transactions/:id", () => {
 		creditReviewed: "0",
 	};
 
+	it("does not turn a note save into a user credit review when the control is hidden", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = 0.95, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const sheet = await get(`/transactions/${bakery}`);
+		expect(sheet.html).not.toContain('name="creditReviewedVisible"');
+		expect(sheet.html).not.toContain('name="creditReviewed"');
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Synthetic Payroll",
+			note: "Synthetic note",
+			back: "/transactions",
+			income: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT note, flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({
+			note: "Synthetic note",
+			flag_income: 1,
+			income_source: "jev",
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+		});
+	});
+
 	it("saves, closes the sheet, and confirms with a toast and announcement (htmx)", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, save);
 		expect(res.status).toBe(200);

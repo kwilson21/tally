@@ -25,8 +25,8 @@ const idOf = async (rawName: string) =>
 const row = (id: number) =>
 	db
 		.prepare(
-			`SELECT category_id, category_source, category_confidence, jev_category_id,
-				flag_transfer, flag_reimbursement, flag_income, excluded, updated_by
+			`SELECT amount_cents, credit_reviewed, category_id, category_source, category_confidence, jev_category_id,
+				flag_transfer, flag_reimbursement, flag_income, excluded, excluded_source, updated_by
 			FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
@@ -40,6 +40,7 @@ const personEdit = {
 	excluded: false,
 	income: false,
 	creditReviewed: true,
+	creditReviewedProvided: true,
 };
 
 const decision = (over = {}) => ({
@@ -161,6 +162,33 @@ describe("applyMerchantRules", () => {
 			category_id: GROCERIES,
 			category_source: "user",
 			flag_income: 1,
+		});
+	});
+
+	it("counts a credit after Jev confidently assigns a non-income category", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: GROCERIES,
+				suggestedCategoryId: GROCERIES,
+				confidence: 0.95,
+				flags: { transfer: false, reimbursement: false, income: false },
+			}),
+		);
+		expect(await row(id)).toMatchObject({
+			amount_cents: -1200,
+			category_id: GROCERIES,
+			category_source: "jev",
+			credit_reviewed: 1,
+			flag_income: 0,
 		});
 	});
 
@@ -386,7 +414,11 @@ describe("saveJevResult", () => {
 				flags: { transfer: true, reimbursement: false, income: false },
 			}),
 		);
-		expect(await row(id)).toMatchObject({ flag_transfer: 1, excluded: 0 });
+		expect(await row(id)).toMatchObject({
+			flag_transfer: 0,
+			excluded: 0,
+			excluded_source: "user",
+		});
 	});
 
 	it("records that Jev said none fit: a confidence with no pick", async () => {

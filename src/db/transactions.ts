@@ -238,14 +238,13 @@ export async function saveEdit(
 ): Promise<void> {
 	const current = await db
 		.prepare(
-			"SELECT raw_name AS rawName, category_id AS categoryId, flag_income AS income, amount_cents AS amountCents, credit_reviewed AS creditReviewed, excluded FROM transactions WHERE id = ?",
+			"SELECT raw_name AS rawName, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded FROM transactions WHERE id = ?",
 		)
 		.bind(id)
 		.first<{
 			rawName: string;
 			categoryId: number | null;
 			income: number;
-			amountCents: number;
 			creditReviewed: number | null;
 			excluded: number;
 		}>();
@@ -253,6 +252,12 @@ export async function saveEdit(
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
+	const creditReviewProvided = edit.creditReviewedProvided !== false;
+	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
+	const creditReviewByUser =
+		creditReviewProvided &&
+		creditReviewChoice === 1 &&
+		current.creditReviewed !== 1;
 	// Changing the exclusion makes it a person's choice, which Jev never overrides.
 	const excluded = edit.excluded ? 1 : 0;
 	const excludeArgs = [excluded, excluded];
@@ -262,9 +267,9 @@ export async function saveEdit(
 			? db
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
-							note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (? < 0 AND ? = 1 AND ? = 0) THEN 'user' ELSE income_source END,
-							credit_reviewed = CASE WHEN ? < 0 THEN CASE WHEN ? = 1 THEN 1 ELSE ? END ELSE credit_reviewed END,
-							credit_reviewed_by = CASE WHEN ? < 0 AND ((? = 1 AND ? = 0) OR flag_income IS NOT ? OR credit_reviewed IS NOT ?) THEN 'user' ELSE credit_reviewed_by END,
+							note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 'user' ELSE income_source END,
+							credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 THEN ? ELSE credit_reviewed END,
+							credit_reviewed_by = CASE WHEN ? = 1 AND ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 							updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
 					.bind(
@@ -273,25 +278,24 @@ export async function saveEdit(
 						...excludeArgs,
 						edit.income ? 1 : 0,
 						edit.income ? 1 : 0,
-						current.amountCents,
-						edit.creditReviewed ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
 						edit.income ? 1 : 0,
-						current.amountCents,
-						edit.creditReviewed ? 1 : 0,
-						edit.income ? 1 : 0,
-						current.amountCents,
-						edit.creditReviewed ? 1 : 0,
-						edit.income ? 1 : 0,
-						edit.income ? 1 : 0,
-						edit.creditReviewed ? 1 : 0,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
 						actor,
 						id,
 					)
 			: db
 					.prepare(
-						`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (? < 0 AND ? = 1 AND ? = 0) THEN 'user' ELSE income_source END,
-						credit_reviewed = CASE WHEN ? < 0 THEN CASE WHEN ? = 1 THEN 1 ELSE ? END ELSE credit_reviewed END,
-						credit_reviewed_by = CASE WHEN ? < 0 AND ((? = 1 AND ? = 0) OR flag_income IS NOT ? OR credit_reviewed IS NOT ?) THEN 'user' ELSE credit_reviewed_by END,
+						`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 'user' ELSE income_source END,
+						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 THEN ? ELSE credit_reviewed END,
+						credit_reviewed_by = CASE WHEN ? = 1 AND ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
 					.bind(
@@ -299,17 +303,16 @@ export async function saveEdit(
 						...excludeArgs,
 						edit.income ? 1 : 0,
 						edit.income ? 1 : 0,
-						current.amountCents,
-						edit.creditReviewed ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
 						edit.income ? 1 : 0,
-						current.amountCents,
-						edit.creditReviewed ? 1 : 0,
-						edit.income ? 1 : 0,
-						current.amountCents,
-						edit.creditReviewed ? 1 : 0,
-						edit.income ? 1 : 0,
-						edit.income ? 1 : 0,
-						edit.creditReviewed ? 1 : 0,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
 						actor,
 						id,
 					),
@@ -531,9 +534,10 @@ export async function saveJevResult(
 				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_id END,
 				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_source END,
 			category_confidence = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_confidence END,
-			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL THEN 1 ELSE credit_reviewed END,
+			-- A credit counts only after a confident category (non-income classification) or an income decision.
+			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= 0.8) OR ? = 1) THEN 1 ELSE credit_reviewed END,
 				jev_category_id = ?,
-				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
+				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
 				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
@@ -552,11 +556,15 @@ export async function saveJevResult(
 			d.categoryId,
 			d.categoryId === null ? null : "jev",
 			d.confidence,
+			d.categoryId !== null ? 1 : 0,
+			d.confidence,
+			d.flags.income ? 1 : 0,
 			d.suggestedCategoryId,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
 			d.flags.income ? 1 : 0,
 			d.flags.income ? 1 : 0,
+
 			excludes,
 			excludes,
 			id,

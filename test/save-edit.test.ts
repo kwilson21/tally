@@ -94,7 +94,7 @@ describe("saveEdit", () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 		await db
 			.prepare(
-				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
 			)
 			.bind(id)
 			.run();
