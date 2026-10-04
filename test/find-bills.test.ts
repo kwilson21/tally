@@ -1,6 +1,11 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { type BillFindingCharge, findBillSuggestions } from "../src/bills/find";
+import {
+	type BillFindingCharge,
+	findBillSuggestions,
+	loadBillSuggestions,
+	threeMonthsBack,
+} from "../src/bills/find";
 import { todayUtc } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
@@ -42,20 +47,43 @@ describe("finding bills", () => {
 		});
 	});
 
+	it("requires the latest two charges to be the monthly pattern", () => {
+		expect(
+			findBillSuggestions([charge("2026-08-01"), charge("2026-09-01")]),
+		).toHaveLength(1);
+		expect(
+			findBillSuggestions([
+				charge("2026-08-23", 8000),
+				charge("2026-09-23", 8000),
+				charge("2026-10-04", 9630),
+			]),
+		).toHaveLength(0);
+	});
+
+	it("clamps the three-month cutoff at month end", () => {
+		expect(threeMonthsBack("2026-05-31")).toBe("2026-02-28");
+		expect(threeMonthsBack("2024-05-31")).toBe("2024-02-29");
+		expect(threeMonthsBack("2026-03-31")).toBe("2025-12-31");
+	});
+
 	it("filters income, exclusions, split parents and children in the database", async () => {
 		await resetDemo(env.DB, todayUtc());
+		expect(
+			(await loadBillSuggestions(env.DB, todayUtc())).map(
+				(row) => row.displayName,
+			),
+		).toEqual(["City Gym", "Procreate Dreams", "YouTube Premium"]);
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
 		expect(html).toContain("Possible bills");
-		expect(html).toContain("about monthly, around the");
+		expect(html).toContain("charges</p>");
+		expect(html).toContain('<form method="post"');
 	});
 
 	it("remembers Not a bill and removes the row with feedback", async () => {
 		await resetDemo(env.DB, todayUtc());
-		const raw = await env.DB.prepare(
-			`SELECT raw_name FROM merchants WHERE raw_name NOT IN (SELECT merchant_raw_name FROM bills) LIMIT 1`,
-		).first<string>("raw_name");
+		const raw = (await loadBillSuggestions(env.DB, todayUtc()))[0]?.rawName;
 		const response = await exports.default.fetch(
 			`http://tally.test/bills/find/${encodeURIComponent(raw ?? "")}/dismiss`,
 			{
@@ -63,7 +91,10 @@ describe("finding bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
-		expect(response.headers.get("HX-Trigger")).toContain('"announce"');
+		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Marked as not a bill", type: "success" },
+			announce: "Suggestion removed",
+		});
 		expect(
 			await env.DB.prepare("SELECT not_a_bill FROM merchants WHERE raw_name=?")
 				.bind(raw)

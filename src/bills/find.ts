@@ -18,6 +18,7 @@ export type BillSuggestion = {
 	amountCents: number;
 	dueDay: number;
 	categoryId: number | null;
+	chargeCount: number;
 };
 
 const epochDay = (date: string) =>
@@ -34,22 +35,15 @@ export function findBillSuggestions(
 	const suggestions: BillSuggestion[] = [];
 	for (const list of groups.values()) {
 		list.sort((a, b) => a.date.localeCompare(b.date));
-		let qualifies = false;
-		for (let i = 1; i < list.length; i++) {
-			const previous = list[i - 1] as BillFindingCharge,
-				current = list[i] as BillFindingCharge;
-			const days = epochDay(current.date) - epochDay(previous.date);
-			const withinAmount =
-				Math.abs(current.amountCents - previous.amountCents) * 100 <=
-				previous.amountCents * BILL_FIND_AMOUNT_PERCENT;
-			if (
-				days >= BILL_FIND_MIN_DAYS &&
-				days <= BILL_FIND_MAX_DAYS &&
-				withinAmount
-			)
-				qualifies = true;
-		}
-		if (!qualifies) continue;
+		if (list.length < 2) continue;
+		const previous = list[list.length - 2] as BillFindingCharge,
+			current = list[list.length - 1] as BillFindingCharge;
+		const days = epochDay(current.date) - epochDay(previous.date);
+		const withinAmount =
+			Math.abs(current.amountCents - previous.amountCents) * 100 <=
+			previous.amountCents * BILL_FIND_AMOUNT_PERCENT;
+		if (days < BILL_FIND_MIN_DAYS || days > BILL_FIND_MAX_DAYS || !withinAmount)
+			continue;
 		const latest = list[list.length - 1] as BillFindingCharge;
 		const counts = new Map<number, number>();
 		for (const row of list)
@@ -65,14 +59,26 @@ export function findBillSuggestions(
 			amountCents: latest.amountCents,
 			dueDay: Number(latest.date.slice(8)),
 			categoryId,
+			chargeCount: list.length,
 		});
 	}
 	return suggestions.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
-function threeMonthsBack(today: string) {
-	const date = new Date(`${today}T00:00:00Z`);
-	date.setUTCMonth(date.getUTCMonth() - BILL_FIND_MONTHS);
+export function threeMonthsBack(today: string) {
+	const source = new Date(`${today}T00:00:00Z`);
+	const day = source.getUTCDate();
+	const date = new Date(
+		Date.UTC(
+			source.getUTCFullYear(),
+			source.getUTCMonth() - BILL_FIND_MONTHS,
+			1,
+		),
+	);
+	const lastDay = new Date(
+		Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0),
+	).getUTCDate();
+	date.setUTCDate(Math.min(day, lastDay));
 	return date.toISOString().slice(0, 10);
 }
 export async function loadBillSuggestions(
@@ -80,13 +86,19 @@ export async function loadBillSuggestions(
 	today: string,
 ): Promise<BillSuggestion[]> {
 	const { results } = await db
-		.prepare(`SELECT t.raw_name AS rawName, COALESCE(m.display_name,m.suggested_name,t.raw_name) AS displayName,
-  t.date, t.amount_cents AS amountCents, t.category_id AS categoryId, m.default_category_id AS defaultCategoryId
-  FROM transactions t JOIN merchants m ON m.raw_name=t.raw_name
-  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.excluded=0 AND t.flag_income=0
-   AND t.is_split=0 AND t.parent_id IS NULL AND m.not_a_bill=0
-   AND NOT EXISTS (SELECT 1 FROM bills b WHERE b.merchant_raw_name=t.raw_name)
-  ORDER BY t.raw_name,t.date`)
+		.prepare(`SELECT COALESCE(p.raw_name,t.raw_name) AS rawName,
+	  COALESCE(m.display_name,m.suggested_name,p.raw_name,t.raw_name) AS displayName,
+	  t.date, t.amount_cents AS amountCents,
+	  CASE WHEN tc.archived=0 THEN t.category_id END AS categoryId,
+	  CASE WHEN dc.archived=0 THEN m.default_category_id END AS defaultCategoryId
+	  FROM transactions t LEFT JOIN transactions p ON p.id=t.parent_id
+	  LEFT JOIN merchants m ON m.raw_name=COALESCE(p.raw_name,t.raw_name)
+	  LEFT JOIN categories tc ON tc.id=t.category_id
+	  LEFT JOIN categories dc ON dc.id=m.default_category_id
+	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.excluded=0 AND t.flag_income=0
+	   AND t.is_split=0 AND COALESCE(m.not_a_bill,0)=0
+	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE b.merchant_raw_name=COALESCE(p.raw_name,t.raw_name))
+	  ORDER BY COALESCE(p.raw_name,t.raw_name),t.date`)
 		.bind(threeMonthsBack(today), today)
 		.all<BillFindingCharge>();
 	return findBillSuggestions(results);

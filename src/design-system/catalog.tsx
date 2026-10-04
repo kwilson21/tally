@@ -647,6 +647,7 @@ function Rows() {
 								amountCents: 4250,
 								dueDay: 12,
 								categoryId: 4,
+								chargeCount: 3,
 							}}
 						/>
 					</ul>

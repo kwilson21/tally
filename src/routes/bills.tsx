@@ -153,7 +153,6 @@ async function page(
 					{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
 					{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
 				</p>
-				<BillFindingBand count={suggestions.length} />
 				<div class="mt-3">
 					<Button
 						kind="secondary"
@@ -163,6 +162,7 @@ async function page(
 						Add a bill
 					</Button>
 				</div>
+				<BillFindingBand count={suggestions.length} />
 				{rows.length === 0 ? (
 					<EmptyState
 						kind="add"
@@ -437,38 +437,63 @@ bills.get("/bills/find", async (c) => {
 					About the same amount, about a month apart. Nothing becomes a bill
 					until you add it.
 				</p>
-				{suggestions.length ? (
-					<ul class="mt-4 divide-y divide-rule border-y border-rule">
-						{suggestions.map((suggestion: BillSuggestion) => (
-							<BillFindingRow suggestion={suggestion} />
-						))}
-					</ul>
-				) : (
-					<EmptyState
-						kind="done"
-						sentence="No possible bills to review."
-						hint="New repeat charges will appear here."
-					/>
-				)}
+				{billFindingList(suggestions)}
 			</div>
 		</Layout>,
 	);
 });
+function billFindingList(suggestions: BillSuggestion[], focusRawName?: string) {
+	return suggestions.length ? (
+		<ul
+			id="bill-finding-list"
+			class="mt-4 divide-y divide-rule border-y border-rule"
+		>
+			{suggestions.map((suggestion) => (
+				<BillFindingRow
+					suggestion={suggestion}
+					focusAdd={suggestion.rawName === focusRawName}
+				/>
+			))}
+		</ul>
+	) : (
+		<div id="bill-finding-list">
+			<h2 tabindex={-1} autofocus={focusRawName != null} class="sr-only">
+				Possible bills review complete
+			</h2>
+			<EmptyState
+				kind="done"
+				sentence="No possible bills to review."
+				hint="New repeat charges will appear here."
+			/>
+		</div>
+	);
+}
 bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	const merchant = decodeURIComponent(c.req.param("merchant"));
+	const before = await loadBillSuggestions(c.env.DB, todayUtc());
+	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
 	const result = await c.env.DB.prepare(
-		"UPDATE merchants SET not_a_bill=1 WHERE raw_name=?",
+		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
+		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1`,
 	)
 		.bind(merchant)
 		.run();
-	if (!result.meta.changes) return c.notFound();
+	if (!result.meta.changes || dismissedIndex < 0) return c.notFound();
 	const headers = {
 		"HX-Trigger": JSON.stringify({
 			toast: { message: "Marked as not a bill", type: "success" },
 			announce: "Suggestion removed",
 		}),
 	};
-	if (c.req.header("HX-Request")) return c.body("", 200, headers);
+	if (c.req.header("HX-Request")) {
+		const remaining = await loadBillSuggestions(c.env.DB, todayUtc());
+		const focus = remaining[dismissedIndex] ?? remaining[0];
+		return c.html(
+			billFindingList(remaining, focus?.rawName ?? ""),
+			200,
+			headers,
+		);
+	}
 	return c.redirect("/bills/find", 303);
 });
 bills.get("/bills/:id", async (c) => billPage(c, Number(c.req.param("id"))));
