@@ -95,7 +95,8 @@ export function BillPaymentPicker({
 									type="radio"
 									name="transaction_id"
 									value={String(t.id)}
-									checked={index === 0}
+									// Nothing is chosen for the person; one required radio makes the group required.
+									required={index === 0}
 								>
 									{t.displayName} · {t.dateLabel} · {formatCents(t.amountCents)}
 								</Chip>

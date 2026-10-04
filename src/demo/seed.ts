@@ -31,6 +31,8 @@ export type SeedMerchant = {
 	defaultCategoryId: number | null;
 };
 export type SeedTransaction = {
+	id?: number;
+	parentId?: number | null;
 	accountId: number;
 	date: string;
 	amountCents: number;
@@ -310,6 +312,41 @@ export function buildSeed(today: string): Seed {
 		transfer(clamp(2)),
 		reimbursement(clamp(10)),
 	);
+
+	// Spec §9 row 4: the warehouse purchase is already split across two categories.
+	const costcoIndex = transactions.findIndex(
+		(t) => t.rawName === "COSTCO WHSE #0431" && t.date.startsWith(thisMonth),
+	);
+	const costco = transactions[costcoIndex];
+	if (costco) {
+		costco.isSplit = true;
+		const parentId = costcoIndex + 1;
+		transactions.push(
+			{
+				...spend(
+					costco.accountId,
+					costco.date,
+					costco.rawName,
+					GROCERIES,
+					15000,
+				),
+				parentId,
+			},
+			{
+				...spend(
+					costco.accountId,
+					costco.date,
+					costco.rawName,
+					HOUSEHOLD,
+					3742,
+				),
+				parentId,
+			},
+		);
+	}
+	transactions.forEach((transaction, index) => {
+		transaction.id = index + 1;
+	});
 
 	const startMonth = monthOffset(today, 5);
 	const budgetAmounts: BudgetAmount[] = [

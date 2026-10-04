@@ -14,6 +14,7 @@ type Props = {
 	/** Last month's amount in cents, offered as a chip when it's above $0. */
 	lastMonthCents?: number;
 	autofocus?: boolean;
+	inputAttributes?: Record<string, string>;
 };
 
 /** The typed text in cents, or null when it isn't a dollar amount. */
@@ -57,6 +58,7 @@ export function MoneyInput({
 	error,
 	lastMonthCents = 0,
 	autofocus,
+	inputAttributes,
 }: Props) {
 	const cents = centsOf(value);
 	const atZero = cents === null || cents === 0;
@@ -71,7 +73,7 @@ export function MoneyInput({
 					type="button"
 					data-money-js
 					data-nudge="-100"
-					aria-label="Decrease by $1"
+					aria-label={`Decrease ${label} by $1`}
 					disabled={atZero}
 					class={round}
 				>
@@ -93,6 +95,7 @@ export function MoneyInput({
 						inputmode="decimal"
 						autocomplete="off"
 						data-money-input
+						{...inputAttributes}
 						autofocus={autofocus}
 						aria-invalid={error ? "true" : undefined}
 						aria-describedby={error ? `${id}-error` : undefined}
@@ -105,7 +108,7 @@ export function MoneyInput({
 						<button
 							type="button"
 							data-nudge="1"
-							aria-label="Increase by 1 cent"
+							aria-label={`Increase ${label} by 1 cent`}
 							class={`${cent} rounded-tr-lg`}
 						>
 							<Arrow up />
@@ -113,7 +116,7 @@ export function MoneyInput({
 						<button
 							type="button"
 							data-nudge="-1"
-							aria-label="Decrease by 1 cent"
+							aria-label={`Decrease ${label} by 1 cent`}
 							disabled={atZero}
 							class={`${cent} rounded-br-lg border-t border-rule`}
 						>
@@ -125,7 +128,7 @@ export function MoneyInput({
 					type="button"
 					data-money-js
 					data-nudge="100"
-					aria-label="Increase by $1"
+					aria-label={`Increase ${label} by $1`}
 					class={round}
 				>
 					+

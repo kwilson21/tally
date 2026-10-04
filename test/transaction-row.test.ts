@@ -54,6 +54,32 @@ describe("rowCaption", () => {
 			rowCaption({ ...base, displayName: base.rawName }).caption,
 		).toBeNull();
 	});
+
+	it("explains when a bank amount change removed a saved split", () => {
+		expect(rowCaption({ ...base, splitRemovedFromCents: 1234 })).toEqual({
+			kind: "needs",
+			caption: "The bank changed this from $12.34, so its split was removed.",
+			tag: true,
+		});
+	});
+
+	it("names a split part's category next to its parent", () => {
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				categoryName: "Groceries",
+			})?.caption,
+		).toBe("Groceries · Split from Costco");
+	});
+
+	it("drops the bank-change note once the purchase has a category again", () => {
+		expect(
+			rowCaption({ ...base, splitRemovedFromCents: 1234, categoryId: 1 })
+				?.caption,
+		).not.toContain("The bank changed this");
+	});
 });
 
 describe("TransactionRow", () => {

@@ -91,10 +91,10 @@ describe("GET /budget/:id", () => {
 		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="700.00"/);
 		expect(html).toMatch(/<input[^>]*inputmode="decimal"/);
 		for (const [delta, label] of <[string, string][]>[
-			["-100", "Decrease by $1"],
-			["-1", "Decrease by 1 cent"],
-			["1", "Increase by 1 cent"],
-			["100", "Increase by $1"],
+			["-100", `Decrease Budget from ${THIS_MONTH()} on by $1`],
+			["-1", `Decrease Budget from ${THIS_MONTH()} on by 1 cent`],
+			["1", `Increase Budget from ${THIS_MONTH()} on by 1 cent`],
+			["100", `Increase Budget from ${THIS_MONTH()} on by $1`],
 		]) {
 			expect(html).toMatch(
 				new RegExp(

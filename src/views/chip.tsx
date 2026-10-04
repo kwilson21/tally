@@ -6,6 +6,8 @@ type Props = {
 	name: string;
 	value: string;
 	checked?: boolean;
+	/** On one radio of a group, makes choosing one of them required. */
+	required?: boolean;
 	/** The id of a hint that explains this choice (aria-describedby). */
 	describedBy?: string;
 	icon?: Child;

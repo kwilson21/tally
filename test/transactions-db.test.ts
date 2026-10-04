@@ -47,22 +47,22 @@ describe("listTransactions", () => {
 	});
 	it("lists this month newest first, one page at a time", async () => {
 		const first = await list("");
-		expect(first).toMatchObject({ total: 35, page: 1, pages: 2 });
+		expect(first).toMatchObject({ total: 37, page: 1, pages: 2 });
 		expect(first.rows).toHaveLength(PAGE_SIZE);
 		const second = await list("page=2");
-		expect(second).toMatchObject({ total: 35, page: 2, pages: 2 });
-		expect(second.rows).toHaveLength(35 - PAGE_SIZE);
+		expect(second).toMatchObject({ total: 37, page: 2, pages: 2 });
+		expect(second.rows).toHaveLength(37 - PAGE_SIZE);
 		const dates = [...first.rows, ...second.rows].map((r) => r.date);
 		expect(dates).toEqual([...dates].sort().reverse());
 		expect(new Set([...first.rows, ...second.rows].map((r) => r.id)).size).toBe(
-			35,
+			37,
 		);
 	});
 
 	it("shows the last page when asked for one past the end", async () => {
 		const { page, rows } = await list("page=99");
 		expect(page).toBe(2);
-		expect(rows).toHaveLength(35 - PAGE_SIZE);
+		expect(rows).toHaveLength(37 - PAGE_SIZE);
 	});
 
 	it("has one empty page when nothing matches", async () => {
@@ -99,6 +99,7 @@ describe("listTransactions", () => {
 	it("filters by category", async () => {
 		const { rows } = await list("category=1");
 		expect(rows).toHaveLength(4);
+		expect(rows.every((r) => !r.isSplit)).toBe(true);
 		expect(rows.every((r) => r.categoryName === "Groceries")).toBe(true);
 	});
 

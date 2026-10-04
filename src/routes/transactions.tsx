@@ -8,7 +8,9 @@ import {
 	monthsWithTransactions,
 	needsCategoryCount,
 	PAGE_SIZE,
+	removeSplit,
 	saveEdit,
+	saveSplit,
 	type TransactionDetail,
 } from "../db/transactions";
 import { formatCents } from "../money";
@@ -24,6 +26,7 @@ import {
 	parseFilters,
 } from "../transactions/filters";
 import { resultCount } from "../transactions/result-count";
+import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -34,6 +37,7 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 
@@ -385,6 +389,13 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
+			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
+				<p role="status" class="text-sm text-over">
+					The bank changed this from{" "}
+					{formatCents(tx.splitRemovedFromCents, { signed: true })}, so its
+					split was removed.
+				</p>
+			)}
 			{tx.countsInMonth && !tx.excluded && (
 				<p class="text-muted">
 					Counts in{" "}
@@ -406,6 +417,32 @@ function EditSheet({
 				<p>
 					<HowLink section="categorization" demo={demo} />
 				</p>
+			)}
+			{tx.parentId === null && !tx.isSplit && !tx.income && (
+				<Button
+					kind="secondary"
+					href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
+					class="mt-4 w-full"
+				>
+					Split
+				</Button>
+			)}
+			{tx.isSplit && (
+				<form
+					method="post"
+					action={`/transactions/${tx.id}/split/remove`}
+					class="mt-4"
+					hx-post={`/transactions/${tx.id}/split/remove`}
+					hx-target="#page"
+					hx-select="#page"
+					hx-swap="outerHTML"
+					hx-select-oob="#needs-count:innerHTML"
+				>
+					<input type="hidden" name="back" value={back} />
+					<Button kind="secondary" type="submit" class="w-full">
+						Remove split
+					</Button>
+				</form>
 			)}
 			<form
 				method="post"
@@ -585,6 +622,183 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 			/>
 		),
 	});
+});
+
+function SplitSheet({
+	tx,
+	back,
+	categories,
+	values,
+	error,
+}: {
+	tx: TransactionDetail;
+	back: string;
+	categories: Category[];
+	values: SplitValue[];
+	error?: string;
+}) {
+	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
+	return (
+		<BottomSheet labelledBy="split-title" closeHref={back}>
+			<p class="text-sm text-muted">{tx.rawName}</p>
+			<h2
+				id="split-title"
+				tabindex={-1}
+				autofocus={values.length <= 2}
+				class="font-serif text-4xl font-semibold outline-none"
+			>
+				{tx.displayName}
+			</h2>
+			<p class="font-serif text-4xl font-semibold">
+				{formatCents(tx.amountCents, { signed: true })}
+			</p>
+			<p class="text-muted">
+				{dayLabel(tx.date, todayUtc())} · {account}
+			</p>
+			<SplitForm
+				id={tx.id}
+				parentCents={tx.amountCents}
+				categories={categories}
+				values={values}
+				back={back}
+				error={error}
+			/>
+		</BottomSheet>
+	);
+}
+
+async function splitContext(c: Context<App>) {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const categories = await c.env.DB.prepare(
+		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+	).all<Category>();
+	return { tx, categories: categories.results };
+}
+
+transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
+	const { tx, categories } = await splitContext(c);
+	// Income is never split (decision 62's review): no form for it either.
+	if (!tx || tx.parentId !== null || tx.income) return notFound(c);
+	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
+	const filters = filtersFrom(back);
+	return renderList(c, filters, {
+		sheet: () => (
+			<SplitSheet
+				tx={tx}
+				back={back}
+				categories={categories}
+				values={[
+					{ category: "", amount: "" },
+					{ category: "", amount: "" },
+				]}
+			/>
+		),
+	});
+});
+
+transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	return c.html(
+		<div id="split-line">
+			<SplitLine
+				parentCents={tx.amountCents}
+				amounts={form.getAll("part_amount").map(String)}
+			/>
+		</div>,
+	);
+});
+
+transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
+	const { tx, categories } = await splitContext(c);
+	if (!tx || tx.parentId !== null) return notFound(c);
+	if (tx.income) return c.text("Income transactions cannot be split.", 400);
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const categoryValues = form.getAll("part_category").map(String);
+	const amountValues = form.getAll("part_amount").map(String);
+	const values = categoryValues.map((category, i) => ({
+		category,
+		amount: amountValues[i] ?? "",
+	}));
+	if (form.get("add") === "1") values.push({ category: "", amount: "" });
+	else {
+		const parsed = parseSplit(
+			categoryValues,
+			amountValues,
+			tx.amountCents,
+			categories.map((cat) => cat.id),
+		);
+		const saved =
+			parsed.ok && (await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c)));
+		if (parsed.ok && !saved) {
+			// Show the bank's new amount, so the next save checks against it.
+			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
+			return renderList(c, filtersFrom(back), {
+				status: 422,
+				sheet: () => (
+					<SplitSheet
+						tx={fresh}
+						back={back}
+						categories={categories}
+						values={values}
+						error="The bank just changed this amount. Check the parts and save again."
+					/>
+				),
+			});
+		}
+		if (parsed.ok) {
+			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({
+					toast: { message: `Split ${tx.displayName}`, type: "success" },
+					announce: `Saved split for ${tx.displayName}.`,
+				}),
+			);
+			c.header("HX-Push-Url", back);
+			return renderList(c, filtersFrom(back), { focusId: tx.id });
+		}
+		return renderList(c, filtersFrom(back), {
+			status: 422,
+			sheet: () => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					error={parsed.error}
+				/>
+			),
+		});
+	}
+	return renderList(c, filtersFrom(back), {
+		sheet: () => (
+			<SplitSheet tx={tx} back={back} categories={categories} values={values} />
+		),
+	});
+});
+
+transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx?.isSplit) return notFound(c);
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	await removeSplit(c.env.DB, tx.id, actor(c));
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: {
+				message: `Removed split from ${tx.displayName}`,
+				type: "success",
+			},
+			announce: `Removed split from ${tx.displayName}.`,
+		}),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, filtersFrom(back), { focusId: tx.id });
 });
 
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.

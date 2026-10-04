@@ -831,7 +831,7 @@ bills.post("/bills/:id/link", async (c) => {
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
 	if (
-		!Number.isInteger(transaction) ||
+		!(Number.isInteger(transaction) && transaction > 0) ||
 		!(await billPeriods(c.env.DB, bill, todayUtc())).includes(period)
 	)
 		return billPage(c, id, opened, "Choose a payment and month.");

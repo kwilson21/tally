@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { todayUtc } from "../src/dates";
+import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 
 async function home() {
@@ -60,13 +61,37 @@ describe("GET / with the demo seed", () => {
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
 		const { html } = await home();
-		expect(html).toMatch(/\$412\s+of\s+\$700/);
+		expect(html).toMatch(/\$375\s+of\s+\$700/);
 		expect(html).toMatch(/\$286\s+of\s+\$250/);
 		// Eating Out is $36 over; its words say by how much (decision 46).
 		expect(
 			html.match(/ over<span class="sr-only"> budget<\/span>/g)?.length,
 		).toBe(1);
 		expect(html).toContain("$36 over");
+	});
+
+	it("counts the seeded split's children, not its parent, in Home and Budget data", async () => {
+		const month = todayUtc().slice(0, 7);
+		const parent = await env.DB.prepare(
+			"SELECT amount_cents FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
+		).first<{ amount_cents: number }>();
+		const children = await env.DB.prepare(
+			"SELECT amount_cents AS amountCents FROM transactions WHERE parent_id = (SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1)",
+		).all<{ amountCents: number }>();
+		const data = await loadMonth(env.DB, month);
+		expect(parent?.amount_cents).toBe(18742);
+		expect(
+			children.results.reduce((sum, row) => sum + row.amountCents, 0),
+		).toBe(18742);
+		for (const child of children.results) {
+			expect(data.transactions).toContainEqual(expect.objectContaining(child));
+		}
+		expect(data.transactions).not.toContainEqual(
+			expect.objectContaining({ amountCents: parent?.amount_cents }),
+		);
+		const html = (await home()).html;
+		expect(html).toMatch(/\$375\s+of\s+\$700/);
+		expect(html).toMatch(/\$286\s+of\s+\$250/);
 	});
 
 	it("says needs a category once: the Band carries the amount, and there's no Uncategorized row (decision 50)", async () => {

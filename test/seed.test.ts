@@ -31,11 +31,11 @@ describe("buildSeed", () => {
 				summary.categories.map((c) => [c.name, c.spentCents]),
 			);
 			expect(spent).toEqual({
-				Groceries: 41200,
+				Groceries: 37458,
 				"Eating Out": 28600,
 				Gas: 18600,
 				Kids: 21000,
-				Household: 9500,
+				Household: 13242,
 			});
 			expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
 			expect(summary.incomeCents).toBe(490000);
