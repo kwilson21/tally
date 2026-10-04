@@ -25,7 +25,7 @@ const countWhere = async (where: string) =>
 	(
 		await db
 			.prepare(
-				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND ${where}`,
+				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND (${where})`,
 			)
 			.bind(MONTH)
 			.first<{ n: number }>()
@@ -48,6 +48,7 @@ describe("monthCounts", () => {
 			noneFit: 0,
 			notYetAsked: 12,
 			income: await countWhere("category_id IS NULL AND flag_income = 1"),
+			heldForReview: 0,
 		});
 		expect(counts.income).toBeGreaterThan(0);
 		expect(counts.needsCategory).toBe(12);

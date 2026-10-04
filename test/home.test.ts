@@ -23,8 +23,8 @@ describe("GET / with the demo seed", () => {
 
 	it("leads with budget remaining and the status sentence", async () => {
 		const { html } = await home();
-		expect(html).toContain("Safe to spend");
-		expect(html).toMatch(/Safe to spend<\/p><p[^>]*>\$[\d,]+/);
+		expect(html).toContain("Budget remaining this month");
+		expect(html).toMatch(/Budget remaining this month<\/p><p[^>]*>\$[\d,]+/);
 		expect(html).toContain(
 			"Eating Out is $36 over. Everything else is on track.",
 		);
@@ -48,7 +48,7 @@ describe("GET / with the demo seed", () => {
 		const dollars = (html: string) =>
 			Number(
 				html
-					.match(/Safe to spend<\/p><p[^>]*>\$([\d,]+)/)?.[1]
+					.match(/Budget remaining this month<\/p><p[^>]*>\$([\d,]+)/)?.[1]
 					?.replaceAll(",", "") ?? Number.NaN,
 			);
 		const withBills = dollars((await home()).html);
