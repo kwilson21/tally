@@ -102,6 +102,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | AccountRow | One account: a bank or card line icon, its name, "••4521" (read as "ending in 4521"), and its balance, with debt shown negative. |
 | LedgerIllustration | The notebook-and-pencil line drawing beside the headline; ink plus a terracotta pencil. |
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
+| SelectableTransactionRow | One transaction in select mode: a 44px-or-larger label with a keyboard-focusable round checkbox, name, status and signed amount. |
 | BillStatusHeading | A bill group heading pairs its status icon with the status in words, never color alone. |
 | BillRow | One bill: category icon, name, due or paid status sentence, and amount from integer cents. |
 | BillFindingBand | The Bills screen’s terracotta-ruled Band shows how many repeat-charge suggestions need review. |

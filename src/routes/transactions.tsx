@@ -39,6 +39,7 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
@@ -69,6 +70,9 @@ type ListOptions = {
 	focusId?: number;
 	status?: 200 | 404 | 422;
 	pageTitle?: string;
+	selecting?: boolean;
+	selectionError?: string;
+	focusHeading?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -81,7 +85,15 @@ function listHref(filters: Filters, thisMonth: string) {
 async function renderList(
 	c: Context<App>,
 	filters: Filters,
-	{ sheet, focusId, status = 200, pageTitle }: ListOptions = {},
+	{
+		sheet,
+		focusId,
+		status = 200,
+		pageTitle,
+		selecting = false,
+		selectionError,
+		focusHeading = false,
+	}: ListOptions = {},
 ) {
 	const today = todayUtc();
 	const [{ rows, total, page, pages }, months, needs, categories] =
@@ -130,7 +142,9 @@ async function renderList(
 		!filters.excluded;
 	const pageHref = (n: number) => {
 		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
-		return `/transactions${query ? `?${query}` : ""}`;
+		const params = new URLSearchParams(query);
+		if (selecting) params.set("select", "1");
+		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
@@ -150,6 +164,20 @@ async function renderList(
 		</a>
 	);
 	const back = listHref(filters, today.slice(0, 7));
+	const modeParams = new URLSearchParams(
+		filtersToQuery({ ...filters, page }, today.slice(0, 7)),
+	);
+	if (selecting) modeParams.set("select", "1");
+	const currentParams =
+		c.req.path === "/transactions"
+			? new URL(c.req.url).searchParams
+			: modeParams;
+	const selectParams = new URLSearchParams(currentParams);
+	selectParams.set("select", "1");
+	const selectHref = `/transactions?${selectParams}`;
+	const doneParams = new URLSearchParams(currentParams);
+	doneParams.delete("select");
+	const doneHref = `/transactions${doneParams.size ? `?${doneParams}` : ""}`;
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
 	return c.html(
@@ -162,9 +190,22 @@ async function renderList(
 			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
-			<h1 class="font-serif text-5xl font-semibold tracking-tight">
-				Transactions
-			</h1>
+			<div class="flex items-center justify-between gap-3">
+				<h1
+					id="transactions-title"
+					tabindex={focusHeading ? -1 : undefined}
+					autofocus={focusHeading}
+					class="font-serif text-5xl font-semibold tracking-tight outline-none"
+				>
+					Transactions
+				</h1>
+				<Button kind="text" href={selecting ? doneHref : selectHref}>
+					{selecting ? "Done" : "Select"}
+				</Button>
+			</div>
+			{selecting && (
+				<p class="mt-2 text-sm text-muted">Tap rows to select them.</p>
+			)}
 			<div class="mt-3">
 				{/* Swapped out-of-band on filter and page changes, so its back URL keeps the current filters. */}
 				<Button
@@ -199,6 +240,7 @@ async function renderList(
 				hx-swap="innerHTML"
 				hx-push-url="true"
 			>
+				{selecting && <input type="hidden" name="select" value="1" />}
 				<FormField id="q" label="Search transactions" hideLabel>
 					{(a11y) => (
 						<div class="relative">
@@ -289,62 +331,125 @@ async function renderList(
 						Organize by merchant
 					</Button>
 				)}
-				<section id="results" class="mt-2" aria-label="Results">
-					{rows.length === 0 ? (
-						allCategorized ? (
-							<EmptyState
-								kind="done"
-								sentence="Every transaction has a category."
-								hint="New ones appear here as they come in."
-							/>
+				{selecting ? (
+					<form
+						id="selection-form"
+						aria-label="Select transactions"
+						method="post"
+						class="pb-28"
+						hx-get="/transactions/select/count"
+						hx-trigger="load, change"
+						hx-target="#selected-count"
+						hx-swap="outerHTML"
+					>
+						<input type="hidden" name="back" value={back} />
+						<section id="results" class="mt-2" aria-label="Results">
+							{selectionError && (
+								<p role="alert" class="my-3 text-sm text-over">
+									{selectionError}
+								</p>
+							)}
+							{rows.length === 0 ? (
+								<EmptyState
+									kind="search"
+									sentence="No transactions match these filters."
+									hint="Try a wider month, or clear the search."
+									action={{ href: "/transactions", label: "Clear filters" }}
+								/>
+							) : (
+								byDay(rows).map(([date, dayRows]) => (
+									<>
+										<h2 class="mt-3 text-sm text-muted">
+											{dayLabel(date, today)}
+										</h2>
+										<ul class="divide-y divide-rule">
+											{dayRows.map((row) =>
+												row.isSplit ? (
+													<TransactionRow row={row} />
+												) : (
+													<SelectableTransactionRow row={row} />
+												),
+											)}
+										</ul>
+									</>
+								))
+							)}
+						</section>
+						<div class="fixed inset-x-0 bottom-[calc(5rem+var(--safe-area-bottom))] z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:bottom-0">
+							<div class="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
+								<span
+									id="selected-count"
+									aria-live="polite"
+									class="mr-auto text-lg"
+								>
+									Choose rows, then an action
+								</span>
+								<SelectionActionButtons />
+							</div>
+						</div>
+					</form>
+				) : (
+					<section id="results" class="mt-2" aria-label="Results">
+						{rows.length === 0 ? (
+							allCategorized ? (
+								<EmptyState
+									kind="done"
+									sentence="Every transaction has a category."
+									hint="New ones appear here as they come in."
+								/>
+							) : (
+								<EmptyState
+									kind="search"
+									sentence="No transactions match these filters."
+									hint="Try a wider month, or clear the search."
+									action={{ href: "/transactions", label: "Clear filters" }}
+								/>
+							)
 						) : (
-							<EmptyState
-								kind="search"
-								sentence="No transactions match these filters."
-								hint="Try a wider month, or clear the search."
-								action={{ href: "/transactions", label: "Clear filters" }}
-							/>
-						)
-					) : (
-						byDay(rows).map(([date, dayRows]) => (
-							<>
-								<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
-								<ul class="divide-y divide-rule">
-									{dayRows.map((row) => {
-										const href = `/transactions/${row.id}${listQuery ? `?${listQuery}` : ""}`;
-										return (
-											<TransactionRow
-												row={row}
-												href={href}
-												autofocus={row.id === focusId}
-												// Opening swaps in only the sheet, so the list keeps its place.
-												attrs={{
-													"hx-get": href,
-													"hx-target": "#sheet",
-													"hx-select": "#sheet",
-													"hx-swap": "outerHTML",
-													"hx-push-url": "true",
-												}}
-											/>
-										);
-									})}
-								</ul>
-							</>
-						))
-					)}
-					{pages > 1 && (
-						<nav
-							aria-label="Pages"
-							class="mt-4 flex items-center justify-between border-t border-rule pt-2"
-						>
-							<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
-							<span class="text-sm text-muted">
-								Page {page} of {pages}
-							</span>
-							<span>{page < pages && pageLink(page + 1, "next", "Older")}</span>
-						</nav>
-					)}
-				</section>
+							byDay(rows).map(([date, dayRows]) => (
+								<>
+									<h2 class="mt-3 text-sm text-muted">
+										{dayLabel(date, today)}
+									</h2>
+									<ul class="divide-y divide-rule">
+										{dayRows.map((row) => {
+											const href = `/transactions/${row.id}${listQuery ? `?${listQuery}` : ""}`;
+											return (
+												<TransactionRow
+													row={row}
+													href={href}
+													autofocus={row.id === focusId}
+													// Opening swaps in only the sheet, so the list keeps its place.
+													attrs={{
+														"hx-get": href,
+														"hx-target": "#sheet",
+														"hx-select": "#sheet",
+														"hx-swap": "outerHTML",
+														"hx-push-url": "true",
+													}}
+												/>
+											);
+										})}
+									</ul>
+								</>
+							))
+						)}
+						{pages > 1 && (
+							<nav
+								aria-label="Pages"
+								class="mt-4 flex items-center justify-between border-t border-rule pt-2"
+							>
+								<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
+								<span class="text-sm text-muted">
+									Page {page} of {pages}
+								</span>
+								<span>
+									{page < pages && pageLink(page + 1, "next", "Older")}
+								</span>
+							</nav>
+						)}
+					</section>
+				)}
 				<div id="sheet">{sheet?.(categories.results)}</div>
 			</div>
 		</Layout>,
@@ -359,7 +464,259 @@ transactions.get("/transactions", (c) => {
 	const focus = Number(params.get("focus"));
 	return renderList(c, parseFilters(params, todayUtc().slice(0, 7)), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		selecting: params.get("select") === "1",
 	});
+});
+
+function SelectionActionButtons({
+	disabled = false,
+	oob = false,
+}: {
+	disabled?: boolean;
+	oob?: boolean;
+}) {
+	const swap = oob ? "outerHTML" : undefined;
+	return (
+		<>
+			<Button
+				id="set-category-selection"
+				kind="secondary"
+				type="submit"
+				formaction="/transactions/select/category"
+				formmethod="post"
+				disabled={disabled}
+				hx-post="/transactions/select/category"
+				hx-target="#sheet"
+				hx-select="#sheet"
+				hx-swap={swap ?? "outerHTML"}
+				hx-swap-oob={swap}
+			>
+				Set category
+			</Button>
+			<Button
+				id="exclude-selection"
+				kind="secondary"
+				type="submit"
+				formaction="/transactions/select/exclude"
+				formmethod="post"
+				disabled={disabled}
+				hx-post="/transactions/select/exclude"
+				hx-target="#main"
+				hx-select="#main > *"
+				hx-swap={swap ?? "innerHTML"}
+				hx-swap-oob={swap}
+			>
+				Exclude
+			</Button>
+		</>
+	);
+}
+
+const selectedIds = (form: FormData) => [
+	...new Set(
+		form
+			.getAll("ids")
+			.map(Number)
+			.filter((id) => Number.isInteger(id) && id > 0),
+	),
+];
+
+async function selectableIds(db: D1Database, ids: number[]) {
+	if (ids.length === 0) return [];
+	const marks = ids.map(() => "?").join(",");
+	const rows = await db
+		.prepare(
+			`SELECT id FROM transactions WHERE is_split = 0 AND id IN (${marks})`,
+		)
+		.bind(...ids)
+		.all<{ id: number }>();
+	return rows.results.map((row) => row.id);
+}
+
+transactions.get("/transactions/select/count", (c) => {
+	const count = new URL(c.req.url).searchParams.getAll("ids").length;
+	return c.html(
+		<>
+			<span id="selected-count" aria-live="polite" class="mr-auto text-lg">
+				{count} selected
+			</span>
+			<SelectionActionButtons disabled={count === 0} oob />
+		</>,
+	);
+});
+
+function SelectCategorySheet({
+	ids,
+	back,
+	categories,
+	error,
+}: {
+	ids: number[];
+	back: string;
+	categories: Category[];
+	error?: string;
+}) {
+	return (
+		<BottomSheet
+			labelledBy="select-category-title"
+			closeHref={`${back}${back.includes("?") ? "&" : "?"}select=1`}
+		>
+			<h2
+				id="select-category-title"
+				tabindex={-1}
+				autofocus
+				class="font-serif text-4xl font-semibold tracking-tight outline-none"
+			>
+				Set category for {ids.length}
+			</h2>
+			<form
+				method="post"
+				action="/transactions/select/category/save"
+				class="mt-4 flex flex-col gap-4"
+				hx-post="/transactions/select/category/save"
+				hx-target="#main"
+				hx-select="#main > *"
+				hx-swap="innerHTML"
+			>
+				{ids.map((id) => (
+					<input type="hidden" name="ids" value={id} />
+				))}
+				<input type="hidden" name="back" value={back} />
+				<fieldset
+					aria-describedby={error ? "select-category-error" : undefined}
+				>
+					<legend class="mb-2">Category</legend>
+					<div class="flex flex-wrap gap-2">
+						{categories.map((cat, index) => (
+							<Chip
+								type="radio"
+								name="category"
+								value={String(cat.id)}
+								required={index === 0}
+								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
+							>
+								{cat.name}
+							</Chip>
+						))}
+					</div>
+					{error && (
+						<p
+							id="select-category-error"
+							role="alert"
+							class="mt-2 text-sm text-over"
+						>
+							{error}
+						</p>
+					)}
+				</fieldset>
+				<div class="grid grid-cols-2 gap-3">
+					<Button
+						kind="secondary"
+						href={`${back}${back.includes("?") ? "&" : "?"}select=1`}
+						class="w-full"
+					>
+						Cancel
+					</Button>
+					<Button type="submit" class="w-full">
+						Save
+					</Button>
+				</div>
+			</form>
+		</BottomSheet>
+	);
+}
+
+transactions.post("/transactions/select/category", async (c) => {
+	const form = await c.req.formData();
+	const ids = await selectableIds(c.env.DB, selectedIds(form));
+	const back = safeBack(form.get("back")?.toString());
+	if (ids.length === 0)
+		return renderList(c, filtersFrom(back), {
+			selecting: true,
+			status: 422,
+			selectionError: "Select at least one transaction.",
+		});
+	return renderList(c, filtersFrom(back), {
+		selecting: true,
+		pageTitle: "Set category · Tally",
+		sheet: (categories) => (
+			<SelectCategorySheet ids={ids} back={back} categories={categories} />
+		),
+	});
+});
+
+async function finishSelection(c: Context<App>, back: string, message: string) {
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	);
+	return renderList(c, filtersFrom(back), { focusHeading: true });
+}
+
+transactions.post("/transactions/select/category/save", async (c) => {
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const ids = await selectableIds(c.env.DB, selectedIds(form));
+	const category = Number(form.get("category"));
+	const cat = Number.isInteger(category)
+		? await c.env.DB.prepare(
+				"SELECT id,name FROM categories WHERE id=? AND archived=0",
+			)
+				.bind(category)
+				.first<{ id: number; name: string }>()
+		: null;
+	if (ids.length === 0 || !cat) {
+		const error =
+			ids.length === 0
+				? "Select at least one transaction."
+				: "Pick a category from the list.";
+		return renderList(c, filtersFrom(back), {
+			selecting: true,
+			status: 422,
+			sheet: (categories) => (
+				<SelectCategorySheet
+					ids={ids}
+					back={back}
+					categories={categories}
+					error={error}
+				/>
+			),
+		});
+	}
+	await c.env.DB.batch(
+		ids.map((id) =>
+			c.env.DB.prepare(
+				"UPDATE transactions SET category_id=?, category_source='user', updated_by=?, updated_at=datetime('now') WHERE id=?",
+			).bind(cat.id, actor(c), id),
+		),
+	);
+	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
+	return finishSelection(c, back, message);
+});
+
+transactions.post("/transactions/select/exclude", async (c) => {
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const ids = await selectableIds(c.env.DB, selectedIds(form));
+	if (ids.length === 0)
+		return renderList(c, filtersFrom(back), {
+			selecting: true,
+			status: 422,
+			selectionError: "Select at least one transaction.",
+		});
+	await c.env.DB.batch(
+		ids.map((id) =>
+			c.env.DB.prepare(
+				"UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?, updated_at=datetime('now') WHERE id=?",
+			).bind(actor(c), id),
+		),
+	);
+	return finishSelection(
+		c,
+		back,
+		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.`,
+	);
 });
 
 type SheetProps = {
