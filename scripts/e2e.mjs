@@ -81,6 +81,15 @@ assert.equal(await rows(), 12);
 step("the Needs category filter lists the 12 transactions");
 
 await page.goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await page.locator("#month").selectOption("all");
+await page.waitForFunction(() =>
+	document
+		.querySelector("#add-cash")
+		?.getAttribute("href")
+		?.includes("month%3Dall"),
+);
+step("changing a filter in place updates Add cash's way back");
+await page.goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
 await page.getByRole("link", { name: "Add cash" }).click();
 await page.getByRole("textbox", { name: "Amount" }).fill("12.00");
 await page.getByLabel("Where").fill("Corner stand");

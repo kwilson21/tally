@@ -115,7 +115,7 @@ describe("GET /transactions", () => {
 			/<p id="result-count" aria-live="polite"[^>]*>12 transactions needing a category in [A-Z][a-z]+<\/p>/,
 		);
 		expect(html).toContain(
-			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"',
+			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #add-cash:outerHTML"',
 		);
 	});
 

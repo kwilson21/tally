@@ -130,6 +130,17 @@ describe("adding cash", () => {
 		expect(html).toContain("Enter where you spent it.");
 	});
 
+	it("refreshes Add cash with the list when filters change in place", async () => {
+		const { html } = await request("/transactions?month=all");
+		const link = html.match(/<a[^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+		expect(link).toContain(
+			'href="/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall"',
+		);
+		expect(html.match(/hx-select-oob="[^"]*#add-cash:outerHTML/g)?.length).toBe(
+			2,
+		);
+	});
+
 	it("returns to the filtered list after save, close, and cancel", async () => {
 		const back = "/transactions?category=1&amp;month=all";
 		const sheet = await request(

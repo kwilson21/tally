@@ -142,7 +142,7 @@ async function renderList(
 			hx-sync="#filters:replace"
 			hx-target="#results"
 			hx-select="#results > *"
-			hx-select-oob="#result-count:innerHTML"
+			hx-select-oob="#result-count:innerHTML, #add-cash:outerHTML"
 			hx-swap="innerHTML show:top"
 			hx-push-url="true"
 		>
@@ -166,7 +166,9 @@ async function renderList(
 				Transactions
 			</h1>
 			<div class="mt-3">
+				{/* Swapped out-of-band on filter and page changes, so its back URL keeps the current filters. */}
 				<Button
+					id="add-cash"
 					kind="secondary"
 					href={cashHref}
 					class="gap-2"
@@ -193,7 +195,7 @@ async function renderList(
 				hx-sync="replace"
 				hx-target="#results"
 				hx-select="#results > *"
-				hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML"
+				hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #add-cash:outerHTML"
 				hx-swap="innerHTML"
 				hx-push-url="true"
 			>
