@@ -271,7 +271,7 @@ describe("Bills", () => {
 				`http://tally.test/bills/1/occurrences/${linked?.period}/link`,
 			)
 		).text();
-		expect(html).toContain("Counts in");
+		expect(html).toContain("A late payment counts in its bill");
 		expect(html).toContain("same merchant first, then closest amount");
 	});
 
@@ -330,7 +330,7 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain("Which month&#39;s bill does it pay?");
 		expect(html).not.toContain(`name="period" value="${linked?.period}"`);
-		expect(html).toContain("Counts in the bill month");
+		expect(html).toContain("an early one stays in");
 	});
 
 	it("returns typed toast and announcement headers for htmx unlink and link", async () => {
@@ -367,7 +367,7 @@ describe("Bills", () => {
 		});
 	});
 
-	it("picker uses a 30-day window, preferred order, 50-row cap, and exclusions", async () => {
+	it("picker uses a 30-day window, preferred order, every eligible payment, and exclusions", async () => {
 		const today = todayUtc();
 		const period = today.slice(0, 7);
 		const day = Number(today.slice(8, 10));
@@ -406,7 +406,10 @@ describe("Bills", () => {
 				`http://tally.test/bills/1/occurrences/${period}/link`,
 			)
 		).text();
-		expect(html.match(/name="transaction_id"/g) ?? []).toHaveLength(50);
+		// Every eligible payment stays reachable, even the furthest in amount.
+		expect(
+			html.match(/name="transaction_id" value="10\d\d"/g) ?? [],
+		).toHaveLength(54);
 		expect(html).not.toContain("INCOME");
 		expect(html).not.toContain("TOO OLD");
 		expect(html).not.toContain("CANDIDATE 1");

@@ -619,7 +619,7 @@ async function billPage(
 		const due = occurrenceDate(bill, pickerPeriod);
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,m.display_name,CASE WHEN t.raw_name=? THEN 1 ELSE 0 END AS sameMerchant FROM transactions t LEFT JOIN merchants m ON m.raw_name=t.raw_name WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.excluded=0 AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id LIMIT 50`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,m.display_name,CASE WHEN t.raw_name=? THEN 1 ELSE 0 END AS sameMerchant FROM transactions t LEFT JOIN merchants m ON m.raw_name=t.raw_name WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.excluded=0 AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					bill.merchant_raw_name,

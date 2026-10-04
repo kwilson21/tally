@@ -127,7 +127,8 @@ howItWorks.get("/how-it-works", async (c) => {
 	const paidBill = billData.rows.find(
 		(bill) => bill.status === "paid" && bill.paidDate,
 	);
-	const billExample = paidBill ?? billData.rows[0];
+	// Only a real, linked payment is drawn; with none, the section shows its rules alone.
+	const billExample = paidBill;
 
 	return c.html(
 		<Layout

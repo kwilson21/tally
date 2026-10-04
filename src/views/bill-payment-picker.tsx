@@ -67,8 +67,8 @@ export function BillPaymentPicker({
 					<fieldset>
 						<legend>Which month's bill does it pay?</legend>
 						<p class="text-sm text-muted">
-							Counts in the bill month. Choose where this payment counts in your
-							budget.
+							A late payment counts in its bill's month; an early one stays in
+							the month it was paid.
 						</p>
 						<div class="mt-2 flex flex-wrap gap-2">
 							{periods.map((period) => (
