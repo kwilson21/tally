@@ -1,6 +1,10 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { matchBillPayments, pickBillPayment } from "../src/bills/match";
+import {
+	assignPairs,
+	matchBillPayments,
+	pickBillPayment,
+} from "../src/bills/match";
 
 describe("bill payment matching", () => {
 	it("enforces date and amount windows, then breaks ties by date, amount, and id", () => {
@@ -143,5 +147,27 @@ describe("bill payment matching", () => {
 				"SELECT bill_id FROM bill_payments WHERE status='linked'",
 			).first("bill_id"),
 		).toBe(1);
+	});
+});
+
+describe("assignPairs", () => {
+	const pair = (bill: number, candidate: number) => ({
+		bill: { id: bill },
+		period: "2026-10",
+		candidate: { id: candidate },
+	});
+	it("leaves no bill unpaid when a valid payment exists for each", () => {
+		// Payment 1 is closest to bill A, but bill B can only use payment 1; A can also use 2.
+		const result = assignPairs([pair(1, 1), pair(2, 1), pair(1, 2)]);
+		expect(result.map((p) => [p.bill.id, p.candidate.id]).sort()).toEqual([
+			[1, 2],
+			[2, 1],
+		]);
+	});
+	it("keeps the closest pair when nothing else is possible, and skips reserved payments", () => {
+		expect(assignPairs([pair(1, 1), pair(2, 1)]).map((p) => p.bill.id)).toEqual(
+			[1],
+		);
+		expect(assignPairs([pair(1, 1)], new Set([1]))).toEqual([]);
 	});
 });

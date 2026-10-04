@@ -165,14 +165,8 @@ export async function matchBillPayments(
 			a.bill.id - b.bill.id ||
 			a.candidate.id - b.candidate.id,
 	);
-	const assignedOccurrences = new Set<string>();
 	const statements: D1PreparedStatement[] = [];
-	for (const pair of pairs) {
-		const occurrence = `${pair.bill.id}:${pair.period}`;
-		if (reserved.has(pair.candidate.id) || assignedOccurrences.has(occurrence))
-			continue;
-		reserved.add(pair.candidate.id);
-		assignedOccurrences.add(occurrence);
+	for (const pair of assignPairs(pairs, reserved))
 		statements.push(
 			db
 				.prepare(
@@ -180,11 +174,65 @@ export async function matchBillPayments(
 				)
 				.bind(pair.bill.id, pair.period, pair.candidate.id),
 		);
-	}
 	if (!statements.length) return 0;
 	const results = await db.batch(statements);
 	return results.reduce(
 		(total, result) => total + (result.meta.changes ?? 0),
 		0,
 	);
+}
+
+type Pair = {
+	bill: { id: number };
+	period: string;
+	candidate: { id: number };
+};
+
+/**
+ * Picks one payment per occurrence and one occurrence per payment from pairs sorted
+ * best-first. Closest pairs are taken first; then an occurrence left without a payment
+ * may take one from another occurrence that has a different eligible payment, so no
+ * bill stays unpaid while a valid payment exists for each.
+ */
+export function assignPairs<P extends Pair>(
+	pairs: P[],
+	reserved: ReadonlySet<number> = new Set(),
+): P[] {
+	const key = (p: P) => `${p.bill.id}:${p.period}`;
+	const options = new Map<string, P[]>();
+	for (const pair of pairs) {
+		if (reserved.has(pair.candidate.id)) continue;
+		const list = options.get(key(pair)) ?? [];
+		list.push(pair);
+		options.set(key(pair), list);
+	}
+	const byPayment = new Map<number, P>();
+	const byOccurrence = new Map<string, P>();
+	const take = (pair: P) => {
+		byPayment.set(pair.candidate.id, pair);
+		byOccurrence.set(key(pair), pair);
+	};
+	for (const pair of pairs)
+		if (
+			!reserved.has(pair.candidate.id) &&
+			!byPayment.has(pair.candidate.id) &&
+			!byOccurrence.has(key(pair))
+		)
+			take(pair);
+	const augment = (occurrence: string, seen: Set<number>): boolean => {
+		for (const pair of options.get(occurrence) ?? []) {
+			const id = pair.candidate.id;
+			if (seen.has(id)) continue;
+			seen.add(id);
+			const holder = byPayment.get(id);
+			if (!holder || augment(key(holder), seen)) {
+				take(pair);
+				return true;
+			}
+		}
+		return false;
+	};
+	for (const occurrence of options.keys())
+		if (!byOccurrence.has(occurrence)) augment(occurrence, new Set());
+	return [...byOccurrence.values()];
 }
