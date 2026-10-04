@@ -1063,6 +1063,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	if (form.get("confirm") !== "1") {
 		const values: Edit = {
 			categoryId: tx.categoryId,
+			income: tx.income,
+			creditReviewed: tx.creditReviewed,
 			alwaysForMerchant: false,
 			displayName: tx.merchantName,
 			note: tx.note,
