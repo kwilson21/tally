@@ -7,6 +7,7 @@ import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
+import { BillRow, BillStatusHeading } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
@@ -429,6 +430,53 @@ function HomeTopGroup() {
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
+			<Specimen
+				id="bill-row"
+				title="BillRow and bill status heading"
+				tier="visual"
+				components={["BillRow", "BillStatusHeading"]}
+				sentence="A bill group names its status with an icon and words; each bill shows its category, name, status sentence and amount."
+			>
+				<State label="Overdue">
+					<div class="max-w-xl">
+						<BillStatusHeading status="overdue" />
+						<ul>
+							<BillRow
+								today="2026-10-04"
+								bill={{
+									id: 1,
+									name: "Electric",
+									amountCents: 14200,
+									status: "overdue",
+									dueDate: "2026-09-24",
+									icon: "household",
+									color: "cat-brown",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Paid late">
+					<div class="max-w-xl">
+						<BillStatusHeading status="paid" />
+						<ul>
+							<BillRow
+								today="2026-10-04"
+								bill={{
+									id: 2,
+									name: "Water",
+									amountCents: 4820,
+									status: "paid",
+									dueDate: "2026-09-20",
+									paidDate: "2026-09-23",
+									icon: "household",
+									color: "cat-blue",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+			</Specimen>
 			<Specimen
 				id="progress-row"
 				title="ProgressRow"

@@ -24,7 +24,7 @@ describe("GET / with the demo seed", () => {
 	it("leads with safe to spend and the status sentence", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
-		expect(html).toContain("$283");
+		expect(html).toContain("-$1,774");
 		expect(html).toContain(
 			"Eating Out is $36 over. Everything else is on track.",
 		);
@@ -101,6 +101,8 @@ describe("GET / with the demo seed", () => {
 describe("GET / with no data", () => {
 	beforeEach(async () => {
 		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM budget_amounts"),
 		]);

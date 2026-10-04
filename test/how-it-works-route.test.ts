@@ -48,7 +48,7 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toMatch(/small AI/);
 	});
 
-	it("works its budget example from the same numbers Home shows", async () => {
+	it("keeps its fixed budget example when live bills change Home", async () => {
 		const page = (await get("/how-it-works")).html;
 		const match = page.match(/= (-?\$[\d,]+\.\d\d) safe to spend\./);
 		expect(match).not.toBeNull();
@@ -56,7 +56,7 @@ describe("GET /how-it-works in the demo", () => {
 			Number((match?.[1] ?? "").replace(/[$,]/g, "")) * 100,
 		);
 		const homeHtml = (await get("/")).html;
-		expect(homeHtml).toContain(formatCents(cents, { wholeDollars: true }));
+		expect(homeHtml).not.toContain(formatCents(cents, { wholeDollars: true }));
 	});
 
 	it("explains exclusions with this month's excluded count", async () => {

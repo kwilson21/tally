@@ -103,5 +103,75 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					b(t.isSplit),
 				),
 		),
+		...demoBills(today).map((bill) =>
+			db
+				.prepare(
+					"INSERT INTO bills (id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,active) VALUES (?,?,?,?,?,?,?,?,?)",
+				)
+				.bind(...bill),
+		),
+		db
+			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
+			SELECT 1, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='APPLE.COM/BILL' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
+			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
+		db
+			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
+			SELECT 2, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='GOOGLE *YOUTUBE' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
+			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 	]);
+}
+
+function demoBills(today: string): (string | number | null)[][] {
+	const day = Number(today.slice(8, 10));
+	const month = Number(today.slice(5, 7));
+	const dueSoon = Math.min(31, day + 3);
+	return [
+		[1, "Streaming", 299, day, "monthly", null, 5, "APPLE.COM/BILL", 1],
+		[
+			2,
+			"Water",
+			1399,
+			Math.max(1, day - 3),
+			"monthly",
+			null,
+			5,
+			"GOOGLE *YOUTUBE",
+			1,
+		],
+		[
+			3,
+			"Electric",
+			14200,
+			Math.max(1, day - 1),
+			"monthly",
+			null,
+			5,
+			"THE HOME DEPOT #6612",
+			1,
+		],
+		[
+			4,
+			"Rent",
+			185000,
+			day,
+			"monthly",
+			null,
+			5,
+			"ONLINE TRANSFER TO SAV ...5678",
+			1,
+		],
+		[5, "Internet", 6500, dueSoon, "monthly", null, 5, "AMAZON.COM*RT4K2", 1],
+		[
+			6,
+			"Car insurance",
+			11840,
+			15,
+			"yearly",
+			month === 12 ? 12 : month + 1,
+			3,
+			"CHEVRON 0098812",
+			1,
+		],
+		[7, "Old phone plan", 4500, 15, "monthly", null, 5, "GOOGLE *YOUTUBE", 0],
+	];
 }
