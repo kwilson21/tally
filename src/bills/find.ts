@@ -36,20 +36,14 @@ export function findBillSuggestions(
 	for (const list of groups.values()) {
 		list.sort((a, b) => a.date.localeCompare(b.date));
 		if (list.length < 2) continue;
-		// The latest charge must have an earlier partner about a month before it, close
-		// in amount; other purchases in between don't matter.
-		const current = list[list.length - 1] as BillFindingCharge;
-		const partner = list.slice(0, -1).some((previous) => {
-			const days = epochDay(current.date) - epochDay(previous.date);
-			return (
-				days >= BILL_FIND_MIN_DAYS &&
-				days <= BILL_FIND_MAX_DAYS &&
-				Math.abs(current.amountCents - previous.amountCents) * 100 <=
-					previous.amountCents * BILL_FIND_AMOUNT_PERCENT
-			);
-		});
-		if (!partner) continue;
 		const latest = list[list.length - 1] as BillFindingCharge;
+		const previous = list[list.length - 2] as BillFindingCharge;
+		const days = epochDay(latest.date) - epochDay(previous.date);
+		const withinAmount =
+			Math.abs(latest.amountCents - previous.amountCents) * 100 <=
+			previous.amountCents * BILL_FIND_AMOUNT_PERCENT;
+		if (days < BILL_FIND_MIN_DAYS || days > BILL_FIND_MAX_DAYS || !withinAmount)
+			continue;
 		const counts = new Map<number, number>();
 		for (const row of list)
 			if (row.categoryId != null)
