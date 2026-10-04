@@ -18,6 +18,37 @@ beforeEach(async () => {
 });
 
 describe("GET /transactions", () => {
+	it.each([
+		["monthly", null, "2026-08"],
+		["yearly", 8, "2026"],
+	] as const)(
+		"shows the Counts in caption in list and detail for a %s bill",
+		async (frequency, anchor, period) => {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name) VALUES(95,'Caption',1000,31,?,?, 'CAPTION')",
+				).bind(frequency, anchor),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT 905,id,'2026-09-02',1000,'CAPTION',1 FROM accounts LIMIT 1",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(95,?,905,'user','linked')",
+				).bind(period),
+			]);
+			expect((await get("/transactions?month=2026-08")).html).toContain(
+				"Counts in August",
+			);
+			expect((await get("/transactions/905")).html).toContain(
+				"Counts in August",
+			);
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded=1 WHERE id=905",
+			).run();
+			expect((await get("/transactions/905")).html).not.toContain(
+				"Counts in August",
+			);
+		},
+	);
 	it("renders the list with labeled search, filters, and day groups", async () => {
 		const { res, html } = await get("/transactions");
 		expect(res.status).toBe(200);
@@ -154,7 +185,7 @@ describe("GET /transactions", () => {
 	});
 
 	it("keeps the filters in page links and hides the pager on a single page", async () => {
-		// All months: 90 history rows + 37 this month = 127, so 6 pages.
+		// All months include the demo's lookalike bill charge, so there are 6 pages.
 		const html = (await get("/transactions?month=all")).html;
 		expect(html).toContain("Page 1 of 6");
 		expect(html).toMatch(/href="\/transactions\?month=all&amp;page=2"/);

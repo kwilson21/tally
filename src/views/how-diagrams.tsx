@@ -11,6 +11,75 @@ const W = 360;
 const plural = (n: number, one: string, many: string) =>
 	`${n} ${n === 1 ? one : many}`;
 
+export function BillsDiagram({
+	amount,
+	due,
+	paid,
+	windowDays,
+	tolerance,
+}: {
+	amount: string;
+	due: string;
+	paid: string;
+	windowDays: number;
+	tolerance: string;
+}) {
+	return (
+		<Figure
+			id="bills-diagram"
+			title="How a bill payment is matched"
+			desc={`A ${amount} bill due ${due} matches its payment on ${paid} when merchant and amount match and the date is within ${windowDays} days.`}
+			height={112}
+		>
+			<rect x="8" y="18" width="112" height="64" rx="8" class="stroke-ink" />
+			<text x="64" y="43" text-anchor="middle" class="fill-ink" font-size="13">
+				Bill {amount}
+			</text>
+			<text
+				x="64"
+				y="63"
+				text-anchor="middle"
+				class="fill-muted"
+				font-size="12"
+			>
+				due {due}
+			</text>
+			<path d="M120 50 H238" class="stroke-accent" />
+			<text
+				x="179"
+				y="39"
+				text-anchor="middle"
+				class="fill-muted"
+				font-size="11"
+			>
+				same merchant · ±{tolerance}
+			</text>
+			<text
+				x="179"
+				y="68"
+				text-anchor="middle"
+				class="fill-muted"
+				font-size="11"
+			>
+				within {windowDays} days
+			</text>
+			<rect x="238" y="18" width="114" height="64" rx="8" class="stroke-ink" />
+			<text x="295" y="43" text-anchor="middle" class="fill-ink" font-size="13">
+				Payment
+			</text>
+			<text
+				x="295"
+				y="63"
+				text-anchor="middle"
+				class="fill-muted"
+				font-size="12"
+			>
+				{paid}
+			</text>
+		</Figure>
+	);
+}
+
 /** An accessible SVG: a role, a title and a description that say the same numbers in words. */
 function Figure({
 	id,

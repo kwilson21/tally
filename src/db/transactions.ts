@@ -5,6 +5,9 @@ import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern } from "../transactions/filters";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
+import { countedMonthSql } from "./counted-month";
+
+const COUNTED_MONTH = countedMonthSql();
 
 export type ListRow = {
 	id: number;
@@ -20,6 +23,7 @@ export type ListRow = {
 	categoryName: string | null;
 	categoryIcon: string | null;
 	categoryColor: string | null;
+	countsInMonth?: string | null;
 	parentId?: number | null;
 	parentName?: string | null;
 	isSplit?: boolean;
@@ -43,7 +47,7 @@ export async function listTransactions(
 	const where: string[] = [];
 	const args: (string | number)[] = [];
 	if (f.month !== "all") {
-		where.push("substr(t.date, 1, 7) = ?");
+		where.push(`${COUNTED_MONTH} = ?`);
 		args.push(f.month);
 	}
 	if (f.category !== null) {
@@ -66,6 +70,8 @@ export async function listTransactions(
 	const from = `FROM transactions t
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+			LEFT JOIN bills b ON b.id=bp.bill_id
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			LEFT JOIN merchants pm ON pm.raw_name = p.raw_name
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
@@ -85,7 +91,8 @@ export async function listTransactions(
 				t.is_split AS isSplit, pm.display_name AS parentMerchantName, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
-				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor
+				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
 			ORDER BY t.date DESC, t.id DESC
 			LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`,
@@ -128,9 +135,9 @@ export async function needsCategoryCount(
 	db: D1Database,
 	month: string,
 ): Promise<number> {
-	const inMonth = month === "all" ? "" : "substr(t.date, 1, 7) = ? AND ";
+	const inMonth = month === "all" ? "" : `${COUNTED_MONTH} = ? AND `;
 	const statement = db.prepare(
-		`SELECT COUNT(*) AS n FROM transactions t WHERE ${inMonth}${NEEDS_CATEGORY}`,
+		`SELECT COUNT(*) AS n FROM transactions t LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked' LEFT JOIN bills b ON b.id=bp.bill_id WHERE ${inMonth}${NEEDS_CATEGORY}`,
 	);
 	const row = await (month === "all"
 		? statement
@@ -147,7 +154,9 @@ export async function monthsWithTransactions(
 ): Promise<string[]> {
 	const { results } = await db
 		.prepare(
-			"SELECT DISTINCT substr(date, 1, 7) AS month FROM transactions ORDER BY month DESC",
+			`SELECT DISTINCT ${COUNTED_MONTH} AS month FROM transactions t
+			 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+			 LEFT JOIN bills b ON b.id=bp.bill_id ORDER BY month DESC`,
 		)
 		.all<{ month: string }>();
 	return results.map((r) => r.month);
@@ -177,11 +186,14 @@ export async function getTransaction(
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+			LEFT JOIN bills b ON b.id=bp.bill_id
 			WHERE t.id = ?`,
 		)
 		.bind(id)
@@ -587,7 +599,9 @@ export async function monthCounts(
 				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1) AND t.category_id IS NULL AND t.flag_income = 1), 0) AS income,
 				COALESCE(SUM(t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0), 0) AS heldForReview
 			FROM transactions t
-			WHERE substr(t.date, 1, 7) = ? AND t.excluded = 0 AND t.is_split = 0`,
+			LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+			LEFT JOIN bills b ON b.id=bp.bill_id
+			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0`,
 		)
 		.bind(month)
 		.first<{

@@ -7,6 +7,8 @@ import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
+import { BillOccurrenceRow } from "../views/bill-occurrence-row";
+import { BillPaymentPicker } from "../views/bill-payment-picker";
 import { BillRow, BillStatusHeading } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
@@ -18,6 +20,7 @@ import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { HomeTop } from "../views/home-top";
 import {
+	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -431,6 +434,91 @@ function HomeTopGroup() {
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
+			<Specimen
+				id="bill-occurrence"
+				title="Bill occurrence and payment picker"
+				tier="visual"
+				components={["BillOccurrenceRow", "BillPaymentPicker"]}
+				sentence="A bill page shows paid, due, upcoming and not-paid occurrences and offers eligible payments in an inert picker."
+			>
+				<State label="Paid occurrence">
+					<div inert>
+						<ul>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-09"
+								label="September 2026"
+								status="paid"
+								payment={{
+									displayName: "City Electric",
+									dateLabel: "Sep 24",
+									amountCents: 14200,
+									matchedBy: "auto",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Unpaid occurrence">
+					<div inert>
+						<ul>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-10"
+								label="October 2026"
+								status="due"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Picker">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
+							candidates={[
+								{
+									id: 1,
+									displayName: "City Electric",
+									date: "2026-09-24",
+									dateLabel: "Sep 24",
+									amountCents: 14150,
+								},
+							]}
+							periods={[
+								{
+									value: "2026-09",
+									label: "September",
+									countedMonth: "2026-09",
+								},
+								{ value: "2026-10", label: "October", countedMonth: "2026-10" },
+							]}
+						/>
+					</div>
+				</State>
+				<State label="Empty picker">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
+							candidates={[]}
+							periods={[
+								{
+									value: "2026-09",
+									label: "September",
+									countedMonth: "2026-09",
+								},
+							]}
+						/>
+					</div>
+				</State>
+			</Specimen>
 			<Specimen
 				id="bill-row"
 				title="BillRow and bill status heading"
@@ -1009,6 +1097,7 @@ function Diagrams() {
 				tier="visual"
 				components={[
 					"BudgetDiagram",
+					"BillsDiagram",
 					"TransactionsDiagram",
 					"ExclusionsDiagram",
 					"CategoriesDiagram",
@@ -1017,6 +1106,15 @@ function Diagrams() {
 			>
 				<State label="BudgetDiagram">
 					<BudgetDiagram {...BUDGET_EXAMPLE} />
+				</State>
+				<State label="BillsDiagram">
+					<BillsDiagram
+						amount="$142.00"
+						due="Sep 21"
+						paid="Sep 24"
+						windowDays={5}
+						tolerance="10%"
+					/>
 				</State>
 				<State label="TransactionsDiagram">
 					<TransactionsDiagram {...TRANSACTIONS_EXAMPLE} />

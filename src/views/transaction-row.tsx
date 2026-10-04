@@ -114,6 +114,15 @@ export function TransactionRow({
 					</span>
 					<span class="flex min-w-0 items-center gap-2 leading-6">
 						{caption && <span class="truncate text-muted">{caption}</span>}
+						{row.countsInMonth && (
+							<span class="shrink-0 text-muted">
+								{caption && "· "}Counts in{" "}
+								{new Intl.DateTimeFormat("en-US", {
+									month: "long",
+									timeZone: "UTC",
+								}).format(new Date(`${row.countsInMonth}-01T00:00:00Z`))}
+							</span>
+						)}
 						{tag && (
 							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
 								Needs category

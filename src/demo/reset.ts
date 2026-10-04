@@ -1,3 +1,4 @@
+import { matchBillPayments } from "../bills/match";
 import { buildSeed, monthOffset } from "./seed";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
@@ -30,8 +31,6 @@ export function canResetDemo(env: {
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
 export async function resetDemo(db: D1Database, today: string): Promise<void> {
 	const seed = buildSeed(today);
-	// Early in a month, Water's payment moves to today so it is still in this
-	// month's period, never in the future (paid late from the 2nd on).
 	const todayDay = Number(today.slice(8, 10));
 	if (todayDay < 4) {
 		const waterPayment = seed.transactions.find(
@@ -122,19 +121,8 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 				)
 				.bind(...bill),
 		),
-		db
-			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
-			SELECT 1, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='APPLE.COM/BILL' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
-			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
-		db
-			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
-			SELECT 6, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='YOUTH SOCCER LEAGUE' AND date = ? ORDER BY id LIMIT 1`)
-			.bind(monthOffset(today, 3).slice(0, 4), `${monthOffset(today, 3)}-14`),
-		db
-			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
-			SELECT 2, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='GOOGLE *YOUTUBE' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
-			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 	]);
+	await matchBillPayments(db, today);
 }
 
 function demoBills(
@@ -153,11 +141,20 @@ function demoBills(
 	};
 	const paymentDay = (rawName: string) =>
 		Number(
-			[...transactions]
-				.reverse()
-				.find((transaction) => transaction.rawName === rawName)
+			transactions
+				.filter((transaction) => transaction.rawName === rawName)
+				.sort((a, b) => b.date.localeCompare(a.date))[0]
 				?.date.slice(8) ?? day,
 		);
+	const threeDaysBeforePayment = (rawName: string) => {
+		const payment = transactions
+			.slice()
+			.reverse()
+			.find((transaction) => transaction.rawName === rawName)?.date;
+		const due = new Date(`${payment ?? today}T00:00:00Z`);
+		due.setUTCDate(due.getUTCDate() - 3);
+		return due.getUTCDate();
+	};
 	const plusThree = new Date(`${today}T00:00:00Z`);
 	plusThree.setUTCDate(plusThree.getUTCDate() + 3);
 	const dueSoon = plusThree.getUTCDate();
@@ -177,7 +174,7 @@ function demoBills(
 			2,
 			"Water",
 			1399,
-			Math.max(1, paymentDay("GOOGLE *YOUTUBE") - 3),
+			threeDaysBeforePayment("GOOGLE *YOUTUBE"),
 			"monthly",
 			null,
 			5,
