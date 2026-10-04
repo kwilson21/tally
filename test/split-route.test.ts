@@ -130,7 +130,10 @@ describe("transaction splits", () => {
 			{ categoryId: 1, amountCents: 500 },
 			{ categoryId: 5, amountCents: (bakery?.cents as number) - 400 },
 		];
-		expect(await saveSplit(env.DB, id, stale, "test")).toBe(false);
+		expect(await saveSplit(env.DB, id, stale, "test")).toEqual({
+			saved: false,
+			unlinked: [],
+		});
 		expect(
 			await env.DB.prepare(
 				"SELECT is_split AS split, (SELECT COUNT(*) FROM transactions WHERE parent_id = ?1) AS parts FROM transactions WHERE id = ?1",

@@ -13,6 +13,8 @@ export type CountedTransaction = {
 	categoryId: number | null;
 	amountCents: number;
 	income: boolean;
+	/** A refund linked to its purchase: its money counts, but its purchase is the row to categorize. */
+	linked?: boolean;
 };
 
 export type CategorySummary = Category & {
@@ -70,7 +72,7 @@ export function summarizeMonth(input: MonthInput): MonthSummary {
 		totalSpentCents += t.amountCents;
 		if (t.categoryId === null) {
 			uncategorizedCents += t.amountCents;
-			uncategorizedCount += 1;
+			if (!t.linked) uncategorizedCount += 1;
 		} else {
 			spentByCategory.set(
 				t.categoryId,

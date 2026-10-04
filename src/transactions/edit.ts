@@ -9,10 +9,11 @@ export type Edit = {
 	note: string | null;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
 	excluded: boolean;
+	refundOfId?: number | null;
 };
 
 export type EditErrors = Partial<
-	Record<"category" | "merchant" | "note", string>
+	Record<"category" | "merchant" | "note" | "refund", string>
 >;
 
 const MAX_NAME = 80;

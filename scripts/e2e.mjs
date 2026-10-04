@@ -243,6 +243,45 @@ await page
 assert.equal(await rows(), 1);
 step("removing the split restores the transaction");
 
+// The demo's Target refund is linked to its purchase (P19): its row says so, and its panel shows the link.
+await page.goto(`${BASE}/transactions?q=Target&month=all`, {
+	waitUntil: "networkidle",
+});
+const refundRow = page
+	.locator("#results li[data-transaction]")
+	.filter({ hasText: "Refund for" });
+assert.equal(await refundRow.count(), 1);
+assert.match(
+	await refundRow.innerText(),
+	/Kids · Refund for [A-Z][a-z]{2} \d{1,2}/,
+);
+assert.equal(
+	await page
+		.locator("#results li[data-transaction]")
+		.filter({ hasText: "$24.99 refunded" })
+		.count(),
+	1,
+);
+await refundRow.locator("a").click();
+await page.locator('[role="dialog"]').waitFor();
+await page.locator("#sheet summary", { hasText: "This refunds…" }).click();
+const linked = page.locator('input[name="refund_of"]:checked');
+assert.equal(await page.locator("#sheet").locator(linked).count(), 1);
+assert.notEqual(
+	await page.locator("#sheet").locator(linked).getAttribute("value"),
+	"",
+);
+assert.match(
+	await page.locator("#sheet label", { has: linked }).innerText(),
+	/\$84\.99 · Kids/,
+);
+await page
+	.getByText(/^Counts in Kids with the [A-Z][a-z]{2} \d{1,2} purchase\.$/)
+	.waitFor();
+step(
+	"the demo refund shows its linked purchase, checked, and Refund for on its row",
+);
+
 // Reorder through htmx: the button inside the edit form must send its own direction.
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.locator('summary[data-category="3"]').click();
