@@ -18,6 +18,16 @@ const charge = (date: string, amountCents = 1000): BillFindingCharge => ({
 });
 
 describe("finding bills", () => {
+	it("allows other purchases between the monthly pair, anchored on the latest charge", () => {
+		expect(
+			findBillSuggestions([
+				charge("2026-08-01", 1000),
+				charge("2026-08-15", 5000),
+				charge("2026-09-01", 1000),
+			]),
+		).toMatchObject([{ amountCents: 1000, dueDay: 1, chargeCount: 3 }]);
+	});
+
 	it("requires two eligible charges 25–35 days apart and within 10%", () => {
 		expect(
 			findBillSuggestions([charge("2026-08-01"), charge("2026-09-01", 1100)]),
@@ -47,7 +57,7 @@ describe("finding bills", () => {
 		});
 	});
 
-	it("qualifies a merchant when its latest consecutive charges match", () => {
+	it("qualifies a merchant when its latest charge repeats an earlier one", () => {
 		expect(
 			findBillSuggestions([
 				charge("2026-07-01", 900),
@@ -102,6 +112,46 @@ describe("finding bills", () => {
 		expect(await loadBillSuggestions(env.DB, todayUtc())).not.toContainEqual(
 			expect.objectContaining({ rawName: "FILTER ME" }),
 		);
+	});
+
+	it("suggests a fresh candidate (the control for the filter tests)", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await insertCandidate("KEEP ME");
+		expect(await loadBillSuggestions(env.DB, todayUtc())).toContainEqual(
+			expect.objectContaining({ rawName: "KEEP ME" }),
+		);
+	});
+
+	it("dismisses a merchant whose name has a percent sign", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await insertCandidate("100% PURE");
+		const response = await exports.default.fetch(
+			"http://tally.test/bills/find/100%25%20PURE/dismiss",
+			{
+				method: "POST",
+				headers: { Origin: "http://tally.test", "HX-Request": "true" },
+			},
+		);
+		expect(response.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT not_a_bill FROM merchants WHERE raw_name=?")
+				.bind("100% PURE")
+				.first("not_a_bill"),
+		).toBe(1);
+	});
+
+	it("saves nothing when the name isn't a current suggestion", async () => {
+		await resetDemo(env.DB, todayUtc());
+		const response = await exports.default.fetch(
+			"http://tally.test/bills/find/NOT%20LISTED/dismiss",
+			{ method: "POST", headers: { Origin: "http://tally.test" } },
+		);
+		expect(response.status).toBe(404);
+		expect(
+			await env.DB.prepare(
+				"SELECT 1 FROM merchants WHERE raw_name='NOT LISTED'",
+			).first(),
+		).toBeNull();
 	});
 
 	it("filters merchants that already have a bill", async () => {
@@ -172,6 +222,13 @@ describe("finding bills", () => {
 	});
 });
 
+/** A day `days` before today, as YYYY-MM-DD. */
+const daysAgo = (days: number) =>
+	new Date(Date.parse(`${todayUtc()}T00:00:00Z`) - days * 86400000)
+		.toISOString()
+		.slice(0, 10);
+
+/** Two $10 charges 30 days apart, both inside the three-month window. */
 async function insertCandidate(rawName: string, notABill = 0) {
 	await env.DB.prepare(
 		"INSERT INTO merchants(raw_name,display_name,default_category_id,not_a_bill) VALUES(?,?,4,?)",
@@ -182,12 +239,12 @@ async function insertCandidate(rawName: string, notABill = 0) {
 		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
 		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
 	)
-		.bind("2026-08-01", rawName)
+		.bind(daysAgo(40), rawName)
 		.run();
 	await env.DB.prepare(
 		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
 		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
 	)
-		.bind("2026-09-01", rawName)
+		.bind(daysAgo(10), rawName)
 		.run();
 }

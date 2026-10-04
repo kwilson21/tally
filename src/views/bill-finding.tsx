@@ -1,4 +1,5 @@
 import { BILL_FIND_MONTHS, type BillSuggestion } from "../bills/find";
+import { ordinal } from "../dates";
 import { centsToAmount, formatCents } from "../money";
 import { Button } from "./button";
 import { Icon } from "./icons";
@@ -40,14 +41,15 @@ export function BillFindingRow({
 	});
 	return (
 		<li id={`finding-${encodeURIComponent(suggestion.rawName)}`} class="py-3">
-			<div class="flex items-baseline justify-between gap-3">
-				<p class="text-lg font-semibold">{suggestion.displayName}</p>
-				<p class="shrink-0 text-right">
+			<p class="flex items-baseline justify-between gap-3 text-lg">
+				<span>{suggestion.displayName}</span>
+				<span class="shrink-0 text-right">
 					About {formatCents(suggestion.amountCents)}
-				</p>
-			</div>
+				</span>
+			</p>
 			<p class="text-sm text-muted">
-				{suggestion.rawName} · {suggestion.chargeCount} charges
+				{suggestion.rawName} · {suggestion.chargeCount} charges, around the{" "}
+				{ordinal(suggestion.dueDay)}
 			</p>
 			<div class="mt-2 flex items-center gap-3">
 				<Button

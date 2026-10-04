@@ -6,7 +6,7 @@ import {
 	billOccurrence,
 	billOccurrenceForMonth,
 } from "../bills/status";
-import { todayUtc } from "../dates";
+import { ordinal, todayUtc } from "../dates";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
@@ -469,16 +469,18 @@ function billFindingList(suggestions: BillSuggestion[], focusRawName?: string) {
 	);
 }
 bills.post("/bills/find/:merchant/dismiss", async (c) => {
-	const merchant = decodeURIComponent(c.req.param("merchant"));
+	// Hono has already decoded the name once.
+	const merchant = c.req.param("merchant");
 	const before = await loadBillSuggestions(c.env.DB, todayUtc());
 	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
+	if (dismissedIndex < 0) return c.notFound();
 	const result = await c.env.DB.prepare(
 		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
 		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1`,
 	)
 		.bind(merchant)
 		.run();
-	if (!result.meta.changes || dismissedIndex < 0) return c.notFound();
+	if (!result.meta.changes) return c.notFound();
 	const headers = {
 		"HX-Trigger": JSON.stringify({
 			toast: { message: "Marked as not a bill", type: "success" },
@@ -666,8 +668,6 @@ const shortDate = (date: string) =>
 		day: "numeric",
 		timeZone: "UTC",
 	}).format(new Date(`${date}T00:00:00Z`));
-const ordinal = (day: number) =>
-	`${day}${day % 100 >= 11 && day % 100 <= 13 ? "th" : day % 10 === 1 ? "st" : day % 10 === 2 ? "nd" : day % 10 === 3 ? "rd" : "th"}`;
 const addMonths = (period: string, amount: number) => {
 	const date = new Date(`${period}-01T00:00:00Z`);
 	date.setUTCMonth(date.getUTCMonth() + amount);

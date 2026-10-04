@@ -36,14 +36,19 @@ export function findBillSuggestions(
 	for (const list of groups.values()) {
 		list.sort((a, b) => a.date.localeCompare(b.date));
 		if (list.length < 2) continue;
+		// The newest charge must repeat an earlier one (other purchases may fall between),
+		// so a store that once matched by chance doesn't show up.
 		const latest = list[list.length - 1] as BillFindingCharge;
-		const previous = list[list.length - 2] as BillFindingCharge;
-		const days = epochDay(latest.date) - epochDay(previous.date);
-		const withinAmount =
-			Math.abs(latest.amountCents - previous.amountCents) * 100 <=
-			previous.amountCents * BILL_FIND_AMOUNT_PERCENT;
-		if (days < BILL_FIND_MIN_DAYS || days > BILL_FIND_MAX_DAYS || !withinAmount)
-			continue;
+		const partner = list.slice(0, -1).some((previous) => {
+			const days = epochDay(latest.date) - epochDay(previous.date);
+			return (
+				days >= BILL_FIND_MIN_DAYS &&
+				days <= BILL_FIND_MAX_DAYS &&
+				Math.abs(latest.amountCents - previous.amountCents) * 100 <=
+					previous.amountCents * BILL_FIND_AMOUNT_PERCENT
+			);
+		});
+		if (!partner) continue;
 		const counts = new Map<number, number>();
 		for (const row of list)
 			if (row.categoryId != null)
