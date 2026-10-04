@@ -73,4 +73,32 @@ describe("loadMonth", () => {
 		]);
 		expect(data.amounts).toHaveLength(2);
 	});
+
+	it("counts a late bill payment in its occurrence month, never twice", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(90,'Rent',4000,30,'monthly',1,'RENT')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES(90,1,'2026-10-02',4000,'RENT',1)",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(90,'2026-09',90,'user','linked')",
+			)
+			.run();
+		expect(
+			(await loadMonth(db, "2026-09")).transactions.some(
+				(t) => t.amountCents === 4000,
+			),
+		).toBe(true);
+		expect(
+			(await loadMonth(db, "2026-10")).transactions.some(
+				(t) => t.amountCents === 4000,
+			),
+		).toBe(false);
+	});
 });

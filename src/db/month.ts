@@ -1,4 +1,7 @@
 import type { BudgetAmount, CountedTransaction } from "../budget";
+import { countedMonthSql } from "./counted-month";
+
+const COUNTED_MONTH = countedMonthSql();
 
 export type CategoryRow = {
 	id: number;
@@ -32,7 +35,9 @@ export async function loadMonth(
 				`SELECT id, name, icon, color, archived FROM categories c
 				 WHERE archived = 0 OR EXISTS (
 					SELECT 1 FROM transactions t
-					WHERE t.category_id = c.id AND substr(t.date, 1, 7) = ?1 AND t.excluded = 0 AND t.is_split = 0
+					LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+					LEFT JOIN bills b ON b.id=bp.bill_id
+					WHERE t.category_id = c.id AND ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
 						AND t.flag_income = 0
 				 )
 				 ORDER BY sort_order, name`,
@@ -43,9 +48,11 @@ export async function loadMonth(
 		),
 		db
 			.prepare(
-				`SELECT category_id AS categoryId, amount_cents AS amountCents, flag_income AS income
-				 FROM transactions
-				 WHERE substr(date, 1, 7) = ?1 AND excluded = 0 AND is_split = 0`,
+				`SELECT t.category_id AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income
+				 FROM transactions t
+				 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+				 LEFT JOIN bills b ON b.id=bp.bill_id
+				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0`,
 			)
 			.bind(month),
 	])) as [D1Result, D1Result, D1Result];

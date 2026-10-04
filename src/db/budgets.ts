@@ -2,6 +2,7 @@
 import { budgetForMonth } from "../budget";
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import { NUDGE_STEP_CENTS } from "../budgets/nudge";
+import { countedMonthSql } from "./counted-month";
 
 /** Sets a category's budget from `month` on, replacing one already set for that month. */
 export async function setBudget(
@@ -111,8 +112,10 @@ export async function lastMonthSpentCents(
 ): Promise<number> {
 	const row = await db
 		.prepare(
-			`SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions
-			 WHERE category_id = ? AND substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND flag_income = 0`,
+			`SELECT COALESCE(SUM(t.amount_cents), 0) AS cents FROM transactions t
+			 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+			 LEFT JOIN bills b ON b.id=bp.bill_id
+			 WHERE t.category_id = ? AND ${countedMonthSql()} = ? AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0`,
 		)
 		.bind(categoryId, previousMonth(month))
 		.first<{ cents: number }>();

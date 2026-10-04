@@ -105,7 +105,9 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | BillStatusHeading | A bill group heading pairs its status icon with the status in words, never color alone. |
 | BillRow | One bill: category icon, name, due or paid status sentence, and amount from integer cents. |
 | EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do; add sign: one thing to start), one sentence, a muted hint and at most one button, centred (decisions 54, 55). The button is a secondary link, or, for an add, the screen's own primary control passed in. |
-| Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |
+| BillOccurrenceRow | One bill occurrence with its status, linked-payment detail, and link or “Not this one” action. Older unpaid occurrences are neutral. |
+| BillPaymentPicker | Eligible payments and unpaid occurrence choices as Chip radios; no payment is chosen in advance, so the person picks one. Its empty state has no submit action. |
+| Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. `required` on one radio makes its group required. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
 | Button | A primary, secondary, or quiet text action, rendered as a button or link; an HTMX submit can keep its size while showing a still-or-spinning ring and action-specific busy label, and is disabled for the request. |
 | TextInput | A labeled single-line text field with accessible error and disabled states; an invalid field shakes once, while reduced motion keeps it still. |
@@ -117,9 +119,10 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | MoneyInput | The owner's hero amount from the original app (#66), in Tally's tokens: a round −$1 button (48px), a 292px amount field (`$`, the amount in bold 1.75rem, always with cents: "700.00") with ▲▼ cent arrows stacked inside its right edge behind a hairline (each 44×44: the field is 90px tall so the stacked arrows meet the touch-target rule, decision 41), and a round +$1 button. Under it, centered chips: "Round to $X" (only with cents) and "Last month: $X" (dimmed when the field already holds it). Minus buttons are disabled at $0. In the field, ↑ / ↓ change the amount by 1¢ (Shift: $1), as the original's number field did. money.js runs it; without it the buttons and chips are hidden. |
 | SplitForm | P17 option A: two or more category-and-MoneyInput part rows, Add a part, and a polite live line above them that says “$X left to assign,” “$X over,” or “Adds up to $Y” with a check; save remains server-validated. |
 | SystemDiagram | The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers. |
-| BudgetDiagram, TransactionsDiagram, ExclusionsDiagram, CategoriesDiagram | How Tally works' section diagrams (#61), drawn from the same numbers as each worked example: boxes and arrows for Budget, Transactions and Categories; one bar for Excluding. Ink, muted and rule only, plus ok (or over) on the safe-to-spend box, always with its words. A dashed outline means "not counted" or "not decided yet". |
+| BudgetDiagram, BillsDiagram, TransactionsDiagram, ExclusionsDiagram, CategoriesDiagram | How Tally works' section diagrams (#61), drawn from the same numbers as each worked example: boxes and arrows for Budget, Bills, Transactions and Categories; one bar for Excluding. Ink, muted and rule only, plus ok (or over) on the safe-to-spend box, always with its words. A dashed outline means "not counted" or "not decided yet". |
 
 ## Patterns
+- Bill page (P16 A/P22): newest occurrence first, with its status and linked payment; “Link a payment” opens the 30-day picker and month choice in the page, while “Not this one” rejects a match.
 - Organize screen (owner's P10 option B): one uncategorized merchant group at a time, largest total first, with category chips, an optional shared name, and Save or Skip actions.
 - Empty lists: every list that can be empty shows EmptyState, never a blank space or a lone muted line.
 - Feedback after an HTMX change: `HX-Trigger: {"toast": {"message", "type"}, "announce": "..."}`.

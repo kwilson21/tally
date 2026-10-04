@@ -1,3 +1,4 @@
+import { matchBillPayments } from "../bills/match";
 import { plaidAmountToCents } from "../money";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
@@ -419,7 +420,10 @@ export async function syncItem(
 					`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
 				);
 			}
-			if (!page.has_more) return summary;
+			if (!page.has_more) {
+				await matchBillPayments(env.DB);
+				return summary;
+			}
 		}
 	} finally {
 		await env.DB.prepare(

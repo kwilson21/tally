@@ -22,6 +22,7 @@ import { CategoryIcon } from "../src/views/category";
 import { Chip } from "../src/views/chip";
 import { EmptyState } from "../src/views/empty-state";
 import {
+	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -117,6 +118,13 @@ describe("GET /design-system in the demo", () => {
 			HowLink({ section: "budget", demo: true }),
 			SystemDiagram(),
 			BudgetDiagram(BUDGET_EXAMPLE),
+			BillsDiagram({
+				amount: "$142.00",
+				due: "Sep 21",
+				paid: "Sep 24",
+				windowDays: 5,
+				tolerance: "10%",
+			}),
 			TransactionsDiagram(TRANSACTIONS_EXAMPLE),
 			ExclusionsDiagram(EXCLUSIONS_EXAMPLE),
 			CategoriesDiagram(CATEGORIES_EXAMPLE),

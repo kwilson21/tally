@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { JEV_THRESHOLD } from "../ai/categorize";
+import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
 import { todayUtc } from "../dates";
 import { loadMonth } from "../db/month";
@@ -12,8 +13,10 @@ import {
 	exclusionsExample,
 	transactionsExample,
 } from "../how-it-works/examples";
+import { formatCents } from "../money";
 import { TallyMark } from "../views/brand";
 import {
+	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -121,6 +124,11 @@ howItWorks.get("/how-it-works", async (c) => {
 		.reduce((sum, bill) => sum + bill.amountCents, 0);
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
+	const paidBill = billData.rows.find(
+		(bill) => bill.name === "Water" && bill.status === "paid" && bill.paidDate,
+	);
+	// Only a real, linked payment is drawn; with none, the section shows its rules alone.
+	const billExample = paidBill;
 
 	return c.html(
 		<Layout
@@ -274,6 +282,50 @@ howItWorks.get("/how-it-works", async (c) => {
 					<Example>{categorizationExample(counts)}</Example>
 				</Section>
 
+				<Section id="bills" title="Bills">
+					<p class="mt-2">
+						Tally matches each bill occurrence to at most one payment, while you
+						stay in control of every link.
+					</p>
+					<ul class="mt-3 list-disc space-y-1 pl-5">
+						<li>
+							A match has the same merchant, is within{" "}
+							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% of the bill amount, and
+							is within {BILL_DATE_WINDOW_DAYS} days of its due date.
+						</li>
+						<li>A payment can pay only one bill occurrence.</li>
+						<li>
+							A late payment counts in the month of the bill it paid, instead of
+							the month when it appeared at the bank.
+						</li>
+						<li>
+							You can link a payment to a chosen month, or reject a wrong match
+							so Tally will not suggest it again.
+						</li>
+					</ul>
+					{billExample && (
+						<>
+							<Diagram>
+								<BillsDiagram
+									amount={formatCents(billExample.amountCents)}
+									due={shortBillDate(billExample.dueDate)}
+									paid={shortBillDate(
+										billExample.paidDate ?? billExample.dueDate,
+									)}
+									windowDays={BILL_DATE_WINDOW_DAYS}
+									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
+								/>
+							</Diagram>
+							<Example>
+								{billExample.name} is {formatCents(billExample.amountCents)},
+								due {shortBillDate(billExample.dueDate)}; its demo payment is{" "}
+								{shortBillDate(billExample.paidDate ?? billExample.dueDate)} and
+								counts in the month of the bill it paid.
+							</Example>
+						</>
+					)}
+				</Section>
+
 				<div class="mt-10">
 					<TallyMark class="size-9" />
 				</div>
@@ -281,3 +333,11 @@ howItWorks.get("/how-it-works", async (c) => {
 		</Layout>,
 	);
 });
+
+function shortBillDate(date: string) {
+	return new Intl.DateTimeFormat("en-US", {
+		month: "short",
+		day: "numeric",
+		timeZone: "UTC",
+	}).format(new Date(`${date}T00:00:00Z`));
+}
