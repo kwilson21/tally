@@ -1,10 +1,5 @@
 import { type Context, Hono } from "hono";
-import {
-	accountsByBank,
-	type Bank,
-	hasCashTransactions,
-	netWorthCents,
-} from "../db/accounts";
+import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { applyMerchantRules } from "../db/transactions";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
@@ -47,7 +42,6 @@ const SyncNow = () => (
 
 async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 	const banks = await accountsByBank(env.DB);
-	const cash = await hasCashTransactions(env.DB);
 	const plaidEnabled = enabled(env);
 	return (
 		<div id="accounts-summary">
@@ -56,7 +50,7 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 					{alert}
 				</p>
 			)}
-			{banks.length === 0 && !cash ? (
+			{banks.length === 0 ? (
 				<>
 					<h1 class="font-serif text-5xl font-semibold tracking-tight">
 						Accounts

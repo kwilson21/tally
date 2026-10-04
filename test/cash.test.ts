@@ -199,6 +199,18 @@ describe("cash lifecycle", () => {
 		expect(html).not.toContain("$999,999.99");
 	});
 
+	it("shows Accounts' empty state when cash is all there is", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE type<>'cash')",
+			),
+			env.DB.prepare("DELETE FROM accounts WHERE type<>'cash'"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+		]);
+		const { html } = await request("/accounts");
+		expect(html).toContain("No banks linked yet.");
+	});
+
 	it("can be edited, excluded, and split", async () => {
 		const cash = await env.DB.prepare(
 			"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' LIMIT 1",

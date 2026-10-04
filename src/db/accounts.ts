@@ -94,13 +94,3 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 	}
 	return banks;
 }
-
-export async function hasCashTransactions(db: D1Database): Promise<boolean> {
-	return (
-		(await db
-			.prepare(
-				"SELECT 1 FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' LIMIT 1",
-			)
-			.first()) !== null
-	);
-}
