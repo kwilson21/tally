@@ -22,6 +22,7 @@ export type ListRow = {
 	parentId?: number | null;
 	parentName?: string | null;
 	isSplit?: boolean;
+	splitRemovedFromCents?: number | null;
 };
 
 export const PAGE_SIZE = 25;
@@ -43,6 +44,7 @@ export async function listTransactions(
 	}
 	if (f.category !== null) {
 		where.push("t.category_id = ?");
+		where.push("t.is_split = 0");
 		args.push(f.category);
 	}
 	if (f.uncategorized) where.push(NEEDS_CATEGORY);
@@ -76,7 +78,8 @@ export async function listTransactions(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
-				t.is_split AS isSplit, COALESCE(pm.display_name, p.raw_name) AS parentName,
+				t.is_split AS isSplit, pm.display_name AS parentMerchantName, p.raw_name AS parentRawName,
+				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.excluded, t.flag_income AS income,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor
 			${from}
@@ -87,6 +90,8 @@ export async function listTransactions(
 		.all<
 			Omit<ListRow, "excluded" | "income" | "displayName" | "isSplit"> & {
 				merchantName: string | null;
+				parentMerchantName: string | null;
+				parentRawName: string | null;
 				excluded: number;
 				income: number;
 				isSplit: number;
@@ -94,13 +99,18 @@ export async function listTransactions(
 		>();
 
 	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
-	const rows = results.map(({ merchantName, ...r }) => ({
-		...r,
-		excluded: r.excluded === 1,
-		income: r.income === 1,
-		isSplit: r.isSplit === 1,
-		displayName: merchantName ?? tidyName(r.rawName),
-	}));
+	const rows = results.map(
+		({ merchantName, parentMerchantName, parentRawName, ...r }) => ({
+			...r,
+			parentName: parentRawName
+				? (parentMerchantName ?? tidyName(parentRawName))
+				: null,
+			excluded: r.excluded === 1,
+			income: r.income === 1,
+			isSplit: r.isSplit === 1,
+			displayName: merchantName ?? tidyName(r.rawName),
+		}),
+	);
 	return { rows, total, page, pages };
 }
 
@@ -154,6 +164,7 @@ export async function getTransaction(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, NULL AS parentName,
+				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				a.name AS accountName, a.mask AS accountMask
@@ -203,10 +214,10 @@ export async function saveEdit(
 ): Promise<void> {
 	const current = await db
 		.prepare(
-			"SELECT raw_name AS rawName, category_id AS categoryId FROM transactions WHERE id = ?",
+			"SELECT raw_name AS rawName, category_id AS categoryId, excluded FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first<{ rawName: string; categoryId: number | null }>();
+		.first<{ rawName: string; categoryId: number | null; excluded: number }>();
 	if (!current) throw new Error(`No transaction ${id}`);
 
 	const changed =
@@ -219,13 +230,13 @@ export async function saveEdit(
 		changed
 			? db
 					.prepare(
-						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
+						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
 							note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
 					.bind(edit.categoryId, edit.note, ...excludeArgs, actor, id)
 			: db
 					.prepare(
-						`UPDATE transactions SET note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+						`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
 					.bind(edit.note, ...excludeArgs, actor, id),
 		db
@@ -234,13 +245,16 @@ export async function saveEdit(
 				ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name`,
 			)
 			.bind(current.rawName, edit.displayName),
-		// A split is one bank transaction: excluding its parent excludes every counted child too.
-		db
-			.prepare(
-				"UPDATE transactions SET excluded = ?, excluded_source = 'user', updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
-			)
-			.bind(excluded, actor, id),
 	];
+	// A split is one bank transaction. Do not rewrite child audit fields for unrelated edits.
+	if (excluded !== current.excluded)
+		statements.push(
+			db
+				.prepare(
+					"UPDATE transactions SET excluded = ?, excluded_source = 'user', updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
+				)
+				.bind(excluded, actor, id),
+		);
 	if (edit.alwaysForMerchant && edit.categoryId !== null) {
 		statements.push(
 			db
@@ -299,7 +313,7 @@ export async function saveSplit(
 		),
 		db
 			.prepare(
-				"UPDATE transactions SET is_split = 1, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+				"UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
 			)
 			.bind(by, parentId),
 	]);
@@ -311,6 +325,7 @@ export async function removeSplit(
 	parentId: number,
 	by: string,
 ) {
+	// TODO(#134 refunds): unlink refunds when refund_of_id is added.
 	await db.batch([
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
 		db

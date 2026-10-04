@@ -71,7 +71,7 @@ export function MoneyInput({
 					type="button"
 					data-money-js
 					data-nudge="-100"
-					aria-label="Decrease by $1"
+					aria-label={`Decrease ${label} by $1`}
 					disabled={atZero}
 					class={round}
 				>
@@ -105,7 +105,7 @@ export function MoneyInput({
 						<button
 							type="button"
 							data-nudge="1"
-							aria-label="Increase by 1 cent"
+							aria-label={`Increase ${label} by 1 cent`}
 							class={`${cent} rounded-tr-lg`}
 						>
 							<Arrow up />
@@ -113,7 +113,7 @@ export function MoneyInput({
 						<button
 							type="button"
 							data-nudge="-1"
-							aria-label="Decrease by 1 cent"
+							aria-label={`Decrease ${label} by 1 cent`}
 							disabled={atZero}
 							class={`${cent} rounded-br-lg border-t border-rule`}
 						>
@@ -125,7 +125,7 @@ export function MoneyInput({
 					type="button"
 					data-money-js
 					data-nudge="100"
-					aria-label="Increase by $1"
+					aria-label={`Increase ${label} by $1`}
 					class={round}
 				>
 					+
@@ -141,7 +141,13 @@ export function MoneyInput({
 				</p>
 			)}
 			<div data-money-js class="flex flex-wrap justify-center gap-2">
-				<button type="button" data-roundup hidden={!hasCents} class={chip}>
+				<button
+					type="button"
+					data-roundup
+					hidden={!hasCents}
+					class={chip}
+					aria-label={`Round ${label} up`}
+				>
 					Round to{" "}
 					{hasCents
 						? formatCents(Math.ceil(cents / 100) * 100, { wholeDollars: true })

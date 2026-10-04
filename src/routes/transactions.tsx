@@ -389,6 +389,12 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
+			{tx.splitRemovedFromCents != null && (
+				<p role="status" class="text-sm text-over">
+					The bank changed this from {formatCents(tx.splitRemovedFromCents)}, so
+					its split was removed.
+				</p>
+			)}
 			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
 			{tx.excluded && (
 				<p class="flex items-center gap-2 text-muted">
@@ -402,7 +408,7 @@ function EditSheet({
 					<HowLink section="categorization" demo={demo} />
 				</p>
 			)}
-			{tx.parentId === null && !tx.isSplit && (
+			{tx.parentId === null && !tx.isSplit && !tx.income && (
 				<Button
 					kind="secondary"
 					href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
@@ -420,6 +426,7 @@ function EditSheet({
 					hx-target="#page"
 					hx-select="#page"
 					hx-swap="outerHTML"
+					hx-select-oob="#needs-count:innerHTML"
 				>
 					<input type="hidden" name="back" value={back} />
 					<Button kind="secondary" type="submit" class="w-full">
@@ -620,18 +627,23 @@ function SplitSheet({
 	values: SplitValue[];
 	error?: string;
 }) {
+	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
 		<BottomSheet labelledBy="split-title" closeHref={back}>
+			<p class="text-sm text-muted">{tx.rawName}</p>
 			<h2
 				id="split-title"
 				tabindex={-1}
-				autofocus
+				autofocus={values.length <= 2}
 				class="font-serif text-4xl font-semibold outline-none"
 			>
 				Split {tx.displayName}
 			</h2>
 			<p class="font-serif text-4xl font-semibold">
 				{formatCents(tx.amountCents, { signed: true })}
+			</p>
+			<p class="text-muted">
+				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
 			<SplitForm
 				id={tx.id}
@@ -678,16 +690,19 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	return c.html(
-		<SplitLine
-			parentCents={tx.amountCents}
-			amounts={form.getAll("part_amount").map(String)}
-		/>,
+		<div id="split-line">
+			<SplitLine
+				parentCents={tx.amountCents}
+				amounts={form.getAll("part_amount").map(String)}
+			/>
+		</div>,
 	);
 });
 
 transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	if (!tx || tx.parentId !== null) return notFound(c);
+	if (tx.income) return c.text("Income transactions cannot be split.", 400);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const categoryValues = form.getAll("part_category").map(String);

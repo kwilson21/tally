@@ -73,7 +73,8 @@ describe("listTransactions", () => {
 
 	it("filters by category", async () => {
 		const { rows } = await list("category=1");
-		expect(rows).toHaveLength(5);
+		expect(rows).toHaveLength(4);
+		expect(rows.every((r) => !r.isSplit)).toBe(true);
 		expect(rows.every((r) => r.categoryName === "Groceries")).toBe(true);
 	});
 

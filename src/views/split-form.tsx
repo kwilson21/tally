@@ -1,4 +1,3 @@
-import { formatCents } from "../money";
 import { splitStatus } from "../transactions/split";
 import { Button } from "./button";
 import { Icon } from "./icons";
@@ -17,8 +16,6 @@ export function SplitLine({
 	const status = splitStatus(parentCents, amounts);
 	return (
 		<p
-			id="split-line"
-			aria-live="polite"
 			class={`flex items-center gap-2 text-lg font-medium ${status.kind === "over" ? "text-over" : "text-ink"}`}
 		>
 			{status.kind === "done" && <Icon name="check" class="size-5" />}
@@ -51,13 +48,16 @@ export function SplitForm({
 			hx-target="#page"
 			hx-select="#page"
 			hx-swap="outerHTML"
+			hx-select-oob="#needs-count:innerHTML"
 		>
 			<input type="hidden" name="back" value={back} />
 			<div class="flex items-center justify-between gap-3">
-				<SplitLine
-					parentCents={parentCents}
-					amounts={values.map((v) => v.amount)}
-				/>
+				<div id="split-line" aria-live="polite">
+					<SplitLine
+						parentCents={parentCents}
+						amounts={values.map((v) => v.amount)}
+					/>
+				</div>
 				<Button kind="text" type="submit" name="add" value="1" formnovalidate>
 					Add a part
 				</Button>
@@ -68,14 +68,17 @@ export function SplitForm({
 				</p>
 			)}
 			{values.map((value, index) => (
-				<div class="flex flex-col gap-2 border-t border-rule pt-3">
+				<div
+					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
+				>
 					<label for={`part-category-${index}`} class="text-base text-ink">
 						Part {index + 1} category
 					</label>
 					<select
 						id={`part-category-${index}`}
 						name="part_category"
-						class="min-h-11 rounded-control border border-rule bg-paper px-3"
+						class="min-h-11 rounded-full border border-rule bg-paper px-3"
+						autofocus={index === values.length - 1 && values.length > 2}
 						required
 					>
 						<option value="">Pick a category</option>
@@ -90,10 +93,10 @@ export function SplitForm({
 					</select>
 					<div
 						hx-post={`/transactions/${id}/split/line`}
-						hx-trigger="input changed delay:300ms"
+						hx-trigger="input delay:300ms"
 						hx-target="#split-line"
 						hx-select="#split-line"
-						hx-swap="outerHTML"
+						hx-swap="innerHTML"
 						hx-include="closest form"
 					>
 						<MoneyInput
@@ -105,9 +108,6 @@ export function SplitForm({
 					</div>
 				</div>
 			))}
-			<p class="text-sm text-muted">
-				Parts must total {formatCents(Math.abs(parentCents))}.
-			</p>
 			<div class="grid grid-cols-2 gap-3">
 				<Button href={back} kind="secondary">
 					Cancel

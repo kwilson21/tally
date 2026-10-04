@@ -62,10 +62,11 @@ function update(root) {
 }
 
 /** Puts new text in the field and says it, since the field isn't what has focus. */
-function set(root, text) {
+export function set(root, text) {
 	const input = root.querySelector("[data-money-input]");
 	if (!input) return;
 	input.value = text;
+	input.dispatchEvent(new Event("input", { bubbles: true }));
 	update(root);
 	const region = document.getElementById("announcer");
 	if (region) {
@@ -114,6 +115,7 @@ if (typeof document !== "undefined") {
 		event.preventDefault();
 		const step = event.shiftKey ? 100 : 1;
 		input.value = nudged(input.value, event.key === "ArrowUp" ? step : -step);
+		input.dispatchEvent(new Event("input", { bubbles: true }));
 		update(root);
 	});
 

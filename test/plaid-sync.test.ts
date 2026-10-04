@@ -365,6 +365,64 @@ describe("syncItem", () => {
 		expect(row?.category_id).not.toBeNull();
 	});
 
+	it("moves split children with a date correction and removes them for an amount correction", async () => {
+		const item = await addItem();
+		const sync = (overrides: Record<string, unknown>) =>
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				item,
+				plaidFetch(() =>
+					response(page({ modified: [transaction(overrides)] })),
+				),
+			);
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			item,
+			plaidFetch(() => response(page({ added: [transaction()] }))),
+		);
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number; account_id: number }>();
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET is_split = 1, category_id = ? WHERE id = ?",
+			).bind(category?.id, parent?.id),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, parent_id) VALUES (?, '2026-09-27', 500, 'RAW SHOP', ?, ?)",
+			).bind(parent?.account_id, category?.id, parent?.id),
+		]);
+		await sync({ date: "2026-10-01" });
+		expect(
+			await env.DB.prepare("SELECT date FROM transactions WHERE parent_id = ?")
+				.bind(parent?.id)
+				.first(),
+		).toEqual({ date: "2026-10-01" });
+		await sync({ date: "2026-10-01", amount: 20 });
+		expect(
+			await env.DB.prepare(
+				"SELECT is_split, category_id, split_removed_from_cents FROM transactions WHERE id = ?",
+			)
+				.bind(parent?.id)
+				.first(),
+		).toEqual({
+			is_split: 0,
+			category_id: null,
+			split_removed_from_cents: 1234,
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
+				)
+					.bind(parent?.id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(0);
+	});
+
 	it("skips a concurrent run and releases the lock after success", async () => {
 		const id = await addItem();
 		let releaseAccounts!: () => void;

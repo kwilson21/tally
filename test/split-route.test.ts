@@ -27,10 +27,24 @@ describe("transaction splits", () => {
 		).text();
 		expect(html).toContain("$12.00 left to assign");
 		expect(html.match(/name="part_category"/g)).toHaveLength(2);
-		expect(html).toContain('hx-trigger="input changed delay:300ms"');
+		expect(html).toContain('hx-trigger="input delay:300ms"');
 		// The amount request is nested inside a form that selects #page. Override that inherited
 		// selector so its partial response can update the live total.
 		expect(html).toContain('hx-select="#split-line"');
+	});
+
+	it("does not offer or allow splitting income", async () => {
+		const income = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE flag_income = 1 LIMIT 1",
+		).first<{ id: number }>();
+		const edit = await (
+			await exports.default.fetch(`${BASE}/transactions/${income?.id}`)
+		).text();
+		expect(edit).not.toContain(`/transactions/${income?.id}/split?`);
+		const response = await post(`/transactions/${income?.id}/split`, [
+			["back", "/transactions"],
+		]);
+		expect(response.status).toBe(400);
 	});
 
 	it("rejects a mismatch, then saves children and removes them atomically", async () => {

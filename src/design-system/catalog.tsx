@@ -852,19 +852,21 @@ function Controls() {
 				components={["SplitForm"]}
 				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total."
 			>
-				<SplitForm
-					id={1}
-					parentCents={18742}
-					categories={[
-						{ id: 1, name: "Groceries" },
-						{ id: 5, name: "Household" },
-					]}
-					values={[
-						{ category: "1", amount: "150.00" },
-						{ category: "5", amount: "12.00" },
-					]}
-					back="/transactions"
-				/>
+				<div inert>
+					<SplitForm
+						id={1}
+						parentCents={18742}
+						categories={[
+							{ id: 1, name: "Groceries" },
+							{ id: 5, name: "Household" },
+						]}
+						values={[
+							{ category: "1", amount: "150.00" },
+							{ category: "5", amount: "12.00" },
+						]}
+						back="/transactions"
+					/>
+				</div>
 			</Specimen>
 			<Specimen
 				id="money-input"
