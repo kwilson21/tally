@@ -80,7 +80,7 @@ export function TransactionRow({
 						{caption && <span class="truncate text-muted">{caption}</span>}
 						{row.countsInMonth && (
 							<span class="shrink-0 text-muted">
-								Counts in{" "}
+								{caption && "· "}Counts in{" "}
 								{new Intl.DateTimeFormat("en-US", {
 									month: "long",
 									timeZone: "UTC",

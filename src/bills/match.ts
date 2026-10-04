@@ -1,4 +1,5 @@
 import { todayUtc } from "../dates";
+import { billOccurrenceForMonth } from "./status";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
 export const BILL_DATE_WINDOW_DAYS = 5;
@@ -28,8 +29,7 @@ export function pickBillPayment(
 		)
 		.filter(
 			(candidate) =>
-				Math.abs(candidate.amountCents - amountCents) <=
-				Math.floor(amountCents * BILL_AMOUNT_TOLERANCE),
+				10 * Math.abs(candidate.amountCents - amountCents) <= amountCents,
 		)
 		.sort(
 			(a, b) =>
@@ -49,11 +49,6 @@ type Bill = {
 	merchant_raw_name: string;
 };
 
-function dueDate(year: number, month: number, day: number) {
-	const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
-	return `${year}-${String(month).padStart(2, "0")}-${String(Math.min(day, last)).padStart(2, "0")}`;
-}
-
 /** Fills every unlinked occurrence in range; unique indexes remain the final concurrency guard. */
 export async function matchBillPayments(
 	db: D1Database,
@@ -66,7 +61,7 @@ export async function matchBillPayments(
 	const bills = (
 		await db
 			.prepare(
-				"SELECT id,amount_cents,due_day,frequency,anchor_month,merchant_raw_name FROM bills",
+				"SELECT id,amount_cents,due_day,frequency,anchor_month,merchant_raw_name FROM bills WHERE active=1",
 			)
 			.all<Bill>()
 	).results;
@@ -74,8 +69,10 @@ export async function matchBillPayments(
 	const statements: D1PreparedStatement[] = [];
 	const reserved = new Set<number>();
 	for (const bill of bills) {
-		let year = Number(first.date.slice(0, 4));
-		let month = Number(first.date.slice(5, 7));
+		const firstMonth = new Date(`${first.date.slice(0, 7)}-01T00:00:00Z`);
+		firstMonth.setUTCMonth(firstMonth.getUTCMonth() - 1);
+		let year = firstMonth.getUTCFullYear();
+		let month = firstMonth.getUTCMonth() + 1;
 		while (year < Number(today.slice(0, 4)) + 2) {
 			if (bill.frequency === "yearly" && month !== bill.anchor_month) {
 				month += 1;
@@ -85,33 +82,40 @@ export async function matchBillPayments(
 				}
 				continue;
 			}
-			const due = dueDate(year, month, bill.due_day);
+			const schedule = {
+				frequency: bill.frequency,
+				dueDay: bill.due_day,
+				anchorMonth: bill.anchor_month,
+			};
+			const { dueDate: due, period } = billOccurrenceForMonth(
+				schedule,
+				year,
+				month,
+			);
 			if (dayNumber(due) > endDay) break;
-			const period =
-				bill.frequency === "monthly" ? due.slice(0, 7) : String(year);
-			const alreadyLinked = await db
-				.prepare(
-					"SELECT 1 FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
-				)
-				.bind(bill.id, period)
-				.first();
-			if (alreadyLinked) {
-				month += bill.frequency === "yearly" ? 12 : 1;
-				while (month > 12) {
-					month -= 12;
-					year += 1;
-				}
-				continue;
-			}
+			const start = new Date(`${due}T00:00:00Z`);
+			const finish = new Date(start);
+			start.setUTCDate(start.getUTCDate() - BILL_DATE_WINDOW_DAYS);
+			finish.setUTCDate(finish.getUTCDate() + BILL_DATE_WINDOW_DAYS);
 			const candidates = (
 				await db
 					.prepare(
 						`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
 				 WHERE t.raw_name=? AND t.excluded=0 AND t.is_split=0
-				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
-				 AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed')`,
+					 AND t.date BETWEEN ? AND ?
+					 AND NOT EXISTS (SELECT 1 FROM bill_payments occurrence WHERE occurrence.bill_id=? AND occurrence.period=? AND occurrence.status='linked')
+					 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
+					 AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed')`,
 					)
-					.bind(bill.merchant_raw_name, bill.id, period)
+					.bind(
+						bill.merchant_raw_name,
+						start.toISOString().slice(0, 10),
+						finish.toISOString().slice(0, 10),
+						bill.id,
+						period,
+						bill.id,
+						period,
+					)
 					.all<MatchCandidate>()
 			).results;
 			const picked = pickBillPayment(

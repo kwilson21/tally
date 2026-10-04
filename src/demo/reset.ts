@@ -31,8 +31,6 @@ export function canResetDemo(env: {
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
 export async function resetDemo(db: D1Database, today: string): Promise<void> {
 	const seed = buildSeed(today);
-	// Early in a month, Water's payment moves to today so it is still in this
-	// month's period, never in the future (paid late from the 2nd on).
 	const todayDay = Number(today.slice(8, 10));
 	if (todayDay < 4) {
 		const waterPayment = seed.transactions.find(
@@ -142,11 +140,21 @@ function demoBills(
 	};
 	const paymentDay = (rawName: string) =>
 		Number(
-			[...transactions]
+			transactions
+				.slice()
 				.reverse()
 				.find((transaction) => transaction.rawName === rawName)
 				?.date.slice(8) ?? day,
 		);
+	const threeDaysBeforePayment = (rawName: string) => {
+		const payment = transactions
+			.slice()
+			.reverse()
+			.find((transaction) => transaction.rawName === rawName)?.date;
+		const due = new Date(`${payment ?? today}T00:00:00Z`);
+		due.setUTCDate(due.getUTCDate() - 3);
+		return due.getUTCDate();
+	};
 	const plusThree = new Date(`${today}T00:00:00Z`);
 	plusThree.setUTCDate(plusThree.getUTCDate() + 3);
 	const dueSoon = plusThree.getUTCDate();
@@ -166,7 +174,7 @@ function demoBills(
 			2,
 			"Water",
 			1399,
-			Math.max(1, paymentDay("GOOGLE *YOUTUBE") - 3),
+			threeDaysBeforePayment("GOOGLE *YOUTUBE"),
 			"monthly",
 			null,
 			5,

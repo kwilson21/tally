@@ -172,10 +172,17 @@ describe("Bills", () => {
 			new Set(rows.filter((row) => row.active).map((row) => row.status)),
 		).toEqual(new Set(["overdue", "due", "upcoming", "paid"]));
 		const late = rows.find((row) => row.name === "Water");
-		expect(late?.paidDate).toBeTruthy();
-		// On the 1st there is no earlier day this month to be late against.
-		if (!date.endsWith("-01"))
-			expect(late?.paidDate && late.paidDate > late.dueDate).toBe(true);
+		expect(late).toBeTruthy();
+		const waterPayment = await env.DB.prepare(
+			`SELECT t.date, CASE WHEN length(bp.period)=4 THEN bp.period || '-' || printf('%02d', b.anchor_month) ELSE bp.period END || '-' || printf('%02d', b.due_day) AS due
+			 FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id JOIN transactions t ON t.id=bp.transaction_id
+			 WHERE b.name='Water' AND bp.status='linked' ORDER BY bp.period DESC LIMIT 1`,
+		).first<{ date: string; due: string }>();
+		expect(waterPayment).toBeTruthy();
+		expect(
+			Math.floor(Date.parse(`${waterPayment?.date}T00:00:00Z`) / 86400000) -
+				Math.floor(Date.parse(`${waterPayment?.due}T00:00:00Z`) / 86400000),
+		).toBe(3);
 		const future = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE date > ?",
 		)

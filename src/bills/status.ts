@@ -16,7 +16,11 @@ function daysInMonth(year: number, month: number) {
 	] as number;
 }
 
-function occurrence(bill: BillSchedule, year: number, month: number) {
+export function billOccurrenceForMonth(
+	bill: BillSchedule,
+	year: number,
+	month: number,
+) {
 	const day = Math.min(bill.dueDay, daysInMonth(year, month));
 	const dueDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 	return {
@@ -52,20 +56,20 @@ export function billOccurrence(
 ): { dueDate: string; period: string; status: BillStatus } {
 	const year = Number(today.slice(0, 4));
 	const month = Number(today.slice(5, 7));
-	let occurrences: ReturnType<typeof occurrence>[];
+	let occurrences: ReturnType<typeof billOccurrenceForMonth>[];
 	if (bill.frequency === "monthly") {
 		const [previousYear, previousMonth] =
 			month === 1 ? [year - 1, 12] : [year, month - 1];
 		const [nextYear, nextMonth] = addMonth(year, month) as [number, number];
 		occurrences = [
-			occurrence(bill, previousYear, previousMonth),
-			occurrence(bill, year, month),
-			occurrence(bill, nextYear, nextMonth),
+			billOccurrenceForMonth(bill, previousYear, previousMonth),
+			billOccurrenceForMonth(bill, year, month),
+			billOccurrenceForMonth(bill, nextYear, nextMonth),
 		];
 	} else {
 		const anchor = bill.anchorMonth ?? 1;
 		occurrences = [year - 1, year, year + 1].map((y) =>
-			occurrence(bill, y, anchor),
+			billOccurrenceForMonth(bill, y, anchor),
 		);
 	}
 	const isLinked = (period: string) => isLinkedPeriod(linked, period);
@@ -74,10 +78,12 @@ export function billOccurrence(
 	occurrences.forEach((o, i) => {
 		if (daysBetween(today, o.dueDate) <= 7) index = i;
 	});
-	const shown = occurrences[index] as ReturnType<typeof occurrence>;
+	const shown = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
 	if (isLinked(shown.period) && shown.dueDate.slice(0, 7) < today.slice(0, 7))
 		index += 1;
-	const current = occurrences[index] as ReturnType<typeof occurrence>;
+	const current = occurrences[index] as ReturnType<
+		typeof billOccurrenceForMonth
+	>;
 	const distance = daysBetween(today, current.dueDate);
 	const status: BillStatus = isLinked(current.period)
 		? "paid"

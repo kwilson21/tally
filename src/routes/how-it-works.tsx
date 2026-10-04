@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { JEV_THRESHOLD } from "../ai/categorize";
+import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
 import { todayUtc } from "../dates";
 import { loadMonth } from "../db/month";
@@ -12,8 +13,10 @@ import {
 	exclusionsExample,
 	transactionsExample,
 } from "../how-it-works/examples";
+import { formatCents } from "../money";
 import { TallyMark } from "../views/brand";
 import {
+	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -121,6 +124,10 @@ howItWorks.get("/how-it-works", async (c) => {
 		.reduce((sum, bill) => sum + bill.amountCents, 0);
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
+	const paidBill = billData.rows.find(
+		(bill) => bill.status === "paid" && bill.paidDate,
+	);
+	const billExample = paidBill ?? billData.rows[0];
 
 	return c.html(
 		<Layout
@@ -281,8 +288,9 @@ howItWorks.get("/how-it-works", async (c) => {
 					</p>
 					<ul class="mt-3 list-disc space-y-1 pl-5">
 						<li>
-							A match has the same merchant, is within 10% of the bill amount,
-							and is within 5 days of its due date.
+							A match has the same merchant, is within{" "}
+							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% of the bill amount, and
+							is within {BILL_DATE_WINDOW_DAYS} days of its due date.
 						</li>
 						<li>A payment can pay only one bill occurrence.</li>
 						<li>
@@ -294,10 +302,24 @@ howItWorks.get("/how-it-works", async (c) => {
 							so Tally will not suggest it again.
 						</li>
 					</ul>
-					<Example>
-						Streaming was matched on its due date, and Water was matched three
-						days late.
-					</Example>
+					{billExample && (
+						<>
+							<Diagram>
+								<BillsDiagram
+									amount={formatCents(billExample.amountCents)}
+									due={billExample.dueDate}
+									paid={billExample.paidDate ?? billExample.dueDate}
+									windowDays={BILL_DATE_WINDOW_DAYS}
+									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
+								/>
+							</Diagram>
+							<Example>
+								{billExample.name} is {formatCents(billExample.amountCents)},
+								due {billExample.dueDate}; its demo payment is{" "}
+								{billExample.paidDate ?? "not linked yet"}.
+							</Example>
+						</>
+					)}
 				</Section>
 
 				<div class="mt-10">

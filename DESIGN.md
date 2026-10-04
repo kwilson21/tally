@@ -105,6 +105,8 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | BillStatusHeading | A bill group heading pairs its status icon with the status in words, never color alone. |
 | BillRow | One bill: category icon, name, due or paid status sentence, and amount from integer cents. |
 | EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do; add sign: one thing to start), one sentence, a muted hint and at most one button, centred (decisions 54, 55). The button is a secondary link, or, for an add, the screen's own primary control passed in. |
+| BillOccurrenceRow | One bill occurrence with its status, linked-payment detail, and link or “Not this one” action. Older unpaid occurrences are neutral. |
+| BillPaymentPicker | Eligible payments and unpaid occurrence choices as Chip radios; its empty state has no submit action. |
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. |
 | FormField | A labeled control, with its error shown in `role="alert"`. |
 | Button | A primary, secondary, or quiet text action, rendered as a button or link; an HTMX submit can keep its size while showing a still-or-spinning ring and action-specific busy label, and is disabled for the request. |
