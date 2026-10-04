@@ -283,6 +283,27 @@ export function buildSeed(today: string): Seed {
 	for (const [target, rawName, cents] of UNCATEGORIZED) {
 		transactions.push(spend(CARD, clamp(target), rawName, null, cents));
 	}
+	// A plausible Streaming charge that is deliberately outside the five-day
+	// matching window. It makes the demo show why merchant and amount alone are
+	// not enough to claim a payment.
+	const streamingDueDay = Math.min(16, todayDay);
+	const priorMonth = monthOffset(today, 1);
+	const priorMonthEnd = new Date(
+		Date.UTC(Number(priorMonth.slice(0, 4)), Number(priorMonth.slice(5, 7)), 0),
+	).getUTCDate();
+	const streamingLookalike = new Date(
+		`${day(priorMonth, Math.min(streamingDueDay, priorMonthEnd))}T00:00:00Z`,
+	);
+	streamingLookalike.setUTCDate(streamingLookalike.getUTCDate() + 8);
+	transactions.push(
+		spend(
+			CARD,
+			streamingLookalike.toISOString().slice(0, 10),
+			"APPLE.COM/BILL",
+			HOUSEHOLD,
+			299,
+		),
+	);
 	transactions.push(
 		income(clamp(1)),
 		income(clamp(15)),

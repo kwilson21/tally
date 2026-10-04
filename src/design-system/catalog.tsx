@@ -476,17 +476,23 @@ function Rows() {
 							billName="Electric"
 							billAmountCents={14200}
 							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
 							candidates={[
 								{
 									id: 1,
 									displayName: "City Electric",
+									date: "2026-09-24",
 									dateLabel: "Sep 24",
 									amountCents: 14150,
 								},
 							]}
 							periods={[
-								{ value: "2026-09", label: "September 2026" },
-								{ value: "2026-10", label: "October 2026" },
+								{
+									value: "2026-09",
+									label: "September",
+									countedMonth: "2026-09",
+								},
+								{ value: "2026-10", label: "October", countedMonth: "2026-10" },
 							]}
 						/>
 					</div>
@@ -498,8 +504,15 @@ function Rows() {
 							billName="Electric"
 							billAmountCents={14200}
 							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
 							candidates={[]}
-							periods={[{ value: "2026-09", label: "September 2026" }]}
+							periods={[
+								{
+									value: "2026-09",
+									label: "September",
+									countedMonth: "2026-09",
+								},
+							]}
 						/>
 					</div>
 				</State>

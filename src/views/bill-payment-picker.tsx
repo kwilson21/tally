@@ -6,10 +6,38 @@ import { EmptyState } from "./empty-state";
 export type PaymentPickerCandidate = {
 	id: number;
 	displayName: string;
+	date: string;
 	dateLabel: string;
 	amountCents: number;
 };
-export type PaymentPickerPeriod = { value: string; label: string };
+export type PaymentPickerPeriod = {
+	value: string;
+	label: string;
+	countedMonth: string;
+};
+
+const month = (value: string) =>
+	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
+		new Date(`${value}-01T00:00:00Z`),
+	);
+
+export function BillMonthExplanation({
+	countedMonth,
+	paymentDate,
+}: {
+	countedMonth: string;
+	paymentDate: string;
+}) {
+	const bankMonth = paymentDate.slice(0, 7);
+	const bankName = month(bankMonth);
+	return (
+		<p id="bill-month-explanation" class="text-sm text-muted">
+			{countedMonth < bankMonth
+				? `It counts in ${month(countedMonth)}'s spending, not ${bankName}'s. The bank's date stays ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${paymentDate}T00:00:00Z`))}.`
+				: `It counts in ${bankName}'s spending, its bank month.`}
+		</p>
+	);
+}
 
 /** Bill page's hand-link picker. It is also rendered, inert, in the catalog. */
 export function BillPaymentPicker({
@@ -17,6 +45,7 @@ export function BillPaymentPicker({
 	billName,
 	billAmountCents,
 	openedPeriod,
+	dueDateLabel,
 	candidates,
 	periods,
 }: {
@@ -24,10 +53,14 @@ export function BillPaymentPicker({
 	billName: string;
 	billAmountCents: number;
 	openedPeriod: string;
+	dueDateLabel: string;
 	candidates: PaymentPickerCandidate[];
 	periods: PaymentPickerPeriod[];
 }) {
 	const action = `/bills/${billId}/link`;
+	const opened =
+		periods.find((period) => period.value === openedPeriod) ?? periods[0];
+	const firstPayment = candidates[0];
 	return (
 		<section
 			id="payment-picker"
@@ -36,8 +69,13 @@ export function BillPaymentPicker({
 			class="mt-6 border-t border-rule pt-4"
 		>
 			<h2 class="font-serif text-3xl font-semibold">Link a payment</h2>
-			<p class="mt-2">
-				Within 30 days, same merchant first, then closest amount.
+			<p class="mt-2 text-lg">
+				To {opened?.label ?? openedPeriod}'s {billName},{" "}
+				{formatCents(billAmountCents)}.
+			</p>
+			<p class="mt-1 text-muted">
+				Within 30 days of {dueDateLabel}, same merchant first, then closest
+				amount.
 			</p>
 			{candidates.length ? (
 				<form
@@ -66,27 +104,29 @@ export function BillPaymentPicker({
 					</fieldset>
 					<fieldset>
 						<legend>Which month's bill does it pay?</legend>
-						<p class="text-sm text-muted">
-							A late payment counts in its bill's month; an early one stays in
-							the month it was paid.
-						</p>
 						<div class="mt-2 flex flex-wrap gap-2">
 							{periods.map((period) => (
 								<Chip
 									type="radio"
 									name="period"
 									value={period.value}
-									checked={period.value === openedPeriod}
+									checked={period.value === opened?.value}
+									hx-get={`/bills/${billId}/month-explanation?period=${encodeURIComponent(period.value)}`}
+									hx-include="[name='transaction_id']"
+									hx-target="#bill-month-explanation"
+									hx-swap="outerHTML"
 								>
 									{period.label}
 								</Chip>
 							))}
 						</div>
+						{opened && firstPayment && (
+							<BillMonthExplanation
+								countedMonth={opened.countedMonth}
+								paymentDate={firstPayment.date}
+							/>
+						)}
 					</fieldset>
-					<p class="text-sm text-muted">
-						To {openedPeriod}'s {billName}, {formatCents(billAmountCents)} ·
-						within 30 days
-					</p>
 					<div class="flex gap-3">
 						<Button type="submit">Link</Button>
 						<Button kind="text" href={`/bills/${billId}`}>

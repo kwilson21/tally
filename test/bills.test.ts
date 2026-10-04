@@ -192,6 +192,25 @@ describe("Bills", () => {
 		const onTime = rows.find((row) => row.name === "Streaming");
 		expect(onTime?.status).toBe("paid");
 		expect(onTime?.paidDate).toBe(onTime?.dueDate);
+		const lookalike = await env.DB.prepare(
+			`SELECT t.id, t.date, t.amount_cents, bp.status
+			 FROM transactions t
+			 JOIN bills b ON b.name='Streaming' AND b.merchant_raw_name=t.raw_name
+			 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id
+			 WHERE t.amount_cents BETWEEN b.amount_cents * 0.9 AND b.amount_cents * 1.1
+			   AND t.date <> ?
+			 ORDER BY t.date DESC LIMIT 1`,
+		)
+			.bind(onTime?.paidDate)
+			.first<{
+				id: number;
+				date: string;
+				amount_cents: number;
+				status: string | null;
+			}>();
+		expect(lookalike).toBeTruthy();
+		expect(Boolean(lookalike?.date && lookalike.date <= date)).toBe(true);
+		expect(lookalike?.status).toBeNull();
 		// The demo's set-aside stays small enough that Safe to spend stays positive.
 		const setAside = rows
 			.filter((row) => row.active && ["due", "overdue"].includes(row.status))
@@ -271,7 +290,7 @@ describe("Bills", () => {
 				`http://tally.test/bills/1/occurrences/${linked?.period}/link`,
 			)
 		).text();
-		expect(html).toContain("A late payment counts in its bill");
+		expect(html).toContain("It counts in");
 		expect(html).toContain("same merchant first, then closest amount");
 	});
 
@@ -348,7 +367,24 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain("Which month&#39;s bill does it pay?");
 		expect(html).not.toContain(`name="period" value="${linked?.period}"`);
-		expect(html).toContain("an early one stays in");
+		expect(html).toContain("It counts in");
+		expect(html).toMatch(/To [A-Z][a-z]+&#39;s Streaming, \$2\.99\./);
+		expect(html).toMatch(
+			/Within 30 days of [A-Z][a-z]{2} \d{1,2}, same merchant first, then closest amount\./,
+		);
+		expect(html).toMatch(/(The bank&#39;s date stays|its bank month)/);
+	});
+
+	it("bill rows use drawn statuses, compact month labels, actions, and guidance", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/1")
+		).text();
+		expect(html).toContain("rounded-control bg-band");
+		expect(html).toContain('class="size-4"');
+		expect(html).toContain("-ml-2");
+		expect(html).toContain("Deactivate");
+		expect(html).toContain("&quot;Not this one&quot;");
+		expect(html).not.toContain("· matched");
 	});
 
 	it("returns typed toast and announcement headers for htmx unlink and link", async () => {

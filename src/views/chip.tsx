@@ -10,6 +10,10 @@ type Props = {
 	describedBy?: string;
 	icon?: Child;
 	children?: Child;
+	"hx-get"?: string;
+	"hx-include"?: string;
+	"hx-target"?: string;
+	"hx-swap"?: string;
 };
 
 /** A pill-shaped checkbox or radio: the real input is visually hidden but keyboard-reachable; the pill shows its state. */
@@ -21,6 +25,7 @@ export function Chip({
 	describedBy,
 	icon,
 	children,
+	...inputAttrs
 }: Props) {
 	return (
 		<label class="group inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-rule px-4 text-base text-ink has-[:checked]:border-ink has-[:checked]:bg-band has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
@@ -31,6 +36,7 @@ export function Chip({
 				checked={checked}
 				aria-describedby={describedBy}
 				class="sr-only"
+				{...inputAttrs}
 			/>
 			{/* A switched-on toggle also shows a check mark, so its state isn't color alone (DESIGN.md). */}
 			{type === "checkbox" && (

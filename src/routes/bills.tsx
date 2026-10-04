@@ -9,7 +9,10 @@ import { todayUtc } from "../dates";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
-import { BillPaymentPicker } from "../views/bill-payment-picker";
+import {
+	BillMonthExplanation,
+	BillPaymentPicker,
+} from "../views/bill-payment-picker";
 import {
 	BillRow,
 	type BillRowData,
@@ -537,10 +540,12 @@ type LinkedPayment = {
 	raw_name: string;
 	display_name: string | null;
 };
-const monthName = (period: string) =>
+const monthName = (period: string, today = todayUtc()) =>
 	new Intl.DateTimeFormat("en-US", {
 		month: "long",
-		year: "numeric",
+		...(period.slice(0, 4) === today.slice(0, 4)
+			? {}
+			: { year: "numeric" as const }),
 		timeZone: "UTC",
 	}).format(new Date(`${period}-01T00:00:00Z`));
 const shortDate = (date: string) =>
@@ -663,6 +668,10 @@ async function billPage(
 		today,
 		new Set(payments.map((p) => p.period)),
 	);
+	const countedMonth = (period: string) =>
+		bill.frequency === "monthly"
+			? period
+			: `${period}-${String(bill.anchor_month).padStart(2, "0")}`;
 	return c.html(
 		<Layout
 			title={`${bill.name} · Tally`}
@@ -731,16 +740,36 @@ async function billPage(
 					>
 						Edit bill
 					</Button>
+					{bill.active && (
+						<form
+							method="post"
+							action={`/bills/${id}/deactivate`}
+							hx-post={`/bills/${id}/deactivate`}
+							hx-target="body"
+							hx-swap="outerHTML"
+							class="inline"
+						>
+							<Button kind="text" type="submit">
+								Deactivate
+							</Button>
+						</form>
+					)}
 				</div>
+				<p class="mt-6 border-t border-rule pt-3 text-sm text-muted">
+					&quot;Not this one&quot; unlinks a payment, and Tally won't suggest it
+					again for that month.
+				</p>
 				{pickerPeriod && (
 					<BillPaymentPicker
 						billId={id}
 						billName={bill.name}
 						billAmountCents={bill.amount_cents}
 						openedPeriod={pickerPeriod}
+						dueDateLabel={shortDate(occurrenceDate(bill, pickerPeriod))}
 						candidates={candidates.map((t) => ({
 							id: t.transaction_id,
 							displayName: t.display_name ?? tidyName(t.raw_name),
+							date: t.date,
 							dateLabel: shortDate(t.date),
 							amountCents: t.amount_cents,
 						}))}
@@ -749,7 +778,10 @@ async function billPage(
 							.map((period) => ({
 								value: period,
 								label:
-									bill.frequency === "monthly" ? monthName(period) : period,
+									bill.frequency === "monthly"
+										? monthName(period, today)
+										: period,
+								countedMonth: countedMonth(period),
 							}))}
 					/>
 				)}
@@ -762,6 +794,34 @@ async function billPage(
 bills.get("/bills/:id/occurrences/:period/link", (c) =>
 	billPage(c, Number(c.req.param("id")), c.req.param("period")),
 );
+bills.get("/bills/:id/month-explanation", async (c) => {
+	const id = Number(c.req.param("id"));
+	const period = c.req.query("period") ?? "";
+	const transactionId = Number(c.req.query("transaction_id"));
+	const bill = await dbBill(c, id);
+	if (
+		!bill ||
+		!Number.isInteger(transactionId) ||
+		!(await billPeriods(c.env.DB, bill, todayUtc())).includes(period)
+	)
+		return c.notFound();
+	const payment = await c.env.DB.prepare(
+		"SELECT date FROM transactions WHERE id=?",
+	)
+		.bind(transactionId)
+		.first<{ date: string }>();
+	if (!payment) return c.notFound();
+	return c.html(
+		<BillMonthExplanation
+			countedMonth={
+				bill.frequency === "monthly"
+					? period
+					: `${period}-${String(bill.anchor_month).padStart(2, "0")}`
+			}
+			paymentDate={payment.date}
+		/>,
+	);
+});
 bills.post("/bills/:id/link", async (c) => {
 	const id = Number(c.req.param("id"));
 	const form = await c.req.parseBody();

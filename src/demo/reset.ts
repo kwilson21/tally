@@ -141,9 +141,8 @@ function demoBills(
 	const paymentDay = (rawName: string) =>
 		Number(
 			transactions
-				.slice()
-				.reverse()
-				.find((transaction) => transaction.rawName === rawName)
+				.filter((transaction) => transaction.rawName === rawName)
+				.sort((a, b) => b.date.localeCompare(a.date))[0]
 				?.date.slice(8) ?? day,
 		);
 	const threeDaysBeforePayment = (rawName: string) => {

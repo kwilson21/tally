@@ -185,9 +185,9 @@ describe("GET /transactions", () => {
 	});
 
 	it("keeps the filters in page links and hides the pager on a single page", async () => {
-		// All months: 90 history rows + 35 this month = 125, so 5 pages.
+		// All months include the demo's lookalike bill charge, so there are 6 pages.
 		const html = (await get("/transactions?month=all")).html;
-		expect(html).toContain("Page 1 of 5");
+		expect(html).toContain("Page 1 of 6");
 		expect(html).toMatch(/href="\/transactions\?month=all&amp;page=2"/);
 		expect((await get("/transactions?uncategorized=1")).html).not.toContain(
 			'aria-label="Pages"',

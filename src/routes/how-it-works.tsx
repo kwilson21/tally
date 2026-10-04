@@ -125,7 +125,7 @@ howItWorks.get("/how-it-works", async (c) => {
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 	const paidBill = billData.rows.find(
-		(bill) => bill.status === "paid" && bill.paidDate,
+		(bill) => bill.name === "Water" && bill.status === "paid" && bill.paidDate,
 	);
 	// Only a real, linked payment is drawn; with none, the section shows its rules alone.
 	const billExample = paidBill;
@@ -295,8 +295,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>A payment can pay only one bill occurrence.</li>
 						<li>
-							A late payment counts in the month it paid, instead of the month
-							when it appeared at the bank.
+							A late payment counts in the month of the bill it paid, instead of
+							the month when it appeared at the bank.
 						</li>
 						<li>
 							You can link a payment to a chosen month, or reject a wrong match
@@ -308,16 +308,19 @@ howItWorks.get("/how-it-works", async (c) => {
 							<Diagram>
 								<BillsDiagram
 									amount={formatCents(billExample.amountCents)}
-									due={billExample.dueDate}
-									paid={billExample.paidDate ?? billExample.dueDate}
+									due={shortBillDate(billExample.dueDate)}
+									paid={shortBillDate(
+										billExample.paidDate ?? billExample.dueDate,
+									)}
 									windowDays={BILL_DATE_WINDOW_DAYS}
 									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
 								/>
 							</Diagram>
 							<Example>
 								{billExample.name} is {formatCents(billExample.amountCents)},
-								due {billExample.dueDate}; its demo payment is{" "}
-								{billExample.paidDate ?? "not linked yet"}.
+								due {shortBillDate(billExample.dueDate)}; its demo payment is{" "}
+								{shortBillDate(billExample.paidDate ?? billExample.dueDate)} and
+								counts in the month of the bill it paid.
 							</Example>
 						</>
 					)}
@@ -330,3 +333,11 @@ howItWorks.get("/how-it-works", async (c) => {
 		</Layout>,
 	);
 });
+
+function shortBillDate(date: string) {
+	return new Intl.DateTimeFormat("en-US", {
+		month: "short",
+		day: "numeric",
+		timeZone: "UTC",
+	}).format(new Date(`${date}T00:00:00Z`));
+}

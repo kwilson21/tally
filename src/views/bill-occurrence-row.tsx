@@ -1,6 +1,7 @@
 import type { BillStatus } from "../bills/status";
 import { formatCents } from "../money";
 import { Button } from "./button";
+import { Icon } from "./icons";
 
 export type OccurrencePayment = {
 	displayName: string;
@@ -17,14 +18,24 @@ const statusLabel: Record<BillStatus | "not-paid", string> = {
 	"not-paid": "Not paid",
 };
 
+const statusLook = {
+	paid: { icon: "check", tone: "text-ok" },
+	overdue: { icon: "alert", tone: "text-over" },
+	due: { icon: "bills", tone: "text-ink" },
+	upcoming: { icon: "bills", tone: "text-muted" },
+	"not-paid": { icon: "bills", tone: "text-muted" },
+} as const;
+
 export function StatusTag({ status }: { status: BillStatus | "not-paid" }) {
-	const tone =
-		status === "overdue"
-			? "text-over"
-			: status === "paid"
-				? "text-ok"
-				: "text-muted";
-	return <span class={`text-sm ${tone}`}>{statusLabel[status]}</span>;
+	const look = statusLook[status];
+	return (
+		<span class="inline-flex shrink-0 items-center gap-1 rounded-control bg-band px-2 text-sm text-ink">
+			<span class={look.tone}>
+				<Icon name={look.icon} class="size-4" />
+			</span>
+			{statusLabel[status]}
+		</span>
+	);
 }
 
 /** One occurrence on a bill page, including its real link/unlink controls. */
@@ -50,7 +61,7 @@ export function BillOccurrenceRow({
 			</p>
 			<p class="text-muted">
 				{payment
-					? `${payment.displayName} · ${payment.dateLabel} · ${formatCents(payment.amountCents)} · ${payment.matchedBy === "user" ? "linked by you" : "matched"}`
+					? `${payment.displayName} · ${payment.dateLabel} · ${formatCents(payment.amountCents)}${payment.matchedBy === "user" ? " · by hand" : ""}`
 					: "No payment linked yet"}
 			</p>
 			{payment ? (
@@ -61,13 +72,14 @@ export function BillOccurrenceRow({
 					hx-target="body"
 					hx-swap="outerHTML"
 				>
-					<Button kind="text" type="submit">
+					<Button kind="text" type="submit" class="-ml-2">
 						Not this one
 					</Button>
 				</form>
 			) : (
 				<Button
 					kind="text"
+					class="-ml-2"
 					href={`/bills/${billId}/occurrences/${period}/link#payment-picker`}
 				>
 					Link a payment
