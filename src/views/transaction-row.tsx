@@ -94,6 +94,7 @@ export function TransactionRow({
 	href,
 	attrs,
 	autofocus,
+	bare = false,
 }: {
 	row: ListRow;
 	href?: string;
@@ -101,11 +102,13 @@ export function TransactionRow({
 	attrs?: Record<string, string>;
 	/** Move focus here after a swap (the row just saved). */
 	autofocus?: boolean;
+	/** Leave out the list item when another interactive row owns the wrapper. */
+	bare?: boolean;
 }) {
 	const { kind, caption, tag } = rowCaption(row);
 	const Row = href ? "a" : "div";
-	return (
-		<li data-transaction={row.id}>
+	const content = (
+		<>
 			{/* Every row is the same height: two lines (name, then caption and tag), long text truncated. */}
 			<Row
 				href={href}
@@ -144,6 +147,7 @@ export function TransactionRow({
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
 			</Row>
-		</li>
+		</>
 	);
+	return bare ? content : <li data-transaction={row.id}>{content}</li>;
 }
