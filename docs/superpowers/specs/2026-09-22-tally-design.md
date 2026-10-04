@@ -130,7 +130,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 | **Left** | Budget minus spent. |
 | **Uncategorized** | Counted transactions with `category_id` null, shown as their own row and never hidden. |
 | **Income** | Absolute value of the sum of counted transactions flagged `income`. |
-| **Bill status** | *Paid* if the bill occurrence has a linked `bill_payments` row (see §6.1). Otherwise *overdue* if the due date has passed, *due* if it falls within the next 7 days, or *upcoming*. |
+| **Bill status** | A bill shows its latest occurrence due by a week from now. *Paid* if that occurrence has a linked `bill_payments` row (see §6.1); a paid occurrence from an earlier month gives way to the next one. Otherwise *overdue* if the due date has passed, *due* if it falls within the next 7 days, or *upcoming*. So a missed bill stays overdue until it is paid or the next one is due, which then takes its place, for monthly and yearly bills alike (decision 62). |
 | **Safe to spend** | Total budget for the month, minus all counted spending (every category, including uncategorized and unbudgeted; income excluded), minus the amounts of bills that are *due* or *overdue* and not *paid*. In one sentence: what's left of the whole budget after setting aside money for bills that are due. |
 
 ### 6.1 Matching bills to payments
@@ -153,7 +153,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 The amount tolerance (10%) and date window (±5 days) are single config values. The demo seed exercises all the cases: a bill paid on time, one paid 3 days late, and a lookalike charge outside the window that correctly doesn't match.
 
-**Splits:** splitting creates child transactions (`parent_id` set) and marks the parent `is_split = true`. The children must add up exactly to the parent's `amount_cents`, or the split is rejected. Removing a split deletes the children and clears `is_split`; a refund linked to one of the children is unlinked (`refund_of_id` is set to null) and counts on its own date and category again, and the toast says so (decision 60).
+**Splits:** splitting creates child transactions (`parent_id` set) and marks the parent `is_split = true`. The children must add up exactly to the parent's `amount_cents`, or the split is rejected. If the bank later changes a split purchase's amount, sync removes the split and the purchase goes back to needing a category, with a note on it saying the amount changed; a changed date is copied to the parts (decision 62). Removing a split deletes the children and clears `is_split`; a refund linked to one of the children is unlinked (`refund_of_id` is set to null) and counts on its own date and category again, and the toast says so (decision 60).
 
 **Exclusions:** transactions flagged `transfer` or `reimbursement` start with `excluded = true`. A person can always toggle it.
 
