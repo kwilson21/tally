@@ -58,8 +58,8 @@ export function BillOccurrenceRow({
 					method="post"
 					action={unlink}
 					hx-post={unlink}
-					hx-target="#main"
-					hx-swap="innerHTML"
+					hx-target="body"
+					hx-swap="outerHTML"
 				>
 					<Button kind="text" type="submit">
 						Not this one
