@@ -11,11 +11,15 @@ import {
 	getTransaction,
 	monthCounts,
 	needsCategoryCount,
+	pendingForJev,
 	refundPurchases,
 	saveEdit,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
-import { saveOrganizeGroup } from "../src/transactions/organize";
+import {
+	organizeGroups,
+	saveOrganizeGroup,
+} from "../src/transactions/organize";
 
 const db = env.DB;
 const BASE = "http://tally.test";
@@ -373,7 +377,7 @@ describe("linking a refund", () => {
 		expect(await ownCategory(REFUND)).toBe(GROCERIES);
 	});
 
-	it("needs a category when its purchase has none", async () => {
+	it("leaves the category to its purchase when that has none", async () => {
 		await link(REFUND, PURCHASE);
 		const before = await needsCategoryCount(db, "2026-08");
 		await db
@@ -382,23 +386,47 @@ describe("linking a refund", () => {
 			)
 			.bind(PURCHASE)
 			.run();
-		// The purchase and its refund.
-		expect(await needsCategoryCount(db, "2026-08")).toBe(before + 2);
-		const { html } = await get(
-			"/transactions?month=2026-08&uncategorized=1&q=refund",
-		);
-		const row = rowHtml(html, REFUND);
+		// Only the purchase needs one; categorizing it covers the refund too.
+		expect(await needsCategoryCount(db, "2026-08")).toBe(before + 1);
+		const { html } = await get("/transactions?month=2026-08&uncategorized=1");
+		expect(rowHtml(html, PURCHASE)).toContain("Needs category");
+		expect(html).not.toContain(`/transactions/${REFUND}`);
+		const all = await get("/transactions?month=2026-08&q=refund");
+		const row = rowHtml(all.html, REFUND);
 		expect(row).toContain("Refund for Aug 20");
-		expect(row).toContain("Needs category");
-		// How Tally works sorts it with its purchase: waiting, not already categorized by Jev.
+		expect(row).not.toContain("Needs category");
+		// How Tally works still adds up.
 		const counts = await monthCounts(db, "2026-08");
-		expect(counts.needsCategory).toBe(before + 2);
+		expect(counts.needsCategory).toBe(before + 1);
 		expect(counts.notYetAsked + counts.unsure + counts.noneFit).toBe(
 			counts.needsCategory,
 		);
 		expect(
 			counts.user + counts.merchantRule + counts.jev + counts.needsCategory,
 		).toBe(counts.counted - counts.income);
+	});
+
+	it("isn't sent to Jev or listed in Organize while linked", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL WHERE id IN (?, ?)",
+			)
+			.bind(PURCHASE, REFUND)
+			.run();
+		const pending = (await pendingForJev(db, 500)).map((row) => row.id);
+		expect(pending).toContain(PURCHASE);
+		expect(pending).not.toContain(REFUND);
+		const group = (await organizeGroups(db)).find((g) =>
+			g.rawNames.includes("REFUND SHOP"),
+		);
+		const uncategorized = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'REFUND SHOP' AND category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0",
+			)
+			.first<number>("n");
+		// Every uncategorized REFUND SHOP row but the linked refund.
+		expect(group?.count).toBe((uncategorized ?? 0) - 1);
 	});
 
 	it("counts in the bill month of a purchase that paid an earlier bill", async () => {

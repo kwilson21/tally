@@ -50,6 +50,9 @@ export function rowCaption(row: ListRow): Caption {
 			caption: pair ? `${row.categoryName} · ${pair}` : row.categoryName,
 			tag: false,
 		};
+	// A linked refund's category is its purchase's, so the tag sits on the purchase's row.
+	if (row.refundPurchaseDate)
+		return { kind: "needs", caption: pair, tag: false };
 	return {
 		kind: "needs",
 		caption: pair ?? (row.rawName === row.displayName ? null : row.rawName),
@@ -119,16 +122,17 @@ export function TransactionRow({
 					</span>
 					<span class="flex min-w-0 items-center gap-2 leading-6">
 						{caption && <span class="truncate text-muted">{caption}</span>}
-						{/* A linked refund's caption already says where it counts. */}
-						{row.countsInMonth && !row.refundPurchaseDate && (
-							<span class="shrink-0 text-muted">
-								{caption && "· "}Counts in{" "}
-								{new Intl.DateTimeFormat("en-US", {
-									month: "long",
-									timeZone: "UTC",
-								}).format(new Date(`${row.countsInMonth}-01T00:00:00Z`))}
-							</span>
-						)}
+						{/* A linked refund's caption names its purchase; the month shows only when a bill moved it. */}
+						{row.countsInMonth &&
+							row.countsInMonth !== row.refundPurchaseDate?.slice(0, 7) && (
+								<span class="shrink-0 text-muted">
+									{caption && "· "}Counts in{" "}
+									{new Intl.DateTimeFormat("en-US", {
+										month: "long",
+										timeZone: "UTC",
+									}).format(new Date(`${row.countsInMonth}-01T00:00:00Z`))}
+								</span>
+							)}
 						{tag && (
 							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
 								Needs category

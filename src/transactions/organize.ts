@@ -2,9 +2,10 @@ import { COUNTED_JOINS, countedCategorySql } from "../db/counted-month";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
-const NEEDS_CATEGORY = `${countedCategorySql()} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0`;
+// A linked refund is left to its purchase, as in src/db/transactions.ts.
+const NEEDS_CATEGORY = `${countedCategorySql()} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND t.refund_of_id IS NULL`;
 const NEEDS_CATEGORY_UPDATE =
-	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0";
+	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0 AND refund_of_id IS NULL";
 const CHUNK_SIZE = 90;
 
 export type OrganizeGroup = {

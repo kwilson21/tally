@@ -40,8 +40,9 @@ export type ListRow = {
 export const PAGE_SIZE = 25;
 
 // "Needs category" is the same set Home counts as uncategorized (spec §6): counted, not income, no
-// counted category (a linked refund needs one when its purchase has none). Queries add COUNTED_JOINS.
-const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0`;
+// counted category. A linked refund is never on it: it has no category of its own to set, so its
+// purchase carries the need and categorizing that covers both. Queries add COUNTED_JOINS.
+const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND t.refund_of_id IS NULL`;
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -570,7 +571,8 @@ const COUNTED_BY = {
 
 /**
  * This month's numbers for the How Tally works page (spec §9): counted transactions, how many
- * need a category (the same set Home counts), and who categorized the rest.
+ * need a category (the same set Home counts), and who categorized the rest. A linked refund goes
+ * with its purchase, so it isn't a decision of its own here.
  */
 export async function monthCounts(
 	db: D1Database,
@@ -600,7 +602,7 @@ export async function monthCounts(
 				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income
 			FROM transactions t
 			${COUNTED_JOINS}
-			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0`,
+			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0 AND t.refund_of_id IS NULL`,
 		)
 		.bind(month)
 		.first<{

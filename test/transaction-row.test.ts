@@ -51,10 +51,10 @@ describe("rowCaption", () => {
 		).toBe("Kids · Refund for Dec 20, 2026");
 	});
 
-	it("flags a refund whose purchase has no category", () => {
+	it("leaves the Needs category tag to the purchase of a linked refund", () => {
 		expect(
 			rowCaption({ ...base, refundOfId: 3, refundPurchaseDate: "2026-09-05" }),
-		).toEqual({ kind: "needs", caption: "Refund for Sep 5", tag: true });
+		).toEqual({ kind: "needs", caption: "Refund for Sep 5", tag: false });
 	});
 
 	it("shows how much of a purchase or a split part was refunded", () => {
@@ -149,6 +149,20 @@ describe("TransactionRow", () => {
 			row: { ...base, countsInMonth: "2026-08" },
 		}).toString();
 		expect(payment).toContain("Counts in");
+	});
+
+	it("keeps Counts in on a linked refund when a bill moved its purchase's month", async () => {
+		const html = await TransactionRow({
+			row: {
+				...base,
+				date: "2026-10-12",
+				countsInMonth: "2026-09",
+				refundOfId: 3,
+				refundPurchaseDate: "2026-10-02",
+			},
+		}).toString();
+		expect(html).toContain("Refund for Oct 2");
+		expect(html).toContain("Counts in September");
 	});
 
 	it("is one link to the edit URL when given one, with the signed amount", async () => {
