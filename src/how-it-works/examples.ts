@@ -108,7 +108,7 @@ export function categorizationExample(c: {
 		);
 	if (c.heldForReview && c.heldForReview > 0)
 		parts.push(
-			`${c.heldForReview} ${c.heldForReview === 1 ? "credit is" : "credits are"} held for review and don't count toward spending yet.`,
+			`${c.heldForReview} ${c.heldForReview === 1 ? "credit is" : "credits are"} held for review and ${c.heldForReview === 1 ? "doesn't" : "don't"} count toward spending yet.`,
 		);
 	if (parts.length === 0) return "Nothing has been categorized yet this month.";
 	return `This month, ${parts.join(" ")}`;

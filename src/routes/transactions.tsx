@@ -519,10 +519,10 @@ function EditSheet({
 						</Chip>
 					</div>
 				</div>
-				{tx.amountCents < 0 && !tx.income && (
+				{tx.amountCents < 0 && (
 					<div class="flex flex-col gap-2 border-t border-rule pt-3">
 						<input type="hidden" name="creditReviewedVisible" value="1" />
-						{!tx.creditReviewed && (
+						{!tx.creditReviewed && !values.income && (
 							<p class="text-sm text-muted">
 								This bank credit is held out of spending until you identify it.
 							</p>
@@ -642,7 +642,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		note: tx.note,
 		excluded: tx.excluded,
 		income: tx.income,
-		creditReviewed: tx.creditReviewed,
+		creditReviewed: tx.income ? false : tx.creditReviewed,
 	};
 	return renderList(c, filters, {
 		sheet: (categories) => (

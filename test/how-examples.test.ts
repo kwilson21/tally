@@ -119,7 +119,10 @@ describe("categorizationExample", () => {
 
 	it("explains that held-for-review credits are omitted from spending", () => {
 		expect(categorizationExample({ ...none, heldForReview: 1 })).toBe(
-			"This month, 1 credit is held for review and don't count toward spending yet.",
+			"This month, 1 credit is held for review and doesn't count toward spending yet.",
+		);
+		expect(categorizationExample({ ...none, heldForReview: 2 })).toBe(
+			"This month, 2 credits are held for review and don't count toward spending yet.",
 		);
 	});
 });

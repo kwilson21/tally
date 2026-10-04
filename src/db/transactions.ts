@@ -256,8 +256,9 @@ export async function saveEdit(
 	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
 	const creditReviewByUser =
 		creditReviewProvided &&
+		!edit.income &&
 		creditReviewChoice === 1 &&
-		current.creditReviewed !== 1;
+		(current.creditReviewed !== 1 || current.income === 1);
 	// Changing the exclusion makes it a person's choice, which Jev never overrides.
 	const excluded = edit.excluded ? 1 : 0;
 	const excludeArgs = [excluded, excluded];
@@ -268,7 +269,7 @@ export async function saveEdit(
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
 							note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
-							credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 THEN ? ELSE credit_reviewed END,
+							credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? ELSE credit_reviewed END,
 							credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 							updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
@@ -282,6 +283,7 @@ export async function saveEdit(
 						edit.income ? 1 : 0,
 						creditReviewByUser ? 1 : 0,
 						creditReviewProvided ? 1 : 0,
+						edit.income ? 1 : 0,
 						creditReviewChoice,
 						creditReviewByUser ? 1 : 0,
 						creditReviewProvided ? 1 : 0,
@@ -292,7 +294,7 @@ export async function saveEdit(
 			: db
 					.prepare(
 						`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
-						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 THEN ? ELSE credit_reviewed END,
+						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
@@ -305,6 +307,7 @@ export async function saveEdit(
 						edit.income ? 1 : 0,
 						creditReviewByUser ? 1 : 0,
 						creditReviewProvided ? 1 : 0,
+						edit.income ? 1 : 0,
 						creditReviewChoice,
 						creditReviewByUser ? 1 : 0,
 						creditReviewProvided ? 1 : 0,
