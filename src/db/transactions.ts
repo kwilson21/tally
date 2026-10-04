@@ -451,18 +451,21 @@ export async function monthCounts(
 	notYetAsked: number;
 	/** Income with no category: it needs none, so it isn't waiting. */
 	income: number;
+	/** Negative credits that still need a person to review them. */
+	heldForReview: number;
 }> {
 	const row = await db
 		.prepare(
-			`SELECT COUNT(*) AS counted,
+			`SELECT COALESCE(SUM(t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1), 0) AS counted,
 				COALESCE(SUM(CASE WHEN ${NEEDS_CATEGORY} THEN 1 ELSE 0 END), 0) AS needsCategory,
-				COALESCE(SUM(t.category_source = 'user'), 0) AS user,
-				COALESCE(SUM(t.category_source = 'merchant_rule'), 0) AS merchantRule,
-				COALESCE(SUM(t.category_source = 'jev'), 0) AS jev,
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1) AND t.category_source = 'user'), 0) AS user,
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1) AND t.category_source = 'merchant_rule'), 0) AS merchantRule,
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1) AND t.category_source = 'jev'), 0) AS jev,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NOT NULL), 0) AS unsure,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NULL), 0) AS noneFit,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL), 0) AS notYetAsked,
-				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1) AND t.category_id IS NULL AND t.flag_income = 1), 0) AS income,
+				COALESCE(SUM(t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0), 0) AS heldForReview
 			FROM transactions t
 			WHERE substr(t.date, 1, 7) = ? AND t.excluded = 0 AND t.is_split = 0`,
 		)
@@ -477,6 +480,7 @@ export async function monthCounts(
 			noneFit: number;
 			notYetAsked: number;
 			income: number;
+			heldForReview: number;
 		}>();
 	return (
 		row ?? {
@@ -489,6 +493,7 @@ export async function monthCounts(
 			noneFit: 0,
 			notYetAsked: 0,
 			income: 0,
+			heldForReview: 0,
 		}
 	);
 }

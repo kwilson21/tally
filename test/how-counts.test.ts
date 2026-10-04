@@ -98,6 +98,23 @@ describe("monthCounts", () => {
 			notYetAsked: 8,
 		});
 	});
+
+	it("reports held-for-review credits outside the counted transaction total", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		const counts = await monthCounts(db, MONTH);
+		expect(counts.heldForReview).toBe(1);
+		expect(counts.counted).toBe(
+			await countWhere(
+				"amount_cents >= 0 OR credit_reviewed = 1 OR flag_income = 1",
+			),
+		);
+	});
 });
 
 describe("excludedBreakdown", () => {
