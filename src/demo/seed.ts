@@ -17,7 +17,7 @@ export type SeedBank = {
 };
 export type SeedAccount = {
 	id: number;
-	bankId: number;
+	bankId: number | null;
 	name: string;
 	mask: string;
 	type: string;
@@ -38,7 +38,7 @@ export type SeedTransaction = {
 	amountCents: number;
 	rawName: string;
 	categoryId: number | null;
-	categorySource: "jev" | null;
+	categorySource: "jev" | "user" | null;
 	categoryConfidence: number | null;
 	flagTransfer: boolean;
 	flagReimbursement: boolean;
@@ -63,6 +63,7 @@ const HOUSEHOLD = 5;
 const CHECKING = 1;
 const SAVINGS = 2;
 const CARD = 3;
+const CASH = 4;
 
 const CATEGORIES: SeedCategory[] = [
 	{
@@ -128,6 +129,16 @@ const ACCOUNTS: SeedAccount[] = [
 		subtype: "credit card",
 		isLiability: true,
 		balanceCents: 84217,
+	},
+	{
+		id: CASH,
+		bankId: null,
+		name: "Cash",
+		mask: "",
+		type: "cash",
+		subtype: "cash",
+		isLiability: false,
+		balanceCents: 0,
 	},
 ];
 
@@ -285,6 +296,11 @@ export function buildSeed(today: string): Seed {
 	for (const [target, rawName, cents] of UNCATEGORIZED) {
 		transactions.push(spend(CARD, clamp(target), rawName, null, cents));
 	}
+	transactions.push({
+		...spend(CASH, clamp(20), "Farmers market", GROCERIES, 2000),
+		categorySource: "user",
+		categoryConfidence: null,
+	});
 	// A plausible Streaming charge that is deliberately outside the five-day
 	// matching window. It makes the demo show why merchant and amount alone are
 	// not enough to claim a payment.
@@ -375,6 +391,11 @@ export function buildSeed(today: string): Seed {
 			displayName,
 			defaultCategoryId: null,
 		})),
+		{
+			rawName: "Farmers market",
+			displayName: "Farmers market",
+			defaultCategoryId: null,
+		},
 		{
 			rawName: "ACME CORP PAYROLL",
 			displayName: "Paycheck, Acme Corp",

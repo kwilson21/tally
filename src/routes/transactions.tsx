@@ -14,6 +14,7 @@ import {
 	type TransactionDetail,
 } from "../db/transactions";
 import { formatCents } from "../money";
+import { type CashValues, parseCash, saveCash } from "../transactions/cash";
 import {
 	type Edit,
 	type EditErrors,
@@ -30,6 +31,7 @@ import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
+import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
@@ -157,6 +159,20 @@ async function renderList(
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">
 				Transactions
 			</h1>
+			<div class="mt-3">
+				<Button
+					kind="secondary"
+					href="/transactions/cash/new"
+					class="gap-2"
+					hx-get="/transactions/cash/new"
+					hx-target="#sheet"
+					hx-select="#sheet"
+					hx-swap="outerHTML"
+					hx-push-url="true"
+				>
+					<Icon name="plus" class="size-5" /> Add cash
+				</Button>
+			</div>
 			<HowLink section="transactions" demo={c.env.DEMO === "true"} />
 
 			{/* Works as a plain GET form; htmx re-requests the same URL and swaps in only the results. */}
@@ -564,6 +580,22 @@ function EditSheet({
 					</Button>
 				</div>
 			</form>
+			{tx.accountType === "cash" && (
+				<form
+					method="post"
+					action={`/transactions/${tx.id}/delete`}
+					class="mt-4"
+					hx-post={`/transactions/${tx.id}/delete`}
+					hx-target="#page"
+					hx-select="#page"
+					hx-swap="outerHTML"
+				>
+					<input type="hidden" name="back" value={back} />
+					<Button kind="text" type="submit">
+						Delete cash transaction
+					</Button>
+				</form>
+			)}
 		</BottomSheet>
 	);
 }
@@ -573,6 +605,98 @@ const filtersFrom = (url: string) =>
 		new URL(url, "http://tally").searchParams,
 		todayUtc().slice(0, 7),
 	);
+
+const cashValues = (form?: FormData): CashValues => ({
+	date: form?.get("date")?.toString() ?? todayUtc(),
+	amount: form?.get("amount")?.toString() ?? "20.00",
+	direction: form?.get("direction") === "in" ? "in" : "out",
+	merchant: form?.get("merchant")?.toString() ?? "",
+	category: form?.get("category")?.toString() ?? "",
+	note: form?.get("note")?.toString() ?? "",
+});
+
+function CashSheet({
+	categories,
+	values,
+	errors,
+}: {
+	categories: Category[];
+	values: CashValues;
+	errors?: import("../transactions/cash").CashErrors;
+}) {
+	return (
+		<BottomSheet labelledBy="cash-title" closeHref="/transactions">
+			<h2
+				id="cash-title"
+				tabindex={-1}
+				autofocus
+				class="font-serif text-4xl font-semibold tracking-tight outline-none"
+			>
+				Add cash spending
+			</h2>
+			<CashForm
+				categories={categories}
+				values={values}
+				errors={errors}
+				today={todayUtc()}
+			/>
+		</BottomSheet>
+	);
+}
+
+transactions.get("/transactions/cash/new", (c) =>
+	renderList(
+		c,
+		parseFilters(new URL(c.req.url).searchParams, todayUtc().slice(0, 7)),
+		{
+			sheet: (categories) => (
+				<CashSheet categories={categories} values={cashValues()} />
+			),
+		},
+	),
+);
+
+transactions.post("/transactions/cash", async (c) => {
+	const form = await c.req.formData();
+	const values = cashValues(form);
+	const { results: categories } = await c.env.DB.prepare(
+		"SELECT id,name,icon,color FROM categories WHERE archived=0 ORDER BY sort_order,name",
+	).all<Category>();
+	const parsed = parseCash(
+		values,
+		todayUtc(),
+		categories.map((x) => x.id),
+	);
+	if (!parsed.ok)
+		return renderList(
+			c,
+			parseFilters(new URL(c.req.url).searchParams, todayUtc().slice(0, 7)),
+			{
+				status: 422,
+				sheet: () => (
+					<CashSheet
+						categories={categories}
+						values={values}
+						errors={parsed.errors}
+					/>
+				),
+			},
+		);
+	await saveCash(c.env.DB, parsed.value, actor(c));
+	if (!c.req.header("HX-Request")) return c.redirect("/transactions", 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message: `Added ${parsed.value.merchant}`, type: "success" },
+			announce: `Added ${formatCents(Math.abs(parsed.value.amountCents))} cash ${parsed.value.amountCents < 0 ? "income" : "spending"} at ${parsed.value.merchant}.`,
+		}),
+	);
+	c.header("HX-Push-Url", "/transactions");
+	return renderList(
+		c,
+		parseFilters(new URL(c.req.url).searchParams, todayUtc().slice(0, 7)),
+	);
+});
 
 async function notFound(c: Context<App>) {
 	return c.html(
@@ -865,4 +989,26 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, filters, { focusId: tx.id });
+});
+
+transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (tx?.accountType !== "cash") return notFound(c);
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	await c.env.DB.prepare(
+		"DELETE FROM transactions WHERE id=? AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
+	)
+		.bind(tx.id)
+		.run();
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message: `Deleted ${tx.displayName}`, type: "success" },
+			announce: `Deleted cash transaction for ${tx.displayName}.`,
+		}),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, filtersFrom(back));
 });

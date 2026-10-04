@@ -13,6 +13,7 @@ import { BillRow, BillStatusHeading } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
+import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
@@ -932,6 +933,52 @@ function Controls() {
 						/>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="cash-form"
+				title="Add cash"
+				tier="visual"
+				components={["CashForm"]}
+				sentence="P21 A's secondary button and edit-panel-shaped form add cash money in or out."
+			>
+				<div
+					inert
+					class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
+				>
+					<Button kind="secondary" type="button" class="gap-2">
+						<Icon name="plus" class="size-5" />
+						Add cash
+					</Button>
+					<h4 class="mt-6 font-serif text-4xl font-semibold">
+						Add cash spending
+					</h4>
+					<CashForm
+						today="2026-09-29"
+						values={{
+							date: "2026-09-29",
+							amount: "20.00",
+							direction: "out",
+							merchant: "Farmers market",
+							category: "1",
+							note: "Peaches and eggs",
+						}}
+						categories={[
+							{
+								id: 1,
+								name: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+							},
+							{
+								id: 2,
+								name: "Eating Out",
+								icon: "eating-out",
+								color: "cat-plum",
+							},
+						]}
+						action="#"
+					/>
+				</div>
 			</Specimen>
 			<Specimen
 				id="split-form"
