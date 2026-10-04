@@ -248,7 +248,9 @@ describe("POST /transactions/organize", () => {
 	it("keeps unreviewed credits out of merchant organization until reviewed", async () => {
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, credit_reviewed) VALUES (1, ?, -1200, 'PENDING CREDIT', 0)",
-		).bind(todayUtc()).run();
+		)
+			.bind(todayUtc())
+			.run();
 		const { html } = await get();
 		expect(html).not.toContain("PENDING CREDIT");
 	});
