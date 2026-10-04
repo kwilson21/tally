@@ -240,7 +240,7 @@ async function renderHome(
 										id="home-bills-title"
 										class="font-serif text-2xl font-semibold"
 									>
-										Bills due in the next 7 days
+										Bills due soon
 									</h2>
 									<a href="/bills" class="min-h-11 py-2 text-accent">
 										All bills

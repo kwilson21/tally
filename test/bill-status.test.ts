@@ -47,4 +47,31 @@ describe("bill status", () => {
 				.status,
 		).toBe("overdue");
 	});
+
+	it("moves into the next month and year when it enters the seven-day window", () => {
+		expect(
+			billOccurrence({ frequency: "monthly", dueDay: 1 }, "2026-09-28", false),
+		).toMatchObject({
+			dueDate: "2026-10-01",
+			period: "2026-10",
+			status: "due",
+		});
+		expect(
+			billOccurrence({ frequency: "monthly", dueDay: 2 }, "2026-12-28", false),
+		).toMatchObject({
+			dueDate: "2027-01-02",
+			period: "2027-01",
+			status: "due",
+		});
+	});
+
+	it("does not leave yearly bills overdue outside their anchor month", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "yearly", dueDay: 15, anchorMonth: 2 },
+				"2026-10-04",
+				false,
+			),
+		).toMatchObject({ dueDate: "2027-02-15", status: "upcoming" });
+	});
 });

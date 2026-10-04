@@ -30,6 +30,17 @@ export function canResetDemo(env: {
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
 export async function resetDemo(db: D1Database, today: string): Promise<void> {
 	const seed = buildSeed(today);
+	// Keep the paid-late specimen meaningful at the very start of a month too.
+	// The demo is illustrative data, so its linked payment may be a few days ahead.
+	const todayDay = Number(today.slice(8, 10));
+	if (todayDay < 4) {
+		const waterPayment = seed.transactions.find(
+			(transaction) =>
+				transaction.rawName === "GOOGLE *YOUTUBE" &&
+				transaction.date.startsWith(today.slice(0, 7)),
+		);
+		if (waterPayment) waterPayment.date = `${today.slice(0, 8)}04`;
+	}
 	const b = (v: boolean) => (v ? 1 : 0);
 
 	await db.batch([
@@ -103,7 +114,7 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					b(t.isSplit),
 				),
 		),
-		...demoBills(today).map((bill) =>
+		...demoBills(today, seed.transactions).map((bill) =>
 			db
 				.prepare(
 					"INSERT INTO bills (id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,active) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -118,20 +129,46 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
 			SELECT 2, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='GOOGLE *YOUTUBE' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
 			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
+		db
+			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
+			SELECT 4, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='ONLINE TRANSFER TO SAV ...5678' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
+			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 	]);
 }
 
-function demoBills(today: string): (string | number | null)[][] {
+function demoBills(
+	today: string,
+	transactions: { date: string; rawName: string }[],
+): (string | number | null)[][] {
 	const day = Number(today.slice(8, 10));
 	const month = Number(today.slice(5, 7));
-	const dueSoon = Math.min(31, day + 3);
+	const paymentDay = (rawName: string) =>
+		Number(
+			[...transactions]
+				.reverse()
+				.find((transaction) => transaction.rawName === rawName)
+				?.date.slice(8) ?? day,
+		);
+	const plusThree = new Date(`${today}T00:00:00Z`);
+	plusThree.setUTCDate(plusThree.getUTCDate() + 3);
+	const dueSoon = plusThree.getUTCDate();
 	return [
-		[1, "Streaming", 299, day, "monthly", null, 5, "APPLE.COM/BILL", 1],
+		[
+			1,
+			"Streaming",
+			299,
+			paymentDay("APPLE.COM/BILL"),
+			"monthly",
+			null,
+			5,
+			"APPLE.COM/BILL",
+			1,
+		],
 		[
 			2,
 			"Water",
 			1399,
-			Math.max(1, day - 3),
+			Math.max(1, paymentDay("GOOGLE *YOUTUBE") - 3),
 			"monthly",
 			null,
 			5,
@@ -142,7 +179,7 @@ function demoBills(today: string): (string | number | null)[][] {
 			3,
 			"Electric",
 			14200,
-			Math.max(1, day - 1),
+			day === 1 ? 28 : day - 1,
 			"monthly",
 			null,
 			5,
@@ -153,7 +190,7 @@ function demoBills(today: string): (string | number | null)[][] {
 			4,
 			"Rent",
 			185000,
-			day,
+			paymentDay("ONLINE TRANSFER TO SAV ...5678"),
 			"monthly",
 			null,
 			5,
@@ -167,7 +204,7 @@ function demoBills(today: string): (string | number | null)[][] {
 			11840,
 			15,
 			"yearly",
-			month === 12 ? 12 : month + 1,
+			month === 12 ? 1 : month + 1,
 			3,
 			"CHEVRON 0098812",
 			1,

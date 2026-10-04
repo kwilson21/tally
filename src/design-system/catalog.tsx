@@ -456,6 +456,65 @@ function Rows() {
 						</ul>
 					</div>
 				</State>
+				<State label="Due">
+					<div class="max-w-xl">
+						<BillStatusHeading status="due" />
+						<ul>
+							<BillRow
+								today="2026-10-04"
+								bill={{
+									id: 3,
+									name: "Rent",
+									amountCents: 185000,
+									status: "due",
+									dueDate: "2026-10-05",
+									icon: "household",
+									color: "cat-brown",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Upcoming, linked row">
+					<div class="max-w-xl">
+						<BillStatusHeading status="upcoming" />
+						<ul>
+							<BillRow
+								href="#bill-row"
+								today="2026-10-04"
+								bill={{
+									id: 4,
+									name: "Car insurance",
+									amountCents: 11840,
+									status: "upcoming",
+									dueDate: "2026-11-15",
+									icon: "gas",
+									color: "cat-slate",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Paid">
+					<div class="max-w-xl">
+						<BillStatusHeading status="paid" />
+						<ul>
+							<BillRow
+								today="2026-10-04"
+								bill={{
+									id: 5,
+									name: "Streaming",
+									amountCents: 299,
+									status: "paid",
+									dueDate: "2026-10-02",
+									paidDate: "2026-10-02",
+									icon: "household",
+									color: "cat-blue",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
 				<State label="Paid late">
 					<div class="max-w-xl">
 						<BillStatusHeading status="paid" />

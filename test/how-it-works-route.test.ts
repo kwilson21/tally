@@ -43,12 +43,12 @@ describe("GET /how-it-works in the demo", () => {
 		}
 		expect(html).toContain('role="img"');
 		expect(html).toContain("Income counts only toward Income, not spending.");
-		expect(html).toContain("Bills that are due or overdue are also set aside");
+		expect(html).toContain("due and overdue");
 		expect(html).toMatch(/including uncategorized and\s+unbudgeted/);
 		expect(html).not.toMatch(/small AI/);
 	});
 
-	it("keeps its fixed budget example when live bills change Home", async () => {
+	it("keeps its budget example equal to Home", async () => {
 		const page = (await get("/how-it-works")).html;
 		const match = page.match(/= (-?\$[\d,]+\.\d\d) safe to spend\./);
 		expect(match).not.toBeNull();
@@ -56,7 +56,7 @@ describe("GET /how-it-works in the demo", () => {
 			Number((match?.[1] ?? "").replace(/[$,]/g, "")) * 100,
 		);
 		const homeHtml = (await get("/")).html;
-		expect(homeHtml).not.toContain(formatCents(cents, { wholeDollars: true }));
+		expect(homeHtml).toContain(formatCents(cents, { wholeDollars: true }));
 	});
 
 	it("explains exclusions with this month's excluded count", async () => {

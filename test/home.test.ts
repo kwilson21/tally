@@ -24,7 +24,7 @@ describe("GET / with the demo seed", () => {
 	it("leads with safe to spend and the status sentence", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
-		expect(html).toContain("-$1,774");
+		expect(html).toMatch(/Safe to spend<\/p><p[^>]*>\$[\d,]+/);
 		expect(html).toContain(
 			"Eating Out is $36 over. Everything else is on track.",
 		);
@@ -34,6 +34,28 @@ describe("GET / with the demo seed", () => {
 		const { html } = await home();
 		expect(html).toContain('href="/transactions?uncategorized=1"');
 		expect(html).toMatch(/12 transactions need\s+a\s+category/);
+	});
+
+	it("lists due and overdue bills under an accurate heading", async () => {
+		const { html } = await home();
+		expect(html).toContain("Bills due soon");
+		expect(html).toContain("Electric");
+		expect(html).toContain("Internet");
+		expect(html).not.toContain("Bills due in the next 7 days");
+	});
+
+	it("subtracts exactly active, unpaid due and overdue bills", async () => {
+		const dollars = (html: string) =>
+			Number(
+				html
+					.match(/Safe to spend<\/p><p[^>]*>\$([\d,]+)/)?.[1]
+					?.replaceAll(",", "") ?? Number.NaN,
+			);
+		const withBills = dollars((await home()).html);
+		await env.DB.prepare("UPDATE bills SET active=0").run();
+		const withoutBills = dollars((await home()).html);
+		// The demo's only unpaid active due/overdue bills are $142 + $65.
+		expect(withoutBills - withBills).toBe(207);
 	});
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {

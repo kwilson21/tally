@@ -1,7 +1,7 @@
 import { type Context, Hono } from "hono";
 import { type BillStatus, billOccurrence } from "../bills/status";
 import { todayUtc } from "../dates";
-import { formatCents, toCents } from "../money";
+import { centsToAmount, formatCents, toCents } from "../money";
 import {
 	BillRow,
 	type BillRowData,
@@ -31,6 +31,8 @@ type DbBill = {
 	active: number;
 	icon: string | null;
 	color: string | null;
+	payment_period?: string | null;
+	payment_date?: string | null;
 };
 type Category = { id: number; name: string; icon: string; color: string };
 type Values = {
@@ -46,26 +48,28 @@ type Values = {
 export async function loadBillRows(db: D1Database, today = todayUtc()) {
 	const rows = await db
 		.prepare(
-			`SELECT b.*, c.icon, c.color FROM bills b LEFT JOIN categories c ON c.id=b.category_id ORDER BY b.id`,
+			`SELECT b.*, c.icon, c.color, bp.period AS payment_period, t.date AS payment_date
+			 FROM bills b
+			 LEFT JOIN categories c ON c.id=b.category_id
+			 LEFT JOIN bill_payments bp ON bp.bill_id=b.id AND bp.status='linked'
+			 LEFT JOIN transactions t ON t.id=bp.transaction_id
+			 ORDER BY b.id`,
 		)
 		.all<DbBill>();
 	const result: (BillRowData & { active: boolean })[] = [];
-	for (const b of rows.results) {
-		const initial = billOccurrence(
-			{
-				frequency: b.frequency,
-				dueDay: b.due_day,
-				anchorMonth: b.anchor_month,
-			},
-			today,
-			false,
+	const byBill = new Map<number, DbBill[]>();
+	for (const row of rows.results)
+		byBill.set(row.id, [...(byBill.get(row.id) ?? []), row]);
+	for (const billRows of byBill.values()) {
+		const b = billRows[0] as DbBill;
+		const payments = new Map(
+			billRows
+				.filter((row) => row.payment_period && row.payment_date)
+				.map((row) => [
+					row.payment_period as string,
+					row.payment_date as string,
+				]),
 		);
-		const payment = await db
-			.prepare(
-				`SELECT t.date FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.period=? AND bp.status='linked' LIMIT 1`,
-			)
-			.bind(b.id, initial.period)
-			.first<{ date: string }>();
 		const occurrence = billOccurrence(
 			{
 				frequency: b.frequency,
@@ -73,7 +77,7 @@ export async function loadBillRows(db: D1Database, today = todayUtc()) {
 				anchorMonth: b.anchor_month,
 			},
 			today,
-			!!payment,
+			new Set(payments.keys()),
 		);
 		result.push({
 			id: b.id,
@@ -81,7 +85,7 @@ export async function loadBillRows(db: D1Database, today = todayUtc()) {
 			amountCents: b.amount_cents,
 			status: occurrence.status,
 			dueDate: occurrence.dueDate,
-			paidDate: payment?.date,
+			paidDate: payments.get(occurrence.period),
 			icon: b.icon ?? "bills",
 			color: b.color ?? "",
 			active: !!b.active,
@@ -130,7 +134,7 @@ async function page(
 						Add a bill
 					</Button>
 				</div>
-				{active.length === 0 ? (
+				{rows.length === 0 ? (
 					<EmptyState
 						kind="add"
 						sentence="No bills yet."
@@ -199,7 +203,7 @@ async function dbBill(c: Context<App>, id: number) {
 function valuesOf(b?: DbBill): Values {
 	return {
 		name: b?.name ?? "",
-		amount: b ? (b.amount_cents / 100).toFixed(2) : "",
+		amount: b ? centsToAmount(b.amount_cents) : "",
 		due_day: String(b?.due_day ?? ""),
 		frequency: b?.frequency ?? "monthly",
 		anchor_month: String(b?.anchor_month ?? 1),
@@ -225,6 +229,8 @@ function BillSheet({
 			<h2
 				id="bill-sheet-title"
 				class="font-serif text-4xl font-semibold tracking-tight"
+				tabindex={-1}
+				autofocus
 			>
 				{bill ? bill.name : "Add a bill"}
 			</h2>
@@ -234,7 +240,7 @@ function BillSheet({
 				hx-post={action}
 				hx-target="body"
 				hx-swap="outerHTML"
-				class="flex flex-col gap-3"
+				class="bill-form flex flex-col gap-3"
 			>
 				<TextInput
 					id="bill-name"
@@ -252,38 +258,40 @@ function BillSheet({
 					value={values.amount}
 					error={errors.amount}
 				/>
-				<TextInput
-					id="bill-day"
-					name="due_day"
-					label="Due day"
-					value={values.due_day}
-					error={errors.due_day}
-					surface="paper"
-					inputmode="numeric"
-					required
-				/>
-				<fieldset>
-					<legend>How often</legend>
-					<div class="mt-1 flex gap-2">
-						<Chip
-							type="radio"
-							name="frequency"
-							value="monthly"
-							checked={values.frequency === "monthly"}
-						>
-							Monthly
-						</Chip>
-						<Chip
-							type="radio"
-							name="frequency"
-							value="yearly"
-							checked={values.frequency === "yearly"}
-						>
-							Yearly
-						</Chip>
-					</div>
-				</fieldset>
-				<label class="flex flex-col gap-1">
+				<div class="grid gap-3 sm:grid-cols-2">
+					<TextInput
+						id="bill-day"
+						name="due_day"
+						label="Due day"
+						value={values.due_day}
+						error={errors.due_day}
+						surface="paper"
+						inputmode="numeric"
+						required
+					/>
+					<fieldset class="bill-frequency">
+						<legend>How often</legend>
+						<div class="mt-1 flex gap-2">
+							<Chip
+								type="radio"
+								name="frequency"
+								value="monthly"
+								checked={values.frequency === "monthly"}
+							>
+								Monthly
+							</Chip>
+							<Chip
+								type="radio"
+								name="frequency"
+								value="yearly"
+								checked={values.frequency === "yearly"}
+							>
+								Yearly
+							</Chip>
+						</div>
+					</fieldset>
+				</div>
+				<label class="bill-month flex-col gap-1">
 					<span>Month (for yearly bills)</span>
 					<select
 						name="anchor_month"
@@ -301,6 +309,11 @@ function BillSheet({
 							</option>
 						))}
 					</select>
+					{errors.anchor_month && (
+						<span role="alert" class="text-sm text-over">
+							{errors.anchor_month}
+						</span>
+					)}
 				</label>
 				<fieldset>
 					<legend>Category</legend>
@@ -386,6 +399,20 @@ async function save(c: Context<App>, id?: number) {
 	if (!values.merchant_raw_name)
 		errors.merchant_raw_name = "Enter the bank's text.";
 	if (!values.category_id) errors.category_id = "Choose a category.";
+	else {
+		const category = await c.env.DB.prepare(
+			"SELECT id FROM categories WHERE id=? AND archived=0",
+		)
+			.bind(Number(values.category_id))
+			.first();
+		if (!category) errors.category_id = "Choose an existing category.";
+	}
+	const anchor = Number(values.anchor_month);
+	if (
+		values.frequency === "yearly" &&
+		(!Number.isInteger(anchor) || anchor < 1 || anchor > 12)
+	)
+		errors.anchor_month = "Choose a month.";
 	const bill = id ? await dbBill(c, id) : undefined;
 	if (Object.keys(errors).length)
 		return page(c, { bill: bill ?? undefined, values, errors });
@@ -417,6 +444,7 @@ async function save(c: Context<App>, id?: number) {
 			"HX-Trigger",
 			JSON.stringify({ toast: { message }, announce: message }),
 		);
+		res.headers.set("HX-Push-Url", "/bills");
 		return res;
 	}
 	return c.redirect("/bills", 303);
