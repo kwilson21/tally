@@ -587,14 +587,17 @@ function EditSheet({
 				)}
 				{/* The two things people change most after the category, one tap each (owner's pick C). */}
 				<div class="flex flex-wrap gap-2">
-					<Chip
-						type="checkbox"
-						name="always"
-						value="1"
-						checked={values.alwaysForMerchant}
-					>
-						Always for this merchant
-					</Chip>
+					{/* A linked refund has no category of its own to make a rule from. */}
+					{!purchase && (
+						<Chip
+							type="checkbox"
+							name="always"
+							value="1"
+							checked={values.alwaysForMerchant}
+						>
+							Always for this merchant
+						</Chip>
+					)}
 					<Chip
 						type="checkbox"
 						name="excluded"

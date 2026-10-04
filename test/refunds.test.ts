@@ -465,6 +465,7 @@ describe("linking a refund", () => {
 		expect(fieldset).toMatch(/name="category" value="4"[^>]*checked/);
 		expect(fieldset).not.toMatch(/name="category" value="1"[^>]*checked/);
 		expect(html).toContain("Counts in Kids with the Aug 20 purchase.");
+		expect(html).not.toContain("Always for this merchant");
 
 		await save(REFUND, [["category", String(GAS)]]);
 		expect(await ownCategory(REFUND)).toBe(GROCERIES);
