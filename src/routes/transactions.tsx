@@ -389,10 +389,11 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
-			{tx.splitRemovedFromCents != null && (
+			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
 				<p role="status" class="text-sm text-over">
-					The bank changed this from {formatCents(tx.splitRemovedFromCents)}, so
-					its split was removed.
+					The bank changed this from{" "}
+					{formatCents(tx.splitRemovedFromCents, { signed: true })}, so its
+					split was removed.
 				</p>
 			)}
 			{/* The saved state, near the top, so an excluded transaction says so before any options. */}

@@ -144,13 +144,7 @@ export function MoneyInput({
 				</p>
 			)}
 			<div data-money-js class="flex flex-wrap justify-center gap-2">
-				<button
-					type="button"
-					data-roundup
-					hidden={!hasCents}
-					class={chip}
-					aria-label={`Round ${label} up`}
-				>
+				<button type="button" data-roundup hidden={!hasCents} class={chip}>
 					Round to{" "}
 					{hasCents
 						? formatCents(Math.ceil(cents / 100) * 100, { wholeDollars: true })

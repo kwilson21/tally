@@ -135,8 +135,8 @@ step("bottom-sheet controls stay clear of simulated safe areas");
 const budget = page.getByLabel(/^Budget from /);
 await budget.waitFor();
 await budget.fill("650");
-await page.getByRole("button", { name: "Increase by $1" }).click();
-await page.getByRole("button", { name: "Increase by 1 cent" }).click();
+await page.getByRole("button", { name: /^Increase .+ by \$1$/ }).click();
+await page.getByRole("button", { name: /^Increase .+ by 1 cent$/ }).click();
 assert.equal(await budget.inputValue(), "651.01");
 // The round-up chip appears once there are cents.
 await page.getByRole("button", { name: "Round to $652" }).click();
@@ -200,7 +200,7 @@ await page.goto(`${BASE}/transactions?q=Local+Bakery`, {
 });
 await page.getByRole("link", { name: /Local Bakery/ }).click();
 await page.getByRole("link", { name: "Split" }).click();
-const amounts = page.getByLabel(/Part \d amount/);
+const amounts = page.getByLabel(/^Part \d amount$/);
 await amounts.nth(0).fill("5.00");
 await page.getByLabel("Part 1 category").selectOption("1");
 await amounts.nth(1).fill("7.00");

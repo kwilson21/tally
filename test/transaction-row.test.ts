@@ -62,6 +62,13 @@ describe("rowCaption", () => {
 			tag: true,
 		});
 	});
+
+	it("drops the bank-change note once the purchase has a category again", () => {
+		expect(
+			rowCaption({ ...base, splitRemovedFromCents: 1234, categoryId: 1 })
+				?.caption,
+		).not.toContain("The bank changed this");
+	});
 });
 
 describe("TransactionRow", () => {

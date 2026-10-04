@@ -21,9 +21,11 @@ export function rowCaption(row: ListRow): Caption {
 		};
 	if (row.isSplit)
 		return { kind: "category", caption: "Split transaction", tag: false };
+	// The note stays only until the purchase has a category again.
 	if (
 		row.splitRemovedFromCents !== null &&
-		row.splitRemovedFromCents !== undefined
+		row.splitRemovedFromCents !== undefined &&
+		row.categoryId === null
 	)
 		return {
 			kind: "needs",

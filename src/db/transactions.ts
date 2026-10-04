@@ -264,7 +264,7 @@ export async function saveEdit(
 				.bind(edit.categoryId, current.rawName),
 			db
 				.prepare(
-					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
+					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
 						updated_by = ?, updated_at = datetime('now')
 					WHERE raw_name = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
 				)

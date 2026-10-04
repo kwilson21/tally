@@ -30,7 +30,7 @@ describe("transaction splits", () => {
 		expect(html).toContain('hx-trigger="input delay:300ms"');
 		// The amount request is nested inside a form that selects #page. Override that inherited
 		// selector so its partial response can update the live total.
-		expect(html).toContain('hx-select="#split-line"');
+		expect(html).toMatch(/hx-select="#split-line (>|&gt;) \*"/);
 	});
 
 	it("does not offer or allow splitting income", async () => {
