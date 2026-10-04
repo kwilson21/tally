@@ -1,4 +1,4 @@
-import { shortDay } from "../dates";
+import { dayLabel, todayUtc } from "../dates";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { Icon } from "./icons";
@@ -33,7 +33,8 @@ export function SelectableTransactionRow({
 				</span>
 				<span id={nameId} class="sr-only">
 					Select {row.displayName},{" "}
-					{formatCents(row.amountCents, { signed: true })}, {shortDay(row.date)}
+					{formatCents(row.amountCents, { signed: true })},{" "}
+					{dayLabel(row.date, todayUtc())}
 				</span>
 				<span class="min-w-0 flex-1">
 					<TransactionRow row={row} bare />

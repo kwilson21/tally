@@ -353,8 +353,22 @@ describe("select several transactions", () => {
 		expect(input).toContain('aria-labelledby="select-110-name"');
 		const name = html.match(/id="select-110-name"[^>]*>([^<]*)</)?.[1];
 		expect(name).toMatch(
-			/^Select .+, [−-]?\$[\d,]+\.\d\d, (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}$/,
+			/^Select .+, [−-]?\$[\d,]+\.\d\d, (Today, )?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(, \d{4})?$/,
 		);
+	});
+
+	it("gives the year in a checkbox's name when the row is from another year", async () => {
+		const lastYear = `${Number(todayUtc().slice(0, 4)) - 1}-03-07`;
+		await env.DB.prepare(
+			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT 992,account_id,?,1200,'OLD SHOP',1 FROM transactions WHERE id=110",
+		)
+			.bind(lastYear)
+			.run();
+		const html = await (
+			await request("/transactions?select=1&month=all&q=OLD%20SHOP")
+		).text();
+		const name = html.match(/id="select-992-name"[^>]*>([^<]*)</)?.[1];
+		expect(name).toMatch(new RegExp(`Mar 7, ${lastYear.slice(0, 4)}$`));
 	});
 
 	it("excludes a split part's whole purchase, as the edit panel does", async () => {
