@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { loadMonth } from "../src/db/month";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -19,6 +20,43 @@ async function post(path: string, fields: [string, string][]) {
 }
 
 describe("transaction splits", () => {
+	it("works with the current main schema before the income review migration", async () => {
+		const columns = await env.DB.prepare(
+			"PRAGMA table_info(transactions)",
+		).all<{ name: string }>();
+		expect(
+			columns.results.some((column) => column.name === "income_source"),
+		).toBe(false);
+		expect(
+			columns.results.some((column) => column.name === "credit_reviewed_by"),
+		).toBe(false);
+		const refund = await env.DB.prepare(
+			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
+		).first<{ id: number; amountCents: number }>();
+		const half = Math.trunc((refund?.amountCents as number) / 2);
+		expect(
+			await saveSplit(
+				env.DB,
+				refund?.id as number,
+				[
+					{ categoryId: 1, amountCents: half },
+					{
+						categoryId: 5,
+						amountCents: (refund?.amountCents as number) - half,
+					},
+				],
+				"synthetic-test",
+			),
+		).toBe(true);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
+			)
+				.bind(refund?.id)
+				.first(),
+		).toEqual({ n: 2 });
+	});
+
 	it("renders two labeled parts and the server-computed live line", async () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
@@ -146,8 +184,30 @@ describe("transaction splits", () => {
 		).all<{
 			name: string;
 		}>();
-		if (!columns.results.some((column) => column.name === "credit_reviewed_by"))
-			return;
+		const existing = new Set(columns.results.map((column) => column.name));
+		if (!existing.has("income_source"))
+			await env.DB.prepare(
+				"ALTER TABLE transactions ADD COLUMN income_source TEXT CHECK (income_source IN ('user', 'jev'))",
+			).run();
+		if (!existing.has("credit_reviewed"))
+			await env.DB.prepare(
+				"ALTER TABLE transactions ADD COLUMN credit_reviewed INTEGER CHECK (credit_reviewed IN (0, 1))",
+			).run();
+		if (!existing.has("credit_reviewed_by"))
+			await env.DB.prepare(
+				"ALTER TABLE transactions ADD COLUMN credit_reviewed_by TEXT CHECK (credit_reviewed_by IN ('user'))",
+			).run();
+		const installed = await env.DB.prepare(
+			"PRAGMA table_info(transactions)",
+		).all<{ name: string }>();
+		for (const name of [
+			"income_source",
+			"credit_reviewed",
+			"credit_reviewed_by",
+		])
+			expect(installed.results.some((column) => column.name === name)).toBe(
+				true,
+			);
 
 		const refund = await env.DB.prepare(
 			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
@@ -159,6 +219,11 @@ describe("transaction splits", () => {
 			.bind(id)
 			.run();
 		const total = Math.abs(refund?.amountCents as number);
+		const before = await loadMonth(env.DB, "2026-09");
+		const totalBefore = before.transactions.reduce(
+			(sum, tx) => sum + tx.amountCents,
+			0,
+		);
 		const first = Math.trunc(total / 2);
 		const second = total - first;
 		for (let save = 0; save < 2; save++) {
@@ -185,44 +250,21 @@ describe("transaction splits", () => {
 				credit_reviewed_by: "user",
 			});
 		}
-	});
-
-	it("keeps working on main before income review columns are installed", async () => {
-		const columns = await env.DB.prepare(
-			"PRAGMA table_info(transactions)",
-		).all<{
-			name: string;
-		}>();
-		if (columns.results.some((column) => column.name === "credit_reviewed_by"))
-			return;
-
-		const refund = await env.DB.prepare(
-			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
-		).first<{ id: number; amountCents: number }>();
-		const result = await saveSplit(
-			env.DB,
-			refund?.id as number,
-			[
-				{
-					categoryId: 1,
-					amountCents: Math.trunc((refund?.amountCents as number) / 2),
-				},
-				{
-					categoryId: 5,
-					amountCents:
-						(refund?.amountCents as number) -
-						Math.trunc((refund?.amountCents as number) / 2),
-				},
-			],
-			"synthetic-test",
-		);
-		expect(result).toBe(true);
+		const during = await loadMonth(env.DB, "2026-09");
+		expect(
+			during.transactions.reduce((sum, tx) => sum + tx.amountCents, 0),
+		).toBe(totalBefore);
+		await post(`/transactions/${id}/split/remove`, [["back", "/transactions"]]);
+		const after = await loadMonth(env.DB, "2026-09");
+		expect(
+			after.transactions.reduce((sum, tx) => sum + tx.amountCents, 0),
+		).toBe(totalBefore);
 		expect(
 			await env.DB.prepare(
-				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
+				"SELECT is_split, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
 			)
-				.bind(refund?.id)
+				.bind(id)
 				.first(),
-		).toEqual({ n: 2 });
+		).toEqual({ is_split: 0, credit_reviewed: 1, credit_reviewed_by: "user" });
 	});
 });
