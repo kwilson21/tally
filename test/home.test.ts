@@ -23,7 +23,6 @@ describe("GET / with the demo seed", () => {
 
 	it("leads with budget remaining and the status sentence", async () => {
 		const { html } = await home();
-<<<<<<< HEAD
 		expect(html).toContain("Safe to spend");
 		expect(html).toMatch(/Safe to spend<\/p><p[^>]*>\$[\d,]+/);
 		expect(html).toContain(
