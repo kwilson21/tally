@@ -288,7 +288,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							user={counts.user}
 							merchantRule={counts.merchantRule}
 							jev={counts.jev}
-							waiting={counts.needsCategory}
+							waiting={counts.needsCategory + counts.linkedWaiting}
 							income={counts.income}
 							threshold={threshold}
 						/>

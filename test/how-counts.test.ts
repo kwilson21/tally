@@ -69,6 +69,7 @@ describe("monthCounts", () => {
 			noneFit: 0,
 			notYetAsked: 12,
 			income: await countWhere("category_id IS NULL AND flag_income = 1"),
+			linkedWaiting: 0,
 		});
 		expect(counts.income).toBeGreaterThan(0);
 		expect(counts.needsCategory).toBe(12);

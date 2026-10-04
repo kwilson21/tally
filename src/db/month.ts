@@ -52,7 +52,8 @@ export async function loadMonth(
 		),
 		db
 			.prepare(
-				`SELECT ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income
+				`SELECT ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income,
+				   t.refund_of_id IS NOT NULL AS linked
 				 FROM transactions t
 				 ${COUNTED_JOINS}
 				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0`,
@@ -72,7 +73,8 @@ export async function loadMonth(
 				categoryId: number | null;
 				amountCents: number;
 				income: number;
+				linked: number;
 			}[]
-		).map((t) => ({ ...t, income: t.income === 1 })),
+		).map((t) => ({ ...t, income: t.income === 1, linked: t.linked === 1 })),
 	};
 }

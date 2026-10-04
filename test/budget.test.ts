@@ -44,6 +44,22 @@ const tx = (
 	income,
 });
 
+describe("summarizeMonth with a linked refund", () => {
+	it("counts its money as uncategorized but leaves the row count to its purchase", () => {
+		const summary = summarizeMonth({
+			month: "2026-09",
+			categories: CATEGORIES,
+			amounts: AMOUNTS,
+			transactions: [
+				tx(null, 8499),
+				{ categoryId: null, amountCents: -2499, income: false, linked: true },
+			],
+			unpaidDueBillsCents: 0,
+		});
+		expect(summary.uncategorized).toEqual({ spentCents: 6000, count: 1 });
+	});
+});
+
 describe("summarizeMonth", () => {
 	const summary = summarizeMonth({
 		month: "2026-09",

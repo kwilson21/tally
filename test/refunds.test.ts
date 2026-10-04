@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { summarizeMonth } from "../src/budget";
 import { lastMonthSpentCents } from "../src/db/budgets";
 import {
 	COUNTED_JOINS,
@@ -388,6 +389,13 @@ describe("linking a refund", () => {
 			.run();
 		// Only the purchase needs one; categorizing it covers the refund too.
 		expect(await needsCategoryCount(db, "2026-08")).toBe(before + 1);
+		// Home's count agrees with the list.
+		const home = summarizeMonth({
+			...(await loadMonth(db, "2026-08")),
+			month: "2026-08",
+			unpaidDueBillsCents: 0,
+		});
+		expect(home.uncategorized.count).toBe(before + 1);
 		const { html } = await get("/transactions?month=2026-08&uncategorized=1");
 		expect(rowHtml(html, PURCHASE)).toContain("Needs category");
 		expect(html).not.toContain(`/transactions/${REFUND}`);
@@ -401,8 +409,14 @@ describe("linking a refund", () => {
 		expect(counts.notYetAsked + counts.unsure + counts.noneFit).toBe(
 			counts.needsCategory,
 		);
+		// The refund waits with its purchase, so the categories still add up.
+		expect(counts.linkedWaiting).toBe(1);
 		expect(
-			counts.user + counts.merchantRule + counts.jev + counts.needsCategory,
+			counts.user +
+				counts.merchantRule +
+				counts.jev +
+				counts.needsCategory +
+				counts.linkedWaiting,
 		).toBe(counts.counted - counts.income);
 	});
 
@@ -452,7 +466,9 @@ describe("linking a refund", () => {
 		const october = await loadMonth(db, "2026-10");
 		expect(
 			september.transactions.filter((t) => t.amountCents === -2000),
-		).toEqual([{ categoryId: KIDS, amountCents: -2000, income: false }]);
+		).toEqual([
+			{ categoryId: KIDS, amountCents: -2000, income: false, linked: true },
+		]);
 		expect(october.transactions.some((t) => t.amountCents === -2000)).toBe(
 			false,
 		);
@@ -549,7 +565,14 @@ describe("splits unlink their refunds", () => {
 			(await loadMonth(db, "2026-09")).transactions.filter(
 				(t) => t.amountCents === -2000,
 			),
-		).toEqual([{ categoryId: GROCERIES, amountCents: -2000, income: false }]);
+		).toEqual([
+			{
+				categoryId: GROCERIES,
+				amountCents: -2000,
+				income: false,
+				linked: false,
+			},
+		]);
 	});
 
 	it("counts several refunds in the toast", async () => {

@@ -572,7 +572,7 @@ const COUNTED_BY = {
 /**
  * This month's numbers for the How Tally works page (spec §9): counted transactions, how many
  * need a category (the same set Home counts), and who categorized the rest. A linked refund goes
- * with its purchase, so it isn't a decision of its own here.
+ * with its purchase: categorized the same way, or waiting with it (linkedWaiting).
  */
 export async function monthCounts(
 	db: D1Database,
@@ -588,6 +588,8 @@ export async function monthCounts(
 	notYetAsked: number;
 	/** Income with no category: it needs none, so it isn't waiting. */
 	income: number;
+	/** Linked refunds waiting with a purchase that has no category; the purchase is the one to categorize. */
+	linkedWaiting: number;
 }> {
 	const row = await db
 		.prepare(
@@ -599,10 +601,11 @@ export async function monthCounts(
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NOT NULL), 0) AS unsure,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NULL), 0) AS noneFit,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NULL), 0) AS notYetAsked,
-				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income
+				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income,
+				COALESCE(SUM(t.refund_of_id IS NOT NULL AND ${COUNTED_CATEGORY} IS NULL AND t.flag_income = 0), 0) AS linkedWaiting
 			FROM transactions t
 			${COUNTED_JOINS}
-			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0 AND t.refund_of_id IS NULL`,
+			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0`,
 		)
 		.bind(month)
 		.first<{
@@ -615,6 +618,7 @@ export async function monthCounts(
 			noneFit: number;
 			notYetAsked: number;
 			income: number;
+			linkedWaiting: number;
 		}>();
 	return (
 		row ?? {
@@ -627,6 +631,7 @@ export async function monthCounts(
 			noneFit: 0,
 			notYetAsked: 0,
 			income: 0,
+			linkedWaiting: 0,
 		}
 	);
 }
