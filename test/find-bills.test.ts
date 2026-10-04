@@ -101,7 +101,6 @@ describe("finding bills", () => {
 		["excluded rows", "excluded=1"],
 		["income", "flag_income=1"],
 		["split parents", "is_split=1"],
-		["split children", "parent_id=1"],
 		["money-in rows", "amount_cents=-amount_cents"],
 	] as const)("filters %s", async (_label, mutation) => {
 		await resetDemo(env.DB, todayUtc());
@@ -152,6 +151,38 @@ describe("finding bills", () => {
 				"SELECT 1 FROM merchants WHERE raw_name='NOT LISTED'",
 			).first(),
 		).toBeNull();
+	});
+
+	it("suggests charges whose merchant has no row yet", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await insertCandidate("NO ROW", 0, false);
+		expect(await loadBillSuggestions(env.DB, todayUtc())).toContainEqual(
+			expect.objectContaining({ rawName: "NO ROW", displayName: "NO ROW" }),
+		);
+	});
+
+	it("counts a split part under its purchase's merchant", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await insertCandidate("SPLIT GYM");
+		const { results } = await env.DB.prepare(
+			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT GYM' ORDER BY date DESC LIMIT 1",
+		).all<{ id: number; account_id: number; date: string }>();
+		const parent = results[0] as {
+			id: number;
+			account_id: number;
+			date: string;
+		};
+		await env.DB.batch([
+			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?").bind(
+				parent.id,
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,parent_id) VALUES(?,?,1000,'PART',4,?)",
+			).bind(parent.account_id, parent.date, parent.id),
+		]);
+		expect(await loadBillSuggestions(env.DB, todayUtc())).toContainEqual(
+			expect.objectContaining({ rawName: "SPLIT GYM", chargeCount: 2 }),
+		);
 	});
 
 	it("filters merchants that already have a bill", async () => {
@@ -229,12 +260,13 @@ const daysAgo = (days: number) =>
 		.slice(0, 10);
 
 /** Two $10 charges 30 days apart, both inside the three-month window. */
-async function insertCandidate(rawName: string, notABill = 0) {
-	await env.DB.prepare(
-		"INSERT INTO merchants(raw_name,display_name,default_category_id,not_a_bill) VALUES(?,?,4,?)",
-	)
-		.bind(rawName, rawName, notABill)
-		.run();
+async function insertCandidate(rawName: string, notABill = 0, withRow = true) {
+	if (withRow)
+		await env.DB.prepare(
+			"INSERT INTO merchants(raw_name,display_name,default_category_id,not_a_bill) VALUES(?,?,4,?)",
+		)
+			.bind(rawName, rawName, notABill)
+			.run();
 	await env.DB.prepare(
 		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
 		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
