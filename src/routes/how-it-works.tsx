@@ -21,6 +21,7 @@ import {
 } from "../views/how-diagrams";
 import { Layout } from "../views/layout";
 import { SystemDiagram } from "../views/system-diagram";
+import { loadBillRows } from "./bills";
 
 export const howItWorks = new Hono<{ Bindings: Env }>();
 
@@ -106,13 +107,19 @@ howItWorks.get("/how-it-works", async (c) => {
 	if (c.env.DEMO !== "true") return c.notFound();
 
 	const month = todayUtc().slice(0, 7);
-	const [data, counts, excluded] = await Promise.all([
+	const [data, counts, excluded, billData] = await Promise.all([
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
 		excludedBreakdown(c.env.DB, month),
+		loadBillRows(c.env.DB),
 	]);
-	// Bills arrive in Phase 3; until then nothing is set aside for them, as on Home.
-	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents: 0 });
+	const unpaidDueBillsCents = billData.rows
+		.filter(
+			(bill) =>
+				bill.active && (bill.status === "due" || bill.status === "overdue"),
+		)
+		.reduce((sum, bill) => sum + bill.amountCents, 0);
+	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 
 	return c.html(
@@ -176,8 +183,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						<BudgetDiagram {...summary} />
 					</Diagram>
 					<Example>
-						{budgetExample(summary)} Bills that are due or overdue are also set
-						aside; the demo adds bills in a later phase.
+						{budgetExample(summary)} This includes the demo's due and overdue,
+						unpaid bills.
 					</Example>
 				</Section>
 

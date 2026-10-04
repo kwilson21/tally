@@ -129,3 +129,10 @@ html:not(.js) [data-money-js] {
 		animation: none;
 	}
 }
+/* A yearly bill needs one extra calendar field; CSS keeps the server-rendered form complete. */
+.bill-month {
+	display: none;
+}
+.bill-form:has(input[name="frequency"][value="yearly"]:checked) .bill-month {
+	display: flex;
+}

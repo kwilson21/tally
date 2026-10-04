@@ -1,4 +1,4 @@
-import { buildSeed } from "./seed";
+import { buildSeed, monthOffset } from "./seed";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
 const TABLES_CHILD_FIRST = [
@@ -30,6 +30,17 @@ export function canResetDemo(env: {
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
 export async function resetDemo(db: D1Database, today: string): Promise<void> {
 	const seed = buildSeed(today);
+	// Early in a month, Water's payment moves to today so it is still in this
+	// month's period, never in the future (paid late from the 2nd on).
+	const todayDay = Number(today.slice(8, 10));
+	if (todayDay < 4) {
+		const waterPayment = seed.transactions.find(
+			(transaction) =>
+				transaction.rawName === "GOOGLE *YOUTUBE" &&
+				transaction.date.startsWith(today.slice(0, 7)),
+		);
+		if (waterPayment) waterPayment.date = today;
+	}
 	const b = (v: boolean) => (v ? 1 : 0);
 
 	await db.batch([
@@ -103,5 +114,99 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					b(t.isSplit),
 				),
 		),
+		...demoBills(today, seed.transactions).map((bill) =>
+			db
+				.prepare(
+					"INSERT INTO bills (id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,active) VALUES (?,?,?,?,?,?,?,?,?)",
+				)
+				.bind(...bill),
+		),
+		db
+			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
+			SELECT 1, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='APPLE.COM/BILL' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
+			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
+		db
+			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
+			SELECT 6, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='YOUTH SOCCER LEAGUE' AND date = ? ORDER BY id LIMIT 1`)
+			.bind(monthOffset(today, 3).slice(0, 4), `${monthOffset(today, 3)}-14`),
+		db
+			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
+			SELECT 2, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='GOOGLE *YOUTUBE' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
+			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 	]);
+}
+
+function demoBills(
+	today: string,
+	transactions: { date: string; rawName: string; amountCents: number }[],
+): (string | number | null)[][] {
+	const day = Number(today.slice(8, 10));
+	// The soccer payment the yearly bill is linked to, so its amount matches.
+	const paidSoccer = {
+		cents:
+			transactions.find(
+				(t) =>
+					t.rawName === "YOUTH SOCCER LEAGUE" &&
+					t.date === `${monthOffset(today, 3)}-14`,
+			)?.amountCents ?? 9000,
+	};
+	const paymentDay = (rawName: string) =>
+		Number(
+			[...transactions]
+				.reverse()
+				.find((transaction) => transaction.rawName === rawName)
+				?.date.slice(8) ?? day,
+		);
+	const plusThree = new Date(`${today}T00:00:00Z`);
+	plusThree.setUTCDate(plusThree.getUTCDate() + 3);
+	const dueSoon = plusThree.getUTCDate();
+	return [
+		[
+			1,
+			"Streaming",
+			299,
+			paymentDay("APPLE.COM/BILL"),
+			"monthly",
+			null,
+			5,
+			"APPLE.COM/BILL",
+			1,
+		],
+		[
+			2,
+			"Water",
+			1399,
+			Math.max(1, paymentDay("GOOGLE *YOUTUBE") - 3),
+			"monthly",
+			null,
+			5,
+			"GOOGLE *YOUTUBE",
+			1,
+		],
+		[
+			3,
+			"Electric",
+			14200,
+			day === 1 ? 28 : day - 1,
+			"monthly",
+			null,
+			5,
+			"THE HOME DEPOT #6612",
+			1,
+		],
+		[5, "Internet", 6500, dueSoon, "monthly", null, 5, "AMAZON.COM*RT4K2", 1],
+		// Yearly, paid three months ago, so its next one is upcoming (decision 62).
+		[
+			6,
+			"Soccer league",
+			paidSoccer.cents,
+			14,
+			"yearly",
+			Number(monthOffset(today, 3).slice(5)),
+			4,
+			"YOUTH SOCCER LEAGUE",
+			1,
+		],
+		[7, "Old phone plan", 4500, 15, "monthly", null, 5, "GOOGLE *YOUTUBE", 0],
+	];
 }

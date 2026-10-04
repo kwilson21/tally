@@ -92,6 +92,10 @@ describe("data exports", () => {
 	});
 
 	it("includes every specified table while exposing only safe bank and document fields", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+		]);
 		const secret = "never-export-this-token";
 		await env.DB.prepare(
 			"UPDATE plaid_items SET access_token_encrypted = ? WHERE id = 1",

@@ -13,6 +13,7 @@ import {
 import { loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
 import { AdjustLink } from "../views/adjust-link";
+import { BillRow } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
@@ -22,6 +23,7 @@ import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { ThingsToTry } from "../views/things-to-try";
+import { loadBillRows } from "./bills";
 
 type App = { Bindings: Env };
 export const home = new Hono<App>();
@@ -81,8 +83,15 @@ async function renderHome(
 ) {
 	const month = todayUtc().slice(0, 7);
 	const data = await loadMonth(c.env.DB, month);
-	// Bills arrive in Phase 3; until then nothing is set aside for them.
-	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents: 0 });
+	const billData = await loadBillRows(c.env.DB);
+	const dueBills = billData.rows.filter(
+		(b) => b.active && (b.status === "due" || b.status === "overdue"),
+	);
+	const summary = summarizeMonth({
+		month,
+		...data,
+		unpaidDueBillsCents: dueBills.reduce((sum, b) => sum + b.amountCents, 0),
+	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));
 	const notBudgeted = data.categories.filter(
@@ -224,6 +233,26 @@ async function renderHome(
 								/>
 							)}
 						</section>
+						{dueBills.length > 0 && (
+							<section class="mt-8" aria-labelledby="home-bills-title">
+								<div class="flex items-baseline justify-between">
+									<h2
+										id="home-bills-title"
+										class="font-serif text-2xl font-semibold"
+									>
+										Bills due soon
+									</h2>
+									<a href="/bills" class="min-h-11 py-2 text-accent">
+										All bills
+									</a>
+								</div>
+								<ul class="divide-y divide-rule">
+									{dueBills.slice(0, 3).map((bill) => (
+										<BillRow bill={bill} today={billData.today} />
+									))}
+								</ul>
+							</section>
+						)}
 						{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
 						{demo && (
 							<div class="mt-8">
