@@ -269,7 +269,7 @@ export async function saveSplit(
 ) {
 	const parent = await db
 		.prepare(
-			"SELECT account_id AS accountId, date, raw_name AS rawName, excluded FROM transactions WHERE id = ? AND parent_id IS NULL",
+			"SELECT account_id AS accountId, date, raw_name AS rawName, excluded, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy FROM transactions WHERE id = ? AND parent_id IS NULL",
 		)
 		.bind(parentId)
 		.first<{
@@ -277,6 +277,10 @@ export async function saveSplit(
 			date: string;
 			rawName: string;
 			excluded: number;
+			income: number;
+			incomeSource: string | null;
+			creditReviewed: number | null;
+			creditReviewedBy: string | null;
 		}>();
 	if (!parent) throw new Error(`No transaction ${parentId}`);
 	await db.batch([
@@ -284,8 +288,9 @@ export async function saveSplit(
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, parent_id, plaid_transaction_id, updated_by)
-			VALUES (?, ?, ?, ?, ?, 'user', ?, ?, NULL, ?)`)
+			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, parent_id, plaid_transaction_id, updated_by,
+			 flag_income, income_source, credit_reviewed, credit_reviewed_by)
+			VALUES (?, ?, ?, ?, ?, 'user', ?, ?, NULL, ?, ?, ?, ?, ?)`)
 				.bind(
 					parent.accountId,
 					parent.date,
@@ -295,6 +300,10 @@ export async function saveSplit(
 					parent.excluded,
 					parentId,
 					by,
+					parent.income,
+					parent.incomeSource,
+					parent.creditReviewed,
+					parent.creditReviewedBy,
 				),
 		),
 		db

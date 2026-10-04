@@ -81,6 +81,52 @@ describe("transaction splits", () => {
 		).toBe(0);
 	});
 
+	it("keeps reviewed refund amounts in spending when split, re-split, and restored", async () => {
+		const credit = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).first<{ id: number }>();
+		const id = credit?.id as number;
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -10000, credit_reviewed = 1 WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const before = await env.DB.prepare(
+			"SELECT SUM(amount_cents) AS cents FROM transactions WHERE excluded = 0 AND is_split = 0 AND (amount_cents >= 0 OR credit_reviewed = 1 OR flag_income = 1)",
+		).first<{ cents: number }>();
+		await post(`/transactions/${id}/split`, [
+			["part_category", "1"],
+			["part_category", "5"],
+			["part_amount", "60.00"],
+			["part_amount", "40.00"],
+			["back", "/transactions"],
+		]);
+		const firstSplit = await env.DB.prepare(
+			"SELECT SUM(amount_cents) AS cents, SUM(credit_reviewed) AS reviewed FROM transactions WHERE parent_id = ?",
+		)
+			.bind(id)
+			.first<{ cents: number; reviewed: number }>();
+		expect(firstSplit).toEqual({ cents: -10000, reviewed: 2 });
+		await post(`/transactions/${id}/split`, [
+			["part_category", "1"],
+			["part_category", "5"],
+			["part_amount", "30.00"],
+			["part_amount", "70.00"],
+			["back", "/transactions"],
+		]);
+		const secondSplit = await env.DB.prepare(
+			"SELECT SUM(amount_cents) AS cents, SUM(credit_reviewed) AS reviewed FROM transactions WHERE parent_id = ?",
+		)
+			.bind(id)
+			.first<{ cents: number; reviewed: number }>();
+		expect(secondSplit).toEqual({ cents: -10000, reviewed: 2 });
+		await post(`/transactions/${id}/split/remove`, [["back", "/transactions"]]);
+		const after = await env.DB.prepare(
+			"SELECT SUM(amount_cents) AS cents FROM transactions WHERE excluded = 0 AND is_split = 0 AND (amount_cents >= 0 OR credit_reviewed = 1 OR flag_income = 1)",
+		).first<{ cents: number }>();
+		expect(after?.cents).toBe(before?.cents);
+	});
+
 	it("excluding a split parent excludes its children", async () => {
 		const costco = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
