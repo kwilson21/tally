@@ -33,6 +33,7 @@ import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
+import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
 import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
@@ -708,6 +709,28 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="selectable-transaction-row"
+				title="SelectableTransactionRow"
+				tier="visual"
+				components={["SelectableTransactionRow"]}
+				sentence="One transaction in select mode is a large label whose round checkbox takes keyboard focus and gains the checked Chip look."
+			>
+				<State label="Available to select">
+					<ul class="max-w-xl">
+						{TRANSACTION_ROWS.slice(0, 1).map((state) => (
+							<SelectableTransactionRow row={state.row} />
+						))}
+					</ul>
+				</State>
+				<State label="Selected">
+					<ul class="max-w-xl">
+						{TRANSACTION_ROWS.slice(1, 2).map((state) => (
+							<SelectableTransactionRow row={state.row} checked />
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="empty-state"

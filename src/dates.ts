@@ -40,9 +40,14 @@ const SHORT = [
 	"Dec",
 ];
 
+/** "2026-09-21" → "Sep 21". */
+export function shortDay(date: string): string {
+	return `${SHORT[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
+}
+
 /** "Today, Sep 22", "Sep 21", or "Dec 31, 2025", from YYYY-MM-DD strings. */
 export function dayLabel(date: string, today: string): string {
-	const label = `${SHORT[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
+	const label = shortDay(date);
 	if (date === today) return `Today, ${label}`;
 	const year = date.slice(0, 4);
 	return year === today.slice(0, 4) ? label : `${label}, ${year}`;
