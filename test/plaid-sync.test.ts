@@ -529,7 +529,7 @@ describe("syncItem", () => {
 		await saveJevResult(env.DB, tx?.id as number, {
 			categoryId: null,
 			suggestedCategoryId: null,
-			confidence: 0.4,
+			confidence: 0.95,
 			flags: { transfer: false, reimbursement: false, income: true },
 		});
 		for (const amount of [-3000, -3000]) {
@@ -549,7 +549,7 @@ describe("syncItem", () => {
 				).first(),
 			).toEqual({
 				credit_reviewed: 1,
-				category_confidence: 0.4,
+				category_confidence: 0.95,
 				jev_category_id: null,
 			});
 		}
