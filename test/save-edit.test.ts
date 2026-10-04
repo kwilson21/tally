@@ -93,15 +93,24 @@ describe("saveEdit", () => {
 	it("preserves a person's non-income refund review when Jev later flags income", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 		await db
-			.prepare("UPDATE transactions SET amount_cents = -1200, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?")
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
 			.bind(id)
 			.run();
 		await saveEdit(db, id, edit({ creditReviewed: true }), "demo");
 		expect(
-			await db.prepare(
-				"SELECT flag_income, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
-			).bind(id).first(),
-		).toEqual({ flag_income: 0, income_source: "user", credit_reviewed_by: "user" });
+			await db
+				.prepare(
+					"SELECT flag_income, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed_by: "user",
+		});
 		await saveJevResult(db, id, {
 			categoryId: null,
 			suggestedCategoryId: null,
@@ -109,10 +118,17 @@ describe("saveEdit", () => {
 			flags: { transfer: false, reimbursement: false, income: true },
 		});
 		expect(
-			await db.prepare(
-				"SELECT flag_income, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
-			).bind(id).first(),
-		).toEqual({ flag_income: 0, income_source: "user", credit_reviewed_by: "user" });
+			await db
+				.prepare(
+					"SELECT flag_income, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed_by: "user",
+		});
 	});
 
 	it("marks a changed category as a person's choice, and Home follows", async () => {

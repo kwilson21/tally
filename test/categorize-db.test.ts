@@ -103,8 +103,16 @@ describe("applyMerchantRules", () => {
 	it("keeps merchant-rule credits queued for Jev's separate income classification", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 		await db.batch([
-			db.prepare("UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?").bind(id),
-			db.prepare("UPDATE merchants SET default_category_id = ? WHERE raw_name = 'SQ *LOCAL BAKERY 4432'").bind(GROCERIES),
+			db
+				.prepare(
+					"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?",
+				)
+				.bind(id),
+			db
+				.prepare(
+					"UPDATE merchants SET default_category_id = ? WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+				)
+				.bind(GROCERIES),
 		]);
 		await applyMerchantRules(db);
 		expect(await pendingForJev(db, 40)).toContainEqual(

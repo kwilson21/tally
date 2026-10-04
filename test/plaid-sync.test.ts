@@ -425,9 +425,7 @@ describe("syncItem", () => {
 			await syncItem(
 				opts,
 				id,
-				plaidFetch(() =>
-					response(page({ added: [transaction({ amount })] })),
-				),
+				plaidFetch(() => response(page({ added: [transaction({ amount })] }))),
 			);
 			expect(
 				await env.DB.prepare(
