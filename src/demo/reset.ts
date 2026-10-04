@@ -1,4 +1,4 @@
-import { buildSeed } from "./seed";
+import { buildSeed, monthOffset } from "./seed";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
 const TABLES_CHILD_FIRST = [
@@ -127,6 +127,10 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 		db
 			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
+			SELECT 6, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='YOUTH SOCCER LEAGUE' AND date = ? ORDER BY id LIMIT 1`)
+			.bind(monthOffset(today, 3).slice(0, 4), `${monthOffset(today, 3)}-14`),
+		db
+			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
 			SELECT 2, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='GOOGLE *YOUTUBE' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
 			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 	]);
@@ -134,10 +138,18 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 
 function demoBills(
 	today: string,
-	transactions: { date: string; rawName: string }[],
+	transactions: { date: string; rawName: string; amountCents: number }[],
 ): (string | number | null)[][] {
 	const day = Number(today.slice(8, 10));
-	const month = Number(today.slice(5, 7));
+	// The soccer payment the yearly bill is linked to, so its amount matches.
+	const paidSoccer = {
+		cents:
+			transactions.find(
+				(t) =>
+					t.rawName === "YOUTH SOCCER LEAGUE" &&
+					t.date === `${monthOffset(today, 3)}-14`,
+			)?.amountCents ?? 9000,
+	};
 	const paymentDay = (rawName: string) =>
 		Number(
 			[...transactions]
@@ -183,15 +195,16 @@ function demoBills(
 			1,
 		],
 		[5, "Internet", 6500, dueSoon, "monthly", null, 5, "AMAZON.COM*RT4K2", 1],
+		// Yearly, paid three months ago, so its next one is upcoming (decision 62).
 		[
 			6,
-			"Car insurance",
-			11840,
-			15,
+			"Soccer league",
+			paidSoccer.cents,
+			14,
 			"yearly",
-			month === 12 ? 1 : month + 1,
-			3,
-			"CHEVRON 0098812",
+			Number(monthOffset(today, 3).slice(5)),
+			4,
+			"YOUTH SOCCER LEAGUE",
 			1,
 		],
 		[7, "Old phone plan", 4500, 15, "monthly", null, 5, "GOOGLE *YOUTUBE", 0],

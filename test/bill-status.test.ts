@@ -11,8 +11,11 @@ describe("bill status", () => {
 			status: "due",
 		});
 		expect(
-			billOccurrence({ frequency: "monthly", dueDay: 31 }, "2026-04-22", false)
-				.status,
+			billOccurrence(
+				{ frequency: "monthly", dueDay: 31 },
+				"2026-04-22",
+				new Set(["2026-03"]),
+			).status,
 		).toBe("upcoming");
 	});
 
@@ -65,13 +68,58 @@ describe("bill status", () => {
 		});
 	});
 
-	it("does not leave yearly bills overdue outside their anchor month", () => {
-		expect(
-			billOccurrence(
-				{ frequency: "yearly", dueDay: 15, anchorMonth: 2 },
-				"2026-10-04",
-				false,
-			),
-		).toMatchObject({ dueDate: "2027-02-15", status: "upcoming" });
+	describe("a missed bill stays overdue until paid or the next one is due (decision 62)", () => {
+		const monthly28 = { frequency: "monthly", dueDay: 28 } as const;
+		it("keeps last month's missed bill overdue into this month", () => {
+			expect(billOccurrence(monthly28, "2026-10-08", false)).toMatchObject({
+				dueDate: "2026-09-28",
+				status: "overdue",
+			});
+			expect(billOccurrence(monthly28, "2026-10-20", false)).toMatchObject({
+				dueDate: "2026-09-28",
+				status: "overdue",
+			});
+		});
+		it("lets the next one take its place once it is due", () => {
+			expect(billOccurrence(monthly28, "2026-10-21", false)).toMatchObject({
+				dueDate: "2026-10-28",
+				status: "due",
+			});
+		});
+		it("shows last month's paid bill as the next upcoming one", () => {
+			expect(
+				billOccurrence(monthly28, "2026-10-08", new Set(["2026-09"])),
+			).toMatchObject({ dueDate: "2026-10-28", status: "upcoming" });
+		});
+		it("keeps this month's bill paid until the next one is due", () => {
+			const bill = { frequency: "monthly", dueDay: 2 } as const;
+			expect(
+				billOccurrence(bill, "2026-10-20", new Set(["2026-10"])),
+			).toMatchObject({ dueDate: "2026-10-02", status: "paid" });
+			expect(
+				billOccurrence(bill, "2026-10-28", new Set(["2026-10"])),
+			).toMatchObject({ dueDate: "2026-11-02", status: "due" });
+			expect(billOccurrence(bill, "2026-10-28", false)).toMatchObject({
+				dueDate: "2026-11-02",
+				status: "due",
+			});
+		});
+		it("applies the same rule to yearly bills", () => {
+			const bill = { frequency: "yearly", dueDay: 15, anchorMonth: 2 } as const;
+			expect(billOccurrence(bill, "2026-10-04", false)).toMatchObject({
+				dueDate: "2026-02-15",
+				status: "overdue",
+			});
+			expect(
+				billOccurrence(bill, "2026-10-04", new Set(["2026"])),
+			).toMatchObject({ dueDate: "2027-02-15", status: "upcoming" });
+			expect(
+				billOccurrence(bill, "2026-02-20", new Set(["2026"])),
+			).toMatchObject({ dueDate: "2026-02-15", status: "paid" });
+			expect(billOccurrence(bill, "2027-02-10", false)).toMatchObject({
+				dueDate: "2027-02-15",
+				status: "due",
+			});
+		});
 	});
 });

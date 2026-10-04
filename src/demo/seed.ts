@@ -207,7 +207,7 @@ const HISTORY: Record<number, number[]> = {
 	[HOUSEHOLD]: [12000, 21000, 14000, 9500, 18000],
 };
 
-function monthOffset(today: string, monthsAgo: number): string {
+export function monthOffset(today: string, monthsAgo: number): string {
 	const [y, m] = today.split("-").map(Number) as [number, number];
 	const index = y * 12 + (m - 1) - monthsAgo;
 	return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;

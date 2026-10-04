@@ -64,8 +64,8 @@ export async function loadBillRows(db: D1Database, today = todayUtc()) {
 			 LEFT JOIN transactions t ON t.id=bp.transaction_id
 			 ORDER BY b.id`,
 		)
-		// Only the periods billOccurrence can pick: last month on, or this year on.
-		.bind(previousMonth(today), today.slice(0, 4))
+		// Only the periods billOccurrence can pick: last month on, or last year on.
+		.bind(previousMonth(today), String(Number(today.slice(0, 4)) - 1))
 		.all<DbBill>();
 	const result: (BillRowData & { active: boolean })[] = [];
 	const byBill = new Map<number, DbBill[]>();

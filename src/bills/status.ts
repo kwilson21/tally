@@ -39,7 +39,12 @@ function daysBetween(from: string, to: string) {
 	return Math.round((utc(to) - utc(from)) / 86_400_000);
 }
 
-/** Select the occurrence a person needs to act on, including the next calendar period. */
+/**
+ * The occurrence a person needs to act on (decision 62): the latest one due by a
+ * week from now. A missed bill stays overdue until it is paid or the next one is
+ * due, which then takes its place. A paid occurrence from an earlier month gives
+ * way to the next one, so "Paid" always means paid this month.
+ */
 export function billOccurrence(
 	bill: BillSchedule,
 	today: string,
@@ -47,40 +52,32 @@ export function billOccurrence(
 ): { dueDate: string; period: string; status: BillStatus } {
 	const year = Number(today.slice(0, 4));
 	const month = Number(today.slice(5, 7));
-	let current: ReturnType<typeof occurrence>;
-	let next: ReturnType<typeof occurrence>;
+	let occurrences: ReturnType<typeof occurrence>[];
 	if (bill.frequency === "monthly") {
-		current = occurrence(bill, year, month);
+		const [previousYear, previousMonth] =
+			month === 1 ? [year - 1, 12] : [year, month - 1];
 		const [nextYear, nextMonth] = addMonth(year, month) as [number, number];
-		next = occurrence(bill, nextYear, nextMonth);
-		// Before this month's due window, retain an unpaid prior occurrence rather
-		// than making a missed bill disappear as merely upcoming on the first.
-		if (daysBetween(today, current.dueDate) > 7) {
-			const [previousYear, previousMonth] =
-				month === 1 ? [year - 1, 12] : [year, month - 1];
-			const previous = occurrence(bill, previousYear, previousMonth);
-			if (
-				daysBetween(today, previous.dueDate) >= -7 &&
-				!isLinkedPeriod(linked, previous.period)
-			)
-				current = previous;
-		}
+		occurrences = [
+			occurrence(bill, previousYear, previousMonth),
+			occurrence(bill, year, month),
+			occurrence(bill, nextYear, nextMonth),
+		];
 	} else {
 		const anchor = bill.anchorMonth ?? 1;
-		current = occurrence(bill, year, anchor);
-		next = occurrence(bill, year + 1, anchor);
-		// A yearly bill is not overdue for the rest of the year. Once its month
-		// has passed, the next annual occurrence is the useful one to show.
-		if (month > anchor) current = next;
+		occurrences = [year - 1, year, year + 1].map((y) =>
+			occurrence(bill, y, anchor),
+		);
 	}
-
 	const isLinked = (period: string) => isLinkedPeriod(linked, period);
-	const nextDistance = daysBetween(today, next.dueDate);
-	if (bill.frequency === "monthly" && nextDistance >= 0 && nextDistance <= 7)
-		current = next;
-	else if (isLinked(current.period) && nextDistance >= 0 && nextDistance <= 7)
-		current = next;
-
+	// The latest occurrence due by a week from now; the one after it is upcoming.
+	let index = 0;
+	occurrences.forEach((o, i) => {
+		if (daysBetween(today, o.dueDate) <= 7) index = i;
+	});
+	const shown = occurrences[index] as ReturnType<typeof occurrence>;
+	if (isLinked(shown.period) && shown.dueDate.slice(0, 7) < today.slice(0, 7))
+		index += 1;
+	const current = occurrences[index] as ReturnType<typeof occurrence>;
 	const distance = daysBetween(today, current.dueDate);
 	const status: BillStatus = isLinked(current.period)
 		? "paid"
