@@ -18,6 +18,24 @@ const charge = (date: string, amountCents = 1000): BillFindingCharge => ({
 });
 
 describe("finding bills", () => {
+	it("allows other purchases between the monthly pair, and anchors on the latest charge", () => {
+		const [suggestion] = findBillSuggestions([
+			charge("2026-08-01", 1000),
+			charge("2026-08-15", 5000),
+			charge("2026-09-01", 1000),
+		]);
+		expect(suggestion?.amountCents).toBe(1000);
+		expect(suggestion?.dueDay).toBe(1);
+		// A one-off latest purchase with no partner a month earlier doesn't qualify.
+		expect(
+			findBillSuggestions([
+				charge("2026-08-23", 23000),
+				charge("2026-09-23", 22400),
+				charge("2026-10-04", 9630),
+			]),
+		).toHaveLength(0);
+	});
+
 	it("requires two eligible charges 25–35 days apart and within 10%", () => {
 		expect(
 			findBillSuggestions([charge("2026-08-01"), charge("2026-09-01", 1100)]),
