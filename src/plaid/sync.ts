@@ -266,6 +266,29 @@ export async function syncItem(
 					statements.push(accountUpsert(env, itemRowId, lockId, account));
 				}
 			}
+			// A bank amount change invalidates the user's parts. Remove children before updating the
+			// parent in this same page batch; date-only changes keep the parts and move their dates.
+			for (const transaction of [...posted, ...page.modified]) {
+				const cents = plaidAmountToCents(transaction.amount);
+				statements.push(
+					env.DB.prepare(
+						`DELETE FROM transactions WHERE parent_id = (
+							SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ?
+						) AND ${OWNS_LOCK}`,
+					).bind(transaction.transaction_id, cents, itemRowId, lockId),
+					env.DB.prepare(
+						`UPDATE transactions SET date = ? WHERE parent_id = (
+							SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents = ?
+						) AND ${OWNS_LOCK}`,
+					).bind(
+						transaction.date,
+						transaction.transaction_id,
+						cents,
+						itemRowId,
+						lockId,
+					),
+				);
+			}
 			const firstAddedStatement = statements.length;
 			for (const transaction of posted) {
 				statements.push(
@@ -276,6 +299,11 @@ export async function syncItem(
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
+							category_id = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_id END,
+							category_source = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_source END,
+							category_confidence = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_confidence END,
+							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
+							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
 							raw_name = excluded.raw_name,
 							plaid_category = excluded.plaid_category,
@@ -295,11 +323,21 @@ export async function syncItem(
 			for (const transaction of page.modified) {
 				statements.push(
 					env.DB.prepare(
-						`UPDATE transactions SET date = ?, amount_cents = ?, raw_name = ?,
-							plaid_category = ?, updated_at = datetime('now')
+						`UPDATE transactions SET date = ?,
+							category_id = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_id END,
+							category_source = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_source END,
+							category_confidence = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_confidence END,
+							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
+							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
+							amount_cents = ?, raw_name = ?, plaid_category = ?, updated_at = datetime('now')
 						 WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
 					).bind(
 						transaction.date,
+						plaidAmountToCents(transaction.amount),
+						plaidAmountToCents(transaction.amount),
+						plaidAmountToCents(transaction.amount),
+						plaidAmountToCents(transaction.amount),
+						plaidAmountToCents(transaction.amount),
 						plaidAmountToCents(transaction.amount),
 						transaction.name,
 						transaction.personal_finance_category?.primary ?? null,

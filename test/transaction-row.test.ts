@@ -54,6 +54,14 @@ describe("rowCaption", () => {
 			rowCaption({ ...base, displayName: base.rawName }).caption,
 		).toBeNull();
 	});
+
+	it("explains when a bank amount change removed a saved split", () => {
+		expect(rowCaption({ ...base, splitRemovedFromCents: 1234 })).toEqual({
+			kind: "needs",
+			caption: "The bank changed this from $12.34, so its split was removed.",
+			tag: true,
+		});
+	});
 });
 
 describe("TransactionRow", () => {

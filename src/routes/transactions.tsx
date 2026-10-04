@@ -613,25 +613,32 @@ function SplitSheet({
 	categories,
 	values,
 	error,
+	focusNewPart = false,
 }: {
 	tx: TransactionDetail;
 	back: string;
 	categories: Category[];
 	values: SplitValue[];
 	error?: string;
+	focusNewPart?: boolean;
 }) {
 	return (
 		<BottomSheet labelledBy="split-title" closeHref={back}>
+			<p class="text-sm text-muted">{tx.rawName}</p>
 			<h2
 				id="split-title"
 				tabindex={-1}
-				autofocus
-				class="font-serif text-4xl font-semibold outline-none"
+				autofocus={!focusNewPart}
+				class="font-serif text-4xl font-semibold tracking-tight outline-none"
 			>
-				Split {tx.displayName}
+				{tx.displayName}
 			</h2>
 			<p class="font-serif text-4xl font-semibold">
 				{formatCents(tx.amountCents, { signed: true })}
+			</p>
+			<p class="text-muted">
+				{dayLabel(tx.date, todayUtc())} · {tx.accountName}
+				{tx.accountMask ? ` ••${tx.accountMask}` : ""}
 			</p>
 			<SplitForm
 				id={tx.id}
@@ -640,6 +647,7 @@ function SplitSheet({
 				values={values}
 				back={back}
 				error={error}
+				focusNewPart={focusNewPart}
 			/>
 		</BottomSheet>
 	);
@@ -732,7 +740,13 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	}
 	return renderList(c, filtersFrom(back), {
 		sheet: () => (
-			<SplitSheet tx={tx} back={back} categories={categories} values={values} />
+			<SplitSheet
+				tx={tx}
+				back={back}
+				categories={categories}
+				values={values}
+				focusNewPart={form.get("add") === "1"}
+			/>
 		),
 	});
 });

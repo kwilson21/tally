@@ -73,8 +73,12 @@ describe("listTransactions", () => {
 
 	it("filters by category", async () => {
 		const { rows } = await list("category=1");
-		expect(rows).toHaveLength(5);
+		expect(rows).toHaveLength(4);
 		expect(rows.every((r) => r.categoryName === "Groceries")).toBe(true);
+		expect(
+			rows.some((r) => r.rawName === "COSTCO WHSE #0431" && r.isSplit),
+		).toBe(false);
+		expect(rows.some((r) => r.parentName === "Costco")).toBe(true);
 	});
 
 	it("searches display name and raw name, and treats % literally", async () => {

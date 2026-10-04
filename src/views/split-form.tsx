@@ -1,4 +1,3 @@
-import { formatCents } from "../money";
 import { splitStatus } from "../transactions/split";
 import { Button } from "./button";
 import { Icon } from "./icons";
@@ -18,7 +17,6 @@ export function SplitLine({
 	return (
 		<p
 			id="split-line"
-			aria-live="polite"
 			class={`flex items-center gap-2 text-lg font-medium ${status.kind === "over" ? "text-over" : "text-ink"}`}
 		>
 			{status.kind === "done" && <Icon name="check" class="size-5" />}
@@ -34,6 +32,7 @@ export function SplitForm({
 	values,
 	back,
 	error,
+	focusNewPart = false,
 }: {
 	id: number;
 	parentCents: number;
@@ -41,6 +40,7 @@ export function SplitForm({
 	values: SplitValue[];
 	back: string;
 	error?: string;
+	focusNewPart?: boolean;
 }) {
 	return (
 		<form
@@ -54,10 +54,12 @@ export function SplitForm({
 		>
 			<input type="hidden" name="back" value={back} />
 			<div class="flex items-center justify-between gap-3">
-				<SplitLine
-					parentCents={parentCents}
-					amounts={values.map((v) => v.amount)}
-				/>
+				<div id="split-line-region" aria-live="polite" aria-atomic="true">
+					<SplitLine
+						parentCents={parentCents}
+						amounts={values.map((v) => v.amount)}
+					/>
+				</div>
 				<Button kind="text" type="submit" name="add" value="1" formnovalidate>
 					Add a part
 				</Button>
@@ -68,15 +70,18 @@ export function SplitForm({
 				</p>
 			)}
 			{values.map((value, index) => (
-				<div class="flex flex-col gap-2 border-t border-rule pt-3">
-					<label for={`part-category-${index}`} class="text-base text-ink">
+				<div
+					class={`flex flex-col gap-2 ${index > 0 ? "border-t border-rule pt-3" : ""}`}
+				>
+					<label for={`part-category-${index}`} class="sr-only">
 						Part {index + 1} category
 					</label>
 					<select
 						id={`part-category-${index}`}
 						name="part_category"
-						class="min-h-11 rounded-control border border-rule bg-paper px-3"
+						class="min-h-11 rounded-full border border-rule bg-paper px-3"
 						required
+						autofocus={focusNewPart && index === values.length - 1}
 					>
 						<option value="">Pick a category</option>
 						{categories.map((cat) => (
@@ -88,26 +93,22 @@ export function SplitForm({
 							</option>
 						))}
 					</select>
-					<div
-						hx-post={`/transactions/${id}/split/line`}
-						hx-trigger="input changed delay:300ms"
-						hx-target="#split-line"
-						hx-select="#split-line"
-						hx-swap="outerHTML"
-						hx-include="closest form"
-					>
-						<MoneyInput
-							id={`part-amount-${index}`}
-							name="part_amount"
-							label={`Part ${index + 1} amount`}
-							value={value.amount}
-						/>
-					</div>
+					<MoneyInput
+						id={`part-amount-${index}`}
+						name="part_amount"
+						label={`Part ${index + 1} amount`}
+						value={value.amount}
+						inputAttributes={{
+							"hx-post": `/transactions/${id}/split/line`,
+							"hx-trigger": "input delay:300ms",
+							"hx-target": "#split-line-region",
+							"hx-select": "#split-line",
+							"hx-swap": "innerHTML",
+							"hx-include": "closest form",
+						}}
+					/>
 				</div>
 			))}
-			<p class="text-sm text-muted">
-				Parts must total {formatCents(Math.abs(parentCents))}.
-			</p>
 			<div class="grid grid-cols-2 gap-3">
 				<Button href={back} kind="secondary">
 					Cancel

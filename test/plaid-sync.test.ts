@@ -142,6 +142,111 @@ describe("syncItem", () => {
 		]);
 	});
 
+	it("removes split children and remembers the old total when the bank changes an amount", async () => {
+		const id = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() => response(page({ added: [transaction()] }))),
+		);
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id AS accountId, date, raw_name AS rawName FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number; accountId: number; date: string; rawName: string }>();
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET is_split = 1, category_id = 2 WHERE id = ?",
+			).bind(parent?.id),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (?, ?, 600, ?, ?), (?, ?, 634, ?, ?)",
+			).bind(
+				parent?.accountId,
+				parent?.date,
+				parent?.rawName,
+				parent?.id,
+				parent?.accountId,
+				parent?.date,
+				parent?.rawName,
+				parent?.id,
+			),
+		]);
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({ modified: [transaction({ amount: 20, date: "2026-09-28" })] }),
+				),
+			),
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, category_id, is_split, split_removed_from_cents FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first(),
+		).toEqual({
+			amount_cents: 2000,
+			category_id: null,
+			is_split: 0,
+			split_removed_from_cents: 1234,
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
+			)
+				.bind(parent?.id)
+				.first(),
+		).toEqual({ n: 0 });
+	});
+
+	it("moves split children with a date-only bank change", async () => {
+		const id = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() => response(page({ added: [transaction()] }))),
+		);
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id AS accountId, date, raw_name AS rawName FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number; accountId: number; date: string; rawName: string }>();
+		await env.DB.batch([
+			env.DB.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?").bind(
+				parent?.id,
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (?, ?, 600, ?, ?), (?, ?, 634, ?, ?)",
+			).bind(
+				parent?.accountId,
+				parent?.date,
+				parent?.rawName,
+				parent?.id,
+				parent?.accountId,
+				parent?.date,
+				parent?.rawName,
+				parent?.id,
+			),
+		]);
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(page({ modified: [transaction({ date: "2026-09-28" })] })),
+			),
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ? AND date = '2026-09-28'",
+			)
+				.bind(parent?.id)
+				.first(),
+		).toEqual({ n: 2 });
+		expect(
+			await env.DB.prepare(
+				"SELECT is_split, split_removed_from_cents FROM transactions WHERE id = ?",
+			)
+				.bind(parent?.id)
+				.first(),
+		).toEqual({ is_split: 1, split_removed_from_cents: null });
+	});
+
 	it("preserves a stored balance when accounts/get returns current null", async () => {
 		const id = await addItem();
 		await syncItem(

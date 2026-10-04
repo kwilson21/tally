@@ -22,6 +22,7 @@ export type ListRow = {
 	parentId?: number | null;
 	parentName?: string | null;
 	isSplit?: boolean;
+	splitRemovedFromCents?: number | null;
 };
 
 export const PAGE_SIZE = 25;
@@ -44,6 +45,7 @@ export async function listTransactions(
 	if (f.category !== null) {
 		where.push("t.category_id = ?");
 		args.push(f.category);
+		where.push("t.is_split = 0");
 	}
 	if (f.uncategorized) where.push(NEEDS_CATEGORY);
 	if (f.excluded) where.push("t.excluded = 1");
@@ -77,6 +79,7 @@ export async function listTransactions(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, COALESCE(pm.display_name, p.raw_name) AS parentName,
+				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.excluded, t.flag_income AS income,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor
 			${from}
@@ -90,6 +93,7 @@ export async function listTransactions(
 				excluded: number;
 				income: number;
 				isSplit: number;
+				splitRemovedFromCents: number | null;
 			}
 		>();
 
@@ -99,6 +103,7 @@ export async function listTransactions(
 		excluded: r.excluded === 1,
 		income: r.income === 1,
 		isSplit: r.isSplit === 1,
+		splitRemovedFromCents: r.splitRemovedFromCents,
 		displayName: merchantName ?? tidyName(r.rawName),
 	}));
 	return { rows, total, page, pages };
@@ -154,6 +159,7 @@ export async function getTransaction(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, NULL AS parentName,
+				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				a.name AS accountName, a.mask AS accountMask
@@ -172,6 +178,7 @@ export async function getTransaction(
 				excluded: number;
 				income: number;
 				isSplit: number;
+				splitRemovedFromCents: number | null;
 			}
 		>();
 	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
@@ -181,6 +188,7 @@ export async function getTransaction(
 				excluded: r.excluded === 1,
 				income: r.income === 1,
 				isSplit: r.isSplit === 1,
+				splitRemovedFromCents: r.splitRemovedFromCents,
 				displayName: r.merchantName ?? tidyName(r.rawName),
 			}
 		: null;
@@ -220,6 +228,7 @@ export async function saveEdit(
 			? db
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
+							split_removed_from_cents = NULL,
 							note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
 					.bind(edit.categoryId, edit.note, ...excludeArgs, actor, id)
@@ -237,9 +246,9 @@ export async function saveEdit(
 		// A split is one bank transaction: excluding its parent excludes every counted child too.
 		db
 			.prepare(
-				"UPDATE transactions SET excluded = ?, excluded_source = 'user', updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
+				"UPDATE transactions SET excluded = ?, excluded_source = 'user', updated_by = ?, updated_at = datetime('now') WHERE parent_id = ? AND excluded != ?",
 			)
-			.bind(excluded, actor, id),
+			.bind(excluded, actor, id, excluded),
 	];
 	if (edit.alwaysForMerchant && edit.categoryId !== null) {
 		statements.push(
@@ -299,7 +308,7 @@ export async function saveSplit(
 		),
 		db
 			.prepare(
-				"UPDATE transactions SET is_split = 1, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+				"UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
 			)
 			.bind(by, parentId),
 	]);
@@ -311,6 +320,7 @@ export async function removeSplit(
 	parentId: number,
 	by: string,
 ) {
+	// TODO(#134): preserve refund links when split refunds are modeled explicitly.
 	await db.batch([
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
 		db
