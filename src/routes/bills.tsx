@@ -346,9 +346,14 @@ function BillSheet({
 					required
 				/>
 				<div class="flex items-center justify-between gap-3">
-					<Button type="submit" busyLabel="Saving…">
-						Save
-					</Button>
+					<div class="flex gap-3">
+						<Button href="/bills" kind="secondary">
+							Cancel
+						</Button>
+						<Button type="submit" busyLabel="Saving…">
+							Save
+						</Button>
+					</div>
 					{bill && (
 						<Button
 							kind="text"
@@ -414,6 +419,7 @@ async function save(c: Context<App>, id?: number) {
 	)
 		errors.anchor_month = "Choose a month.";
 	const bill = id ? await dbBill(c, id) : undefined;
+	if (id && !bill) return c.notFound();
 	if (Object.keys(errors).length)
 		return page(c, { bill: bill ?? undefined, values, errors });
 	const args = [
@@ -453,9 +459,12 @@ bills.post("/bills", (c) => save(c));
 bills.post("/bills/:id", (c) => save(c, Number(c.req.param("id"))));
 for (const action of ["deactivate", "reactivate"] as const)
 	bills.post(`/bills/:id/${action}`, async (c) => {
-		await c.env.DB.prepare("UPDATE bills SET active=? WHERE id=?")
+		const { meta } = await c.env.DB.prepare(
+			"UPDATE bills SET active=? WHERE id=?",
+		)
 			.bind(action === "reactivate" ? 1 : 0, Number(c.req.param("id")))
 			.run();
+		if (!meta.changes) return c.notFound();
 		const message =
 			action === "reactivate" ? "Bill reactivated" : "Bill deactivated";
 		if (c.req.header("HX-Request")) {
@@ -464,6 +473,7 @@ for (const action of ["deactivate", "reactivate"] as const)
 				"HX-Trigger",
 				JSON.stringify({ toast: { message }, announce: message }),
 			);
+			res.headers.set("HX-Push-Url", "/bills");
 			return res;
 		}
 		return c.redirect("/bills", 303);

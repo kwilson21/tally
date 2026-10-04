@@ -171,4 +171,46 @@ describe("Bills", () => {
 		expect(late?.paidDate).toBeTruthy();
 		expect(late?.paidDate && late.paidDate > late.dueDate).toBe(true);
 	});
+
+	it("refuses to save, deactivate or reactivate a missing bill", async () => {
+		const post = (path: string, body = "") =>
+			exports.default.fetch(`http://tally.test${path}`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					"HX-Request": "true",
+					Origin: "http://tally.test",
+				},
+				body,
+			});
+		const body = new URLSearchParams({
+			name: "Gym",
+			amount: "42.50",
+			due_day: "12",
+			frequency: "monthly",
+			category_id: "1",
+			merchant_raw_name: "CITY GYM",
+		}).toString();
+		expect((await post("/bills/999999", body)).status).toBe(404);
+		expect((await post("/bills/999999/deactivate")).status).toBe(404);
+		expect((await post("/bills/999999/reactivate")).status).toBe(404);
+	});
+
+	it("gives the bill sheet a Cancel link and clears the URL after deactivating", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/new")
+		).text();
+		expect(html).toMatch(/<a[^>]*href="\/bills"[^>]*>\s*Cancel/);
+		const { id } = (await env.DB.prepare(
+			"SELECT id FROM bills WHERE active=1 LIMIT 1",
+		).first<{ id: number }>()) as { id: number };
+		const res = await exports.default.fetch(
+			`http://tally.test/bills/${id}/deactivate`,
+			{
+				method: "POST",
+				headers: { "HX-Request": "true", Origin: "http://tally.test" },
+			},
+		);
+		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
+	});
 });
