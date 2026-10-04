@@ -290,7 +290,7 @@ describe("Bills", () => {
 				`http://tally.test/bills/1/occurrences/${linked?.period}/link`,
 			)
 		).text();
-		expect(html).toContain("It counts in");
+		expect(html).toContain("A late payment counts in its bill&#39;s month");
 		expect(html).toContain("same merchant first, then closest amount");
 	});
 
@@ -356,6 +356,94 @@ describe("Bills", () => {
 		expect(await count()).toBe(0);
 	});
 
+	it("also refuses to change a linked yearly bill's month", async () => {
+		await env.DB.prepare(
+			"UPDATE bills SET frequency='yearly',anchor_month=3 WHERE id=1",
+		).run();
+		const res = await exports.default.fetch("http://tally.test/bills/1", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Streaming",
+				amount: "2.99",
+				due_day: "4",
+				frequency: "yearly",
+				anchor_month: "4",
+				category_id: "5",
+				merchant_raw_name: "APPLE.COM/BILL",
+			}),
+		});
+		expect(await res.text()).toContain(
+			"To change when it&#39;s due, deactivate it and add a new bill.",
+		);
+		expect(
+			await env.DB.prepare("SELECT anchor_month FROM bills WHERE id=1").first(
+				"anchor_month",
+			),
+		).toBe(3);
+	});
+
+	it("keeps an unpaid recent month before a newer linked month", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,?,id,'user','linked' FROM transactions LIMIT 1",
+			).bind(todayUtc().slice(0, 7)),
+		]);
+		const earlier = new Date(`${todayUtc().slice(0, 7)}-01T00:00:00Z`);
+		earlier.setUTCMonth(earlier.getUTCMonth() - 5);
+		const period = earlier.toISOString().slice(0, 7);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/1")
+		).text();
+		expect(html).toContain(`occurrences/${period}/link`);
+		expect(html).toContain("Not paid");
+	});
+
+	it("refreshes candidates and explanation when the chosen month changes", async () => {
+		const period = todayUtc().slice(0, 7);
+		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
+		const html = await (
+			await exports.default.fetch(
+				`http://tally.test/bills/1/occurrences/${period}/link`,
+			)
+		).text();
+		expect(html).toContain('hx-target="#payment-picker"');
+		expect(html).toContain(
+			'hx-include="[name=&#39;transaction_id&#39;],[name=&#39;period&#39;]"',
+		);
+		expect(html).toContain('aria-live="polite"');
+		expect(html).toContain(
+			"A late payment counts in its bill&#39;s month; an early one stays in the month it was paid.",
+		);
+	});
+
+	it("reports the selected month when a payment is outside its 30-day window", async () => {
+		const period = todayUtc().slice(0, 7);
+		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
+		const old = await env.DB.prepare(
+			"SELECT id FROM transactions ORDER BY date LIMIT 1",
+		).first<number>("id");
+		const res = await exports.default.fetch("http://tally.test/bills/1/link", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				transaction_id: String(old),
+				period,
+				opened_period: period,
+			}),
+		});
+		expect(await res.text()).toContain(
+			`That payment isn&#39;t within 30 days of`,
+		);
+	});
+
 	it("lists only unpaid month choices and captions monthly payments", async () => {
 		const linked = await env.DB.prepare(
 			"SELECT period FROM bill_payments WHERE bill_id=1 AND status='linked' LIMIT 1",
@@ -367,12 +455,12 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain("Which month&#39;s bill does it pay?");
 		expect(html).not.toContain(`name="period" value="${linked?.period}"`);
-		expect(html).toContain("It counts in");
+		expect(html).toContain("A late payment counts in its bill&#39;s month");
 		expect(html).toMatch(/To [A-Z][a-z]+&#39;s Streaming, \$2\.99\./);
 		expect(html).toMatch(
 			/Within 30 days of [A-Z][a-z]{2} \d{1,2}, same merchant first, then closest amount\./,
 		);
-		expect(html).toMatch(/(The bank&#39;s date stays|its bank month)/);
+		expect(html).toContain("an early one stays in the month it was paid");
 	});
 
 	it("bill rows use drawn statuses, compact month labels, actions, and guidance", async () => {

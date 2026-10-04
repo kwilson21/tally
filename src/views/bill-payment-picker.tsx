@@ -31,7 +31,7 @@ export function BillMonthExplanation({
 	const bankMonth = paymentDate.slice(0, 7);
 	const bankName = month(bankMonth);
 	return (
-		<p id="bill-month-explanation" class="text-sm text-muted">
+		<p class="text-sm text-muted">
 			{countedMonth < bankMonth
 				? `It counts in ${month(countedMonth)}'s spending, not ${bankName}'s. The bank's date stays ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${paymentDate}T00:00:00Z`))}.`
 				: `It counts in ${bankName}'s spending, its bank month.`}
@@ -48,6 +48,7 @@ export function BillPaymentPicker({
 	dueDateLabel,
 	candidates,
 	periods,
+	selectedTransactionId,
 }: {
 	billId: number;
 	billName: string;
@@ -56,11 +57,14 @@ export function BillPaymentPicker({
 	dueDateLabel: string;
 	candidates: PaymentPickerCandidate[];
 	periods: PaymentPickerPeriod[];
+	selectedTransactionId?: number;
 }) {
 	const action = `/bills/${billId}/link`;
 	const opened =
 		periods.find((period) => period.value === openedPeriod) ?? periods[0];
-	const firstPayment = candidates[0];
+	const selectedPayment = candidates.find(
+		(candidate) => candidate.id === selectedTransactionId,
+	);
 	return (
 		<section
 			id="payment-picker"
@@ -97,6 +101,11 @@ export function BillPaymentPicker({
 									value={String(t.id)}
 									// Nothing is chosen for the person; one required radio makes the group required.
 									required={index === 0}
+									checked={t.id === selectedTransactionId}
+									hx-get={`/bills/${billId}/month-explanation`}
+									hx-include="[name='transaction_id'],[name='period']"
+									hx-target="#bill-month-explanation"
+									hx-swap="innerHTML"
 								>
 									{t.displayName} · {t.dateLabel} · {formatCents(t.amountCents)}
 								</Chip>
@@ -112,21 +121,28 @@ export function BillPaymentPicker({
 									name="period"
 									value={period.value}
 									checked={period.value === opened?.value}
-									hx-get={`/bills/${billId}/month-explanation?period=${encodeURIComponent(period.value)}`}
-									hx-include="[name='transaction_id']"
-									hx-target="#bill-month-explanation"
+									hx-get={`/bills/${billId}/occurrences/${encodeURIComponent(period.value)}/link`}
+									hx-include="[name='transaction_id'],[name='period']"
+									hx-target="#payment-picker"
 									hx-swap="outerHTML"
 								>
 									{period.label}
 								</Chip>
 							))}
 						</div>
-						{opened && firstPayment && (
-							<BillMonthExplanation
-								countedMonth={opened.countedMonth}
-								paymentDate={firstPayment.date}
-							/>
-						)}
+						<div id="bill-month-explanation" aria-live="polite">
+							{opened && selectedPayment ? (
+								<BillMonthExplanation
+									countedMonth={opened.countedMonth}
+									paymentDate={selectedPayment.date}
+								/>
+							) : (
+								<p class="text-sm text-muted">
+									A late payment counts in its bill's month; an early one stays
+									in the month it was paid.
+								</p>
+							)}
+						</div>
 					</fieldset>
 					<div class="flex gap-3">
 						<Button type="submit">Link</Button>

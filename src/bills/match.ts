@@ -66,7 +66,22 @@ export async function matchBillPayments(
 			.all<Bill>()
 	).results;
 	const endDay = dayNumber(today) + 7;
-	const statements: D1PreparedStatement[] = [];
+	type Pair = {
+		bill: Bill;
+		period: string;
+		candidate: MatchCandidate;
+		dateDistance: number;
+		amountDistance: number;
+	};
+	const pairs: Pair[] = [];
+	const linkedRows = (
+		await db
+			.prepare("SELECT bill_id,period FROM bill_payments WHERE status='linked'")
+			.all<{ bill_id: number; period: string }>()
+	).results;
+	const linked = new Set(
+		linkedRows.map((row) => `${row.bill_id}:${row.period}`),
+	);
 	const reserved = new Set<number>();
 	for (const bill of bills) {
 		const firstMonth = new Date(`${first.date.slice(0, 7)}-01T00:00:00Z`);
@@ -93,6 +108,14 @@ export async function matchBillPayments(
 				month,
 			);
 			if (dayNumber(due) > endDay) break;
+			if (linked.has(`${bill.id}:${period}`)) {
+				month += bill.frequency === "yearly" ? 12 : 1;
+				while (month > 12) {
+					month -= 12;
+					year += 1;
+				}
+				continue;
+			}
 			const start = new Date(`${due}T00:00:00Z`);
 			const finish = new Date(start);
 			start.setUTCDate(start.getUTCDate() - BILL_DATE_WINDOW_DAYS);
@@ -118,26 +141,45 @@ export async function matchBillPayments(
 					)
 					.all<MatchCandidate>()
 			).results;
-			const picked = pickBillPayment(
-				candidates.filter((candidate) => !reserved.has(candidate.id)),
-				due,
-				bill.amount_cents,
-			);
-			if (picked)
-				statements.push(
-					db
-						.prepare(
-							"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'auto','linked')",
-						)
-						.bind(bill.id, period, picked.id),
-				);
-			if (picked) reserved.add(picked.id);
+			for (const candidate of candidates) {
+				if (!pickBillPayment([candidate], due, bill.amount_cents)) continue;
+				pairs.push({
+					bill,
+					period,
+					candidate,
+					dateDistance: Math.abs(dayNumber(candidate.date) - dayNumber(due)),
+					amountDistance: Math.abs(candidate.amountCents - bill.amount_cents),
+				});
+			}
 			month += bill.frequency === "yearly" ? 12 : 1;
 			while (month > 12) {
 				month -= 12;
 				year += 1;
 			}
 		}
+	}
+	pairs.sort(
+		(a, b) =>
+			a.dateDistance - b.dateDistance ||
+			a.amountDistance - b.amountDistance ||
+			a.bill.id - b.bill.id ||
+			a.candidate.id - b.candidate.id,
+	);
+	const assignedOccurrences = new Set<string>();
+	const statements: D1PreparedStatement[] = [];
+	for (const pair of pairs) {
+		const occurrence = `${pair.bill.id}:${pair.period}`;
+		if (reserved.has(pair.candidate.id) || assignedOccurrences.has(occurrence))
+			continue;
+		reserved.add(pair.candidate.id);
+		assignedOccurrences.add(occurrence);
+		statements.push(
+			db
+				.prepare(
+					"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'auto','linked')",
+				)
+				.bind(pair.bill.id, pair.period, pair.candidate.id),
+		);
 	}
 	if (!statements.length) return 0;
 	const results = await db.batch(statements);

@@ -111,4 +111,37 @@ describe("bill payment matching", () => {
 			await env.DB.prepare("SELECT period FROM bill_payments").first("period"),
 		).toBe("2026-03");
 	});
+
+	it("gives a shared payment to the closest due date, then amount, then bill id", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"UPDATE bills SET due_day=8,amount_cents=10100 WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(2,'Other rent',10000,10,'monthly','LANDLORD')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(20,1,'2026-04-10',10000,'LANDLORD')",
+			),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-04-11")).toBe(1);
+		expect(
+			await env.DB.prepare(
+				"SELECT bill_id FROM bill_payments WHERE status='linked'",
+			).first("bill_id"),
+		).toBe(2);
+
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("UPDATE bills SET due_day=10,amount_cents=10000"),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-04-11")).toBe(1);
+		expect(
+			await env.DB.prepare(
+				"SELECT bill_id FROM bill_payments WHERE status='linked'",
+			).first("bill_id"),
+		).toBe(1);
+	});
 });

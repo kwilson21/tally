@@ -20,6 +20,7 @@ import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { HomeTop } from "../views/home-top";
 import {
+	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -1096,6 +1097,7 @@ function Diagrams() {
 				tier="visual"
 				components={[
 					"BudgetDiagram",
+					"BillsDiagram",
 					"TransactionsDiagram",
 					"ExclusionsDiagram",
 					"CategoriesDiagram",
@@ -1104,6 +1106,15 @@ function Diagrams() {
 			>
 				<State label="BudgetDiagram">
 					<BudgetDiagram {...BUDGET_EXAMPLE} />
+				</State>
+				<State label="BillsDiagram">
+					<BillsDiagram
+						amount="$142.00"
+						due="Sep 21"
+						paid="Sep 24"
+						windowDays={5}
+						tolerance="10%"
+					/>
 				</State>
 				<State label="TransactionsDiagram">
 					<TransactionsDiagram {...TRANSACTIONS_EXAMPLE} />
