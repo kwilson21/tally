@@ -153,7 +153,6 @@ async function page(
 					{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
 					{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
 				</p>
-				<BillFindingBand count={suggestions.length} />
 				<div class="mt-3">
 					<Button
 						kind="secondary"
@@ -163,6 +162,7 @@ async function page(
 						Add a bill
 					</Button>
 				</div>
+				<BillFindingBand count={suggestions.length} />
 				{rows.length === 0 ? (
 					<EmptyState
 						kind="add"
@@ -468,7 +468,20 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 			announce: "Suggestion removed",
 		}),
 	};
-	if (c.req.header("HX-Request")) return c.body("", 200, headers);
+	if (c.req.header("HX-Request")) {
+		const suggestions = await loadBillSuggestions(c.env.DB, todayUtc());
+		return suggestions.length
+			? c.body("", 200, headers)
+			: c.html(
+					<EmptyState
+						kind="done"
+						sentence="No possible bills to review."
+						hint="New repeat charges will appear here."
+					/>,
+					200,
+					headers,
+				);
+	}
 	return c.redirect("/bills/find", 303);
 });
 bills.get("/bills/:id", async (c) => billPage(c, Number(c.req.param("id"))));

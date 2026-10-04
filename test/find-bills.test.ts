@@ -1,6 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { type BillFindingCharge, findBillSuggestions } from "../src/bills/find";
+import {
+	type BillFindingCharge,
+	findBillSuggestions,
+	loadBillSuggestions,
+} from "../src/bills/find";
 import { todayUtc } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
@@ -42,13 +46,87 @@ describe("finding bills", () => {
 		});
 	});
 
-	it("filters income, exclusions, split parents and children in the database", async () => {
+	it("qualifies a merchant when its latest consecutive charges match", () => {
+		expect(
+			findBillSuggestions([
+				charge("2026-07-01", 900),
+				charge("2026-08-01", 1000),
+				charge("2026-09-01", 1050),
+			]),
+		).toMatchObject([{ amountCents: 1050, dueDay: 1, chargeCount: 3 }]);
+	});
+
+	it("does not qualify Whole Foods from an old pair when its latest charge is a one-off", () => {
+		expect(
+			findBillSuggestions([
+				charge("2026-08-23", 10000),
+				charge("2026-09-23", 10200),
+				charge("2026-10-04", 9630),
+			]),
+		).toEqual([]);
+	});
+
+	it("suggests exactly the seeded subscriptions on every representative date", async () => {
+		for (const date of [
+			"2026-01-01",
+			"2026-06-15",
+			"2028-02-29",
+			"2026-10-31",
+			"2026-12-31",
+		]) {
+			await resetDemo(env.DB, date);
+			expect(
+				(await loadBillSuggestions(env.DB, date)).map((row) => row.displayName),
+			).toEqual(["City Gym", "Procreate", "YouTube Premium"]);
+		}
+	});
+
+	it.each([
+		["excluded rows", "excluded=1"],
+		["income", "flag_income=1"],
+		["split parents", "is_split=1"],
+		["split children", "parent_id=1"],
+		["money-in rows", "amount_cents=-amount_cents"],
+	] as const)("filters %s", async (_label, mutation) => {
+		await resetDemo(env.DB, todayUtc());
+		await insertCandidate("FILTER ME");
+		await env.DB.prepare(`UPDATE transactions SET ${mutation} WHERE raw_name=?`)
+			.bind("FILTER ME")
+			.run();
+		expect(await loadBillSuggestions(env.DB, todayUtc())).not.toContainEqual(
+			expect.objectContaining({ rawName: "FILTER ME" }),
+		);
+	});
+
+	it("filters merchants that already have a bill", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await insertCandidate("HAS BILL");
+		await env.DB.prepare(
+			"INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES('Existing',1000,1,'monthly',1,?)",
+		)
+			.bind("HAS BILL")
+			.run();
+		expect(await loadBillSuggestions(env.DB, todayUtc())).not.toContainEqual(
+			expect.objectContaining({ rawName: "HAS BILL" }),
+		);
+	});
+
+	it("filters merchants marked not_a_bill", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await insertCandidate("NOT A BILL", 1);
+		expect(await loadBillSuggestions(env.DB, todayUtc())).not.toContainEqual(
+			expect.objectContaining({ rawName: "NOT A BILL" }),
+		);
+	});
+
+	it("prefills every Add value", async () => {
 		await resetDemo(env.DB, todayUtc());
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
-		expect(html).toContain("Possible bills");
-		expect(html).toContain("about monthly, around the");
+		expect(html).toContain(
+			"/bills/new?name=City+Gym&amp;amount=42.50&amp;due_day=12&amp;frequency=monthly&amp;category_id=4&amp;merchant_raw_name=CITY+GYM",
+		);
 	});
 
 	it("remembers Not a bill and removes the row with feedback", async () => {
@@ -63,11 +141,49 @@ describe("finding bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
-		expect(response.headers.get("HX-Trigger")).toContain('"announce"');
+		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Marked as not a bill", type: "success" },
+			announce: "Suggestion removed",
+		});
 		expect(
 			await env.DB.prepare("SELECT not_a_bill FROM merchants WHERE raw_name=?")
 				.bind(raw)
 				.first("not_a_bill"),
 		).toBe(1);
 	});
+
+	it("returns the empty state when dismissing the last suggestion", async () => {
+		await resetDemo(env.DB, todayUtc());
+		await env.DB.prepare(
+			"UPDATE merchants SET not_a_bill=1 WHERE raw_name <> 'CITY GYM'",
+		).run();
+		const response = await exports.default.fetch(
+			"http://tally.test/bills/find/CITY%20GYM/dismiss",
+			{
+				method: "POST",
+				headers: { Origin: "http://tally.test", "HX-Request": "true" },
+			},
+		);
+		expect(await response.text()).toContain("No possible bills to review.");
+	});
 });
+
+async function insertCandidate(rawName: string, notABill = 0) {
+	await env.DB.prepare(
+		"INSERT INTO merchants(raw_name,display_name,default_category_id,not_a_bill) VALUES(?,?,4,?)",
+	)
+		.bind(rawName, rawName, notABill)
+		.run();
+	await env.DB.prepare(
+		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
+		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
+	)
+		.bind("2026-08-01", rawName)
+		.run();
+	await env.DB.prepare(
+		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
+		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
+	)
+		.bind("2026-09-01", rawName)
+		.run();
+}

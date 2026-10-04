@@ -200,6 +200,13 @@ const UNCATEGORIZED: [number, string, number, string | null][] = [
 	[20, "DD *DOORDASH TACO", 3107, null],
 ];
 
+// Genuine recurring charges which have not been turned into bills yet.
+const UNBILLED_SUBSCRIPTIONS: [number, string, string, number, number][] = [
+	[12, "CITY GYM", "City Gym", 4250, KIDS],
+	[7, "APPLE *PROCREATE", "Procreate", 1299, HOUSEHOLD],
+	[18, "YOUTUBE PREMIUM", "YouTube Premium", 1399, HOUSEHOLD],
+];
+
 // Previous months' category totals in cents, oldest first (5 months ago → 1 month ago).
 const HISTORY: Record<number, number[]> = {
 	[GROCERIES]: [64000, 65500, 61000, 69000, 67200],
@@ -257,7 +264,12 @@ export function buildSeed(today: string): Seed {
 			const merchants = MERCHANTS[category.id] ?? [];
 			const third = Math.floor(total / 3);
 			[third, third, total - 2 * third].forEach((cents, i) => {
-				const [rawName] = merchants[i % merchants.length] as [string, string];
+				// Rotate ordinary merchants so a weekly shopping pattern is not
+				// mistaken for one merchant charging on a monthly subscription day.
+				const [rawName] = merchants[(i + monthsAgo) % merchants.length] as [
+					string,
+					string,
+				];
 				transactions.push(
 					spend(
 						i === 2 ? CARD : CHECKING,
@@ -284,6 +296,22 @@ export function buildSeed(today: string): Seed {
 	}
 	for (const [target, rawName, cents] of UNCATEGORIZED) {
 		transactions.push(spend(CARD, clamp(target), rawName, null, cents));
+	}
+	for (const [target, rawName, , cents, categoryId] of UNBILLED_SUBSCRIPTIONS) {
+		for (const monthsAgo of [2, 1])
+			transactions.push(
+				spend(
+					CARD,
+					day(monthOffset(today, monthsAgo), target),
+					rawName,
+					categoryId,
+					cents,
+				),
+			);
+		if (todayDay >= target)
+			transactions.push(
+				spend(CARD, day(thisMonth, target), rawName, categoryId, cents),
+			);
 	}
 	// A plausible Streaming charge that is deliberately outside the five-day
 	// matching window. It makes the demo show why merchant and amount alone are
@@ -374,6 +402,11 @@ export function buildSeed(today: string): Seed {
 			rawName,
 			displayName,
 			defaultCategoryId: null,
+		})),
+		...UNBILLED_SUBSCRIPTIONS.map(([, rawName, displayName, , categoryId]) => ({
+			rawName,
+			displayName,
+			defaultCategoryId: categoryId,
 		})),
 		{
 			rawName: "ACME CORP PAYROLL",

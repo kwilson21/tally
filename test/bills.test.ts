@@ -170,8 +170,8 @@ describe("Bills", () => {
 		await resetDemo(env.DB, date);
 		const { rows } = await loadBillRows(env.DB, date);
 		expect(
-			(await loadBillSuggestions(env.DB, date)).length,
-		).toBeGreaterThanOrEqual(2);
+			(await loadBillSuggestions(env.DB, date)).map((row) => row.displayName),
+		).toEqual(["City Gym", "Procreate", "YouTube Premium"]);
 		expect(
 			new Set(rows.filter((row) => row.active).map((row) => row.status)),
 		).toEqual(new Set(["overdue", "due", "upcoming", "paid"]));
