@@ -288,9 +288,21 @@ export async function saveSplit(
 	by: string,
 ) {
 	const parent = await db
-		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
+		.prepare(
+			"SELECT id, account_id AS accountId, date, raw_name AS rawName, excluded, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy FROM transactions WHERE id = ? AND parent_id IS NULL",
+		)
 		.bind(parentId)
-		.first();
+		.first<{
+			id: number;
+			accountId: number;
+			date: string;
+			rawName: string;
+			excluded: number;
+			income: number;
+			incomeSource: string | null;
+			creditReviewed: number | null;
+			creditReviewedBy: string | null;
+		}>();
 	if (!parent) throw new Error(`No transaction ${parentId}`);
 	// Every write checks, inside the same batch, that the parent still has the amount
 	// the parts were validated against, so a bank correction mid-save writes nothing.
@@ -305,9 +317,9 @@ export async function saveSplit(
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, parent_id, plaid_transaction_id, updated_by)
-			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, id, NULL, ?
-			FROM transactions WHERE id = ? AND amount_cents = ?`)
+				(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, flag_income, income_source, credit_reviewed, credit_reviewed_by, parent_id, plaid_transaction_id, updated_by)
+				SELECT account_id, date, ?, raw_name, ?, 'user', excluded, flag_income, income_source, credit_reviewed, credit_reviewed_by, id, NULL, ?
+				FROM transactions WHERE id = ? AND amount_cents = ?`)
 				.bind(part.amountCents, part.categoryId, by, parentId, total),
 		),
 		db

@@ -100,6 +100,50 @@ describe("transaction splits", () => {
 		).toBe(0);
 	});
 
+	it("preserves reviewed credit metadata when a refund split is saved again", async () => {
+		const refund = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
+		).first<{ id: number }>();
+		const id = refund?.id as number;
+		await env.DB.prepare(
+			"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user', income_source = 'user' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const amount = (
+			await env.DB.prepare("SELECT amount_cents FROM transactions WHERE id = ?")
+				.bind(id)
+				.first<{ amount_cents: number }>()
+		)?.amount_cents as number;
+		const total = Math.abs(amount);
+		const first = Math.trunc(total / 2);
+		const second = total - first;
+		for (let save = 0; save < 2; save++) {
+			const response = await post(`/transactions/${id}/split`, [
+				["part_category", "1"],
+				["part_category", "5"],
+				["part_amount", (first / 100).toFixed(2)],
+				["part_amount", (second / 100).toFixed(2)],
+				["back", "/transactions"],
+			]);
+			expect(response.status).toBe(200);
+		}
+		const children = await env.DB.prepare(
+			"SELECT amount_cents, flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+		)
+			.bind(id)
+			.all();
+		expect(children.results).toHaveLength(2);
+		for (const child of children.results as Array<Record<string, unknown>>) {
+			expect(child).toMatchObject({
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			});
+		}
+	});
+
 	it("excluding a split parent excludes its children", async () => {
 		const costco = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
