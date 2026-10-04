@@ -135,7 +135,7 @@ describe("GET /transactions", () => {
 	it("pages through results with real links, 25 at a time", async () => {
 		const first = (await get("/transactions")).html;
 		expect(first).toMatch(
-			/<p id="result-count"[^>]*>Showing 1–25 of 35 transactions in [A-Z][a-z]+<\/p>/,
+			/<p id="result-count"[^>]*>Showing 1–25 of 37 transactions in [A-Z][a-z]+<\/p>/,
 		);
 		expect(first).toMatch(/<nav aria-label="Pages"/);
 		expect(first).toContain("Page 1 of 2");
@@ -145,8 +145,8 @@ describe("GET /transactions", () => {
 		expect(first).not.toContain(">Newer<");
 
 		const second = (await get("/transactions?page=2")).html;
-		expect(rowCount(second)).toBe(10);
-		expect(second).toMatch(/Showing 26–35 of 35 transactions/);
+		expect(rowCount(second)).toBe(12);
+		expect(second).toMatch(/Showing 26–37 of 37 transactions/);
 		expect(second).toMatch(
 			/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
 		);
@@ -154,9 +154,9 @@ describe("GET /transactions", () => {
 	});
 
 	it("keeps the filters in page links and hides the pager on a single page", async () => {
-		// All months: 90 history rows + 35 this month = 125, so 5 pages.
+		// All months: 90 history rows + 37 this month = 127, so 6 pages.
 		const html = (await get("/transactions?month=all")).html;
-		expect(html).toContain("Page 1 of 5");
+		expect(html).toContain("Page 1 of 6");
 		expect(html).toMatch(/href="\/transactions\?month=all&amp;page=2"/);
 		expect((await get("/transactions?uncategorized=1")).html).not.toContain(
 			'aria-label="Pages"',

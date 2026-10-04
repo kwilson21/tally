@@ -27,6 +27,7 @@ import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
+import { SplitForm } from "../views/split-form";
 import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
@@ -736,6 +737,27 @@ function Controls() {
 						/>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="split-form"
+				title="SplitForm"
+				tier="visual"
+				components={["SplitForm"]}
+				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total."
+			>
+				<SplitForm
+					id={1}
+					parentCents={18742}
+					categories={[
+						{ id: 1, name: "Groceries" },
+						{ id: 5, name: "Household" },
+					]}
+					values={[
+						{ category: "1", amount: "150.00" },
+						{ category: "5", amount: "12.00" },
+					]}
+					back="/transactions"
+				/>
 			</Specimen>
 			<Specimen
 				id="money-input"

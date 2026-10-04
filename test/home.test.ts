@@ -38,7 +38,7 @@ describe("GET / with the demo seed", () => {
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
 		const { html } = await home();
-		expect(html).toMatch(/\$412\s+of\s+\$700/);
+		expect(html).toMatch(/\$375\s+of\s+\$700/);
 		expect(html).toMatch(/\$286\s+of\s+\$250/);
 		// Eating Out is $36 over; its words say by how much (decision 46).
 		expect(

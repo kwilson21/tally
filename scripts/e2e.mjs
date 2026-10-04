@@ -194,6 +194,33 @@ await page.getByText(/of \$690/).waitFor();
 await page.unroute("**/nudge/**", slowNudge);
 step("Done right after a tap keeps the tap ($690) and puts the buttons away");
 
+// Split a transaction, see the server-computed confirmation, then restore it.
+await page.goto(`${BASE}/transactions?q=Local+Bakery`, {
+	waitUntil: "networkidle",
+});
+await page.getByRole("link", { name: /Local Bakery/ }).click();
+await page.getByRole("link", { name: "Split" }).click();
+const amounts = page.getByLabel(/Part \d amount/);
+await amounts.nth(0).fill("5.00");
+await page.getByLabel("Part 1 category").selectOption("1");
+await amounts.nth(1).fill("7.00");
+await page.getByLabel("Part 2 category").selectOption("5");
+await page.getByText("Adds up to $12.00").waitFor();
+await page.getByRole("button", { name: "Save split" }).click();
+await page.locator("#toasts").getByText("Split Local Bakery").waitFor();
+assert.equal(await rows(), 3);
+step("splitting shows both parts and their parent");
+await page
+	.getByRole("link", { name: /Local Bakery.*Split transaction/ })
+	.click();
+await page.getByRole("button", { name: "Remove split" }).click();
+await page
+	.locator("#toasts")
+	.getByText("Removed split from Local Bakery")
+	.waitFor();
+assert.equal(await rows(), 1);
+step("removing the split restores the transaction");
+
 // Reorder through htmx: the button inside the edit form must send its own direction.
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.locator('summary[data-category="3"]').click();
