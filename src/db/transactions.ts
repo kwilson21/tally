@@ -156,6 +156,7 @@ export async function monthsWithTransactions(
 export type TransactionDetail = ListRow & {
 	accountName: string;
 	accountMask: string | null;
+	accountType: string;
 	/** The merchant's chosen display name, or null when it falls back to the raw name. */
 	merchantName: string | null;
 	categorySource: "user" | "merchant_rule" | "jev" | null;
@@ -177,7 +178,7 @@ export async function getTransaction(
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
-				a.name AS accountName, a.mask AS accountMask
+				a.name AS accountName, a.mask AS accountMask, a.type AS accountType
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name

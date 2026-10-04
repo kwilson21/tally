@@ -188,6 +188,10 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>Left is budget minus spent.</li>
 						<li>Income counts only toward Income, not spending.</li>
 						<li>
+							Cash transactions count in spending, but Cash is not part of net
+							worth.
+						</li>
+						<li>
 							Safe to spend is the whole month's budget, minus all counted
 							spending (including uncategorized and unbudgeted), minus bills
 							that are due or overdue and not yet paid.

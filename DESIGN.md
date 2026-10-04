@@ -119,6 +119,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | ThingsToTry | The demo's bordered "New here? Things to try" block, below Home's Budget list until onboarding (#95) replaces it: three links to where each thing is done, plus How Tally works. |
 | HowLink | A small "How this works" link under a screen's title to its section of How Tally works; renders nothing outside the demo. |
 | MoneyInput | The owner's hero amount from the original app (#66), in Tally's tokens: a round −$1 button (48px), a 292px amount field (`$`, the amount in bold 1.75rem, always with cents: "700.00") with ▲▼ cent arrows stacked inside its right edge behind a hairline (each 44×44: the field is 90px tall so the stacked arrows meet the touch-target rule, decision 41), and a round +$1 button. Under it, centered chips: "Round to $X" (only with cents) and "Last month: $X" (dimmed when the field already holds it). Minus buttons are disabled at $0. In the field, ↑ / ↓ change the amount by 1¢ (Shift: $1), as the original's number field did. money.js runs it; without it the buttons and chips are hidden. |
+| CashForm | P21 A's edit-panel-shaped form adds dated cash spending with where it was spent, a category and an optional note. |
 | SplitForm | P17 option A: two or more category-and-MoneyInput part rows, Add a part, and a polite live line above them that says “$X left to assign,” “$X over,” or “Adds up to $Y” with a check; save remains server-validated. |
 | SystemDiagram | The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers. |
 | BudgetDiagram, BillsDiagram, TransactionsDiagram, ExclusionsDiagram, CategoriesDiagram | How Tally works' section diagrams (#61), drawn from the same numbers as each worked example: boxes and arrows for Budget, Bills, Transactions and Categories; one bar for Excluding. Ink, muted and rule only, plus ok (or over) on the safe-to-spend box, always with its words. A dashed outline means "not counted" or "not decided yet". |
@@ -141,6 +142,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 - Explainer page (How Tally works): each section is a serif h2 with an `id` the HowLinks point to, the rule in a short list quoted from the spec, and a worked example in a band-tinted box ("In the demo: …") computed by code from live numbers. When a rule changes in the spec, its section changes in the same PR.
 - Illustrations: SVG, drawn with the icon stroke rules, ink plus one accent. Generated images never ship.
 - Money: integer cents in the database and in code; format only in views with `formatCents` (src/money.ts).
+- Cash: the secondary “Add cash” action opens a sheet; cash spending counts everywhere a bank transaction does, while the Cash account never counts in net worth.
 - Motion: budget bars fill on load (CSS). `prefers-reduced-motion` shows the final state. No count-up: it would need custom JavaScript.
 - Bars are inline SVG. The CSP forbids style attributes, and SVG width attributes aren't CSS.
 
