@@ -258,7 +258,7 @@ function BillSheet({
 					value={values.amount}
 					error={errors.amount}
 				/>
-				<div class="grid gap-3 sm:grid-cols-2">
+				<div class="flex flex-wrap items-end gap-3">
 					<TextInput
 						id="bill-day"
 						name="due_day"
@@ -266,6 +266,7 @@ function BillSheet({
 						value={values.due_day}
 						error={errors.due_day}
 						surface="paper"
+						class="w-24"
 						inputmode="numeric"
 						required
 					/>

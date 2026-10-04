@@ -129,10 +129,6 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
 			SELECT 2, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='GOOGLE *YOUTUBE' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
 			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
-		db
-			.prepare(`INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status)
-			SELECT 4, ?, id, 'user', 'linked' FROM transactions WHERE raw_name='ONLINE TRANSFER TO SAV ...5678' AND date LIKE ? ORDER BY id DESC LIMIT 1`)
-			.bind(today.slice(0, 7), `${today.slice(0, 7)}%`),
 	]);
 }
 
@@ -184,17 +180,6 @@ function demoBills(
 			null,
 			5,
 			"THE HOME DEPOT #6612",
-			1,
-		],
-		[
-			4,
-			"Rent",
-			185000,
-			paymentDay("ONLINE TRANSFER TO SAV ...5678"),
-			"monthly",
-			null,
-			5,
-			"ONLINE TRANSFER TO SAV ...5678",
 			1,
 		],
 		[5, "Internet", 6500, dueSoon, "monthly", null, 5, "AMAZON.COM*RT4K2", 1],

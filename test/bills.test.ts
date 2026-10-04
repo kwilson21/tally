@@ -66,7 +66,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
-		expect(html).toContain("Inactive (7)");
+		expect(html).toContain("Inactive (6)");
 		expect(html).not.toContain("No bills yet.");
 	});
 
@@ -159,6 +159,9 @@ describe("Bills", () => {
 		"2026-01-01",
 		"2026-06-15",
 		"2028-02-29",
+		"2026-02-24",
+		"2026-10-26",
+		"2026-10-31",
 		"2026-12-09",
 		"2026-12-31",
 	])("keeps every demo status available on %s", async (date) => {
@@ -170,6 +173,14 @@ describe("Bills", () => {
 		const late = rows.find((row) => row.name === "Water");
 		expect(late?.paidDate).toBeTruthy();
 		expect(late?.paidDate && late.paidDate > late.dueDate).toBe(true);
+		const onTime = rows.find((row) => row.name === "Streaming");
+		expect(onTime?.status).toBe("paid");
+		expect(onTime?.paidDate).toBe(onTime?.dueDate);
+		// The demo's set-aside stays small enough that Safe to spend stays positive.
+		const setAside = rows
+			.filter((row) => row.active && ["due", "overdue"].includes(row.status))
+			.reduce((sum, row) => sum + row.amountCents, 0);
+		expect(setAside).toBeLessThan(25_000);
 	});
 
 	it("refuses to save, deactivate or reactivate a missing bill", async () => {
