@@ -141,13 +141,14 @@ describe("counted month and category (one shared expression)", () => {
 		period?: string | null;
 		frequency?: "monthly" | "yearly";
 		anchor?: number | null;
+		excluded?: boolean;
 	};
 	/** Evaluates the expressions over one transaction and the purchase it refunds (if any), no tables. */
 	async function counted(t: Side, purchase?: Side) {
 		const row = (side: Side | undefined, id: number | null) =>
 			side
-				? `SELECT ${id} AS id, '${side.date}' AS date, ${side.category ?? "NULL"} AS category_id, ${purchase && id === 1 ? 2 : "NULL"} AS refund_of_id`
-				: "SELECT NULL AS id, NULL AS date, NULL AS category_id, NULL AS refund_of_id";
+				? `SELECT ${id} AS id, '${side.date}' AS date, ${side.category ?? "NULL"} AS category_id, ${purchase && id === 1 ? 2 : "NULL"} AS refund_of_id, ${side.excluded ? 1 : 0} AS excluded`
+				: "SELECT NULL AS id, NULL AS date, NULL AS category_id, NULL AS refund_of_id, NULL AS excluded";
 		const pay = (side: Side | undefined) =>
 			side?.period
 				? `SELECT '${side.period}' AS period`
@@ -170,6 +171,15 @@ describe("counted month and category (one shared expression)", () => {
 			month: "2026-09",
 			category: 1,
 		});
+	});
+
+	it("a refund of an excluded purchase counts on its own date and category", async () => {
+		expect(
+			await counted(
+				{ date: "2026-09-10", category: 1 },
+				{ date: "2026-08-20", category: 4, excluded: true },
+			),
+		).toEqual({ month: "2026-09", category: 1 });
 	});
 
 	it("a linked refund counts in its purchase's month and category", async () => {
@@ -418,6 +428,54 @@ describe("linking a refund", () => {
 				counts.needsCategory +
 				counts.linkedWaiting,
 		).toBe(counts.counted - counts.income);
+	});
+
+	it("counts on its own, with its own prompt, once its purchase is excluded", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = NULL, category_source = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const before = await needsCategoryCount(db, "2026-09");
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+			)
+			.bind(PURCHASE)
+			.run();
+		// Back in its own month (September), waiting for a category of its own.
+		expect(await needsCategoryCount(db, "2026-09")).toBe(before + 1);
+		const home = summarizeMonth({
+			...(await loadMonth(db, "2026-09")),
+			month: "2026-09",
+			unpaidDueBillsCents: 0,
+		});
+		expect(home.uncategorized.count).toBe(before + 1);
+		const { html } = await get("/transactions?month=2026-09&uncategorized=1");
+		expect(rowHtml(html, REFUND)).toContain("Needs category");
+		// Its category can be set again, and it counts there.
+		const sheet = await get(`/transactions/${REFUND}`);
+		expect(sheet.html).not.toMatch(/<fieldset[^>]*disabled/);
+		const gasBefore = await spent("2026-09", GAS);
+		await save(REFUND, [["category", String(GAS)]]);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+		expect(await spent("2026-09", GAS)).toBe(
+			gasBefore + (await detail(REFUND)).amountCents,
+		);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("doesn't offer an excluded purchase", async () => {
+		await db
+			.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
+			.bind(PURCHASE)
+			.run();
+		const offered = (await refundPurchases(db, await detail(REFUND))).map(
+			(p) => p.id,
+		);
+		expect(offered).not.toContain(PURCHASE);
 	});
 
 	it("isn't sent to Jev or listed in Organize while linked", async () => {

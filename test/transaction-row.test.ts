@@ -53,8 +53,18 @@ describe("rowCaption", () => {
 
 	it("leaves the Needs category tag to the purchase of a linked refund", () => {
 		expect(
-			rowCaption({ ...base, refundOfId: 3, refundPurchaseDate: "2026-09-05" }),
+			rowCaption({
+				...base,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+				followsPurchase: true,
+			}),
 		).toEqual({ kind: "needs", caption: "Refund for Sep 5", tag: false });
+		// Once the purchase is excluded, the refund counts on its own and asks for its own category.
+		expect(
+			rowCaption({ ...base, refundOfId: 3, refundPurchaseDate: "2026-09-05" })
+				.tag,
+		).toBe(true);
 	});
 
 	it("shows how much of a purchase or a split part was refunded", () => {

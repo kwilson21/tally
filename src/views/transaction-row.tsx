@@ -50,9 +50,8 @@ export function rowCaption(row: ListRow): Caption {
 			caption: pair ? `${row.categoryName} · ${pair}` : row.categoryName,
 			tag: false,
 		};
-	// A linked refund's category is its purchase's, so the tag sits on the purchase's row.
-	if (row.refundPurchaseDate)
-		return { kind: "needs", caption: pair, tag: false };
+	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
+	if (row.followsPurchase) return { kind: "needs", caption: pair, tag: false };
 	return {
 		kind: "needs",
 		caption: pair ?? (row.rawName === row.displayName ? null : row.rawName),

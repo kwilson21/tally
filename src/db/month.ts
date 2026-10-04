@@ -3,6 +3,7 @@ import {
 	COUNTED_JOINS,
 	countedCategorySql,
 	countedMonthSql,
+	FOLLOWS_PURCHASE,
 } from "./counted-month";
 
 const COUNTED_MONTH = countedMonthSql();
@@ -53,7 +54,7 @@ export async function loadMonth(
 		db
 			.prepare(
 				`SELECT ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income,
-				   t.refund_of_id IS NOT NULL AS linked
+				   ${FOLLOWS_PURCHASE} AS linked
 				 FROM transactions t
 				 ${COUNTED_JOINS}
 				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0`,

@@ -9,6 +9,7 @@ import {
 	COUNTED_JOINS,
 	countedCategorySql,
 	countedMonthSql,
+	FOLLOWS_PURCHASE,
 } from "./counted-month";
 
 const COUNTED_MONTH = countedMonthSql();
@@ -34,15 +35,18 @@ export type ListRow = {
 	splitRemovedFromCents?: number | null;
 	refundOfId?: number | null;
 	refundPurchaseDate?: string | null;
+	/** A linked refund whose purchase counts, so it takes that purchase's month and category. */
+	followsPurchase?: boolean;
 	refundedCents?: number;
 };
 
 export const PAGE_SIZE = 25;
 
 // "Needs category" is the same set Home counts as uncategorized (spec §6): counted, not income, no
-// counted category. A linked refund is never on it: it has no category of its own to set, so its
-// purchase carries the need and categorizing that covers both. Queries add COUNTED_JOINS.
-const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND t.refund_of_id IS NULL`;
+// counted category. A refund that follows its purchase is never on it: it has no category of its
+// own to set, so the purchase carries the need and categorizing that covers both. Queries add
+// COUNTED_JOINS.
+const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE}`;
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -95,7 +99,7 @@ export async function listTransactions(
 				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, pm.display_name AS parentMerchantName, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
-				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate,
+				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id) AS refundedCents,
 				t.excluded, t.flag_income AS income,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
@@ -106,13 +110,17 @@ export async function listTransactions(
 		)
 		.bind(...args)
 		.all<
-			Omit<ListRow, "excluded" | "income" | "displayName" | "isSplit"> & {
+			Omit<
+				ListRow,
+				"excluded" | "income" | "displayName" | "isSplit" | "followsPurchase"
+			> & {
 				merchantName: string | null;
 				parentMerchantName: string | null;
 				parentRawName: string | null;
 				excluded: number;
 				income: number;
 				isSplit: number;
+				followsPurchase: number;
 			}
 		>();
 
@@ -126,6 +134,7 @@ export async function listTransactions(
 			excluded: r.excluded === 1,
 			income: r.income === 1,
 			isSplit: r.isSplit === 1,
+			followsPurchase: r.followsPurchase === 1,
 			displayName: merchantName ?? tidyName(r.rawName),
 		}),
 	);
@@ -180,6 +189,8 @@ export type RefundPurchase = {
 	amountCents: number;
 	categoryId: number | null;
 	categoryName: string | null;
+	/** An excluded purchase isn't offered, and a refund stops following it (it counts on its own). */
+	excluded: number;
 };
 
 /**
@@ -202,9 +213,9 @@ export async function refundPurchases(
 	const isRefund = refund.amountCents < 0 && !refund.income && !refund.isSplit;
 	if (!isRefund && refund.refundOfId == null) return [];
 	const { results } = await db
-		.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents,t.category_id AS categoryId,c.name AS categoryName
+		.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents,t.category_id AS categoryId,c.name AS categoryName,t.excluded
 		FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
-		WHERE t.id = ?1 OR (?2 AND t.amount_cents>0 AND t.is_split=0 AND t.raw_name=?3 AND t.date<=?4 AND t.date>=date(?4,'-90 days') AND t.id!=?5)
+		WHERE t.id = ?1 OR (?2 AND t.amount_cents>0 AND t.is_split=0 AND t.excluded=0 AND t.raw_name=?3 AND t.date<=?4 AND t.date>=date(?4,'-90 days') AND t.id!=?5)
 		ORDER BY t.date DESC,t.id DESC`)
 		.bind(
 			refund.refundOfId ?? null,
@@ -228,7 +239,7 @@ export async function getTransaction(
 				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
-				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate,
+				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id) AS refundedCents,
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
@@ -246,11 +257,12 @@ export async function getTransaction(
 		.first<
 			Omit<
 				TransactionDetail,
-				"excluded" | "income" | "displayName" | "isSplit"
+				"excluded" | "income" | "displayName" | "isSplit" | "followsPurchase"
 			> & {
 				excluded: number;
 				income: number;
 				isSplit: number;
+				followsPurchase: number;
 			}
 		>();
 	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
@@ -260,6 +272,7 @@ export async function getTransaction(
 				excluded: r.excluded === 1,
 				income: r.income === 1,
 				isSplit: r.isSplit === 1,
+				followsPurchase: r.followsPurchase === 1,
 				displayName: r.merchantName ?? tidyName(r.rawName),
 			}
 		: null;
@@ -562,7 +575,7 @@ export async function excludedBreakdown(
 
 // Who categorized a transaction, read from where its category comes from: a linked refund's purchase.
 const countedBy = (column: string) =>
-	`CASE WHEN rp.id IS NOT NULL THEN rp.${column} ELSE t.${column} END`;
+	`CASE WHEN ${FOLLOWS_PURCHASE} THEN rp.${column} ELSE t.${column} END`;
 const COUNTED_BY = {
 	source: countedBy("category_source"),
 	confidence: countedBy("category_confidence"),
@@ -602,7 +615,7 @@ export async function monthCounts(
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NULL), 0) AS noneFit,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NULL), 0) AS notYetAsked,
 				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income,
-				COALESCE(SUM(t.refund_of_id IS NOT NULL AND ${COUNTED_CATEGORY} IS NULL AND t.flag_income = 0), 0) AS linkedWaiting
+				COALESCE(SUM(${FOLLOWS_PURCHASE} AND ${COUNTED_CATEGORY} IS NULL AND t.flag_income = 0), 0) AS linkedWaiting
 			FROM transactions t
 			${COUNTED_JOINS}
 			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0`,

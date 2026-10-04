@@ -3,11 +3,15 @@
  *
  * A bill occurrence moves a payment only when the occurrence is earlier than the bank month.
  * A refund linked to its purchase counts in that purchase's counted month and current
- * category, never its own; unlinking it brings back its own date and category.
+ * category, never its own, while the purchase counts; unlinking it, or excluding the purchase,
+ * brings back its own date and category.
  * Every query that uses these expressions adds COUNTED_JOINS, which names the aliases:
  * t (the transaction), bp/b (its bill payment), rp (the purchase it refunds) and rbp/rb
  * (that purchase's bill payment).
  */
+
+/** True when a transaction is a refund that follows its purchase: linked, and the purchase counts. */
+export const FOLLOWS_PURCHASE = "(rp.id IS NOT NULL AND rp.excluded = 0)";
 
 /** The month a transaction's own date and bill payment put it in. */
 function billMonthSql(transaction: string, payment: string, bill: string) {
@@ -18,12 +22,12 @@ function billMonthSql(transaction: string, payment: string, bill: string) {
 
 /** SQL for the month a transaction counts in. */
 export function countedMonthSql() {
-	return `CASE WHEN rp.id IS NOT NULL THEN ${billMonthSql("rp", "rbp", "rb")} ELSE ${billMonthSql("t", "bp", "b")} END`;
+	return `CASE WHEN ${FOLLOWS_PURCHASE} THEN ${billMonthSql("rp", "rbp", "rb")} ELSE ${billMonthSql("t", "bp", "b")} END`;
 }
 
 /** SQL for the category a transaction counts in: a linked refund's purchase's, otherwise its own. */
 export function countedCategorySql() {
-	return "CASE WHEN rp.id IS NOT NULL THEN rp.category_id ELSE t.category_id END";
+	return `CASE WHEN ${FOLLOWS_PURCHASE} THEN rp.category_id ELSE t.category_id END`;
 }
 
 /** The joins countedMonthSql and countedCategorySql read from. */

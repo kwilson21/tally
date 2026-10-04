@@ -823,8 +823,11 @@ function EditSheet({
 		"hx-push-url": back,
 	};
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
-	// A linked refund counts in its purchase's category, so its own can't be picked until it's unlinked.
-	const purchase = refunds.find((p) => p.id === values.refundOfId);
+	// A refund that follows its purchase counts in that purchase's category, so its own can't be
+	// picked until it's unlinked (or the purchase is excluded, when it counts on its own).
+	const purchase = refunds.find(
+		(p) => p.id === values.refundOfId && !p.excluded,
+	);
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
@@ -1491,9 +1494,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		posted === null ? current : posted === "" ? null : Number(posted);
 	const refundOk =
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
-	// A linked refund counts in its purchase's category, so a posted category (and a merchant rule
-	// made from it) is ignored.
-	if (refundOk && refundOfId !== null) {
+	// A refund that follows its purchase counts in that purchase's category, so a posted category
+	// (and a merchant rule made from it) is ignored.
+	if (refundOk && refunds.some((p) => p.id === refundOfId && !p.excluded)) {
 		form.delete("category");
 		form.delete("always");
 	}
