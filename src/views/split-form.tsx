@@ -71,7 +71,7 @@ export function SplitForm({
 				<div
 					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
 				>
-					<label for={`part-category-${index}`} class="text-base text-ink">
+					<label for={`part-category-${index}`} class="sr-only">
 						Part {index + 1} category
 					</label>
 					<select

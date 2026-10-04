@@ -638,7 +638,7 @@ function SplitSheet({
 				autofocus={values.length <= 2}
 				class="font-serif text-4xl font-semibold outline-none"
 			>
-				Split {tx.displayName}
+				{tx.displayName}
 			</h2>
 			<p class="font-serif text-4xl font-semibold">
 				{formatCents(tx.amountCents, { signed: true })}
@@ -668,7 +668,8 @@ async function splitContext(c: Context<App>) {
 
 transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
-	if (!tx || tx.parentId !== null) return notFound(c);
+	// Income is never split (decision 62's review): no form for it either.
+	if (!tx || tx.parentId !== null || tx.income) return notFound(c);
 	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
 	const filters = filtersFrom(back);
 	return renderList(c, filters, {

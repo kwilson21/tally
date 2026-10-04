@@ -41,6 +41,10 @@ describe("transaction splits", () => {
 			await exports.default.fetch(`${BASE}/transactions/${income?.id}`)
 		).text();
 		expect(edit).not.toContain(`/transactions/${income?.id}/split?`);
+		const form = await exports.default.fetch(
+			`${BASE}/transactions/${income?.id}/split`,
+		);
+		expect(form.status).toBe(404);
 		const response = await post(`/transactions/${income?.id}/split`, [
 			["back", "/transactions"],
 		]);
