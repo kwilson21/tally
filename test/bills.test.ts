@@ -160,6 +160,7 @@ describe("Bills", () => {
 		"2026-06-15",
 		"2028-02-29",
 		"2026-02-24",
+		"2026-03-02",
 		"2026-10-26",
 		"2026-10-31",
 		"2026-12-09",
@@ -172,7 +173,15 @@ describe("Bills", () => {
 		).toEqual(new Set(["overdue", "due", "upcoming", "paid"]));
 		const late = rows.find((row) => row.name === "Water");
 		expect(late?.paidDate).toBeTruthy();
-		expect(late?.paidDate && late.paidDate > late.dueDate).toBe(true);
+		// On the 1st there is no earlier day this month to be late against.
+		if (!date.endsWith("-01"))
+			expect(late?.paidDate && late.paidDate > late.dueDate).toBe(true);
+		const future = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE date > ?",
+		)
+			.bind(date)
+			.first<{ n: number }>();
+		expect(future?.n).toBe(0);
 		const onTime = rows.find((row) => row.name === "Streaming");
 		expect(onTime?.status).toBe("paid");
 		expect(onTime?.paidDate).toBe(onTime?.dueDate);

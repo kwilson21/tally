@@ -30,8 +30,8 @@ export function canResetDemo(env: {
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
 export async function resetDemo(db: D1Database, today: string): Promise<void> {
 	const seed = buildSeed(today);
-	// Keep the paid-late specimen meaningful at the very start of a month too.
-	// The demo is illustrative data, so its linked payment may be a few days ahead.
+	// Early in a month, Water's payment moves to today so it is still in this
+	// month's period, never in the future (paid late from the 2nd on).
 	const todayDay = Number(today.slice(8, 10));
 	if (todayDay < 4) {
 		const waterPayment = seed.transactions.find(
@@ -39,7 +39,7 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 				transaction.rawName === "GOOGLE *YOUTUBE" &&
 				transaction.date.startsWith(today.slice(0, 7)),
 		);
-		if (waterPayment) waterPayment.date = `${today.slice(0, 8)}04`;
+		if (waterPayment) waterPayment.date = today;
 	}
 	const b = (v: boolean) => (v ? 1 : 0);
 

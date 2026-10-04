@@ -45,6 +45,14 @@ type Values = {
 	merchant_raw_name: string;
 };
 
+function previousMonth(today: string) {
+	const year = Number(today.slice(0, 4));
+	const month = Number(today.slice(5, 7));
+	return month === 1
+		? `${year - 1}-12`
+		: `${year}-${String(month - 1).padStart(2, "0")}`;
+}
+
 export async function loadBillRows(db: D1Database, today = todayUtc()) {
 	const rows = await db
 		.prepare(
@@ -52,14 +60,20 @@ export async function loadBillRows(db: D1Database, today = todayUtc()) {
 			 FROM bills b
 			 LEFT JOIN categories c ON c.id=b.category_id
 			 LEFT JOIN bill_payments bp ON bp.bill_id=b.id AND bp.status='linked'
+			   AND (bp.period >= ? OR (length(bp.period)=4 AND bp.period >= ?))
 			 LEFT JOIN transactions t ON t.id=bp.transaction_id
 			 ORDER BY b.id`,
 		)
+		// Only the periods billOccurrence can pick: last month on, or this year on.
+		.bind(previousMonth(today), today.slice(0, 4))
 		.all<DbBill>();
 	const result: (BillRowData & { active: boolean })[] = [];
 	const byBill = new Map<number, DbBill[]>();
-	for (const row of rows.results)
-		byBill.set(row.id, [...(byBill.get(row.id) ?? []), row]);
+	for (const row of rows.results) {
+		const list = byBill.get(row.id);
+		if (list) list.push(row);
+		else byBill.set(row.id, [row]);
+	}
 	for (const billRows of byBill.values()) {
 		const b = billRows[0] as DbBill;
 		const payments = new Map(
