@@ -25,7 +25,7 @@ const countWhere = async (where: string) =>
 	(
 		await db
 			.prepare(
-				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND ${where}`,
+				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND (${where})`,
 			)
 			.bind(MONTH)
 			.first<{ n: number }>()
@@ -48,6 +48,7 @@ describe("monthCounts", () => {
 			noneFit: 0,
 			notYetAsked: 12,
 			income: await countWhere("category_id IS NULL AND flag_income = 1"),
+			heldForReview: 0,
 		});
 		expect(counts.income).toBeGreaterThan(0);
 		expect(counts.needsCategory).toBe(12);
@@ -64,6 +65,8 @@ describe("monthCounts", () => {
 				displayName: null,
 				note: null,
 				excluded: false,
+				creditReviewed: true,
+				income: false,
 			},
 			"demo",
 		);
@@ -95,6 +98,23 @@ describe("monthCounts", () => {
 			noneFit: 1,
 			notYetAsked: 8,
 		});
+	});
+
+	it("reports held-for-review credits outside the counted transaction total", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		const counts = await monthCounts(db, MONTH);
+		expect(counts.heldForReview).toBe(1);
+		expect(counts.counted).toBe(
+			await countWhere(
+				"amount_cents >= 0 OR credit_reviewed = 1 OR flag_income = 1",
+			),
+		);
 	});
 });
 

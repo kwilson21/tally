@@ -23,6 +23,8 @@ describe("parseEdit", () => {
 				displayName: "Local Bakery",
 				note: null,
 				excluded: false,
+				income: false,
+				creditReviewed: false,
 			},
 		});
 	});

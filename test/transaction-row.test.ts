@@ -14,6 +14,7 @@ const base: ListRow = {
 	note: null,
 	excluded: false,
 	income: false,
+	creditReviewed: true,
 	categoryId: null,
 	categoryName: null,
 	categoryIcon: null,
@@ -21,6 +22,14 @@ const base: ListRow = {
 };
 
 describe("rowCaption", () => {
+	it("shows a newly imported credit as needing review", () => {
+		expect(
+			rowCaption({ ...base, amountCents: -2500, creditReviewed: false }),
+		).toMatchObject({
+			caption: "Review credit",
+			tag: true,
+		});
+	});
 	it("shows the category when there is one", () => {
 		expect(
 			rowCaption({

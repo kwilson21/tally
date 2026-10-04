@@ -75,6 +75,7 @@ export function categorizationExample(c: {
 	notYetAsked: number;
 	/** Income with no category: it needs none. */
 	income: number;
+	heldForReview?: number;
 }): string {
 	const parts: string[] = [];
 	if (c.jev > 0) {
@@ -104,6 +105,10 @@ export function categorizationExample(c: {
 	if (c.income > 0)
 		parts.push(
 			`${c.income} ${c.income === 1 ? "is" : "are"} income, which needs no category.`,
+		);
+	if (c.heldForReview && c.heldForReview > 0)
+		parts.push(
+			`${c.heldForReview} ${c.heldForReview === 1 ? "credit is" : "credits are"} held for review and don't count toward spending yet.`,
 		);
 	if (parts.length === 0) return "Nothing has been categorized yet this month.";
 	return `This month, ${parts.join(" ")}`;

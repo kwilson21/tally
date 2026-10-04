@@ -17,6 +17,7 @@ const row: ListRow = {
 	note: null,
 	excluded: false,
 	income: false,
+	creditReviewed: true,
 	categoryId: null,
 	categoryName: null,
 	categoryIcon: null,

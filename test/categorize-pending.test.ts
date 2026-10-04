@@ -59,6 +59,46 @@ describe("categorizePending", () => {
 		expect(await needsCategoryCount(db, MONTH)).toBe(12);
 	});
 
+	it("never queues a user-owned uncategorized credit on repeated runs", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const id = 1;
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL, amount_cents = -500, flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = 0.5 WHERE id != ?",
+			)
+			.bind(id)
+			.run();
+		expect((await pendingForJev(db, 40)).map((item) => item.id)).not.toContain(
+			id,
+		);
+		for (let run = 0; run < 2; run++) {
+			const jev = fakeJev(() => reply(0.95));
+			expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
+				asked: 0,
+				applied: 0,
+			});
+			expect(jev.calls()).toBe(0);
+		}
+		expect(
+			await db
+				.prepare(
+					"SELECT amount_cents, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			amount_cents: -500,
+			income_source: "user",
+			credit_reviewed_by: "user",
+		});
+	});
+
 	it("applies confident answers and stores the confidence of unsure ones", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		// First 4 calls confident, the rest unsure.

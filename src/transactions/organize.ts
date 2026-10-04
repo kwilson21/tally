@@ -1,9 +1,9 @@
 import { tidyName } from "./tidy-name";
 
 const NEEDS_CATEGORY =
-	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0";
+	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)";
 const NEEDS_CATEGORY_UPDATE =
-	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0";
+	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0 AND (amount_cents >= 0 OR credit_reviewed = 1)";
 const CHUNK_SIZE = 90;
 
 export type OrganizeGroup = {
