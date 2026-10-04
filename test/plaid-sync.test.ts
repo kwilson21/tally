@@ -476,6 +476,51 @@ describe("syncItem", () => {
 		expect(row?.category_id).not.toBeNull();
 	});
 
+	it.each(["added", "modified"] as const)(
+		"unlinks a refund of a part when a %s amount change removes the split",
+		async (kind) => {
+			const item = await addItem();
+			await syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				item,
+				plaidFetch(() => response(page({ added: [transaction()] }))),
+			);
+			const parent = await env.DB.prepare(
+				"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first<{ id: number; account_id: number }>();
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET is_split = 1 WHERE id = ?",
+				).bind(parent?.id),
+				env.DB.prepare(
+					"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, parent_id) VALUES (8801, ?, '2026-09-27', 1234, 'RAW SHOP', ?)",
+				).bind(parent?.account_id, parent?.id),
+				env.DB.prepare(
+					"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, refund_of_id) VALUES (8802, ?, '2026-09-29', -500, 'RAW SHOP', 8801)",
+				).bind(parent?.account_id),
+			]);
+			await syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				item,
+				plaidFetch(() =>
+					response(page({ [kind]: [transaction({ amount: 20 })] })),
+				),
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT refund_of_id FROM transactions WHERE id = 8802",
+				).first(),
+			).toEqual({ refund_of_id: null });
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
+				)
+					.bind(parent?.id)
+					.first(),
+			).toEqual({ n: 0 });
+		},
+	);
+
 	it("moves split children with a date correction and removes them for an amount correction", async () => {
 		const item = await addItem();
 		const sync = (overrides: Record<string, unknown>) =>

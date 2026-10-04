@@ -1,7 +1,8 @@
+import { COUNTED_JOINS, countedCategorySql } from "../db/counted-month";
 import { tidyName } from "./tidy-name";
 
-const NEEDS_CATEGORY =
-	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0";
+// The same set Home counts as needing a category (a linked refund goes by its purchase's category).
+const NEEDS_CATEGORY = `${countedCategorySql()} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0`;
 const NEEDS_CATEGORY_UPDATE =
 	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0";
 const CHUNK_SIZE = 90;
@@ -20,6 +21,7 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			`SELECT t.raw_name AS rawName, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
 				m.display_name AS displayName
 			FROM transactions t LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			${COUNTED_JOINS}
 			WHERE ${NEEDS_CATEGORY}
 			GROUP BY t.raw_name, m.display_name`,
 		)
@@ -67,7 +69,7 @@ export async function saveOrganizeGroup(
 		const marks = chunk.map(() => "?").join(", ");
 		const count = await db
 			.prepare(
-				`SELECT COUNT(*) AS n FROM transactions t WHERE ${NEEDS_CATEGORY} AND t.raw_name IN (${marks})`,
+				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND t.raw_name IN (${marks})`,
 			)
 			.bind(...chunk)
 			.first<{ n: number }>();

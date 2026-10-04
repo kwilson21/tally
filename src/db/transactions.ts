@@ -5,9 +5,14 @@ import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern } from "../transactions/filters";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
-import { countedMonthSql } from "./counted-month";
+import {
+	COUNTED_JOINS,
+	countedCategorySql,
+	countedMonthSql,
+} from "./counted-month";
 
 const COUNTED_MONTH = countedMonthSql();
+const COUNTED_CATEGORY = countedCategorySql();
 
 export type ListRow = {
 	id: number;
@@ -34,9 +39,9 @@ export type ListRow = {
 
 export const PAGE_SIZE = 25;
 
-// "Needs category" is the same set Home counts as uncategorized (spec §6): counted, not income, no category.
-const NEEDS_CATEGORY =
-	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0";
+// "Needs category" is the same set Home counts as uncategorized (spec §6): counted, not income, no
+// counted category (a linked refund needs one when its purchase has none). Queries add COUNTED_JOINS.
+const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0`;
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -50,7 +55,7 @@ export async function listTransactions(
 		args.push(f.month);
 	}
 	if (f.category !== null) {
-		where.push("t.category_id = ?");
+		where.push(`${COUNTED_CATEGORY} = ?`);
 		where.push("t.is_split = 0");
 		args.push(f.category);
 	}
@@ -66,12 +71,11 @@ export async function listTransactions(
 		args.push(pattern, pattern, pattern, pattern);
 	}
 
+	// The row shows the category it counts in, so a linked refund shows its purchase's.
 	const from = `FROM transactions t
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
-			LEFT JOIN categories c ON c.id = t.category_id
-			LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
-			LEFT JOIN bills b ON b.id=bp.bill_id
-			LEFT JOIN transactions rp ON rp.id=t.refund_of_id
+			${COUNTED_JOINS}
+			LEFT JOIN categories c ON c.id = ${COUNTED_CATEGORY}
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			LEFT JOIN merchants pm ON pm.raw_name = p.raw_name
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
@@ -134,7 +138,7 @@ export async function needsCategoryCount(
 ): Promise<number> {
 	const inMonth = month === "all" ? "" : `${COUNTED_MONTH} = ? AND `;
 	const statement = db.prepare(
-		`SELECT COUNT(*) AS n FROM transactions t LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked' LEFT JOIN bills b ON b.id=bp.bill_id LEFT JOIN transactions rp ON rp.id=t.refund_of_id WHERE ${inMonth}${NEEDS_CATEGORY}`,
+		`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${inMonth}${NEEDS_CATEGORY}`,
 	);
 	const row = await (month === "all"
 		? statement
@@ -152,9 +156,7 @@ export async function monthsWithTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT DISTINCT ${COUNTED_MONTH} AS month FROM transactions t
-			 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
-			 LEFT JOIN bills b ON b.id=bp.bill_id
-			 LEFT JOIN transactions rp ON rp.id=t.refund_of_id ORDER BY month DESC`,
+			 ${COUNTED_JOINS} ORDER BY month DESC`,
 		)
 		.all<{ month: string }>();
 	return results.map((r) => r.month);
@@ -179,21 +181,37 @@ export type RefundPurchase = {
 	categoryName: string | null;
 };
 
-/** Eligible purchases for a refund: same bank merchant, on or before it, within 90 days; split parents give way to their parts. */
+/**
+ * The purchases a refund can link to: same bank merchant, on or before it, within 90 days; a split
+ * purchase gives way to its parts. The purchase it's linked to now is always included, so it can be kept.
+ */
 export async function refundPurchases(
 	db: D1Database,
 	refund: Pick<
 		TransactionDetail,
-		"id" | "date" | "rawName" | "amountCents" | "income" | "isSplit"
+		| "id"
+		| "date"
+		| "rawName"
+		| "amountCents"
+		| "income"
+		| "isSplit"
+		| "refundOfId"
 	>,
 ): Promise<RefundPurchase[]> {
-	if (refund.amountCents >= 0 || refund.income || refund.isSplit) return [];
+	const isRefund = refund.amountCents < 0 && !refund.income && !refund.isSplit;
+	if (!isRefund && refund.refundOfId == null) return [];
 	const { results } = await db
 		.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents,t.category_id AS categoryId,c.name AS categoryName
 		FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
-		WHERE t.amount_cents>0 AND t.is_split=0 AND t.raw_name=? AND t.date<=? AND t.date>=date(?,'-90 days') AND t.id!=?
+		WHERE t.id = ?1 OR (?2 AND t.amount_cents>0 AND t.is_split=0 AND t.raw_name=?3 AND t.date<=?4 AND t.date>=date(?4,'-90 days') AND t.id!=?5)
 		ORDER BY t.date DESC,t.id DESC`)
-		.bind(refund.rawName, refund.date, refund.date, refund.id)
+		.bind(
+			refund.refundOfId ?? null,
+			isRefund ? 1 : 0,
+			refund.rawName,
+			refund.date,
+			refund.id,
+		)
 		.all<RefundPurchase>();
 	return results;
 }
@@ -218,10 +236,9 @@ export async function getTransaction(
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
-			LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
-			LEFT JOIN bills b ON b.id=bp.bill_id
-			LEFT JOIN transactions rp ON rp.id=t.refund_of_id
+			${COUNTED_JOINS}
 			WHERE t.id = ?`,
 		)
 		.bind(id)
@@ -296,28 +313,12 @@ export async function saveEdit(
 			)
 			.bind(current.rawName, edit.displayName),
 	];
-	if (edit.refundOfId !== undefined) {
+	// Linking only sets the link: the refund's own category stays, so unlinking brings it back.
+	if (edit.refundOfId !== undefined)
 		statements.push(
 			db
-				.prepare(
-					`UPDATE transactions SET refund_of_id=?, category_id=CASE WHEN ? IS NULL THEN category_id ELSE (SELECT category_id FROM transactions WHERE id=?) END, category_source=CASE WHEN ? IS NULL THEN category_source ELSE 'user' END WHERE id=?`,
-				)
-				.bind(
-					edit.refundOfId,
-					edit.refundOfId,
-					edit.refundOfId,
-					edit.refundOfId,
-					id,
-				),
-		);
-	}
-	if (changed)
-		statements.push(
-			db
-				.prepare(
-					"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL WHERE refund_of_id=?",
-				)
-				.bind(edit.categoryId, id),
+				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+				.bind(edit.refundOfId, id),
 		);
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
@@ -353,13 +354,30 @@ export async function saveEdit(
 	await db.batch(statements);
 }
 
-/** Creates every child and marks its parent in one D1 batch. */
+/**
+ * Dates of the refunds linked to a purchase or its parts, oldest first: the ones a split change unlinks.
+ * `self` includes refunds of the purchase itself.
+ */
+async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
+	const { results } = await db
+		.prepare(
+			`SELECT date FROM transactions WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1${self ? " OR id = ?1" : ""}) ORDER BY date, id`,
+		)
+		.bind(id)
+		.all<{ date: string }>();
+	return results.map((row) => row.date);
+}
+
+/**
+ * Creates every child and marks its parent in one D1 batch. Refunds linked to the purchase or to
+ * parts being replaced are unlinked in the same batch; their dates are returned for the toast.
+ */
 export async function saveSplit(
 	db: D1Database,
 	parentId: number,
 	parts: SplitPart[],
 	by: string,
-) {
+): Promise<{ saved: boolean; unlinked: string[] }> {
 	const parent = await db
 		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
 		.bind(parentId)
@@ -370,7 +388,14 @@ export async function saveSplit(
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	const unchanged =
 		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	const unlinked = await linkedRefundDates(db, parentId, true);
 	const results = await db.batch([
+		db
+			.prepare(
+				`UPDATE transactions SET refund_of_id = NULL
+				WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ? OR id = ?) AND ${unchanged}`,
+			)
+			.bind(parentId, parentId, parentId, total),
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
 			.bind(parentId, parentId, total),
@@ -389,21 +414,17 @@ export async function saveSplit(
 			)
 			.bind(by, parentId, total),
 	]);
-	return (results.at(-1)?.meta.changes ?? 0) > 0;
+	const saved = (results.at(-1)?.meta.changes ?? 0) > 0;
+	return { saved, unlinked: saved ? unlinked : [] };
 }
 
-/** Deletes a split and restores its parent atomically. */
+/** Deletes a split and restores its parent atomically, unlinking refunds of its parts; returns their dates. */
 export async function removeSplit(
 	db: D1Database,
 	parentId: number,
 	by: string,
-) {
-	const { results: linked } = await db
-		.prepare(
-			"SELECT date FROM transactions WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=?) ORDER BY date",
-		)
-		.bind(parentId)
-		.all<{ date: string }>();
+): Promise<string[]> {
+	const unlinked = await linkedRefundDates(db, parentId, false);
 	await db.batch([
 		db
 			.prepare(
@@ -417,7 +438,7 @@ export async function removeSplit(
 			)
 			.bind(by, parentId),
 	]);
-	return linked.map((row) => row.date);
+	return unlinked;
 }
 
 /**
@@ -456,6 +477,7 @@ export async function pendingForJev(
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			${COUNTED_JOINS}
 			WHERE ${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
@@ -537,6 +559,15 @@ export async function excludedBreakdown(
 	return row ?? { transfer: 0, reimbursement: 0, byPerson: 0 };
 }
 
+// Who categorized a transaction, read from where its category comes from: a linked refund's purchase.
+const countedBy = (column: string) =>
+	`CASE WHEN rp.id IS NOT NULL THEN rp.${column} ELSE t.${column} END`;
+const COUNTED_BY = {
+	source: countedBy("category_source"),
+	confidence: countedBy("category_confidence"),
+	jev: countedBy("jev_category_id"),
+};
+
 /**
  * This month's numbers for the How Tally works page (spec §9): counted transactions, how many
  * need a category (the same set Home counts), and who categorized the rest.
@@ -560,17 +591,15 @@ export async function monthCounts(
 		.prepare(
 			`SELECT COUNT(*) AS counted,
 				COALESCE(SUM(CASE WHEN ${NEEDS_CATEGORY} THEN 1 ELSE 0 END), 0) AS needsCategory,
-				COALESCE(SUM(t.category_source = 'user'), 0) AS user,
-				COALESCE(SUM(t.category_source = 'merchant_rule'), 0) AS merchantRule,
-				COALESCE(SUM(t.category_source = 'jev'), 0) AS jev,
-				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NOT NULL), 0) AS unsure,
-				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NOT NULL AND t.jev_category_id IS NULL), 0) AS noneFit,
-				COALESCE(SUM(${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL), 0) AS notYetAsked,
+				COALESCE(SUM(${COUNTED_BY.source} = 'user'), 0) AS user,
+				COALESCE(SUM(${COUNTED_BY.source} = 'merchant_rule'), 0) AS merchantRule,
+				COALESCE(SUM(${COUNTED_BY.source} = 'jev'), 0) AS jev,
+				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NOT NULL), 0) AS unsure,
+				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NULL), 0) AS noneFit,
+				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NULL), 0) AS notYetAsked,
 				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income
 			FROM transactions t
-			LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
-			LEFT JOIN bills b ON b.id=bp.bill_id
-			LEFT JOIN transactions rp ON rp.id=t.refund_of_id
+			${COUNTED_JOINS}
 			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0`,
 		)
 		.bind(month)

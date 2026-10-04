@@ -166,7 +166,7 @@ describe("GET /transactions", () => {
 	it("pages through results with real links, 25 at a time", async () => {
 		const first = (await get("/transactions")).html;
 		expect(first).toMatch(
-			/<p id="result-count"[^>]*>Showing 1–25 of 40 transactions in [A-Z][a-z]+<\/p>/,
+			/<p id="result-count"[^>]*>Showing 1–25 of 38 transactions in [A-Z][a-z]+<\/p>/,
 		);
 		expect(first).toMatch(/<nav aria-label="Pages"/);
 		expect(first).toContain("Page 1 of 2");
@@ -176,8 +176,8 @@ describe("GET /transactions", () => {
 		expect(first).not.toContain(">Newer<");
 
 		const second = (await get("/transactions?page=2")).html;
-		expect(rowCount(second)).toBe(15);
-		expect(second).toMatch(/Showing 26–40 of 40 transactions/);
+		expect(rowCount(second)).toBe(13);
+		expect(second).toMatch(/Showing 26–38 of 38 transactions/);
 		expect(second).toMatch(
 			/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
 		);

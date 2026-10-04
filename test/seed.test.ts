@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
+import { daysBefore } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
-import { buildSeed } from "../src/demo/seed";
+import { buildSeed, monthOffset } from "../src/demo/seed";
 
 describe("buildSeed", () => {
 	it.each(["2026-09-22", "2026-09-01", "2026-02-28", "2027-01-31"])(
@@ -11,8 +12,11 @@ describe("buildSeed", () => {
 		(today) => {
 			const seed = buildSeed(today);
 			const month = today.slice(0, 7);
+			// A linked refund counts in its purchase's month (spec §6).
+			const countedDate = (t: (typeof seed.transactions)[number]) =>
+				seed.transactions.find((p) => p.id === t.refundOfId)?.date ?? t.date;
 			const counted = seed.transactions.filter(
-				(t) => t.date.startsWith(month) && !t.excluded && !t.isSplit,
+				(t) => countedDate(t).startsWith(month) && !t.excluded && !t.isSplit,
 			);
 
 			const summary = summarizeMonth({
@@ -40,6 +44,29 @@ describe("buildSeed", () => {
 			expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
 			expect(summary.incomeCents).toBe(490000);
 			expect(summary.safeToSpendCents).toBe(26299);
+		},
+	);
+
+	it.each(["2026-09-22", "2026-09-01", "2026-03-31", "2027-01-31"])(
+		"links the Target refund to a purchase last month on %s",
+		(today) => {
+			const seed = buildSeed(today);
+			const refund = seed.transactions.find((t) => t.refundOfId);
+			const purchase = seed.transactions.find(
+				(t) => t.id === refund?.refundOfId,
+			);
+			expect(refund).toMatchObject({
+				rawName: "TARGET T-1432",
+				amountCents: -2499,
+			});
+			expect(purchase).toMatchObject({
+				rawName: "TARGET T-1432",
+				amountCents: 8499,
+				categoryId: 4,
+			});
+			expect(purchase?.date.slice(0, 7)).toBe(monthOffset(today, 1));
+			expect(refund?.date).toBe(daysBefore(today, 5));
+			expect((purchase?.date ?? "") >= daysBefore(today, 31)).toBe(true);
 		},
 	);
 

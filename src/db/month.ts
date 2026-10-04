@@ -1,7 +1,12 @@
 import type { BudgetAmount, CountedTransaction } from "../budget";
-import { countedMonthSql } from "./counted-month";
+import {
+	COUNTED_JOINS,
+	countedCategorySql,
+	countedMonthSql,
+} from "./counted-month";
 
 const COUNTED_MONTH = countedMonthSql();
+const COUNTED_CATEGORY = countedCategorySql();
 
 export type CategoryRow = {
 	id: number;
@@ -35,10 +40,8 @@ export async function loadMonth(
 				`SELECT id, name, icon, color, archived FROM categories c
 				 WHERE archived = 0 OR EXISTS (
 					SELECT 1 FROM transactions t
-					LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
-					LEFT JOIN bills b ON b.id=bp.bill_id
-					LEFT JOIN transactions rp ON rp.id=t.refund_of_id
-					WHERE t.category_id = c.id AND ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
+					${COUNTED_JOINS}
+					WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
 						AND t.flag_income = 0
 				 )
 				 ORDER BY sort_order, name`,
@@ -49,11 +52,9 @@ export async function loadMonth(
 		),
 		db
 			.prepare(
-				`SELECT t.category_id AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income
+				`SELECT ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income
 				 FROM transactions t
-				 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
-				 LEFT JOIN bills b ON b.id=bp.bill_id
-				 LEFT JOIN transactions rp ON rp.id=t.refund_of_id
+				 ${COUNTED_JOINS}
 				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0`,
 			)
 			.bind(month),

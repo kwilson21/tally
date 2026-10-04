@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { dayLabel, monthLabel, todayUtc } from "../dates";
+import { dayLabel, monthLabel, shortDay, todayUtc } from "../dates";
 import {
 	getTransaction,
 	type ListRow,
@@ -396,6 +396,11 @@ function EditSheet({
 		"hx-push-url": back,
 	};
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
+	// A linked refund counts in its purchase's category, so its own can't be picked until it's unlinked.
+	const purchase = refunds.find((p) => p.id === values.refundOfId);
+	const purchaseCategory = categories.find(
+		(cat) => cat.id === purchase?.categoryId,
+	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -491,6 +496,7 @@ function EditSheet({
 				<input type="hidden" name="back" value={back} />
 				<fieldset
 					class="flex flex-col gap-2"
+					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
 					<legend class="text-base text-ink">Category</legend>
@@ -500,18 +506,31 @@ function EditSheet({
 								type="radio"
 								name="category"
 								value={String(cat.id)}
-								checked={values.categoryId === cat.id}
+								checked={
+									purchase
+										? purchase.categoryId === cat.id
+										: values.categoryId === cat.id
+								}
 								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
 							>
 								{cat.name}
 							</Chip>
 						))}
 					</div>
-					{tx.categorySource === "jev" && tx.categoryConfidence !== null && (
+					{purchase && (
 						<p class="text-sm text-muted">
-							Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
+							{purchaseCategory
+								? `Counts in ${purchaseCategory.name} with the ${shortDay(purchase.date, tx.date)} purchase.`
+								: `Counts with the ${shortDay(purchase.date, tx.date)} purchase.`}
 						</p>
 					)}
+					{!purchase &&
+						tx.categorySource === "jev" &&
+						tx.categoryConfidence !== null && (
+							<p class="text-sm text-muted">
+								Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
+							</p>
+						)}
 					{errors.category && (
 						<p id="category-error" role="alert" class="text-sm text-over">
 							{errors.category}
@@ -529,36 +548,41 @@ function EditSheet({
 							</span>
 							This refunds…
 						</summary>
-						<p class="mb-2 text-sm text-muted">
-							{tx.displayName} purchases in the last 90 days
-						</p>
-						<div class="flex flex-wrap gap-2">
-							<Chip
-								type="radio"
-								name="refund_of"
-								value=""
-								checked={values.refundOfId == null}
+						<div class="flex flex-col gap-3 pt-1">
+							<p class="text-sm text-muted">
+								{tx.displayName} purchases in the last 90 days
+							</p>
+							<fieldset
+								class="flex flex-col gap-3"
+								aria-describedby={errors.refund ? "refund-error" : undefined}
 							>
-								Not linked
-							</Chip>
-							{refunds.map((purchase) => (
+								<legend class="sr-only">Purchase this refunds</legend>
 								<Chip
 									type="radio"
 									name="refund_of"
-									value={String(purchase.id)}
-									checked={values.refundOfId === purchase.id}
+									value=""
+									checked={values.refundOfId == null}
 								>
-									{dayLabel(purchase.date, todayUtc())} ·{" "}
-									{formatCents(purchase.amountCents)} ·{" "}
-									{purchase.categoryName ?? "No category"}
+									Not linked
 								</Chip>
-							))}
+								{refunds.map((p) => (
+									<Chip
+										type="radio"
+										name="refund_of"
+										value={String(p.id)}
+										checked={values.refundOfId === p.id}
+									>
+										{shortDay(p.date, tx.date)} · {formatCents(p.amountCents)} ·{" "}
+										{p.categoryName ?? "No category"}
+									</Chip>
+								))}
+							</fieldset>
+							{errors.refund && (
+								<p id="refund-error" role="alert" class="text-sm text-over">
+									{errors.refund}
+								</p>
+							)}
 						</div>
-						{errors.refund && (
-							<p role="alert" class="text-sm text-over">
-								{errors.refund}
-							</p>
-						)}
 					</details>
 				)}
 				{/* The two things people change most after the category, one tap each (owner's pick C). */}
@@ -931,9 +955,10 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			tx.amountCents,
 			categories.map((cat) => cat.id),
 		);
-		const saved =
-			parsed.ok && (await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c)));
-		if (parsed.ok && !saved) {
+		const result = parsed.ok
+			? await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c))
+			: null;
+		if (result && !result.saved) {
 			// Show the bank's new amount, so the next save checks against it.
 			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 			return renderList(c, filtersFrom(back), {
@@ -949,13 +974,17 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				),
 			});
 		}
-		if (parsed.ok) {
+		if (result) {
 			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+			const unlinked = unlinkedSentence(result.unlinked);
 			c.header(
 				"HX-Trigger",
 				JSON.stringify({
-					toast: { message: `Split ${tx.displayName}`, type: "success" },
-					announce: `Saved split for ${tx.displayName}.`,
+					toast: {
+						message: `Split ${tx.displayName}${unlinked ? `.${unlinked}` : ""}`,
+						type: "success",
+					},
+					announce: `Saved split for ${tx.displayName}.${unlinked}`,
 				}),
 			);
 			c.header("HX-Push-Url", back);
@@ -969,7 +998,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					back={back}
 					categories={categories}
 					values={values}
-					error={parsed.error}
+					error={parsed.ok ? undefined : parsed.error}
 				/>
 			),
 		});
@@ -981,25 +1010,32 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	});
 });
 
+/** What a split change says about refunds it unlinked: " The refund on Sep 26 is no longer linked.", or "" for none. */
+function unlinkedSentence(dates: string[]): string {
+	const [first] = dates;
+	if (first === undefined) return "";
+	return dates.length === 1
+		? ` The refund on ${shortDay(first, todayUtc())} is no longer linked.`
+		: ` ${dates.length} refunds are no longer linked.`;
+}
+
 transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx?.isSplit) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const unlinked = await removeSplit(c.env.DB, tx.id, actor(c));
+	const unlinked = unlinkedSentence(
+		await removeSplit(c.env.DB, tx.id, actor(c)),
+	);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-	const unlinkText =
-		unlinked.length > 0
-			? ` The refund on ${dayLabel(unlinked[0] as string, todayUtc())} is no longer linked.`
-			: "";
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: {
-				message: `Split removed.${unlinkText}`,
+				message: `Removed split from ${tx.displayName}${unlinked ? `.${unlinked}` : ""}`,
 				type: "success",
 			},
-			announce: `Split removed.${unlinkText}`,
+			announce: `Removed split from ${tx.displayName}.${unlinked}`,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -1016,17 +1052,27 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
 	).all<{ id: number; name: string }>();
+	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
+	// must be one the panel offers (the current link always is).
+	const refunds = await refundPurchases(c.env.DB, tx);
+	const current = tx.refundOfId ?? null;
+	const posted = form.get("refund_of");
+	const refundOfId =
+		posted === null ? current : posted === "" ? null : Number(posted);
+	const refundOk =
+		refundOfId === null || refunds.some((p) => p.id === refundOfId);
+	// A linked refund counts in its purchase's category, so a posted category (and a merchant rule
+	// made from it) is ignored.
+	if (refundOk && refundOfId !== null) {
+		form.delete("category");
+		form.delete("always");
+	}
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),
 	);
-	const refunds = await refundPurchases(c.env.DB, tx);
-	const requestedRefund = String(form.get("refund_of") ?? "");
-	const refundOfId = requestedRefund === "" ? null : Number(requestedRefund);
-	if (
-		requestedRefund !== "" &&
-		!refunds.some((purchase) => purchase.id === refundOfId)
-	) {
+
+	if (!parsed.ok || !refundOk) {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -1034,6 +1080,10 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
 			refundOfId,
+		};
+		const errors: EditErrors = {
+			...(parsed.ok ? {} : parsed.errors),
+			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
 		};
 		return renderList(c, filters, {
 			status: 422,
@@ -1044,39 +1094,23 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					categories={all}
 					values={values}
 					refunds={refunds}
-					errors={{ refund: "Pick a purchase from the list." }}
+					errors={errors}
 					demo={c.env.DEMO === "true"}
 				/>
 			),
 		});
 	}
 
-	if (!parsed.ok) {
-		const values: Edit = {
-			categoryId: Number(form.get("category")) || null,
-			alwaysForMerchant: form.get("always") === "1",
-			displayName: form.get("merchant")?.toString() ?? null,
-			note: form.get("note")?.toString() ?? null,
-			excluded: form.get("excluded") === "1",
-			refundOfId,
-		};
-		return renderList(c, filters, {
-			status: 422,
-			sheet: (all) => (
-				<EditSheet
-					tx={tx}
-					back={back}
-					categories={all}
-					values={values}
-					refunds={refunds}
-					errors={parsed.errors}
-					demo={c.env.DEMO === "true"}
-				/>
-			),
-		});
-	}
-
-	await saveEdit(c.env.DB, tx.id, { ...parsed.value, refundOfId }, actor(c));
+	// The link is written only when it changes.
+	await saveEdit(
+		c.env.DB,
+		tx.id,
+		{
+			...parsed.value,
+			refundOfId: refundOfId === current ? undefined : refundOfId,
+		},
+		actor(c),
+	);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).
@@ -1116,7 +1150,9 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			displayName: tx.merchantName,
 			note: tx.note,
 			excluded: tx.excluded,
+			refundOfId: tx.refundOfId ?? null,
 		};
+		const refunds = await refundPurchases(c.env.DB, tx);
 		return renderList(c, filtersFrom(back), {
 			sheet: (categories) => (
 				<EditSheet
@@ -1124,6 +1160,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 					back={back}
 					categories={categories}
 					values={values}
+					refunds={refunds}
 					demo={c.env.DEMO === "true"}
 					deleteConfirm
 				/>

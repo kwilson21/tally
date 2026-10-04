@@ -25,7 +25,8 @@ const countWhere = async (where: string) =>
 	(
 		await db
 			.prepare(
-				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND ${where}`,
+				// The demo's linked Target refund counts in its purchase's month (last month), not its own.
+				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND refund_of_id IS NULL AND ${where}`,
 			)
 			.bind(MONTH)
 			.first<{ n: number }>()
@@ -61,7 +62,7 @@ describe("monthCounts", () => {
 		expect(counts).toEqual({
 			counted: await countWhere("1 = 1"),
 			needsCategory: await needsCategoryCount(db, MONTH),
-			user: 2,
+			user: 1,
 			merchantRule: 0,
 			jev: await countWhere("category_source = 'jev'"),
 			unsure: 0,
@@ -109,7 +110,7 @@ describe("monthCounts", () => {
 		const counts = await monthCounts(db, MONTH);
 		expect(counts).toMatchObject({
 			needsCategory: 10,
-			user: 3,
+			user: 2,
 			merchantRule: 1,
 			unsure: 1,
 			noneFit: 1,

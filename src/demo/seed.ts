@@ -2,6 +2,7 @@
 // Nothing here is real. Designed totals are documented in the Phase 1b plan and asserted in test/seed.test.ts.
 
 import type { BudgetAmount } from "../budget";
+import { daysBefore } from "../dates";
 
 export type SeedCategory = {
 	id: number;
@@ -380,13 +381,24 @@ export function buildSeed(today: string): Seed {
 			},
 		);
 	}
+	// P19: a refund linked to its purchase. The purchase is about 30 days ago, always last month, and
+	// the refund 5 days ago, so the refund usually shows counting in the purchase's month.
+	const lastMonthEnd = daysBefore(`${thisMonth}-01`, 1);
+	const thirtyDaysAgo = daysBefore(today, 30);
 	const targetPurchaseId = transactions.length + 1;
-	transactions.push(spend(CARD, clamp(5), "TARGET T-1432", KIDS, 2499), {
-		...spend(CARD, clamp(9), "TARGET T-1432", KIDS, -2499),
-		categorySource: "user",
-		categoryConfidence: null,
-		refundOfId: targetPurchaseId,
-	});
+	transactions.push(
+		spend(
+			CARD,
+			thirtyDaysAgo < lastMonthEnd ? thirtyDaysAgo : lastMonthEnd,
+			"TARGET T-1432",
+			KIDS,
+			8499,
+		),
+		{
+			...spend(CARD, daysBefore(today, 5), "TARGET T-1432", KIDS, -2499),
+			refundOfId: targetPurchaseId,
+		},
+	);
 	transactions.forEach((transaction, index) => {
 		transaction.id = index + 1;
 	});
