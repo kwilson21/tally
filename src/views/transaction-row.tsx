@@ -13,6 +13,25 @@ type Caption = {
 export function rowCaption(row: ListRow): Caption {
 	if (row.excluded)
 		return { kind: "excluded", caption: "Excluded", tag: false };
+	if (row.parentId)
+		return {
+			kind: "category",
+			caption: `${row.categoryName ? `${row.categoryName} · ` : ""}Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
+			tag: false,
+		};
+	if (row.isSplit)
+		return { kind: "category", caption: "Split transaction", tag: false };
+	// The note stays only until the purchase has a category again.
+	if (
+		row.splitRemovedFromCents !== null &&
+		row.splitRemovedFromCents !== undefined &&
+		row.categoryId === null
+	)
+		return {
+			kind: "needs",
+			caption: `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.`,
+			tag: true,
+		};
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
 	if (row.categoryName)
 		return { kind: "category", caption: row.categoryName, tag: false };
@@ -22,6 +41,9 @@ export function rowCaption(row: ListRow): Caption {
 		tag: true,
 	};
 }
+
+const tidyFallback = (name: string) =>
+	name.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 function RowIcon({ row, kind }: { row: ListRow; kind: Caption["kind"] }) {
 	if (kind === "category")

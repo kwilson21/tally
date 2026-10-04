@@ -5,6 +5,7 @@ import {
 	fieldCents,
 	nudged,
 	roundedUp,
+	set,
 	showCents,
 } from "../public/js/money.js";
 
@@ -30,6 +31,31 @@ describe("fieldCents (the field's text → cents, or null)", () => {
 		expect(fieldCents(".5")).toBeNull();
 		expect(fieldCents("12.")).toBeNull();
 		expect(fieldCents("$")).toBeNull();
+	});
+});
+
+describe("programmatic money controls", () => {
+	it("dispatches a bubbling input event after changing the field", () => {
+		const input = new EventTarget() as EventTarget & { value: string };
+		input.value = "1.00";
+		const events: Event[] = [];
+		input.addEventListener("input", (event) => {
+			events.push(event);
+		});
+		const root = {
+			querySelector: (selector: string) =>
+				selector === "[data-money-input]" ? input : null,
+			querySelectorAll: () => [],
+		};
+		Object.defineProperty(globalThis, "document", {
+			value: { getElementById: () => null },
+			configurable: true,
+		});
+		set(root, "2.00");
+		expect(input.value).toBe("2.00");
+		expect(events).toHaveLength(1);
+		expect(events[0]?.bubbles).toBe(true);
+		Reflect.deleteProperty(globalThis, "document");
 	});
 });
 
