@@ -236,10 +236,7 @@ await page
 	.getByRole("link", { name: /Local Bakery.*Split transaction/ })
 	.click();
 await page.getByRole("button", { name: "Remove split" }).click();
-await page
-	.locator("#toasts")
-	.getByText("Removed split from Local Bakery")
-	.waitFor();
+await page.locator("#toasts").getByText("Split removed.").waitFor();
 assert.equal(await rows(), 1);
 step("removing the split restores the transaction");
 

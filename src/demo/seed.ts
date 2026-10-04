@@ -45,6 +45,7 @@ export type SeedTransaction = {
 	flagIncome: boolean;
 	excluded: boolean;
 	isSplit: boolean;
+	refundOfId?: number | null;
 };
 export type Seed = {
 	categories: SeedCategory[];
@@ -379,6 +380,13 @@ export function buildSeed(today: string): Seed {
 			},
 		);
 	}
+	const targetPurchaseId = transactions.length + 1;
+	transactions.push(spend(CARD, clamp(5), "TARGET T-1432", KIDS, 2499), {
+		...spend(CARD, clamp(9), "TARGET T-1432", KIDS, -2499),
+		categorySource: "user",
+		categoryConfidence: null,
+		refundOfId: targetPurchaseId,
+	});
 	transactions.forEach((transaction, index) => {
 		transaction.id = index + 1;
 	});

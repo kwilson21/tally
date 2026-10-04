@@ -11,7 +11,7 @@ const EXPORT_COLUMNS = {
 		(SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank_disconnected`,
 	balance_history: "account_id, date, balance_cents",
 	transactions:
-		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, excluded, parent_id, is_split, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents",
+		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents",
 	bills:
 		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active",
 	bill_payments:

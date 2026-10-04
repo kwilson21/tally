@@ -61,7 +61,7 @@ describe("monthCounts", () => {
 		expect(counts).toEqual({
 			counted: await countWhere("1 = 1"),
 			needsCategory: await needsCategoryCount(db, MONTH),
-			user: 1,
+			user: 2,
 			merchantRule: 0,
 			jev: await countWhere("category_source = 'jev'"),
 			unsure: 0,
@@ -109,7 +109,7 @@ describe("monthCounts", () => {
 		const counts = await monthCounts(db, MONTH);
 		expect(counts).toMatchObject({
 			needsCategory: 10,
-			user: 2,
+			user: 3,
 			merchantRule: 1,
 			unsure: 1,
 			noneFit: 1,

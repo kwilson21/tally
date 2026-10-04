@@ -33,14 +33,32 @@ export function rowCaption(row: ListRow): Caption {
 			tag: true,
 		};
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
+	const relationship = row.refundPurchaseDate
+		? `Refund for ${shortDate(row.refundPurchaseDate)}`
+		: row.refundedCents
+			? `${formatCents(row.refundedCents)} refunded`
+			: null;
 	if (row.categoryName)
-		return { kind: "category", caption: row.categoryName, tag: false };
+		return {
+			kind: "category",
+			caption: `${row.categoryName}${relationship ? ` · ${relationship}` : ""}`,
+			tag: false,
+		};
+	if (relationship)
+		return { kind: "category", caption: relationship, tag: false };
 	return {
 		kind: "needs",
 		caption: row.rawName === row.displayName ? null : row.rawName,
 		tag: true,
 	};
 }
+
+const shortDate = (date: string) =>
+	new Intl.DateTimeFormat("en-US", {
+		month: "short",
+		day: "numeric",
+		timeZone: "UTC",
+	}).format(new Date(`${date}T00:00:00Z`));
 
 const tidyFallback = (name: string) =>
 	name.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());

@@ -115,6 +115,7 @@ export async function lastMonthSpentCents(
 			`SELECT COALESCE(SUM(t.amount_cents), 0) AS cents FROM transactions t
 			 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
 			 LEFT JOIN bills b ON b.id=bp.bill_id
+			 LEFT JOIN transactions rp ON rp.id=t.refund_of_id
 			 WHERE t.category_id = ? AND ${countedMonthSql()} = ? AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0`,
 		)
 		.bind(categoryId, previousMonth(month))

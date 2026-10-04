@@ -37,6 +37,7 @@ export async function loadMonth(
 					SELECT 1 FROM transactions t
 					LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
 					LEFT JOIN bills b ON b.id=bp.bill_id
+					LEFT JOIN transactions rp ON rp.id=t.refund_of_id
 					WHERE t.category_id = c.id AND ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
 						AND t.flag_income = 0
 				 )
@@ -52,6 +53,7 @@ export async function loadMonth(
 				 FROM transactions t
 				 LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
 				 LEFT JOIN bills b ON b.id=bp.bill_id
+				 LEFT JOIN transactions rp ON rp.id=t.refund_of_id
 				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0`,
 			)
 			.bind(month),

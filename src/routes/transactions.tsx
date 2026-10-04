@@ -8,6 +8,8 @@ import {
 	monthsWithTransactions,
 	needsCategoryCount,
 	PAGE_SIZE,
+	type RefundPurchase,
+	refundPurchases,
 	removeSplit,
 	saveEdit,
 	saveSplit,
@@ -370,6 +372,7 @@ type SheetProps = {
 	errors?: EditErrors;
 	demo: boolean;
 	deleteConfirm?: boolean;
+	refunds?: RefundPurchase[];
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -381,6 +384,7 @@ function EditSheet({
 	errors = {},
 	demo,
 	deleteConfirm = false,
+	refunds = [],
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -514,6 +518,49 @@ function EditSheet({
 						</p>
 					)}
 				</fieldset>
+				{(refunds.length > 0 || tx.refundOfId != null) && (
+					<details
+						class="group border-t border-rule"
+						open={Boolean(errors.refund)}
+					>
+						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+							<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
+								<Icon name="chevron-right" class="size-5" />
+							</span>
+							This refunds…
+						</summary>
+						<p class="mb-2 text-sm text-muted">
+							{tx.displayName} purchases in the last 90 days
+						</p>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="radio"
+								name="refund_of"
+								value=""
+								checked={values.refundOfId == null}
+							>
+								Not linked
+							</Chip>
+							{refunds.map((purchase) => (
+								<Chip
+									type="radio"
+									name="refund_of"
+									value={String(purchase.id)}
+									checked={values.refundOfId === purchase.id}
+								>
+									{dayLabel(purchase.date, todayUtc())} ·{" "}
+									{formatCents(purchase.amountCents)} ·{" "}
+									{purchase.categoryName ?? "No category"}
+								</Chip>
+							))}
+						</div>
+						{errors.refund && (
+							<p role="alert" class="text-sm text-over">
+								{errors.refund}
+							</p>
+						)}
+					</details>
+				)}
 				{/* The two things people change most after the category, one tap each (owner's pick C). */}
 				<div class="flex flex-wrap gap-2">
 					<Chip
@@ -761,7 +808,9 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		displayName: tx.merchantName,
 		note: tx.note,
 		excluded: tx.excluded,
+		refundOfId: tx.refundOfId ?? null,
 	};
+	const refunds = await refundPurchases(c.env.DB, tx);
 	return renderList(c, filters, {
 		sheet: (categories) => (
 			<EditSheet
@@ -769,6 +818,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				back={back}
 				categories={categories}
 				values={values}
+				refunds={refunds}
 				demo={c.env.DEMO === "true"}
 			/>
 		),
@@ -936,16 +986,20 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	if (!tx?.isSplit) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	await removeSplit(c.env.DB, tx.id, actor(c));
+	const unlinked = await removeSplit(c.env.DB, tx.id, actor(c));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const unlinkText =
+		unlinked.length > 0
+			? ` The refund on ${dayLabel(unlinked[0] as string, todayUtc())} is no longer linked.`
+			: "";
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: {
-				message: `Removed split from ${tx.displayName}`,
+				message: `Split removed.${unlinkText}`,
 				type: "success",
 			},
-			announce: `Removed split from ${tx.displayName}.`,
+			announce: `Split removed.${unlinkText}`,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -966,14 +1020,20 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		form,
 		categories.map((cat) => cat.id),
 	);
-
-	if (!parsed.ok) {
+	const refunds = await refundPurchases(c.env.DB, tx);
+	const requestedRefund = String(form.get("refund_of") ?? "");
+	const refundOfId = requestedRefund === "" ? null : Number(requestedRefund);
+	if (
+		requestedRefund !== "" &&
+		!refunds.some((purchase) => purchase.id === refundOfId)
+	) {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
+			refundOfId,
 		};
 		return renderList(c, filters, {
 			status: 422,
@@ -983,6 +1043,32 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					back={back}
 					categories={all}
 					values={values}
+					refunds={refunds}
+					errors={{ refund: "Pick a purchase from the list." }}
+					demo={c.env.DEMO === "true"}
+				/>
+			),
+		});
+	}
+
+	if (!parsed.ok) {
+		const values: Edit = {
+			categoryId: Number(form.get("category")) || null,
+			alwaysForMerchant: form.get("always") === "1",
+			displayName: form.get("merchant")?.toString() ?? null,
+			note: form.get("note")?.toString() ?? null,
+			excluded: form.get("excluded") === "1",
+			refundOfId,
+		};
+		return renderList(c, filters, {
+			status: 422,
+			sheet: (all) => (
+				<EditSheet
+					tx={tx}
+					back={back}
+					categories={all}
+					values={values}
+					refunds={refunds}
 					errors={parsed.errors}
 					demo={c.env.DEMO === "true"}
 				/>
@@ -990,7 +1076,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		});
 	}
 
-	await saveEdit(c.env.DB, tx.id, parsed.value, actor(c));
+	await saveEdit(c.env.DB, tx.id, { ...parsed.value, refundOfId }, actor(c));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).
