@@ -18,6 +18,31 @@ beforeEach(async () => {
 });
 
 describe("GET /transactions", () => {
+	it.each([
+		["monthly", null, "2026-08"],
+		["yearly", 8, "2026"],
+	] as const)(
+		"shows the Counts in caption in list and detail for a %s bill",
+		async (frequency, anchor, period) => {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name) VALUES(95,'Caption',1000,31,?,?, 'CAPTION')",
+				).bind(frequency, anchor),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT 905,id,'2026-09-02',1000,'CAPTION',1 FROM accounts LIMIT 1",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(95,?,905,'user','linked')",
+				).bind(period),
+			]);
+			expect((await get("/transactions?month=2026-08")).html).toContain(
+				"Counts in August",
+			);
+			expect((await get("/transactions/905")).html).toContain(
+				"Counts in August",
+			);
+		},
+	);
 	it("renders the list with labeled search, filters, and day groups", async () => {
 		const { res, html } = await get("/transactions");
 		expect(res.status).toBe(200);

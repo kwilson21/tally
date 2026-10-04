@@ -385,6 +385,15 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, todayUtc())} · {account}
 			</p>
+			{tx.countsInMonth && (
+				<p class="text-muted">
+					Counts in{" "}
+					{new Intl.DateTimeFormat("en-US", {
+						month: "long",
+						timeZone: "UTC",
+					}).format(new Date(`${tx.countsInMonth}-01T00:00:00Z`))}
+				</p>
+			)}
 			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
 			{tx.excluded && (
 				<p class="flex items-center gap-2 text-muted">

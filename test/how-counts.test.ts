@@ -36,6 +36,26 @@ beforeEach(async () => {
 });
 
 describe("monthCounts", () => {
+	it("counts a late payment in its bill month for both totals and needs-category", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(93,'Moved',1000,30,'monthly','COUNT MOVED')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 903,id,'2026-10-02',1000,'COUNT MOVED' FROM accounts LIMIT 1",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(93,'2026-09',903,'user','linked')",
+			),
+		]);
+		const before = await monthCounts(db, MONTH);
+		expect(await needsCategoryCount(db, MONTH)).toBe(before.needsCategory);
+		expect(before.counted).toBe((await countWhere("1 = 1")) + 1);
+		expect(before.needsCategory).toBe(
+			(await countWhere("category_id IS NULL AND flag_income=0")) + 1,
+		);
+		expect((await monthCounts(db, "2026-10")).counted).toBe(0);
+	});
 	it("counts the month's transactions and who categorized them, matching Home", async () => {
 		const counts = await monthCounts(db, MONTH);
 		expect(counts).toEqual({

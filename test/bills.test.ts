@@ -274,4 +274,155 @@ describe("Bills", () => {
 		expect(html).toContain("Counts in");
 		expect(html).toContain("same merchant first, then closest amount");
 	});
+
+	it("always shows the current overdue yearly occurrence outside the history window", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='yearly',anchor_month=12,due_day=1 WHERE id=1",
+			),
+		]);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/1")
+		).text();
+		expect(html).toContain("2025");
+		expect(html).toContain("Overdue");
+	});
+
+	it("clears links and dismissals when frequency changes", async () => {
+		await env.DB.prepare(
+			"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,'old-dismissal',id,'user','dismissed' FROM transactions LIMIT 1",
+		).run();
+		const response = await exports.default.fetch("http://tally.test/bills/1", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Movies",
+				amount: "3.99",
+				due_day: "4",
+				frequency: "yearly",
+				anchor_month: "1",
+				category_id: "5",
+				merchant_raw_name: "NO AUTOMATIC REMATCH",
+			}),
+		});
+		expect(response.status).toBe(200);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=1",
+				).first<{ n: number }>()
+			)?.n,
+		).toBe(0);
+	});
+
+	it("lists only unpaid month choices and captions monthly payments", async () => {
+		const linked = await env.DB.prepare(
+			"SELECT period FROM bill_payments WHERE bill_id=1 AND status='linked' LIMIT 1",
+		).first<{ period: string }>();
+		const html = await (
+			await exports.default.fetch(
+				`http://tally.test/bills/1/occurrences/${linked?.period}/link`,
+			)
+		).text();
+		expect(html).toContain("Which month&#39;s bill does it pay?");
+		expect(html).not.toContain(`name="period" value="${linked?.period}"`);
+		expect(html).toContain("Counts in the bill month");
+	});
+
+	it("returns typed toast and announcement headers for htmx unlink and link", async () => {
+		const linked = await env.DB.prepare(
+			"SELECT period,transaction_id FROM bill_payments WHERE bill_id=1 AND status='linked' LIMIT 1",
+		).first<{ period: string; transaction_id: number }>();
+		const unlink = await exports.default.fetch(
+			`http://tally.test/bills/1/occurrences/${linked?.period}/unlink`,
+			{
+				method: "POST",
+				headers: { Origin: "http://tally.test", "HX-Request": "true" },
+			},
+		);
+		expect(JSON.parse(unlink.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Payment unlinked", type: "success" },
+			announce: "Payment unlinked",
+		});
+		const link = await exports.default.fetch("http://tally.test/bills/1/link", {
+			method: "POST",
+			headers: {
+				Origin: "http://tally.test",
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				transaction_id: String(linked?.transaction_id),
+				period: String(linked?.period),
+				opened_period: String(linked?.period),
+			}),
+		});
+		expect(JSON.parse(link.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "Payment linked", type: "success" },
+			announce: "Payment linked",
+		});
+	});
+
+	it("picker uses a 30-day window, preferred order, 50-row cap, and exclusions", async () => {
+		const today = todayUtc();
+		const period = today.slice(0, 7);
+		const day = Number(today.slice(8, 10));
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"UPDATE bills SET due_day=?,amount_cents=1000,frequency='monthly',merchant_raw_name='PREFERRED' WHERE id=1",
+			).bind(day),
+		]);
+		const statements = [];
+		for (let i = 0; i < 55; i++)
+			statements.push(
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT ?,id,?,?,? FROM accounts LIMIT 1",
+				).bind(
+					1000 + i,
+					today,
+					1000 + i,
+					i === 54 ? "PREFERRED" : `CANDIDATE ${i}`,
+				),
+			);
+		statements.push(
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,flag_income) SELECT 1100,id,?,1000,'INCOME',1 FROM accounts LIMIT 1",
+			).bind(today),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 1101,id,date(?, '-31 day'),1000,'TOO OLD' FROM accounts LIMIT 1",
+			).bind(today),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,?,1001,'user','dismissed')",
+			).bind(period),
+		);
+		await env.DB.batch(statements);
+		const html = await (
+			await exports.default.fetch(
+				`http://tally.test/bills/1/occurrences/${period}/link`,
+			)
+		).text();
+		expect(html.match(/name="transaction_id"/g) ?? []).toHaveLength(50);
+		expect(html).not.toContain("INCOME");
+		expect(html).not.toContain("TOO OLD");
+		expect(html).not.toContain("CANDIDATE 1");
+		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
+		expect(picker.indexOf('value="1054"')).toBeLessThan(
+			picker.indexOf('value="1000"'),
+		);
+	});
+
+	it("returns 404 for a malformed occurrence period", async () => {
+		expect(
+			(
+				await exports.default.fetch(
+					"http://tally.test/bills/1/occurrences/not-a-month/link",
+				)
+			).status,
+		).toBe(404);
+	});
 });

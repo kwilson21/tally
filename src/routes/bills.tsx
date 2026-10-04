@@ -451,13 +451,19 @@ async function save(c: Context<App>, id?: number) {
 		Number(values.category_id),
 		values.merchant_raw_name,
 	];
-	if (id)
-		await c.env.DB.prepare(
+	if (id) {
+		const update = c.env.DB.prepare(
 			"UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,merchant_raw_name=? WHERE id=?",
-		)
-			.bind(...args, id)
-			.run();
-	else
+		).bind(...args, id);
+		if (bill && bill.frequency !== values.frequency)
+			// Period keys have different shapes (YYYY-MM vs YYYY), so neither links nor
+			// dismissals remain meaningful after this schedule change.
+			await c.env.DB.batch([
+				update,
+				c.env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=?").bind(id),
+			]);
+		else await update.run();
+	} else
 		await c.env.DB.prepare(
 			"INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(?,?,?,?,?,?,?)",
 		)
@@ -561,15 +567,29 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 		today.slice(0, 7),
 		bill.frequency === "yearly" ? 12 : 1,
 	);
+	const current = billOccurrence(
+		{
+			frequency: bill.frequency,
+			dueDay: bill.due_day,
+			anchorMonth: bill.anchor_month,
+		},
+		today,
+		new Set(),
+	).period;
 	const end = bill.frequency === "yearly" ? upcoming.slice(0, 4) : upcoming;
-	if (bill.frequency === "yearly")
-		return Array.from(
+	if (bill.frequency === "yearly") {
+		const periods = Array.from(
 			{ length: Math.max(0, Number(end) - Number(start.slice(0, 4)) + 1) },
 			(_, i) => String(Number(end) - i),
 		);
+		if (!periods.includes(current)) periods.push(current);
+		return periods.sort().reverse();
+	}
 	const result: string[] = [];
 	for (let period = end; period >= start; period = addMonths(period, -1))
 		result.push(period);
+	if (!result.includes(current)) result.push(current);
+	result.sort().reverse();
 	return result;
 }
 

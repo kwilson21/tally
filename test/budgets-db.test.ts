@@ -55,6 +55,27 @@ describe("budgetCategory", () => {
 });
 
 describe("lastMonthSpentCents", () => {
+	it("uses the linked occurrence month for a late payment", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(94,'Moved',1234,30,'monthly','BUDGET MOVED')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT 904,id,'2026-09-02',1234,'BUDGET MOVED',1 FROM accounts LIMIT 1",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(94,'2026-08',904,'user','linked')",
+			),
+		]);
+		const augustBankTotal = await db
+			.prepare(
+				"SELECT COALESCE(SUM(amount_cents),0) AS n FROM transactions WHERE category_id=1 AND substr(date,1,7)='2026-08' AND excluded=0 AND is_split=0 AND flag_income=0",
+			)
+			.first<{ n: number }>();
+		expect(await lastMonthSpentCents(db, 1, "2026-09")).toBe(
+			(augustBankTotal?.n ?? 0) + 1234,
+		);
+	});
 	it("adds up last month's counted spending in the category, leaving out income and excluded rows", async () => {
 		const expected = await db
 			.prepare(

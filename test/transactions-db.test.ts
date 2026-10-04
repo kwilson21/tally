@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { loadMonth } from "../src/db/month";
 import {
+	getTransaction,
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
@@ -20,6 +21,30 @@ beforeEach(async () => {
 });
 
 describe("listTransactions", () => {
+	it("keeps an early payment in its bank month and moves a late payment to its occurrence month", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name) VALUES(90,'Early',1000,1,'monthly',NULL,'EARLY'),(91,'Late yearly',2000,31,'yearly',8,'LATE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 900,id,'2026-09-28',1000,'EARLY' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 901,id,'2026-09-02',2000,'LATE' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(90,'2026-10',900,'user','linked'),(91,'2026',901,'user','linked')",
+			),
+		]);
+		const september = await list("month=2026-09");
+		expect(september.rows.some((row) => row.id === 900)).toBe(true);
+		expect(september.rows.some((row) => row.id === 901)).toBe(false);
+		const august = await list("month=2026-08");
+		expect(august.rows.find((row) => row.id === 901)?.countsInMonth).toBe(
+			"2026-08",
+		);
+		expect((await getTransaction(env.DB, 901))?.countsInMonth).toBe("2026-08");
+	});
 	it("lists this month newest first, one page at a time", async () => {
 		const first = await list("");
 		expect(first).toMatchObject({ total: 35, page: 1, pages: 2 });
@@ -133,5 +158,22 @@ describe("monthsWithTransactions", () => {
 			"2026-05",
 			"2026-04",
 		]);
+	});
+
+	it("uses the counted month rather than the bank month", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(92,'Moved',1000,30,'monthly','MOVED')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 902,id,'2026-10-02',1000,'MOVED' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(92,'2026-09',902,'user','linked')",
+			),
+		]);
+		const months = await monthsWithTransactions(env.DB);
+		expect(months).not.toContain("2026-10");
+		expect(months).toContain("2026-09");
 	});
 });
