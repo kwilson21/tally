@@ -37,7 +37,7 @@ const NEEDS_CATEGORY =
 	"t.category_id IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)";
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
 const NEEDS_JEV_CLASSIFICATION =
-	"t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user' AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))";
+	"t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))";
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -362,26 +362,27 @@ export async function saveSplit(
 	by: string,
 ) {
 	const parent = await db
-		.prepare(
-			"SELECT account_id AS accountId, date, raw_name AS rawName, excluded, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy FROM transactions WHERE id = ? AND parent_id IS NULL",
-		)
+		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
 		.bind(parentId)
-		.first<{
-			accountId: number;
-			date: string;
-			rawName: string;
-			excluded: number;
-			income: number;
-			incomeSource: string | null;
-			creditReviewed: number | null;
-			creditReviewedBy: string | null;
-		}>();
+		.first();
 	if (!parent) throw new Error(`No transaction ${parentId}`);
-	// Every write checks, inside the same batch, that the parent still has the amount
-	// the parts were validated against, so a bank correction mid-save writes nothing.
+	// Every child reads its parent inside the atomic batch, so date, exclusion and review edits
+	// made after the route validation are reflected in the children.
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	const unchanged =
 		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	const columns = await db
+		.prepare("PRAGMA table_info(transactions)")
+		.all<{ name: string }>();
+	const hasIncomeReviewColumns = columns.results.some(
+		(column) => column.name === "credit_reviewed_by",
+	);
+	const reviewColumns = hasIncomeReviewColumns
+		? ", income_source, credit_reviewed, credit_reviewed_by"
+		: "";
+	const reviewValues = hasIncomeReviewColumns
+		? ", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)"
+		: "";
 	const results = await db.batch([
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
@@ -389,20 +390,13 @@ export async function saveSplit(
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, flag_income, income_source, credit_reviewed, credit_reviewed_by, parent_id, plaid_transaction_id, updated_by)
-			SELECT ?, ?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, NULL, ? WHERE ${unchanged}`)
+			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, excluded_source${reviewColumns}, parent_id, plaid_transaction_id, updated_by)
+			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, excluded_source${reviewValues}, id, NULL, ?
+			FROM transactions WHERE id = ? AND amount_cents = ?`)
 				.bind(
-					parent.accountId,
-					parent.date,
 					part.amountCents,
-					parent.rawName,
 					part.categoryId,
-					parent.excluded,
-					parent.income,
-					parent.incomeSource,
-					parent.creditReviewed,
-					parent.creditReviewedBy,
-					parentId,
+					...(hasIncomeReviewColumns ? [parentId, parentId, parentId] : []),
 					by,
 					parentId,
 					total,
@@ -455,18 +449,20 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
- * unreviewed negative credits, even when a category was selected already. A stored confidence means
- * Jev already looked and wasn't sure (decision 27).
+ * unreviewed negative credits, even when a category was selected already. A user-reviewed
+ * uncategorized credit is eligible for category help only. A stored confidence means Jev already
+ * looked and wasn't sure (decision 27).
  */
 export async function pendingForJev(
 	db: D1Database,
 	limit: number,
-): Promise<(JevInput & { id: number })[]> {
+): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, m.display_name AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
-				t.plaid_category AS plaidCategory
+				t.plaid_category AS plaidCategory,
+				(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')) AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
@@ -476,8 +472,11 @@ export async function pendingForJev(
 			LIMIT ?`,
 		)
 		.bind(limit)
-		.all<JevInput & { id: number }>();
-	return results;
+		.all<JevInput & { id: number; categoryOnly: number }>();
+	return results.map((transaction) => ({
+		...transaction,
+		categoryOnly: transaction.categoryOnly === 1,
+	}));
 }
 
 /** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */
@@ -500,7 +499,30 @@ export async function saveJevResult(
 	db: D1Database,
 	id: number,
 	d: Decision,
+	options: { categoryOnly?: boolean } = {},
 ): Promise<boolean> {
+	if (options.categoryOnly) {
+		// A person already decided what this credit means. Jev may help with its category only.
+		const category = await db
+			.prepare(
+				`UPDATE transactions SET
+					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
+					updated_at = datetime('now')
+				 WHERE id = ? AND amount_cents < 0 AND credit_reviewed = 1 AND flag_income = 0
+					AND (income_source = 'user' OR credit_reviewed_by = 'user')
+					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+					AND excluded = 0 AND is_split = 0`,
+			)
+			.bind(
+				d.categoryId,
+				d.categoryId === null ? null : "jev",
+				d.confidence,
+				d.suggestedCategoryId,
+				id,
+			)
+			.run();
+		return category.meta.changes > 0;
+	}
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise.
 	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
 	const result = await db

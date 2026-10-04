@@ -58,7 +58,9 @@ export async function categorizePending(
 		}
 		failuresInARow = 0;
 		const decision = decide(result.answer, categories, JEV_THRESHOLD);
-		const written = await saveJevResult(env.DB, tx.id, decision);
+		const written = await saveJevResult(env.DB, tx.id, decision, {
+			categoryOnly: tx.categoryOnly,
+		});
 		if (written && decision.categoryId !== null) done.applied += 1;
 	}
 

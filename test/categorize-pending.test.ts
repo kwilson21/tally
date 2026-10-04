@@ -59,12 +59,12 @@ describe("categorizePending", () => {
 		expect(await needsCategoryCount(db, MONTH)).toBe(12);
 	});
 
-	it("never queues a user-owned uncategorized credit on repeated runs", async () => {
+	it("offers category-only help for a user-reviewed credit and never overwrites the decision", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const id = 1;
 		await db
 			.prepare(
-				"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL, amount_cents = -500, flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				"UPDATE transactions SET raw_name = 'SYNTHETIC USER REVIEWED CREDIT', category_id = NULL, category_source = NULL, category_confidence = NULL, amount_cents = -500, flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user', excluded = 0, excluded_source = NULL, flag_transfer = 0, flag_reimbursement = 0 WHERE id = ?",
 			)
 			.bind(id)
 			.run();
@@ -74,17 +74,61 @@ describe("categorizePending", () => {
 			)
 			.bind(id)
 			.run();
-		expect((await pendingForJev(db, 40)).map((item) => item.id)).not.toContain(
-			id,
+		const pending = await pendingForJev(db, 40);
+		expect(pending).toContainEqual(
+			expect.objectContaining({ id, categoryOnly: true }),
 		);
-		for (let run = 0; run < 2; run++) {
-			const jev = fakeJev(() => reply(0.95));
-			expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
-				asked: 0,
-				applied: 0,
-			});
-			expect(jev.calls()).toBe(0);
-		}
+		const jev = fakeJev(
+			() =>
+				new Response(
+					JSON.stringify({
+						answers: {
+							category: {
+								type: "choice",
+								choice: "Eating Out",
+								confidence: 0.95,
+							},
+							transfer: { type: "noul", noul: 0.99 },
+							reimbursement: { type: "noul", noul: 0.99 },
+							income: { type: "noul", noul: 0.99 },
+						},
+					}),
+					{ status: 200 },
+				),
+		);
+		expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
+			asked: 1,
+			applied: 1,
+		});
+		expect(jev.calls()).toBe(1);
+		const category = await db
+			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
+			.first<{ id: number }>();
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source, category_confidence, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, flag_transfer, flag_reimbursement FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			category_id: category?.id,
+			category_source: "jev",
+			category_confidence: 0.95,
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+			excluded: 0,
+			flag_transfer: 0,
+			flag_reimbursement: 0,
+		});
+		const secondRun = fakeJev(() => reply(0.95));
+		expect(await categorizePending(withKey, secondRun.fetchImpl)).toEqual({
+			asked: 0,
+			applied: 0,
+		});
+		expect(secondRun.calls()).toBe(0);
 		expect(
 			await db
 				.prepare(

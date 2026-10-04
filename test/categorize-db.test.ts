@@ -58,14 +58,17 @@ describe("pendingForJev", () => {
 	it("returns the transactions that need a category, with what Jev is told", async () => {
 		const pending = await pendingForJev(db, 40);
 		expect(pending).toHaveLength(12);
-		expect(pending).toContainEqual({
-			id: await idOf("SQ *LOCAL BAKERY 4432"),
-			rawName: "SQ *LOCAL BAKERY 4432",
-			displayName: "Local Bakery",
-			amountCents: 1200,
-			accountType: "credit",
-			plaidCategory: null,
-		});
+		expect(pending).toContainEqual(
+			expect.objectContaining({
+				id: await idOf("SQ *LOCAL BAKERY 4432"),
+				rawName: "SQ *LOCAL BAKERY 4432",
+				displayName: "Local Bakery",
+				amountCents: 1200,
+				accountType: "credit",
+				plaidCategory: null,
+				categoryOnly: false,
+			}),
+		);
 	});
 
 	it("respects the limit", async () => {
