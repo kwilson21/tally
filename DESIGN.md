@@ -104,6 +104,8 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | TransactionRow | One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. |
 | BillStatusHeading | A bill group heading pairs its status icon with the status in words, never color alone. |
 | BillRow | One bill: category icon, name, due or paid status sentence, and amount from integer cents. |
+| BillFindingBand | The Bills screen’s terracotta-ruled Band shows how many repeat-charge suggestions need review. |
+| BillFindingRow | One possible bill with its latest amount and timing, plus Add and permanent Not a bill actions. |
 | EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do; add sign: one thing to start), one sentence, a muted hint and at most one button, centred (decisions 54, 55). The button is a secondary link, or, for an add, the screen's own primary control passed in. |
 | BillOccurrenceRow | One bill occurrence with its status, linked-payment detail, and link or “Not this one” action. Older unpaid occurrences are neutral. |
 | BillPaymentPicker | Eligible payments and unpaid occurrence choices as Chip radios; no payment is chosen in advance, so the person picks one. Its empty state has no submit action. |

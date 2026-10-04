@@ -1,13 +1,15 @@
 import { type Context, Hono } from "hono";
+import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { matchBillPayments } from "../bills/match";
 import {
 	type BillStatus,
 	billOccurrence,
 	billOccurrenceForMonth,
 } from "../bills/status";
-import { todayUtc } from "../dates";
+import { ordinal, todayUtc } from "../dates";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
+import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import {
 	BillMonthExplanation,
@@ -132,6 +134,7 @@ async function page(
 	sheet?: { bill?: DbBill; values?: Values; errors?: Record<string, string> },
 ) {
 	const { today, rows } = await loadBillRows(c.env.DB);
+	const suggestions = await loadBillSuggestions(c.env.DB, today);
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
 	const soon = active.filter(
@@ -159,6 +162,7 @@ async function page(
 						Add a bill
 					</Button>
 				</div>
+				<BillFindingBand count={suggestions.length} />
 				{rows.length === 0 ? (
 					<EmptyState
 						kind="add"
@@ -398,7 +402,102 @@ function BillSheet({
 }
 
 bills.get("/bills", (c) => page(c));
-bills.get("/bills/new", (c) => page(c, {}));
+bills.get("/bills/new", (c) => {
+	const q = c.req.query();
+	const values = q.name
+		? {
+				name: q.name,
+				amount: q.amount ?? "",
+				due_day: q.due_day ?? "",
+				frequency: "monthly" as const,
+				anchor_month: "1",
+				category_id: q.category_id ?? "",
+				merchant_raw_name: q.merchant_raw_name ?? "",
+			}
+		: undefined;
+	return page(c, { values });
+});
+bills.get("/bills/find", async (c) => {
+	const suggestions = await loadBillSuggestions(c.env.DB, todayUtc());
+	return c.html(
+		<Layout
+			title="Possible bills · Tally"
+			active="bills"
+			demo={c.env.DEMO === "true"}
+			currentPath={c.req.path}
+		>
+			<div class="max-w-2xl">
+				<a href="/bills" class="inline-flex min-h-11 items-center">
+					Bills
+				</a>
+				<h1 class="font-serif text-4xl font-semibold tracking-tight">
+					Possible bills
+				</h1>
+				<p class="mt-2 text-muted">
+					About the same amount, about a month apart. Nothing becomes a bill
+					until you add it.
+				</p>
+				{billFindingList(suggestions)}
+			</div>
+		</Layout>,
+	);
+});
+function billFindingList(suggestions: BillSuggestion[], focusRawName?: string) {
+	return suggestions.length ? (
+		<ul
+			id="bill-finding-list"
+			class="mt-4 divide-y divide-rule border-y border-rule"
+		>
+			{suggestions.map((suggestion) => (
+				<BillFindingRow
+					suggestion={suggestion}
+					focusAdd={suggestion.rawName === focusRawName}
+				/>
+			))}
+		</ul>
+	) : (
+		<div id="bill-finding-list">
+			<h2 tabindex={-1} autofocus={focusRawName != null} class="sr-only">
+				Possible bills review complete
+			</h2>
+			<EmptyState
+				kind="done"
+				sentence="No possible bills to review."
+				hint="New repeat charges will appear here."
+			/>
+		</div>
+	);
+}
+bills.post("/bills/find/:merchant/dismiss", async (c) => {
+	// Hono has already decoded the name once.
+	const merchant = c.req.param("merchant");
+	const before = await loadBillSuggestions(c.env.DB, todayUtc());
+	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
+	if (dismissedIndex < 0) return c.notFound();
+	const result = await c.env.DB.prepare(
+		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
+		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1`,
+	)
+		.bind(merchant)
+		.run();
+	if (!result.meta.changes) return c.notFound();
+	const headers = {
+		"HX-Trigger": JSON.stringify({
+			toast: { message: "Marked as not a bill", type: "success" },
+			announce: "Suggestion removed",
+		}),
+	};
+	if (c.req.header("HX-Request")) {
+		const remaining = await loadBillSuggestions(c.env.DB, todayUtc());
+		const focus = remaining[dismissedIndex] ?? remaining[0];
+		return c.html(
+			billFindingList(remaining, focus?.rawName ?? ""),
+			200,
+			headers,
+		);
+	}
+	return c.redirect("/bills/find", 303);
+});
 bills.get("/bills/:id", async (c) => billPage(c, Number(c.req.param("id"))));
 bills.get("/bills/:id/edit", async (c) => {
 	const bill = await dbBill(c, Number(c.req.param("id")));
@@ -569,8 +668,6 @@ const shortDate = (date: string) =>
 		day: "numeric",
 		timeZone: "UTC",
 	}).format(new Date(`${date}T00:00:00Z`));
-const ordinal = (day: number) =>
-	`${day}${day % 100 >= 11 && day % 100 <= 13 ? "th" : day % 10 === 1 ? "st" : day % 10 === 2 ? "nd" : day % 10 === 3 ? "rd" : "th"}`;
 const addMonths = (period: string, amount: number) => {
 	const date = new Date(`${period}-01T00:00:00Z`);
 	date.setUTCMonth(date.getUTCMonth() + amount);

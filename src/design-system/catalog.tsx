@@ -7,6 +7,7 @@ import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
+import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
 import { BillRow, BillStatusHeading } from "../views/bill-row";
@@ -623,6 +624,33 @@ function Rows() {
 							/>
 						</ul>
 					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="bill-finding"
+				title="Bill finding Band and review row"
+				tier="visual"
+				components={["BillFindingBand", "BillFindingRow"]}
+				sentence="The Band points to repeat charges worth reviewing; each row lets a person add or permanently dismiss one suggestion."
+			>
+				<State label="Band">
+					<div inert class="max-w-xl">
+						<BillFindingBand count={3} />
+					</div>
+				</State>
+				<State label="Review row">
+					<ul inert class="max-w-xl">
+						<BillFindingRow
+							suggestion={{
+								rawName: "CITY GYM",
+								displayName: "City Gym",
+								amountCents: 4250,
+								dueDay: 12,
+								categoryId: 4,
+								chargeCount: 3,
+							}}
+						/>
+					</ul>
 				</State>
 			</Specimen>
 			<Specimen
