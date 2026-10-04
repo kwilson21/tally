@@ -139,4 +139,90 @@ describe("transaction splits", () => {
 				.first(),
 		).toEqual({ split: 0, parts: 0 });
 	});
+
+	it("preserves reviewed credit metadata when income review columns are installed", async () => {
+		const columns = await env.DB.prepare(
+			"PRAGMA table_info(transactions)",
+		).all<{
+			name: string;
+		}>();
+		if (!columns.results.some((column) => column.name === "credit_reviewed_by"))
+			return;
+
+		const refund = await env.DB.prepare(
+			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
+		).first<{ id: number; amountCents: number }>();
+		const id = refund?.id as number;
+		await env.DB.prepare(
+			"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user', income_source = 'user' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const total = Math.abs(refund?.amountCents as number);
+		const first = Math.trunc(total / 2);
+		const second = total - first;
+		for (let save = 0; save < 2; save++) {
+			const response = await post(`/transactions/${id}/split`, [
+				["part_category", "1"],
+				["part_category", "5"],
+				["part_amount", (first / 100).toFixed(2)],
+				["part_amount", (second / 100).toFixed(2)],
+				["back", "/transactions"],
+			]);
+			expect(response.status).toBe(200);
+		}
+		const children = await env.DB.prepare(
+			"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ?",
+		)
+			.bind(id)
+			.all();
+		expect(children.results).toHaveLength(2);
+		for (const child of children.results as Array<Record<string, unknown>>) {
+			expect(child).toMatchObject({
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			});
+		}
+	});
+
+	it("keeps working on main before income review columns are installed", async () => {
+		const columns = await env.DB.prepare(
+			"PRAGMA table_info(transactions)",
+		).all<{
+			name: string;
+		}>();
+		if (columns.results.some((column) => column.name === "credit_reviewed_by"))
+			return;
+
+		const refund = await env.DB.prepare(
+			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
+		).first<{ id: number; amountCents: number }>();
+		const result = await saveSplit(
+			env.DB,
+			refund?.id as number,
+			[
+				{
+					categoryId: 1,
+					amountCents: Math.trunc((refund?.amountCents as number) / 2),
+				},
+				{
+					categoryId: 5,
+					amountCents:
+						(refund?.amountCents as number) -
+						Math.trunc((refund?.amountCents as number) / 2),
+				},
+			],
+			"synthetic-test",
+		);
+		expect(result).toBe(true);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
+			)
+				.bind(refund?.id)
+				.first(),
+		).toEqual({ n: 2 });
+	});
 });

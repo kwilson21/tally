@@ -297,6 +297,18 @@ export async function saveSplit(
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	const unchanged =
 		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	const hasIncomeReviewColumns = await db
+		.prepare("PRAGMA table_info(transactions)")
+		.all<{ name: string }>();
+	const preservesIncomeReview = hasIncomeReviewColumns.results.some(
+		(column) => column.name === "credit_reviewed_by",
+	);
+	const reviewColumns = preservesIncomeReview
+		? ", income_source, credit_reviewed, credit_reviewed_by"
+		: "";
+	const reviewValues = preservesIncomeReview
+		? ", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)"
+		: "";
 	const results = await db.batch([
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
@@ -305,10 +317,17 @@ export async function saveSplit(
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, parent_id, plaid_transaction_id, updated_by)
-			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, id, NULL, ?
+			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded${reviewColumns}, parent_id, plaid_transaction_id, updated_by)
+			SELECT account_id, date, ?, raw_name, ?, 'user', excluded${reviewValues}, id, NULL, ?
 			FROM transactions WHERE id = ? AND amount_cents = ?`)
-				.bind(part.amountCents, part.categoryId, by, parentId, total),
+				.bind(
+					part.amountCents,
+					part.categoryId,
+					...(preservesIncomeReview ? [parentId, parentId, parentId] : []),
+					by,
+					parentId,
+					total,
+				),
 		),
 		db
 			.prepare(
