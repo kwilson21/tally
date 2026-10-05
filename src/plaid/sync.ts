@@ -27,6 +27,8 @@ type PlaidTransaction = {
 	name: string;
 	merchant_name?: string | null;
 	pending: boolean;
+	/** On a posted transaction, the id of the pending one it replaces, when the bank gave one. */
+	pending_transaction_id?: string | null;
 	personal_finance_category?: { primary?: string | null } | null;
 };
 
@@ -202,6 +204,10 @@ export async function syncItem(
 		let firstPage = true;
 		let summary: SyncSummary = { added: 0, modified: 0, removed: 0 };
 		const addedDuringRun = new Set<string>();
+		// Pending transactions the bank dropped on an earlier page of this run, and where the run's saved
+		// position is held while any waits (see below).
+		const waitingDrops = new Set<string>();
+		let holdAt: { cursor: string | null } | null = null;
 
 		for (;;) {
 			let page: SyncResponse;
@@ -228,6 +234,8 @@ export async function syncItem(
 					cursor = startCursor;
 					firstPage = true;
 					summary = { added: 0, modified: 0, removed: 0 };
+					waitingDrops.clear();
+					holdAt = null;
 					continue;
 				}
 				return await handlePlaidError(
@@ -240,9 +248,10 @@ export async function syncItem(
 				);
 			}
 
-			const posted = page.added.filter((transaction) => !transaction.pending);
+			// Pending transactions are stored and counted like posted ones (decision 67).
+			const added = page.added;
 			if (
-				posted.some((transaction) => !knownAccounts.has(transaction.account_id))
+				added.some((transaction) => !knownAccounts.has(transaction.account_id))
 			) {
 				throw new Error(
 					"Plaid sync returned a transaction for an unknown account",
@@ -256,12 +265,12 @@ export async function syncItem(
 				).bind(itemRowId, lockId),
 			];
 			const existingTransactionIds = new Set<string>();
-			if (posted.length > 0) {
-				const placeholders = posted.map(() => "?").join(", ");
+			if (added.length > 0) {
+				const placeholders = added.map(() => "?").join(", ");
 				const existing = await env.DB.prepare(
 					`SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id IN (${placeholders})`,
 				)
-					.bind(...posted.map((transaction) => transaction.transaction_id))
+					.bind(...added.map((transaction) => transaction.transaction_id))
 					.all<{ plaid_transaction_id: string }>();
 				for (const row of existing.results) {
 					existingTransactionIds.add(row.plaid_transaction_id);
@@ -272,9 +281,34 @@ export async function syncItem(
 					statements.push(accountUpsert(env, itemRowId, lockId, account));
 				}
 			}
-			const firstAddedStatement = statements.length;
-			for (const transaction of posted) {
+			// Where each added transaction's statements sit in the batch, to read what they changed.
+			const addedAt: { upsert: number; rekey?: number }[] = [];
+			for (const transaction of added) {
 				const cents = plaidAmountToCents(transaction.amount);
+				let rekey: number | undefined;
+				// The bank posted a pending transaction under a new id (and drops the pending id). The pending
+				// row takes the posted id and stays the same row, so whatever a person or Tally attached to it
+				// (category, note, exclusion, income choice, bill payment, refund links both ways, split parts)
+				// is still attached, with nothing copied. The statements below then treat the row like any
+				// bank correction: the posted date and amount are written, a split is removed when the amount
+				// changed and kept, with its parts following the date, when it didn't. It's skipped when the
+				// posted id is already stored, so the two ids can never collide.
+				if (!transaction.pending && transaction.pending_transaction_id) {
+					rekey = statements.length;
+					statements.push(
+						env.DB.prepare(
+							`UPDATE transactions SET plaid_transaction_id = ?
+							 WHERE plaid_transaction_id = ? AND pending = 1
+							 AND NOT EXISTS (SELECT 1 FROM transactions WHERE plaid_transaction_id = ?) AND ${OWNS_LOCK}`,
+						).bind(
+							transaction.transaction_id,
+							transaction.pending_transaction_id,
+							transaction.transaction_id,
+							itemRowId,
+							lockId,
+						),
+					);
+				}
 				// A corrected amount invalidates a person's parts; a date-only correction follows them.
 				statements.push(
 					env.DB.prepare(
@@ -307,8 +341,8 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed)
-						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END FROM accounts
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, pending)
+						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, ? FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
@@ -326,6 +360,7 @@ export async function syncItem(
 							raw_name = excluded.raw_name,
 							merchant_name = excluded.merchant_name,
 							plaid_category = excluded.plaid_category,
+							pending = excluded.pending,
 							updated_at = datetime('now')`,
 					).bind(
 						transaction.transaction_id,
@@ -335,11 +370,13 @@ export async function syncItem(
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						plaidAmountToCents(transaction.amount),
+						transaction.pending ? 1 : 0,
 						transaction.account_id,
 						itemRowId,
 						lockId,
 					),
 				);
+				addedAt.push({ upsert: statements.length - 1, rekey });
 			}
 			for (const transaction of page.modified) {
 				const cents = plaidAmountToCents(transaction.amount);
@@ -383,7 +420,7 @@ export async function syncItem(
 							jev_category_id = CASE WHEN amount_cents != ? THEN NULL ELSE jev_category_id END,
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?, merchant_name = ?,
-							plaid_category = ?,
+							plaid_category = ?, pending = ?,
 							flag_income = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN 0 ELSE flag_income END,
 							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
 							credit_reviewed = CASE WHEN credit_reviewed_by = 'user' THEN credit_reviewed WHEN amount_cents = ? THEN credit_reviewed WHEN ? < 0 THEN 0 ELSE 1 END,
@@ -404,6 +441,7 @@ export async function syncItem(
 						transaction.name,
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
+						transaction.pending ? 1 : 0,
 						cents,
 						cents,
 						cents,
@@ -418,7 +456,7 @@ export async function syncItem(
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
 			// starts as a copy of the row saved under the bank text, if there is one: its name, rule and Not a
 			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one.
-			for (const transaction of [...posted, ...page.modified]) {
+			for (const transaction of [...added, ...page.modified]) {
 				const key = merchantNameOf(transaction);
 				if (!key || key === transaction.name) continue;
 				statements.push(
@@ -429,18 +467,48 @@ export async function syncItem(
 					).bind(key, transaction.name, key, itemRowId, lockId),
 				);
 			}
-			for (const transaction of page.removed) {
+			// A pending transaction the bank drops waits for the update's last page before it is deleted, because
+			// its posted twin can arrive on a later page (Plaid doesn't promise they share one) and must still
+			// find it. While any waits, the saved position stays at the page that dropped the first, so an
+			// update that stops partway sees the drop again. A posted transaction the bank removes goes at once,
+			// and so does a pending one whose posted twin is on this page, which took the row over above.
+			const drops = new Set(page.removed.map((gone) => gone.transaction_id));
+			if (page.has_more) {
+				const unsettled = [...drops].filter(
+					(id) => !added.some((twin) => twin.pending_transaction_id === id),
+				);
+				if (unsettled.length > 0) {
+					const marks = unsettled.map(() => "?").join(", ");
+					const pendingDrops = await env.DB.prepare(
+						`SELECT plaid_transaction_id FROM transactions WHERE pending = 1 AND plaid_transaction_id IN (${marks})`,
+					)
+						.bind(...unsettled)
+						.all<{ plaid_transaction_id: string }>();
+					for (const { plaid_transaction_id } of pendingDrops.results) {
+						waitingDrops.add(plaid_transaction_id);
+						drops.delete(plaid_transaction_id);
+					}
+				}
+				if (waitingDrops.size > 0) holdAt ??= { cursor };
+			} else {
+				for (const id of waitingDrops) drops.add(id);
+			}
+			for (const id of drops) {
 				statements.push(
 					env.DB.prepare(
 						`DELETE FROM transactions WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
-					).bind(transaction.transaction_id, itemRowId, lockId),
+					).bind(id, itemRowId, lockId),
 				);
 			}
 			statements.push(
 				env.DB.prepare(
 					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : ", last_synced_at = datetime('now')"}
 					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
-				).bind(page.next_cursor, itemRowId, lockId),
+				).bind(
+					page.has_more && holdAt ? holdAt.cursor : page.next_cursor,
+					itemRowId,
+					lockId,
+				),
 			);
 			const results = await env.DB.batch(statements);
 			// The renewal changed nothing: a newer run owns the Item, and every guarded write above was a no-op.
@@ -448,9 +516,16 @@ export async function syncItem(
 				throw new Error("Plaid sync lost its lock to a newer run");
 			}
 			let inserted = 0;
-			for (const [index, transaction] of posted.entries()) {
-				const changed =
-					results[firstAddedStatement + index * 4 + 3]?.meta.changes ?? 0;
+			for (const [index, transaction] of added.entries()) {
+				const at = addedAt[index];
+				if (!at) continue;
+				// A posted transaction that took over a pending row isn't new: it counted when it arrived pending.
+				if (
+					at.rekey !== undefined &&
+					(results[at.rekey]?.meta.changes ?? 0) > 0
+				)
+					continue;
+				const changed = results[at.upsert]?.meta.changes ?? 0;
 				if (
 					changed > 0 &&
 					(!existingTransactionIds.has(transaction.transaction_id) ||

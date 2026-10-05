@@ -32,6 +32,7 @@ import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
+import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
@@ -771,7 +772,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A pending one adds “Pending” to the same caption line in muted words, with no new tag or color (P34 A, decision 72). Here the rows don't link anywhere."
 			>
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
@@ -780,6 +781,20 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="pending-note"
+				title="PendingNote"
+				tier="visual"
+				components={["PendingNote"]}
+				sentence="The muted line under a pending transaction's date in its edit panel: a clock and what pending means (P34 A, decision 72)."
+			>
+				<State label="Under the date, in the edit panel">
+					<div class="flex max-w-xl flex-col gap-1">
+						<p class="text-muted">Today, Oct 5 · Everyday Checking ••1234</p>
+						<PendingNote />
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="selectable-transaction-row"
