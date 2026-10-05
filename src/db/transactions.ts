@@ -184,6 +184,29 @@ export async function monthsWithTransactions(
 	return results.map((r) => r.month);
 }
 
+/** What the household's empty list means before anything has arrived (spec §8.5). */
+export type FirstVisit = "no-bank" | "importing";
+
+/**
+ * Null once the household has a transaction in any month. With none at all, "importing" when a
+ * connected bank (not disconnected) is linked and "no-bank" when not. Rows aren't scoped to a user,
+ * so this is one cheap statement over everything; run it only when the list on screen is empty.
+ */
+export async function firstVisitState(
+	db: D1Database,
+): Promise<FirstVisit | null> {
+	const row = await db
+		.prepare(
+			`SELECT CASE
+				WHEN EXISTS (SELECT 1 FROM transactions) THEN NULL
+				WHEN EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL) THEN 'importing'
+				ELSE 'no-bank'
+			END AS state`,
+		)
+		.first<{ state: FirstVisit | null }>();
+	return row?.state ?? null;
+}
+
 export type TransactionDetail = ListRow & {
 	accountName: string;
 	accountMask: string | null;
