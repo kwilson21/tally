@@ -21,6 +21,7 @@ import { TallyMark, Wordmark } from "../src/views/brand";
 import { CategoryIcon } from "../src/views/category";
 import { Chip } from "../src/views/chip";
 import { EmptyState } from "../src/views/empty-state";
+import { ErrorPage } from "../src/views/error-page";
 import {
 	BillsDiagram,
 	BudgetDiagram,
@@ -93,6 +94,8 @@ describe("GET /design-system in the demo", () => {
 				CategoryIcon({ icon: "groceries", color }),
 			),
 			LedgerIllustration(),
+			ErrorPage({ kind: "404" }),
+			ErrorPage({ kind: "500", retryHref: "#error-pages" }),
 			Sidebar({}),
 			BottomTabs({}),
 			...PROGRESS_ROWS.map((s) => ProgressRow(s.props)),
@@ -181,7 +184,8 @@ describe("GET /design-system in the demo", () => {
 		const { html } = await get("/design-system");
 		const labels = [...html.matchAll(/role="img" aria-label="([^"]*)"/g)]
 			.map((m) => m[1] ?? "")
-			.filter((l) => l.includes("Home"));
+			// The pictures of Home itself, not others that mention it ("Go to Home" on the 404 page).
+			.filter((l) => l.startsWith("Home"));
 		expect(labels).toHaveLength(3);
 		for (const label of labels) {
 			expect(label).toContain("Safe to spend $283");
