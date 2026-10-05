@@ -34,17 +34,17 @@ Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's
 
 Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Phases 3.5 to 5 are built in a new session with ultracode workflows (decision 69).
 
-## Where Phase 4 stands (Oct 5: picked, briefed to Codex)
+## Where Phase 4 stands (Oct 5: picked; built from Phase 3.5 on, decision 69)
 
 The owner picked every Phase 4 design on the proposals page (decision 64, spec §8.3), and asked for "Why?" links and How Tally works in the family app (decision 65).
 
 | Part | Issue | State |
 |---|---|---|
-| How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Briefed; first, as the parts below use it |
-| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Briefed after #170 |
-| Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Briefed after #170 |
+| How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Briefed to Codex (PR #173, being fixed); first, as the parts below use it |
+| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | To build (decision 69) |
+| Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | To build (decision 69) |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
-| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | Briefed after #170 |
-| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | Briefed after #33 (both use `src/ai/suggest-name.ts`) |
+| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | To build (decision 69) |
+| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 69) |
 
 Later list (not scheduled): see spec §12.
