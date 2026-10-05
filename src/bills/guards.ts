@@ -5,8 +5,14 @@
 /** A bill may be this much without asking; one cent more has to be confirmed. */
 export const BIG_BILL_CENTS = 10_000_000;
 
-/** What is compared: a name without its surrounding spaces and without its capitals. */
-const sameName = (name: string) => name.trim().toLowerCase();
+/**
+ * What is compared: exactly what the database's `lower(trim(name))` makes of it (src/bills/write.ts),
+ * so what the form turns away and what the write turns away are the same names. That is only spaces
+ * trimmed from the ends and only A to Z folded, so "Café" and "CAFÉ" are different names, as they
+ * are for categories (a NOCASE index).
+ */
+const sameName = (name: string) =>
+	name.replace(/^ +| +$/g, "").replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 /**
  * The name of the other active bill that `name` repeats, ignoring case and surrounding spaces, or

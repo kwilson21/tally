@@ -37,10 +37,14 @@ describe("duplicateBillName", () => {
 		expect(duplicateBillName([], "Rent")).toBeUndefined();
 	});
 
-	it("matches accented capitals too", () => {
-		expect(
-			duplicateBillName([{ id: 9, name: "Café", active: 1 }, ...bills], "CAFÉ"),
-		).toBe("Café");
+	it("folds only A to Z and trims only spaces, as the database does", () => {
+		const cafe = [{ id: 9, name: "Café", active: 1 }];
+		expect(duplicateBillName(cafe, "CAFÉ")).toBeUndefined();
+		expect(duplicateBillName(cafe, "CAFé")).toBe("Café");
+		expect(duplicateBillName(cafe, "café")).toBe("Café");
+		const tab = [{ id: 9, name: "Rent\t", active: 1 }];
+		expect(duplicateBillName(tab, "Rent")).toBeUndefined();
+		expect(duplicateBillName(tab, "rent\t")).toBe("Rent");
 	});
 });
 

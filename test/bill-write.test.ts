@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { duplicateBillName } from "../src/bills/guards";
 import {
 	activateBill,
 	type BillFields,
@@ -84,6 +85,44 @@ describe("bill writes", () => {
 				).first("anchor_month"),
 			).toBe(4);
 		});
+	});
+
+	// The form's check and these writes must call the same pairs of names the same: otherwise two saves
+	// racing past the form could leave two active bills it would have refused.
+	describe("the same names as the form's check", () => {
+		it.each([
+			["rent", " RENT ", true],
+			["Rent", "rent", true],
+			["Rent", "Rent 2", false],
+			["Café", "CAFÉ", false],
+			["Café", "CAFé", true],
+			["Café", "café", true],
+			["Straße", "STRASSE", false],
+			["İstanbul", "istanbul", false],
+			["Rent\t", "Rent", false],
+			["Rent\t", "rent\t", true],
+			["Rent ", "Rent", false],
+		])(
+			"%j and %j: duplicates is %s, in both",
+			async (existing, typed, same) => {
+				await env.DB.prepare(
+					`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
+				 VALUES(?,1000,1,'monthly',5,'RIVAL CO')`,
+				)
+					.bind(existing)
+					.run();
+				const active = (
+					await env.DB.prepare("SELECT id,name,active FROM bills").all<{
+						id: number;
+						name: string;
+						active: number;
+					}>()
+				).results;
+				expect(duplicateBillName(active, typed) !== undefined).toBe(same);
+				expect(await insertBill(env.DB, fields({ name: typed }))).toBe(!same);
+				await resetDemo(env.DB, todayUtc());
+			},
+		);
 	});
 
 	describe("updateBill", () => {

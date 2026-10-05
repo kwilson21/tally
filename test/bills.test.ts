@@ -679,6 +679,32 @@ describe("Bill guards", () => {
 			expect(await nameOf(1)).toBe("Streaming");
 		});
 
+		it("compares names as the database does: spaces and A to Z only", async () => {
+			const add = (name: string) =>
+				post("/bills", fields({ name, merchant_raw_name: name }));
+			expect((await add("Café")).headers.get("HX-Trigger")).toContain(
+				"Bill added",
+			);
+			// É is a different letter from é, in the form and in the write alike.
+			expect((await add("CAFÉ")).headers.get("HX-Trigger")).toContain(
+				"Bill added",
+			);
+			// Rent and " RENT " are the same name in both.
+			expect((await add("Rent")).headers.get("HX-Trigger")).toContain(
+				"Bill added",
+			);
+			const again = await add(" RENT ");
+			expect(again.headers.get("HX-Trigger")).toBeNull();
+			expect(await again.text()).toContain(
+				"You already have a bill called Rent.",
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM bills WHERE active=1 AND name IN ('Café','CAFÉ','Rent')",
+				).first("n"),
+			).toBe(3);
+		});
+
 		it("lets an add reuse an inactive bill's name", async () => {
 			const res = await post(
 				"/bills",

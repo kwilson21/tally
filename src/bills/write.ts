@@ -4,8 +4,11 @@
 // when another active bill already has the name, and says so by returning false. There's no unique
 // index: a bank-synced family may already hold duplicates, and an index would fail to apply.
 //
-// SQLite's lower() only folds ASCII capitals, so for "Café" against "CAFÉ" this check is weaker than
-// the form's; the form's check still catches those unless two saves race on exactly such a name.
+// "The same name" is exactly SQLite's `lower(trim(name))`: only spaces trimmed from the ends and only
+// A to Z folded, so "Café" and "CAFÉ" are different names, as they are for categories (a NOCASE
+// index). The form's check (guards.ts, sameName) compares the very same way, so whatever the form
+// lets through the write lets through, and no race can leave two active bills the form would call
+// duplicates. Change one and change the other.
 
 export type BillFields = {
 	name: string;
