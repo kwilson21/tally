@@ -185,6 +185,7 @@ describe("CategoriesDiagram", () => {
 				waiting: 10,
 				income: 2,
 				threshold: "80%",
+				ai: "Jev",
 			}),
 		);
 		expectLabelled(html);
@@ -196,6 +197,23 @@ describe("CategoriesDiagram", () => {
 		);
 		// The waiting step is dashed: nothing has decided yet.
 		expect(html.match(/stroke-dasharray/g)).toHaveLength(1);
+	});
+
+	it("names the AI as Tally outside the demo", async () => {
+		const html = await render(
+			CategoriesDiagram({
+				user: 0,
+				merchantRule: 0,
+				jev: 4,
+				waiting: 0,
+				income: 0,
+				threshold: "80%",
+				ai: "Tally",
+			}),
+		);
+		expect(html).not.toMatch(/jev/i);
+		expect(words(html)).toContain("3 Tally, if 80% or more sure 4");
+		expect(desc(html)).toContain("Tally 4");
 	});
 
 	it("leaves out the income line when there's none", async () => {

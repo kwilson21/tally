@@ -128,7 +128,6 @@ async function renderHome(
 							month={monthName(month)}
 							safeToSpendCents={summary.safeToSpendCents}
 							status={statusSentence(summary.categories)}
-							demo={demo}
 							band={
 								count > 0
 									? {

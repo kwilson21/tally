@@ -752,6 +752,20 @@ const COUNTED_BY = {
  * need a category (the same set Home counts), and who categorized the rest. A linked refund goes
  * with its purchase: categorized the same way, or waiting with it (linkedWaiting).
  */
+/** How many transactions the bank dated in a month, wherever they count (a refund or late payment can count earlier). */
+export async function bankDatedCount(
+	db: D1Database,
+	month: string,
+): Promise<number> {
+	const row = await db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ?",
+		)
+		.bind(month)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
 export async function monthCounts(
 	db: D1Database,
 	month: string,

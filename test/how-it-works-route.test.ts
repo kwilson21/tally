@@ -21,6 +21,10 @@ const decodeHtml = (html: string) =>
 		.replaceAll("&quot;", '"')
 		.replaceAll("&amp;", "&");
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+const monthName = () =>
+	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
+		new Date(`${todayUtc().slice(0, 7)}-01T00:00:00Z`),
+	);
 
 beforeEach(async () => {
 	await resetDemo(env.DB, todayUtc());
@@ -110,28 +114,135 @@ describe("GET /how-it-works in the demo", () => {
 });
 
 describe("outside the demo", () => {
-	it("has no How Tally works page", async () => {
+	it("has How Tally works with household numbers and no architecture", async () => {
 		const res = await howItWorks.request("/how-it-works", {}, notDemo);
-		expect(res.status).toBe(404);
+		const html = await res.text();
+		expect(res.status).toBe(200);
+		expect(html).toContain(`With your numbers for ${monthName()}:`);
+		expect(html).not.toContain("In the demo");
+		expect(html).not.toContain('id="architecture"');
+		expect(html).not.toContain("system-diagram");
+		expect(html).not.toContain("Cloudflare Worker (Hono, TypeScript)");
 	});
 
-	it("shows no Things to try and no How this works link on Home", async () => {
+	it("uses a plain sentence instead of transaction examples when the month is empty", async () => {
+		const month = todayUtc().slice(0, 7);
+		await env.DB.prepare(
+			"DELETE FROM transactions WHERE substr(date, 1, 7) = ?",
+		)
+			.bind(month)
+			.run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(
+			html.match(
+				/(?:There are no transactions this month yet|No bill has been paid yet this month)\./g,
+			),
+		).toHaveLength(4);
+		expect(html).not.toContain("This month has");
+		expect(html).not.toContain('id="transactions-diagram-title"');
+		expect(html).not.toContain('id="exclusions-diagram-title"');
+		expect(html).not.toContain('id="categories-diagram-title"');
+	});
+
+	it("uses the household's own paid bill for the Bills example", async () => {
+		await env.DB.prepare("UPDATE bills SET name = 'Electricity'").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain(`With your numbers for ${monthName()}:`);
+		expect(html).toContain("Electricity is");
+		expect(html).toContain('id="bills-diagram-title"');
+		expect(html).not.toContain("No bill has been paid yet this month.");
+	});
+
+	it("uses a plain sentence and no diagram when no bill has been paid", async () => {
+		await env.DB.prepare("DELETE FROM bill_payments").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain("No bill has been paid yet this month.");
+		expect(html).not.toContain('id="bills-diagram-title"');
+	});
+
+	it("uses a plain sentence and no diagram when no budgets, spending or bills are set", async () => {
+		await env.DB.prepare("DELETE FROM budget_amounts").run();
+		await env.DB.prepare("DELETE FROM transactions").run();
+		await env.DB.prepare("UPDATE bills SET active = 0").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain("No budgets have been set yet.");
+		expect(html).not.toContain('id="budget-diagram-title"');
+	});
+
+	it("never names Jev (decision 64)", async () => {
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).not.toMatch(/jev/i);
+		expect(decodeHtml(html)).toContain("Tally, if 80% or more sure");
+	});
+
+	it("shows the calculation when there's spending but no budget", async () => {
+		await env.DB.prepare("DELETE FROM budget_amounts").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain("No budgets have been set yet.");
+		expect(html).toContain('id="budget-diagram-title"');
+		expect(html).toMatch(/safe to spend\./);
+	});
+
+	it("keeps the transaction examples when this month's only transaction counts in an earlier month", async () => {
+		const month = todayUtc().slice(0, 7);
+		const { results } = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE substr(date, 1, 7) = ? ORDER BY id",
+		)
+			.bind(month)
+			.all<{ id: number }>();
+		const keep = results[0]?.id;
+		expect(keep).toBeDefined();
+		await env.DB.prepare(
+			"DELETE FROM transactions WHERE substr(date, 1, 7) = ? AND id != ?",
+		)
+			.bind(month, keep)
+			.run();
+		// It refunds a purchase from an earlier month, so it counts there instead.
+		const earlier = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE substr(date, 1, 7) < ? AND excluded = 0 AND is_split = 0 ORDER BY date DESC LIMIT 1",
+		)
+			.bind(month)
+			.first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET refund_of_id = ?, excluded = 0, is_split = 0, amount_cents = -500 WHERE id = ?",
+		)
+			.bind(earlier?.id, keep)
+			.run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain('id="transactions-diagram-title"');
+	});
+
+	it("shows no Things to try but does show How this works on Home", async () => {
 		const html = await (await home.request("/", {}, notDemo)).text();
 		expect(html).not.toContain("Things to try");
-		expect(html).not.toContain("/how-it-works");
+		expect(html).toContain('href="/how-it-works#budget"');
 	});
 
-	it("leaves How Tally works off the More page", async () => {
+	it("lists How Tally works on the More page", async () => {
 		const html = await (
 			await destinations.request("/more", {}, notDemo)
 		).text();
-		expect(html).not.toContain("/how-it-works");
+		expect(html).toContain('href="/how-it-works"');
 	});
 
-	it("shows no How this works link on Transactions or the edit sheet", async () => {
+	it("shows How this works on Transactions and the edit sheet", async () => {
 		for (const path of ["/transactions", "/transactions/110"]) {
 			const html = await (await transactions.request(path, {}, notDemo)).text();
-			expect(html).not.toContain("/how-it-works");
+			expect(html).toContain("/how-it-works");
 		}
 	});
 });

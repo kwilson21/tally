@@ -136,3 +136,89 @@ html:not(.js) [data-money-js] {
 .bill-form:has(input[name="frequency"][value="yearly"]:checked) .bill-month {
 	display: flex;
 }
+
+/*
+ * P74, the proposals page only (delete this block when P74 A ships, decision 76). Each motion
+ * picture loops --proposal-t from 0 (before) to 1 (after) at the move's real speed, pauses, then
+ * plays back to repeat: 150 ms is 1/30 of 4.5 s, and 200 ms is 1/30 of 6 s. The parts are drawn
+ * from it. The end state is held longest and the negative delay starts each loop on it, so a still
+ * capture mostly shows it. Reduced motion drops the loop, so --proposal-t rests at 1, still.
+ */
+@property --proposal-t {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 1;
+}
+@keyframes proposal-loop {
+	0%,
+	26.67% {
+		--proposal-t: 0;
+	}
+	30%,
+	96.67% {
+		--proposal-t: 1;
+	}
+	100% {
+		--proposal-t: 0;
+	}
+}
+.proposal-loop {
+	animation: proposal-loop 4.5s ease-out -1.5s infinite;
+}
+.proposal-200 {
+	animation-duration: 6s;
+	animation-delay: -2s;
+}
+.proposal-cut {
+	animation-timing-function: step-start;
+}
+.proposal-fade {
+	opacity: var(--proposal-t);
+}
+.proposal-rise {
+	transform: translateY(calc((1 - var(--proposal-t)) * 100%));
+}
+.proposal-toast {
+	opacity: var(--proposal-t);
+	transform: translateY(calc((1 - var(--proposal-t)) * 8px));
+}
+.proposal-slide-out {
+	opacity: calc(1 - var(--proposal-t));
+	transform: translateX(calc(var(--proposal-t) * -25%));
+}
+.proposal-slide-in {
+	opacity: var(--proposal-t);
+	transform: translateX(calc((1 - var(--proposal-t)) * 25%));
+}
+.proposal-morph {
+	opacity: min(1, calc(var(--proposal-t) * 3));
+	translate: calc((1 - var(--proposal-t)) * 2.75rem)
+		calc((1 - var(--proposal-t)) * -5rem);
+	scale: calc(0.5 + var(--proposal-t) * 0.5);
+}
+.proposal-knob {
+	transform: translateX(calc((1 - var(--proposal-t)) * 1.375rem));
+	background-color: color-mix(
+		in srgb,
+		var(--color-paper) calc((1 - var(--proposal-t)) * 100%),
+		var(--color-ink)
+	);
+}
+.proposal-track {
+	background-color: color-mix(
+		in srgb,
+		var(--color-ink) calc((1 - var(--proposal-t)) * 100%),
+		var(--color-rule)
+	);
+}
+.proposal-on {
+	opacity: clamp(0, calc((0.5 - var(--proposal-t)) * 1000), 1);
+}
+.proposal-off {
+	opacity: clamp(0, calc((var(--proposal-t) - 0.5) * 1000), 1);
+}
+@media (prefers-reduced-motion: reduce) {
+	.proposal-loop {
+		animation: none;
+	}
+}

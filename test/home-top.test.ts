@@ -7,7 +7,6 @@ const top = async (overrides: Partial<Parameters<typeof HomeTop>[0]> = {}) =>
 			month: "September",
 			safeToSpendCents: 28300,
 			status: "Eating Out is $36 over. Everything else is on track.",
-			demo: true,
 			band: {
 				href: "/transactions?uncategorized=1",
 				text: "12 transactions need a category",
@@ -41,9 +40,9 @@ describe("HomeTop", () => {
 		expect(html).toMatch(/class="font-serif text-6xl[^"]*">\$283</);
 	});
 
-	it("shows no Band when nothing needs a category, and no How this works outside the demo", async () => {
-		const html = await top({ band: undefined, demo: false });
+	it("shows no Band when nothing needs a category", async () => {
+		const html = await top({ band: undefined });
 		expect(html).not.toContain("bg-band");
-		expect(html).not.toContain("How this works");
+		expect(html).toContain("How this works");
 	});
 });
