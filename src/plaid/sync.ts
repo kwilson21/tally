@@ -65,28 +65,56 @@ const EXCLUDED_BY_PLAID = ["TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS"];
 const isPlaidExcludedSql = (category: string) =>
 	`${category} IN (${EXCLUDED_BY_PLAID.map((name) => `'${name}'`).join(", ")})`;
 
+/** SQL that is true when a bill's payment is linked to this transaction, so it has to keep counting. */
+const PAYS_A_BILL =
+	"EXISTS (SELECT 1 FROM bill_payments WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked')";
+
 /**
  * The `excluded` and `excluded_source` assignments for a transaction that already exists (spec §8.5).
  * `category` is SQL for its new Plaid category and repeats once per assignment, so a bound value
- * must be bound twice. A person's choice is never touched. Otherwise a transfer category excludes
- * it, with Plaid as the source unless something already excludes it (Jev's or an older exclusion
- * keeps its source), and a category that is no longer a transfer lifts an exclusion only when
- * Plaid made it.
+ * must be bound twice. A person's choice is never touched, and neither is a payment linked to a
+ * bill: it stays in the budget, so a paid bill isn't paid by something nothing counts. Otherwise a
+ * transfer category excludes it, with Plaid as the source unless something already excludes it
+ * (Jev's or an older exclusion keeps its source), and a category that is no longer a transfer lifts
+ * an exclusion only when Plaid made it.
  */
-const plaidExclusionSql = (category: string) => `excluded = CASE
+const plaidExclusionSql = (category: string) => {
+	const excludes = `(${isPlaidExcludedSql(category)} AND NOT ${PAYS_A_BILL})`;
+	return `excluded = CASE
 	WHEN transactions.excluded_source = 'user' THEN transactions.excluded
-	WHEN ${isPlaidExcludedSql(category)} THEN 1
+	WHEN ${excludes} THEN 1
 	WHEN transactions.excluded_source = 'plaid' THEN 0
 	ELSE transactions.excluded END,
 excluded_source = CASE
 	WHEN transactions.excluded_source = 'user' THEN 'user'
-	WHEN ${isPlaidExcludedSql(category)} THEN CASE WHEN transactions.excluded = 1 THEN transactions.excluded_source ELSE 'plaid' END
+	WHEN ${excludes} THEN CASE WHEN transactions.excluded = 1 THEN transactions.excluded_source ELSE 'plaid' END
 	WHEN transactions.excluded_source = 'plaid' THEN NULL
 	ELSE transactions.excluded_source END`;
+};
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
 	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
+
+/**
+ * A split's parts follow the bank transaction's exclusion by the same rule (spec §8.5), because the
+ * budget counts the parts, not the parent. A split a person excluded or included stays as they set it.
+ * It runs before the parent's own write and reads the parent as it was.
+ */
+function partsExclusion(
+	env: SyncEnv,
+	itemRowId: number,
+	lockId: string,
+	transaction: PlaidTransaction,
+): D1PreparedStatement {
+	const category = transaction.personal_finance_category?.primary ?? null;
+	return env.DB.prepare(
+		`UPDATE transactions SET ${plaidExclusionSql("?")}
+		 WHERE parent_id = (
+			SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND COALESCE(excluded_source, '') != 'user'
+		 ) AND ${OWNS_LOCK}`,
+	).bind(category, category, transaction.transaction_id, itemRowId, lockId);
+}
 
 function accountUpsert(
 	env: SyncEnv,
@@ -330,6 +358,7 @@ export async function syncItem(
 						lockId,
 					),
 				);
+				statements.push(partsExclusion(env, itemRowId, lockId, transaction));
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
@@ -404,6 +433,7 @@ export async function syncItem(
 						lockId,
 					),
 				);
+				statements.push(partsExclusion(env, itemRowId, lockId, transaction));
 				statements.push(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,
@@ -484,7 +514,7 @@ export async function syncItem(
 			let inserted = 0;
 			for (const [index, transaction] of posted.entries()) {
 				const changed =
-					results[firstAddedStatement + index * 4 + 3]?.meta.changes ?? 0;
+					results[firstAddedStatement + index * 5 + 4]?.meta.changes ?? 0;
 				if (
 					changed > 0 &&
 					(!existingTransactionIds.has(transaction.transaction_id) ||
