@@ -183,11 +183,8 @@ async function page(
 	const { rows: loaded } = await loadBillRows(c.env.DB, today);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);
 	// A payment at another price is offered on the row it would pay: an active bill whose shown
-	// occurrence has no payment (P36 B, spec §8.5). Worked out here each time; nothing is stored.
-	const offers = await loadPriceOffers(
-		c.env.DB,
-		loaded.filter((b) => b.active && b.status !== "paid"),
-	);
+	// occurrence is unpaid, due or overdue (P36 B, spec §8.5). Worked out here each time; nothing is stored.
+	const offers = await loadPriceOffers(c.env.DB, loaded);
 	const rows = loaded.map((b) => {
 		const offer = offers.get(b.id);
 		return offer
@@ -921,10 +918,7 @@ async function billPage(
 		new Set(payments.map((p) => p.period)),
 	);
 	// A payment at another price, offered on the occurrence the Bills row shows (P36 B, spec §8.5).
-	const offer =
-		bill.active && current.status !== "paid"
-			? await findPriceOffer(c.env.DB, offerBill(bill, current))
-			: undefined;
+	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
 	const countedMonth = (period: string) =>
 		bill.frequency === "monthly"
 			? period
@@ -1221,10 +1215,12 @@ async function feedbackRedirect(
 /** The occurrence a bill's Bills row and page ask about, and the question: what `findPriceOffer` finds for it. */
 function offerBill(
 	bill: DbBill,
-	occurrence: { period: string; dueDate: string },
+	occurrence: { period: string; dueDate: string; status: BillStatus },
 ) {
 	return {
 		id: bill.id,
+		active: !!bill.active,
+		status: occurrence.status,
 		amountCents: bill.amount_cents,
 		merchantRawName: bill.merchant_raw_name,
 		merchantRawText: bill.merchant_raw_text,
@@ -1237,7 +1233,6 @@ async function currentOffer(
 	bill: DbBill,
 	today: string,
 ): Promise<({ period: string } & PriceOffer) | undefined> {
-	if (!bill.active) return undefined;
 	const linked = (
 		await c.env.DB.prepare(
 			"SELECT period FROM bill_payments WHERE bill_id=? AND status='linked'",
@@ -1254,7 +1249,6 @@ async function currentOffer(
 		today,
 		new Set(linked.map((row) => row.period)),
 	);
-	if (current.status === "paid") return undefined;
 	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
 	return offer && { period: current.period, ...offer };
 }

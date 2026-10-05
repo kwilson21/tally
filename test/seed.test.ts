@@ -40,11 +40,11 @@ describe("buildSeed", () => {
 				"Eating Out": 28600,
 				Gas: 18600,
 				Kids: 21000,
-				Household: 13242,
+				Household: 15041,
 			});
 			expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
 			expect(summary.incomeCents).toBe(490000);
-			expect(summary.safeToSpendCents).toBe(26299);
+			expect(summary.safeToSpendCents).toBe(24500);
 		},
 	);
 
@@ -74,6 +74,43 @@ describe("buildSeed", () => {
 	it("never dates a transaction after today", () => {
 		const seed = buildSeed("2026-09-03");
 		expect(seed.transactions.every((t) => t.date <= "2026-09-03")).toBe(true);
+	});
+
+	// The designed totals above include Netflix's $17.99 in Household, and Safe to spend is $17.99 lower.
+	it.each(["2026-09-22", "2026-09-01", "2026-03-31", "2027-01-31"])(
+		"has Netflix's one $17.99 charge, last, in this month, on %s",
+		(today) => {
+			const seed = buildSeed(today);
+			const netflix = seed.transactions.filter(
+				(t) => t.rawName === "NETFLIX.COM",
+			);
+			expect(netflix).toHaveLength(1);
+			expect(netflix[0]).toMatchObject({ amountCents: 1799, categoryId: 5 });
+			expect(netflix[0]?.date.slice(0, 7)).toBe(today.slice(0, 7));
+			expect((netflix[0]?.date ?? "9") <= today).toBe(true);
+			// Appended after everything else, so the ids the screenshots use don't move.
+			expect(seed.transactions.at(-1)?.rawName).toBe("NETFLIX.COM");
+			expect(seed.merchants.find((m) => m.key === "NETFLIX.COM")).toMatchObject(
+				{ displayName: "Netflix" },
+			);
+		},
+	);
+
+	it("gives the unpaid Electric and Internet bills' merchants no charges to offer", async () => {
+		const seed = buildSeed("2026-09-22");
+		for (const rawName of ["METRO ELECTRIC CO", "RIVERSIDE FIBER INTERNET"])
+			expect(seed.transactions.some((t) => t.rawName === rawName)).toBe(false);
+		await resetDemo(env.DB, "2026-09-22");
+		const bills = (
+			await env.DB.prepare(
+				"SELECT name, merchant_raw_name AS merchant FROM bills WHERE name IN ('Electric','Internet','Netflix') ORDER BY id",
+			).all<{ name: string; merchant: string }>()
+		).results;
+		expect(bills).toEqual([
+			{ name: "Electric", merchant: "METRO ELECTRIC CO" },
+			{ name: "Netflix", merchant: "NETFLIX.COM" },
+			{ name: "Internet", merchant: "RIVERSIDE FIBER INTERNET" },
+		]);
 	});
 
 	it("includes six months of history with Eating Out creeping up", () => {
@@ -189,7 +226,7 @@ describe("resetDemo", () => {
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		expect(summary.safeToSpendCents).toBe(26299);
+		expect(summary.safeToSpendCents).toBe(24500);
 		expect(summary.uncategorized.count).toBe(12);
 
 		const { results } = await env.DB.prepare(

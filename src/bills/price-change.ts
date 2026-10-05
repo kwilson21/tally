@@ -19,6 +19,7 @@ import {
 	type MatchCandidate,
 	withinBillAmount,
 } from "./match";
+import type { BillStatus } from "./status";
 import { putBackInBudget, setBillAmountStatement } from "./write";
 
 /** The payment on offer for a bill's occurrence. */
@@ -62,9 +63,15 @@ export function pickPriceOffer<P extends MatchCandidate>(
 		)[0];
 }
 
-/** What an offer needs to know about a bill; the occurrence is the one Bills shows for it. */
+/**
+ * What an offer needs to know about a bill; the occurrence is the one Bills shows for it, with the
+ * status `billOccurrence` gave it. An offer is only for an active bill whose occurrence is unpaid, which
+ * is to say due or overdue with no payment linked (paid has one; upcoming is weeks away).
+ */
 export type OfferBill = {
 	id: number;
+	active: boolean;
+	status: BillStatus;
 	amountCents: number;
 	/** The bill's merchant key (or the bank's raw text, when `merchantRawText` is 1), as §6.1 rule 1 matches it. */
 	merchantRawName: string;
@@ -117,11 +124,16 @@ function offerFrom(rows: Row[], bill: OfferBill): PriceOffer | undefined {
 		: undefined;
 }
 
+/** Whether an occurrence can be asked about at all: an active bill, due or overdue, so no payment is linked. */
+const asks = (bill: OfferBill) =>
+	bill.active && (bill.status === "due" || bill.status === "overdue");
+
 /** The offer for one bill's occurrence, or undefined. */
 export async function findPriceOffer(
 	db: D1Database,
 	bill: OfferBill,
 ): Promise<PriceOffer | undefined> {
+	if (!asks(bill)) return undefined;
 	const { results } = await candidates(db, bill).all<Row>();
 	return offerFrom(results, bill);
 }
@@ -132,11 +144,12 @@ export async function loadPriceOffers(
 	bills: OfferBill[],
 ): Promise<Map<number, PriceOffer>> {
 	const offers = new Map<number, PriceOffer>();
-	if (!bills.length) return offers;
+	const asked = bills.filter(asks);
+	if (!asked.length) return offers;
 	const answers = await db.batch<Row>(
-		bills.map((bill) => candidates(db, bill)),
+		asked.map((bill) => candidates(db, bill)),
 	);
-	bills.forEach((bill, i) => {
+	asked.forEach((bill, i) => {
 		const offer = offerFrom(answers[i]?.results ?? [], bill);
 		if (offer) offers.set(bill.id, offer);
 	});

@@ -2,7 +2,11 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { BIG_BILL_CENTS } from "../src/bills/guards";
 import { matchBillPayments } from "../src/bills/match";
-import { pickPriceOffer } from "../src/bills/price-change";
+import {
+	findPriceOffer,
+	loadPriceOffers,
+	pickPriceOffer,
+} from "../src/bills/price-change";
 import { summarizeMonth } from "../src/budget";
 import {
 	DEFAULT_TIME_ZONE,
@@ -550,6 +554,91 @@ describe("bill matching and price changes", () => {
 			});
 			expect(res.status).toBe(200);
 			expect((await billRow())?.amount_cents).toBe(11500);
+		});
+	});
+
+	describe("an offer is for one unpaid occurrence, one payment, and a payment nobody has claimed", () => {
+		const bill = {
+			id: 1,
+			amountCents: 10000,
+			merchantRawName: "NETFLIX.COM",
+			merchantRawText: 0,
+			period,
+			dueDate: due,
+		};
+
+		it("is made only for an active bill whose occurrence is due or overdue", async () => {
+			await seed({ amount: 10000 }, [{ id: 1, amount: 11500 }]);
+			for (const status of ["due", "overdue"] as const) {
+				expect(
+					(await findPriceOffer(env.DB, { ...bill, active: true, status }))
+						?.transactionId,
+				).toBe(1);
+			}
+			// Paid already, still weeks away, or an inactive bill: nothing to ask.
+			for (const [active, status] of [
+				[true, "paid"],
+				[true, "upcoming"],
+				[false, "due"],
+				[false, "overdue"],
+			] as const)
+				expect(
+					await findPriceOffer(env.DB, { ...bill, active, status }),
+				).toBeUndefined();
+			const all = await loadPriceOffers(env.DB, [
+				{ ...bill, id: 1, active: true, status: "paid" },
+				{ ...bill, id: 2, active: true, status: "upcoming" },
+				{ ...bill, id: 3, active: false, status: "overdue" },
+				{ ...bill, id: 4, active: true, status: "due" },
+			]);
+			expect([...all.keys()]).toEqual([4]);
+		});
+
+		it("is one payment: the closest by date, then by amount, shown once", async () => {
+			await seed({ amount: 10000 }, [
+				{ id: 1, amount: 11500, date: daysBefore(due, 4) },
+				{ id: 2, amount: 13000, date: daysBefore(due, 2) },
+				{ id: 3, amount: 12000, date: daysBefore(due, 2) },
+				{ id: 4, amount: 14000, date: daysBefore(due, -2) },
+			]);
+			const page = await get("/bills/1");
+			expect(page.match(/Update the bill to/g)).toHaveLength(1);
+			// Three are two days away; of those the closest amount, $120.00, not $130.00 or $140.00.
+			expect(page).toContain("Update the bill to $120.00");
+			expect(await get("/bills")).toContain(
+				`Paid $120.00 on ${shortDay(daysBefore(due, 2), today)}`,
+			);
+		});
+
+		it("is never a charge another bill has already claimed", async () => {
+			await seed({ amount: 10000 }, [
+				{ id: 1, amount: 11500 },
+				{ id: 2, amount: 12000, date: daysBefore(paidOn, 1) },
+			]);
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(2,'Netflix kids',12000,?,'monthly','NETFLIX.COM')",
+				).bind(Number(due.slice(8, 10))),
+				// The other bill's own payment for that month is the closer charge, and is linked to it.
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(2,?,1,'auto','linked')",
+				).bind(period),
+			]);
+			const page = await get("/bills/1");
+			expect(page).not.toContain("Update the bill to $115.00");
+			expect(page).toContain("Update the bill to $120.00");
+			// And once that one is claimed too, nothing is left to ask about.
+			await env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(3,'Netflix 4K',12000,?,'monthly','NETFLIX.COM')",
+			)
+				.bind(Number(due.slice(8, 10)))
+				.run();
+			await env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(3,?,2,'auto','linked')",
+			)
+				.bind(period)
+				.run();
+			expect(await get("/bills/1")).not.toContain("Update the bill to");
 		});
 	});
 
