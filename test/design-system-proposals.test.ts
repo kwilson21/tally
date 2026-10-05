@@ -35,10 +35,10 @@ describe("GET /design-system/proposals", () => {
 			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
 				recommended,
 			);
-			// From P34 on, each marks the owner's pick (decisions 72–76); P60 took two options.
+			// P34–P75 mark the owner's pick (decisions 72–76); P60 took two options. Later ones are open.
 			const n = Number(id.match(/^p(\d+)/)?.[1]);
 			const picked = section.match(/>Picked</g)?.length ?? 0;
-			const expected = n < 34 ? 0 : id === "p60-bills-total" ? 2 : 1;
+			const expected = n < 34 || n > 75 ? 0 : id === "p60-bills-total" ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 		}
 		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.

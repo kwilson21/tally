@@ -5,6 +5,7 @@
 
 import { AiProposals } from "./proposals-ai";
 import { P75 } from "./proposals-corners";
+import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
 import { Phase4Proposals } from "./proposals-phase4";
@@ -270,7 +271,18 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="followups-title" class="mt-10">
+			<section aria-labelledby="details-title" class="mt-10">
+				<h2 id="details-title" class="font-serif text-3xl font-semibold">
+					Open: details from the issues
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					The questions in docs/reviews/open-questions-2026-10-05.md that change
+					how a screen looks, drawn to decide by seeing.
+				</p>
+				<DetailsProposals />
+			</section>
+
+			<section aria-labelledby="followups-title" class="mt-12">
 				<h2 id="followups-title" class="font-serif text-3xl font-semibold">
 					Picked: follow-ups
 				</h2>
