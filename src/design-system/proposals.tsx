@@ -3,11 +3,25 @@
 // accepted one moves into the real component in its own PR, and a decided one leaves this page
 // for the Decided list.
 
+import { AiProposals } from "./proposals-ai";
+import { P75 } from "./proposals-corners";
+import { FollowupProposals } from "./proposals-followups";
+import { FormsProposals } from "./proposals-forms";
 import { Phase4Proposals } from "./proposals-phase4";
+import { Phase5BillsProposals } from "./proposals-phase5-bills";
+import { Phase5HomeProposals } from "./proposals-phase5-home";
+import { Phase5PlansProposals } from "./proposals-phase5-plans";
+import { Phase5TransactionsProposals } from "./proposals-phase5-transactions";
+import { Phase35Proposals } from "./proposals-phase35";
+import { Phase35StatesProposals } from "./proposals-phase35-states";
 
 // What the owner decided on 2026-09-26, 2026-09-28 and 2026-09-29 (decisions 46, 48, 50, 54, 55, 59
 // and 60), and the issue each ships in.
-export const DECIDED = [
+export const DECIDED: readonly {
+	title: string;
+	outcome: string;
+	issue?: number;
+}[] = [
 	{
 		title: "P1 · The number on a phone's first screen",
 		outcome:
@@ -129,7 +143,115 @@ export const DECIDED = [
 			"Option A: the month is chosen when linking, from the bill (decision 60).",
 		issue: 26,
 	},
-] as const;
+	{
+		title: "P34 · The Pending marker",
+		outcome:
+			"Option A: “Pending” in the row's caption line, and a line in the panel saying its amount can still change (decision 72).",
+		issue: 179,
+	},
+	{
+		title: "P35 · The household's time zone",
+		outcome:
+			"Option A: a “Time zone · Eastern” disclosure row under a Household heading in Settings (decision 72).",
+		issue: 174,
+	},
+	{
+		title: "P36 · “Price changed? Update the bill”",
+		outcome:
+			"Option B: the bill's row on Bills says “Price changed?” with the payment, and the bill's page offers the update (decision 72).",
+		issue: 180,
+	},
+	{
+		title: "P37 · A bank that stopped syncing, on Home",
+		outcome:
+			"Option A: a line with the alert icon under the status sentence, linking to Accounts; the Band keeps its job (decision 72).",
+		issue: 184,
+	},
+	{
+		title: "P38 · A failed save",
+		outcome:
+			"Option A: an error toast with the alert icon; the sheet stays open with what was typed (decision 72).",
+		issue: 183,
+	},
+	{
+		title: "P39 · The app's own 404 and 500 pages",
+		outcome:
+			"Option C: the ledger drawing with a serif 404 (or 500) and a sentence (decision 72).",
+		issue: 183,
+	},
+	{
+		title: "P40 · The first visit's empty Transactions list",
+		outcome:
+			"Option A: EmptyState for “Link a bank to see transactions” and for “Importing your transactions…” (decision 72).",
+		issue: 185,
+	},
+	{
+		title: "P45 · Confirming a bill amount over $100,000",
+		outcome:
+			"Option A: an alert line and a “Yes, $150,000.00 is right” chip to tick before Save (decision 72).",
+		issue: 182,
+	},
+	{
+		title: "P41 · The AI suggestions switches in Settings",
+		outcome:
+			"Option B: switches with On or Off beside each, and one Save under the group (decision 73).",
+	},
+	{
+		title: "P42 · One review screen for every “Maybe …”",
+		outcome:
+			"Option A: each suggestion asked as a yes-or-no question, one at a time (decision 73).",
+	},
+	{
+		title: "P43 · What AI did this month",
+		outcome:
+			"Option A: an “In October” tally under the switches, with a Why? link (decision 73).",
+	},
+	{
+		title: "P44 · See it without AI",
+		outcome:
+			"Option A: two links under the Transactions title, “What Tally made of it · As the bank sends it” (decision 73).",
+	},
+	{
+		title: "P46–P53 · Home",
+		outcome:
+			"Option A of each (decision 74): arrows by the month for past months; “Over budget this month”; Why? beside Safe to spend; “$14 left” when nearly spent; a daily amount under the sentence; what each unbudgeted category spent; older uncategorized on the Band; a link to a category's transactions in its budget sheet.",
+	},
+	{
+		title: "P54–P56 · Savings, planned expenses, the reconnect email",
+		outcome:
+			"A savings goal as a line in Home's budget, set aside in full from the 1st (R1); planned one-time expenses on Bills; the reconnect email with a little detail (B), to the whole family, once and then every 3 days (decision 74).",
+	},
+	{
+		title: "P57–P61 · Bills",
+		outcome:
+			"Occurrences one by one, keyed by due date (weekly matched within ±3 days); several payments for one occurrence; a payment takes its bill's category; the monthly total under the title and a total under each group; amount history like budgets (decision 74).",
+	},
+	{
+		title: "P62–P71 · Transactions",
+		outcome:
+			"A rule offer after the third matching save and every one after (B); an Account filter; a Show choice for type (B); search matches categories and amounts, in every month; a New category chip; rename this one or all; “Always for these merchants” in Settings; Select all in the action bar; a cash entry's date and amount as fields (decision 74).",
+	},
+	{
+		title: "P72 · Forms, rethought",
+		outcome:
+			"Option A, the quiet ledger form, for every form, with a plain big amount field for bills and cash; budgets keep MoneyInput (decision 75).",
+	},
+	{
+		title: "P73 · A new category with its likely transactions",
+		outcome:
+			"Option A: right after a new category is made, the panel offers the others that likely belong, each with its reason; same-merchant ones ticked, Tally's guesses not (decision 76).",
+	},
+	{
+		title: "P74 · Motion",
+		outcome:
+			"Option A: quiet confirmations in CSS only (the switch, the sheet, toasts) and the browser's own cross-fade between pages; B's morphs wait, as they need a script (decision 76).",
+	},
+	{
+		title: "P75 · Squircle corners",
+		outcome:
+			"Option A: squircle corners on every button, field and the sheet, in CSS only; chips stay pills, and Safari and Firefox keep today's corners until they support it (decision 76).",
+	},
+];
 
 /** The proposals page body. */
 export function Proposals() {
@@ -148,7 +270,69 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="open-title" class="mt-10">
+			<section aria-labelledby="followups-title" class="mt-10">
+				<h2 id="followups-title" class="font-serif text-3xl font-semibold">
+					Picked: follow-ups
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Follow-ups from the owner's picks and the micro-interaction libraries
+					they shared: suggested transactions for a new category (P67), motion,
+					and squircle corners. Picks marked (decision 76).
+				</p>
+				<FollowupProposals />
+				<P75 />
+			</section>
+
+			<section aria-labelledby="trust-title" class="mt-12">
+				<h2 id="trust-title" class="font-serif text-3xl font-semibold">
+					Picked, to build in Phase 3.5
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					The fixes that keep Safe to spend honest (spec §8.5, decision 67). The
+					owner's pick of each is marked Picked (decision 72); the drawings stay
+					here as the build reference until each ships.
+				</p>
+				<Phase35Proposals />
+				<Phase35StatesProposals />
+			</section>
+
+			<section aria-labelledby="ai-title" class="mt-12">
+				<h2 id="ai-title" class="font-serif text-3xl font-semibold">
+					Picked: AI that earns its place
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Every AI feature can be switched off, and Tally shows plainly what it
+					did (spec §8.6, decision 68). Picks marked (decision 73).
+				</p>
+				<AiProposals />
+			</section>
+
+			<section aria-labelledby="forms-title" class="mt-12">
+				<h2 id="forms-title" class="font-serif text-3xl font-semibold">
+					Picked: forms
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Add a bill felt crowded (the owner, on P45), so every form gets one
+					pattern: the quiet ledger form (decision 75).
+				</p>
+				<FormsProposals />
+			</section>
+
+			<section aria-labelledby="phase5-title" class="mt-12">
+				<h2 id="phase5-title" class="font-serif text-3xl font-semibold">
+					Picked, to build in Phase 5
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					The original app's features and the review's gaps placed in Phase 5
+					(spec §8.4, decisions 66 and 67). Picks marked (decision 74).
+				</p>
+				<Phase5HomeProposals />
+				<Phase5PlansProposals />
+				<Phase5BillsProposals />
+				<Phase5TransactionsProposals />
+			</section>
+
+			<section aria-labelledby="open-title" class="mt-12">
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
 					Picked, to build in Phase 4
 				</h2>
@@ -169,14 +353,22 @@ export function Proposals() {
 						<li class="py-3">
 							<p class="font-medium">{d.title}</p>
 							<p class="text-muted">
-								{d.outcome} Ships in{" "}
-								<a
-									href={`https://github.com/kwilson21/tally/issues/${d.issue}`}
-									class="inline-flex min-h-11 items-center"
-								>
-									#{d.issue}
-								</a>
-								.
+								{d.outcome}
+								{d.issue ? (
+									<>
+										{" "}
+										Ships in{" "}
+										<a
+											href={`https://github.com/kwilson21/tally/issues/${d.issue}`}
+											class="inline-flex min-h-11 items-center"
+										>
+											#{d.issue}
+										</a>
+										.
+									</>
+								) : (
+									" Its issue is written when it's built."
+								)}
 							</p>
 						</li>
 					))}

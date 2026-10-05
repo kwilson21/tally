@@ -71,7 +71,7 @@ A component isn't ready for sign-off until every line is answered or marked "not
 | over | #A93226 | over budget / overdue bar, icon, word | 6.3 |
 | cat-blue / plum / slate / ochre / brown | #3F6C9A / #7A4A7E / #4F6272 / #A87414 / #7A5230 | category icons only | 5.2 / 6.4 / 6.0 / 3.8 / 6.4 |
 
-Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (1.25rem) for the bottom sheet top corners. No shadows except toasts.
+Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (1.25rem) for the bottom sheet top corners. From decision 76 both are drawn as squircles (`corner-shape: squircle`) where the browser supports it; elsewhere they stay round, and chips stay pills. No shadows except toasts.
 
 ## Type roles
 | Role | Style |
@@ -145,7 +145,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 - Illustrations: SVG, drawn with the icon stroke rules, ink plus one accent. Generated images never ship.
 - Money: integer cents in the database and in code; format only in views with `formatCents` (src/money.ts).
 - Cash: the secondary “Add cash” action opens a sheet; cash spending counts everywhere a bank transaction does, while the Cash account never counts in net worth.
-- Motion: budget bars fill on load (CSS). `prefers-reduced-motion` shows the final state. No count-up: it would need custom JavaScript.
+- Motion: budget bars fill on load (CSS). `prefers-reduced-motion` shows the final state. No count-up: it would need custom JavaScript. From decision 76 (P74 A), quiet confirmations in CSS only: a switch's knob slides, a sheet rises, a toast fades in, and pages cross-fade through the browser's View Transitions, each 150 to 200 ms, with durations as tokens in app.css.
 - Bars are inline SVG. The CSP forbids style attributes, and SVG width attributes aren't CSS.
 
 ## Catalog (decisions 42–44)
