@@ -146,6 +146,84 @@ describe("bill writes", () => {
 			});
 		});
 
+		describe("bills that already share a name", () => {
+			// Two active Rent bills, as a family's data may already hold. Ids 8 and 9.
+			beforeEach(async () => {
+				for (const merchant of ["LANDLORD", "LANDLORD 2"])
+					await env.DB.prepare(
+						`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
+						 VALUES('Rent',100000,1,'monthly',5,?)`,
+					)
+						.bind(merchant)
+						.run();
+			});
+
+			it.each([8, 9])(
+				"still saves bill %i with its name unchanged",
+				async (id) => {
+					expect(
+						await updateBill(
+							env.DB,
+							id,
+							fields({ name: "Rent", amountCents: 120000 }),
+							false,
+						),
+					).toBe(true);
+					expect(await row(id)).toMatchObject({
+						name: "Rent",
+						amount_cents: 120000,
+					});
+				},
+			);
+
+			it("counts a name that differs only by case or surrounding spaces as unchanged", async () => {
+				expect(
+					await updateBill(env.DB, 8, fields({ name: " rent " }), false),
+				).toBe(true);
+				expect(await row(8)).toMatchObject({ name: " rent " });
+			});
+
+			it.each([8, 9])(
+				"still refuses renaming bill %i to a third bill's name",
+				async (id) => {
+					expect(
+						await updateBill(env.DB, id, fields({ name: "water" }), false),
+					).toBe(false);
+					expect(await row(id)).toMatchObject({ name: "Rent" });
+				},
+			);
+
+			it("keeps clearing dismissals when its schedule changes, name unchanged", async () => {
+				const transaction = await env.DB.prepare(
+					"SELECT id FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
+				).first<{ id: number }>();
+				await env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(8,'2020-01',?,'user','dismissed')",
+				)
+					.bind(transaction?.id)
+					.run();
+				expect(
+					await updateBill(
+						env.DB,
+						8,
+						fields({ name: "Rent", frequency: "yearly", anchorMonth: 3 }),
+						true,
+					),
+				).toBe(true);
+				expect(
+					await env.DB.prepare(
+						"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=8",
+					).first("n"),
+				).toBe(0);
+			});
+
+			it("does not let a new bill or a reactivation take the shared name", async () => {
+				expect(await insertBill(env.DB, fields({ name: "rent" }))).toBe(false);
+				await env.DB.prepare("UPDATE bills SET active=0 WHERE id=9").run();
+				expect(await activateBill(env.DB, 9, "Rent")).toBe(false);
+			});
+		});
+
 		it("refuses an inactive bill's rename to an active bill's name, and allows a free one", async () => {
 			expect(
 				await updateBill(env.DB, 7, fields({ name: "Water" }), false),

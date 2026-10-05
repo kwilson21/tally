@@ -681,6 +681,58 @@ describe("Bill guards", () => {
 			expect(await nameOf(1)).toBe("Streaming");
 		});
 
+		describe("bills that already share a name", () => {
+			// Two active Rent bills, as a family's data may already hold. Ids 8 and 9.
+			beforeEach(async () => {
+				for (const merchant of ["LANDLORD", "LANDLORD 2"])
+					await env.DB.prepare(
+						`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
+						 VALUES('Rent',100000,1,'monthly',5,?)`,
+					)
+						.bind(merchant)
+						.run();
+			});
+			const edit = (id: number, over: Record<string, string>) =>
+				post(
+					`/bills/${id}`,
+					fields({
+						name: "Rent",
+						amount: "1200.00",
+						due_day: "1",
+						merchant_raw_name: id === 8 ? "LANDLORD" : "LANDLORD 2",
+						...over,
+					}),
+				);
+
+			it.each([8, 9])("still lets bill %i's amount be changed", async (id) => {
+				const res = await edit(id, { amount: "1250.00" });
+				expect(res.headers.get("HX-Trigger")).toContain(
+					'"announce":"Bill saved"',
+				);
+				expect(await amountOf(id)).toBe(125000);
+				expect(await nameOf(id)).toBe("Rent");
+			});
+
+			it.each([8, 9])(
+				"still refuses renaming bill %i to a third bill's name",
+				async (id) => {
+					const res = await edit(id, { name: "water" });
+					const html = await res.text();
+					expect(res.headers.get("HX-Trigger")).toBeNull();
+					expect(html).toContain("You already have a bill called Water.");
+					expect(await nameOf(id)).toBe("Rent");
+				},
+			);
+
+			it("still refuses adding another bill with the shared name", async () => {
+				const res = await post("/bills", fields({ name: "RENT" }));
+				expect(res.headers.get("HX-Trigger")).toBeNull();
+				expect(await res.text()).toContain(
+					"You already have a bill called Rent.",
+				);
+			});
+		});
+
 		it("compares names as the database does: spaces and A to Z only", async () => {
 			const add = (name: string) =>
 				post("/bills", fields({ name, merchant_raw_name: name }));

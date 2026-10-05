@@ -4,6 +4,7 @@ import {
 	BIG_BILL_CENTS,
 	duplicateBillName,
 	needsBigAmountConfirm,
+	sameBillName,
 } from "../bills/guards";
 import { matchBillPayments } from "../bills/match";
 import {
@@ -616,7 +617,8 @@ async function save(c: Context<App>, id?: number) {
 		errors.anchor_month = "Choose a month.";
 	const bill = id ? await dbBill(c, id) : undefined;
 	if (id && !bill) return c.notFound();
-	if (!errors.name) {
+	// Only a new name is checked: a bill that already shares its name can still be edited.
+	if (!errors.name && !(bill && sameBillName(bill.name, values.name))) {
 		const duplicate = duplicateBillName(await activeBills(c), values.name, id);
 		if (duplicate) errors.name = alreadyCalled(duplicate);
 	}

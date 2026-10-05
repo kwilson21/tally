@@ -3,7 +3,18 @@ import {
 	BIG_BILL_CENTS,
 	duplicateBillName,
 	needsBigAmountConfirm,
+	sameBillName,
 } from "../src/bills/guards";
+
+describe("sameBillName", () => {
+	it("compares as duplicateBillName does: spaces trimmed, only A to Z folded", () => {
+		expect(sameBillName("Rent", " RENT ")).toBe(true);
+		expect(sameBillName("Rent", "Rent 2")).toBe(false);
+		expect(sameBillName("Café", "CAFÉ")).toBe(false);
+		expect(sameBillName("Café", "CAFé")).toBe(true);
+		expect(sameBillName("Rent\t", "Rent")).toBe(false);
+	});
+});
 
 const bills = [
 	{ id: 1, name: "Rent", active: 1 },

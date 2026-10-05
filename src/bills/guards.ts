@@ -14,6 +14,14 @@ const sameName = (name: string) =>
 	name.replace(/^ +| +$/g, "").replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 /**
+ * Whether two names are the same name. An edit that leaves a bill's name as it was isn't checked
+ * against other bills, so a family whose data already holds two bills with a name can still change
+ * either one's amount; only changing the name, adding and reactivating are checked.
+ */
+export const sameBillName = (a: string, b: string) =>
+	sameName(a) === sameName(b);
+
+/**
  * The name of the other active bill that `name` repeats, ignoring case and surrounding spaces, or
  * undefined. `ignoreId` is the bill being edited, which may keep its own name.
  */

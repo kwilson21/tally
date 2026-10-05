@@ -8,6 +8,9 @@
 // A to Z folded, so "Café" and "CAFÉ" are different names. The form's check (guards.ts, sameName)
 // compares the very same way, so whatever the form lets through the write lets through, and no race
 // can leave two active bills the form would call duplicates. Change one and change the other.
+//
+// Only a name that is new is checked: adding, reactivating and renaming. Editing a bill under the
+// name it already has isn't, so two bills that already share a name stay editable.
 
 export type BillFields = {
 	name: string;
@@ -49,9 +52,12 @@ export async function insertBill(
 }
 
 /**
- * Changes a bill. False, with nothing written, when another active bill has the new name.
+ * Changes a bill. False, with nothing written, when another active bill has the new name. A name
+ * that is the bill's own, as it is stored (spaces and A to Z case aside), is never checked, so a
+ * bill that already shares its name with another one (the data may hold such pairs from before this
+ * rule) can still have its amount or day changed; only a new name has to be free.
  * `dropDismissals` is for a changed schedule: old dismissals no longer apply (period keys have
- * different shapes, YYYY-MM against YYYY), and they go in the same batch, under the same check.
+ * different shapes, YYYY-MM against YYYY), and they go in the same batch, once the update applied.
  */
 export async function updateBill(
 	db: D1Database,
@@ -59,10 +65,11 @@ export async function updateBill(
 	f: BillFields,
 	dropDismissals: boolean,
 ): Promise<boolean> {
+	// In an UPDATE's WHERE, `name` is the row's name as it is now, before the SET.
 	const update = db
 		.prepare(
 			`UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,merchant_raw_name=?
-			 WHERE id=? AND ${FREE}`,
+			 WHERE id=? AND (lower(trim(name))=lower(trim(?)) OR ${FREE})`,
 		)
 		.bind(
 			f.name,
@@ -73,14 +80,19 @@ export async function updateBill(
 			f.categoryId,
 			f.merchantRawName,
 			id,
+			f.name,
 			id,
 			f.name,
 		);
 	if (!dropDismissals) return (await update.run()).meta.changes > 0;
+	// The bill has its new name exactly when the update just applied (it set it, and a refused update
+	// leaves a name that differs), so the dismissals go only then.
 	const [result] = await db.batch([
 		update,
 		db
-			.prepare(`DELETE FROM bill_payments WHERE bill_id=? AND ${FREE}`)
+			.prepare(
+				"DELETE FROM bill_payments WHERE bill_id=? AND EXISTS (SELECT 1 FROM bills WHERE id=? AND name=?)",
+			)
 			.bind(id, id, f.name),
 	]);
 	return (result?.meta.changes ?? 0) > 0;
