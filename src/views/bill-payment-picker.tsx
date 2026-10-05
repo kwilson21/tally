@@ -9,6 +9,8 @@ export type PaymentPickerCandidate = {
 	date: string;
 	dateLabel: string;
 	amountCents: number;
+	/** An excluded payment can pay a bill, and linking it puts it back in the budget (spec §6.1 rule 4). */
+	excluded?: boolean;
 };
 export type PaymentPickerPeriod = {
 	value: string;
@@ -107,7 +109,7 @@ export function BillPaymentPicker({
 									hx-target="#bill-month-explanation"
 									hx-swap="innerHTML"
 								>
-									{t.displayName} · {t.dateLabel} · {formatCents(t.amountCents)}
+									{`${t.displayName} · ${t.dateLabel} · ${formatCents(t.amountCents)}${t.excluded ? " · Excluded" : ""}`}
 								</Chip>
 							))}
 						</div>

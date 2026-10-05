@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { daysBefore } from "../src/dates";
+import { merchantKeySql } from "../src/db/merchant-key";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { buildSeed, monthOffset } from "../src/demo/seed";
@@ -39,11 +40,11 @@ describe("buildSeed", () => {
 				"Eating Out": 28600,
 				Gas: 18600,
 				Kids: 21000,
-				Household: 13242,
+				Household: 15041,
 			});
 			expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
 			expect(summary.incomeCents).toBe(490000);
-			expect(summary.safeToSpendCents).toBe(26299);
+			expect(summary.safeToSpendCents).toBe(24500);
 		},
 	);
 
@@ -75,6 +76,43 @@ describe("buildSeed", () => {
 		expect(seed.transactions.every((t) => t.date <= "2026-09-03")).toBe(true);
 	});
 
+	// The designed totals above include Netflix's $17.99 in Household, and Safe to spend is $17.99 lower.
+	it.each(["2026-09-22", "2026-09-01", "2026-03-31", "2027-01-31"])(
+		"has Netflix's one $17.99 charge, last, in this month, on %s",
+		(today) => {
+			const seed = buildSeed(today);
+			const netflix = seed.transactions.filter(
+				(t) => t.rawName === "NETFLIX.COM",
+			);
+			expect(netflix).toHaveLength(1);
+			expect(netflix[0]).toMatchObject({ amountCents: 1799, categoryId: 5 });
+			expect(netflix[0]?.date.slice(0, 7)).toBe(today.slice(0, 7));
+			expect((netflix[0]?.date ?? "9") <= today).toBe(true);
+			// Appended after everything else, so the ids the screenshots use don't move.
+			expect(seed.transactions.at(-1)?.rawName).toBe("NETFLIX.COM");
+			expect(seed.merchants.find((m) => m.key === "NETFLIX.COM")).toMatchObject(
+				{ displayName: "Netflix" },
+			);
+		},
+	);
+
+	it("gives the unpaid Electric and Internet bills' merchants no charges to offer", async () => {
+		const seed = buildSeed("2026-09-22");
+		for (const rawName of ["METRO ELECTRIC CO", "RIVERSIDE FIBER INTERNET"])
+			expect(seed.transactions.some((t) => t.rawName === rawName)).toBe(false);
+		await resetDemo(env.DB, "2026-09-22");
+		const bills = (
+			await env.DB.prepare(
+				"SELECT name, merchant_raw_name AS merchant FROM bills WHERE name IN ('Electric','Internet','Netflix') ORDER BY id",
+			).all<{ name: string; merchant: string }>()
+		).results;
+		expect(bills).toEqual([
+			{ name: "Electric", merchant: "METRO ELECTRIC CO" },
+			{ name: "Netflix", merchant: "NETFLIX.COM" },
+			{ name: "Internet", merchant: "RIVERSIDE FIBER INTERNET" },
+		]);
+	});
+
 	it("includes six months of history with Eating Out creeping up", () => {
 		const seed = buildSeed("2026-09-22");
 		const eatingOut = (month: string) =>
@@ -86,11 +124,30 @@ describe("buildSeed", () => {
 		).toEqual([17000, 19500, 21500, 24000, 26200]);
 	});
 
-	it("has exactly one merchant row per raw name, covering every transaction", () => {
+	it("has exactly one merchant row per merchant key, covering every transaction", () => {
 		const seed = buildSeed("2026-09-22");
-		const names = seed.merchants.map((m) => m.rawName);
-		expect(new Set(names).size).toBe(names.length);
-		for (const t of seed.transactions) expect(names).toContain(t.rawName);
+		const keys = seed.merchants.map((m) => m.key);
+		expect(new Set(keys).size).toBe(keys.length);
+		for (const t of seed.transactions)
+			expect(keys).toContain(t.merchantName ?? t.rawName);
+	});
+
+	it("gives a few transactions Plaid's merchant name, two raw names sharing one", () => {
+		const seed = buildSeed("2026-09-22");
+		const named = seed.transactions.filter((t) => t.merchantName);
+		expect(named.length).toBeGreaterThan(5);
+		expect(
+			new Set(
+				named.filter((t) => t.merchantName === "Amazon").map((t) => t.rawName),
+			),
+		).toEqual(new Set(["AMAZON.COM*RT4K2", "AMZN MKTP US*2K4"]));
+		// Most of the demo, and every cash transaction, has none.
+		expect(
+			seed.transactions.filter((t) => !t.merchantName).length,
+		).toBeGreaterThan(named.length);
+		expect(
+			seed.transactions.find((t) => t.accountId === 4)?.merchantName ?? null,
+		).toBeNull();
 	});
 
 	it("changes the Eating Out budget two months ago", () => {
@@ -122,6 +179,31 @@ describe("resetDemo", () => {
 		});
 	});
 
+	it("stores the seed's merchant names, and every bill's key is its linked payment's merchant key", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const named = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE merchant_name IS NOT NULL",
+		).first<{ n: number }>();
+		expect(named?.n).toBeGreaterThan(5);
+
+		const { results } = await env.DB.prepare(
+			`SELECT b.merchant_raw_name AS billKey, ${merchantKeySql("t")} AS paymentKey
+			FROM bill_payments bp
+			JOIN bills b ON b.id = bp.bill_id
+			JOIN transactions t ON t.id = bp.transaction_id
+			WHERE bp.status = 'linked'`,
+		).all<{ billKey: string; paymentKey: string }>();
+		expect(results.length).toBeGreaterThan(0);
+		for (const row of results) expect(row.billKey).toBe(row.paymentKey);
+
+		// Every transaction's display name is found under its key, so names resolve for both Amazons.
+		const unresolved = await env.DB.prepare(
+			`SELECT COUNT(*) AS n FROM transactions t
+			WHERE NOT EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")})`,
+		).first<{ n: number }>();
+		expect(unresolved?.n).toBe(0);
+	});
+
 	it("gives the seed's Jev-categorized rows a matching Jev pick", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		const mismatched = await env.DB.prepare(
@@ -144,7 +226,7 @@ describe("resetDemo", () => {
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		expect(summary.safeToSpendCents).toBe(26299);
+		expect(summary.safeToSpendCents).toBe(24500);
 		expect(summary.uncategorized.count).toBe(12);
 
 		const { results } = await env.DB.prepare(

@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -34,7 +34,7 @@ async function post(
 }
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("GET /transactions/organize", () => {
@@ -48,10 +48,10 @@ describe("GET /transactions/organize", () => {
 			),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'RAW TWO')",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
 		const { res, html } = await get();
 		expect(res.status).toBe(200);
@@ -64,6 +64,23 @@ describe("GET /transactions/organize", () => {
 		);
 		expect(html).toMatch(/name="name"[^>]*value="Target"/);
 		expect(html).toContain("Future Target transactions get this category too.");
+	});
+
+	it("shows one merchant's bank texts on its group, so one choice's reach is visible", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('Comcast', 'Comcast Cable')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 900000, 'COMCAST CABLE', 'Comcast'), (1, ?, 800000, 'COMCAST CABLE 2', 'Comcast')",
+			).bind(todayIn(DEFAULT_TIME_ZONE), todayIn(DEFAULT_TIME_ZONE)),
+		]);
+
+		const { html } = await get();
+
+		expect(html).toMatch(/<h2[^>]*>Comcast Cable<\/h2>/);
+		expect(html).toContain("2 transactions · $17,000.00");
+		expect(html).toContain("From COMCAST CABLE, COMCAST CABLE 2");
 	});
 
 	it("skips a group without saving it", async () => {
@@ -208,7 +225,7 @@ describe("POST /transactions/organize", () => {
 				).bind(raw),
 				env.DB.prepare(
 					"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 100000, ?)",
-				).bind(todayUtc(), raw),
+				).bind(todayIn(DEFAULT_TIME_ZONE), raw),
 			);
 		}
 		await env.DB.batch(statements);
@@ -230,16 +247,16 @@ describe("POST /transactions/organize", () => {
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, excluded) VALUES (1, ?, 1, 'HIDDEN EXCLUDED', 1)",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, is_split) VALUES (1, ?, 1, 'HIDDEN SPLIT', 1)",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, flag_income) VALUES (1, ?, 1, 'HIDDEN INCOME', 1)",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1, 'HIDDEN CATEGORIZED', 2, 'user')",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
 		const { html } = await get();
 		expect(html).not.toMatch(/HIDDEN (EXCLUDED|SPLIT|INCOME|CATEGORIZED)/);
@@ -249,7 +266,7 @@ describe("POST /transactions/organize", () => {
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, credit_reviewed) VALUES (1, ?, -1200, 'PENDING CREDIT', 0)",
 		)
-			.bind(todayUtc())
+			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.run();
 		const { html } = await get();
 		expect(html).not.toContain("PENDING CREDIT");

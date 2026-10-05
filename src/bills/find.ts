@@ -1,3 +1,10 @@
+import {
+	isMerchantTextOfSql,
+	merchantColumnOfSql,
+	merchantKeySql,
+	merchantNotABillSql,
+} from "../db/merchant-key";
+
 /** Rules for finding monthly bills from recent charges (spec §8.2, P18). */
 export const BILL_FIND_MONTHS = 3;
 export const BILL_FIND_MIN_DAYS = 25;
@@ -5,6 +12,7 @@ export const BILL_FIND_MAX_DAYS = 35;
 export const BILL_FIND_AMOUNT_PERCENT = 10;
 
 export type BillFindingCharge = {
+	/** The charge's merchant key: Plaid's merchant name, or the raw name when it sent none (spec §6.1). */
 	rawName: string;
 	displayName: string;
 	date: string;
@@ -13,6 +21,7 @@ export type BillFindingCharge = {
 	defaultCategoryId?: number | null;
 };
 export type BillSuggestion = {
+	/** The merchant key, which becomes the new bill's `merchant_raw_name`. */
 	rawName: string;
 	displayName: string;
 	amountCents: number;
@@ -85,24 +94,35 @@ export function threeMonthsBack(today: string) {
 	date.setUTCDate(Math.min(day, lastDay));
 	return date.toISOString().slice(0, 10);
 }
+/** A charge's merchant key and raw name; a split part has its purchase's. */
+const CHARGE_KEY = `COALESCE(${merchantKeySql("p")},${merchantKeySql("t")})`;
+const CHARGE_RAW = "COALESCE(p.raw_name,t.raw_name)";
+const chargeMerchant = (
+	column: "display_name" | "suggested_name" | "default_category_id",
+) => merchantColumnOfSql(CHARGE_KEY, column);
+
+/**
+ * Suggests bills from the last three months of charges, one per merchant key. A charge is left out when
+ * its key is marked Not a bill, or an existing bill covers it: by its key, or by its raw name for a bill
+ * saved under the bank's raw text, before the key existed.
+ */
 export async function loadBillSuggestions(
 	db: D1Database,
 	today: string,
 ): Promise<BillSuggestion[]> {
 	const { results } = await db
-		.prepare(`SELECT COALESCE(p.raw_name,t.raw_name) AS rawName,
-	  COALESCE(m.display_name,m.suggested_name,p.raw_name,t.raw_name) AS displayName,
+		.prepare(`SELECT ${CHARGE_KEY} AS rawName,
+	  COALESCE(${chargeMerchant("display_name")},${chargeMerchant("suggested_name")},${CHARGE_KEY}) AS displayName,
 	  t.date, t.amount_cents AS amountCents,
 	  CASE WHEN tc.archived=0 THEN t.category_id END AS categoryId,
-	  CASE WHEN dc.archived=0 THEN m.default_category_id END AS defaultCategoryId
+	  CASE WHEN dc.archived=0 THEN dc.id END AS defaultCategoryId
 	  FROM transactions t LEFT JOIN transactions p ON p.id=t.parent_id
-	  LEFT JOIN merchants m ON m.raw_name=COALESCE(p.raw_name,t.raw_name)
 	  LEFT JOIN categories tc ON tc.id=t.category_id
-	  LEFT JOIN categories dc ON dc.id=m.default_category_id
+	  LEFT JOIN categories dc ON dc.id=${chargeMerchant("default_category_id")}
 	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.excluded=0 AND t.flag_income=0
-	   AND t.is_split=0 AND COALESCE(m.not_a_bill,0)=0
-	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE b.merchant_raw_name=COALESCE(p.raw_name,t.raw_name))
-	  ORDER BY COALESCE(p.raw_name,t.raw_name),t.date`)
+	   AND t.is_split=0 AND NOT ${merchantNotABillSql(CHARGE_KEY)}
+	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE ${isMerchantTextOfSql(CHARGE_KEY, CHARGE_RAW, "b.merchant_raw_name", "b.merchant_raw_text")})
+	  ORDER BY ${CHARGE_KEY},t.date`)
 		.bind(threeMonthsBack(today), today)
 		.all<BillFindingCharge>();
 	return findBillSuggestions(results);

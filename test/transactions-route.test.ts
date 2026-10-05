@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 async function get(path: string, headers: Record<string, string> = {}) {
@@ -14,7 +14,7 @@ const rowCount = (html: string) =>
 	(html.match(/<li data-transaction=/g) ?? []).length;
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("GET /transactions", () => {
@@ -121,10 +121,10 @@ describe("GET /transactions", () => {
 
 	it("names the filters in the count, so two filters with the same count still read differently (#56)", async () => {
 		// Every earlier month has three transactions in each category.
-		const [y, m] = todayUtc().slice(0, 7).split("-").map(Number) as [
-			number,
-			number,
-		];
+		const [y, m] = todayIn(DEFAULT_TIME_ZONE)
+			.slice(0, 7)
+			.split("-")
+			.map(Number) as [number, number];
 		const last =
 			m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
 		const countText = (html: string) =>
@@ -166,7 +166,7 @@ describe("GET /transactions", () => {
 	it("pages through results with real links, 25 at a time", async () => {
 		const first = (await get("/transactions")).html;
 		expect(first).toMatch(
-			/<p id="result-count"[^>]*>Showing 1–25 of 38 transactions in [A-Z][a-z]+<\/p>/,
+			/<p id="result-count"[^>]*>Showing 1–25 of 39 transactions in [A-Z][a-z]+<\/p>/,
 		);
 		expect(first).toMatch(/<nav aria-label="Pages"/);
 		expect(first).toContain("Page 1 of 2");
@@ -176,8 +176,8 @@ describe("GET /transactions", () => {
 		expect(first).not.toContain(">Newer<");
 
 		const second = (await get("/transactions?page=2")).html;
-		expect(rowCount(second)).toBe(13);
-		expect(second).toMatch(/Showing 26–38 of 38 transactions/);
+		expect(rowCount(second)).toBe(14);
+		expect(second).toMatch(/Showing 26–39 of 39 transactions/);
 		expect(second).toMatch(
 			/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
 		);

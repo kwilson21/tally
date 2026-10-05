@@ -1,12 +1,12 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("data exports", () => {
@@ -25,6 +25,41 @@ describe("data exports", () => {
 			credit_reviewed: 0,
 			credit_reviewed_by: null,
 		});
+	});
+
+	it("includes Plaid's merchant name and the pending flag in the JSON transaction export", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Target', pending = 1 WHERE id = 1",
+		).run();
+		const data = (await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).json()) as { transactions: Record<string, unknown>[] };
+
+		expect(data.transactions[0]).toMatchObject({
+			merchant_name: "Target",
+			pending: 1,
+		});
+	});
+
+	it("shows a merchant's chosen name beside every raw name that shares its merchant name in the CSV", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET raw_name = 'ZETA MART 1234', merchant_name = 'Zeta Mart' WHERE id = 1",
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET raw_name = 'ZETA MART 5678', merchant_name = 'Zeta Mart' WHERE id = 2",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('Zeta Mart', 'Zeta Stores')",
+			),
+		]);
+
+		const csv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+
+		expect(csv).toMatch(/ZETA MART 1234,Zeta Stores,/);
+		expect(csv).toMatch(/ZETA MART 5678,Zeta Stores,/);
 	});
 
 	it("neutralizes formulas in CSV text fields without changing numeric amounts", async () => {
@@ -97,7 +132,7 @@ describe("data exports", () => {
 		expect(res.status).toBe(200);
 		expect(res.headers.get("content-type")).toContain("text/csv");
 		expect(res.headers.get("content-disposition")).toBe(
-			`attachment; filename="tally-transactions-${todayUtc()}.csv"`,
+			`attachment; filename="tally-transactions-${todayIn(DEFAULT_TIME_ZONE)}.csv"`,
 		);
 		expect(res.headers.get("cache-control")).toBe("no-store");
 		expect(csv).toContain("amount (USD; positive = money out)");
@@ -142,7 +177,7 @@ describe("data exports", () => {
 
 		expect(res.headers.get("content-type")).toContain("application/json");
 		expect(res.headers.get("content-disposition")).toBe(
-			`attachment; filename="tally-${todayUtc()}.json"`,
+			`attachment; filename="tally-${todayIn(DEFAULT_TIME_ZONE)}.json"`,
 		);
 		expect(res.headers.get("cache-control")).toBe("no-store");
 		expect(data).toHaveProperty("schema_version", 1);
@@ -158,6 +193,7 @@ describe("data exports", () => {
 			"bill_payments",
 			"plaid_items",
 			"documents",
+			"household_settings",
 		]) {
 			expect(data[table], table).toBeInstanceOf(Array);
 		}
@@ -206,8 +242,10 @@ describe("data exports", () => {
 				"is_split",
 				"jev_category_id",
 				"jev_failed_at",
+				"merchant_name",
 				"note",
 				"parent_id",
+				"pending",
 				"plaid_category",
 				"plaid_transaction_id",
 				"raw_name",
@@ -225,6 +263,7 @@ describe("data exports", () => {
 				"frequency",
 				"id",
 				"merchant_raw_name",
+				"merchant_raw_text",
 				"name",
 			],
 			bill_payments: [
@@ -238,6 +277,7 @@ describe("data exports", () => {
 			],
 			plaid_items: ["institution_name", "status"],
 			documents: ["filename", "uploaded_at"],
+			household_settings: ["key", "value"],
 		} as const;
 		for (const [table, columns] of Object.entries(exportedColumns)) {
 			expect(
@@ -249,6 +289,9 @@ describe("data exports", () => {
 			filename: "statement.pdf",
 			uploaded_at: "2026-09-12 10:30:00",
 		});
+		expect(data.household_settings).toEqual([
+			{ key: "time_zone", value: "America/New_York" },
+		]);
 		expect(body).not.toContain(secret);
 		expect(body).not.toContain("access_token_encrypted");
 		expect(body).not.toContain("sync_cursor");

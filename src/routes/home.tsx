@@ -2,7 +2,8 @@ import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
-import { monthName, todayUtc } from "../dates";
+import { householdToday, monthName } from "../dates";
+import { bankSyncs } from "../db/accounts";
 import {
 	type BudgetCategory,
 	budgetCategory,
@@ -12,6 +13,7 @@ import {
 } from "../db/budgets";
 import { loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
+import { flaggedBanks, staleBankWords } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
@@ -77,13 +79,15 @@ type HomeOptions = {
 
 // Home: what's safe to spend this month, and how each category is doing (spec §8, feature 1).
 // Every htmx swap selects a part of this same page.
+// `today` is the household's date, read once by the handler, so the whole request uses one month.
 async function renderHome(
 	c: Context<App>,
+	today: string,
 	{ sheet, focusId, adjusting, nudgeFocus, status = 200 }: HomeOptions = {},
 ) {
-	const month = todayUtc().slice(0, 7);
+	const month = today.slice(0, 7);
 	const data = await loadMonth(c.env.DB, month);
-	const billData = await loadBillRows(c.env.DB);
+	const billData = await loadBillRows(c.env.DB, today);
 	const dueBills = billData.rows.filter(
 		(b) => b.active && (b.status === "due" || b.status === "overdue"),
 	);
@@ -108,6 +112,11 @@ async function renderHome(
 	const { count, spentCents } = summary.uncategorized;
 	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
 	const demo = c.env.DEMO === "true";
+	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
+	// no real banks, so it never asks.
+	const bankLine = demo
+		? null
+		: staleBankWords(flaggedBanks(await bankSyncs(c.env.DB), today), today);
 	// Counted spending by category, income left out, as Home counts it (spec §6).
 	const spent = (id: number) =>
 		data.transactions
@@ -128,6 +137,7 @@ async function renderHome(
 							month={monthName(month)}
 							safeToSpendCents={summary.safeToSpendCents}
 							status={statusSentence(summary.categories)}
+							bankLine={bankLine ?? undefined}
 							band={
 								count > 0
 									? {
@@ -274,14 +284,17 @@ function BudgetSheet({
 	error,
 	spentCents,
 	lastMonthCents,
+	month: monthPeriod,
 }: {
 	category: BudgetCategory;
 	value: string;
 	error?: string;
 	spentCents: number;
 	lastMonthCents: number;
+	/** The household's current month, YYYY-MM. */
+	month: string;
 }) {
-	const month = monthName(todayUtc().slice(0, 7));
+	const month = monthName(monthPeriod);
 	// Closing swaps Home back in with focus on the row, so the change is announced.
 	const closeAttrs = {
 		"hx-get": `/?focus=${category.id}`,
@@ -351,21 +364,22 @@ function BudgetSheet({
 }
 
 const idOf = (c: Context<App>) => Number(c.req.param("id"));
-/** The active category a budget route is about, or null. */
+/**
+ * The active category a budget route is about, or null, with the household's date and current
+ * month. This is the one place a budget request reads the date; it passes it on to renderHome.
+ */
 async function activeCategory(c: Context<App>) {
-	const category = await budgetCategory(
-		c.env.DB,
-		idOf(c),
-		todayUtc().slice(0, 7),
-	);
-	return category && !category.archived ? category : null;
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
+	const category = await budgetCategory(c.env.DB, idOf(c), month);
+	return category && !category.archived ? { category, today, month } : null;
 }
 
 // ?focus=<id> puts focus on that row when the sheet closes.
 // ?adjust=1 is Adjust mode (#94).
-home.get("/", (c) => {
+home.get("/", async (c) => {
 	const focus = Number(c.req.query("focus"));
-	return renderHome(c, {
+	return renderHome(c, await householdToday(c.env.DB), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		adjusting: c.req.query("adjust") === "1",
 	});
@@ -373,14 +387,11 @@ home.get("/", (c) => {
 
 // A category's budget sheet over Home (#66). A real URL: it works without JavaScript and can be linked to.
 home.get("/budget/:id{[0-9]+}", async (c) => {
-	const category = await activeCategory(c);
-	if (!category) return c.notFound();
-	const lastMonth = await lastMonthSpentCents(
-		c.env.DB,
-		category.id,
-		todayUtc().slice(0, 7),
-	);
-	return renderHome(c, {
+	const active = await activeCategory(c);
+	if (!active) return c.notFound();
+	const { category, today, month } = active;
+	const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
+	return renderHome(c, today, {
 		sheet: (spent) => (
 			<BudgetSheet
 				category={category}
@@ -391,6 +402,7 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 				}
 				spentCents={spent(category.id)}
 				lastMonthCents={lastMonth}
+				month={month}
 			/>
 		),
 	});
@@ -398,14 +410,14 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 
 // Saving a budget, from this month on (spec §7). htmx gets Home back with a toast; plain browsers are redirected.
 home.post("/budget/:id{[0-9]+}", async (c) => {
-	const category = await activeCategory(c);
-	if (!category) return c.notFound();
-	const month = todayUtc().slice(0, 7);
+	const active = await activeCategory(c);
+	if (!active) return c.notFound();
+	const { category, today, month } = active;
 	const typed = String((await c.req.formData()).get("budget") ?? "");
 	const parsed = parseBudgetAmount(typed);
 	if (!parsed.ok) {
 		const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
-		return renderHome(c, {
+		return renderHome(c, today, {
 			status: 422,
 			sheet: (spent) => (
 				<BudgetSheet
@@ -414,6 +426,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 					error={parsed.error}
 					spentCents={spent(category.id)}
 					lastMonthCents={lastMonth}
+					month={month}
 				/>
 			),
 		});
@@ -428,17 +441,17 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", "/");
-	return renderHome(c, { focusId: category.id });
+	return renderHome(c, today, { focusId: category.id });
 });
 
 // One tap in Adjust mode (#94, decision 48): the budget moves to the next round $10, from this month
 // on, as the sheet saves it. htmx gets Home back in Adjust mode; plain browsers are redirected there.
 home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
-	const category = await activeCategory(c);
+	const active = await activeCategory(c);
 	// Only a budgeted category has buttons; one without a budget gets it from its sheet.
-	if (!category || category.budgetCents === null) return c.notFound();
+	if (!active || active.category.budgetCents === null) return c.notFound();
+	const { category, today, month } = active;
 	const direction = c.req.param("direction") === "up" ? "up" : "down";
-	const month = todayUtc().slice(0, 7);
 	// Read and written in one statement, so two taps at once (two phones) both count.
 	const cents = await nudgeBudget(c.env.DB, category.id, direction, month);
 	if (!c.req.header("HX-Request")) return c.redirect("/?adjust=1", 303);
@@ -468,7 +481,7 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 		cents === null ||
 		(direction === "down" && cents === 0) ||
 		(direction === "up" && cents === MAX_BUDGET_CENTS);
-	return renderHome(c, {
+	return renderHome(c, today, {
 		adjusting: true,
 		nudgeFocus: atLimit
 			? { id: category.id, direction: direction === "up" ? "down" : "up" }

@@ -1,12 +1,14 @@
-import { todayUtc } from "../dates";
+import { householdToday } from "../dates";
+import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
 import { billOccurrenceForMonth } from "./status";
+import { putBackInBudget } from "./write";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
 export const BILL_DATE_WINDOW_DAYS = 5;
 
 export type MatchCandidate = { id: number; date: string; amountCents: number };
 
-const dayNumber = (date: string) =>
+export const dayNumber = (date: string) =>
 	Math.floor(
 		Date.UTC(
 			Number(date.slice(0, 4)),
@@ -14,6 +16,10 @@ const dayNumber = (date: string) =>
 			Number(date.slice(8, 10)),
 		) / 86_400_000,
 	);
+
+/** Spec §6.1 rule 2: a payment within ±10% of the bill's amount, both ends included. */
+export const withinBillAmount = (paymentCents: number, billCents: number) =>
+	10 * Math.abs(paymentCents - billCents) <= billCents;
 
 /** Applies all four candidate rules and the deterministic §6.1 tie-break. */
 export function pickBillPayment(
@@ -27,10 +33,7 @@ export function pickBillPayment(
 			(candidate) =>
 				Math.abs(dayNumber(candidate.date) - due) <= BILL_DATE_WINDOW_DAYS,
 		)
-		.filter(
-			(candidate) =>
-				10 * Math.abs(candidate.amountCents - amountCents) <= amountCents,
-		)
+		.filter((candidate) => withinBillAmount(candidate.amountCents, amountCents))
 		.sort(
 			(a, b) =>
 				Math.abs(dayNumber(a.date) - due) - Math.abs(dayNumber(b.date) - due) ||
@@ -46,14 +49,21 @@ type Bill = {
 	due_day: number;
 	frequency: "monthly" | "yearly";
 	anchor_month: number | null;
+	/** The bill's merchant key, which a payment's merchant key (or its raw name, for a bill flagged below) must equal (spec §6.1 rule 1). */
 	merchant_raw_name: string;
+	/** 1 for a bill saved under the bank's raw text, before a merchant key existed. */
+	merchant_raw_text: number;
 };
 
-/** Fills every unlinked occurrence in range; unique indexes remain the final concurrency guard. */
+/**
+ * Fills every unlinked occurrence in range; unique indexes remain the final concurrency guard.
+ * `given` is the household's date when the caller already has it, otherwise it's read here.
+ */
 export async function matchBillPayments(
 	db: D1Database,
-	today = todayUtc(),
+	given?: string,
 ): Promise<number> {
+	const today = given ?? (await householdToday(db));
 	const first = await db
 		.prepare("SELECT MIN(date) AS date FROM transactions")
 		.first<{ date: string | null }>();
@@ -61,7 +71,7 @@ export async function matchBillPayments(
 	const bills = (
 		await db
 			.prepare(
-				"SELECT id,amount_cents,due_day,frequency,anchor_month,merchant_raw_name FROM bills WHERE active=1",
+				"SELECT id,amount_cents,due_day,frequency,anchor_month,merchant_raw_name,merchant_raw_text FROM bills WHERE active=1",
 			)
 			.all<Bill>()
 	).results;
@@ -124,14 +134,14 @@ export async function matchBillPayments(
 				await db
 					.prepare(
 						`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
-				 WHERE t.raw_name=? AND t.excluded=0 AND t.is_split=0
+				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
 					 AND t.date BETWEEN ? AND ?
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments occurrence WHERE occurrence.bill_id=? AND occurrence.period=? AND occurrence.status='linked')
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed')`,
 					)
 					.bind(
-						bill.merchant_raw_name,
+						...merchantTextArgs(bill),
 						start.toISOString().slice(0, 10),
 						finish.toISOString().slice(0, 10),
 						bill.id,
@@ -165,8 +175,17 @@ export async function matchBillPayments(
 			a.bill.id - b.bill.id ||
 			a.candidate.id - b.candidate.id,
 	);
+	// An excluded payment qualifies (§6.1 rule 4, decision 67), and linking it puts it back in the budget:
+	// each link is a put-back statement, then the insert it depends on, and only the inserts are counted.
+	// Income is never a bill payment, excluded or not (the candidate query leaves `flag_income` ones out,
+	// as the hand-link picker does), so putting a payment back can't turn a paycheck into spending.
 	const statements: D1PreparedStatement[] = [];
-	for (const pair of assignPairs(pairs, reserved))
+	const inserts: number[] = [];
+	for (const pair of assignPairs(pairs, reserved)) {
+		statements.push(
+			putBackInBudget(db, pair.bill.id, pair.period, pair.candidate.id, null),
+		);
+		inserts.push(statements.length);
 		statements.push(
 			db
 				.prepare(
@@ -174,10 +193,11 @@ export async function matchBillPayments(
 				)
 				.bind(pair.bill.id, pair.period, pair.candidate.id),
 		);
+	}
 	if (!statements.length) return 0;
 	const results = await db.batch(statements);
-	return results.reduce(
-		(total, result) => total + (result.meta.changes ?? 0),
+	return inserts.reduce(
+		(total, at) => total + (results[at]?.meta.changes ?? 0),
 		0,
 	);
 }

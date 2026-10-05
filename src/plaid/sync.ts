@@ -1,5 +1,8 @@
-import { matchBillPayments } from "../bills/match";
+import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
+import { merchantKeySql } from "../db/merchant-key";
+import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
+import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
 import { decryptToken } from "./token-crypto";
@@ -52,6 +55,10 @@ const transient = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 
 export type SyncSummary = { added: number; modified: number; removed: number };
 export type SyncResult = SyncSummary | { skipped: true };
+
+/** Plaid's cleaned merchant name, or null when it sent none or a blank one (spec §5, decision 67). */
+const merchantNameOf = (transaction: PlaidTransaction) =>
+	transaction.merchant_name?.trim() || null;
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
@@ -131,6 +138,8 @@ export async function syncItem(
 	env: SyncEnv,
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
+	// The daily catch-up and Sync now sync every bank, then run the after-sync step once for all of them.
+	{ runAfterSync = true }: { runAfterSync?: boolean } = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
@@ -287,11 +296,12 @@ export async function syncItem(
 					),
 				);
 				statements.push(
-					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ? WHERE parent_id = (
+					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ?, merchant_name = ? WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents = ?
 				) AND ${OWNS_LOCK}`).bind(
 						transaction.date,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.transaction_id,
 						cents,
 						itemRowId,
@@ -301,23 +311,24 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category, credit_reviewed)
-						 SELECT ?, id, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END FROM accounts
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, flag_income)
+						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' AND ? < 0 THEN 1 ELSE 0 END FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
-								flag_income = CASE WHEN transactions.income_source = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.flag_income END,
+								flag_income = ${syncedIncomeFlagSql("transactions", "excluded.plaid_category", "excluded.amount_cents")},
 								income_source = CASE WHEN transactions.income_source = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.income_source END,
 								credit_reviewed = CASE WHEN transactions.credit_reviewed_by = 'user' THEN transactions.credit_reviewed WHEN transactions.amount_cents = excluded.amount_cents THEN transactions.credit_reviewed WHEN excluded.amount_cents < 0 THEN 0 ELSE 1 END,
 								credit_reviewed_by = CASE WHEN transactions.credit_reviewed_by = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.credit_reviewed_by END,
 							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
-							category_id = CASE WHEN (transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_id END,
-							category_source = CASE WHEN (transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_source END,
+							category_id = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_id END,
+							category_source = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_source END,
 							category_confidence = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_confidence END,
 							jev_category_id = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.jev_category_id END,
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
 							raw_name = excluded.raw_name,
+							merchant_name = excluded.merchant_name,
 							plaid_category = excluded.plaid_category,
 							updated_at = datetime('now')`,
 					).bind(
@@ -325,8 +336,11 @@ export async function syncItem(
 						transaction.date,
 						cents,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						plaidAmountToCents(transaction.amount),
+						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						transaction.account_id,
 						itemRowId,
 						lockId,
@@ -335,6 +349,8 @@ export async function syncItem(
 			}
 			for (const transaction of page.modified) {
 				const cents = plaidAmountToCents(transaction.amount);
+				// A corrected merchant takes its new rule, not the old merchant's (a person's or Jev's pick stays).
+				const newKey = merchantNameOf(transaction) ?? transaction.name;
 				statements.push(
 					env.DB.prepare(
 						`UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
@@ -351,11 +367,12 @@ export async function syncItem(
 					),
 				);
 				statements.push(
-					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ? WHERE parent_id = (
+					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ?, merchant_name = ? WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents = ?
 				) AND ${OWNS_LOCK}`).bind(
 						transaction.date,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.transaction_id,
 						cents,
 						itemRowId,
@@ -366,14 +383,14 @@ export async function syncItem(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,
 							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
-							category_id = CASE WHEN (is_split = 1 OR category_source = 'jev') AND amount_cents != ? THEN NULL ELSE category_id END,
-							category_source = CASE WHEN (is_split = 1 OR category_source = 'jev') AND amount_cents != ? THEN NULL ELSE category_source END,
+							category_id = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_id END,
+							category_source = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_source END,
 							category_confidence = CASE WHEN amount_cents != ? THEN NULL ELSE category_confidence END,
 							jev_category_id = CASE WHEN amount_cents != ? THEN NULL ELSE jev_category_id END,
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
-							amount_cents = ?, raw_name = ?,
+							amount_cents = ?, raw_name = ?, merchant_name = ?,
 							plaid_category = ?,
-							flag_income = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN 0 ELSE flag_income END,
+							flag_income = ${syncedIncomeFlagSql("transactions", "?", "?")},
 							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
 							credit_reviewed = CASE WHEN credit_reviewed_by = 'user' THEN credit_reviewed WHEN amount_cents = ? THEN credit_reviewed WHEN ? < 0 THEN 0 ELSE 1 END,
 							credit_reviewed_by = CASE WHEN credit_reviewed_by = 'jev' AND amount_cents != ? THEN NULL ELSE credit_reviewed_by END,
@@ -383,13 +400,18 @@ export async function syncItem(
 						transaction.date,
 						cents,
 						cents,
+						newKey,
 						cents,
+						newKey,
 						cents,
 						cents,
 						cents,
 						cents,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
+						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						cents,
 						cents,
 						cents,
@@ -399,6 +421,33 @@ export async function syncItem(
 						itemRowId,
 						lockId,
 					),
+				);
+			}
+			// A corrected amount can leave a purchase refunded for more than it is worth (spec §8.5). Once this
+			// page's amounts are written, in the same batch, the refunds that no longer fit lose their link,
+			// newest first; a person can link them again. Only the purchases these transactions touch are checked.
+			for (const transaction of [...posted, ...page.modified]) {
+				statements.push(
+					env.DB.prepare(unlinkOverRefundedSql(OWNS_LOCK)).bind(
+						transaction.transaction_id,
+						transaction.transaction_id,
+						itemRowId,
+						lockId,
+					),
+				);
+			}
+			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
+			// starts as a copy of the row saved under the bank text, if there is one: its name, rule and Not a
+			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one.
+			for (const transaction of [...posted, ...page.modified]) {
+				const key = merchantNameOf(transaction);
+				if (!key || key === transaction.name) continue;
+				statements.push(
+					env.DB.prepare(
+						`INSERT INTO merchants (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill)
+						 SELECT ?, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill FROM merchants
+						 WHERE raw_name = ? AND NOT EXISTS (SELECT 1 FROM merchants WHERE raw_name = ?) AND ${OWNS_LOCK}`,
+					).bind(key, transaction.name, key, itemRowId, lockId),
 				);
 			}
 			for (const transaction of page.removed) {
@@ -449,7 +498,7 @@ export async function syncItem(
 				);
 			}
 			if (!page.has_more) {
-				await matchBillPayments(env.DB);
+				if (runAfterSync) await afterSync(env.DB);
 				return summary;
 			}
 		}

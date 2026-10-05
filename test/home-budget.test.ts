@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { monthName, todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { lastMonthSpentCents } from "../src/db/budgets";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
@@ -33,10 +33,10 @@ const textOf = (html: string) =>
 		.replace(/<[^>]+>/g, " ")
 		.replaceAll("&#39;", "'")
 		.replace(/\s+/g, " ");
-const THIS_MONTH = () => monthName(todayUtc().slice(0, 7));
+const THIS_MONTH = () => monthName(todayIn(DEFAULT_TIME_ZONE).slice(0, 7));
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("Home's budget rows", () => {
@@ -102,7 +102,11 @@ describe("GET /budget/:id", () => {
 				),
 			);
 		}
-		const last = await lastMonthSpentCents(env.DB, 1, todayUtc().slice(0, 7));
+		const last = await lastMonthSpentCents(
+			env.DB,
+			1,
+			todayIn(DEFAULT_TIME_ZONE).slice(0, 7),
+		);
 		expect(html).toMatch(new RegExp(`data-set="${last}"`));
 		expect(textOf(html)).toContain(`Last month: ${formatCents(last)}`);
 		// $700 has no cents, so there's nothing to round up yet.
@@ -114,7 +118,7 @@ describe("GET /budget/:id", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents = -amount_cents WHERE category_id = 1 AND substr(date, 1, 7) = ?",
 		)
-			.bind(todayUtc().slice(0, 7))
+			.bind(todayIn(DEFAULT_TIME_ZONE).slice(0, 7))
 			.run();
 		const { html } = await get("/budget/1");
 		expect(textOf(html)).toMatch(

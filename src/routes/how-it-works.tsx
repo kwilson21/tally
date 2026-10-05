@@ -9,7 +9,7 @@ import {
 } from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
-import { monthName, todayUtc } from "../dates";
+import { householdToday, monthName } from "../dates";
 import { loadMonth } from "../db/month";
 import {
 	bankDatedCount,
@@ -130,7 +130,8 @@ function Example({
 howItWorks.get("/how-it-works", async (c) => {
 	const demo = c.env.DEMO === "true";
 
-	const month = todayUtc().slice(0, 7);
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
 	const monthLabel = monthName(month);
 	// Screens call the AI "Tally"; only the demo's page names Jev (decision 64).
 	const ai: "Jev" | "Tally" = demo ? "Jev" : "Tally";
@@ -138,7 +139,7 @@ howItWorks.get("/how-it-works", async (c) => {
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
 		excludedBreakdown(c.env.DB, month),
-		loadBillRows(c.env.DB),
+		loadBillRows(c.env.DB, today),
 		bankDatedCount(c.env.DB, month),
 	]);
 	const hasTransactions =
@@ -381,6 +382,16 @@ howItWorks.get("/how-it-works", async (c) => {
 							in the last {BILL_FIND_MONTHS} months are {BILL_FIND_MIN_DAYS}–
 							{BILL_FIND_MAX_DAYS} days apart and within{" "}
 							{BILL_FIND_AMOUNT_PERCENT}% in amount.
+						</li>
+						<li>
+							A payment from the same merchant that is outside that{" "}
+							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% is not matched. Tally
+							asks "Price changed?" on the bill instead, and nothing changes
+							until you update the bill or say it is not this bill.
+						</li>
+						<li>
+							A payment you left out of the budget can still pay a bill, and
+							linking it puts it back in the budget, so it counts once.
 						</li>
 						<li>A payment can pay only one bill occurrence.</li>
 						<li>

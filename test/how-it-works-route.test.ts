@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { destinations } from "../src/routes/destinations";
@@ -23,11 +23,11 @@ const decodeHtml = (html: string) =>
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 const monthName = () =>
 	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
-		new Date(`${todayUtc().slice(0, 7)}-01T00:00:00Z`),
+		new Date(`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}-01T00:00:00Z`),
 	);
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("GET /how-it-works in the demo", () => {
@@ -126,7 +126,7 @@ describe("outside the demo", () => {
 	});
 
 	it("uses a plain sentence instead of transaction examples when the month is empty", async () => {
-		const month = todayUtc().slice(0, 7);
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare(
 			"DELETE FROM transactions WHERE substr(date, 1, 7) = ?",
 		)
@@ -196,7 +196,7 @@ describe("outside the demo", () => {
 	});
 
 	it("keeps the transaction examples when this month's only transaction counts in an earlier month", async () => {
-		const month = todayUtc().slice(0, 7);
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const { results } = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE substr(date, 1, 7) = ? ORDER BY id",
 		)

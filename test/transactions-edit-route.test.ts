@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -28,7 +28,7 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 
 let bakery: number;
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	bakery = (
 		await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
@@ -92,6 +92,22 @@ describe("GET /transactions/:id", () => {
 		const { res, html } = await get("/transactions/999999");
 		expect(res.status).toBe(404);
 		expect(html).toContain('aria-label="Main"');
+		// The app's own 404 page (spec §8.5), not a page of this route's own.
+		expect(html).toContain("This page isn&#39;t here.");
+		expect(html).not.toContain("Back to Transactions");
+	});
+
+	it("is that same 404 page for a missing split form and a missing cash delete", async () => {
+		const split = await get("/transactions/999999/split");
+		expect(split.res.status).toBe(404);
+		expect(split.html).toContain("This page isn&#39;t here.");
+		const gone = await post(
+			"/transactions/999999/delete",
+			{ back: "/transactions" },
+			false,
+		);
+		expect(gone.res.status).toBe(404);
+		expect(gone.html).toContain("This page isn&#39;t here.");
 	});
 });
 

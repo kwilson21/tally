@@ -114,4 +114,72 @@ describe("scheduled handler", () => {
 			).first(),
 		).toEqual({ category_id: category?.id, category_source: "merchant_rule" });
 	});
+
+	it("applies merchant rules at the nightly sync even when Jev has no key", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
+		]);
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('NEW SHOP', ?)",
+		)
+			.bind(category?.id)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', 'item')",
+		)
+			.bind(await encryptToken("access-token", KEY))
+			.run();
+		const fetchImpl = async (url: RequestInfo | URL) =>
+			String(url).endsWith("/accounts/get")
+				? Response.json({
+						accounts: [
+							{
+								account_id: "account",
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					})
+				: Response.json({
+						added: [
+							{
+								transaction_id: "new-transaction",
+								account_id: "account",
+								date: "2026-09-27",
+								amount: 12,
+								name: "NEW SHOP",
+								pending: false,
+							},
+						],
+						modified: [],
+						removed: [],
+						next_cursor: "next",
+						has_more: false,
+					});
+
+		await runScheduled(
+			{
+				...env,
+				DEMO: "false",
+				PLAID_CLIENT_ID: "client",
+				PLAID_SECRET: "secret",
+				TOKEN_ENCRYPTION_KEY: KEY,
+				JEV_API_KEY: undefined,
+			},
+			fetchImpl,
+		);
+
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE plaid_transaction_id = 'new-transaction'",
+			).first(),
+		).toEqual({ category_id: category?.id, category_source: "merchant_rule" });
+	});
 });

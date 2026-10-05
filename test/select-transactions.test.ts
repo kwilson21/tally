@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const request = async (path: string, init?: RequestInit) => {
@@ -12,7 +12,7 @@ const request = async (path: string, init?: RequestInit) => {
 	});
 };
 
-beforeEach(async () => resetDemo(env.DB, todayUtc()));
+beforeEach(async () => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
 describe("select several transactions", () => {
 	it("keeps every list parameter in Select and Done drops only select", async () => {
@@ -358,7 +358,7 @@ describe("select several transactions", () => {
 	});
 
 	it("gives the year in a checkbox's name when the row is from another year", async () => {
-		const lastYear = `${Number(todayUtc().slice(0, 4)) - 1}-03-07`;
+		const lastYear = `${Number(todayIn(DEFAULT_TIME_ZONE).slice(0, 4)) - 1}-03-07`;
 		await env.DB.prepare(
 			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT 992,account_id,?,1200,'OLD SHOP',1 FROM transactions WHERE id=110",
 		)

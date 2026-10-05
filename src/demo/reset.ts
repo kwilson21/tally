@@ -1,5 +1,12 @@
 import { matchBillPayments } from "../bills/match";
-import { buildSeed, monthOffset } from "./seed";
+import { DEFAULT_TIME_ZONE, daysBefore } from "../dates";
+import { buildSeed, monthOffset, NETFLIX, seedMerchantKey } from "./seed";
+
+// Electric and Internet are unpaid on purpose (they are what Safe to spend sets aside), so their
+// merchants have no charges at all: a bill whose merchant has other charges nearby would be offered
+// one as "Price changed?" (spec §8.5). Netflix is the demo's one deliberate offer.
+const ELECTRIC_MERCHANT = "METRO ELECTRIC CO";
+const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
 const TABLES_CHILD_FIRST = [
@@ -13,6 +20,7 @@ const TABLES_CHILD_FIRST = [
 	"categories",
 	"accounts",
 	"plaid_items",
+	"household_settings",
 ];
 
 /**
@@ -44,6 +52,12 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 
 	await db.batch([
 		...TABLES_CHILD_FIRST.map((t) => db.prepare(`DELETE FROM ${t}`)),
+		// The demo's time zone goes back to the default, like everything else a visitor can change.
+		db
+			.prepare(
+				"INSERT INTO household_settings (key, value) VALUES ('time_zone', ?)",
+			)
+			.bind(DEFAULT_TIME_ZONE),
 		...seed.categories.map((c) =>
 			db
 				.prepare(
@@ -78,9 +92,9 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		...seed.merchants.map((m) =>
 			db
 				.prepare(
-					"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)",
+					"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, ?, ?, ?)",
 				)
-				.bind(m.rawName, m.displayName, m.defaultCategoryId),
+				.bind(m.key, m.displayName, m.defaultCategoryId, m.notABill ? 1 : 0),
 		),
 		...seed.budgetAmounts.map((a) =>
 			db
@@ -92,9 +106,9 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		...seed.transactions.map((t) =>
 			db
 				.prepare(
-					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence,
+					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, category_confidence,
 					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, parent_id, refund_of_id, income_source, credit_reviewed, credit_reviewed_by, updated_by)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, 'demo')`,
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, 'demo')`,
 				)
 				.bind(
 					t.id,
@@ -102,6 +116,7 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					t.date,
 					t.amountCents,
 					t.rawName,
+					t.merchantName ?? null,
 					t.categoryId,
 					t.categorySource,
 					t.categoryConfidence,
@@ -158,6 +173,11 @@ function demoBills(
 		due.setUTCDate(due.getUTCDate() - 3);
 		return due.getUTCDate();
 	};
+	// The day before Netflix's charge, wherever the seed put it (the previous month's last day, on the 1st).
+	const netflixDue = daysBefore(
+		transactions.find((t) => t.rawName === NETFLIX.rawName)?.date ?? today,
+		1,
+	);
 	const plusThree = new Date(`${today}T00:00:00Z`);
 	plusThree.setUTCDate(plusThree.getUTCDate() + 3);
 	const dueSoon = plusThree.getUTCDate();
@@ -170,7 +190,7 @@ function demoBills(
 			"monthly",
 			null,
 			5,
-			"APPLE.COM/BILL",
+			seedMerchantKey("APPLE.COM/BILL"),
 			1,
 		],
 		[
@@ -181,7 +201,7 @@ function demoBills(
 			"monthly",
 			null,
 			5,
-			"GOOGLE *YOUTUBE",
+			seedMerchantKey("GOOGLE *YOUTUBE"),
 			1,
 		],
 		[
@@ -192,10 +212,22 @@ function demoBills(
 			"monthly",
 			null,
 			5,
-			"THE HOME DEPOT #6612",
+			ELECTRIC_MERCHANT,
 			1,
 		],
-		[5, "Internet", 6500, dueSoon, "monthly", null, 5, "AMAZON.COM*RT4K2", 1],
+		// Due the day before its $17.99 charge, which is 16% over $15.49: overdue, with the charge on offer.
+		[
+			4,
+			"Netflix",
+			NETFLIX.billCents,
+			Number(netflixDue.slice(8)),
+			"monthly",
+			null,
+			5,
+			seedMerchantKey(NETFLIX.rawName),
+			1,
+		],
+		[5, "Internet", 6500, dueSoon, "monthly", null, 5, INTERNET_MERCHANT, 1],
 		// Yearly, paid three months ago, so its next one is upcoming (decision 62).
 		[
 			6,
@@ -205,9 +237,19 @@ function demoBills(
 			"yearly",
 			Number(monthOffset(today, 3).slice(5)),
 			4,
-			"YOUTH SOCCER LEAGUE",
+			seedMerchantKey("YOUTH SOCCER LEAGUE"),
 			1,
 		],
-		[7, "Old phone plan", 4500, 15, "monthly", null, 5, "GOOGLE *YOUTUBE", 0],
+		[
+			7,
+			"Old phone plan",
+			4500,
+			15,
+			"monthly",
+			null,
+			5,
+			seedMerchantKey("GOOGLE *YOUTUBE"),
+			0,
+		],
 	];
 }

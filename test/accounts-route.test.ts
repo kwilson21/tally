@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
 import { encryptToken } from "../src/plaid/token-crypto";
@@ -32,7 +32,7 @@ describe("netWorthCents", () => {
 });
 
 describe("accountsByBank", () => {
-	beforeEach(() => resetDemo(env.DB, todayUtc()));
+	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
 	it("groups the demo's accounts under their banks, in the order they were linked", async () => {
 		const banks = await accountsByBank(env.DB);
@@ -81,7 +81,7 @@ describe("accountsByBank", () => {
 });
 
 describe("GET /accounts", () => {
-	beforeEach(() => resetDemo(env.DB, todayUtc()));
+	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
 	it("shows net worth in whole dollars, then each bank's accounts with debt negative", async () => {
 		const { res, html } = await get("/accounts");
@@ -159,7 +159,7 @@ describe("POST /accounts/sync", () => {
 	});
 
 	it("does not sync again within a minute and preserves the focus target", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
 		const response = await accounts.request(
 			"/accounts/sync",
@@ -179,7 +179,7 @@ describe("POST /accounts/sync", () => {
 	});
 
 	it("redirects a native form submission back to Accounts", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const response = await accounts.request(
 			"/accounts/sync",
 			{ method: "POST" },
@@ -190,7 +190,7 @@ describe("POST /accounts/sync", () => {
 	});
 
 	it("omits drifting sync times from the demo", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const response = await accounts.request(
 			"/accounts",
 			{},
@@ -213,7 +213,7 @@ describe("POST /accounts/sync feedback", () => {
 			void promise.catch(() => {});
 		});
 		// The demo's categories and merchants, but none of its banks.
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
@@ -325,6 +325,81 @@ describe("POST /accounts/sync feedback", () => {
 		expect(html).toContain("Couldn&#39;t sync Chase. Try again later.");
 	});
 
+	it("says so in an alert when sorting what arrived fails after the banks synced", async () => {
+		await addBank("Chase");
+		stubPlaid({ Chase: ["SHOP"] });
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('SHOP', (SELECT id FROM categories ORDER BY id LIMIT 1))",
+			),
+			// Makes the merchant rule's update fail, standing in for any failure in the after-sync step.
+			env.DB.prepare(
+				"CREATE TRIGGER fail_rules BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'nope'); END",
+			),
+		]);
+		try {
+			const { response, trigger, html } = await sync();
+			expect(response.status).toBe(200);
+			expect(trigger).toBeNull();
+			expect(html.match(/role="alert"/g)).toHaveLength(1);
+			expect(html).toContain("Couldn&#39;t sync accounts. Try again later.");
+		} finally {
+			await env.DB.prepare("DROP TRIGGER fail_rules").run();
+		}
+	});
+
+	it("still sorts with merchant rules when every bank is busy", async () => {
+		await addBank("Chase", { attemptedNow: true });
+		stubPlaid({});
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO accounts (id, name, type, balance_cents) VALUES (900, 'Checking', 'depository', 0)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (900, '2026-09-27', 100, 'SHOP')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('SHOP', ?)",
+			).bind(category?.id),
+		]);
+		const { trigger } = await sync();
+		expect(trigger).toEqual(said("Already synced a moment ago.", "info"));
+		const row = await env.DB.prepare(
+			"SELECT category_id, category_source FROM transactions WHERE raw_name = 'SHOP'",
+		).first<{ category_id: number; category_source: string }>();
+		expect(row).toEqual({
+			category_id: category?.id,
+			category_source: "merchant_rule",
+		});
+	});
+
+	it("still sorts with merchant rules when every bank needs attention", async () => {
+		await addBank("Chase", { status: "needs_attention" });
+		stubPlaid({});
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO accounts (id, name, type, balance_cents) VALUES (901, 'Checking', 'depository', 0)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (901, '2026-09-27', 100, 'CAFE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('CAFE', ?)",
+			).bind(category?.id),
+		]);
+		await sync();
+		const row = await env.DB.prepare(
+			"SELECT category_source FROM transactions WHERE raw_name = 'CAFE'",
+		).first<{ category_source: string }>();
+		expect(row?.category_source).toBe("merchant_rule");
+	});
+
 	it("shows the failure on the Accounts page when the form posts without htmx", async () => {
 		await addBank("Chase");
 		stubPlaid({}, ["Chase"]);
@@ -407,7 +482,7 @@ const plaidEnabled = {
 
 describe("Link a bank", () => {
 	it("adds repair hooks and a busy label only when Plaid is enabled", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await env.DB.prepare(
 			"UPDATE plaid_items SET status = 'needs_attention' WHERE institution_name = 'Northline Card Services'",
 		).run();
@@ -459,7 +534,7 @@ describe("Link a bank", () => {
 	});
 
 	it("keeps Link a bank inside the refreshed summary, after the banks", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const response = await accounts.request("/accounts", {}, plaidEnabled);
 		const html = await response.text();
 		const summaryStart = html.indexOf('<div id="accounts-summary">');

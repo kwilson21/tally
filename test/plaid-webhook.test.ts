@@ -49,6 +49,7 @@ describe("Plaid webhook route", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
 		]);
 		Object.assign(env, {
 			DEMO: "false",
@@ -449,5 +450,103 @@ describe("Plaid webhook route", () => {
 		expect(output).not.toContain("item-secret");
 		expect(output).not.toContain("token-secret");
 		expect(output).not.toContain(token);
+	});
+
+	it("applies a merchant rule to the new transactions a webhook sync brings in", async () => {
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULED SHOP', ?)",
+		)
+			.bind(category?.id)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-rules', ?, 'Bank', 'person')",
+		)
+			.bind(await encryptToken("token-rules", KEY))
+			.run();
+		const sign = await signer();
+		const body = JSON.stringify({
+			item_id: "item-rules",
+			webhook_type: "TRANSACTIONS",
+			webhook_code: "SYNC_UPDATES_AVAILABLE",
+		});
+		const { token, jwk } = await sign(body);
+		const added = (id: string, name: string) => ({
+			transaction_id: id,
+			account_id: "account-1",
+			date: "2026-09-27",
+			amount: 4.25,
+			name,
+			pending: false,
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = String(input);
+				if (url.endsWith("/webhook_verification_key/get"))
+					return Response.json({ key: { ...jwk, expired_at: null } });
+				if (url.endsWith("/accounts/get"))
+					return Response.json({
+						accounts: [
+							{
+								account_id: "account-1",
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					});
+				return Response.json({
+					added: [
+						added("ruled", "RULED SHOP"),
+						added("unruled", "UNKNOWN SHOP"),
+					],
+					modified: [],
+					removed: [],
+					next_cursor: "next",
+					has_more: false,
+				});
+			}),
+		);
+		const promises: Promise<unknown>[] = [];
+		const ctx = {
+			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+			passThroughOnException() {},
+			props: {},
+		} as unknown as ExecutionContext;
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const response = await app.request(
+			"http://tally.test/webhooks/plaid",
+			{
+				method: "POST",
+				body,
+				headers: {
+					"content-type": "application/json",
+					"Plaid-Verification": token,
+				},
+			},
+			env,
+			ctx,
+		);
+		expect(response.status).toBe(200);
+		await Promise.all(promises);
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT plaid_transaction_id AS id, category_id, category_source FROM transactions ORDER BY id",
+				).all()
+			).results,
+		).toEqual([
+			{
+				id: "ruled",
+				category_id: category?.id,
+				category_source: "merchant_rule",
+			},
+			{ id: "unruled", category_id: null, category_source: null },
+		]);
 	});
 });
