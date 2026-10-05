@@ -1,6 +1,6 @@
-import { matchBillPayments } from "../bills/match";
 import { merchantKeySql } from "../db/merchant-key";
 import { plaidAmountToCents } from "../money";
+import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
 import { decryptToken } from "./token-crypto";
@@ -477,7 +477,7 @@ export async function syncItem(
 				);
 			}
 			if (!page.has_more) {
-				await matchBillPayments(env.DB);
+				await afterSync(env.DB);
 				return summary;
 			}
 		}

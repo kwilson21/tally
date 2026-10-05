@@ -1,6 +1,5 @@
 import { type Context, Hono } from "hono";
 import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
-import { applyMerchantRules } from "../db/transactions";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
 import { decryptToken } from "../plaid/token-crypto";
@@ -148,8 +147,8 @@ function syncOutcome(
 	};
 }
 
-// Sync now (P12 A): every healthy bank, at most once a minute each. Merchant rules run before the
-// answer so the count and list are right; Jev is left to the nightly job (spec §8.1).
+// Sync now (P12 A): every healthy bank, at most once a minute each. Merchant rules run inside each
+// bank's sync, so the count and list are right when it answers; Jev is left to the nightly job (spec §8.1).
 // A failure is said once, in the summary's alert, like Fix connection; success is a toast plus announce.
 accounts.post("/accounts/sync", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
@@ -157,7 +156,6 @@ accounts.post("/accounts/sync", async (c) => {
 	let alert: string | undefined;
 	try {
 		const result = await syncAllItems(c.env, undefined, Date.now, true);
-		await applyMerchantRules(c.env.DB);
 		const outcome = syncOutcome(result, await accountsByBank(c.env.DB));
 		if ("alert" in outcome) alert = outcome.alert;
 		else if (!isHtmx) return c.redirect("/accounts", 303);

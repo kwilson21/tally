@@ -47,7 +47,7 @@ export async function runScheduled(
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	}
 	await syncAllItems(env, fetchImpl);
-	// Merchant rules and Jev run after sync so newly fetched transactions are sorted tonight.
+	// Each sync has already applied merchant rules; Jev then asks about what they left, so newly fetched transactions are sorted tonight.
 	await categorizePending(env, fetchImpl);
 	await retryFeedback(env, fetchImpl);
 }
