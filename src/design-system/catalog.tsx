@@ -1185,12 +1185,12 @@ function Feedback() {
 					</State>
 				</div>
 				<p class="max-w-prose text-muted">
-					An htmx request that gets a 404 swaps in one plain sentence, "This
-					page isn't here.", as an alert. One that gets a 500 swaps nothing in:
-					the page stays as it was, so an open sheet keeps what was typed, and
-					the error toast above says "Couldn't save. Check your connection and
-					try again." (or "Couldn't load…" when the request was a GET, such as a
-					filter or opening a sheet). A dropped connection says the same.
+					An htmx request that gets a 404 or a 500 swaps nothing in: the page
+					stays as it was, so an open sheet stays open with what was typed. The
+					404 says "This page isn't here." in the error toast; the 500 says, in
+					the same toast, "Couldn't save. Check your connection and try again."
+					(or "Couldn't load…" when the request was a GET, such as a filter or
+					opening a sheet). A dropped connection says the same.
 				</p>
 			</Specimen>
 			<Specimen

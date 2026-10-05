@@ -35,13 +35,23 @@ export function retryHref(
 	return from.pathname + from.search;
 }
 
-// An htmx request swaps its reply into a part of a page, so a whole page would land inside a page:
-// it gets one plain sentence, announced as an alert (spec §8.5).
+// An htmx request swaps its reply into a part of a page, so a whole page would land inside a page,
+// and even a fragment would be swapped in as nothing (and remove the sheet) when it doesn't match
+// the request's hx-select. It gets no body to swap instead, and HX-Reswap: none says so.
 const isHtmx = (c: Context<App>) => Boolean(c.req.header("HX-Request"));
 
 /** The app's own 404: any address nothing answers, and any route that reports a missing record. */
 export const notFoundPage: NotFoundHandler<App> = (c) => {
-	if (isHtmx(c)) return c.html(<p role="alert">This page isn't here.</p>, 404);
+	if (isHtmx(c)) {
+		// The toast and the announcer say it (CLAUDE.md's HTMX feedback rule); the page stays as it was.
+		const message = "This page isn't here.";
+		c.header("HX-Reswap", "none");
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ toast: { message, type: "error" }, announce: message }),
+		);
+		return c.body(null, 404);
+	}
 	return c.html(
 		<Layout
 			title="Page not found · Tally"
@@ -68,8 +78,11 @@ export const serverErrorPage: ErrorHandler<App> = (err, c) => {
 	console.error(
 		`error: ${err instanceof Error ? err.name : "unknown"} ${c.req.method} ${routePath(c, -1)}`,
 	);
+	// Layout's noSwap already keeps a 500 out of the page; saying so here too means it never swaps.
+	// No toast from here: toast.js shows "Couldn't save" or "Couldn't load" for a 500 itself.
 	if (isHtmx(c)) {
-		return c.html(<p role="alert">Something went wrong on our side.</p>, 500);
+		c.header("HX-Reswap", "none");
+		return c.body(null, 500);
 	}
 	return c.html(
 		<Layout

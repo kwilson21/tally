@@ -54,7 +54,21 @@ export function parseCash(
 			};
 }
 
-/** Creates the guarded local account and transaction in one D1 batch. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The one-time key an Add cash form carries (a UUID made when the form is drawn), in lower case, or
+ * null when there isn't a usable one: then the post saves, as it always did, without the guard.
+ */
+export function entryKeyOf(raw: unknown): string | null {
+	return typeof raw === "string" && UUID.test(raw) ? raw.toLowerCase() : null;
+}
+
+/**
+ * Creates the guarded local account and transaction in one D1 batch. The same entry key a second
+ * time (the form posted again after a lost reply or a failed render) records nothing more; the
+ * caller answers it as a success, since the first post saved it.
+ */
 export async function saveCash(
 	db: D1Database,
 	value: {
@@ -65,14 +79,16 @@ export async function saveCash(
 		note: string | null;
 	},
 	by: string,
+	entryKey: string | null = null,
 ) {
 	await db.batch([
 		db.prepare(
 			"INSERT INTO accounts (name,type) VALUES ('Cash','cash') ON CONFLICT(type) WHERE type='cash' DO NOTHING",
 		),
 		db
-			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id,category_source,flag_income,note,updated_by)
-			VALUES ((SELECT id FROM accounts WHERE type='cash'),?,?,?,?, 'user',?,?,?)`)
+			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id,category_source,flag_income,note,updated_by,entry_key)
+			VALUES ((SELECT id FROM accounts WHERE type='cash'),?,?,?,?, 'user',?,?,?,?)
+			ON CONFLICT(entry_key) WHERE entry_key IS NOT NULL DO NOTHING`)
 			.bind(
 				value.date,
 				value.amountCents,
@@ -81,6 +97,7 @@ export async function saveCash(
 				0,
 				value.note,
 				by,
+				entryKey,
 			),
 	]);
 }

@@ -80,15 +80,28 @@ describe("the 404 page (app.notFound)", () => {
 		expect(await res.text()).toContain("This page isn&#39;t here.");
 	});
 
-	it("gives an htmx request one plain sentence, not a page inside a page", async () => {
+	it("gives an htmx request nothing to swap, and says it in the toast and the announcer", async () => {
 		const res = await exports.default.fetch(`${BASE}/no-such-page`, {
 			headers: { "HX-Request": "true" },
 		});
-		const body = await res.text();
 		expect(res.status).toBe(404);
-		expect(body).not.toContain("<html");
-		expect(body).not.toContain("<svg");
-		expect(body).toMatch(/<p role="alert">This page isn&#39;t here\.<\/p>/);
+		// No body: a reply that matches no hx-select would otherwise swap in nothing and remove a sheet.
+		expect(await res.text()).toBe("");
+		expect(res.headers.get("HX-Reswap")).toBe("none");
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message: "This page isn't here.", type: "error" },
+			announce: "This page isn't here.",
+		});
+	});
+
+	it("does the same for a missing record that a route reports", async () => {
+		const res = await exports.default.fetch(`${BASE}/budget/999999`, {
+			headers: { "HX-Request": "true" },
+		});
+		expect(res.status).toBe(404);
+		expect(await res.text()).toBe("");
+		expect(res.headers.get("HX-Reswap")).toBe("none");
+		expect(res.headers.get("HX-Trigger")).toContain("This page isn't here.");
 	});
 });
 
@@ -180,17 +193,15 @@ describe("the 500 page (app.onError)", () => {
 		expect(logged.mock.calls[0]?.length).toBe(1);
 	});
 
-	it("gives an htmx request one plain sentence, not a page inside a page", async () => {
+	it("gives an htmx request nothing to swap and no message of its own: toast.js says it", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const res = await fail("/", { "HX-Request": "true" });
-		const body = await text(res);
 		expect(res.status).toBe(500);
-		expect(body).not.toContain("<html");
-		expect(body).not.toContain("<svg");
-		expect(body).toMatch(
-			/<p role="alert">Something went wrong on our side\.<\/p>/,
-		);
-		expect(body).not.toContain("access-sandbox");
+		expect(await text(res)).toBe("");
+		expect(res.headers.get("HX-Reswap")).toBe("none");
+		// A second toast from here would sit beside toast.js's "Couldn't save".
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(JSON.stringify([...res.headers])).not.toContain("access-sandbox");
 	});
 
 	it("keeps the security headers on the error page", async () => {

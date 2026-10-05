@@ -16,7 +16,12 @@ import {
 	type TransactionDetail,
 } from "../db/transactions";
 import { formatCents } from "../money";
-import { type CashValues, parseCash, saveCash } from "../transactions/cash";
+import {
+	type CashValues,
+	entryKeyOf,
+	parseCash,
+	saveCash,
+} from "../transactions/cash";
 import {
 	type Edit,
 	type EditErrors,
@@ -1217,6 +1222,8 @@ function CashSheet({
 				errors={errors}
 				today={today}
 				back={back}
+				// Made each time the form is drawn: posting this form again records one transaction.
+				entryKey={crypto.randomUUID()}
 			/>
 		</BottomSheet>
 	);
@@ -1267,7 +1274,13 @@ transactions.post("/transactions/cash", async (c) => {
 				/>
 			),
 		});
-	await saveCash(c.env.DB, parsed.value, actor(c));
+	// The same form posted again (a lost reply, a failed render) answers as a success and saves once.
+	await saveCash(
+		c.env.DB,
+		parsed.value,
+		actor(c),
+		entryKeyOf(form.get("entry_key")),
+	);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
@@ -1280,31 +1293,10 @@ transactions.post("/transactions/cash", async (c) => {
 	return renderList(c, today, filtersFrom(today, back));
 });
 
-async function notFound(c: Context<App>) {
-	return c.html(
-		<Layout
-			title="Not found · Tally"
-			active="transactions"
-			currentPath={c.req.path + new URL(c.req.url).search}
-			demo={c.env.DEMO === "true"}
-		>
-			<h1 class="font-serif text-5xl font-semibold tracking-tight">
-				Not found
-			</h1>
-			<p class="mt-2">
-				<a href="/transactions" class="inline-flex min-h-11 items-center">
-					Back to Transactions
-				</a>
-			</p>
-		</Layout>,
-		404,
-	);
-}
-
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
-	if (!tx) return notFound(c);
+	if (!tx) return c.notFound();
 	const today = await householdToday(c.env.DB);
 	const thisMonth = today.slice(0, 7);
 	const filters = parseFilters(new URL(c.req.url).searchParams, thisMonth);
@@ -1390,7 +1382,7 @@ async function splitContext(c: Context<App>) {
 transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	// Income is never split (decision 62's review): no form for it either.
-	if (!tx || tx.parentId !== null || tx.income) return notFound(c);
+	if (!tx || tx.parentId !== null || tx.income) return c.notFound();
 	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(today, back);
@@ -1426,7 +1418,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 
 transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
-	if (!tx || tx.parentId !== null) return notFound(c);
+	if (!tx || tx.parentId !== null) return c.notFound();
 	if (tx.income) return c.text("Income transactions cannot be split.", 400);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
@@ -1519,7 +1511,7 @@ function unlinkedSentence(dates: string[], today: string): string {
 
 transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
-	if (!tx?.isSplit) return notFound(c);
+	if (!tx?.isSplit) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
@@ -1545,7 +1537,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
-	if (!tx) return notFound(c);
+	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
@@ -1645,7 +1637,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
-	if (tx?.accountType !== "cash" || tx.parentId !== null) return notFound(c);
+	if (tx?.accountType !== "cash" || tx.parentId !== null) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);

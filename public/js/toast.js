@@ -66,7 +66,7 @@
 
 	// A failed request shows an error toast, and the page is left as it is, so an open sheet keeps
 	// what was typed. htmx 4's names: htmx:error is a request that never got an answer (the network
-	// dropped); htmx:response:error is any 4xx or 5xx reply, and only a 500 is a failure here: it's
+	// dropped, or it timed out); htmx:response:error is any 4xx or 5xx reply, and only a 500 is a failure here: it's
 	// what an unhandled error sends, and Layout's noSwap keeps it out of the page. Every other 4xx
 	// and 5xx carries its own message on purpose, such as a field's error (422) or a bank that
 	// couldn't be reached (502), so it's swapped in and says its own words. The words follow what
@@ -86,12 +86,32 @@
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);
 	}
+	// htmx 4 aborts a request that timed out exactly as it aborts one that was replaced (hx-sync) or
+	// cancelled (htmx:abort): an AbortError with no reason and no timeout event of its own. So a
+	// timeout is known by how long the request ran: as long as its limit, less a second's slack.
+	const startedAt = new WeakMap();
+	document.addEventListener("htmx:before:request", (event) => {
+		const ctx = event.detail?.ctx;
+		if (ctx) startedAt.set(ctx, Date.now());
+	});
+	function timedOut(ctx) {
+		const started = startedAt.get(ctx);
+		const own = ctx.request?.timeout;
+		const { htmx } = globalThis;
+		const limit =
+			Number(
+				own != null ? htmx?.parseInterval(own) : htmx?.config.defaultTimeout,
+			) || 0;
+		return (
+			started !== undefined && limit > 0 && Date.now() - started >= limit - 1000
+		);
+	}
 	document.addEventListener("htmx:error", (event) => {
 		const { ctx, error } = event.detail ?? {};
 		// Only a request has a ctx; htmx also reports a bug in someone's hx-on handler this way.
 		if (!ctx) return;
-		// A request replaced by a newer one, or cancelled, is not a failure.
-		if (error?.name === "AbortError") return;
+		// A request replaced by a newer one, or cancelled, is not a failure; a timeout is.
+		if (error?.name === "AbortError" && !timedOut(ctx)) return;
 		failed(ctx);
 	});
 	document.addEventListener("htmx:response:error", (event) => {

@@ -53,8 +53,11 @@ const load = Object.values(import.meta.glob("../public/js/toast.js"))[0] as
 	| (() => Promise<unknown>)
 	| undefined;
 
-/** Puts a page in place, then runs toast.js against it. */
-async function page() {
+/**
+ * Puts a page in place, then runs toast.js against it. `defaultTimeout` is htmx's own
+ * (htmx.config.defaultTimeout, 60 seconds out of the box; 0 turns timeouts off).
+ */
+async function page(defaultTimeout = 60000) {
 	const toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const body = new EventTarget();
@@ -71,6 +74,10 @@ async function page() {
 	vi.stubGlobal("location", { search: "", pathname: "/", hash: "" });
 	vi.stubGlobal("history", { replaceState: () => {} });
 	vi.stubGlobal("requestAnimationFrame", (run: () => void) => run());
+	vi.stubGlobal("htmx", {
+		config: { defaultTimeout },
+		parseInterval: (value: string | number) => Number(value),
+	});
 	vi.resetModules();
 	await load?.();
 	return { document, body, toasts };
@@ -150,6 +157,80 @@ describe("a request that never reached Tally", () => {
 			ctx: {},
 			error: new DOMException("The operation was aborted.", "AbortError"),
 		});
+		expect(toasts.children).toHaveLength(0);
+	});
+});
+
+// htmx 4 aborts a request that timed out exactly as it aborts one that was replaced (hx-sync) or
+// cancelled (htmx:abort): an AbortError with no reason, and no timeout event of its own. So a
+// timeout is known by how long the request ran: as long as its limit.
+describe("a request that timed out", () => {
+	const aborted = () =>
+		new DOMException("The operation was aborted.", "AbortError");
+	const begin = (document: EventTarget, ctx: object) =>
+		fire(document, "htmx:before:request", { ctx });
+
+	it("says it couldn't save when a POST is aborted after its full 60 seconds", async () => {
+		const { document, toasts } = await page();
+		const ctx = { request: { method: "POST" } };
+		begin(document, ctx);
+		vi.advanceTimersByTime(60000);
+		fire(document, "htmx:error", { ctx, error: aborted() });
+		expect(toasts.children).toHaveLength(1);
+		const toast = toasts.children[0] as FakeNode;
+		expect(toast.words()).toBe(COULDNT_SAVE);
+		expect(toast.attrs.get("role")).toBe("alert");
+	});
+
+	it("says it couldn't load when a GET times out", async () => {
+		const { document, toasts } = await page();
+		const ctx = { request: { method: "GET" } };
+		begin(document, ctx);
+		vi.advanceTimersByTime(60000);
+		fire(document, "htmx:error", { ctx, error: aborted() });
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_LOAD);
+	});
+
+	it("says nothing when a request is aborted long before its limit: it was replaced or cancelled", async () => {
+		const { document, toasts } = await page();
+		const ctx = { request: { method: "POST" } };
+		begin(document, ctx);
+		vi.advanceTimersByTime(2000);
+		fire(document, "htmx:error", { ctx, error: aborted() });
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("goes by the request's own timeout when it has one", async () => {
+		const { document, toasts } = await page();
+		const quick = { request: { method: "POST", timeout: 5000 } };
+		begin(document, quick);
+		vi.advanceTimersByTime(5000);
+		fire(document, "htmx:error", { ctx: quick, error: aborted() });
+		expect(toasts.children).toHaveLength(1);
+		vi.advanceTimersByTime(4000);
+		const early = { request: { method: "POST", timeout: 5000 } };
+		begin(document, early);
+		vi.advanceTimersByTime(1000);
+		fire(document, "htmx:error", { ctx: early, error: aborted() });
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("says nothing for an abort of a request it never saw start", async () => {
+		const { document, toasts } = await page();
+		vi.advanceTimersByTime(60000);
+		fire(document, "htmx:error", {
+			ctx: { request: { method: "POST" } },
+			error: aborted(),
+		});
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("says nothing when htmx has timeouts turned off, since then nothing ever times out", async () => {
+		const { document, toasts } = await page(0);
+		const ctx = { request: { method: "POST" } };
+		begin(document, ctx);
+		vi.advanceTimersByTime(120000);
+		fire(document, "htmx:error", { ctx, error: aborted() });
 		expect(toasts.children).toHaveLength(0);
 	});
 });
