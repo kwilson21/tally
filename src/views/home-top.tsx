@@ -3,6 +3,7 @@
 // Band is the one next action. Things to try and the Budget list come after, in the route.
 import { formatCents } from "../money";
 import { Band } from "./band";
+import { BankLine } from "./bank-line";
 import { HowLink } from "./how-link";
 import { LedgerIllustration } from "./illustration";
 
@@ -12,12 +13,20 @@ type Props = {
 	safeToSpendCents: number;
 	/** The status sentence: "Eating Out is $36 over. Everything else is on track." */
 	status: string;
+	/** A connected bank that stopped syncing, in words (src/stale-bank.ts); drawn between the status sentence and the Band (decision 72, P37 A). */
+	bankLine?: string;
 	/** The one next action, when there is one: "12 transactions need a category", and its amount (decision 50). */
 	band?: { href: string; text: string; detail?: string };
 };
 
-/** The month, then Safe to spend, the status sentence, How this works and the Band. */
-export function HomeTop({ month, safeToSpendCents, status, band }: Props) {
+/** The month, then Safe to spend, the status sentence, How this works, a stale-bank line when needed, and the Band. */
+export function HomeTop({
+	month,
+	safeToSpendCents,
+	status,
+	bankLine,
+	band,
+}: Props) {
 	return (
 		<>
 			<h1 class="font-serif text-2xl font-semibold tracking-tight">{month}</h1>
@@ -32,8 +41,9 @@ export function HomeTop({ month, safeToSpendCents, status, band }: Props) {
 			</div>
 			<p class="mt-3 font-serif text-lg italic">{status}</p>
 			<HowLink section="budget" />
+			{bankLine && <BankLine words={bankLine} />}
 			{band && (
-				<div class="mt-4">
+				<div class={bankLine ? "mt-2" : "mt-4"}>
 					<Band href={band.href} detail={band.detail}>
 						{band.text}
 					</Band>

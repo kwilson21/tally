@@ -1,4 +1,5 @@
 // The household's accounts, grouped by the bank they were linked from, as Accounts shows them (spec §5, §8).
+import type { BankSync } from "../stale-bank";
 
 export type Account = {
 	id: number;
@@ -52,6 +53,29 @@ export function netWorthCents(
 					: a.balanceCents),
 		0,
 	);
+}
+
+/**
+ * Every linked bank's status and last sync, in the order it was linked, for Home's stale-bank line
+ * (spec §8.5). It reads `plaid_items` alone, so Home needn't load accounts to ask.
+ */
+export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
+	const { results } = await db
+		.prepare(
+			"SELECT institution_name, status, last_synced_at, disconnected_at FROM plaid_items ORDER BY id",
+		)
+		.all<{
+			institution_name: string;
+			status: string;
+			last_synced_at: string | null;
+			disconnected_at: string | null;
+		}>();
+	return results.map((row) => ({
+		name: row.institution_name,
+		needsAttention: row.status === "needs_attention",
+		lastSyncedAt: row.last_synced_at,
+		disconnected: row.disconnected_at !== null,
+	}));
 }
 
 /**
