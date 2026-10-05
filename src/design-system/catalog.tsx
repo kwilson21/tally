@@ -76,7 +76,7 @@ const SECTIONS = [
 	["rows", "Rows"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
-	["demo", "Demo only"],
+	["demo", "Guidance"],
 	["diagrams", "Diagrams"],
 ] as const;
 
@@ -407,7 +407,7 @@ function HomeTopGroup() {
 				title="HomeTop"
 				tier="visual"
 				components={["HomeTop"]}
-				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works (demo only) and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
 					<PhoneFrame

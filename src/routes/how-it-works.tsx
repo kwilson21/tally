@@ -132,10 +132,11 @@ howItWorks.get("/how-it-works", async (c) => {
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 	const paidBill = billData.rows.find(
-		(bill) => bill.name === "Water" && bill.status === "paid" && bill.paidDate,
+		(bill) =>
+			bill.status === "paid" &&
+			bill.paidDate &&
+			(!demo || bill.name === "Water"),
 	);
-	// Only a real, linked payment is drawn; with none, the section shows its rules alone.
-	const billExample = paidBill;
 
 	return c.html(
 		<Layout
@@ -202,13 +203,20 @@ howItWorks.get("/how-it-works", async (c) => {
 							that are due or overdue and not yet paid.
 						</li>
 					</ul>
-					<Diagram>
-						<BudgetDiagram {...summary} />
-					</Diagram>
-					<Example demo={demo}>
-						{budgetExample(summary)} This includes {demo ? "the demo's " : ""}
-						due and overdue, unpaid bills.
-					</Example>
+					{demo || summary.categories.length > 0 ? (
+						<>
+							<Diagram>
+								<BudgetDiagram {...summary} />
+							</Diagram>
+							<Example demo={demo}>
+								{budgetExample(summary)} This includes{" "}
+								{demo ? "the demo's " : ""}
+								due and overdue, unpaid bills.
+							</Example>
+						</>
+					) : (
+						<p class="mt-3">No budgets have been set yet.</p>
+					)}
 				</Section>
 
 				<Section id="transactions" title="Transactions">
@@ -233,15 +241,17 @@ howItWorks.get("/how-it-works", async (c) => {
 							Search matches the merchant name, the bank's name, and the note.
 						</li>
 					</ul>
-					<Diagram>
-						<TransactionsDiagram
-							counted={counts.counted}
-							excluded={excludedTotal(excluded)}
-							needsCategory={counts.needsCategory}
-						/>
-					</Diagram>
 					{demo || counts.counted + excludedTotal(excluded) > 0 ? (
-						<Example demo={demo}>{transactionsExample(counts)}</Example>
+						<>
+							<Diagram>
+								<TransactionsDiagram
+									counted={counts.counted}
+									excluded={excludedTotal(excluded)}
+									needsCategory={counts.needsCategory}
+								/>
+							</Diagram>
+							<Example demo={demo}>{transactionsExample(counts)}</Example>
+						</>
 					) : (
 						<p class="mt-3">There are no transactions this month yet.</p>
 					)}
@@ -268,11 +278,16 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>
-					<Diagram>
-						<ExclusionsDiagram counted={counts.counted} breakdown={excluded} />
-					</Diagram>
 					{demo || counts.counted + excludedTotal(excluded) > 0 ? (
-						<Example demo={demo}>{exclusionsExample(excluded)}</Example>
+						<>
+							<Diagram>
+								<ExclusionsDiagram
+									counted={counts.counted}
+									breakdown={excluded}
+								/>
+							</Diagram>
+							<Example demo={demo}>{exclusionsExample(excluded)}</Example>
+						</>
 					) : (
 						<p class="mt-3">There are no transactions this month yet.</p>
 					)}
@@ -296,18 +311,20 @@ howItWorks.get("/how-it-works", async (c) => {
 							fit; anything else waits for a person.
 						</li>
 					</ol>
-					<Diagram>
-						<CategoriesDiagram
-							user={counts.user}
-							merchantRule={counts.merchantRule}
-							jev={counts.jev}
-							waiting={counts.needsCategory + counts.linkedWaiting}
-							income={counts.income}
-							threshold={threshold}
-						/>
-					</Diagram>
 					{demo || counts.counted + excludedTotal(excluded) > 0 ? (
-						<Example demo={demo}>{categorizationExample(counts)}</Example>
+						<>
+							<Diagram>
+								<CategoriesDiagram
+									user={counts.user}
+									merchantRule={counts.merchantRule}
+									jev={counts.jev}
+									waiting={counts.needsCategory + counts.linkedWaiting}
+									income={counts.income}
+									threshold={threshold}
+								/>
+							</Diagram>
+							<Example demo={demo}>{categorizationExample(counts)}</Example>
+						</>
 					) : (
 						<p class="mt-3">There are no transactions this month yet.</p>
 					)}
@@ -340,27 +357,27 @@ howItWorks.get("/how-it-works", async (c) => {
 							so Tally will not suggest it again.
 						</li>
 					</ul>
-					{billExample && (
+					{paidBill ? (
 						<>
 							<Diagram>
 								<BillsDiagram
-									amount={formatCents(billExample.amountCents)}
-									due={shortBillDate(billExample.dueDate)}
-									paid={shortBillDate(
-										billExample.paidDate ?? billExample.dueDate,
-									)}
+									amount={formatCents(paidBill.amountCents)}
+									due={shortBillDate(paidBill.dueDate)}
+									paid={shortBillDate(paidBill.paidDate ?? paidBill.dueDate)}
 									windowDays={BILL_DATE_WINDOW_DAYS}
 									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
 								/>
 							</Diagram>
 							<Example demo={demo}>
-								{billExample.name} is {formatCents(billExample.amountCents)},
-								due {shortBillDate(billExample.dueDate)}; its{" "}
+								{paidBill.name} is {formatCents(paidBill.amountCents)}, due{" "}
+								{shortBillDate(paidBill.dueDate)}; its{" "}
 								{demo ? "demo payment" : "payment"} is{" "}
-								{shortBillDate(billExample.paidDate ?? billExample.dueDate)} and
+								{shortBillDate(paidBill.paidDate ?? paidBill.dueDate)} and
 								counts in the month of the bill it paid.
 							</Example>
 						</>
+					) : (
+						<p class="mt-3">No bill has been paid yet this month.</p>
 					)}
 				</Section>
 

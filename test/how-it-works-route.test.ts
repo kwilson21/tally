@@ -124,7 +124,7 @@ describe("outside the demo", () => {
 	it("uses a plain sentence instead of transaction examples when the month is empty", async () => {
 		const month = todayUtc().slice(0, 7);
 		await env.DB.prepare(
-			"UPDATE transactions SET date = '2000-01-01' WHERE substr(date, 1, 7) = ?",
+			"DELETE FROM transactions WHERE substr(date, 1, 7) = ?",
 		)
 			.bind(month)
 			.run();
@@ -132,9 +132,43 @@ describe("outside the demo", () => {
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
 		expect(
-			html.match(/There are no transactions this month yet\./g),
-		).toHaveLength(3);
+			html.match(
+				/(?:There are no transactions this month yet|No bill has been paid yet this month)\./g,
+			),
+		).toHaveLength(4);
 		expect(html).not.toContain("With your numbers: This month has");
+		expect(html).not.toContain('id="transactions-diagram-title"');
+		expect(html).not.toContain('id="exclusions-diagram-title"');
+		expect(html).not.toContain('id="categories-diagram-title"');
+	});
+
+	it("uses the household's own paid bill for the Bills example", async () => {
+		await env.DB.prepare("UPDATE bills SET name = 'Electricity'").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain("With your numbers:");
+		expect(html).toContain("Electricity is");
+		expect(html).toContain('id="bills-diagram-title"');
+		expect(html).not.toContain("No bill has been paid yet this month.");
+	});
+
+	it("uses a plain sentence and no diagram when no bill has been paid", async () => {
+		await env.DB.prepare("DELETE FROM bill_payments").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain("No bill has been paid yet this month.");
+		expect(html).not.toContain('id="bills-diagram-title"');
+	});
+
+	it("uses a plain sentence and no diagram when no budgets are set", async () => {
+		await env.DB.prepare("DELETE FROM budget_amounts").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain("No budgets have been set yet.");
+		expect(html).not.toContain('id="budget-diagram-title"');
 	});
 
 	it("shows no Things to try but does show How this works on Home", async () => {
