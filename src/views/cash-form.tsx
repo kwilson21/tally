@@ -14,6 +14,7 @@ export function CashForm({
 	today,
 	action = "/transactions/cash",
 	back = "/transactions",
+	entryKey,
 }: {
 	values: CashValues;
 	errors?: CashErrors;
@@ -21,6 +22,8 @@ export function CashForm({
 	today: string;
 	action?: string;
 	back?: string;
+	/** A one-time key (a UUID) made when the form is drawn, so posting the form twice saves once. */
+	entryKey?: string;
 }) {
 	return (
 		<form
@@ -34,6 +37,7 @@ export function CashForm({
 			hx-disable="findAll button[type=submit]"
 		>
 			<input type="hidden" name="back" value={back} />
+			{entryKey && <input type="hidden" name="entry_key" value={entryKey} />}
 			<MoneyInput
 				id="cash-amount"
 				name="amount"
