@@ -403,6 +403,15 @@ export async function saveEdit(
 	// An explicit human link is also a review of this credit as a refund. Keep ownership on a
 	// split parent so split children can inherit the reviewed link as one bank transaction.
 	if (edit.refundOfId !== undefined) {
+		// Parts move with the parent only while they still follow its old link; a part a person
+		// linked to another purchase keeps its own choice. Runs before the parent's own update.
+		statements.push(
+			db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = ?1 WHERE parent_id = ?2 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?2)",
+				)
+				.bind(edit.refundOfId, id),
+		);
 		statements.push(
 			db
 				.prepare(
@@ -419,11 +428,6 @@ export async function saveEdit(
 					edit.refundOfId,
 					id,
 				),
-		);
-		statements.push(
-			db
-				.prepare("UPDATE transactions SET refund_of_id = ? WHERE parent_id = ?")
-				.bind(edit.refundOfId, id),
 		);
 	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and

@@ -838,6 +838,39 @@ describe("splits unlink their refunds", () => {
 		expect(await spent("2026-09", GAS)).toBe(beforeGas - 1000);
 	});
 
+	it("keeps a split part's own purchase link when the refund parent is unlinked", async () => {
+		await link(REFUND, PURCHASE);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const parts = await db
+			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+			.bind(REFUND)
+			.all<{ id: number }>();
+		const firstPart = parts.results[0];
+		if (!firstPart) throw new Error("Expected first refund part");
+		// A person linked this part to a different purchase of their own.
+		await db
+			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+			.bind(AFTER_REFUND, firstPart.id)
+			.run();
+		await link(REFUND, "");
+		const links = await db
+			.prepare(
+				"SELECT refund_of_id FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all();
+		expect(links.results).toEqual([
+			{ refund_of_id: AFTER_REFUND },
+			{ refund_of_id: null },
+		]);
+	});
+
 	it("preserves each split part's review when unlinking the refund parent", async () => {
 		await link(REFUND, PURCHASE);
 		await post(`/transactions/${REFUND}/split`, [
