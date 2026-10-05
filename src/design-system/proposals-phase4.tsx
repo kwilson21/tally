@@ -1210,6 +1210,7 @@ function pet(id: number, name: string, cents: number): ListRow {
 		note: null,
 		excluded: false,
 		income: false,
+		creditReviewed: true,
 		categoryId: null,
 		categoryName: null,
 		categoryIcon: null,
