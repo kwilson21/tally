@@ -8,7 +8,9 @@
 // as income: that one doesn't follow the purchase (src/db/counted-month.ts), so it uses none of it. A
 // split refund counts by its parts, never also by its parent; a refund of a split purchase is linked to
 // one part, so the part's own amount is the cap. The refund being linked is left out of the sum, so
-// saving the link it already has isn't counted against itself.
+// saving the link it already has isn't counted against itself. A split's parent keeps its link while its
+// parts follow it, or stop following it, so when a split is removed or replaced that link is checked
+// like a new one (unlinkSplitOverRefundedSql).
 
 import { leftToRefundCents } from "../transactions/refund-guards";
 
@@ -91,4 +93,22 @@ export function unlinkOverRefundedSql(guard: string) {
 					WHERE o.refund_of_id = r.refund_of_id AND ${counts("o")}
 						AND (o.date < r.date OR (o.date = r.date AND o.id <= r.id))) > p.amount_cents
 		) AND ${guard}`;
+}
+
+/**
+ * A statement for when a split refund's parent is about to count, or have its parts count, from its own
+ * link: a split is removed, or replaced by new parts that take the link. The parent's link may be stale,
+ * since the bank trimmed some of its parts or a person moved them (the parent keeps its link while they
+ * do), so the whole refund is checked as a new link is, and the link is cleared when it doesn't fit.
+ * Does nothing for a refund with no link, or one marked as income, which doesn't count. Run once the
+ * refund's old parts are gone and before new ones are made, so none is counted against the refund.
+ *
+ * `refund` is a SQL expression for the refund's id, such as `?1`; the refund's own cents are the row's.
+ */
+export function unlinkSplitOverRefundedSql(refund: string) {
+	return `UPDATE transactions SET refund_of_id = NULL
+		WHERE id = ${refund} AND refund_of_id IS NOT NULL AND amount_cents < 0 AND flag_income = 0
+			AND ABS(amount_cents) > MAX(0,
+				(SELECT pur.amount_cents FROM transactions pur WHERE pur.id = transactions.refund_of_id)
+				- ${refundedByOthersSql("transactions.refund_of_id", refund)})`;
 }

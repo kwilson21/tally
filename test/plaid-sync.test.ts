@@ -6,6 +6,7 @@ import { loadMonth } from "../src/db/month";
 import {
 	getTransaction,
 	pendingForJev,
+	removeSplit,
 	saveEdit,
 	saveJevResult,
 	saveSplit,
@@ -1515,6 +1516,139 @@ describe("syncItem", () => {
 			expect(await stillLinked()).toEqual(["income", "refund"]);
 			await correct(item, "modified", refundTx("refund", 55, "2026-09-10"));
 			expect(await stillLinked()).toEqual(["income"]);
+		});
+
+		describe("a split refund", () => {
+			/** A $50 purchase and a $40 refund linked to it, split into two $20 parts, then the purchase corrected to $30. */
+			async function trimmedSplit() {
+				const item = await linked(50, [
+					{ id: "refund", amount: 40, date: "2026-09-10" },
+				]);
+				const refund = (await env.DB.prepare(
+					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+				).first<{ id: number }>()) as { id: number };
+				await saveSplit(
+					env.DB,
+					refund.id,
+					[
+						{ categoryId: 1, amountCents: -2000 },
+						{ categoryId: 2, amountCents: -2000 },
+					],
+					"person@example.com",
+				);
+				await correct(item, "modified", {
+					transaction_id: "purchase",
+					amount: 30,
+					name: "REFUND SHOP",
+					date: "2026-09-01",
+				});
+				return { item, refundId: refund.id };
+			}
+
+			/** What is linked to the purchase and counts: every unsplit refund and every part, in cents. */
+			async function refundedCents() {
+				const row = await env.DB.prepare(
+					`SELECT COALESCE(SUM(-amount_cents), 0) AS cents FROM transactions
+					WHERE refund_of_id = (SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase')
+						AND is_split = 0 AND amount_cents < 0 AND flag_income = 0`,
+				).first<{ cents: number }>();
+				return row?.cents;
+			}
+
+			it("loses the parts that no longer fit, one part at a time", async () => {
+				const { refundId } = await trimmedSplit();
+				const { results } = await env.DB.prepare(
+					"SELECT refund_of_id IS NOT NULL AS linked FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(refundId)
+					.all<{ linked: number }>();
+				expect(results.map((part) => part.linked)).toEqual([1, 0]);
+				expect(await refundedCents()).toBe(2000);
+			});
+
+			it("is not over-refunded when the split is removed", async () => {
+				const { refundId } = await trimmedSplit();
+				const unlinked = await removeSplit(
+					env.DB,
+					refundId,
+					"person@example.com",
+				);
+				// The whole $40 refund no longer fits the $30 purchase: it is unlinked, and the person is told.
+				expect(unlinked).toEqual(["2026-09-10"]);
+				expect(await refundedCents()).toBe(0);
+				expect(
+					await env.DB.prepare(
+						"SELECT is_split, refund_of_id FROM transactions WHERE id = ?",
+					)
+						.bind(refundId)
+						.first(),
+				).toEqual({ is_split: 0, refund_of_id: null });
+			});
+
+			it("is not over-refunded when it is split again", async () => {
+				const { refundId } = await trimmedSplit();
+				const result = await saveSplit(
+					env.DB,
+					refundId,
+					[
+						{ categoryId: 1, amountCents: -2500 },
+						{ categoryId: 2, amountCents: -1500 },
+					],
+					"person@example.com",
+				);
+				expect(result).toEqual({ saved: true, unlinked: ["2026-09-10"] });
+				expect(await refundedCents()).toBe(0);
+			});
+
+			it("keeps its link when the split is removed and the whole refund still fits", async () => {
+				const item = await linked(50, [
+					{ id: "refund", amount: 40, date: "2026-09-10" },
+				]);
+				const refund = (await env.DB.prepare(
+					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+				).first<{ id: number }>()) as { id: number };
+				await saveSplit(
+					env.DB,
+					refund.id,
+					[
+						{ categoryId: 1, amountCents: -2000 },
+						{ categoryId: 2, amountCents: -2000 },
+					],
+					"person@example.com",
+				);
+				// A date-only correction to the purchase changes no amount.
+				await correct(item, "modified", {
+					transaction_id: "purchase",
+					amount: 50,
+					name: "REFUND SHOP",
+					date: "2026-09-02",
+				});
+				expect(
+					await removeSplit(env.DB, refund.id, "person@example.com"),
+				).toEqual([]);
+				expect(await stillLinked()).toEqual(["refund"]);
+			});
+
+			it("is checked as a whole when the bank corrects its amount and ends the split", async () => {
+				const item = await linked(50, [
+					{ id: "refund", amount: 40, date: "2026-09-10" },
+				]);
+				const refund = (await env.DB.prepare(
+					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+				).first<{ id: number }>()) as { id: number };
+				await saveSplit(
+					env.DB,
+					refund.id,
+					[
+						{ categoryId: 1, amountCents: -2000 },
+						{ categoryId: 2, amountCents: -2000 },
+					],
+					"person@example.com",
+				);
+				await correct(item, "modified", refundTx("refund", 60, "2026-09-10"));
+				expect(await refundedCents()).toBe(0);
+				expect(await stillLinked()).toEqual([]);
+			});
 		});
 	});
 

@@ -22,6 +22,7 @@ import {
 	refundedByOthersSql,
 	refundFitsSql,
 	refundLeftCents,
+	unlinkSplitOverRefundedSql,
 } from "./refunded";
 
 const COUNTED_MONTH = countedMonthSql();
@@ -593,7 +594,8 @@ async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
 
 /**
  * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows
- * each new part; refunds linked to replaced parts are unlinked in the same batch.
+ * each new part, if the whole refund still fits its purchase (src/db/refunded.ts), and is dropped if
+ * not; refunds linked to replaced parts are unlinked in the same batch.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -616,9 +618,11 @@ export async function saveSplit(
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
 	const unlinked = await linkedRefundDates(db, parentId, true);
 	const linkedPurchase = await db
-		.prepare("SELECT refund_of_id AS refundOfId FROM transactions WHERE id = ?")
+		.prepare(
+			"SELECT refund_of_id AS refundOfId, date FROM transactions WHERE id = ?",
+		)
 		.bind(parentId)
-		.first<{ refundOfId: number | null }>();
+		.first<{ refundOfId: number | null; date: string }>();
 	const inheritedRefundLink =
 		"CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END";
 	const results = await db.batch([
@@ -631,6 +635,13 @@ export async function saveSplit(
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
 			.bind(parentId, parentId, total),
+		// With the old parts gone and before the new ones take the parent's link: if the whole refund
+		// no longer fits its purchase, the link goes, and the new parts start unlinked.
+		db
+			.prepare(
+				`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)`,
+			)
+			.bind(parentId, total),
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
@@ -656,20 +667,36 @@ export async function saveSplit(
 			.bind(by, parentId, total),
 	]);
 	const saved = (results.at(-1)?.meta.changes ?? 0) > 0;
+	// A refund's own link is kept by its new parts, unless it no longer fit: then it is the one unlinked.
+	const refundUnlinked = (results[2]?.meta.changes ?? 0) > 0;
 	return {
 		saved,
-		unlinked: saved && !linkedPurchase?.refundOfId ? unlinked : [],
+		unlinked: !saved
+			? []
+			: !linkedPurchase?.refundOfId
+				? unlinked
+				: refundUnlinked
+					? [linkedPurchase.date]
+					: [],
 	};
 }
 
-/** Deletes a split and restores its parent atomically, unlinking refunds of its parts; returns their dates. */
+/**
+ * Deletes a split and restores its parent atomically, unlinking refunds of its parts; returns their
+ * dates. A split refund's parent is whole again and counts by its own link, so that link is checked
+ * like a new one (src/db/refunded.ts) and dropped if the refund no longer fits; its date is returned too.
+ */
 export async function removeSplit(
 	db: D1Database,
 	parentId: number,
 	by: string,
 ): Promise<string[]> {
 	const unlinked = await linkedRefundDates(db, parentId, false);
-	await db.batch([
+	const parent = await db
+		.prepare("SELECT date FROM transactions WHERE id = ?")
+		.bind(parentId)
+		.first<{ date: string }>();
+	const results = await db.batch([
 		db
 			.prepare(
 				"UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=?)",
@@ -681,8 +708,10 @@ export async function removeSplit(
 				"UPDATE transactions SET is_split = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
 			)
 			.bind(by, parentId),
+		db.prepare(unlinkSplitOverRefundedSql("?1")).bind(parentId),
 	]);
-	return unlinked;
+	const refundUnlinked = (results.at(-1)?.meta.changes ?? 0) > 0;
+	return parent && refundUnlinked ? [...unlinked, parent.date] : unlinked;
 }
 
 /**
