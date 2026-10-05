@@ -4,8 +4,8 @@ import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
 import { loadMonth } from "../src/db/month";
 import {
-	applyMerchantRules,
 	getTransaction,
+	pendingForJev,
 	saveEdit,
 	saveJevResult,
 } from "../src/db/transactions";
@@ -425,7 +425,7 @@ describe("syncItem", () => {
 	});
 
 	it.each(["added", "modified"] as const)(
-		"clears a merchant rule's category when Plaid corrects the merchant (%s), so the new merchant's rule applies",
+		"clears a merchant rule's category when Plaid corrects the merchant (%s), and the sync gives it the new merchant's rule",
 		async (path) => {
 			const id = await addItem();
 			const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
@@ -522,18 +522,12 @@ describe("syncItem", () => {
 						}>()
 					).results.map((r) => [r.id, [r.category_id, r.category_source]]),
 				);
+			// The old rule's category is cleared, and the sync's own rules step gives the new merchant's.
 			expect(await state()).toEqual({
-				"by-rule": [null, null],
-				"by-user": [first, "user"],
-				"by-jev": [first, "jev"],
-				same: [first, "merchant_rule"],
-			});
-
-			await applyMerchantRules(env.DB);
-			expect(await state()).toMatchObject({
 				"by-rule": [second, "merchant_rule"],
 				"by-user": [first, "user"],
 				"by-jev": [first, "jev"],
+				same: [first, "merchant_rule"],
 			});
 			await env.DB.prepare(
 				"DELETE FROM merchants WHERE raw_name = 'New Shop'",
@@ -541,7 +535,77 @@ describe("syncItem", () => {
 		},
 	);
 
-	it("starts a merchant's settings as a copy of its bank-text row when Plaid first names it, so its rule, name and Not a bill carry over", async () => {
+	it("applies merchant rules to the transactions a sync brings in, and never to one a person or Jev categorized", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({ transaction_id: "by-user" }),
+							transaction({ transaction_id: "by-jev" }),
+						],
+					}),
+				),
+			),
+		);
+		const [rule, mine] = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+			).all<{ id: number }>()
+		).results.map((r) => r.id) as [number, number];
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE plaid_transaction_id = 'by-user'",
+			).bind(mine),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.9 WHERE plaid_transaction_id = 'by-jev'",
+			).bind(mine),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Shop', ?)",
+			).bind(rule),
+		]);
+
+		// The two already-sorted ones come back changed; a third arrives new.
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [transaction({ transaction_id: "fresh" })],
+						modified: [
+							transaction({ transaction_id: "by-user", date: "2026-09-28" }),
+							transaction({ transaction_id: "by-jev", date: "2026-09-28" }),
+						],
+					}),
+				),
+			),
+		);
+
+		expect(
+			Object.fromEntries(
+				(
+					await env.DB.prepare(
+						"SELECT plaid_transaction_id AS id, category_id, category_source FROM transactions",
+					).all<{
+						id: string;
+						category_id: number | null;
+						category_source: string | null;
+					}>()
+				).results.map((r) => [r.id, [r.category_id, r.category_source]]),
+			),
+		).toEqual({
+			fresh: [rule, "merchant_rule"],
+			"by-user": [mine, "user"],
+			"by-jev": [mine, "jev"],
+		});
+	});
+
+	it("starts a merchant's settings as a copy of its bank-text row when Plaid first names it, so its rule, name and Not a bill carry over, and the sync's rules step then applies the rule", async () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
@@ -569,7 +633,6 @@ describe("syncItem", () => {
 				),
 			),
 		);
-		await applyMerchantRules(env.DB);
 
 		// The new row is the old row's settings, under the key.
 		expect(
@@ -1844,5 +1907,366 @@ describe("syncItem", () => {
 			expect((await itemState(id))?.status).toBe(expectedStatus);
 			spy.mockRestore();
 		}
+	});
+});
+
+describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", () => {
+	const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+	const payroll = (overrides: Record<string, unknown> = {}) =>
+		transaction({
+			transaction_id: "payroll",
+			amount: -3000,
+			name: "PAYROLL",
+			personal_finance_category: { primary: "INCOME" },
+			...overrides,
+		});
+	const notIncomeByPlaid = {
+		personal_finance_category: { primary: "GENERAL_MERCHANDISE" },
+	};
+	const send = (
+		id: number,
+		path: "added" | "modified",
+		...transactions: ReturnType<typeof transaction>[]
+	) =>
+		syncItem(
+			opts,
+			id,
+			plaidFetch(() => response(page({ [path]: transactions }))),
+		);
+	const income = () =>
+		env.DB.prepare(
+			"SELECT flag_income, income_source, plaid_category FROM transactions WHERE plaid_transaction_id = 'payroll'",
+		).first();
+	const payrollId = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE plaid_transaction_id = 'payroll'",
+			).first<{ id: number }>()
+		)?.id as number;
+	const jevAnswer = (income: boolean) => ({
+		categoryId: null,
+		suggestedCategoryId: null,
+		confidence: 0.95,
+		flags: { transfer: false, reimbursement: false, income },
+	});
+
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
+		]);
+	});
+
+	it("counts a paycheck Plaid calls INCOME toward Income and not Spent, and never holds it for review", async () => {
+		const id = await addItem();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM categories"),
+		]);
+		const category = await env.DB.prepare(
+			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Synthetic', 'groceries', 'cat-blue', 1) RETURNING id",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO budget_amounts VALUES (?, '2026-09', 100000)",
+		)
+			.bind(category?.id)
+			.run();
+
+		await send(
+			id,
+			"added",
+			transaction({
+				transaction_id: "purchase",
+				amount: 200,
+				name: "PURCHASE",
+			}),
+			payroll(),
+			transaction({ transaction_id: "refund", amount: -5, name: "REFUND" }),
+		);
+
+		expect(await income()).toEqual({
+			flag_income: 1,
+			income_source: null,
+			plaid_category: "INCOME",
+		});
+		const month = summarizeMonth({
+			month: "2026-09",
+			...(await loadMonth(env.DB, "2026-09")),
+			unpaidDueBillsCents: 0,
+		});
+		expect(month.incomeCents).toBe(300000);
+		// Only the purchase is spent: the paycheck is income, and the unreviewed refund is held.
+		expect(month.totalSpentCents).toBe(20000);
+		expect(month.safeToSpendCents).toBe(80000);
+		const asked = (await pendingForJev(env.DB, 10)).map((t) => t.rawName);
+		expect(asked).toContain("REFUND");
+		expect(asked).not.toContain("PAYROLL");
+	});
+
+	it("does not ask Jev about a Plaid-income paycheck", async () => {
+		const id = await addItem();
+		await send(id, "added", payroll());
+		const jev = vi.fn(async () => response({}, 500));
+		expect(
+			await categorizePending(
+				{ DB: env.DB, JEV_API_KEY: "synthetic-key" },
+				jev,
+			),
+		).toEqual({ asked: 0, applied: 0 });
+		expect(jev).not.toHaveBeenCalled();
+		expect(await income()).toMatchObject({
+			flag_income: 1,
+			income_source: null,
+		});
+	});
+
+	it.each(["added", "modified"] as const)(
+		"keeps a person's 'not income' through a %s sync that still says INCOME",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income = 0, income_source = 'user' WHERE plaid_transaction_id = 'payroll'",
+			).run();
+
+			await send(id, path, payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 0,
+				income_source: "user",
+			});
+			// A corrected amount does not hand the choice back either.
+			await send(id, path, payroll({ amount: -3100 }));
+			expect(await income()).toMatchObject({
+				flag_income: 0,
+				income_source: "user",
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"keeps a credit a person reviewed as non-income through a %s sync that says INCOME",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll({ amount: -30, ...notIncomeByPlaid }));
+			await env.DB.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE plaid_transaction_id = 'payroll'",
+			).run();
+
+			await send(id, path, payroll({ amount: -30 }));
+			expect(await income()).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"marks a transaction already synced as income when a %s sync first says INCOME",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll(notIncomeByPlaid));
+			expect(await income()).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+			});
+
+			await send(id, path, payroll());
+			expect(await income()).toEqual({
+				flag_income: 1,
+				income_source: null,
+				plaid_category: "INCOME",
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"clears a Plaid-set flag when a %s sync says it is no longer INCOME",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+			});
+
+			await send(id, path, payroll(notIncomeByPlaid));
+			expect(await income()).toEqual({
+				flag_income: 0,
+				income_source: null,
+				plaid_category: "GENERAL_MERCHANDISE",
+			});
+			// Back to INCOME, it is marked again.
+			await send(id, path, payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"leaves a person's income flag alone when a %s sync says it is no longer INCOME",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE plaid_transaction_id = 'payroll'",
+			).run();
+
+			await send(id, path, payroll(notIncomeByPlaid));
+			expect(await income()).toEqual({
+				flag_income: 1,
+				income_source: "user",
+				plaid_category: "GENERAL_MERCHANDISE",
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"leaves Jev's income flag alone through %s syncs that say INCOME and then not",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll(notIncomeByPlaid));
+			await saveJevResult(env.DB, await payrollId(), jevAnswer(true));
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: "jev",
+			});
+
+			await send(id, path, payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: "jev",
+			});
+			await send(id, path, payroll(notIncomeByPlaid));
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: "jev",
+			});
+		},
+	);
+
+	it("marks a credit as income when Plaid says INCOME after Jev said it wasn't", async () => {
+		const id = await addItem();
+		await send(id, "added", payroll(notIncomeByPlaid));
+		await saveJevResult(env.DB, await payrollId(), jevAnswer(false));
+		expect(await income()).toMatchObject({
+			flag_income: 0,
+			income_source: null,
+		});
+
+		await send(id, "modified", payroll());
+		expect(await income()).toMatchObject({
+			flag_income: 1,
+			income_source: null,
+		});
+	});
+
+	it.each([
+		{ answer: false, incomeSwitch: true },
+		{ answer: true, incomeSwitch: true },
+		{ answer: true, incomeSwitch: false },
+		{ answer: false, incomeSwitch: false },
+	])(
+		"does not let Jev's income answer ($answer, income switch on: $incomeSwitch) clear or take over a Plaid-set flag",
+		async ({ answer, incomeSwitch }) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			const written = await saveJevResult(
+				env.DB,
+				await payrollId(),
+				jevAnswer(answer),
+				{ switches: { income: incomeSwitch } },
+			);
+
+			expect(written).toBe(true);
+			// Still Plaid's, not a person's or Jev's, so a later sync can still undo it.
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+			});
+			await send(id, "modified", payroll(notIncomeByPlaid));
+			expect(await income()).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"does not flag an outgoing payment Plaid labels INCOME, so it stays in Spent, on a %s sync",
+		async (path) => {
+			const id = await addItem();
+			if (path === "modified") {
+				await send(id, "added", payroll({ amount: 500, ...notIncomeByPlaid }));
+			}
+			await send(id, path, payroll({ amount: 500 }));
+
+			expect(await income()).toEqual({
+				flag_income: 0,
+				income_source: null,
+				plaid_category: "INCOME",
+			});
+			const month = summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(env.DB, "2026-09")),
+				unpaidDueBillsCents: 0,
+			});
+			expect(month.incomeCents).toBe(0);
+			expect(month.totalSpentCents).toBe(50000);
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"clears a Plaid-set flag when a %s sync turns the amount into money out",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+			});
+
+			await send(id, path, payroll({ amount: 3000 }));
+			expect(await income()).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+			});
+			// Money in again, it is marked again.
+			await send(id, path, payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"leaves a person's income flag alone when a %s sync turns the amount into money out",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE plaid_transaction_id = 'payroll'",
+			).run();
+
+			await send(id, path, payroll({ amount: 3000 }));
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: "user",
+			});
+		},
+	);
+
+	it("still lets Jev set income where Plaid did not", async () => {
+		const id = await addItem();
+		await send(id, "added", payroll(notIncomeByPlaid));
+		await saveJevResult(env.DB, await payrollId(), jevAnswer(true));
+		expect(await income()).toMatchObject({
+			flag_income: 1,
+			income_source: "jev",
+		});
 	});
 });
