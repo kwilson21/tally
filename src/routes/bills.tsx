@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import { actor } from "../actor";
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import {
 	BIG_BILL_CENTS,
@@ -8,6 +9,13 @@ import {
 } from "../bills/guards";
 import { matchBillPayments } from "../bills/match";
 import {
+	acceptPriceOffer,
+	dismissPriceOffer,
+	findPriceOffer,
+	loadPriceOffers,
+	type PriceOffer,
+} from "../bills/price-change";
+import {
 	type BillStatus,
 	billOccurrence,
 	billOccurrenceForMonth,
@@ -16,9 +24,10 @@ import {
 	activateBill,
 	type BillFields,
 	insertBill,
+	putBackInBudget,
 	updateBill,
 } from "../bills/write";
-import { householdToday, ordinal } from "../dates";
+import { householdToday, ordinal, shortDay } from "../dates";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -101,7 +110,13 @@ export async function loadBillRows(db: D1Database, today: string) {
 		// Only the periods billOccurrence can pick: last month on, or last year on.
 		.bind(previousMonth(today), String(Number(today.slice(0, 4)) - 1))
 		.all<DbBill>();
-	const result: (BillRowData & { active: boolean })[] = [];
+	const result: (BillRowData & {
+		active: boolean;
+		/** The occurrence the row shows, as bill_payments keys it, and the merchant it's matched on. */
+		period: string;
+		merchantRawName: string;
+		merchantRawText: number;
+	})[] = [];
 	const byBill = new Map<number, DbBill[]>();
 	for (const row of rows.results) {
 		const list = byBill.get(row.id);
@@ -137,6 +152,9 @@ export async function loadBillRows(db: D1Database, today: string) {
 			icon: b.icon ?? "bills",
 			color: b.color ?? "",
 			active: !!b.active,
+			period: occurrence.period,
+			merchantRawName: b.merchant_raw_name,
+			merchantRawText: b.merchant_raw_text,
 		});
 	}
 	return { today, rows: result };
@@ -162,8 +180,20 @@ async function page(
 	given?: string,
 ) {
 	const today = given ?? (await householdToday(c.env.DB));
-	const { rows } = await loadBillRows(c.env.DB, today);
+	const { rows: loaded } = await loadBillRows(c.env.DB, today);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);
+	// A payment at another price is offered on the row it would pay: an active bill whose shown
+	// occurrence is unpaid, due or overdue (P36 B, spec §8.5). Worked out here each time; nothing is stored.
+	const offers = await loadPriceOffers(c.env.DB, loaded);
+	const rows = loaded.map((b) => {
+		const offer = offers.get(b.id);
+		return offer
+			? {
+					...b,
+					priceOffer: { amountCents: offer.amountCents, date: offer.date },
+				}
+			: b;
+	});
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
 	const soon = active.filter(
@@ -757,6 +787,7 @@ type LinkedPayment = {
 	amount_cents: number;
 	raw_name: string;
 	display_name: string | null;
+	excluded?: number;
 };
 const monthName = (period: string, today: string) =>
 	new Intl.DateTimeFormat("en-US", {
@@ -864,7 +895,7 @@ async function billPage(
 		const due = occurrenceDate(bill, pickerPeriod);
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.excluded=0 AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),
@@ -886,6 +917,8 @@ async function billPage(
 		today,
 		new Set(payments.map((p) => p.period)),
 	);
+	// A payment at another price, offered on the occurrence the Bills row shows (P36 B, spec §8.5).
+	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
 	const countedMonth = (period: string) =>
 		bill.frequency === "monthly"
 			? period
@@ -904,6 +937,7 @@ async function billPage(
 				date: t.date,
 				dateLabel: shortDate(t.date),
 				amountCents: t.amount_cents,
+				excluded: t.excluded === 1,
 			}))}
 			periods={periods
 				.filter((period) => !byPeriod.has(period))
@@ -972,6 +1006,18 @@ async function billPage(
 												dateLabel: shortDate(payment.date),
 												amountCents: payment.amount_cents,
 												matchedBy: payment.matched_by,
+											}
+										: undefined
+								}
+								priceOffer={
+									offer && period === current.period
+										? {
+												transactionId: offer.transactionId,
+												merchant: offer.merchant,
+												amountCents: offer.amountCents,
+												dateLabel: shortDay(offer.date, today),
+												billAmountCents: bill.amount_cents,
+												frequency: bill.frequency,
 											}
 										: undefined
 								}
@@ -1081,7 +1127,7 @@ bills.post("/bills/:id/link", async (c) => {
 		);
 	const due = occurrenceDate(bill, period);
 	const eligible = await c.env.DB.prepare(
-		"SELECT 1 FROM transactions WHERE id=? AND excluded=0 AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30",
+		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30",
 	)
 		.bind(transaction, due)
 		.first();
@@ -1101,12 +1147,14 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 	}
-	const result = await c.env.DB.prepare(
-		`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND excluded=0 AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30)`,
-	)
-		.bind(id, period, transaction, transaction, due)
-		.run();
-	if (!result.meta.changes)
+	// An excluded payment can pay a bill; linking it puts it back in the budget (spec §6.1 rule 4).
+	const [, result] = await c.env.DB.batch([
+		putBackInBudget(c.env.DB, id, period, transaction, actor(c)),
+		c.env.DB.prepare(
+			`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30)`,
+		).bind(id, period, transaction, transaction, due),
+	]);
+	if (!result?.meta.changes)
 		return billPage(
 			c,
 			id,
@@ -1141,6 +1189,7 @@ async function feedbackRedirect(
 	id: number,
 	message: string,
 	today?: string,
+	announce = message,
 ) {
 	if (c.req.header("HX-Request")) {
 		const response = await billPage(
@@ -1155,10 +1204,115 @@ async function feedbackRedirect(
 			"HX-Trigger",
 			JSON.stringify({
 				toast: { message, type: "success" },
-				announce: message,
+				announce,
 			}),
 		);
 		return response;
 	}
 	return c.redirect(`/bills/${id}`, 303);
 }
+
+/** The occurrence a bill's Bills row and page ask about, and the question: what `findPriceOffer` finds for it. */
+function offerBill(
+	bill: DbBill,
+	occurrence: { period: string; dueDate: string; status: BillStatus },
+) {
+	return {
+		id: bill.id,
+		active: !!bill.active,
+		status: occurrence.status,
+		amountCents: bill.amount_cents,
+		merchantRawName: bill.merchant_raw_name,
+		merchantRawText: bill.merchant_raw_text,
+		period: occurrence.period,
+		dueDate: occurrence.dueDate,
+	};
+}
+async function currentOffer(
+	c: Context<App>,
+	bill: DbBill,
+	today: string,
+): Promise<({ period: string } & PriceOffer) | undefined> {
+	const linked = (
+		await c.env.DB.prepare(
+			"SELECT period FROM bill_payments WHERE bill_id=? AND status='linked'",
+		)
+			.bind(bill.id)
+			.all<{ period: string }>()
+	).results;
+	const current = billOccurrence(
+		{
+			frequency: bill.frequency,
+			dueDay: bill.due_day,
+			anchorMonth: bill.anchor_month,
+		},
+		today,
+		new Set(linked.map((row) => row.period)),
+	);
+	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
+	return offer && { period: current.period, ...offer };
+}
+
+// "Price changed?" (P36 B, decision 72): a payment from the bill's merchant at another price is offered
+// on the bill's page. Yes links it and sets the bill's amount to what was charged; "Not this bill"
+// remembers the payment for that month. Both answer for the very payment the page showed, and Yes also
+// for the two prices it showed (the bill's amount and the charge's, in whole cents): once either has
+// changed, a page that has gone stale saves nothing and the person is told, so no one is made to accept
+// a price they didn't see.
+const wholeCents = (value: unknown) =>
+	typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
+	const id = Number(c.req.param("id"));
+	const period = c.req.param("period");
+	const form = await c.req.parseBody();
+	const transaction = Number(form.transaction_id);
+	const bill = await dbBill(c, id);
+	if (!bill) return c.notFound();
+	const today = await householdToday(c.env.DB);
+	const offer = await currentOffer(c, bill, today);
+	const gone = () =>
+		billPage(
+			c,
+			id,
+			undefined,
+			"That price change isn't on offer any more.",
+			undefined,
+			today,
+		);
+	if (!offer || offer.period !== period || offer.transactionId !== transaction)
+		return gone();
+	if (verb === "accept") {
+		const seenBill = wholeCents(form.bill_cents);
+		if (
+			seenBill !== bill.amount_cents ||
+			wholeCents(form.charge_cents) !== offer.amountCents ||
+			!(await acceptPriceOffer(c.env.DB, id, period, offer, seenBill, actor(c)))
+		)
+			return gone();
+	} else {
+		await dismissPriceOffer(c.env.DB, id, period, transaction);
+		return feedbackRedirect(
+			c,
+			id,
+			`Left the bill at ${formatCents(bill.amount_cents)}`,
+			today,
+			`Price change dismissed. The bill stays ${formatCents(bill.amount_cents)}.`,
+		);
+	}
+	// The new price may match other months' payments that were left over at the old one.
+	await matchBillPayments(c.env.DB, today);
+	const updated = `Bill updated to ${formatCents(offer.amountCents)}`;
+	return feedbackRedirect(
+		c,
+		id,
+		updated,
+		today,
+		`${updated} and the payment linked`,
+	);
+}
+bills.post("/bills/:id/occurrences/:period/price/accept", (c) =>
+	answerPrice(c, "accept"),
+);
+bills.post("/bills/:id/occurrences/:period/price/dismiss", (c) =>
+	answerPrice(c, "dismiss"),
+);

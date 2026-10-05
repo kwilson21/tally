@@ -17,6 +17,11 @@ import {
 	merchantKeySql,
 	sameMerchantSql,
 } from "./merchant-key";
+import {
+	refundedByOthersSql,
+	refundFitsSql,
+	refundLeftCents,
+} from "./refunded";
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
@@ -232,8 +237,9 @@ export type RefundPurchase = {
 /**
  * The purchases a refund can link to: same merchant (by merchant key, so a "TARGET 1234" purchase is
  * offered for a "TARGET 5678" refund; or by raw name when either has no merchant name, as before Plaid's
- * merchant name was stored, never across two different merchant names), on or before it, within 90 days; a split purchase gives way to its parts. The purchase it's
- * linked to now is always included, so it can be kept.
+ * merchant name was stored, never across two different merchant names), on or before it, within 90 days; a split purchase gives way to its parts. A purchase
+ * with nothing left to refund (other refunds already took every cent) isn't offered, since no refund
+ * fits it (spec §8.5). The purchase it's linked to now is always included, so it can be kept.
  */
 export async function refundPurchases(
 	db: D1Database,
@@ -249,7 +255,8 @@ export async function refundPurchases(
 		FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
 		WHERE t.id = ?1 OR (?2 AND t.amount_cents>0 AND t.is_split=0 AND t.excluded=0
 			AND EXISTS (SELECT 1 FROM transactions r WHERE r.id=?4 AND ${sameMerchantSql("t", "r")})
-			AND t.date<=?3 AND t.date>=date(?3,'-90 days') AND t.id!=?4)
+			AND t.date<=?3 AND t.date>=date(?3,'-90 days') AND t.id!=?4
+			AND t.amount_cents > ${refundedByOthersSql("t.id", "?4")})
 		ORDER BY t.date DESC,t.id DESC`)
 		.bind(refund.refundOfId ?? null, isRefund ? 1 : 0, refund.date, refund.id)
 		.all<RefundPurchase>();
@@ -318,19 +325,35 @@ const EXCLUDE =
 	"excluded_source = CASE WHEN excluded = ? THEN excluded_source ELSE 'user' END, excluded = ?";
 
 /**
+ * What saving the edit panel did. A refund link that is more than what's left of its purchase is
+ * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left.
+ */
+export type SaveEditResult =
+	| { saved: true }
+	| { saved: false; refundLeftCents: number };
+
+/**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
  * changes), the note, whether it's excluded, the merchant's display name, and, if asked, the merchant rule, which also
  * recategorizes the merchant's other transactions except ones a person chose (spec §7).
+ *
+ * Linking a refund to a purchase (spec §6, §8.5) is the one write that can be refused, and so is
+ * turning off "Count as income" on a credit that stays linked, which makes it count against its
+ * purchase. The check is an UPDATE that changes nothing unless what moves with the refund fits what's
+ * left of the purchase (src/db/refunded.ts), so two saves at once can't both fit; every other write
+ * in the batch applies only once it has, so a refusal saves nothing, and an error anywhere rolls the
+ * link back too. A person linking a refund includes it in the budget, even when it was excluded
+ * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone.
  */
 export async function saveEdit(
 	db: D1Database,
 	id: number,
 	edit: Edit,
 	actor: string,
-): Promise<void> {
+): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded, refund_of_id AS refundOfId, is_split AS isSplit FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -339,8 +362,53 @@ export async function saveEdit(
 			income: number;
 			creditReviewed: number | null;
 			excluded: number;
+			refundOfId: number | null;
+			isSplit: number;
 		}>();
 	if (!current) throw new Error(`No transaction ${id}`);
+
+	// The purchase this refund is being linked to now: undefined when its link stays as it is, null
+	// when it's being unlinked.
+	const newLink =
+		edit.refundOfId !== undefined && edit.refundOfId !== current.refundOfId
+			? edit.refundOfId
+			: undefined;
+	const linking = typeof newLink === "number";
+	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so
+	// turning that off, with the link staying, makes it count: that is checked like a link. (A split
+	// parent never counts, only its parts do, and the cap ignores whether a refund is excluded or
+	// reviewed, so income is the one flag that changes what counts.)
+	const recounting =
+		newLink === undefined &&
+		current.refundOfId !== null &&
+		current.income === 1 &&
+		!edit.income &&
+		current.isSplit === 0
+			? current.refundOfId
+			: null;
+
+	// Every other write waits on that check, so a refusal writes nothing at all, and an error anywhere
+	// in the batch rolls everything back, link included. For a link, once it has taken the refund's
+	// `refund_of_id` is the new purchase, and when it was refused it is not. For a credit that
+	// counts again, the same amount check is made by each write. The check's two parameters are
+	// numbered from `n`, after the statement's own.
+	const gate: { sql: (n: number) => string; args: unknown[] } = linking
+		? {
+				sql: (n) =>
+					` AND EXISTS (SELECT 1 FROM transactions WHERE id = ?${n} AND refund_of_id = ?${n + 1})`,
+				args: [id, newLink],
+			}
+		: recounting !== null
+			? {
+					sql: (n) => ` AND ${refundFitsSql(`?${n}`, `?${n + 1}`)}`,
+					args: [id, recounting],
+				}
+			: { sql: () => "", args: [] };
+	/** A statement with the gate on its WHERE (before `tail`), binding `args` and then the gate's. */
+	const gated = (sql: string, args: unknown[], tail = "") =>
+		db
+			.prepare(`${sql}${gate.sql(args.length + 1)}${tail}`)
+			.bind(...args, ...gate.args);
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
@@ -351,135 +419,149 @@ export async function saveEdit(
 		!edit.income &&
 		creditReviewChoice === 1 &&
 		(current.creditReviewed !== 1 || current.income === 1);
-	// Changing the exclusion makes it a person's choice, which Jev never overrides.
-	const excluded = edit.excluded ? 1 : 0;
+	// Changing the exclusion makes it a person's choice, which Jev never overrides. A refund being
+	// linked counts, whatever the panel's Exclude chip held (it was drawn from the old state).
+	const excluded = edit.excluded && !linking ? 1 : 0;
 	const excludeArgs = [excluded, excluded];
+	// The review and income parameters the panel's own UPDATE shares between its two forms.
+	const reviewArgs = [
+		edit.income ? 1 : 0,
+		edit.income ? 1 : 0,
+		creditReviewByUser ? 1 : 0,
+		edit.income ? 1 : 0,
+		creditReviewByUser ? 1 : 0,
+		creditReviewProvided ? 1 : 0,
+		edit.income ? 1 : 0,
+		creditReviewChoice,
+		creditReviewProvided ? 1 : 0,
+		edit.income ? 1 : 0,
+		creditReviewByUser ? 1 : 0,
+		creditReviewProvided ? 1 : 0,
+		creditReviewChoice,
+		actor,
+		id,
+	];
 
-	const statements = [
+	const statements: D1PreparedStatement[] = [];
+	if (linking) {
+		// First, so what follows can depend on it. The parts of a split refund move with it, only while
+		// they still follow its old link; one a person linked to another purchase keeps its own choice.
+		// That runs before the refund's own update, which changes the link they are compared with. Both
+		// check that what moves fits what is left of the purchase.
+		statements.push(
+			db
+				.prepare(
+					`UPDATE transactions SET refund_of_id = ?1
+					WHERE parent_id = ?2 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?2)
+						AND ${refundFitsSql("?2", "?1")}`,
+				)
+				.bind(newLink, id),
+			// A person linking it makes it a reviewed refund that counts, as their choice. This is the
+			// statement whose result says whether the link was refused.
+			db
+				.prepare(
+					`UPDATE transactions SET refund_of_id = ?1,
+						credit_reviewed = CASE WHEN amount_cents < 0 THEN 1 ELSE credit_reviewed END,
+						credit_reviewed_by = CASE WHEN amount_cents < 0 THEN 'user' ELSE credit_reviewed_by END,
+						excluded_source = CASE WHEN excluded = 1 THEN 'user' ELSE excluded_source END,
+						excluded = 0
+					WHERE id = ?2 AND ${refundFitsSql("?2", "?1")}`,
+				)
+				.bind(newLink, id),
+		);
+	}
+	// The panel's own update comes next, so for a credit that counts again its result says whether it
+	// was refused (it is the first statement then).
+	statements.push(
 		changed
-			? db
-					.prepare(
-						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
-							note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
-							credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
-							credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
-							updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
-					)
-					.bind(
-						edit.categoryId,
-						edit.note,
-						...excludeArgs,
-						edit.income ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewByUser ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewByUser ? 1 : 0,
-						creditReviewProvided ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewChoice,
-						creditReviewProvided ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewByUser ? 1 : 0,
-						creditReviewProvided ? 1 : 0,
-						creditReviewChoice,
-						actor,
-						id,
-					)
-			: db
-					.prepare(
-						`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
+			? gated(
+					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
+						note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
 						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
-					)
-					.bind(
-						edit.note,
-						...excludeArgs,
-						edit.income ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewByUser ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewByUser ? 1 : 0,
-						creditReviewProvided ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewChoice,
-						creditReviewProvided ? 1 : 0,
-						edit.income ? 1 : 0,
-						creditReviewByUser ? 1 : 0,
-						creditReviewProvided ? 1 : 0,
-						creditReviewChoice,
-						actor,
-						id,
-					),
-		db
-			.prepare(
-				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
-				ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name`,
-			)
-			.bind(current.merchantKey, edit.displayName),
-	];
-	// An explicit human link is also a review of this credit as a refund. Keep ownership on a
-	// split parent so split children can inherit the reviewed link as one bank transaction.
-	if (edit.refundOfId !== undefined) {
-		// Parts move with the parent only while they still follow its old link; a part a person
-		// linked to another purchase keeps its own choice. Runs before the parent's own update.
-		statements.push(
-			db
-				.prepare(
-					"UPDATE transactions SET refund_of_id = ?1 WHERE parent_id = ?2 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?2)",
+					[edit.categoryId, edit.note, ...excludeArgs, ...reviewArgs],
 				)
-				.bind(edit.refundOfId, id),
-		);
-		statements.push(
-			db
-				.prepare(
-					`UPDATE transactions SET refund_of_id = ?,
-						credit_reviewed = CASE WHEN ? IS NOT NULL AND amount_cents < 0 AND refund_of_id IS NOT ? THEN 1 ELSE credit_reviewed END,
-						credit_reviewed_by = CASE WHEN ? IS NOT NULL AND amount_cents < 0 AND refund_of_id IS NOT ? THEN 'user' ELSE credit_reviewed_by END
-					WHERE id = ?`,
-				)
-				.bind(
-					edit.refundOfId,
-					edit.refundOfId,
-					edit.refundOfId,
-					edit.refundOfId,
-					edit.refundOfId,
-					id,
+			: gated(
+					`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
+					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
+					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
+					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+					[edit.note, ...excludeArgs, ...reviewArgs],
 				),
+		gated(
+			"INSERT INTO merchants (raw_name, display_name) SELECT ?, ? WHERE 1",
+			[current.merchantKey, edit.displayName],
+			" ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
+		),
+	);
+	if (newLink === null) {
+		// Unlinking: the parts of a split refund that still follow its link go too, before its own
+		// update changes it; one a person linked to another purchase keeps its own choice. The
+		// credit's review stays as it was.
+		statements.push(
+			db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = NULL WHERE parent_id = ?1 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?1)",
+				)
+				.bind(id),
+			db
+				.prepare("UPDATE transactions SET refund_of_id = NULL WHERE id = ?")
+				.bind(id),
+		);
+	} else if (linking) {
+		// An explicit human link is also a review of this credit as a refund. The link was written
+		// first, with that review, but the category update after it applies the panel's review chip,
+		// which a person linking a refund hasn't ticked, so the review is made again here. It stays on
+		// a split parent, so its parts inherit the reviewed link as one bank transaction.
+		statements.push(
+			db
+				.prepare(
+					`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user'
+					WHERE id = ? AND amount_cents < 0 AND refund_of_id = ?`,
+				)
+				.bind(id, newLink),
 		);
 	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
 	if (excluded !== current.excluded)
 		statements.push(
-			db
-				.prepare(
-					`UPDATE transactions SET excluded = ?1, excluded_source = 'user', updated_by = ?2, updated_at = datetime('now')
-					WHERE id != ?3 AND (
-						parent_id = ?3
-						OR id = (SELECT parent_id FROM transactions WHERE id = ?3)
-						OR parent_id = (SELECT parent_id FROM transactions WHERE id = ?3)
-					)`,
-				)
-				.bind(excluded, actor, id),
+			gated(
+				`UPDATE transactions SET excluded = ?1, excluded_source = 'user', updated_by = ?2, updated_at = datetime('now')
+				WHERE id != ?3 AND (
+					parent_id = ?3
+					OR id = (SELECT parent_id FROM transactions WHERE id = ?3)
+					OR parent_id = (SELECT parent_id FROM transactions WHERE id = ?3)
+				)`,
+				[excluded, actor, id],
+			),
 		);
 	if (edit.alwaysForMerchant && edit.categoryId !== null) {
 		statements.push(
-			db
-				.prepare(
-					"UPDATE merchants SET default_category_id = ? WHERE raw_name = ?",
-				)
-				.bind(edit.categoryId, current.merchantKey),
-			db
-				.prepare(
-					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
-						updated_by = ?, updated_at = datetime('now')
-					WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
-				)
-				.bind(edit.categoryId, actor, current.merchantKey, id),
+			gated("UPDATE merchants SET default_category_id = ? WHERE raw_name = ?", [
+				edit.categoryId,
+				current.merchantKey,
+			]),
+			gated(
+				`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+					updated_by = ?, updated_at = datetime('now')
+				WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
+				[edit.categoryId, actor, current.merchantKey, id],
+			),
 		);
 	}
-	await db.batch(statements);
+	const results = await db.batch(statements);
+	// The statement that decides is the refund's own link, the second one, when there is a link; for a
+	// credit that counts again it is the panel's own update, the first. No change means the amount
+	// didn't fit, and then none of the others applied either.
+	const purchase = linking ? newLink : recounting;
+	if (typeof purchase === "number" && !results[linking ? 1 : 0]?.meta.changes)
+		return {
+			saved: false,
+			refundLeftCents: await refundLeftCents(db, purchase, id),
+		};
+	return { saved: true };
 }
 
 /**
