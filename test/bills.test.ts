@@ -68,7 +68,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
-		expect(html).toContain("Inactive (6)");
+		expect(html).toContain("Inactive (7)");
 		expect(html).not.toContain("No bills yet.");
 	});
 
