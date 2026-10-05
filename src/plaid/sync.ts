@@ -53,6 +53,10 @@ const transient = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 export type SyncSummary = { added: number; modified: number; removed: number };
 export type SyncResult = SyncSummary | { skipped: true };
 
+/** Plaid's cleaned merchant name, or null when it sent none or a blank one (spec §5, decision 67). */
+const merchantNameOf = (transaction: PlaidTransaction) =>
+	transaction.merchant_name?.trim() || null;
+
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
 	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
@@ -287,11 +291,12 @@ export async function syncItem(
 					),
 				);
 				statements.push(
-					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ? WHERE parent_id = (
+					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ?, merchant_name = ? WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents = ?
 				) AND ${OWNS_LOCK}`).bind(
 						transaction.date,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.transaction_id,
 						cents,
 						itemRowId,
@@ -301,8 +306,8 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category, credit_reviewed)
-						 SELECT ?, id, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END FROM accounts
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed)
+						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
@@ -318,6 +323,7 @@ export async function syncItem(
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
 							raw_name = excluded.raw_name,
+							merchant_name = excluded.merchant_name,
 							plaid_category = excluded.plaid_category,
 							updated_at = datetime('now')`,
 					).bind(
@@ -325,6 +331,7 @@ export async function syncItem(
 						transaction.date,
 						cents,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						plaidAmountToCents(transaction.amount),
 						transaction.account_id,
@@ -351,11 +358,12 @@ export async function syncItem(
 					),
 				);
 				statements.push(
-					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ? WHERE parent_id = (
+					env.DB.prepare(`UPDATE transactions SET date = ?, raw_name = ?, merchant_name = ? WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents = ?
 				) AND ${OWNS_LOCK}`).bind(
 						transaction.date,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.transaction_id,
 						cents,
 						itemRowId,
@@ -371,7 +379,7 @@ export async function syncItem(
 							category_confidence = CASE WHEN amount_cents != ? THEN NULL ELSE category_confidence END,
 							jev_category_id = CASE WHEN amount_cents != ? THEN NULL ELSE jev_category_id END,
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
-							amount_cents = ?, raw_name = ?,
+							amount_cents = ?, raw_name = ?, merchant_name = ?,
 							plaid_category = ?,
 							flag_income = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN 0 ELSE flag_income END,
 							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
@@ -389,6 +397,7 @@ export async function syncItem(
 						cents,
 						cents,
 						transaction.name,
+						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						cents,
 						cents,

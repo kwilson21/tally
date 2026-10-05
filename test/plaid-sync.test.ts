@@ -257,6 +257,167 @@ describe("syncItem", () => {
 		).toEqual({ is_split: 1, split_removed_from_cents: null });
 	});
 
+	it("stores Plaid's merchant_name on added transactions, and null when Plaid sends none or a blank one", async () => {
+		const id = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								transaction_id: "named",
+								name: "TARGET 1234",
+								merchant_name: "Target",
+							}),
+							transaction({ transaction_id: "null", merchant_name: null }),
+							transaction({ transaction_id: "blank", merchant_name: "  " }),
+							// JSON drops undefined, so the field is absent, as for a payment with no merchant.
+							transaction({
+								transaction_id: "absent",
+								merchant_name: undefined,
+							}),
+						],
+					}),
+				),
+			),
+		);
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT plaid_transaction_id AS id, merchant_name, pending FROM transactions ORDER BY transactions.id",
+				).all()
+			).results,
+		).toEqual([
+			{ id: "named", merchant_name: "Target", pending: 0 },
+			{ id: "null", merchant_name: null, pending: 0 },
+			{ id: "blank", merchant_name: null, pending: 0 },
+			{ id: "absent", merchant_name: null, pending: 0 },
+		]);
+	});
+
+	it("updates merchant_name on modified transactions, including a part of a split, and clears it when Plaid drops it", async () => {
+		const id = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ merchant_name: null })] })),
+			),
+		);
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id AS accountId, date, raw_name AS rawName FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number; accountId: number; date: string; rawName: string }>();
+		await env.DB.batch([
+			env.DB.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?").bind(
+				parent?.id,
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (?, ?, 600, ?, ?), (?, ?, 634, ?, ?)",
+			).bind(
+				parent?.accountId,
+				parent?.date,
+				parent?.rawName,
+				parent?.id,
+				parent?.accountId,
+				parent?.date,
+				parent?.rawName,
+				parent?.id,
+			),
+		]);
+		const merchantNames = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT merchant_name FROM transactions ORDER BY id",
+				).all()
+			).results.map((r) => r.merchant_name);
+		expect(await merchantNames()).toEqual([null, null, null]);
+
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({ modified: [transaction({ merchant_name: "Shop Co" })] }),
+				),
+			),
+		);
+		expect(await merchantNames()).toEqual(["Shop Co", "Shop Co", "Shop Co"]);
+
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(page({ modified: [transaction({ merchant_name: null })] })),
+			),
+		);
+		expect(await merchantNames()).toEqual([null, null, null]);
+	});
+
+	it("keeps a pending transaction out, as before: this only adds the column", async () => {
+		const id = await addItem();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [transaction({ transaction_id: "p", pending: true })],
+					}),
+				),
+			),
+		);
+
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions").first(),
+		).toEqual({ n: 0 });
+	});
+
+	it("matches a bill from raw names that share Plaid's merchant name", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Card', 1234, 27, 'monthly', 'Target')",
+		).run();
+
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								transaction_id: "a",
+								date: "2026-08-27",
+								name: "TARGET 1234",
+								merchant_name: "Target",
+							}),
+							transaction({
+								transaction_id: "b",
+								date: "2026-09-27",
+								name: "TARGET 5678",
+								merchant_name: "Target",
+							}),
+						],
+					}),
+				),
+			),
+		);
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT bp.period, t.raw_name FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id WHERE bp.status = 'linked' ORDER BY bp.period",
+				).all()
+			).results,
+		).toEqual([
+			{ period: "2026-08", raw_name: "TARGET 1234" },
+			{ period: "2026-09", raw_name: "TARGET 5678" },
+		]);
+	});
+
 	it("preserves a stored balance when accounts/get returns current null", async () => {
 		const id = await addItem();
 		await syncItem(

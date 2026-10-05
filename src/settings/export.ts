@@ -1,3 +1,4 @@
+import { merchantKeySql } from "../db/merchant-key";
 import { tidyName } from "../transactions/tidy-name";
 
 const EXPORT_COLUMNS = {
@@ -11,7 +12,7 @@ const EXPORT_COLUMNS = {
 		(SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank_disconnected`,
 	balance_history: "account_id, date, balance_cents",
 	transactions:
-		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents",
+		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending",
 	bills:
 		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active",
 	bill_payments:
@@ -40,7 +41,7 @@ function csvText(value: string | null): string {
 type CsvRow = {
 	date: string;
 	raw_name: string;
-	merchant_name: string | null;
+	display_name: string | null;
 	amount_cents: number;
 	category: string | null;
 	excluded: number;
@@ -51,11 +52,11 @@ type CsvRow = {
 export async function transactionsCsv(db: D1Database): Promise<string> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.date, t.raw_name, m.display_name AS merchant_name, t.amount_cents,
+			`SELECT t.date, t.raw_name, m.display_name, t.amount_cents,
 				c.name AS category, t.excluded, t.note, a.name AS account
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
-			LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 			LEFT JOIN categories c ON c.id = t.category_id
 			WHERE t.is_split = 0
 			ORDER BY t.date DESC, t.id DESC`,
@@ -75,7 +76,7 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 		...results.map((row) => [
 			row.date,
 			csvText(row.raw_name),
-			csvText(row.merchant_name ?? tidyName(row.raw_name)),
+			csvText(row.display_name ?? tidyName(row.raw_name)),
 			exportDollars(row.amount_cents),
 			csvText(row.category),
 			row.excluded === 1,

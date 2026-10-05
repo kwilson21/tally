@@ -584,7 +584,7 @@ describe("linking a refund", () => {
 		expect(pending).toContain(PURCHASE);
 		expect(pending).not.toContain(REFUND);
 		const group = (await organizeGroups(db)).find((g) =>
-			g.rawNames.includes("REFUND SHOP"),
+			g.merchantKeys.includes("REFUND SHOP"),
 		);
 		const uncategorized = await db
 			.prepare(

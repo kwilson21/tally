@@ -3,6 +3,7 @@ import {
 	countedCategorySql,
 	FOLLOWS_PURCHASE,
 } from "../db/counted-month";
+import { merchantKeySql } from "../db/merchant-key";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
@@ -10,44 +11,47 @@ import { tidyName } from "./tidy-name";
 const NEEDS_CATEGORY = `${countedCategorySql()} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 const NEEDS_CATEGORY_UPDATE =
 	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0 AND (amount_cents >= 0 OR credit_reviewed = 1) AND (refund_of_id IS NULL OR refund_of_id IN (SELECT id FROM transactions WHERE excluded = 1))";
+const KEY = merchantKeySql("t");
+const KEY_UPDATE = merchantKeySql("transactions");
 const CHUNK_SIZE = 90;
 
 export type OrganizeGroup = {
 	name: string;
 	count: number;
 	totalCents: number;
-	rawNames: string[];
+	/** The group's merchant keys (Plaid's merchant name, or the raw name when it sent none), one `merchants` row each. */
+	merchantKeys: string[];
 };
 
-/** Aggregates transactions in SQL, then combines raw merchants that share a shown name. */
+/** Aggregates transactions in SQL by merchant key, then combines merchants that share a shown name. */
 export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.raw_name AS rawName, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
+			`SELECT ${KEY} AS merchantKey, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
 				m.display_name AS displayName
-			FROM transactions t LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${KEY}
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_CATEGORY}
-			GROUP BY t.raw_name, m.display_name`,
+			GROUP BY ${KEY}, m.display_name`,
 		)
 		.all<{
-			rawName: string;
+			merchantKey: string;
 			count: number;
 			totalCents: number;
 			displayName: string | null;
 		}>();
 	const groups = new Map<string, OrganizeGroup>();
 	for (const row of results) {
-		const name = row.displayName ?? tidyName(row.rawName);
+		const name = row.displayName ?? tidyName(row.merchantKey);
 		const group = groups.get(name) ?? {
 			name,
 			count: 0,
 			totalCents: 0,
-			rawNames: [],
+			merchantKeys: [],
 		};
 		group.count += row.count;
 		group.totalCents += row.totalCents;
-		group.rawNames.push(row.rawName);
+		group.merchantKeys.push(row.merchantKey);
 		groups.set(name, group);
 	}
 	return [...groups.values()].sort(
@@ -61,12 +65,12 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 /** Categorizes a current merchant group and creates rules for future transactions. */
 export async function saveOrganizeGroup(
 	db: D1Database,
-	rawNames: string[],
+	merchantKeys: string[],
 	categoryId: number,
 	displayName: string | null,
 	updatedBy: string,
 ): Promise<number> {
-	const names = [...new Set(rawNames)];
+	const names = [...new Set(merchantKeys)];
 	if (names.length === 0) return 0;
 	let saved = 0;
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
@@ -74,7 +78,7 @@ export async function saveOrganizeGroup(
 		const marks = chunk.map(() => "?").join(", ");
 		const count = await db
 			.prepare(
-				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND t.raw_name IN (${marks})`,
+				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND ${KEY} IN (${marks})`,
 			)
 			.bind(...chunk)
 			.first<{ n: number }>();
@@ -92,12 +96,12 @@ export async function saveOrganizeGroup(
 				.prepare(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
 						updated_by = ?, updated_at = datetime('now')
-					WHERE ${NEEDS_CATEGORY_UPDATE} AND raw_name IN (${marks})`,
+					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})`,
 				)
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	for (const rawName of names) {
+	for (const merchantKey of names) {
 		statements.push(
 			db
 				.prepare(
@@ -105,7 +109,7 @@ export async function saveOrganizeGroup(
 					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
 						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END`,
 				)
-				.bind(rawName, displayName, categoryId, displayName),
+				.bind(merchantKey, displayName, categoryId, displayName),
 		);
 	}
 	await db.batch(statements);

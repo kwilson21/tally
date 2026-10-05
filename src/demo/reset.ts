@@ -1,5 +1,5 @@
 import { matchBillPayments } from "../bills/match";
-import { buildSeed, monthOffset } from "./seed";
+import { buildSeed, monthOffset, seedMerchantKey } from "./seed";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
 const TABLES_CHILD_FIRST = [
@@ -80,7 +80,7 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 				.prepare(
 					"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)",
 				)
-				.bind(m.rawName, m.displayName, m.defaultCategoryId),
+				.bind(m.key, m.displayName, m.defaultCategoryId),
 		),
 		...seed.budgetAmounts.map((a) =>
 			db
@@ -92,9 +92,9 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		...seed.transactions.map((t) =>
 			db
 				.prepare(
-					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence,
+					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, category_confidence,
 					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, parent_id, refund_of_id, income_source, credit_reviewed, credit_reviewed_by, updated_by)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, 'demo')`,
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, 'demo')`,
 				)
 				.bind(
 					t.id,
@@ -102,6 +102,7 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					t.date,
 					t.amountCents,
 					t.rawName,
+					t.merchantName ?? null,
 					t.categoryId,
 					t.categorySource,
 					t.categoryConfidence,
@@ -170,7 +171,7 @@ function demoBills(
 			"monthly",
 			null,
 			5,
-			"APPLE.COM/BILL",
+			seedMerchantKey("APPLE.COM/BILL"),
 			1,
 		],
 		[
@@ -181,7 +182,7 @@ function demoBills(
 			"monthly",
 			null,
 			5,
-			"GOOGLE *YOUTUBE",
+			seedMerchantKey("GOOGLE *YOUTUBE"),
 			1,
 		],
 		[
@@ -192,10 +193,20 @@ function demoBills(
 			"monthly",
 			null,
 			5,
-			"THE HOME DEPOT #6612",
+			seedMerchantKey("THE HOME DEPOT #6612"),
 			1,
 		],
-		[5, "Internet", 6500, dueSoon, "monthly", null, 5, "AMAZON.COM*RT4K2", 1],
+		[
+			5,
+			"Internet",
+			6500,
+			dueSoon,
+			"monthly",
+			null,
+			5,
+			seedMerchantKey("AMAZON.COM*RT4K2"),
+			1,
+		],
 		// Yearly, paid three months ago, so its next one is upcoming (decision 62).
 		[
 			6,
@@ -205,9 +216,19 @@ function demoBills(
 			"yearly",
 			Number(monthOffset(today, 3).slice(5)),
 			4,
-			"YOUTH SOCCER LEAGUE",
+			seedMerchantKey("YOUTH SOCCER LEAGUE"),
 			1,
 		],
-		[7, "Old phone plan", 4500, 15, "monthly", null, 5, "GOOGLE *YOUTUBE", 0],
+		[
+			7,
+			"Old phone plan",
+			4500,
+			15,
+			"monthly",
+			null,
+			5,
+			seedMerchantKey("GOOGLE *YOUTUBE"),
+			0,
+		],
 	];
 }
