@@ -29,6 +29,8 @@ type Option = {
 	recommended?: string;
 	/** Drawn at desktop width instead of on a phone. */
 	desktop?: boolean;
+	/** Drawn as the family app, without the demo banner. */
+	family?: boolean;
 	screen: Child;
 };
 
@@ -62,7 +64,9 @@ function Options({ options }: { options: Option[] }) {
 							{o.screen}
 						</DesktopFrame>
 					) : (
-						<PhoneFrame label={`${o.name}, on a phone`}>{o.screen}</PhoneFrame>
+						<PhoneFrame label={`${o.name}, on a phone`} demo={!o.family}>
+							{o.screen}
+						</PhoneFrame>
 					)}
 				</div>
 			))}
@@ -1457,7 +1461,195 @@ const netEarly = (
 	</>
 );
 
-/** P23–P32 on the proposals page. */
+// ---------------------------------------------------------------------------------------------
+// P33: "Why?" links beside what a rule decides, and How Tally works in the family app (decision 64).
+
+type WhyLook = "word" | "mark";
+
+/** A prototype of the "Why?" link: the word in terracotta, or a small circled question mark. */
+function Why({ look, topic }: { look: WhyLook; topic: string }) {
+	return look === "word" ? (
+		<a
+			href="#p33-why"
+			aria-label={`Why: ${topic}`}
+			class="inline-flex min-h-11 items-center text-sm"
+		>
+			Why?
+		</a>
+	) : (
+		<a
+			href="#p33-why"
+			class="inline-flex size-11 shrink-0 items-center justify-center text-accent"
+		>
+			<span class="sr-only">Why: {topic}</span>
+			<svg
+				viewBox="0 0 24 24"
+				class="size-5"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.75"
+				stroke-linecap="round"
+				aria-hidden="true"
+			>
+				<circle cx="12" cy="12" r="9" />
+				<path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6" />
+				<line x1="12" y1="17" x2="12" y2="17.01" />
+			</svg>
+		</a>
+	);
+}
+
+/** A group heading with its "Why?" after it. */
+function WhyHeading({
+	icon,
+	tone,
+	look,
+	children,
+}: {
+	icon: "check" | "arrow-up";
+	tone: string;
+	look: WhyLook;
+	children: string;
+}) {
+	return (
+		<h2 class="mt-3 flex items-center gap-2 text-sm text-muted">
+			<span class={tone}>
+				<Icon name={icon} class="size-4" />
+			</span>
+			{children}
+			{look === "word" && <span aria-hidden="true">·</span>}
+			<Why look={look} topic={children.toLowerCase()} />
+		</h2>
+	);
+}
+
+/** Trends with its hints: How this works under the title, Why? after the sentence and each group. */
+function trendsWhy(look: WhyLook) {
+	return (
+		<>
+			<Title>Trends</Title>
+			<a href="#p33-why" class="inline-flex min-h-11 items-center text-sm">
+				How this works
+			</a>
+			<p class="text-lg text-muted">Spent so far in October</p>
+			<p class="font-serif text-6xl font-semibold tracking-tight">
+				{dollars(SO_FAR.now)}
+			</p>
+			<p class="mt-1 flex flex-wrap items-center gap-x-2 font-serif text-lg italic">
+				{dollars(SO_FAR.before - SO_FAR.now)} less than by this time in
+				September.
+				<span class="font-sans not-italic">
+					<Why look={look} topic="this month against last" />
+				</span>
+			</p>
+			<WhyHeading icon="check" tone="text-ok" look={look}>
+				Going well
+			</WhyHeading>
+			<ul class="divide-y divide-rule border-y border-rule">
+				<InsightRow t={GROCERIES} line="5 months under budget" />
+				<InsightRow t={KIDS} line="5 months under budget" />
+			</ul>
+			<WhyHeading icon="arrow-up" tone="text-ink" look={look}>
+				Worth a look
+			</WhyHeading>
+			<ul class="divide-y divide-rule border-y border-rule">
+				<InsightRow t={EATING_OUT} line="Up 4 months running" />
+			</ul>
+		</>
+	);
+}
+
+/** Transactions with a suggested name, and the edit panel's guess line, each with its Why?. */
+function transactionsWhy(look: WhyLook) {
+	return (
+		<Sheet
+			behind={
+				<>
+					<Title>Transactions</Title>
+					<p class="mt-2 flex flex-wrap items-center gap-x-2 text-muted">
+						Dashed names are suggestions.
+						<Why look={look} topic="suggested names" />
+					</p>
+					<ul class="divide-y divide-rule">
+						<SuggestedRow
+							name="Blue Bottle Coffee"
+							cents={650}
+							cat={CATS.eatingOut}
+						/>
+						<MaybeRow
+							name="Lupita's Taqueria"
+							cents={2240}
+							maybe="Eating Out"
+						/>
+					</ul>
+				</>
+			}
+		>
+			<div>
+				<p class="text-sm text-muted">TST* LUPITAS TAQ</p>
+				<h2 class="font-serif text-4xl font-semibold tracking-tight">
+					Lupita's Taqueria
+				</h2>
+				<p class="font-serif text-4xl font-semibold">−$22.40</p>
+			</div>
+			<div class="flex flex-wrap gap-2">
+				<span class="rounded-full border border-dashed border-ink">
+					<Chip
+						type="radio"
+						name={`p33-${look}`}
+						value="2"
+						icon={<CategoryIcon icon="eating-out" color="cat-plum" />}
+					>
+						Eating Out · Suggested
+					</Chip>
+				</span>
+				<Chip
+					type="radio"
+					name={`p33-${look}`}
+					value="1"
+					icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+				>
+					Groceries
+				</Chip>
+			</div>
+			<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+				Tally's guess · 64% sure
+				{look === "word" && <span aria-hidden="true">·</span>}
+				<Why look={look} topic="Tally's guess" />
+			</p>
+		</Sheet>
+	);
+}
+
+/** Both: where a Why? leads, as the family sees it: their own numbers, no architecture part. */
+const howFamily = (
+	<>
+		<Title>How Tally works</Title>
+		<p class="mt-2 text-muted">
+			Each part of Tally in a sentence, worked out with your numbers.
+		</p>
+		<h2 class="mt-6 font-serif text-3xl font-semibold">Trends</h2>
+		<p class="mt-2">
+			Trends compares this month with last month and shows which categories are
+			going well.
+		</p>
+		<ul class="mt-3 list-disc pl-5">
+			<li>
+				This month so far is compared with the same days of last month (Oct 1–5
+				against Sep 1–5).
+			</li>
+			<li>Going well: under budget 3 or more months running.</li>
+			<li>Worth a look: spending up 3 or more months running.</li>
+		</ul>
+		<p class="mt-4 bg-band px-4 py-3">
+			<span class="font-semibold">With your numbers: </span>Groceries was under
+			its $900 budget in May, June, July, August and September, so it's going
+			well.
+		</p>
+	</>
+);
+
+/** P23–P33 on the proposals page. */
 export function Phase4Proposals() {
 	return (
 		<>
@@ -1818,6 +2010,57 @@ export function Phase4Proposals() {
 							name: "Both · The edit panel",
 							note: "The suggestion is the first chip, dashed and marked Suggested, with how sure Jev was.",
 							screen: maybePanel,
+						},
+					]}
+				/>
+			</Specimen>
+
+			<Specimen
+				id="p33-why"
+				title="P33 · Why? links"
+				tier="visual"
+				sentence="A small link beside anything a rule decides, to the part of How Tally works that explains it (decision 64). Pick how it looks."
+			>
+				<Fixed>
+					where they go (decision 64): How this works under each screen's title,
+					and a Why? after the trends sentence, Going well, Worth a look, the
+					net-worth sentence, the suggested-names line, Tally's guess and a
+					suggested category. Each is a 44px link with its own name for screen
+					readers ("Why: going well"). How Tally works is in the family app too,
+					with your numbers and without the architecture part.
+				</Fixed>
+				<Options
+					options={[
+						{
+							name: "Option A · The word “Why?”",
+							note: "Terracotta “Why?” after the label, separated by a dot, like How this works.",
+							tradeoff: "a few more words on the screen.",
+							recommended:
+								"terracotta already means “you can tap this”, and a word says what it does without guessing.",
+							screen: trendsWhy("word"),
+						},
+						{
+							name: "Option A · Transactions and the panel",
+							note: "The same word after the suggested-names line and Tally's guess.",
+							screen: transactionsWhy("word"),
+						},
+						{
+							name: "Option B · A small circled ?",
+							note: "A terracotta question mark in a circle after the label.",
+							tradeoff:
+								"quieter, but an icon alone has to be learned, and a ? can read as help or an error.",
+							screen: trendsWhy("mark"),
+						},
+						{
+							name: "Option B · Transactions and the panel",
+							note: "The same mark after the suggested-names line and Tally's guess.",
+							screen: transactionsWhy("mark"),
+						},
+						{
+							name: "Both · Where a Why? leads",
+							note: "How Tally works in the family app: the rule in plain words and a worked example with your numbers.",
+							family: true,
+							screen: howFamily,
 						},
 					]}
 				/>
