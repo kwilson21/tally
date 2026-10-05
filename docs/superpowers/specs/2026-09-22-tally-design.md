@@ -197,7 +197,8 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 | **More → Documents** | Upload, list, download, and delete PDFs | 8 |
 | **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review; Download your data (§8.1) | — |
 | **Transactions → Organize** | Transactions that need a category, grouped by merchant, each group categorized in one go (§8.1) | 3 |
-| **Demo only** | A banner on every page ("Demo data. Nothing here is real."), a "Things to try" list, and a "How it works" page | — |
+| **How Tally works** | One section per feature, in the demo and the family app; the architecture part is demo only (decision 64) | — |
+| **Demo only** | A banner on every page ("Demo data. Nothing here is real.") and a "Things to try" list | — |
 
 ### 8.1 Brought back from the original app (decision 57)
 
@@ -267,9 +268,9 @@ The "How Tally works" page has two parts:
 1. **Architecture:** the system diagram (built as SVG) and the one-sentence explanation of each part (§4).
 2. **One section per feature (all 8),** each with the feature's one-sentence explanation, its rule in plain words (taken from §6 and §6.1), a small diagram of the rule, and a small worked example using the demo's own numbers. Code draws the diagram from the same numbers as the example (#61), as inline SVG with a title and description for screen readers. For example: "Safe to spend = $1,850 budget − $424 spent − $142 overdue bill."
 
-Every screen has a small "How this works" link to its feature's section. In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
+Every screen has a small "How this works" link to its feature's section. From Phase 4, anything a rule decides also gets a small "Why?" link beside it to its exact section: Going well and Worth a look on Trends, the net-worth sentence, a dashed suggested name, a "Maybe …" tag, "Tally's guess" and a suggested category (decision 64). In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
 
-**Demo only (#13):** the "How Tally works" page (`/how-it-works`), the Things to try block and the "How this works" links appear only when `DEMO` is `"true"`; outside the demo the page is a 404. **Things to try** is a short block on Home, below the Budget list (#92, decision 46: safe to spend comes first on a phone), with three items, each linking to where it's done: "Give a transaction a category" (the Needs category list), "Set a rule for a merchant" and "Rename a merchant" (the Local Bakery edit panel), plus a "How Tally works" link. It has no close button: the demo resets nightly and remembering a dismissal would need saved state. It is the demo's only onboarding for now; onboarding (#95, decision 49) replaces it. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
+**In both environments (decision 64, replacing #13's demo-only rule):** the "How Tally works" page (`/how-it-works`), the "How this works" links and the "Why?" links appear in the demo and the family app. In the family app the page leaves out the architecture part, and each worked example uses the household's own numbers ("With your numbers: …" instead of "In the demo: …"). **Demo only (#13):** the Things to try block. **Things to try** is a short block on Home, below the Budget list (#92, decision 46: safe to spend comes first on a phone), with three items, each linking to where it's done: "Give a transaction a category" (the Needs category list), "Set a rule for a merchant" and "Rename a merchant" (the Local Bakery edit panel), plus a "How Tally works" link. It has no close button: the demo resets nightly and remembering a dismissal would need saved state. It is the demo's only onboarding for now; onboarding (#95, decision 49) replaces it. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
 
 ## 10. Errors, security, and operations
 
