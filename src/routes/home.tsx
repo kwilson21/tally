@@ -3,6 +3,7 @@ import type { Child } from "hono/jsx";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { householdToday, monthName } from "../dates";
+import { bankSyncs } from "../db/accounts";
 import {
 	type BudgetCategory,
 	budgetCategory,
@@ -12,6 +13,7 @@ import {
 } from "../db/budgets";
 import { loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
+import { flaggedBanks, staleBankWords } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
@@ -110,6 +112,11 @@ async function renderHome(
 	const { count, spentCents } = summary.uncategorized;
 	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
 	const demo = c.env.DEMO === "true";
+	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
+	// no real banks, so it never asks.
+	const bankLine = demo
+		? null
+		: staleBankWords(flaggedBanks(await bankSyncs(c.env.DB), today), today);
 	// Counted spending by category, income left out, as Home counts it (spec §6).
 	const spent = (id: number) =>
 		data.transactions
@@ -130,6 +137,7 @@ async function renderHome(
 							month={monthName(month)}
 							safeToSpendCents={summary.safeToSpendCents}
 							status={statusSentence(summary.categories)}
+							bankLine={bankLine ?? undefined}
 							band={
 								count > 0
 									? {
