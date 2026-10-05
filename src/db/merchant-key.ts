@@ -21,7 +21,16 @@ export function merchantKeySql(alias: string): string {
 	return `COALESCE(NULLIF(${alias}.merchant_name, ''), ${alias}.raw_name)`;
 }
 
-type MerchantColumn = "display_name" | "suggested_name" | "default_category_id";
+type MerchantColumn =
+	| "display_name"
+	| "suggested_name"
+	| "default_category_id"
+	| "not_a_bill";
+
+/** True when a key row (flag 0) exists under the merchant key. */
+function hasKeyRowSql(keySql: string): string {
+	return `EXISTS (SELECT 1 FROM merchants k WHERE k.raw_text = 0 AND k.raw_name = ${keySql})`;
+}
 
 /** A `merchants` column on the key row (flag 0) saved under the merchant key. */
 export function keyRowColumnSql(
@@ -40,44 +49,70 @@ export function rawTextRowColumnSql(
 }
 
 /**
- * A `merchants` column for a merchant, given SQL for its key and for its raw name: the value on the
- * row saved under the key, otherwise on the flagged row saved under the raw text. Per column, so a row
- * under the key that holds only a rule still shows the name saved under the raw text.
+ * The governing row of a charge: the one `merchants` row it reads its rule, name and Not a bill from. It
+ * is the key row (flag 0, text = the charge's key) if there is one, otherwise the flagged row (flag 1,
+ * text = the charge's raw name) if there is one, otherwise none. Reads (below) and writes
+ * (`governingRow`) use this one definition, so a change shows where it is saved.
+ *
+ * A `merchants` column for a merchant, given SQL for its key and for its raw name: the governing row's.
  */
 export function merchantColumnOfSql(
 	keySql: string,
 	rawNameSql: string,
 	column: MerchantColumn,
 ): string {
-	return `COALESCE(${keyRowColumnSql(keySql, column)}, ${rawTextRowColumnSql(rawNameSql, column)})`;
+	return `CASE WHEN ${hasKeyRowSql(keySql)} THEN ${keyRowColumnSql(keySql, column)} ELSE ${rawTextRowColumnSql(rawNameSql, column)} END`;
 }
 
 /**
- * Which of these keys a person's write goes to the flagged bank-text row for: those with a flagged row
- * that no transaction has as its Plaid merchant name, so the text is only ever bank text, and the row is
- * the one that already governs those charges. Every other key's write goes to its key row (flag 0), which
- * shares the text with a flagged row when an unrelated merchant name equals an old bank text, and a key
- * row's write never touches a flagged row. Merchant rows are written only through this choice.
+ * The governing row of a charge (`merchantColumnOfSql`), as the text and flag that identify it, or NULL
+ * when there is none: SQL for its key and raw name.
  */
-export async function bankTextRowKeys(
+function governingSql(
+	keySql: string,
+	rawNameSql: string,
+): { name: string; flag: string } {
+	const flagged = `EXISTS (SELECT 1 FROM merchants f WHERE f.raw_text = 1 AND f.raw_name = ${rawNameSql})`;
+	return {
+		name: `CASE WHEN ${hasKeyRowSql(keySql)} THEN ${keySql} WHEN ${flagged} THEN ${rawNameSql} END`,
+		flag: `CASE WHEN ${hasKeyRowSql(keySql)} THEN 0 WHEN ${flagged} THEN 1 END`,
+	};
+}
+
+/**
+ * The one row a person's change should be saved to: the governing row that every charge in scope (one
+ * transaction, or every transaction with a merchant key) reads. Null when there is none, or the charges
+ * read different rows, and then the change is saved to the key row (flag 0), created if need be, which
+ * every charge with that key reads from then on. A flagged row is therefore only ever edited, never
+ * created, and only when it is the row the charges already read.
+ */
+export async function governingRow(
 	db: D1Database,
-	keys: string[],
-): Promise<Set<string>> {
-	const found = new Set<string>();
-	const unique = [...new Set(keys)];
-	for (let i = 0; i < unique.length; i += 90) {
-		const chunk = unique.slice(i, i + 90);
-		const { results } = await db
-			.prepare(
-				`SELECT m.raw_name AS key FROM merchants m
-				 WHERE m.raw_text = 1 AND m.raw_name IN (${chunk.map(() => "?").join(", ")})
-				   AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.merchant_name = m.raw_name)`,
-			)
-			.bind(...chunk)
-			.all<{ key: string }>();
-		for (const row of results) found.add(row.key);
-	}
-	return found;
+	scope: { transactionId: number } | { key: string },
+): Promise<{ name: string; flag: 0 | 1 } | null> {
+	const { name, flag } = governingSql(merchantKeySql("t"), "t.raw_name");
+	const [where, arg] =
+		"transactionId" in scope
+			? ["t.id = ?", scope.transactionId]
+			: [`${merchantKeySql("t")} = ?`, scope.key];
+	const { results } = await db
+		.prepare(
+			`SELECT DISTINCT ${name} AS name, ${flag} AS flag FROM transactions t WHERE ${where}`,
+		)
+		.bind(arg)
+		.all<{ name: string | null; flag: 0 | 1 | null }>();
+	const [only] = results;
+	return results.length === 1 && only?.name != null && only.flag != null
+		? { name: only.name, flag: only.flag }
+		: null;
+}
+
+/**
+ * SQL for "no key row (flag 0) exists under this transaction's key": the charges a flagged row governs are
+ * those with its text as their raw name that also pass this (`alias` as for `merchantKeySql`).
+ */
+export function hasNoKeyRowSql(alias: string): string {
+	return `NOT ${hasKeyRowSql(merchantKeySql(alias))}`;
 }
 
 /** `merchantColumnOfSql` for a transaction (see `merchantKeySql` for `alias`). */
@@ -92,12 +127,12 @@ export function merchantColumnSql(
 	);
 }
 
-/** True when the row under the merchant's key, or its flagged row under the raw text, is marked "not a bill". */
+/** True when the governing row is marked "not a bill". */
 export function merchantNotABillSql(
 	keySql: string,
 	rawNameSql: string,
 ): string {
-	return `EXISTS (SELECT 1 FROM merchants m WHERE m.not_a_bill = 1 AND ((m.raw_text = 0 AND m.raw_name = ${keySql}) OR (m.raw_text = 1 AND m.raw_name = ${rawNameSql})))`;
+	return `(COALESCE(${merchantColumnOfSql(keySql, rawNameSql, "not_a_bill")}, 0) = 1)`;
 }
 
 /**

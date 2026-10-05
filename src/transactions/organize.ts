@@ -4,10 +4,9 @@ import {
 	FOLLOWS_PURCHASE,
 } from "../db/counted-month";
 import {
-	bankTextRowKeys,
-	keyRowColumnSql,
+	governingRow,
+	merchantColumnSql,
 	merchantKeySql,
-	rawTextRowColumnSql,
 } from "../db/merchant-key";
 import { tidyName } from "./tidy-name";
 
@@ -37,15 +36,15 @@ const byCountThenName = (a: [string, number], b: [string, number]) =>
 /**
  * Aggregates transactions in SQL, once per merchant key and bank text, then combines the keys that
  * share a shown name. A key is one merchant whatever bank texts its charges carry, so it is always one
- * group, and saving it categorizes all of its charges. Its name is the one saved under the key; failing
- * that, the name saved under the bank text most of its charges carry (a tie goes to the first alphabetically).
+ * group, and saving it categorizes all of its charges. Its name is the one its charges show, read from
+ * the row that governs each (see governingRow); where they show different names, the one most of them
+ * show (a tie goes to the first alphabetically).
  */
 export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT ${KEY} AS merchantKey, t.raw_name AS rawName, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
-				${keyRowColumnSql(KEY, "display_name")} AS keyName,
-				${rawTextRowColumnSql("t.raw_name", "display_name")} AS rawRowName
+				${merchantColumnSql("t", "display_name")} AS shownName
 			FROM transactions t
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_CATEGORY}
@@ -56,16 +55,14 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			rawName: string;
 			count: number;
 			totalCents: number;
-			keyName: string | null;
-			rawRowName: string | null;
+			shownName: string | null;
 		}>();
 	const byKey = new Map<
 		string,
 		{
 			count: number;
 			totalCents: number;
-			keyName: string | null;
-			oldNames: Map<string, number>;
+			shownNames: Map<string, number>;
 			bankTexts: Map<string, number>;
 		}
 	>();
@@ -73,25 +70,24 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 		const key = byKey.get(row.merchantKey) ?? {
 			count: 0,
 			totalCents: 0,
-			keyName: row.keyName,
-			oldNames: new Map<string, number>(),
+			shownNames: new Map<string, number>(),
 			bankTexts: new Map<string, number>(),
 		};
 		key.bankTexts.set(row.rawName, row.count);
 		key.count += row.count;
 		key.totalCents += row.totalCents;
-		if (row.rawRowName)
-			key.oldNames.set(
-				row.rawRowName,
-				(key.oldNames.get(row.rawRowName) ?? 0) + row.count,
+		if (row.shownName)
+			key.shownNames.set(
+				row.shownName,
+				(key.shownNames.get(row.shownName) ?? 0) + row.count,
 			);
 		byKey.set(row.merchantKey, key);
 	}
 	const groups = new Map<string, OrganizeGroup>();
 	const bankTextCounts = new Map<string, Map<string, number>>();
 	for (const [merchantKey, key] of byKey) {
-		const oldName = [...key.oldNames].sort(byCountThenName)[0]?.[0];
-		const name = key.keyName ?? oldName ?? tidyName(merchantKey);
+		const shown = [...key.shownNames].sort(byCountThenName)[0]?.[0];
+		const name = shown ?? tidyName(merchantKey);
 		const group = groups.get(name) ?? {
 			name,
 			count: 0,
@@ -160,9 +156,12 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	// A key that is only bank text takes its flagged row, anything else its key row (see bankTextRowKeys).
-	const bankText = await bankTextRowKeys(db, names);
 	for (const merchantKey of names) {
+		// The row every charge with this key reads, else the key's own (see governingRow).
+		const target = (await governingRow(db, { key: merchantKey })) ?? {
+			name: merchantKey,
+			flag: 0 as const,
+		};
 		statements.push(
 			db
 				.prepare(
@@ -170,13 +169,7 @@ export async function saveOrganizeGroup(
 					ON CONFLICT(raw_name, raw_text) DO UPDATE SET default_category_id = excluded.default_category_id,
 						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END`,
 				)
-				.bind(
-					merchantKey,
-					bankText.has(merchantKey) ? 1 : 0,
-					displayName,
-					categoryId,
-					displayName,
-				),
+				.bind(target.name, target.flag, displayName, categoryId, displayName),
 		);
 	}
 	await db.batch(statements);

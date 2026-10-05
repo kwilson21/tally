@@ -20,7 +20,7 @@ import {
 } from "../bills/write";
 import { householdToday, ordinal } from "../dates";
 import {
-	bankTextRowKeys,
+	governingRow,
 	isMerchantTextSql,
 	merchantColumnSql,
 	merchantTextArgs,
@@ -551,14 +551,16 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	const before = await loadBillSuggestions(c.env.DB, today);
 	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
 	if (dismissedIndex < 0) return c.notFound();
+	// Saved to the row every charge with this key reads, else the key's own (see governingRow).
+	const target = (await governingRow(c.env.DB, { key: merchant })) ?? {
+		name: merchant,
+		flag: 0 as const,
+	};
 	const result = await c.env.DB.prepare(
 		`INSERT INTO merchants(raw_name,raw_text,not_a_bill) VALUES(?,?,1)
 		 ON CONFLICT(raw_name,raw_text) DO UPDATE SET not_a_bill=1`,
 	)
-		.bind(
-			merchant,
-			(await bankTextRowKeys(c.env.DB, [merchant])).has(merchant) ? 1 : 0,
-		)
+		.bind(target.name, target.flag)
 		.run();
 	if (!result.meta.changes) return c.notFound();
 	const headers = {
