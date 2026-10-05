@@ -468,6 +468,53 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 		expect(await recorded()).toBe(1);
 	});
 
+	it("saves what the form says now when the same key is posted again with changes, still as one transaction", async () => {
+		const ofKey = () =>
+			env.DB.prepare(
+				"SELECT id, date, amount_cents, raw_name, category_id, note, category_source, flag_income, updated_by FROM transactions WHERE entry_key = ?",
+			)
+				.bind(KEY)
+				.all();
+		const yesterday = "2026-10-02";
+		await post({ entry_key: KEY, note: "Peaches" });
+		const first = (await ofKey()).results;
+		expect(first).toHaveLength(1);
+		// The reply was lost; the person fixes the still-open form and taps Add again.
+		const again = await post({
+			entry_key: KEY,
+			amount: "31.10",
+			merchant: "Retried market, corrected",
+			category: "2",
+			date: yesterday,
+			note: "",
+		});
+		expect(again.res.status).toBe(200);
+		expect(
+			JSON.parse(again.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Added Retried market, corrected");
+		const rows = (await ofKey()).results;
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			// Still the same transaction.
+			id: first[0]?.id,
+			amount_cents: 3110,
+			raw_name: "Retried market, corrected",
+			category_id: 2,
+			date: yesterday,
+			note: null,
+			category_source: "user",
+			flag_income: 0,
+			updated_by: "demo",
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'Retried market%'",
+				).first<{ n: number }>()
+			)?.n,
+		).toBe(1);
+	});
+
 	it("records one transaction when the two posts arrive at once", async () => {
 		const [a, b] = await Promise.all([
 			post({ entry_key: KEY }),

@@ -53,11 +53,8 @@ const load = Object.values(import.meta.glob("../public/js/toast.js"))[0] as
 	| (() => Promise<unknown>)
 	| undefined;
 
-/**
- * Puts a page in place, then runs toast.js against it. `defaultTimeout` is htmx's own
- * (htmx.config.defaultTimeout, 60 seconds out of the box; 0 turns timeouts off).
- */
-async function page(defaultTimeout = 60000) {
+/** Puts a page in place, then runs toast.js against it. */
+async function page() {
 	const toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const body = new EventTarget();
@@ -74,10 +71,6 @@ async function page(defaultTimeout = 60000) {
 	vi.stubGlobal("location", { search: "", pathname: "/", hash: "" });
 	vi.stubGlobal("history", { replaceState: () => {} });
 	vi.stubGlobal("requestAnimationFrame", (run: () => void) => run());
-	vi.stubGlobal("htmx", {
-		config: { defaultTimeout },
-		parseInterval: (value: string | number) => Number(value),
-	});
 	vi.resetModules();
 	await load?.();
 	return { document, body, toasts };
@@ -162,20 +155,40 @@ describe("a request that never reached Tally", () => {
 });
 
 // htmx 4 aborts a request that timed out exactly as it aborts one that was replaced (hx-sync) or
-// cancelled (htmx:abort): an AbortError with no reason, and no timeout event of its own. So a
-// timeout is known by how long the request ran: as long as its limit.
+// cancelled (htmx:abort): ctx.request.abort(), an AbortError with no reason, and no timeout event.
+// So Layout turns htmx's own timeout off (defaultTimeout: 0) and toast.js keeps the 60 seconds
+// itself: when its timer fires it marks the request as timed out, then aborts it. Only a marked
+// request's AbortError is a failure.
 describe("a request that timed out", () => {
-	const aborted = () =>
-		new DOMException("The operation was aborted.", "AbortError");
-	const begin = (document: EventTarget, ctx: object) =>
+	/** A request whose abort(), like htmx's, makes the fetch reject with an AbortError. */
+	const request = (document: EventTarget, method = "POST") => {
+		const ctx: { request: { method: string; abort: () => void } } = {
+			request: {
+				method,
+				abort: vi.fn(() =>
+					fire(document, "htmx:error", {
+						ctx,
+						error: new DOMException("The operation was aborted.", "AbortError"),
+					}),
+				),
+			},
+		};
+		return ctx;
+	};
+	const start = (document: EventTarget, ctx: object) =>
 		fire(document, "htmx:before:request", { ctx });
+	const end = (document: EventTarget, ctx: object) =>
+		fire(document, "htmx:finally:request", { ctx });
 
-	it("says it couldn't save when a POST is aborted after its full 60 seconds", async () => {
+	it("aborts the request itself at 60 seconds and says it couldn't save", async () => {
 		const { document, toasts } = await page();
-		const ctx = { request: { method: "POST" } };
-		begin(document, ctx);
-		vi.advanceTimersByTime(60000);
-		fire(document, "htmx:error", { ctx, error: aborted() });
+		const ctx = request(document);
+		start(document, ctx);
+		vi.advanceTimersByTime(59999);
+		expect(ctx.request.abort).not.toHaveBeenCalled();
+		expect(toasts.children).toHaveLength(0);
+		vi.advanceTimersByTime(1);
+		expect(ctx.request.abort).toHaveBeenCalledTimes(1);
 		expect(toasts.children).toHaveLength(1);
 		const toast = toasts.children[0] as FakeNode;
 		expect(toast.words()).toBe(COULDNT_SAVE);
@@ -184,54 +197,69 @@ describe("a request that timed out", () => {
 
 	it("says it couldn't load when a GET times out", async () => {
 		const { document, toasts } = await page();
-		const ctx = { request: { method: "GET" } };
-		begin(document, ctx);
+		const ctx = request(document, "GET");
+		start(document, ctx);
 		vi.advanceTimersByTime(60000);
-		fire(document, "htmx:error", { ctx, error: aborted() });
 		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_LOAD);
 	});
 
-	it("says nothing when a request is aborted long before its limit: it was replaced or cancelled", async () => {
+	it("says nothing when a request is replaced or cancelled, even just before its limit", async () => {
 		const { document, toasts } = await page();
-		const ctx = { request: { method: "POST" } };
-		begin(document, ctx);
-		vi.advanceTimersByTime(2000);
-		fire(document, "htmx:error", { ctx, error: aborted() });
+		const ctx = request(document);
+		start(document, ctx);
+		vi.advanceTimersByTime(59900);
+		// htmx aborts it (a newer request replaced it); its AbortError arrives, then it finishes.
+		ctx.request.abort();
+		end(document, ctx);
+		expect(toasts.children).toHaveLength(0);
+		// Its timer was cleared with it: nothing fires later.
+		vi.advanceTimersByTime(120000);
+		expect(ctx.request.abort).toHaveBeenCalledTimes(1);
 		expect(toasts.children).toHaveLength(0);
 	});
 
-	it("goes by the request's own timeout when it has one", async () => {
+	it("stops its timer when the request finishes, so a quick reply is never aborted", async () => {
 		const { document, toasts } = await page();
-		const quick = { request: { method: "POST", timeout: 5000 } };
-		begin(document, quick);
-		vi.advanceTimersByTime(5000);
-		fire(document, "htmx:error", { ctx: quick, error: aborted() });
+		const ctx = request(document);
+		start(document, ctx);
+		vi.advanceTimersByTime(1000);
+		end(document, ctx);
+		vi.advanceTimersByTime(120000);
+		expect(ctx.request.abort).not.toHaveBeenCalled();
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("marks only the request that timed out", async () => {
+		const { document, toasts } = await page();
+		const slow = request(document);
+		const other = request(document);
+		start(document, slow);
+		vi.advanceTimersByTime(30000);
+		start(document, other);
+		vi.advanceTimersByTime(30000);
+		expect(slow.request.abort).toHaveBeenCalledTimes(1);
 		expect(toasts.children).toHaveLength(1);
 		vi.advanceTimersByTime(4000);
-		const early = { request: { method: "POST", timeout: 5000 } };
-		begin(document, early);
-		vi.advanceTimersByTime(1000);
-		fire(document, "htmx:error", { ctx: early, error: aborted() });
+		// The other is replaced 10 seconds later: silent, though a request did time out before it.
+		vi.advanceTimersByTime(6000);
+		other.request.abort();
+		end(document, other);
 		expect(toasts.children).toHaveLength(0);
 	});
 
 	it("says nothing for an abort of a request it never saw start", async () => {
 		const { document, toasts } = await page();
-		vi.advanceTimersByTime(60000);
 		fire(document, "htmx:error", {
 			ctx: { request: { method: "POST" } },
-			error: aborted(),
+			error: new DOMException("The operation was aborted.", "AbortError"),
 		});
 		expect(toasts.children).toHaveLength(0);
 	});
 
-	it("says nothing when htmx has timeouts turned off, since then nothing ever times out", async () => {
-		const { document, toasts } = await page(0);
-		const ctx = { request: { method: "POST" } };
-		begin(document, ctx);
-		vi.advanceTimersByTime(120000);
-		fire(document, "htmx:error", { ctx, error: aborted() });
-		expect(toasts.children).toHaveLength(0);
+	it("keeps no timer for an event that carries no request", async () => {
+		const { document } = await page();
+		expect(() => fire(document, "htmx:before:request", {})).not.toThrow();
+		expect(() => fire(document, "htmx:finally:request", {})).not.toThrow();
 	});
 });
 

@@ -87,31 +87,37 @@
 		);
 	}
 	// htmx 4 aborts a request that timed out exactly as it aborts one that was replaced (hx-sync) or
-	// cancelled (htmx:abort): an AbortError with no reason and no timeout event of its own. So a
-	// timeout is known by how long the request ran: as long as its limit, less a second's slack.
-	const startedAt = new WeakMap();
+	// cancelled (htmx:abort): ctx.request.abort(), an AbortError with no reason and no timeout event
+	// of its own. So Layout turns htmx's own timeout off (defaultTimeout: 0) and the 60 seconds are
+	// kept here: when a request's timer fires it is marked as timed out, then aborted, and only a
+	// marked request's AbortError is a failure. The timer stops when the request ends.
+	const REQUEST_TIMEOUT_MS = 60000;
+	const timers = new Map();
+	const timedOut = new WeakSet();
 	document.addEventListener("htmx:before:request", (event) => {
 		const ctx = event.detail?.ctx;
-		if (ctx) startedAt.set(ctx, Date.now());
-	});
-	function timedOut(ctx) {
-		const started = startedAt.get(ctx);
-		const own = ctx.request?.timeout;
-		const { htmx } = globalThis;
-		const limit =
-			Number(
-				own != null ? htmx?.parseInterval(own) : htmx?.config.defaultTimeout,
-			) || 0;
-		return (
-			started !== undefined && limit > 0 && Date.now() - started >= limit - 1000
+		if (!ctx) return;
+		clearTimeout(timers.get(ctx));
+		timers.set(
+			ctx,
+			setTimeout(() => {
+				timedOut.add(ctx);
+				ctx.request?.abort?.();
+			}, REQUEST_TIMEOUT_MS),
 		);
-	}
+	});
+	document.addEventListener("htmx:finally:request", (event) => {
+		const ctx = event.detail?.ctx;
+		if (!ctx) return;
+		clearTimeout(timers.get(ctx));
+		timers.delete(ctx);
+	});
 	document.addEventListener("htmx:error", (event) => {
 		const { ctx, error } = event.detail ?? {};
 		// Only a request has a ctx; htmx also reports a bug in someone's hx-on handler this way.
 		if (!ctx) return;
 		// A request replaced by a newer one, or cancelled, is not a failure; a timeout is.
-		if (error?.name === "AbortError" && !timedOut(ctx)) return;
+		if (error?.name === "AbortError" && !timedOut.has(ctx)) return;
 		failed(ctx);
 	});
 	document.addEventListener("htmx:response:error", (event) => {

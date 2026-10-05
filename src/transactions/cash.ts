@@ -66,8 +66,8 @@ export function entryKeyOf(raw: unknown): string | null {
 
 /**
  * Creates the guarded local account and transaction in one D1 batch. The same entry key a second
- * time (the form posted again after a lost reply or a failed render) records nothing more; the
- * caller answers it as a success, since the first post saved it.
+ * time (the form posted again after a lost reply or a failed render) saves what the form says now
+ * over the same row, so the person's last edit wins and it is still one transaction.
  */
 export async function saveCash(
 	db: D1Database,
@@ -88,7 +88,11 @@ export async function saveCash(
 		db
 			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id,category_source,flag_income,note,updated_by,entry_key)
 			VALUES ((SELECT id FROM accounts WHERE type='cash'),?,?,?,?, 'user',?,?,?,?)
-			ON CONFLICT(entry_key) WHERE entry_key IS NOT NULL DO NOTHING`)
+			ON CONFLICT(entry_key) WHERE entry_key IS NOT NULL DO UPDATE SET
+				date=excluded.date, amount_cents=excluded.amount_cents, raw_name=excluded.raw_name,
+				category_id=excluded.category_id, category_source=excluded.category_source,
+				flag_income=excluded.flag_income, note=excluded.note, updated_by=excluded.updated_by,
+				updated_at=datetime('now')`)
 			.bind(
 				value.date,
 				value.amountCents,

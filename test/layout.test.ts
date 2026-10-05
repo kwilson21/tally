@@ -75,4 +75,14 @@ describe("app shell", () => {
 		// 502 (a bank that couldn't be reached, which Tally sends with its own message) still swap.
 		expect(config.noSwap).toEqual([204, 304, 500]);
 	});
+
+	it("turns htmx's own request timeout off, since toast.js keeps the 60 seconds itself", async () => {
+		const html = await home();
+		const content =
+			html.match(/<meta name="htmx-config" content="([^"]*)"/)?.[1] ?? "{}";
+		// htmx 4 aborts a timed-out request the same way it aborts a replaced one, so it can't be told apart.
+		expect(JSON.parse(content.replaceAll("&quot;", '"')).defaultTimeout).toBe(
+			0,
+		);
+	});
 });
