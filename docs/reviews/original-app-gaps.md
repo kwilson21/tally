@@ -6,7 +6,7 @@ The owner asked whether anything from the original app (`kwilson21/superhuman-pe
 - its screens and behaviour;
 - its GitHub backlog (102 issues, including the family's beta feedback).
 
-Every gap is listed here, so nothing is lost. A gap becomes work only when the owner picks it, recorded as a decision. The **Proposed** column is a recommendation; it isn't decided.
+Every gap is listed here, so nothing is lost. The owner accepted every **Proposed** placement in decision 67 (Oct 5); "Fix now" items form Phase 3.5 (spec §8.5), and Phase 5 items are still drawn and picked before they are built.
 
 Already decided: decision 66 for receipts and the Phase 5 eight, and decision 65 for "Why?" links.
 
