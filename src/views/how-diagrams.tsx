@@ -399,10 +399,10 @@ export function CategoriesDiagram(c: {
 	income: number;
 	/** Jev's threshold as the page says it, like "80%". */
 	threshold: string;
-	/** What to call the AI: "Jev" on the demo's page, "Tally" in the family app (decision 64). */
-	ai?: string;
+	/** What to call the AI: "Tally" on screens, "Jev" only on the demo's page (decision 64). */
+	ai?: "Jev" | "Tally";
 }) {
-	const ai = c.ai ?? "Jev";
+	const ai = c.ai ?? "Tally";
 	const income =
 		c.income > 0
 			? ` ${c.income} ${c.income === 1 ? "is" : "are"} income, which needs no category.`

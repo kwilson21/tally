@@ -159,6 +159,7 @@ describe("CategoriesDiagram", () => {
 				waiting: 10,
 				income: 2,
 				threshold: "80%",
+				ai: "Jev",
 			}),
 		);
 		expectLabelled(html);

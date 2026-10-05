@@ -73,34 +73,39 @@ describe("categorizationExample", () => {
 
 	it("counts transactions, not categories, and covers every source", () => {
 		expect(
-			categorizationExample({
-				user: 1,
-				merchantRule: 2,
-				jev: 8,
-				unsure: 3,
-				noneFit: 1,
-				notYetAsked: 4,
-				income: 2,
-			}),
+			categorizationExample(
+				{
+					user: 1,
+					merchantRule: 2,
+					jev: 8,
+					unsure: 3,
+					noneFit: 1,
+					notYetAsked: 4,
+					income: 2,
+				},
+				"Jev",
+			),
 		).toBe(
 			"This month, Jev categorized 8 transactions. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 4 are waiting for tonight's run. 2 came from merchant rules. 1 was chosen by a person. 2 are income, which needs no category.",
 		);
 	});
 
 	it("uses the singular for one income transaction", () => {
-		expect(categorizationExample({ ...none, jev: 3, income: 1 })).toBe(
+		expect(categorizationExample({ ...none, jev: 3, income: 1 }, "Jev")).toBe(
 			"This month, Jev categorized 3 transactions. 1 is income, which needs no category.",
 		);
 	});
 
 	it("names only the kinds of leftovers there are", () => {
-		expect(categorizationExample({ ...none, jev: 5, noneFit: 2 })).toBe(
+		expect(categorizationExample({ ...none, jev: 5, noneFit: 2 }, "Jev")).toBe(
 			"This month, Jev categorized 5 transactions. It left 2 that fit none of the categories for a person.",
 		);
 	});
 
 	it("uses the singular for one", () => {
-		expect(categorizationExample({ ...none, jev: 1, notYetAsked: 1 })).toBe(
+		expect(
+			categorizationExample({ ...none, jev: 1, notYetAsked: 1 }, "Jev"),
+		).toBe(
 			"This month, Jev categorized 1 transaction. 1 is waiting for tonight's run.",
 		);
 	});

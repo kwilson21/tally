@@ -28,6 +28,8 @@ export function transactionsExample(c: {
 		c.needsCategory === 0
 			? "every one has a category"
 			: plural(c.needsCategory, "needs a category", "need a category");
+	if (c.counted === 0)
+		return "None counts this month yet: what came in counts in an earlier month.";
 	return `This month has ${plural(c.counted, "counted transaction", "counted transactions")}, and ${needs}.`;
 }
 
@@ -77,8 +79,8 @@ export function categorizationExample(
 		/** Income with no category: it needs none. */
 		income: number;
 	},
-	/** What to call the AI: "Jev" on the demo's page, "Tally" in the family app (decision 64). */
-	ai = "Jev",
+	/** What to call the AI: "Tally" on screens, "Jev" only on the demo's page (decision 64). */
+	ai: "Jev" | "Tally" = "Tally",
 ): string {
 	const parts: string[] = [];
 	if (c.jev > 0) {

@@ -9,9 +9,13 @@ import {
 } from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
-import { todayUtc } from "../dates";
+import { monthName, todayUtc } from "../dates";
 import { loadMonth } from "../db/month";
-import { excludedBreakdown, monthCounts } from "../db/transactions";
+import {
+	bankDatedCount,
+	excludedBreakdown,
+	monthCounts,
+} from "../db/transactions";
 import {
 	budgetExample,
 	categorizationExample,
@@ -127,28 +131,18 @@ howItWorks.get("/how-it-works", async (c) => {
 	const demo = c.env.DEMO === "true";
 
 	const month = todayUtc().slice(0, 7);
-	const monthName = new Intl.DateTimeFormat("en-US", {
-		month: "long",
-		timeZone: "UTC",
-	}).format(new Date(`${month}-01T00:00:00Z`));
+	const monthLabel = monthName(month);
 	// Screens call the AI "Tally"; only the demo's page names Jev (decision 64).
-	const ai = demo ? "Jev" : "Tally";
+	const ai: "Jev" | "Tally" = demo ? "Jev" : "Tally";
 	const [data, counts, excluded, billData, bankDated] = await Promise.all([
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
 		excludedBreakdown(c.env.DB, month),
 		loadBillRows(c.env.DB),
-		// By the bank's date: a refund or late payment from this month can count in an earlier one.
-		c.env.DB.prepare(
-			"SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ?",
-		)
-			.bind(month)
-			.first<{ n: number }>(),
+		bankDatedCount(c.env.DB, month),
 	]);
 	const hasTransactions =
-		demo ||
-		counts.counted + excludedTotal(excluded) > 0 ||
-		(bankDated?.n ?? 0) > 0;
+		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
 	const unpaidDueBillsCents = billData.rows
 		.filter(
 			(bill) =>
@@ -159,6 +153,7 @@ howItWorks.get("/how-it-works", async (c) => {
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 	const paidBill = billData.rows.find(
 		(bill) =>
+			bill.active &&
 			bill.status === "paid" &&
 			bill.paidDate &&
 			(!demo || bill.name === "Water"),
@@ -242,7 +237,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							<Diagram>
 								<BudgetDiagram {...summary} />
 							</Diagram>
-							<Example demo={demo} monthName={monthName}>
+							<Example demo={demo} monthName={monthLabel}>
 								{budgetExample(summary)} This includes{" "}
 								{demo ? "the demo's " : ""}
 								due and overdue, unpaid bills.
@@ -282,7 +277,7 @@ howItWorks.get("/how-it-works", async (c) => {
 									needsCategory={counts.needsCategory}
 								/>
 							</Diagram>
-							<Example demo={demo} monthName={monthName}>
+							<Example demo={demo} monthName={monthLabel}>
 								{transactionsExample(counts)}
 							</Example>
 						</>
@@ -320,7 +315,7 @@ howItWorks.get("/how-it-works", async (c) => {
 									breakdown={excluded}
 								/>
 							</Diagram>
-							<Example demo={demo} monthName={monthName}>
+							<Example demo={demo} monthName={monthLabel}>
 								{exclusionsExample(excluded)}
 							</Example>
 						</>
@@ -359,7 +354,7 @@ howItWorks.get("/how-it-works", async (c) => {
 									ai={ai}
 								/>
 							</Diagram>
-							<Example demo={demo} monthName={monthName}>
+							<Example demo={demo} monthName={monthLabel}>
 								{categorizationExample(counts, ai)}
 							</Example>
 						</>
@@ -406,7 +401,7 @@ howItWorks.get("/how-it-works", async (c) => {
 									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
 								/>
 							</Diagram>
-							<Example demo={demo} monthName={monthName}>
+							<Example demo={demo} monthName={monthLabel}>
 								{paidBill.name} is {formatCents(paidBill.amountCents)}, due{" "}
 								{shortBillDate(paidBill.dueDate)}; its{" "}
 								{demo ? "demo payment" : "payment"} is{" "}
