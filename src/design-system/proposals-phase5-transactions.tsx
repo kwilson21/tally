@@ -1059,6 +1059,7 @@ export function Phase5TransactionsProposals() {
 						},
 						{
 							name: "Option B · A question after the third save",
+							picked: true,
 							note: "The panel stays open with one question, “Always use Groceries for Costco?”, and Yes or Not now.",
 							tradeoff:
 								"one more step on the third save, even in a hurry, once for each merchant.",
@@ -1096,6 +1097,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · An Account filter",
+							picked: true,
 							note: "An Account choice beside Month and Category; the count names it.",
 							tradeoff:
 								"one more control, and on a phone the filters wrap to another row, so the list starts lower.",
@@ -1145,6 +1147,7 @@ export function Phase5TransactionsProposals() {
 						},
 						{
 							name: "Option B · A Show choice",
+							picked: true,
 							note: "One Show choice beside Month and Category holds the same five; Excluded leaves the chips.",
 							tradeoff: "the types stay hidden until you open the choice.",
 							screen: typeShow,
@@ -1172,6 +1175,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · Search matches both, and says so",
+							picked: true,
 							note: "“$42” finds $42.00 to $42.99, and the count says what matched; “groceries” finds the category, and says “(category)”.",
 							tradeoff: "a longer count line.",
 							recommended:
@@ -1209,6 +1213,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · Search looks everywhere",
+							picked: true,
 							note: "A search switches the month to All months, the count says so, and “Only October” narrows it.",
 							tradeoff:
 								"a search can list more than you expected; the link narrows it.",
@@ -1247,6 +1252,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · A “New category” chip",
+							picked: true,
 							note: "The last chip opens a name field in place; one Save makes the category and files this transaction. Organize ends its chips the same way.",
 							tradeoff: "the chip row gets one more chip.",
 							recommended:
@@ -1284,6 +1290,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · Choose how many",
+							picked: true,
 							note: "Under the name field: “This one only” or “All 23 from Amazon”.",
 							tradeoff: "one more choice in a panel that's already full.",
 							recommended:
@@ -1325,6 +1332,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · A Rules list in Settings",
+							picked: true,
 							note: "Each rule is a row, “Costco → Groceries”, with Remove; the panel's toggle also opens ticked when a rule exists, as in B.",
 							tradeoff:
 								"one more section on a Settings page that's already long.",
@@ -1363,6 +1371,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · Select all in the action bar",
+							picked: true,
 							note: "A link beside the count: “Select all 25” ticks the page.",
 							tradeoff: "the bar grows a second line.",
 							recommended:
@@ -1405,6 +1414,7 @@ export function Phase5TransactionsProposals() {
 					options={[
 						{
 							name: "Option A · Fields in the panel",
+							picked: true,
 							note: "A cash entry's panel shows the Add cash form's amount and date as fields, under “Cash · you entered this”.",
 							tradeoff: "the panel is taller, and Save does more.",
 							recommended:

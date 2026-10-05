@@ -996,6 +996,7 @@ export function AiProposals() {
 						},
 						{
 							name: "Option B · Switches and Save",
+							picked: true,
 							note: "Switch-shaped toggles made from real checkboxes, ink when on, with On or Off beside each and one Save under the group.",
 							tradeoff:
 								"a switch that waits for Save is unusual, and it's a new component.",
@@ -1039,6 +1040,7 @@ export function AiProposals() {
 					options={[
 						{
 							name: "Option A · A yes-or-no question",
+							picked: true,
 							note: "The guess is the one question, as a dashed “Maybe …”; Yes is the primary, Something else opens the choices in place, and Skip leaves it for later.",
 							tradeoff:
 								"a wrong guess takes three taps to fix (Something else, a category, Save and next).",
@@ -1114,6 +1116,7 @@ export function AiProposals() {
 					options={[
 						{
 							name: "Option A · Under the switches",
+							picked: true,
 							note: "A muted “In October” in the AI suggestions group, three short lines and a Why? to How Tally works.",
 							tradeoff: "it's far down Settings, below the categories.",
 							recommended:
@@ -1159,6 +1162,7 @@ export function AiProposals() {
 					options={[
 						{
 							name: "Option A · Two links under the title",
+							picked: true,
 							note: "“What Tally made of it · As the bank sends it”: two 44px links, the current one in ink; the list swaps on a page with ?raw=1.",
 							tradeoff: "two more links under the title.",
 							recommended:

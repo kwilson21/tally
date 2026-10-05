@@ -2,6 +2,7 @@
 // owner decides by seeing (decision 47). Every proposal file draws with these.
 
 import type { Child } from "hono/jsx";
+import { Icon } from "../views/icons";
 import { PhoneFrame } from "./specimen";
 
 export type Option = {
@@ -12,6 +13,8 @@ export type Option = {
 	tradeoff?: string;
 	/** Why it's the recommended one, in one line. */
 	recommended?: string;
+	/** The owner picked this one (decisions 72–75). */
+	picked?: boolean;
 	/** Drawn at desktop width instead of on a phone. */
 	desktop?: boolean;
 	/** Drawn as the family app, without the demo banner. */
@@ -33,6 +36,12 @@ export function Options({ options }: { options: Option[] }) {
 							{o.recommended && (
 								<span class="rounded-full border border-ink px-2.5 py-0.5 text-sm font-medium">
 									Recommended
+								</span>
+							)}
+							{o.picked && (
+								<span class="inline-flex items-center gap-1 rounded-full bg-band px-2.5 py-0.5 text-sm font-medium">
+									<Icon name="check" class="size-4" />
+									Picked
 								</span>
 							)}
 						</h4>

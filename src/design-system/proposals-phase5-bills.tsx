@@ -987,6 +987,7 @@ export function Phase5BillsProposals() {
 					options={[
 						{
 							name: "Option A · Occurrences one by one",
+							picked: true,
 							note: "One row for the next Friday that isn't paid, “Due Oct 9 · every Friday”; its page lists each Friday.",
 							tradeoff:
 								"a missed Friday is set aside too, so Safe to spend can hold back more than the one row shows.",
@@ -1051,6 +1052,7 @@ export function Phase5BillsProposals() {
 					options={[
 						{
 							name: "Option A · Link more than one payment",
+							picked: true,
 							note: "October stays Overdue as “Part paid: $600 of $1,200” until the links add up; September's two payments made it Paid.",
 							tradeoff:
 								"Paid now depends on amounts, so linking by hand can leave a month still part paid.",
@@ -1100,6 +1102,7 @@ export function Phase5BillsProposals() {
 						},
 						{
 							name: "Option A · It takes the bill's category",
+							picked: true,
 							note: "Linking gives a payment with no category the bill's, and a linked payment's row says which bill it paid. Spectrum stays Utilities, not the Internet bill's Household: a person put it there.",
 							recommended:
 								"no extra step, and a person's own choice is never touched.",
@@ -1137,6 +1140,7 @@ export function Phase5BillsProposals() {
 					options={[
 						{
 							name: "Option A · A line under the title",
+							picked: true,
 							note: "One quiet line: what the bills cost a month, with a yearly bill as a twelfth, and what's still to pay this month.",
 							recommended:
 								"it answers the question once, without a new number on every group.",
@@ -1144,6 +1148,7 @@ export function Phase5BillsProposals() {
 						},
 						{
 							name: "Option B · A total under each group",
+							picked: true,
 							note: "Each heading ends with what its group adds up to.",
 							tradeoff:
 								"Upcoming holds next March's soccer fee, so its total isn't the sum of its rows.",
@@ -1184,6 +1189,7 @@ export function Phase5BillsProposals() {
 					options={[
 						{
 							name: "Option A · A line on the bill page",
+							picked: true,
 							note: "Each month shows its own amount, and one muted line says when it changed.",
 							tradeoff:
 								"only the latest change is in words, an older one shows in the months' amounts, and a paid month says its amount twice.",

@@ -46,7 +46,6 @@ const homeBehind = (
 		month="October"
 		safeToSpendCents={SAFE_TO_SPEND}
 		status="Everything is on track."
-		demo
 		band={{
 			href: "#p38-failed-save",
 			text: "4 transactions need a category",
@@ -525,6 +524,7 @@ export function Phase35StatesProposals() {
 					options={[
 						{
 							name: "Option A · An error toast",
+							picked: true,
 							note: "The toast you already know, with an alert icon, where every toast shows (above the tab bar; drawn flat here, the real one floats a little); the sheet stays open with what was typed.",
 							tradeoff:
 								"it goes after 4 seconds, and over a sheet it covers part of the form until it does.",
@@ -586,6 +586,7 @@ export function Phase35StatesProposals() {
 						},
 						{
 							name: "Option C · The ledger drawing",
+							picked: true,
 							note: "Home's notebook drawing, larger, over a serif 404 and the sentence. The 500 page says “500” and its own sentence.",
 							tradeoff:
 								"an error number means nothing to most people, and the drawing is Home's.",
@@ -619,6 +620,7 @@ export function Phase35StatesProposals() {
 					options={[
 						{
 							name: "Option A · Two EmptyStates",
+							picked: true,
 							note: "Before a bank: the add sign and Link a bank. Search, filters and Select wait for the first transaction; Add cash stays, since cash works without a bank.",
 							tradeoff:
 								"with no bank yet, Add cash and Link a bank are two outline buttons on one screen.",
@@ -673,6 +675,7 @@ export function Phase35StatesProposals() {
 					options={[
 						{
 							name: "Option A · A tick to confirm",
+							picked: true,
 							note: "The form comes back with a line under the amount and a chip to tick, “Yes, $150,000.00 is right”, before Save.",
 							tradeoff: "one more tap, in the middle of the form.",
 							recommended:

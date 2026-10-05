@@ -775,7 +775,6 @@ const HOME = {
 	month: "October",
 	safeToSpendCents: SAFE_TO_SPEND,
 	status: "Everything is on track.",
-	demo: false,
 };
 const NEEDS_BAND = {
 	href: "#p37-bank",
@@ -896,6 +895,7 @@ export function Phase35Proposals() {
 					options={[
 						{
 							name: "Option A · In the caption line",
+							picked: true,
 							note: "The line under the name says “Groceries · Pending”, in muted words; it's never cut off.",
 							tradeoff:
 								"quiet, so a pending row is found by reading, not at a glance, and a row that also needs a category shows “Pending” where the bank's text would be.",
@@ -953,6 +953,7 @@ export function Phase35Proposals() {
 					options={[
 						{
 							name: "Option A · A disclosure row",
+							picked: true,
 							note: "Under a Household heading, one row, “Time zone” with “Eastern” and the chevron, shaped like a category row.",
 							tradeoff: "the choice is one tap away, not in view.",
 							recommended:
@@ -1012,6 +1013,7 @@ export function Phase35Proposals() {
 						},
 						{
 							name: "Option B · On the row and the page",
+							picked: true,
 							note: `The Overdue row says “Price changed? ${paidOn}” and leads to the question on the bill's page.`,
 							tradeoff:
 								"the row no longer says the day it was due, and it grows a line.",
@@ -1058,6 +1060,7 @@ export function Phase35Proposals() {
 					options={[
 						{
 							name: "Option A · A line under the number",
+							picked: true,
 							note: `Between the sentence and the Band: an alert icon, “${SYNC_LATE}, so Safe to spend may be too high.”, and Check Accounts.`,
 							tradeoff: "one more line before the Band.",
 							recommended:

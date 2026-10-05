@@ -980,6 +980,7 @@ export function FormsProposals() {
 					},
 					{
 						name: "Option A · A quiet ledger form",
+						picked: true,
 						note: "One quiet column: small labels over lines, the amount as the one big thing, Due as a sentence of pickers. Category and the bank's text fold into a row each. Save stays pinned.",
 						tradeoff:
 							"Category and the bank's text are one tap away, not on show.",

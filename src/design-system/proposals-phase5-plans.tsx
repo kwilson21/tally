@@ -120,14 +120,7 @@ function Top({
 	safe: number;
 	status?: string;
 }) {
-	return (
-		<HomeTop
-			month="October"
-			safeToSpendCents={safe}
-			status={status}
-			demo={true}
-		/>
-	);
+	return <HomeTop month="October" safeToSpendCents={safe} status={status} />;
 }
 
 const rows = (list: Row[]) => list.map((r) => <ProgressRow {...r} />);
@@ -712,6 +705,7 @@ export function Phase5PlansProposals() {
 					options={[
 						{
 							name: "Option A · A line in Home's budget",
+							picked: true,
 							note: "“Savings · $500 a month” is the Budget list's first row, with no bar; tapping it opens a sheet like a budget's.",
 							tradeoff: "one row without a bar among rows with bars.",
 							recommended:
@@ -767,6 +761,7 @@ export function Phase5PlansProposals() {
 					options={[
 						{
 							name: "Option R1 · All of it, from day one",
+							picked: true,
 							note: sum(SAFE_R1, [GOAL, "goal"]),
 							tradeoff:
 								"moving the $200 changes nothing, so saving can feel like nothing happened.",
@@ -825,6 +820,7 @@ export function Phase5PlansProposals() {
 					options={[
 						{
 							name: "Option A · Planned, on Bills",
+							picked: true,
 							note: "A Planned group after Upcoming, and “Plan an expense” beside Add a bill, which opens the sheet drawn next.",
 							tradeoff: `one more kind of thing on Bills, and once paid its category reads “${dollars(CAR.spentCents + PLANNED - CAR.budgetCents)} over” though planned.`,
 							recommended:
@@ -885,6 +881,7 @@ export function Phase5PlansProposals() {
 						},
 						{
 							name: "Option B · With a little detail",
+							picked: true,
 							note: "Adds the accounts behind the login and the exact time it last synced.",
 							tradeoff:
 								"more to read, and account endings in an inbox, though still no amounts.",

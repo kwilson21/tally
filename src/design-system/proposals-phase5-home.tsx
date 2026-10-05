@@ -128,7 +128,6 @@ const homeTop = (
 		month="October"
 		safeToSpendCents={SAFE_CENTS}
 		status={status}
-		demo
 		band={band}
 	/>
 );
@@ -207,7 +206,7 @@ function Top({
 			</div>
 			<p class="mt-3 font-serif text-lg italic">{status}</p>
 			{under}
-			<HowLink section="budget" demo />
+			<HowLink section="budget" />
 			{after && <div class="mt-4">{after}</div>}
 		</>
 	);
@@ -1024,6 +1023,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · Arrows by the month",
+							picked: true,
 							note: "‹ and › beside the month step back and forward (› is hidden on this month); a finished month reads “September ended $86 under budget” in Safe to spend's place, with no Band or Adjust, and a Back to October link.",
 							tradeoff: "one month at a time, so a year ago is twelve taps.",
 							recommended:
@@ -1070,6 +1070,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · “Over budget this month”",
+							picked: true,
 							note: "“Safe to spend” goes; the headline is how far over, “$120”, with the alert icon and “over” in brick under it, and the sentence says what more spending does.",
 							tradeoff:
 								"the big number now means how far over, not what's safe, so the words under it have to be read.",
@@ -1115,6 +1116,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · Why? beside Safe to spend",
+							picked: true,
 							note: "A Why? after the label (the number is what the rule decides) goes to How Tally works with your numbers.",
 							tradeoff: "the answer is a page away.",
 							recommended:
@@ -1163,6 +1165,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · “$14 left” under the bar",
+							picked: true,
 							note: "Where an over row says “$36 over”, a nearly spent row says what's left, in ink; the bar stays green.",
 							tradeoff: "quiet, so it's easy to read past.",
 							recommended:
@@ -1205,6 +1208,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · A line under the sentence",
+							picked: true,
 							note: `“${DAILY}” in quiet text under the status sentence.`,
 							tradeoff: "one more line before the Band.",
 							recommended:
@@ -1245,6 +1249,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · What each one spent",
+							picked: true,
 							note: "Each row adds “$60 spent” under its name; one with nothing spent stays as today.",
 							tradeoff: "the list grows a little taller.",
 							recommended:
@@ -1281,6 +1286,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · On the Band's second line",
+							picked: true,
 							note: "“$228 of this month's spending and 6 more from earlier months”, on two lines.",
 							tradeoff: "a longer second line.",
 							recommended:
@@ -1323,6 +1329,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · A link in the budget sheet",
+							picked: true,
 							note: "“See the 9 transactions” under what's spent, above the amount.",
 							tradeoff: "one more tap to reach the list.",
 							recommended:
