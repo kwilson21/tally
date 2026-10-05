@@ -56,7 +56,6 @@ Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggest
 | **Tailwind CSS** | Styles the pages with utility classes, compiled into one CSS file. |
 | **Workers static assets** | Serves the CSS file, `htmx.js`, and icons. |
 | **D1 (SQLite)** | Stores all data. |
-| **R2** | Not used yet: it would store receipts when they are built (§12, decision 66). The buckets exist, unbound. |
 | **Plaid (REST over `fetch`)** | Supplies accounts, transactions, and balances from the family's banks. |
 | **Jev (TypeSafe AI)** | Picks a category and flags for each transaction, with a confidence score. |
 | **Workers AI** | Suggests a clean merchant name, which a person accepts or rejects. |
@@ -72,7 +71,7 @@ Wrangler environments deploy the same code twice:
 |---|---|---|
 | Hostname | `tally.thesuperhuman.us` (decision 34); may later take over `finance.thesuperhuman.us` as its own decision (decision 16) | `tally-demo.thesuperhuman.us` |
 | D1 database | `tally-prod` | `tally-demo` |
-| R2 bucket | `tally-prod-docs` | `tally-demo-docs` (fake PDFs) |
+| R2 bucket (unused until receipts, decision 66) | `tally-prod-docs` | `tally-demo-docs` |
 | Plaid | On | **Off.** No Plaid secrets exist in this environment. |
 | Jev / Workers AI | On | On |
 | Login | Cloudflare Access | Public, with a demo banner on every page |
