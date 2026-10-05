@@ -39,7 +39,8 @@ function NeedsLine({ children }: { children?: Child }) {
 }
 
 const TODAY = "2026-10-05";
-const dollars = (cents: number) => formatCents(cents, { wholeDollars: true });
+export const dollars = (cents: number) =>
+	formatCents(cents, { wholeDollars: true });
 
 // ---------------------------------------------------------------------------------------------
 // Sample data, in the demo's style: October, five days in.
@@ -57,15 +58,15 @@ const HOUSEHOLD: Cat = {
 	icon: "household",
 	color: "cat-brown",
 };
-const RENT_CAT: Cat = { name: "Rent", icon: "rent", color: "cat-slate" };
-const UTILITIES: Cat = {
+export const RENT_CAT: Cat = { name: "Rent", icon: "rent", color: "cat-slate" };
+export const UTILITIES: Cat = {
 	name: "Utilities",
 	icon: "utilities",
 	color: "cat-blue",
 };
 
 /** A bill as Bills lists it; a paid one was paid on its due date. */
-const bill = (
+export const bill = (
 	id: number,
 	name: string,
 	amountCents: number,
@@ -83,7 +84,7 @@ const bill = (
 	color: cat.color,
 });
 
-const ELECTRIC = bill(
+export const ELECTRIC = bill(
 	1,
 	"City Electric",
 	14200,
@@ -93,8 +94,22 @@ const ELECTRIC = bill(
 );
 const DAYCARE = bill(2, "Daycare", 24000, "due", "2026-10-09", KIDS);
 const SWIM = bill(3, "Swim lessons", 6000, "due", "2026-10-10", KIDS);
-const INTERNET = bill(4, "Internet", 7000, "upcoming", "2026-10-18", HOUSEHOLD);
-const CAR = bill(5, "Car insurance", 11800, "upcoming", "2026-10-20", GAS);
+export const INTERNET = bill(
+	4,
+	"Internet",
+	7000,
+	"upcoming",
+	"2026-10-18",
+	HOUSEHOLD,
+);
+export const CAR = bill(
+	5,
+	"Car insurance",
+	11800,
+	"upcoming",
+	"2026-10-20",
+	GAS,
+);
 const RENT = bill(6, "Rent", 120000, "paid", "2026-10-01", RENT_CAT);
 /** A yearly bill: paid in March, so Bills shows next March's as Upcoming. */
 const SOCCER = bill(7, "Youth soccer", 54000, "upcoming", "2027-03-15", KIDS);
@@ -104,14 +119,14 @@ const rows = (bills: BillRowData[]) =>
 const sum = (bills: BillRowData[]) =>
 	bills.reduce((n, b) => n + b.amountCents, 0);
 /** Bills' status sentence, as the page writes it. */
-const toPay = (n: number, cents: number) =>
+export const toPay = (n: number, cents: number) =>
 	`${n} ${n === 1 ? "bill" : "bills"} to pay soon, ${formatCents(cents)} in all`;
 
 /**
  * A BillRow with its status sentence given, for the proposals that change what the row says. `side`
  * is a muted small line under the amount.
  */
-function LineRow({
+export function LineRow({
 	bill: b,
 	line,
 	side,
@@ -627,7 +642,7 @@ function DayGroup({ date, children }: { date: string; children?: Child }) {
  * A TransactionRow whose caption also names the bill it paid: the category, then "paid" and the
  * bill, as a refund's "Refund for Sep 3" follows its category.
  */
-function PaymentRow({
+export function PaymentRow({
 	name,
 	cents,
 	cat,

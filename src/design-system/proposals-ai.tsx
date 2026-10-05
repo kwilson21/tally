@@ -36,7 +36,7 @@ const CATS = {
 type Cat = (typeof CATS)[keyof typeof CATS];
 
 /** A small terracotta "Why?" (P33 A), 44px tall, with its own name for screen readers. */
-function Why({ topic, href }: { topic: string; href: string }) {
+export function Why({ topic, href }: { topic: string; href: string }) {
 	return (
 		<a
 			href={href}
@@ -64,7 +64,7 @@ function NeedsLine({ children }: { children?: Child }) {
 type Feature = { id: string; name: string; line: string };
 
 /** The four switches (spec §8.6), each with the one muted line that says what it does. */
-const FEATURES: Feature[] = [
+export const FEATURES: Feature[] = [
 	{
 		id: "names",
 		name: "Merchant names",
@@ -90,7 +90,7 @@ const FEATURES: Feature[] = [
 /** The pictures show the last switch turned off, so each option's off look is drawn beside its on look. */
 const SOME_OFF = [true, true, true, false];
 
-const OFF_MEANS =
+export const OFF_MEANS =
 	"Off means your rules and choices only. Nothing already decided changes.";
 const ALL_OFF = "Tally sorts by your rules and choices only.";
 
@@ -115,7 +115,13 @@ function SettingsScrolled({ children }: { children?: Child }) {
 }
 
 /** The group's heading and its one line, then whatever the option puts under them. */
-function AiGroup({ intro, children }: { intro: string; children?: Child }) {
+export function AiGroup({
+	intro,
+	children,
+}: {
+	intro: string;
+	children?: Child;
+}) {
 	return (
 		<>
 			<h2 class="font-serif text-3xl font-semibold">AI suggestions</h2>
@@ -167,7 +173,7 @@ const switchButtons = (
  * and the knob on the right when on, a ruled track and the knob on the left when off, and the word
  * beside it says which. The whole 44px-tall row is its label.
  */
-function SwitchRow({ f, on }: { f: Feature; on: boolean }) {
+export function SwitchRow({ f, on }: { f: Feature; on: boolean }) {
 	return (
 		<li>
 			<label class="group flex min-h-11 cursor-pointer items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
@@ -535,7 +541,7 @@ const askName = (
 );
 
 /** Both: money in that looks like pay, answered Yes or No. */
-const askIncome = (
+export const askIncome = (
 	<>
 		<ReviewHead
 			place="5 of 14"

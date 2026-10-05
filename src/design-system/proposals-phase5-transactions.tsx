@@ -32,36 +32,36 @@ function NeedsLine({ children }: { children?: Child }) {
 	);
 }
 
-const TODAY = "2026-10-05";
-const CARD = "Chase Card ••9921";
+export const TODAY = "2026-10-05";
+export const CARD = "Chase Card ••9921";
 
 // ---------------------------------------------------------------------------------------------
 // Sample data, in the demo's style: October, five days in.
 
-type Cat = { name: string; icon: string; color: string };
-const GROCERIES: Cat = {
+export type Cat = { name: string; icon: string; color: string };
+export const GROCERIES: Cat = {
 	name: "Groceries",
 	icon: "groceries",
 	color: "cat-blue",
 };
-const EATING_OUT: Cat = {
+export const EATING_OUT: Cat = {
 	name: "Eating Out",
 	icon: "eating-out",
 	color: "cat-plum",
 };
-const KIDS: Cat = { name: "Kids", icon: "kids", color: "cat-ochre" };
-const GAS: Cat = { name: "Gas", icon: "gas", color: "cat-slate" };
-const HOUSEHOLD: Cat = {
+export const KIDS: Cat = { name: "Kids", icon: "kids", color: "cat-ochre" };
+export const GAS: Cat = { name: "Gas", icon: "gas", color: "cat-slate" };
+export const HOUSEHOLD: Cat = {
 	name: "Household",
 	icon: "household",
 	color: "cat-brown",
 };
-const FIVE = [GROCERIES, EATING_OUT, KIDS, GAS, HOUSEHOLD];
-const FOUR = [GROCERIES, EATING_OUT, KIDS, HOUSEHOLD];
-const THREE = [GROCERIES, EATING_OUT, HOUSEHOLD];
+export const FIVE = [GROCERIES, EATING_OUT, KIDS, GAS, HOUSEHOLD];
+export const FOUR = [GROCERIES, EATING_OUT, KIDS, HOUSEHOLD];
+export const THREE = [GROCERIES, EATING_OUT, HOUSEHOLD];
 
 /** A list row as the app loads it; amounts are Plaid's way round (positive is money out). */
-function tx(
+export function tx(
 	id: number,
 	date: string,
 	name: string,
@@ -87,12 +87,24 @@ function tx(
 	};
 }
 
-const BLUE_BOTTLE = tx(1, "2026-10-05", "Blue Bottle Coffee", 650, EATING_OUT);
-const TRADER_JOES = tx(2, "2026-10-04", "Trader Joe's", 8217, GROCERIES);
-const LUPITAS = tx(3, "2026-10-04", "Lupita's Taqueria", 4290, EATING_OUT);
-const COSTCO = tx(4, "2026-10-03", "Costco", 14260, GROCERIES);
-const AMAZON = tx(5, "2026-10-02", "Amazon", 4217, HOUSEHOLD);
-const SHELL = tx(6, "2026-10-02", "Shell", 4410, GAS);
+export const BLUE_BOTTLE = tx(
+	1,
+	"2026-10-05",
+	"Blue Bottle Coffee",
+	650,
+	EATING_OUT,
+);
+export const TRADER_JOES = tx(2, "2026-10-04", "Trader Joe's", 8217, GROCERIES);
+export const LUPITAS = tx(
+	3,
+	"2026-10-04",
+	"Lupita's Taqueria",
+	4290,
+	EATING_OUT,
+);
+export const COSTCO = tx(4, "2026-10-03", "Costco", 14260, GROCERIES);
+export const AMAZON = tx(5, "2026-10-02", "Amazon", 4217, HOUSEHOLD);
+export const SHELL = tx(6, "2026-10-02", "Shell", 4410, GAS);
 const PAYROLL = tx(7, "2026-10-01", "Acme Payroll", -245000, undefined, {
 	income: true,
 });
@@ -125,7 +137,7 @@ const withNote = (id: number, date: string, cents: number, note?: string) =>
 type DaysProps = { rows: ListRow[]; select?: boolean; checked?: number[] };
 
 /** Rows grouped under their day, as the list does; in Select mode each row has its round tick. */
-function Days({ rows, select, checked }: DaysProps) {
+export function Days({ rows, select, checked }: DaysProps) {
 	const days: [string, ListRow[]][] = [];
 	for (const row of rows) {
 		const last = days.at(-1);
@@ -155,9 +167,9 @@ function Days({ rows, select, checked }: DaysProps) {
 	);
 }
 
-const TITLE = "font-serif text-5xl font-semibold tracking-tight";
+export const TITLE = "font-serif text-5xl font-semibold tracking-tight";
 
-function TxHeader() {
+export function TxHeader() {
 	return (
 		<>
 			<div class="flex items-center justify-between gap-3">
@@ -175,12 +187,18 @@ function TxHeader() {
 	);
 }
 
-type SearchProps = { id: string; q: string; hint?: string };
+type SearchProps = {
+	id: string;
+	q: string;
+	hint?: string;
+	/** What it searches, in the words of its label and placeholder. */
+	what?: string;
+};
 
 /** The search box, as the page draws it; a hint, when given, sits under it. */
-function Search({ id, q, hint }: SearchProps) {
+export function Search({ id, q, hint, what = "transactions" }: SearchProps) {
 	return (
-		<FormField id={id} label="Search transactions" hideLabel hint={hint}>
+		<FormField id={id} label={`Search ${what}`} hideLabel hint={hint}>
 			{(a11y) => (
 				<div class="relative">
 					<span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
@@ -191,7 +209,7 @@ function Search({ id, q, hint }: SearchProps) {
 						name="q"
 						type="search"
 						value={q}
-						placeholder="Search transactions"
+						placeholder={`Search ${what}`}
 						autocomplete="off"
 						class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
 						{...a11y}
@@ -305,12 +323,23 @@ function Transactions(props: TxProps) {
 // The edit panel. The real BottomSheet grows to 90% of the screen, so this one is drawn as tall as
 // its content, with the list dimmed above it; the sheet scrolls, so a long panel is cropped here.
 
-function PanelSheet({ children }: { children?: Child }) {
+export function PanelSheet({
+	behind,
+	children,
+}: {
+	/** The page above the panel, when it isn't the list's top. */
+	behind?: Child;
+	children?: Child;
+}) {
 	return (
 		<div class="relative -mx-5 h-[686px] overflow-hidden">
 			<div class="px-5">
-				<TxHeader />
-				<Days rows={[BLUE_BOTTLE, TRADER_JOES, COSTCO]} />
+				{behind ?? (
+					<>
+						<TxHeader />
+						<Days rows={[BLUE_BOTTLE, TRADER_JOES, COSTCO]} />
+					</>
+				)}
 			</div>
 			<div class="absolute inset-0 bg-ink/30" />
 			<div class="absolute inset-x-0 bottom-0 flex max-h-full flex-col gap-3 overflow-y-auto rounded-t-sheet bg-paper p-5">
@@ -323,7 +352,7 @@ function PanelSheet({ children }: { children?: Child }) {
 type TopProps = { row: ListRow; raw?: string; account: string };
 
 /** The panel's top: the bank's text when it differs, the name, the amount, the day and account. */
-function PanelTop({ row, raw, account }: TopProps) {
+export function PanelTop({ row, raw, account }: TopProps) {
 	return (
 		<div>
 			{raw && <p class="text-sm text-muted">{raw}</p>}
@@ -341,7 +370,7 @@ function PanelTop({ row, raw, account }: TopProps) {
 }
 
 /** The panel's form part, under its rule. */
-function PanelForm({ children }: { children?: Child }) {
+export function PanelForm({ children }: { children?: Child }) {
 	return (
 		<div class="flex flex-col gap-4 border-t border-rule pt-4">{children}</div>
 	);
@@ -358,7 +387,7 @@ type CatsProps = {
 };
 
 /** The category chips (the app shows every category; the pictures show a few). */
-function Categories({ p, cats, selected, end, children }: CatsProps) {
+export function Categories({ p, cats, selected, end, children }: CatsProps) {
 	return (
 		<fieldset class="flex flex-col gap-2">
 			<legend class="text-base text-ink">Category</legend>
@@ -384,7 +413,7 @@ function Categories({ p, cats, selected, end, children }: CatsProps) {
 type TogglesProps = { p: string; always?: boolean; dashed?: boolean };
 
 /** The two toggle chips; the merchant one can be dashed, P32's "not decided yet" look. */
-function Toggles({ p, always, dashed }: TogglesProps) {
+export function Toggles({ p, always, dashed }: TogglesProps) {
 	const chip = (
 		<Chip type="checkbox" name={`${p}-always`} value="1" checked={always}>
 			Always for this merchant
@@ -405,7 +434,7 @@ function Toggles({ p, always, dashed }: TogglesProps) {
 }
 
 /** Cancel and Save, as the panel ends. */
-const actions = (
+export const actions = (
 	<div class="grid grid-cols-2 gap-3">
 		<Button kind="secondary" type="button" class="w-full">
 			Cancel
@@ -859,10 +888,18 @@ type SelectProps = {
 	checked: number[];
 	aboveList?: Child;
 	bar: Child;
+	/** The result count above the list; P70's is September's. */
+	count?: string;
 };
 
 /** Select mode, scrolled past its filters: the title, the count, the rows, and the action bar. */
-function SelectScreen({ rows, checked, aboveList, bar }: SelectProps) {
+export function SelectScreen({
+	rows,
+	checked,
+	aboveList,
+	bar,
+	count = "Showing 1–25 of 112 transactions in September",
+}: SelectProps) {
 	return (
 		<div class="relative -mx-5 h-[684px] overflow-hidden">
 			<div class="px-5">
@@ -873,9 +910,7 @@ function SelectScreen({ rows, checked, aboveList, bar }: SelectProps) {
 					</Button>
 				</div>
 				<p class="mt-2 text-sm text-muted">Tap rows to select them.</p>
-				<p class="mt-4 text-sm text-muted">
-					Showing 1–25 of 112 transactions in September
-				</p>
+				<p class="mt-4 text-sm text-muted">{count}</p>
 				{aboveList}
 				<div class="mt-2">
 					<Days rows={rows} select checked={checked} />
@@ -898,7 +933,7 @@ const sept = (base: number) => [
 	tx(base + 6, "2026-09-28", "Chewy", 6412),
 ];
 
-const barButtons = (
+export const barButtons = (
 	<>
 		<Button kind="secondary" type="button" class="px-3">
 			Set category
@@ -910,7 +945,13 @@ const barButtons = (
 );
 
 /** A: the bar's new line beside the count; it offers the page, then (once ticked) the whole month. */
-function SelectBar({ selected, link }: { selected: number; link: string }) {
+export function SelectBar({
+	selected,
+	link,
+}: {
+	selected: number;
+	link: string;
+}) {
 	return (
 		<div class="flex flex-col gap-1">
 			<div class="flex items-center justify-between gap-2">
