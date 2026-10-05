@@ -405,8 +405,11 @@ howItWorks.get("/how-it-works", async (c) => {
 								{paidBill.name} is {formatCents(paidBill.amountCents)}, due{" "}
 								{shortBillDate(paidBill.dueDate)}; its{" "}
 								{demo ? "demo payment" : "payment"} is{" "}
-								{shortBillDate(paidBill.paidDate ?? paidBill.dueDate)} and
-								counts in the month of the bill it paid.
+								{shortBillDate(paidBill.paidDate ?? paidBill.dueDate)}
+								{(paidBill.paidDate ?? paidBill.dueDate).slice(0, 7) >
+								paidBill.dueDate.slice(0, 7)
+									? " and counts in the month of the bill it paid, not the month it reached the bank."
+									: ", so it counts in the month it reached the bank."}
 							</Example>
 						</>
 					) : (

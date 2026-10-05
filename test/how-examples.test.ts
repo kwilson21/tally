@@ -41,6 +41,12 @@ describe("budgetExample", () => {
 });
 
 describe("transactionsExample", () => {
+	it("says so plainly when nothing counts this month", () => {
+		expect(transactionsExample({ counted: 0, needsCategory: 0 })).toBe(
+			"No transaction counts this month yet.",
+		);
+	});
+
 	it("counts this month's transactions and the ones needing a category", () => {
 		expect(transactionsExample({ counted: 125, needsCategory: 12 })).toBe(
 			"This month has 125 counted transactions, and 12 need a category.",

@@ -28,8 +28,7 @@ export function transactionsExample(c: {
 		c.needsCategory === 0
 			? "every one has a category"
 			: plural(c.needsCategory, "needs a category", "need a category");
-	if (c.counted === 0)
-		return "None counts this month yet: what came in counts in an earlier month.";
+	if (c.counted === 0) return "No transaction counts this month yet.";
 	return `This month has ${plural(c.counted, "counted transaction", "counted transactions")}, and ${needs}.`;
 }
 
