@@ -47,8 +47,10 @@ type Bill = {
 	due_day: number;
 	frequency: "monthly" | "yearly";
 	anchor_month: number | null;
-	/** The bill's merchant key, which a payment's merchant key (or its raw name, for older bills) must equal (spec §6.1 rule 1). */
+	/** The bill's merchant key, which a payment's merchant key (or its raw name, for a bill flagged below) must equal (spec §6.1 rule 1). */
 	merchant_raw_name: string;
+	/** 1 for a bill saved under the bank's raw text, before a merchant key existed. */
+	merchant_raw_text: number;
 };
 
 /**
@@ -67,7 +69,7 @@ export async function matchBillPayments(
 	const bills = (
 		await db
 			.prepare(
-				"SELECT id,amount_cents,due_day,frequency,anchor_month,merchant_raw_name FROM bills WHERE active=1",
+				"SELECT id,amount_cents,due_day,frequency,anchor_month,merchant_raw_name,merchant_raw_text FROM bills WHERE active=1",
 			)
 			.all<Bill>()
 	).results;
@@ -130,14 +132,14 @@ export async function matchBillPayments(
 				await db
 					.prepare(
 						`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
-				 WHERE ${isMerchantTextSql("t", "?")} AND t.excluded=0 AND t.is_split=0
+				 WHERE ${isMerchantTextSql("t")} AND t.excluded=0 AND t.is_split=0
 					 AND t.date BETWEEN ? AND ?
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments occurrence WHERE occurrence.bill_id=? AND occurrence.period=? AND occurrence.status='linked')
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed')`,
 					)
 					.bind(
-						...merchantTextArgs(bill.merchant_raw_name),
+						...merchantTextArgs(bill),
 						start.toISOString().slice(0, 10),
 						finish.toISOString().slice(0, 10),
 						bill.id,

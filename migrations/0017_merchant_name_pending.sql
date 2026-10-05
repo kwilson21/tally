@@ -3,6 +3,10 @@
 --   merchant_name  nullable. A transaction's merchant key is this when present, otherwise raw_name.
 --   pending        0 or 1. Nothing sets it yet (sync still skips pending transactions).
 --   excluded_source now accepts 'plaid' as well as 'user' and 'jev'.
+--   merchants.raw_text and bills.merchant_raw_text say that a row was saved under the bank's raw text,
+--   before a merchant key existed. Every row that exists now was, so each starts at 1, and a row written
+--   from now on is a key and starts at 0. Matching reads the flag, so old rows keep working without
+--   guessing which ones are old (spec 6.1).
 --
 -- SQLite can't change a CHECK, so `transactions` is rebuilt, keeping every row and id, column, index,
 -- unique constraint and foreign key. Foreign keys are enforced and can't be switched off in D1, and
@@ -91,3 +95,9 @@ DROP TABLE bill_payments_keep;
 -- Each bill gets at most one payment per period, and each transaction pays at most one bill (spec §6.1).
 CREATE UNIQUE INDEX bill_payments_one_per_period ON bill_payments(bill_id, period) WHERE status = 'linked';
 CREATE UNIQUE INDEX bill_payments_one_bill_per_transaction ON bill_payments(transaction_id) WHERE status = 'linked';
+
+-- Every merchants row and bill saved before this migration is keyed by the bank's raw text.
+ALTER TABLE merchants ADD COLUMN raw_text INTEGER NOT NULL DEFAULT 0 CHECK (raw_text IN (0, 1));
+UPDATE merchants SET raw_text = 1;
+ALTER TABLE bills ADD COLUMN merchant_raw_text INTEGER NOT NULL DEFAULT 0 CHECK (merchant_raw_text IN (0, 1));
+UPDATE bills SET merchant_raw_text = 1;

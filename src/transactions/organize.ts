@@ -5,8 +5,8 @@ import {
 } from "../db/counted-month";
 import {
 	keyRowColumnSql,
-	legacyRowColumnSql,
 	merchantKeySql,
+	rawTextRowColumnSql,
 } from "../db/merchant-key";
 import { tidyName } from "./tidy-name";
 
@@ -25,7 +25,13 @@ export type OrganizeGroup = {
 	totalCents: number;
 	/** The group's merchant keys (Plaid's merchant name, or the raw name when it sent none), one `merchants` row each. */
 	merchantKeys: string[];
+	/** The bank texts its charges carry, most charges first, so a person sees everything one choice changes. */
+	bankTexts: string[];
 };
+
+/** Most charges first, then alphabetical, so the order never depends on how the database returns rows. */
+const byCountThenName = (a: [string, number], b: [string, number]) =>
+	b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
 
 /**
  * Aggregates transactions in SQL, once per merchant key and bank text, then combines the keys that
@@ -38,7 +44,7 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 		.prepare(
 			`SELECT ${KEY} AS merchantKey, t.raw_name AS rawName, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
 				${keyRowColumnSql(KEY, "display_name")} AS keyName,
-				${legacyRowColumnSql("t.raw_name", "display_name")} AS rawRowName
+				${rawTextRowColumnSql("t.raw_name", "display_name")} AS rawRowName
 			FROM transactions t
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_CATEGORY}
@@ -59,6 +65,7 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			totalCents: number;
 			keyName: string | null;
 			oldNames: Map<string, number>;
+			bankTexts: Map<string, number>;
 		}
 	>();
 	for (const row of results) {
@@ -67,7 +74,9 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			totalCents: 0,
 			keyName: row.keyName,
 			oldNames: new Map<string, number>(),
+			bankTexts: new Map<string, number>(),
 		};
+		key.bankTexts.set(row.rawName, row.count);
 		key.count += row.count;
 		key.totalCents += row.totalCents;
 		if (row.rawRowName)
@@ -78,21 +87,30 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 		byKey.set(row.merchantKey, key);
 	}
 	const groups = new Map<string, OrganizeGroup>();
+	const bankTextCounts = new Map<string, Map<string, number>>();
 	for (const [merchantKey, key] of byKey) {
-		const oldName = [...key.oldNames].sort(
-			(a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
-		)[0]?.[0];
+		const oldName = [...key.oldNames].sort(byCountThenName)[0]?.[0];
 		const name = key.keyName ?? oldName ?? tidyName(merchantKey);
 		const group = groups.get(name) ?? {
 			name,
 			count: 0,
 			totalCents: 0,
 			merchantKeys: [],
+			bankTexts: [],
 		};
 		group.count += key.count;
 		group.totalCents += key.totalCents;
 		group.merchantKeys.push(merchantKey);
+		const counts = bankTextCounts.get(name) ?? new Map<string, number>();
+		for (const [text, count] of key.bankTexts)
+			counts.set(text, (counts.get(text) ?? 0) + count);
+		bankTextCounts.set(name, counts);
 		groups.set(name, group);
+	}
+	for (const [name, counts] of bankTextCounts) {
+		const group = groups.get(name);
+		if (group)
+			group.bankTexts = [...counts].sort(byCountThenName).map(([text]) => text);
 	}
 	return [...groups.values()].sort(
 		(a, b) =>

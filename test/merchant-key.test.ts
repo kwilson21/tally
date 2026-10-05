@@ -622,7 +622,7 @@ describe("rows saved under the bank's raw text", () => {
 	beforeEach(async () => {
 		await db
 			.prepare(
-				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('COMCAST CABLE', 'Comcast Cable', ?)",
+				"INSERT INTO merchants (raw_name, display_name, default_category_id, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', ?, 1)",
 			)
 			.bind(HOUSEHOLD)
 			.run();
@@ -690,7 +690,7 @@ describe("rows saved under the bank's raw text", () => {
 	it("matches a bill saved under the raw name, automatically and when linking by hand", async () => {
 		await db
 			.prepare(
-				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (8601, 'Internet', 8000, 10, 'monthly', 5, 'COMCAST CABLE')",
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name, merchant_raw_text) VALUES (8601, 'Internet', 8000, 10, 'monthly', 5, 'COMCAST CABLE', 1)",
 			)
 			.run();
 		await insert({
@@ -774,7 +774,7 @@ describe("rows saved under the bank's raw text", () => {
 		await db.prepare("UPDATE merchants SET not_a_bill = 0").run();
 		await db
 			.prepare(
-				"INSERT INTO bills (name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES ('Internet', 8000, 10, 'monthly', 5, 'COMCAST CABLE')",
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, category_id, merchant_raw_name, merchant_raw_text) VALUES ('Internet', 8000, 10, 'monthly', 5, 'COMCAST CABLE', 1)",
 			)
 			.run();
 		expect(await found()).toEqual([]);
@@ -876,18 +876,25 @@ describe("rows saved under the bank's raw text", () => {
 // is that merchant's key, not a legacy raw text, and a transaction that has a merchant name is never
 // "the same merchant" as another merchant's by raw text alone.
 describe("the raw-name fallback never overrides two known merchants", () => {
-	const bill = (id: number, text: string, due = 10, cents = 5000) =>
+	/** A bill saved under `text`: a legacy one was saved under the bank's raw text, before Phase 3.5. */
+	const bill = (
+		id: number,
+		text: string,
+		due = 10,
+		cents = 5000,
+		legacy = false,
+	) =>
 		db
 			.prepare(
-				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (?, ?, ?, ?, 'monthly', 5, ?)",
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name, merchant_raw_text) VALUES (?, ?, ?, ?, 'monthly', 5, ?, ?)",
 			)
-			.bind(id, `Bill ${id}`, cents, due, text)
+			.bind(id, `Bill ${id}`, cents, due, text, legacy ? 1 : 0)
 			.run();
 
 	it("shows two charges with one key and different old names as one Organize group, saved once", async () => {
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchants (raw_name, display_name) VALUES ('COMCAST CABLE', 'Comcast Cable'), ('COMCAST CABLE 2', 'Comcast Two')",
+				"INSERT INTO merchants (raw_name, display_name, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', 1), ('COMCAST CABLE 2', 'Comcast Two', 1)",
 			),
 		]);
 		await insert(
@@ -925,6 +932,8 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 				count: 3,
 				totalCents: 6000,
 				merchantKeys: ["Comcast"],
+				// The bank texts it carries, so a person sees what else one choice changes.
+				bankTexts: ["COMCAST CABLE", "COMCAST CABLE 2"],
 			},
 		]);
 
@@ -942,7 +951,7 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 	it("names an Organize group by its key's row first, then its old names by count and then alphabet", async () => {
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchants (raw_name, display_name) VALUES ('B OLD', 'Beta'), ('A OLD', 'Alpha')",
+				"INSERT INTO merchants (raw_name, display_name, raw_text) VALUES ('B OLD', 'Beta', 1), ('A OLD', 'Alpha', 1)",
 			),
 		]);
 		await insert(
@@ -1018,7 +1027,7 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 		).toEqual([{ transaction_id: 8721 }]);
 	});
 
-	it("still matches a bill saved under bank text that is nobody's merchant name", async () => {
+	it("still matches a legacy bill saved under the bank's raw text", async () => {
 		await insert(
 			{
 				id: 8731,
@@ -1035,7 +1044,7 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 				merchant: "Comcast",
 			},
 		);
-		await bill(8702, "COMCAST CABLE", 10, 8000);
+		await bill(8702, "COMCAST CABLE", 10, 8000, true);
 
 		await matchBillPayments(db, TODAY);
 
@@ -1197,5 +1206,153 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 		);
 
 		expect(offered.map((p) => p.id)).toEqual([8782]);
+	});
+
+	it("keeps a legacy rule, name and bill working when an unrelated charge has the old text as its merchant name", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name, default_category_id, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', 5, 1)",
+			),
+		]);
+		await bill(8705, "COMCAST CABLE", 10, 8000, true);
+		await insert(
+			{
+				id: 8801,
+				date: "2026-09-10",
+				cents: 8000,
+				raw: "COMCAST CABLE",
+				merchant: "Comcast",
+			},
+			// An unrelated charge whose Plaid merchant name happens to be the old text.
+			{
+				id: 8802,
+				date: "2026-03-01",
+				cents: 100,
+				raw: "SOMETHING ELSE",
+				merchant: "COMCAST CABLE",
+			},
+		);
+
+		await applyMerchantRules(db);
+		await matchBillPayments(db, TODAY);
+
+		expect(await row(8801)).toMatchObject({
+			category_id: 5,
+			category_source: "merchant_rule",
+		});
+		expect((await getTransaction(db, 8801))?.displayName).toBe("Comcast Cable");
+		expect(
+			(
+				await db
+					.prepare(
+						"SELECT transaction_id FROM bill_payments WHERE bill_id = 8705 AND status = 'linked'",
+					)
+					.all()
+			).results,
+		).toEqual([{ transaction_id: 8801 }]);
+	});
+
+	it("lets a row saved under the key beat a legacy row for the same bank text", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name, default_category_id, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', 5, 1)",
+			),
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('Comcast', 'Comcast Internet', 3)",
+			),
+		]);
+		await insert({
+			id: 8811,
+			date: "2026-09-10",
+			cents: 8000,
+			raw: "COMCAST CABLE",
+			merchant: "Comcast",
+		});
+
+		await applyMerchantRules(db);
+
+		expect(await row(8811)).toMatchObject({ category_id: 3 });
+		expect((await getTransaction(db, 8811))?.displayName).toBe(
+			"Comcast Internet",
+		);
+	});
+
+	it("does not let a bill saved under the key claim another merchant's charge, even with the same bank text", async () => {
+		await insert({
+			id: 8821,
+			date: "2026-09-10",
+			cents: 5000,
+			raw: "Target",
+			merchant: "Target Optical",
+		});
+		// Saved after Phase 3.5, so "Target" is a key, not bank text.
+		await bill(8706, "Target");
+
+		await matchBillPayments(db, TODAY);
+
+		expect(
+			(await db.prepare("SELECT COUNT(*) AS n FROM bill_payments").first())?.n,
+		).toBe(0);
+	});
+
+	it("keeps a legacy bill on the bank text it was saved under, as before Phase 3.5, whatever Plaid now calls the charge", async () => {
+		await insert({
+			id: 8831,
+			date: "2026-09-10",
+			cents: 5000,
+			raw: "Target",
+			merchant: "Target Optical",
+		});
+		await bill(8707, "Target", 10, 5000, true);
+
+		await matchBillPayments(db, TODAY);
+
+		expect(
+			(
+				await db
+					.prepare(
+						"SELECT transaction_id FROM bill_payments WHERE bill_id = 8707",
+					)
+					.all()
+			).results,
+		).toEqual([{ transaction_id: 8831 }]);
+	});
+
+	it("saves a new row under the key with the flag off, and leaves a legacy row's flag alone", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', 1)",
+			)
+			.run();
+		await insert(
+			{
+				id: 8841,
+				date: "2026-09-10",
+				cents: 8000,
+				raw: "COMCAST CABLE",
+				merchant: "Comcast",
+			},
+			{ id: 8842, date: "2026-09-11", cents: 8000, raw: "COMCAST CABLE" },
+		);
+
+		await saveEdit(db, 8841, edit({ displayName: "Comcast Internet" }), "me");
+		await saveEdit(db, 8842, edit({ displayName: "Comcast Cable Co" }), "me");
+
+		expect(
+			(
+				await db
+					.prepare(
+						"SELECT raw_name, display_name, raw_text FROM merchants ORDER BY raw_name",
+					)
+					.all()
+			).results,
+		).toEqual([
+			{
+				raw_name: "COMCAST CABLE",
+				display_name: "Comcast Cable Co",
+				raw_text: 1,
+			},
+			{ raw_name: "Comcast", display_name: "Comcast Internet", raw_text: 0 },
+		]);
 	});
 });

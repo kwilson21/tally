@@ -207,6 +207,7 @@ describe("data exports", () => {
 				"suggested_name",
 				"suggestion_status",
 				"not_a_bill",
+				"raw_text",
 			],
 			accounts: [
 				"balance_cents",
@@ -263,6 +264,7 @@ describe("data exports", () => {
 				"frequency",
 				"id",
 				"merchant_raw_name",
+				"merchant_raw_text",
 				"name",
 			],
 			bill_payments: [

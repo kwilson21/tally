@@ -46,6 +46,7 @@ type DbBill = {
 	anchor_month: number | null;
 	category_id: number | null;
 	merchant_raw_name: string;
+	merchant_raw_text: number;
 	active: number;
 	icon: string | null;
 	color: string | null;
@@ -599,8 +600,14 @@ async function save(c: Context<App>, id?: number) {
 	];
 	if (id) {
 		const update = c.env.DB.prepare(
-			"UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,merchant_raw_name=? WHERE id=?",
-		).bind(...args, id);
+			// A changed text is a new write, saved as a key (flag 0). An unchanged one keeps its flag.
+			"UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,merchant_raw_text=CASE WHEN merchant_raw_name=? THEN merchant_raw_text ELSE 0 END,merchant_raw_name=? WHERE id=?",
+		).bind(
+			...args.slice(0, 6),
+			values.merchant_raw_name,
+			values.merchant_raw_name,
+			id,
+		);
 		if (bill && bill.frequency !== values.frequency)
 			// Period keys have different shapes (YYYY-MM vs YYYY), so old dismissals
 			// no longer apply; links can't exist here (checked above).
@@ -774,10 +781,10 @@ async function billPage(
 		const due = occurrenceDate(bill, pickerPeriod);
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,CASE WHEN ${isMerchantTextSql("t", "?")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.excluded=0 AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.excluded=0 AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
-					...merchantTextArgs(bill.merchant_raw_name),
+					...merchantTextArgs(bill),
 					due,
 					bill.id,
 					pickerPeriod,

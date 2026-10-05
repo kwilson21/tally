@@ -51,7 +51,7 @@ async function renderOrganize(
 	if (group) skipParams.append("skip", group.name);
 	const skipHref = `/transactions/organize?${skipParams}`;
 	const sources = group
-		? `${group.merchantKeys.slice(0, 3).join(", ")}${group.merchantKeys.length > 3 ? ` and ${group.merchantKeys.length - 3} more` : ""}`
+		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
 
 	return c.html(

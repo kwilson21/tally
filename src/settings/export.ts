@@ -5,7 +5,7 @@ const EXPORT_COLUMNS = {
 	categories: "id, name, icon, color, sort_order, archived",
 	budget_amounts: "category_id, effective_month, amount_cents",
 	merchants:
-		"raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill",
+		"raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill, raw_text",
 	// Each account names its bank and says whether it's disconnected, since bank rows carry no id.
 	accounts: `id, plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents, updated_at,
 		(SELECT institution_name FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank,
@@ -14,7 +14,7 @@ const EXPORT_COLUMNS = {
 	transactions:
 		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending",
 	bills:
-		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active",
+		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, merchant_raw_text, active",
 	bill_payments:
 		"id, bill_id, period, transaction_id, matched_by, status, created_at",
 	household_settings: "key, value",

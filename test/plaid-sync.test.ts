@@ -544,10 +544,10 @@ describe("syncItem", () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
-				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Internet', 1234, 27, 'monthly', 'COMCAST CABLE')",
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name, merchant_raw_text) VALUES ('Internet', 1234, 27, 'monthly', 'COMCAST CABLE', 1)",
 			),
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('COMCAST CABLE', 'Comcast Cable', (SELECT id FROM categories LIMIT 1))",
+				"INSERT INTO merchants (raw_name, display_name, default_category_id, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', (SELECT id FROM categories LIMIT 1), 1)",
 			),
 		]);
 
