@@ -8,7 +8,8 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 | 1. Core demo live | Home + Transactions on seed data at tally-demo.thesuperhuman.us | Demo live over HTTPS, all routes work, no console errors | [milestone](https://github.com/kwilson21/tally/milestone/2) |
 | 2. Family on the core | Plaid sync + Cloudflare Access for the family, plus Settings with default categories and exclusions, so the numbers are right from day one | Family uses it Oct 1–7, then through October (decision 58) | [milestone](https://github.com/kwilson21/tally/milestone/3) |
 | 3. Bills and splits | In both environments, with the four extras (decisions 57, 58) as picked in decision 60. Building starts Oct 4; production gets it after the trial week | Shown in demo, used by family | [milestone](https://github.com/kwilson21/tally/milestone/4) |
-| 4. Trends, balances, documents, name suggestions | Remaining features, plus AI suggestions for merchant names and new categories | All 8 features live in both | [milestone](https://github.com/kwilson21/tally/milestone/5) |
+| 4. Trends, balances, name suggestions | Remaining features, plus AI suggestions for merchant names and new categories; Documents moved to the Later list (decision 66) | Features 1–7 live in both | [milestone](https://github.com/kwilson21/tally/milestone/5) |
+| 5. From the original app | Eight features the original app had built (decision 66, spec §8.4), each designed on the proposals page first | Shown in demo, used by family | milestone to come |
 | Design system (track) | A catalog at `/design-system` built from the real components, the process every UI change follows, and the original app's components brought over one at a time ([#76](https://github.com/kwilson21/tally/issues/76)) | The catalog is live on the demo, every existing component is in it at its tier, and the owner has signed off MoneyInput and the first flows there | milestone to come |
 | Onboarding (after the design system track) | What a first visit shows and teaches, in the demo and in the family's first week ([#95](https://github.com/kwilson21/tally/issues/95), decision 49) | Both first visits are designed on the proposals page and signed off, and they do Things to try's job and more | milestone to come |
 
@@ -39,7 +40,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Briefed; first, as the parts below use it |
 | Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Briefed after #170 |
 | Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Briefed after #170 |
-| Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Briefed |
+| Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
 | Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | Briefed after #170 |
 | New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | Briefed after #33 (both use `src/ai/suggest-name.ts`) |
 

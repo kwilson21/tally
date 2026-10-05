@@ -26,7 +26,7 @@ Tally replaces the owner's Django app (`personal-finance-app`). That app stays i
 
 ## 3. Scope
 
-All eight features are in scope and ship across phases (§11):
+The first seven features ship across phases (§11); the eighth moved to the Later list (decision 66):
 
 | # | Feature |
 |---|---|
@@ -37,7 +37,7 @@ All eight features are in scope and ship across phases (§11):
 | 5 | Excluding transactions from the budget (transfers, reimbursements, one-offs) |
 | 6 | Spending trends: month over month, by category |
 | 7 | Account balances and net worth over time |
-| 8 | Documents: stored statements and receipts (PDF) |
+| 8 | ~~Documents: stored statements and receipts (PDF)~~ Moved to the Later list as part of receipts (§12, decision 66) |
 
 Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggested new categories when none of the household's categories fit (a person creates or dismisses them), the demo banner, a "Things to try" list, a "How it works" page, and onboarding: what a first visit shows and teaches, in the demo and in the family's first week (decision 49, #95).
 
@@ -56,7 +56,7 @@ Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggest
 | **Tailwind CSS** | Styles the pages with utility classes, compiled into one CSS file. |
 | **Workers static assets** | Serves the CSS file, `htmx.js`, and icons. |
 | **D1 (SQLite)** | Stores all data. |
-| **R2** | Stores document PDFs; D1 keeps only each file's name and details. |
+| **R2** | Not used yet: it would store receipts when they are built (§12, decision 66). The buckets exist, unbound. |
 | **Plaid (REST over `fetch`)** | Supplies accounts, transactions, and balances from the family's banks. |
 | **Jev (TypeSafe AI)** | Picks a category and flags for each transaction, with a confidence score. |
 | **Workers AI** | Suggests a clean merchant name, which a person accepts or rejects. |
@@ -109,7 +109,7 @@ All money is stored as **integer cents**, because SQLite has no exact decimal ty
 | `transactions` | Every transaction and how it's categorized. | `id`, `plaid_transaction_id` (unique, nullable for split children), `account_id`, `date` (`YYYY-MM-DD` as Plaid sends it), `amount_cents`, `raw_name`, `plaid_category` (Plaid's `personal_finance_category.primary`, a hint for Jev), `category_id` (nullable), `category_source` (`user` / `merchant_rule` / `jev` / null), `category_confidence`, `jev_category_id` (Jev's pick, kept even when it's below the threshold; null when Jev said none fit), `jev_failed_at` (when Jev last failed on this transaction; asked last), `flag_transfer`, `flag_reimbursement`, `flag_income` (0/1), `excluded`, `excluded_source` (`user` / `jev` / null: who last decided the exclusion; Jev never overrides a person, #27), `parent_id` (nullable), `is_split`, `refund_of_id` (nullable, from Phase 3: the purchase this refund refunds, decision 60), `note`, `updated_by`, `updated_at`. A hand-entered cash transaction has no `plaid_transaction_id` |
 | `bills` | Recurring bills and how to recognize their payment. | `id`, `name`, `amount_cents`, `due_day`, `frequency` (`monthly` / `yearly`), `anchor_month` (for yearly), `category_id`, `merchant_raw_name`, `active` |
 | `bill_payments` | Links one bill occurrence to the one transaction that paid it. | `bill_id`, `period` (`YYYY-MM` or `YYYY`), `transaction_id`, `matched_by` (`auto` / `user`), `status` (`linked` / `dismissed`), `created_at`. Among `linked` rows: unique on (`bill_id`, `period`) and unique on `transaction_id` |
-| `documents` | Details of each stored PDF, whose file lives in R2. | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
+| `documents` | Details of each stored PDF, whose file lives in R2. Unused until receipts are built (decision 66). | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
 
 `updated_by`, `linked_by`, and `uploaded_by` hold the email claim from Cloudflare Access's signed login token. The Worker verifies the `Cf-Access-Jwt-Assertion` JWT against the team's public keys (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, cached) and never trusts the plain `Cf-Access-Authenticated-User-Email` header. In one sentence: we read who you are from Cloudflare's signed login token, not from a header anyone could fake. In the demo they hold `demo`.
 
@@ -194,7 +194,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 | **Bills** | Each bill with its status, plus add, edit, and deactivate | 2 |
 | **Trends** | Spending by category over the last 6 months, and this month vs. last month (§8.3) | 6 |
 | **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, Fix connection for items that need attention, Disconnect a bank, and Sync now with when each bank last synced (§8.1) | 7 |
-| **More → Documents** | Upload, list, download, and delete PDFs | 8 |
+| **More → Documents** | Not built; moved to the Later list with receipts (decision 66) | — |
 | **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review; Download your data (§8.1) | — |
 | **Transactions → Organize** | Transactions that need a category, grouped by merchant, each group categorized in one go (§8.1) | 3 |
 | **How Tally works** | One section per feature, in the demo and the family app; the architecture part is demo only (decision 65) | — |
@@ -240,11 +240,23 @@ Picked on `/design-system/proposals` (P15–P22); all shipped by Oct 4, so the p
 Picked on `/design-system/proposals` (P23–P32), where the drawings stay as the build reference until each ships.
 - **Trends (P23 D, P24 A):** first, what's spent so far this month as the serif number and a sentence comparing it with the same days last month ("$90 less than by this time in September"), then each category's change in words and an arrow, biggest first. Then "Going well" (categories under budget 3 or more months running), "Worth a look" (categories up 3 or more months running), and every other category, each a row with six small bars. The 6 months include this one so far, dashed; it isn't judged against its budget until it's over. Code writes the sentences, not AI.
 - **Net worth (P25 A, P26 A):** a line through the last 6 months of net worth, in the ruled space under the headline, with "Up $3,600 since May."; account rows keep today's balance only. Before two days of balances, the space says when the chart starts.
-- **Documents (P27 A, P28 A):** newest first; tapping a name downloads it. "Add a document" opens the file (PDF, up to 10 MB) and an optional note in the bottom sheet. Delete turns its row into "Delete this? This can't be undone." with Delete it and Keep. No documents yet is EmptyState with the add sign.
+- **Documents (P27 A, P28 A):** not built; moved to the Later list with receipts (decision 66). The drawings stay on the proposals page for when receipts are designed.
 - **Merchant names (P29 A):** see §7: suggested names show dashed in the list until chosen in the edit panel or the Settings review.
 - **A new category (P30 A):** a dashed row under Settings' categories, open to its transactions with a tick each (§7).
 - **Category suggestions in the list (P32 A):** a row needing a category shows a dashed "Maybe Eating Out" (or "Maybe new: Pet Care") tag; the edit panel puts that category first, marked Suggested, with "Tally's guess · N% sure".
 - **Empty and early states (P31):** as drawn.
+
+### 8.4 Phase 5: from the original app (decision 66)
+
+Each is drawn on `/design-system/proposals` and picked by the owner before it's built; until then, this is what each is for.
+- **Browse past months:** see how an earlier month ended on Home.
+- **A savings goal:** a monthly amount to save, which Safe to spend sets aside.
+- **More bill frequencies:** weekly, every two weeks and quarterly bills, besides monthly and yearly.
+- **Planned one-time expenses:** money set aside in a month for a known one-off cost.
+- **Rule suggestions:** after a person gives the same merchant the same category three times, Tally offers to make it the merchant's rule.
+- **Filter by account:** show only one account's transactions.
+- **Edit a cash transaction's date or amount:** only hand-entered (Cash account) transactions; a bank transaction always keeps the bank's date and amount, so sync never fights a person (split, exclude and "counts in" cover a bank that's wrong).
+- **Reconnect reminder email:** an email when a bank needs signing in again, so sync doesn't stop unnoticed. How Tally sends email is its own decision.
 
 ## 9. Demo experience
 
@@ -259,7 +271,7 @@ The seed data tells the story of a fictional household ("the Rivera family") wit
 | 5 | A transfer between accounts and a reimbursement, both excluded |
 | 6 | Six months with a visible trend (Eating Out creeping up) |
 | 7 | Checking, savings, and a credit card, with daily balance history |
-| 8 | Two sample statement PDFs, clearly watermarked as fake |
+| 8 | None until receipts are built (decision 66) |
 
 Seed dates are relative to the current month, so the demo always looks current. The nightly job rebuilds the demo database and bucket from the seed. Visitors can edit anything; their changes are gone the next morning.
 
@@ -298,7 +310,8 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 | **1. Core demo live** | Wireframes; D1 schema; seed household; Home; Transactions (recategorize, merchant rules, rename); Jev categorization; demo banner, Things to try, How it works; nightly reset; `demo` deploy | `https://tally-demo.thesuperhuman.us` loads over HTTPS, all Phase 1 routes work, and there are no console errors. DNS records are shown to the owner and approved before they're created. |
 | **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection, Settings for categories and budget amounts with the default categories (decision 32), and exclusions (decision 33), so the family's numbers are right from the first week; Organize, Disconnect a bank, Sync now, Download your data and Send feedback (decisions 57 and 58, §8.1) | The family uses it for a week (Oct 1–7), then keeps using it through October; the month-end review feeds Phase 3's review (decision 58). Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
 | **3. Bills and splits** | In both environments, with seed data for each (exclusions moved to Phase 2, decision 33). Also (decisions 57 and 58): finding bills from recurring charges, linking a refund to its purchase, selecting several transactions at once, adding a cash transaction by hand, and counting a bill payment toward its bill's month (a payment linked to an earlier month's bill occurrence counts in that month's spending *instead of* its own date's month, never both; the bank's date is unchanged) | Building starts Oct 4 while production stays frozen for the trial week (fixes only); Phase 3 reaches production after Oct 7 in one owner-approved deploy (decision 60). Shown in the demo, used by the family |
-| **4. Trends, balances, documents, name suggestions** | Trends, net-worth history, R2 documents, Workers AI name suggestions (merchant names and new categories) | All 8 features live in both environments |
+| **4. Trends, balances, name suggestions** | Trends, net-worth history, Workers AI name suggestions (merchant names and new categories), and How Tally works in the family app (decision 65). Documents moved to the Later list (decision 66) | Features 1–7 live in both environments |
+| **5. From the original app** | Eight features the original app had built (decision 66, §8.4): browsing past months, a savings goal, more bill frequencies, planned one-time expenses, rule suggestions, a filter by account, editing a cash transaction's date or amount, and a reminder email when a bank needs reconnecting. Each is designed on the proposals page and picked by the owner before it's built | Shown in the demo, used by the family |
 
 ### Testing
 
@@ -313,9 +326,10 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 
 - An "ask a question" box (LLM-written read-only queries)
 - Deploying automatically from CI
-- Planned one-time expenses
 - Private per-person accounts
 - Statement upload (CSV or PDF) as a second transaction source
+- **Receipts** (decision 66), from the original app's draft design (`superhuman-personal-finance` `docs/designs/RECEIPT-01-tech-design.md` and `RECEIPT-01-user-flows.md`, Feb 2026): (1) attach a photo or PDF of a receipt to a transaction; (2) scan a receipt so AI reads it and makes a cash transaction or matches a bank one, proposing a split from its line items; (3) forward receipts by email. A plain shelf of stored PDFs (the old feature 8, P27/P28) comes back only as part of this. R2 buckets `tally-demo-docs` and `tally-prod-docs` already exist.
+- From the original app, not picked for Phase 5 (decision 66): deleting a transaction (with undo), resetting a category to automatic, grouping the list by week, and merging two categories
 - A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
 - A close (×) button on the demo's Things to try block, remembered with a cookie
