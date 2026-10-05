@@ -3,6 +3,7 @@ import { verifiedEmail } from "./access";
 import { categorizePending } from "./categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
+import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
@@ -15,7 +16,7 @@ import { health } from "./routes/health";
 import { home } from "./routes/home";
 import { howItWorks } from "./routes/how-it-works";
 import { organize } from "./routes/organize";
-import { plaid } from "./routes/plaid";
+import { plaid, enabled as plaidEnabled } from "./routes/plaid";
 import { settings } from "./routes/settings";
 import { transactions } from "./routes/transactions";
 import { webhooks } from "./routes/webhooks";
@@ -37,6 +38,10 @@ type ScheduledEnv = PlaidEnv & {
 };
 export const app = new Hono<App>();
 
+// The app's own 404 and 500 pages (spec §8.5, decision 72); Hono's plain-text ones never show.
+app.notFound(notFoundPage);
+app.onError(serverErrorPage);
+
 export async function runScheduled(
 	env: ScheduledEnv,
 	fetchImpl?: typeof fetch,
@@ -46,9 +51,12 @@ export async function runScheduled(
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	}
-	await syncAllItems(env, fetchImpl);
-	// Merchant rules and Jev run after sync so newly fetched transactions are sorted tonight.
-	await categorizePending(env, fetchImpl);
+	const synced = await syncAllItems(env, fetchImpl);
+	// The catch-up has already applied merchant rules unless Plaid is off (the demo) or that step
+	// failed; Jev then asks about what they left, so newly fetched transactions are sorted tonight.
+	await categorizePending(env, fetchImpl, undefined, {
+		rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
+	});
 	await retryFeedback(env, fetchImpl);
 }
 

@@ -25,11 +25,14 @@ export async function categorizePending(
 	env: CategorizeEnv,
 	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
 	switches: { income: boolean } = { income: true },
+	// The nightly catch-up has just applied merchant rules after its syncs; without banks (the demo)
+	// or when that step failed, this run applies them itself.
+	{ rulesApplied = false }: { rulesApplied?: boolean } = {},
 ): Promise<{ asked: number; applied: number }> {
 	const done = { asked: 0, applied: 0 };
 	if (!env.JEV_API_KEY) return done;
 
-	await applyMerchantRules(env.DB);
+	if (!rulesApplied) await applyMerchantRules(env.DB);
 
 	const { results: categories } = await env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",

@@ -4,7 +4,6 @@ import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
 import { loadMonth } from "../src/db/month";
 import {
-	applyMerchantRules,
 	getTransaction,
 	pendingForJev,
 	saveEdit,
@@ -426,7 +425,7 @@ describe("syncItem", () => {
 	});
 
 	it.each(["added", "modified"] as const)(
-		"clears a merchant rule's category when Plaid corrects the merchant (%s), so the new merchant's rule applies",
+		"clears a merchant rule's category when Plaid corrects the merchant (%s), and the sync gives it the new merchant's rule",
 		async (path) => {
 			const id = await addItem();
 			const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
@@ -523,18 +522,12 @@ describe("syncItem", () => {
 						}>()
 					).results.map((r) => [r.id, [r.category_id, r.category_source]]),
 				);
+			// The old rule's category is cleared, and the sync's own rules step gives the new merchant's.
 			expect(await state()).toEqual({
-				"by-rule": [null, null],
-				"by-user": [first, "user"],
-				"by-jev": [first, "jev"],
-				same: [first, "merchant_rule"],
-			});
-
-			await applyMerchantRules(env.DB);
-			expect(await state()).toMatchObject({
 				"by-rule": [second, "merchant_rule"],
 				"by-user": [first, "user"],
 				"by-jev": [first, "jev"],
+				same: [first, "merchant_rule"],
 			});
 			await env.DB.prepare(
 				"DELETE FROM merchants WHERE raw_name = 'New Shop'",
@@ -542,7 +535,77 @@ describe("syncItem", () => {
 		},
 	);
 
-	it("starts a merchant's settings as a copy of its bank-text row when Plaid first names it, so its rule, name and Not a bill carry over", async () => {
+	it("applies merchant rules to the transactions a sync brings in, and never to one a person or Jev categorized", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({ transaction_id: "by-user" }),
+							transaction({ transaction_id: "by-jev" }),
+						],
+					}),
+				),
+			),
+		);
+		const [rule, mine] = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+			).all<{ id: number }>()
+		).results.map((r) => r.id) as [number, number];
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE plaid_transaction_id = 'by-user'",
+			).bind(mine),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.9 WHERE plaid_transaction_id = 'by-jev'",
+			).bind(mine),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Shop', ?)",
+			).bind(rule),
+		]);
+
+		// The two already-sorted ones come back changed; a third arrives new.
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [transaction({ transaction_id: "fresh" })],
+						modified: [
+							transaction({ transaction_id: "by-user", date: "2026-09-28" }),
+							transaction({ transaction_id: "by-jev", date: "2026-09-28" }),
+						],
+					}),
+				),
+			),
+		);
+
+		expect(
+			Object.fromEntries(
+				(
+					await env.DB.prepare(
+						"SELECT plaid_transaction_id AS id, category_id, category_source FROM transactions",
+					).all<{
+						id: string;
+						category_id: number | null;
+						category_source: string | null;
+					}>()
+				).results.map((r) => [r.id, [r.category_id, r.category_source]]),
+			),
+		).toEqual({
+			fresh: [rule, "merchant_rule"],
+			"by-user": [mine, "user"],
+			"by-jev": [mine, "jev"],
+		});
+	});
+
+	it("starts a merchant's settings as a copy of its bank-text row when Plaid first names it, so its rule, name and Not a bill carry over, and the sync's rules step then applies the rule", async () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
@@ -570,7 +633,6 @@ describe("syncItem", () => {
 				),
 			),
 		);
-		await applyMerchantRules(env.DB);
 
 		// The new row is the old row's settings, under the key.
 		expect(
