@@ -243,7 +243,7 @@ async function renderList(
 					<Icon name="plus" class="size-5" /> Add cash
 				</Button>
 			</div>
-			<HowLink section="transactions" demo={c.env.DEMO === "true"} />
+			<HowLink section="transactions" />
 
 			{/* Works as a plain GET form; htmx re-requests the same URL and swaps in only the results. */}
 			<form
@@ -797,7 +797,6 @@ type SheetProps = {
 	categories: Category[];
 	values: Edit;
 	errors?: EditErrors;
-	demo: boolean;
 	deleteConfirm?: boolean;
 	refunds?: RefundPurchase[];
 };
@@ -809,7 +808,6 @@ function EditSheet({
 	categories,
 	values,
 	errors = {},
-	demo,
 	deleteConfirm = false,
 	refunds = [],
 }: SheetProps) {
@@ -879,11 +877,9 @@ function EditSheet({
 				</p>
 			)}
 			{/* Outside the form, so following it never happens by accident mid-edit. */}
-			{demo && (
-				<p>
-					<HowLink section="categorization" demo={demo} />
-				</p>
-			)}
+			<p>
+				<HowLink section="categorization" />
+			</p>
 			{tx.parentId === null && !tx.isSplit && !tx.income && (
 				<Button
 					kind="secondary"
@@ -1276,7 +1272,6 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				categories={categories}
 				values={values}
 				refunds={refunds}
-				demo={c.env.DEMO === "true"}
 			/>
 		),
 	});
@@ -1528,7 +1523,6 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					values={values}
 					refunds={refunds}
 					errors={errors}
-					demo={c.env.DEMO === "true"}
 				/>
 			),
 		});
@@ -1594,7 +1588,6 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 					categories={categories}
 					values={values}
 					refunds={refunds}
-					demo={c.env.DEMO === "true"}
 					deleteConfirm
 				/>
 			),
