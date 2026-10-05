@@ -575,3 +575,369 @@ describe("Bills", () => {
 		).toBe(404);
 	});
 });
+
+// Spec §8.5, decision 72 (P45 A): no two active bills share a name, and an amount over $100,000
+// is saved only once a "Yes, $X is right" chip for that exact amount is ticked.
+describe("Bill guards", () => {
+	beforeEach(() => resetDemo(env.DB, todayUtc()));
+
+	const fields = (over: Record<string, string> = {}) =>
+		new URLSearchParams({
+			name: "Gym",
+			amount: "42.50",
+			due_day: "12",
+			frequency: "monthly",
+			anchor_month: "1",
+			category_id: "5",
+			merchant_raw_name: "CITY GYM",
+			...over,
+		});
+	const post = (path: string, body: URLSearchParams, htmx = true) =>
+		exports.default.fetch(`http://tally.test${path}`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+				...(htmx ? { "HX-Request": "true" } : {}),
+			},
+			body,
+		});
+	const billCount = async () =>
+		(
+			await env.DB.prepare("SELECT COUNT(*) AS n FROM bills").first<{
+				n: number;
+			}>()
+		)?.n;
+	const nameOf = async (id: number) =>
+		env.DB.prepare("SELECT name FROM bills WHERE id=?").bind(id).first("name");
+	const amountOf = async (id: number) =>
+		env.DB.prepare("SELECT amount_cents FROM bills WHERE id=?")
+			.bind(id)
+			.first("amount_cents");
+	/** The confirm chip's input tag, or undefined when the form has none. */
+	const confirmChip = (html: string) =>
+		html.match(/<input[^>]*name="confirm_amount"[^>]*>/)?.[0];
+
+	describe("duplicate names", () => {
+		it.each([
+			["the same name", "Streaming"],
+			["another case", "STREAMING"],
+			["spaces around it", "  streaming  "],
+		])("refuses adding %s as an active bill", async (_label, name) => {
+			const before = await billCount();
+			const res = await post("/bills", fields({ name }));
+			const html = await res.text();
+			expect(res.status).toBe(200);
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(html).toContain("You already have a bill called Streaming.");
+			expect(html).toMatch(
+				/<p id="bill-name-error" role="alert"[^>]*>You already have a bill called Streaming\.<\/p>/,
+			);
+			expect(html).toMatch(
+				/<input[^>]*id="bill-name"[^>]*aria-describedby="bill-name-error"/,
+			);
+			// The form comes back with what was typed, ready to fix.
+			expect(html).toContain('id="bill-sheet-title"');
+			expect(html).toContain('value="CITY GYM"');
+			expect(await billCount()).toBe(before);
+		});
+
+		it("refuses it without JavaScript the same way", async () => {
+			const before = await billCount();
+			const res = await post("/bills", fields({ name: "water" }), false);
+			expect(res.status).toBe(200);
+			const html = await res.text();
+			expect(html).toContain("<form");
+			expect(html).toContain('role="alert"');
+			expect(html).toContain("You already have a bill called Water.");
+			expect(await billCount()).toBe(before);
+		});
+
+		it("lets a bill keep its own name when it is edited", async () => {
+			for (const name of ["Streaming", "  streaming ", "STREAMING"]) {
+				const res = await post(
+					"/bills/1",
+					fields({ name, amount: "3.99", merchant_raw_name: "APPLE.COM/BILL" }),
+				);
+				expect(res.headers.get("HX-Trigger")).toContain(
+					'"announce":"Bill saved"',
+				);
+				expect(await nameOf(1)).toBe(name.trim());
+			}
+		});
+
+		it("refuses editing a bill to another active bill's name", async () => {
+			const res = await post(
+				"/bills/1",
+				fields({ name: " water", merchant_raw_name: "APPLE.COM/BILL" }),
+			);
+			const html = await res.text();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(html).toContain("You already have a bill called Water.");
+			expect(await nameOf(1)).toBe("Streaming");
+		});
+
+		it("lets an add reuse an inactive bill's name", async () => {
+			const res = await post(
+				"/bills",
+				fields({ name: "old PHONE plan", merchant_raw_name: "PHONE CO" }),
+			);
+			expect(res.headers.get("HX-Trigger")).toContain("Bill added");
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM bills WHERE name='old PHONE plan' AND active=1",
+				).first("n"),
+			).toBe(1);
+		});
+
+		it("refuses reactivating a bill that would duplicate an active one", async () => {
+			await env.DB.prepare(
+				`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
+				 VALUES('old phone plan',4000,3,'monthly',5,'PHONE CO')`,
+			).run();
+			for (const htmx of [true, false]) {
+				const res = await post(
+					"/bills/7/reactivate",
+					new URLSearchParams(),
+					htmx,
+				);
+				const html = await res.text();
+				expect(res.status).toBe(200);
+				expect(res.headers.get("HX-Trigger")).toBeNull();
+				expect(html).toContain(
+					"You already have a bill called old phone plan.",
+				);
+				expect(html).toMatch(/<p id="bill-name-error" role="alert"/);
+				expect(
+					await env.DB.prepare("SELECT active FROM bills WHERE id=7").first(
+						"active",
+					),
+				).toBe(0);
+			}
+		});
+
+		it("reactivates an inactive bill when no active bill has its name", async () => {
+			const res = await post("/bills/7/reactivate", new URLSearchParams());
+			expect(res.headers.get("HX-Trigger")).toContain("Bill reactivated");
+			expect(
+				await env.DB.prepare("SELECT active FROM bills WHERE id=7").first(
+					"active",
+				),
+			).toBe(1);
+		});
+
+		it("still refuses reactivating a missing bill with a 404", async () => {
+			expect(
+				(await post("/bills/999999/reactivate", new URLSearchParams())).status,
+			).toBe(404);
+		});
+	});
+
+	describe("amounts over $100,000.00", () => {
+		it("comes back with the alert line and an unticked chip, and saves nothing", async () => {
+			const before = await billCount();
+			const res = await post(
+				"/bills",
+				fields({ name: "Rent", amount: "150000.00" }),
+			);
+			const html = await res.text();
+			expect(res.status).toBe(200);
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(await billCount()).toBe(before);
+			expect(html).toMatch(
+				/<p id="bill-amount-error" role="alert"[^>]*>\$150,000\.00 is a lot for a bill\.<\/p>/,
+			);
+			const chip = confirmChip(html);
+			expect(chip).toContain('type="checkbox"');
+			expect(chip).toContain('value="15000000"');
+			expect(chip).toContain('aria-describedby="bill-amount-error"');
+			expect(chip).not.toContain("checked");
+			expect(html).toContain("Yes, $150,000.00 is right");
+			// The form keeps what was typed.
+			expect(html).toContain('value="150000.00"');
+		});
+
+		it("does not ask at exactly $100,000.00, and asks one cent over", async () => {
+			const exact = await post(
+				"/bills",
+				fields({ name: "Land", amount: "100,000.00" }),
+			);
+			expect(exact.headers.get("HX-Trigger")).toContain("Bill added");
+			expect(
+				await env.DB.prepare(
+					"SELECT amount_cents FROM bills WHERE name='Land'",
+				).first("amount_cents"),
+			).toBe(10_000_000);
+			const over = await post(
+				"/bills",
+				fields({ name: "Land 2", amount: "100000.01" }),
+			);
+			expect(over.headers.get("HX-Trigger")).toBeNull();
+			expect(await over.text()).toContain("$100,000.01 is a lot for a bill.");
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM bills WHERE name='Land 2'",
+				).first("n"),
+			).toBe(0);
+		});
+
+		it("saves once the chip for that amount is ticked", async () => {
+			const res = await post(
+				"/bills",
+				fields({
+					name: "Rent",
+					amount: "150000.00",
+					confirm_amount: "15000000",
+				}),
+			);
+			expect(res.headers.get("HX-Trigger")).toContain(
+				'"announce":"Bill added"',
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT amount_cents FROM bills WHERE name='Rent'",
+				).first("amount_cents"),
+			).toBe(15_000_000);
+		});
+
+		it("asks again when the amount changed after confirming", async () => {
+			const before = await billCount();
+			const res = await post(
+				"/bills",
+				fields({
+					name: "Rent",
+					amount: "200000.00",
+					confirm_amount: "15000000",
+				}),
+			);
+			const html = await res.text();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(await billCount()).toBe(before);
+			expect(html).toContain("$200,000.00 is a lot for a bill.");
+			expect(html).toContain("Yes, $200,000.00 is right");
+			const chip = confirmChip(html);
+			expect(chip).toContain('value="20000000"');
+			expect(chip).not.toContain("checked");
+		});
+
+		it("does not take any other value as a confirmation", async () => {
+			for (const confirm_amount of ["on", "1", "150000.00", ""]) {
+				const res = await post(
+					"/bills",
+					fields({ name: "Rent", amount: "150000.00", confirm_amount }),
+				);
+				expect(res.headers.get("HX-Trigger")).toBeNull();
+			}
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM bills WHERE name='Rent'",
+				).first("n"),
+			).toBe(0);
+		});
+
+		it("works without JavaScript: the form again, then a redirect once ticked", async () => {
+			const asked = await post(
+				"/bills",
+				fields({ name: "Rent", amount: "150000" }),
+				false,
+			);
+			expect(asked.status).toBe(200);
+			const html = await asked.text();
+			expect(html).toContain("<form");
+			expect(html).toContain("Yes, $150,000.00 is right");
+			const saved = await post(
+				"/bills",
+				fields({ name: "Rent", amount: "150000", confirm_amount: "15000000" }),
+				false,
+			);
+			expect(saved.status).toBe(303);
+			expect(saved.headers.get("location")).toBe("/bills");
+		});
+
+		it("asks when an edit makes the amount that big, and saves once confirmed", async () => {
+			const edit = {
+				name: "Streaming",
+				amount: "150000.00",
+				merchant_raw_name: "APPLE.COM/BILL",
+			};
+			const asked = await post("/bills/1", fields(edit));
+			const html = await asked.text();
+			expect(asked.headers.get("HX-Trigger")).toBeNull();
+			expect(html).toContain("$150,000.00 is a lot for a bill.");
+			expect(confirmChip(html)).toContain('value="15000000"');
+			expect(await amountOf(1)).toBe(299);
+			const saved = await post(
+				"/bills/1",
+				fields({ ...edit, confirm_amount: "15000000" }),
+			);
+			expect(saved.headers.get("HX-Trigger")).toContain(
+				'"announce":"Bill saved"',
+			);
+			expect(await amountOf(1)).toBe(15_000_000);
+		});
+
+		it("asks on every save of a bill over $100,000.00, even with the amount unchanged", async () => {
+			await env.DB.prepare(
+				"UPDATE bills SET amount_cents=20000000 WHERE id=1",
+			).run();
+			const edit = {
+				name: "Streaming plus",
+				amount: "200000.00",
+				merchant_raw_name: "APPLE.COM/BILL",
+			};
+			const asked = await post("/bills/1", fields(edit));
+			expect(asked.headers.get("HX-Trigger")).toBeNull();
+			expect(await asked.text()).toContain("Yes, $200,000.00 is right");
+			expect(await nameOf(1)).toBe("Streaming");
+			const saved = await post(
+				"/bills/1",
+				fields({ ...edit, confirm_amount: "20000000" }),
+			);
+			expect(saved.headers.get("HX-Trigger")).toContain("Bill saved");
+			expect(await nameOf(1)).toBe("Streaming plus");
+		});
+
+		it("keeps a ticked chip, without the alert, when another field needs fixing", async () => {
+			const before = await billCount();
+			const res = await post(
+				"/bills",
+				fields({
+					name: "water",
+					amount: "150000.00",
+					confirm_amount: "15000000",
+				}),
+			);
+			const html = await res.text();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(await billCount()).toBe(before);
+			expect(html).toContain("You already have a bill called Water.");
+			expect(html).not.toContain("is a lot for a bill");
+			expect(html).not.toContain('id="bill-amount-error"');
+			const chip = confirmChip(html);
+			expect(chip).toContain('value="15000000"');
+			expect(chip).toContain("checked");
+			expect(chip).not.toContain("aria-describedby");
+		});
+
+		it("shows both problems at once", async () => {
+			const html = await (
+				await post("/bills", fields({ name: "water", amount: "150000.00" }))
+			).text();
+			expect(html).toContain("You already have a bill called Water.");
+			expect(html).toContain("$150,000.00 is a lot for a bill.");
+			expect(html.match(/role="alert"/g)?.length).toBe(2);
+		});
+
+		it("has no chip on an ordinary form or a normal amount", async () => {
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills/new")
+			).text();
+			expect(confirmChip(html)).toBeUndefined();
+			const bad = await (
+				await post("/bills", fields({ name: "Gym", due_day: "40" }))
+			).text();
+			expect(confirmChip(bad)).toBeUndefined();
+		});
+	});
+});

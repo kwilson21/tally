@@ -1,5 +1,10 @@
 import { type Context, Hono } from "hono";
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
+import {
+	BIG_BILL_CENTS,
+	duplicateBillName,
+	needsBigAmountConfirm,
+} from "../bills/guards";
 import { matchBillPayments } from "../bills/match";
 import {
 	type BillStatus,
@@ -48,6 +53,8 @@ type DbBill = {
 	payment_date?: string | null;
 };
 type Category = { id: number; name: string; icon: string; color: string };
+/** An amount over $100,000.00 that the form asks about with a "Yes, $X is right" chip (P45 A). */
+type BigAmount = { cents: number; confirmed: boolean };
 type Values = {
 	name: string;
 	amount: string;
@@ -131,7 +138,12 @@ const sheetAttrs = (href: string) => ({
 
 async function page(
 	c: Context<App>,
-	sheet?: { bill?: DbBill; values?: Values; errors?: Record<string, string> },
+	sheet?: {
+		bill?: DbBill;
+		values?: Values;
+		errors?: Record<string, string>;
+		bigAmount?: BigAmount;
+	},
 ) {
 	const { today, rows } = await loadBillRows(c.env.DB);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);
@@ -225,6 +237,15 @@ async function dbBill(c: Context<App>, id: number) {
 		.bind(id)
 		.first<DbBill>();
 }
+async function activeBills(c: Context<App>) {
+	return (
+		await c.env.DB.prepare(
+			"SELECT id,name,active FROM bills WHERE active=1",
+		).all<{ id: number; name: string; active: number }>()
+	).results;
+}
+const alreadyCalled = (name: string) =>
+	`You already have a bill called ${name}.`;
 function valuesOf(b?: DbBill): Values {
 	return {
 		name: b?.name ?? "",
@@ -241,11 +262,13 @@ function BillSheet({
 	bill,
 	values = valuesOf(bill),
 	errors = {},
+	bigAmount,
 	categories,
 }: {
 	bill?: DbBill;
 	values?: Values;
 	errors?: Record<string, string>;
+	bigAmount?: BigAmount;
 	categories: Category[];
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
@@ -283,6 +306,23 @@ function BillSheet({
 					value={values.amount}
 					error={errors.amount}
 				/>
+				{bigAmount && (
+					<div class="flex justify-center">
+						{/* Its value is the cents it confirms, so a changed amount isn't covered by it. Ticked
+						    already (another field needed fixing): the alert line is gone, so nothing to describe. */}
+						<Chip
+							type="checkbox"
+							name="confirm_amount"
+							value={String(bigAmount.cents)}
+							checked={bigAmount.confirmed}
+							describedBy={
+								bigAmount.confirmed ? undefined : "bill-amount-error"
+							}
+						>
+							{`Yes, ${formatCents(bigAmount.cents)} is right`}
+						</Chip>
+					</div>
+				)}
 				<div class="flex flex-wrap items-end gap-3">
 					<TextInput
 						id="bill-day"
@@ -547,6 +587,21 @@ async function save(c: Context<App>, id?: number) {
 		errors.anchor_month = "Choose a month.";
 	const bill = id ? await dbBill(c, id) : undefined;
 	if (id && !bill) return c.notFound();
+	if (!errors.name) {
+		const duplicate = duplicateBillName(await activeBills(c), values.name, id);
+		if (duplicate) errors.name = alreadyCalled(duplicate);
+	}
+	// P45 A: a very large amount, added or edited, is saved only once its own "Yes, $X is right" chip
+	// is ticked.
+	let bigAmount: BigAmount | undefined;
+	if (!errors.amount && cents > BIG_BILL_CENTS) {
+		bigAmount = {
+			cents,
+			confirmed: !needsBigAmountConfirm(cents, raw("confirm_amount")),
+		};
+		if (!bigAmount.confirmed)
+			errors.amount = `${formatCents(cents)} is a lot for a bill.`;
+	}
 	// Linked payments are budget history, so a bill that has them keeps its schedule.
 	if (bill && bill.frequency !== values.frequency) {
 		const linked = await c.env.DB.prepare(
@@ -574,7 +629,7 @@ async function save(c: Context<App>, id?: number) {
 				"This bill has payments linked. To change when it's due, deactivate it and add a new bill.";
 	}
 	if (Object.keys(errors).length)
-		return page(c, { bill: bill ?? undefined, values, errors });
+		return page(c, { bill: bill ?? undefined, values, errors, bigAmount });
 	const args = [
 		values.name,
 		cents,
@@ -622,10 +677,21 @@ bills.post("/bills", (c) => save(c));
 bills.post("/bills/:id", (c) => save(c, Number(c.req.param("id"))));
 for (const action of ["deactivate", "reactivate"] as const)
 	bills.post(`/bills/:id/${action}`, async (c) => {
+		const id = Number(c.req.param("id"));
+		if (action === "reactivate") {
+			// A bill that would repeat an active bill's name comes back as the same Name error as adding.
+			const bill = await dbBill(c, id);
+			const duplicate =
+				bill && !bill.active
+					? duplicateBillName(await activeBills(c), bill.name, id)
+					: undefined;
+			if (bill && duplicate)
+				return page(c, { bill, errors: { name: alreadyCalled(duplicate) } });
+		}
 		const { meta } = await c.env.DB.prepare(
 			"UPDATE bills SET active=? WHERE id=?",
 		)
-			.bind(action === "reactivate" ? 1 : 0, Number(c.req.param("id")))
+			.bind(action === "reactivate" ? 1 : 0, id)
 			.run();
 		if (!meta.changes) return c.notFound();
 		const message =
