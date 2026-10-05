@@ -120,14 +120,14 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 **Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date. "Today", which decides the current month and bill status, is the household's date in its time zone, a Settings choice that starts as Eastern (`America/New_York`); a transaction's own date is never converted (decision 67).
 
-**Pending (decision 67):** a pending transaction counts like any other and shows the word "Pending". When the bank posts it under a new id, the person's category, note, exclusion, split and every link (bill, refund, counts in) move to the posted transaction. A pending one the bank drops is removed with its links.
+**Pending (decision 67):** a pending transaction counts like any other and shows the word "Pending". When the bank posts it under a new id, the person's category, note, exclusion and every link (bill, refund, counts in) move to the posted transaction, and so does a split if the amount is unchanged; if the posted amount differs, the split is removed as in §6.1 (decision 62). A pending one the bank drops is removed with its links.
 
 "Counted transactions" for a month means: date in that month (or, from Phase 3, a payment linked to an earlier month's bill occurrence counts in that occurrence's month instead, never both; decision 58, #26; and a refund linked to its purchase counts in the purchase's counted month and current category instead of its own, never both, while the purchase counts; if the purchase is excluded, the refund counts on its own date and category again; a refund of a split purchase links to one of its parts, decision 60), `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. Transactions flagged `income` are counted only toward **Income**. They're left out of Spent, Uncategorized, and Safe to spend. A refund that follows its purchase has no category of its own to set, so only the purchase shows Needs category; its amount stays in Uncategorized until the purchase has a category.
 
 | Number | Rule |
 |---|---|
 | **Budget for a category in month M** | `amount_cents` from the `budget_amounts` row for that category with the latest `effective_month <= M`. No row means no budget. |
-| **Spent** | Sum of `amount_cents` over counted transactions in the category. Refunds are negative, so they reduce it. |
+| **Spent** | Sum of `amount_cents` over counted transactions in the category. Refunds are negative, so they reduce it. When refunds outweigh purchases, Spent is negative and the bar is empty (its wording is designed with Phase 5's Home wording, decision 67). |
 | **Left** | Budget minus spent. |
 | **Uncategorized** | Counted transactions with `category_id` null, shown as their own row and never hidden. |
 | **Income** | Absolute value of the sum of counted transactions flagged `income`. |
@@ -261,8 +261,8 @@ Each is drawn on `/design-system/proposals` and picked by the owner before it's 
 
 ### 8.5 Numbers you can trust (decision 67)
 
-Before more Phase 4 features, the rule gaps that can make the family's numbers wrong are fixed (`docs/reviews/original-app-gaps.md` section A, plus B4, C1, C9 and D7). Each fix states its rule here first.
-- **Income:** a person can mark a transaction as income from the edit panel, and Plaid's own INCOME category marks it at sync (the other session's #149/#153 hold unreviewed credits out of spending).
+Before more Phase 4 features, the rule gaps that can make the family's numbers wrong are fixed (`docs/reviews/original-app-gaps.md` section A, plus B4, C1 and C9). Each fix states its rule here first.
+- **Income:** a person can mark or unmark a transaction as income from the edit panel, and a person's choice always wins over later syncs; Plaid's own INCOME category marks it at sync only when no person has chosen (the other session's #149/#153 hold unreviewed credits out of spending).
 - **Pending:** counted and marked, as in §6.
 - **Transfers and card payments:** Plaid's TRANSFER_IN, TRANSFER_OUT and LOAN_PAYMENTS categories exclude a transaction at sync (`excluded_source = 'plaid'`), which a person can undo; Jev still decides the rest.
 - **Today:** the household's time zone, as in §6.
@@ -270,9 +270,9 @@ Before more Phase 4 features, the rule gaps that can make the family's numbers w
 - **Merchant:** Plaid's `merchant_name` is stored, and rules, bill matching, refunds and finding bills match on it when present, the raw name otherwise.
 - **Rules after every sync:** merchant rules run after each sync, not only on Sync now and overnight.
 - **Refunds:** linking a refund includes it in the budget; a refund can't be larger than what's left of its purchase, and a purchase is refunded at most to its amount.
-- **Bills:** no two active bills with the same name; an amount over $100,000 needs confirming; a yearly bill needs its anchor month.
+- **Bills:** no two active bills with the same name; an amount over $100,000 needs confirming. (A yearly bill already requires its anchor month, in the form and the schema.)
 - **A failed save says so:** an htmx error shows "Couldn't save. Check your connection and try again." in `role="alert"`, and the app has its own 404 and 500 pages.
-- **A bank that needs attention or hasn't synced for 3 days** is flagged on Home with a link to Accounts, because Safe to spend may be too high.
+- **A connected bank (not disconnected) that needs attention or hasn't synced for 3 days** is flagged on Home with a link to Accounts, because Safe to spend may be too high.
 - **The first visit's empty list** says "Importing your transactions…" or "Link a bank to see transactions" rather than "No transactions match".
 
 ### 8.6 AI that earns its place (decision 68)

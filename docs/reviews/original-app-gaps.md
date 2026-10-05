@@ -75,7 +75,7 @@ These are rule gaps rather than missing features: each can make Safe to spend or
 | D4 | Bills and subscriptions told apart, with a subscription review. | Later |
 | D5 | Add found bills in bulk (pre-ticked). | Later |
 | D6 | Suggest a bill's amount from its last payment, with rounding (#68). | Later |
-| D7 | A yearly bill requires its anchor month (#59, #80, #86). | Fix now (validation) |
+| D7 | A yearly bill requires its anchor month (#59, #80, #86). | Already enforced by the form and the schema; nothing to do |
 
 ## E. Household, reliability and other
 
@@ -89,7 +89,7 @@ These are rule gaps rather than missing features: each can make Safe to spend or
 | E6 | Retry when a new bank's first sync is empty. | Later |
 | E7 | A written data-retention policy, and "delete all our data". | Later |
 | E8 | Sheets with up to 50 categories must scroll with their actions pinned (#62, #66); Feedback mustn't cover the last row's amount (#46, #54, #55). | Check in the catalog |
-| E9 | A refund larger than its category's spending: how a bar below $0 looks (#92). | Spec line |
+| E9 | A refund larger than its category's spending: how a bar below $0 looks (#92). | Spec line added (§6 Spent); wording with B1 |
 | E10 | Business and personal spending; who handles which bill; sinking funds; a "Classic" theme; swipe-down to close a sheet; keyboard shortcuts; offline banner. | Later |
 
 ## Feedback themes from the family's beta (keep in mind)
