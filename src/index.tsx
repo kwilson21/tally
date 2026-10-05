@@ -16,7 +16,7 @@ import { health } from "./routes/health";
 import { home } from "./routes/home";
 import { howItWorks } from "./routes/how-it-works";
 import { organize } from "./routes/organize";
-import { plaid } from "./routes/plaid";
+import { plaid, enabled as plaidEnabled } from "./routes/plaid";
 import { settings } from "./routes/settings";
 import { transactions } from "./routes/transactions";
 import { webhooks } from "./routes/webhooks";
@@ -51,9 +51,12 @@ export async function runScheduled(
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	}
-	await syncAllItems(env, fetchImpl);
-	// Each sync has already applied merchant rules; Jev then asks about what they left, so newly fetched transactions are sorted tonight.
-	await categorizePending(env, fetchImpl);
+	const synced = await syncAllItems(env, fetchImpl);
+	// The catch-up has already applied merchant rules unless Plaid is off (the demo) or that step
+	// failed; Jev then asks about what they left, so newly fetched transactions are sorted tonight.
+	await categorizePending(env, fetchImpl, undefined, {
+		rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
+	});
 	await retryFeedback(env, fetchImpl);
 }
 
