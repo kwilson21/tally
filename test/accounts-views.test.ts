@@ -202,12 +202,25 @@ describe("NetWorthChart", () => {
 	it("writes the change in the status sentence's voice, then draws one line on the ledger rules", async () => {
 		const html = await render(NetWorthChart({ view: rising }));
 		expect(html).toContain(
-			'<p class="mt-1 font-serif text-lg italic">Up $3,600 since May.</p>',
+			'<span class="font-serif text-lg italic">Up $3,600 since May.</span>',
 		);
 		expect(html.match(/<polyline/g)).toHaveLength(1);
 		expect(html.match(/<line /g)).toHaveLength(4);
 		expect(html).toContain('class="stroke-rule"');
 		expect(html).toContain('class="stroke-ink"');
+	});
+
+	it("puts a Why? link after the sentence, separated by a dot, to the net-worth section of How Tally works (decision 65)", async () => {
+		const html = await render(NetWorthChart({ view: rising }));
+		expect(html).toMatch(
+			/Up \$3,600 since May\.<\/span><span aria-hidden="true">·<\/span><a href="\/how-it-works#net-worth" aria-label="Why\? net worth"/,
+		);
+		expect(html).toContain("min-h-11");
+		// Beside the sentence, in the early states too; with no sentence there is nothing to explain.
+		expect(await render(NetWorthChart({ view: firstDay }))).toContain(
+			'href="/how-it-works#net-worth"',
+		);
+		expect(await render(NetWorthChart({ view: noDays }))).not.toContain("Why?");
 	});
 
 	it("gives the picture a text alternative in numbers, and hides the labels under it as the same words", async () => {

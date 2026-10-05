@@ -1,7 +1,19 @@
 import type { NetWorthView } from "../net-worth";
+import { WhyLink } from "./why-link";
 
 // Four rules, from where the line's highest point can sit to its lowest, in the chart's 100-high box.
 const RULES = [6, 35.3, 64.7, 94];
+
+/** The sentence in the status sentence's voice, with its Why? after it, separated by a dot (decision 65). */
+function Sentence({ children }: { children: string }) {
+	return (
+		<p class="mt-1 flex flex-wrap items-center gap-x-2">
+			<span class="font-serif text-lg italic">{children}</span>
+			<span aria-hidden="true">·</span>
+			<WhyLink section="net-worth" topic="net worth" />
+		</p>
+	);
+}
 
 /**
  * The line under Accounts' headline (P25 A, P31): code writes the change in a sentence, then one
@@ -14,9 +26,7 @@ export function NetWorthChart({ view }: { view: NetWorthView }) {
 	if (view.kind === "early") {
 		return (
 			<>
-				{view.sentence && (
-					<p class="mt-1 font-serif text-lg italic">{view.sentence}</p>
-				)}
+				{view.sentence && <Sentence>{view.sentence}</Sentence>}
 				{/* Paper's own rules, like a ledger page waiting for its line. */}
 				<div
 					data-chart="early"
@@ -35,7 +45,7 @@ export function NetWorthChart({ view }: { view: NetWorthView }) {
 	}
 	return (
 		<>
-			<p class="mt-1 font-serif text-lg italic">{view.sentence}</p>
+			<Sentence>{view.sentence}</Sentence>
 			{/* The box stretches to the page's width; non-scaling strokes keep the lines thin and the dot round. */}
 			<svg
 				data-chart="line"
