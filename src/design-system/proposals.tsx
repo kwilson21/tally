@@ -3,9 +3,10 @@
 // accepted one moves into the real component in its own PR, and a decided one leaves this page
 // for the Decided list.
 
-import { Phase3Proposals } from "./proposals-phase3";
+import { Phase4Proposals } from "./proposals-phase4";
 
-// What the owner decided on 2026-09-26 and 2026-09-28 (decisions 46, 48, 50, 54, 55 and 59), and the issue each ships in.
+// What the owner decided on 2026-09-26, 2026-09-28 and 2026-09-29 (decisions 46, 48, 50, 54, 55, 59
+// and 60), and the issue each ships in.
 export const DECIDED = [
 	{
 		title: "P1 · The number on a phone's first screen",
@@ -84,6 +85,50 @@ export const DECIDED = [
 			"Always visible: a small Feedback button with a round speech bubble, pinned above the tab bar on every page, opening a form with a type, how it feels and a message (decision 59).",
 		issue: 136,
 	},
+	{
+		title: "P15 · The Bills screen",
+		outcome:
+			"Option A: grouped by status, with Add a bill opening the form in a sheet (decision 60).",
+		issue: 25,
+	},
+	{
+		title: "P16 · A bill's payments",
+		outcome:
+			"Option A: a bill has its own page, with each month and the payment linked to it (decision 60).",
+		issue: 26,
+	},
+	{
+		title: "P17 · Split a transaction",
+		outcome: "Option A: parts with what's left to assign (decision 60).",
+		issue: 28,
+	},
+	{
+		title: "P18 · Find bills from repeat charges",
+		outcome:
+			"Option A with Banner 1: a stronger Band, then a review list (decision 60).",
+		issue: 156,
+	},
+	{
+		title: "P19 · Link a refund to its purchase",
+		outcome: "Option A: from the refund (decision 60).",
+		issue: 157,
+	},
+	{
+		title: "P20 · Select several transactions",
+		outcome: "Option A: a Select button (decision 60).",
+		issue: 158,
+	},
+	{
+		title: "P21 · Add cash spending",
+		outcome: "Option A: Add cash on Transactions (decision 60).",
+		issue: 159,
+	},
+	{
+		title: "P22 · Count a payment in its bill's month",
+		outcome:
+			"Option A: the month is chosen when linking, from the bill (decision 60).",
+		issue: 26,
+	},
 ] as const;
 
 /** The proposals page body. */
@@ -105,14 +150,14 @@ export function Proposals() {
 
 			<section aria-labelledby="open-title" class="mt-10">
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
-					Picked, to build in Phase 3
+					Open, for Phase 4
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					The owner picked the Recommended option of each, and Banner 1 for
-					P18's Band (decision 60). The drawings stay here as the build
-					reference until each ships.
+					Trends, the net-worth chart, Documents and the AI suggestions. Pick
+					one option of each; "Needs a spec line" asks a rule the spec doesn't
+					settle yet.
 				</p>
-				<Phase3Proposals />
+				<Phase4Proposals />
 			</section>
 
 			<section aria-labelledby="decided-title" class="mt-12">

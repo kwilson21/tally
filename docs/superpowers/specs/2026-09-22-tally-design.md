@@ -224,7 +224,7 @@ Generated design studies (phone 390×844, desktop 1280×800) are selected by the
 
 ### 8.2 Phase 3 screens (decision 60)
 
-Picked on `/design-system/proposals` (P15–P22), where the drawings stay as the build reference until each ships.
+Picked on `/design-system/proposals` (P15–P22); all shipped by Oct 4, so the page lists them as decided.
 - **Bills (P15):** grouped by status, each group once under its heading: Overdue, Due in the next 7 days, Upcoming, Paid this month. Add a bill opens the form in a bottom sheet; Deactivate is its text action, and inactive bills wait under Inactive (N).
 - **A bill's page (P16):** its own page with each month's occurrence and the payment linked to it, Link a payment (the picker in §6.1) and Not this one (records a dismissal).
 - **Split (P17):** in the edit panel, parts of category plus amount with a live "$X left to assign" line and Add a part. The line is computed by the server as you type (htmx), so it needs no new script; a save that doesn't add up exactly is rejected with a field error.
