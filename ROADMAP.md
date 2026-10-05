@@ -32,7 +32,7 @@ The design system track runs alongside Phase 2 and comes before the audit detail
 
 Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's paid or the next one is due; a bank change to a split purchase's amount removes the split. Phase 3 is complete on `main` and the demo; it reaches production in the one owner-approved deploy after Oct 7 (decision 60). The other session's income work ([#149](https://github.com/kwilson21/tally/pull/149), [#153](https://github.com/kwilson21/tally/pull/153), [#160](https://github.com/kwilson21/tally/pull/160)) is separate; [#153](https://github.com/kwilson21/tally/pull/153) needs its migration renumbered after `0015`, which `main` now uses.
 
-Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built.
+Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Phases 3.5 to 5 are built in a new session with ultracode workflows (decision 69).
 
 ## Where Phase 4 stands (Oct 5: picked, briefed to Codex)
 
