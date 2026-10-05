@@ -249,8 +249,8 @@ Picked on `/design-system/proposals` (P23–P32), where the drawings stay as the
 
 Each is drawn on `/design-system/proposals` and picked by the owner before it's built; until then, this is what each is for.
 - **Browse past months:** see how an earlier month ended on Home.
-- **A savings goal:** a monthly amount to save, which Safe to spend sets aside.
-- **More bill frequencies:** weekly, every two weeks and quarterly bills, besides monthly and yearly.
+- **A savings goal:** a monthly amount to save, which Safe to spend sets aside. Before it's built, §6's Safe to spend rule gains the line that subtracts it, and the goal's table joins §5.
+- **More bill frequencies:** weekly, every two weeks and quarterly bills, besides monthly and yearly. Before it's built, §6.1 gains how such a bill's occurrence is identified (today `period` is `YYYY-MM` or `YYYY`, one per month or year, so a weekly bill needs its own period key), and how bill status counts several occurrences in one month.
 - **Planned one-time expenses:** money set aside in a month for a known one-off cost.
 - **Rule suggestions:** after a person gives the same merchant the same category three times, Tally offers to make it the merchant's rule.
 - **Filter by account:** show only one account's transactions.
