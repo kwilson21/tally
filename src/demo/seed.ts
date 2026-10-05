@@ -31,6 +31,8 @@ export type SeedMerchant = {
 	key: string;
 	displayName: string | null;
 	defaultCategoryId: number | null;
+	/** "Not a bill" (decision 60): the finder never suggests this merchant. */
+	notABill?: boolean;
 };
 export type SeedTransaction = {
 	id?: number;
@@ -193,6 +195,14 @@ const PLAID_MERCHANT_NAMES: Record<string, string> = {
 	"CHEVRON 0098812": "Chevron",
 	"AMAZON.COM*RT4K2": "Amazon",
 	"AMZN MKTP US*2K4": "Amazon",
+};
+
+/** The demo's one subscription that raised its price: the bill is $15.49, the charge $17.99 (P36 B). */
+export const NETFLIX = {
+	rawName: "NETFLIX.COM",
+	displayName: "Netflix",
+	billCents: 1549,
+	chargedCents: 1799,
 };
 
 /** The merchant key of a seeded raw name (spec §6.1): Plaid's merchant name, otherwise the raw name. */
@@ -480,6 +490,21 @@ export function buildSeed(today: string): Seed {
 			refundOfId: targetPurchaseId,
 		},
 	);
+	// P36 B (decision 72): a subscription whose price went up, so the demo shows "Price changed?" on
+	// one bill. Netflix charged $17.99 yesterday (today, on the 1st, to stay in this month). Its bill,
+	// $15.49, is due the day before the charge (see demoBills): the charge is inside the matcher's date
+	// window but 16% over, so it is offered, not matched, and the bill's occurrence is overdue on every
+	// day of the month, since the next one is always a month away. Appended last, so the ids above
+	// don't move.
+	transactions.push(
+		spend(
+			CARD,
+			day(thisMonth, Math.max(1, todayDay - 1)),
+			NETFLIX.rawName,
+			HOUSEHOLD,
+			NETFLIX.chargedCents,
+		),
+	);
 	transactions.forEach((transaction, index) => {
 		transaction.id = index + 1;
 	});
@@ -505,6 +530,8 @@ export function buildSeed(today: string): Seed {
 				key: seedMerchantKey(rawName),
 				displayName,
 				defaultCategoryId: null,
+				// A store, not a bill: its charges are about monthly, so the finder would suggest it.
+				notABill: rawName === "THE HOME DEPOT #6612",
 			})),
 		...UNCATEGORIZED.map(([, rawName, , displayName]) => ({
 			key: seedMerchantKey(rawName),
@@ -514,6 +541,11 @@ export function buildSeed(today: string): Seed {
 		{
 			key: "Farmers market",
 			displayName: "Farmers market",
+			defaultCategoryId: null,
+		},
+		{
+			key: seedMerchantKey(NETFLIX.rawName),
+			displayName: NETFLIX.displayName,
 			defaultCategoryId: null,
 		},
 		{

@@ -106,6 +106,48 @@ export async function updateBill(
 }
 
 /**
+ * The statement that goes right before a payment is linked to a bill occurrence (spec §6.1 rule 4,
+ * decision 67): an excluded payment can pay a bill, and linking it puts it back in the budget as a
+ * person's choice (`excluded = 0`, `excluded_source = 'user'`), so the bill stops being set aside only
+ * because its payment now counts as spending, and Jev or a sync never takes it out again.
+ *
+ * It runs first, in the same batch as the link's insert, and only when that insert will be new: no
+ * linked row for the transaction, and none for the occurrence. So a refused link (already linked, or the
+ * occurrence taken) changes nothing, and an excluded payment can't be put back without the link that
+ * explains why. A split is one bank transaction (the edit panel excludes it whole), so its parent and
+ * parts come back together. `actor` is who is linking by hand; the matcher passes null and leaves
+ * `updated_by` as it was.
+ *
+ * `also` is a further condition for a caller whose link is conditional too (accepting a price change,
+ * which must put nothing back when the offer has gone stale). Its SQL may use ?1 to ?3 as above and
+ * numbers its own parameters from ?5, after `actor` (?4); its `binds` are those values, in order.
+ */
+export function putBackInBudget(
+	db: D1Database,
+	billId: number,
+	period: string,
+	transactionId: number,
+	actor: string | null,
+	also?: { sql: string; binds: (string | number)[] },
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`UPDATE transactions SET excluded = 0, excluded_source = 'user', updated_by = COALESCE(?4, updated_by), updated_at = datetime('now')
+			 WHERE excluded = 1 AND (
+				id = ?1
+				OR parent_id = ?1
+				OR id = (SELECT parent_id FROM transactions WHERE id = ?1)
+				OR parent_id = (SELECT parent_id FROM transactions WHERE id = ?1)
+			 )
+			 AND NOT EXISTS (
+				SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
+				  AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3))
+			 )${also ? ` AND (${also.sql})` : ""}`,
+		)
+		.bind(transactionId, billId, period, actor, ...(also?.binds ?? []));
+}
+
+/**
  * Makes a bill active under `name`, which is its own name or a new one typed to get past a repeat.
  * False, with nothing written, when another active bill has that name or there is no such bill.
  */

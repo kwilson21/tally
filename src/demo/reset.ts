@@ -1,11 +1,18 @@
 import { matchBillPayments } from "../bills/match";
-import { DEFAULT_TIME_ZONE } from "../dates";
+import { DEFAULT_TIME_ZONE, daysBefore } from "../dates";
 import {
 	buildSeed,
 	monthOffset,
+	NETFLIX,
 	type SeedBalance,
 	seedMerchantKey,
 } from "./seed";
+
+// Electric and Internet are unpaid on purpose (they are what Safe to spend sets aside), so their
+// merchants have no charges at all: a bill whose merchant has other charges nearby would be offered
+// one as "Price changed?" (spec §8.5). Netflix is the demo's one deliberate offer.
+const ELECTRIC_MERCHANT = "METRO ELECTRIC CO";
+const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
 const TABLES_CHILD_FIRST = [
@@ -113,9 +120,9 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		...seed.merchants.map((m) =>
 			db
 				.prepare(
-					"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)",
+					"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, ?, ?, ?)",
 				)
-				.bind(m.key, m.displayName, m.defaultCategoryId),
+				.bind(m.key, m.displayName, m.defaultCategoryId, m.notABill ? 1 : 0),
 		),
 		...seed.budgetAmounts.map((a) =>
 			db
@@ -194,6 +201,11 @@ function demoBills(
 		due.setUTCDate(due.getUTCDate() - 3);
 		return due.getUTCDate();
 	};
+	// The day before Netflix's charge, wherever the seed put it (the previous month's last day, on the 1st).
+	const netflixDue = daysBefore(
+		transactions.find((t) => t.rawName === NETFLIX.rawName)?.date ?? today,
+		1,
+	);
 	const plusThree = new Date(`${today}T00:00:00Z`);
 	plusThree.setUTCDate(plusThree.getUTCDate() + 3);
 	const dueSoon = plusThree.getUTCDate();
@@ -228,20 +240,22 @@ function demoBills(
 			"monthly",
 			null,
 			5,
-			seedMerchantKey("THE HOME DEPOT #6612"),
+			ELECTRIC_MERCHANT,
 			1,
 		],
+		// Due the day before its $17.99 charge, which is 16% over $15.49: overdue, with the charge on offer.
 		[
-			5,
-			"Internet",
-			6500,
-			dueSoon,
+			4,
+			"Netflix",
+			NETFLIX.billCents,
+			Number(netflixDue.slice(8)),
 			"monthly",
 			null,
 			5,
-			seedMerchantKey("AMAZON.COM*RT4K2"),
+			seedMerchantKey(NETFLIX.rawName),
 			1,
 		],
+		[5, "Internet", 6500, dueSoon, "monthly", null, 5, INTERNET_MERCHANT, 1],
 		// Yearly, paid three months ago, so its next one is upcoming (decision 62).
 		[
 			6,
