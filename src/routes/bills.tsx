@@ -6,7 +6,7 @@ import {
 	billOccurrence,
 	billOccurrenceForMonth,
 } from "../bills/status";
-import { ordinal, todayUtc } from "../dates";
+import { householdToday, ordinal } from "../dates";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
@@ -66,7 +66,9 @@ function previousMonth(today: string) {
 		: `${year}-${String(month - 1).padStart(2, "0")}`;
 }
 
-export async function loadBillRows(db: D1Database, today = todayUtc()) {
+/** Every bill with its status. `given` is the household's date when the caller already has it. */
+export async function loadBillRows(db: D1Database, given?: string) {
+	const today = given ?? (await householdToday(db));
 	const rows = await db
 		.prepare(
 			`SELECT b.*, c.icon, c.color, bp.period AS payment_period, t.date AS payment_date
@@ -418,7 +420,10 @@ bills.get("/bills/new", (c) => {
 	return page(c, { values });
 });
 bills.get("/bills/find", async (c) => {
-	const suggestions = await loadBillSuggestions(c.env.DB, todayUtc());
+	const suggestions = await loadBillSuggestions(
+		c.env.DB,
+		await householdToday(c.env.DB),
+	);
 	return c.html(
 		<Layout
 			title="Possible bills · Tally"
@@ -471,7 +476,8 @@ function billFindingList(suggestions: BillSuggestion[], focusRawName?: string) {
 bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	// Hono has already decoded the name once.
 	const merchant = c.req.param("merchant");
-	const before = await loadBillSuggestions(c.env.DB, todayUtc());
+	const today = await householdToday(c.env.DB);
+	const before = await loadBillSuggestions(c.env.DB, today);
 	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
 	if (dismissedIndex < 0) return c.notFound();
 	const result = await c.env.DB.prepare(
@@ -488,7 +494,7 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 		}),
 	};
 	if (c.req.header("HX-Request")) {
-		const remaining = await loadBillSuggestions(c.env.DB, todayUtc());
+		const remaining = await loadBillSuggestions(c.env.DB, today);
 		const focus = remaining[dismissedIndex] ?? remaining[0];
 		return c.html(
 			billFindingList(remaining, focus?.rawName ?? ""),
@@ -654,7 +660,7 @@ type LinkedPayment = {
 	raw_name: string;
 	display_name: string | null;
 };
-const monthName = (period: string, today = todayUtc()) =>
+const monthName = (period: string, today: string) =>
 	new Intl.DateTimeFormat("en-US", {
 		month: "long",
 		...(period.slice(0, 4) === today.slice(0, 4)
@@ -741,7 +747,7 @@ async function billPage(
 ) {
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
-	const today = todayUtc();
+	const today = await householdToday(c.env.DB);
 	const periods = await billPeriods(c.env.DB, bill, today);
 	if (pickerPeriod && !periods.includes(pickerPeriod)) return c.notFound();
 	const payments = (
@@ -854,7 +860,9 @@ async function billPage(
 								billId={id}
 								period={period}
 								label={
-									bill.frequency === "monthly" ? monthName(period) : period
+									bill.frequency === "monthly"
+										? monthName(period, today)
+										: period
 								}
 								status={status}
 								payment={
@@ -922,7 +930,9 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 	const bill = await dbBill(c, id);
 	if (
 		!bill ||
-		!(await billPeriods(c.env.DB, bill, todayUtc())).includes(period)
+		!(
+			await billPeriods(c.env.DB, bill, await householdToday(c.env.DB))
+		).includes(period)
 	)
 		return c.notFound();
 	if (!Number.isInteger(transactionId))
@@ -957,9 +967,10 @@ bills.post("/bills/:id/link", async (c) => {
 	const opened = String(form.opened_period ?? period);
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
+	const today = await householdToday(c.env.DB);
 	if (
 		!(Number.isInteger(transaction) && transaction > 0) ||
-		!(await billPeriods(c.env.DB, bill, todayUtc())).includes(period)
+		!(await billPeriods(c.env.DB, bill, today)).includes(period)
 	)
 		return billPage(c, id, opened, "Choose a payment and month.");
 	const due = occurrenceDate(bill, period);
@@ -973,6 +984,7 @@ bills.post("/bills/:id/link", async (c) => {
 			bill.frequency === "monthly"
 				? period
 				: `${period}-${String(bill.anchor_month).padStart(2, "0")}`,
+			today,
 		);
 		return billPage(
 			c,

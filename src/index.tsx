@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { verifiedEmail } from "./access";
 import { categorizePending } from "./categorize-pending";
-import { todayUtc } from "./dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
 import type { PlaidEnv } from "./plaid/client";
@@ -42,8 +42,9 @@ export async function runScheduled(
 	fetchImpl?: typeof fetch,
 ) {
 	// The nightly job resets the demo first; production then catches up every healthy Plaid Item.
+	// The reset puts the household's time zone back to the default too, so it seeds that zone's date.
 	if (canResetDemo(env)) {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	}
 	await syncAllItems(env, fetchImpl);
 	// Merchant rules and Jev run after sync so newly fetched transactions are sorted tonight.

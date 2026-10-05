@@ -9,7 +9,7 @@ import {
 } from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
-import { monthName, todayUtc } from "../dates";
+import { householdToday, monthName } from "../dates";
 import { loadMonth } from "../db/month";
 import {
 	bankDatedCount,
@@ -130,7 +130,8 @@ function Example({
 howItWorks.get("/how-it-works", async (c) => {
 	const demo = c.env.DEMO === "true";
 
-	const month = todayUtc().slice(0, 7);
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
 	const monthLabel = monthName(month);
 	// Screens call the AI "Tally"; only the demo's page names Jev (decision 64).
 	const ai: "Jev" | "Tally" = demo ? "Jev" : "Tally";
@@ -138,7 +139,7 @@ howItWorks.get("/how-it-works", async (c) => {
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
 		excludedBreakdown(c.env.DB, month),
-		loadBillRows(c.env.DB),
+		loadBillRows(c.env.DB, today),
 		bankDatedCount(c.env.DB, month),
 	]);
 	const hasTransactions =

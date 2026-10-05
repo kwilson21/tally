@@ -1,5 +1,5 @@
 import { type Context, Hono } from "hono";
-import { todayUtc } from "../dates";
+import { householdToday } from "../dates";
 import {
 	addCategory,
 	categoryNames,
@@ -225,7 +225,7 @@ function CategoryRow({
 
 /** The whole Settings page. Every swap selects #categories from this same page. */
 async function renderSettings(c: Context<App>, view: View = {}) {
-	const thisMonth = todayUtc().slice(0, 7);
+	const thisMonth = (await householdToday(c.env.DB)).slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const adding = view.open === "new";
 
@@ -437,7 +437,7 @@ settings.get("/settings/export/transactions.csv", async (c) => {
 	c.header("Cache-Control", "no-store");
 	c.header(
 		"Content-Disposition",
-		`attachment; filename="tally-transactions-${todayUtc()}.csv"`,
+		`attachment; filename="tally-transactions-${await householdToday(c.env.DB)}.csv"`,
 	);
 	return c.body(await transactionsCsv(c.env.DB));
 });
@@ -446,7 +446,7 @@ settings.get("/settings/export/tally.json", async (c) => {
 	c.header("Cache-Control", "no-store");
 	c.header(
 		"Content-Disposition",
-		`attachment; filename="tally-${todayUtc()}.json"`,
+		`attachment; filename="tally-${await householdToday(c.env.DB)}.json"`,
 	);
 	return c.json(await tallyExport(c.env.DB));
 });
@@ -533,7 +533,7 @@ settings.post(
 		await moveCategory(c.env.DB, category.id, direction);
 		const { active } = await settingsCategories(
 			c.env.DB,
-			todayUtc().slice(0, 7),
+			(await householdToday(c.env.DB)).slice(0, 7),
 		);
 		const position = active.findIndex((x) => x.id === category.id) + 1;
 		return done(

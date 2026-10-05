@@ -1,12 +1,12 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { loadBillRows } from "../src/routes/bills";
 
 describe("Bills", () => {
-	beforeEach(() => resetDemo(env.DB, todayUtc()));
+	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 	it("shows grouped active bills and inactive disclosure", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
@@ -395,9 +395,11 @@ describe("Bills", () => {
 			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
 			env.DB.prepare(
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,?,id,'user','linked' FROM transactions LIMIT 1",
-			).bind(todayUtc().slice(0, 7)),
+			).bind(todayIn(DEFAULT_TIME_ZONE).slice(0, 7)),
 		]);
-		const earlier = new Date(`${todayUtc().slice(0, 7)}-01T00:00:00Z`);
+		const earlier = new Date(
+			`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}-01T00:00:00Z`,
+		);
 		earlier.setUTCMonth(earlier.getUTCMonth() - 5);
 		const period = earlier.toISOString().slice(0, 7);
 		const html = await (
@@ -408,7 +410,7 @@ describe("Bills", () => {
 	});
 
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
-		const period = todayUtc().slice(0, 7);
+		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
 		const html = await (
 			await exports.default.fetch(
@@ -426,7 +428,7 @@ describe("Bills", () => {
 	});
 
 	it("reports the selected month when a payment is outside its 30-day window", async () => {
-		const period = todayUtc().slice(0, 7);
+		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
 		const old = await env.DB.prepare(
 			"SELECT id FROM transactions ORDER BY date LIMIT 1",
@@ -514,7 +516,7 @@ describe("Bills", () => {
 	});
 
 	it("picker uses a 30-day window, preferred order, every eligible payment, and exclusions", async () => {
-		const today = todayUtc();
+		const today = todayIn(DEFAULT_TIME_ZONE);
 		const period = today.slice(0, 7);
 		const day = Number(today.slice(8, 10));
 		await env.DB.batch([

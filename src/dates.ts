@@ -1,4 +1,5 @@
-// Dates stay as YYYY-MM-DD / YYYY-MM strings (spec §6). No time-zone math.
+// Dates stay as YYYY-MM-DD / YYYY-MM strings (spec §6). A transaction's own date is never
+// converted; only "today" depends on a time zone, the household's (decision 67).
 
 const MONTHS = [
 	"January",
@@ -15,9 +16,50 @@ const MONTHS = [
 	"December",
 ];
 
-/** Today's UTC date. The demo seed and nightly reset use the same day. */
-export function todayUtc(): string {
-	return new Date().toISOString().slice(0, 10);
+/** The household's time zone until a person chooses another in Settings (decision 67). */
+export const DEFAULT_TIME_ZONE = "America/New_York";
+
+function dateIn(timeZone: string, now: Date): string | null {
+	try {
+		const parts = new Intl.DateTimeFormat("en-CA", {
+			timeZone,
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+		}).formatToParts(now);
+		const part = (type: string) =>
+			parts.find((p) => p.type === type)?.value ?? "";
+		return `${part("year")}-${part("month")}-${part("day")}`;
+	} catch {
+		// Intl throws a RangeError for a time zone it doesn't know.
+		return null;
+	}
+}
+
+/** The calendar date (YYYY-MM-DD) right now in `timeZone`. A zone Intl doesn't know falls back to Eastern. */
+export function todayIn(timeZone: string, now: Date = new Date()): string {
+	return dateIn(timeZone, now) ?? (dateIn(DEFAULT_TIME_ZONE, now) as string);
+}
+
+/**
+ * "Today" for the household: its date in the time zone saved in `household_settings`.
+ * It decides the current month and every bill's status. A missing row, an unknown zone or an
+ * unavailable table all mean Eastern, so a page never fails because of this setting.
+ */
+export async function householdToday(
+	db: D1Database,
+	now: Date = new Date(),
+): Promise<string> {
+	let timeZone = DEFAULT_TIME_ZONE;
+	try {
+		const row = await db
+			.prepare("SELECT value FROM household_settings WHERE key = 'time_zone'")
+			.first<{ value: string }>();
+		if (row?.value) timeZone = row.value;
+	} catch {
+		// The table may not exist yet (a database not yet migrated); the default zone applies.
+	}
+	return todayIn(timeZone, now);
 }
 
 /** "2026-09" → "September". */

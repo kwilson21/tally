@@ -6,7 +6,7 @@ import {
 	loadBillSuggestions,
 	threeMonthsBack,
 } from "../src/bills/find";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const charge = (date: string, amountCents = 1000): BillFindingCharge => ({
@@ -103,26 +103,26 @@ describe("finding bills", () => {
 		["split parents", "is_split=1"],
 		["money-in rows", "amount_cents=-amount_cents"],
 	] as const)("filters %s", async (_label, mutation) => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("FILTER ME");
 		await env.DB.prepare(`UPDATE transactions SET ${mutation} WHERE raw_name=?`)
 			.bind("FILTER ME")
 			.run();
-		expect(await loadBillSuggestions(env.DB, todayUtc())).not.toContainEqual(
-			expect.objectContaining({ rawName: "FILTER ME" }),
-		);
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(expect.objectContaining({ rawName: "FILTER ME" }));
 	});
 
 	it("suggests a fresh candidate (the control for the filter tests)", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("KEEP ME");
-		expect(await loadBillSuggestions(env.DB, todayUtc())).toContainEqual(
-			expect.objectContaining({ rawName: "KEEP ME" }),
-		);
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).toContainEqual(expect.objectContaining({ rawName: "KEEP ME" }));
 	});
 
 	it("dismisses a merchant whose name has a percent sign", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("100% PURE");
 		const response = await exports.default.fetch(
 			"http://tally.test/bills/find/100%25%20PURE/dismiss",
@@ -140,7 +140,7 @@ describe("finding bills", () => {
 	});
 
 	it("saves nothing when the name isn't a current suggestion", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const response = await exports.default.fetch(
 			"http://tally.test/bills/find/NOT%20LISTED/dismiss",
 			{ method: "POST", headers: { Origin: "http://tally.test" } },
@@ -154,15 +154,17 @@ describe("finding bills", () => {
 	});
 
 	it("suggests charges whose merchant has no row yet", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("NO ROW", 0, false);
-		expect(await loadBillSuggestions(env.DB, todayUtc())).toContainEqual(
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).toContainEqual(
 			expect.objectContaining({ rawName: "NO ROW", displayName: "NO ROW" }),
 		);
 	});
 
 	it("counts a split part under its purchase's merchant", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("SPLIT GYM");
 		const { results } = await env.DB.prepare(
 			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT GYM' ORDER BY date DESC LIMIT 1",
@@ -180,39 +182,41 @@ describe("finding bills", () => {
 				"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,parent_id) VALUES(?,?,1000,'PART',4,?)",
 			).bind(parent.account_id, parent.date, parent.id),
 		]);
-		expect(await loadBillSuggestions(env.DB, todayUtc())).toContainEqual(
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).toContainEqual(
 			expect.objectContaining({ rawName: "SPLIT GYM", chargeCount: 2 }),
 		);
 	});
 
 	it("filters merchants that already have a bill", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("HAS BILL");
 		await env.DB.prepare(
 			"INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES('Existing',1000,1,'monthly',1,?)",
 		)
 			.bind("HAS BILL")
 			.run();
-		expect(await loadBillSuggestions(env.DB, todayUtc())).not.toContainEqual(
-			expect.objectContaining({ rawName: "HAS BILL" }),
-		);
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(expect.objectContaining({ rawName: "HAS BILL" }));
 	});
 
 	it("filters merchants marked not_a_bill", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("NOT A BILL", 1);
-		expect(await loadBillSuggestions(env.DB, todayUtc())).not.toContainEqual(
-			expect.objectContaining({ rawName: "NOT A BILL" }),
-		);
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(expect.objectContaining({ rawName: "NOT A BILL" }));
 	});
 
 	it("prefills every Add value", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		// The seeded charge dates follow today, so the due day is its latest charge's day.
 		const latest = await env.DB.prepare(
 			"SELECT MAX(date) AS date FROM transactions WHERE raw_name='CITY GYM MEMBERSHIP' AND date<=?",
 		)
-			.bind(todayUtc())
+			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.first<string>("date");
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
@@ -223,8 +227,10 @@ describe("finding bills", () => {
 	});
 
 	it("remembers Not a bill and removes the row with feedback", async () => {
-		await resetDemo(env.DB, todayUtc());
-		const raw = (await loadBillSuggestions(env.DB, todayUtc()))[0]?.rawName;
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		const raw = (
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE))
+		)[0]?.rawName;
 		const response = await exports.default.fetch(
 			`http://tally.test/bills/find/${encodeURIComponent(raw ?? "")}/dismiss`,
 			{
@@ -244,7 +250,7 @@ describe("finding bills", () => {
 	});
 
 	it("returns the empty state when dismissing the last suggestion", async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await env.DB.prepare(
 			"UPDATE merchants SET not_a_bill=1 WHERE raw_name <> 'CITY GYM MEMBERSHIP'",
 		).run();
@@ -261,7 +267,9 @@ describe("finding bills", () => {
 
 /** A day `days` before today, as YYYY-MM-DD. */
 const daysAgo = (days: number) =>
-	new Date(Date.parse(`${todayUtc()}T00:00:00Z`) - days * 86400000)
+	new Date(
+		Date.parse(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`) - days * 86400000,
+	)
 		.toISOString()
 		.slice(0, 10);
 
