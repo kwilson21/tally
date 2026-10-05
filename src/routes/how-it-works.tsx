@@ -401,7 +401,10 @@ howItWorks.get("/how-it-works", async (c) => {
 									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
 								/>
 							</Diagram>
-							<Example demo={demo} monthName={monthLabel}>
+							<Example
+								demo={demo}
+								monthName={monthName(paidBill.dueDate.slice(0, 7))}
+							>
 								{paidBill.name} is {formatCents(paidBill.amountCents)}, due{" "}
 								{shortBillDate(paidBill.dueDate)}; its{" "}
 								{demo ? "demo payment" : "payment"} is{" "}
