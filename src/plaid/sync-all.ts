@@ -1,4 +1,5 @@
 import { enabled } from "../routes/plaid";
+import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError } from "./client";
 import { syncItem } from "./sync";
 
@@ -70,7 +71,9 @@ export async function syncAllItems(
 				result.skipped += 1;
 				continue;
 			}
-			const synced = await syncItem(env, item.id, fetchImpl);
+			const synced = await syncItem(env, item.id, fetchImpl, {
+				runAfterSync: false,
+			});
 			if ("skipped" in synced) {
 				result.skipped += 1;
 				result.busy += 1;
@@ -91,6 +94,17 @@ export async function syncAllItems(
 		}
 	}
 
+	// Rules and bill matching cover the whole household, so they run once after every bank, not per bank.
+	// A bank that failed part-way may still have saved pages, so they get rules too.
+	if (result.synced + result.failed > 0) {
+		try {
+			await afterSync(env.DB);
+		} catch (error) {
+			console.error(
+				`plaid daily sync: after sync failed ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
+	}
 	logResult(result);
 	return result;
 }

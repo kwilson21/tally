@@ -136,6 +136,8 @@ export async function syncItem(
 	env: SyncEnv,
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
+	// The daily catch-up and Sync now sync every bank, then run the after-sync step once for all of them.
+	{ runAfterSync = true }: { runAfterSync?: boolean } = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
@@ -477,7 +479,7 @@ export async function syncItem(
 				);
 			}
 			if (!page.has_more) {
-				await afterSync(env.DB);
+				if (runAfterSync) await afterSync(env.DB);
 				return summary;
 			}
 		}
