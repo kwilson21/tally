@@ -15,6 +15,11 @@ export type Edit = {
 	creditReviewed: boolean;
 	/** False when the edit form omitted the credit-review control for an income credit. */
 	creditReviewedProvided?: boolean;
+	/**
+	 * The purchase this refund refunds. Left out, the link stays; null unlinks. A purchase links it,
+	 * unless it's more than what's left of that purchase (saveEdit refuses it, spec §8.5), and
+	 * counts it in the budget even if it was excluded.
+	 */
 	refundOfId?: number | null;
 };
 

@@ -35,6 +35,7 @@ import {
 	filtersToQuery,
 	parseFilters,
 } from "../transactions/filters";
+import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
@@ -1046,7 +1047,8 @@ function EditSheet({
 						</p>
 					)}
 				</fieldset>
-				{(refunds.length > 0 || tx.refundOfId != null) && (
+				{/* An error keeps the section, even when no purchase is offered any more. */}
+				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
 					<details
 						class="group border-t border-rule"
 						open={Boolean(errors.refund)}
@@ -1632,7 +1634,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		categories.map((cat) => cat.id),
 	);
 
-	if (!parsed.ok || !refundOk) {
+	// The panel again, as the person left it, with what's wrong (422).
+	const showErrors = (errors: EditErrors) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -1644,10 +1647,6 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			creditReviewedProvided:
 				form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
 			refundOfId,
-		};
-		const errors: EditErrors = {
-			...(parsed.ok ? {} : parsed.errors),
-			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
 		};
 		return renderList(c, today, filters, {
 			status: 422,
@@ -1663,10 +1662,17 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 				/>
 			),
 		});
-	}
+	};
 
-	// The link is written only when it changes.
-	await saveEdit(
+	if (!parsed.ok || !refundOk)
+		return showErrors({
+			...(parsed.ok ? {} : parsed.errors),
+			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
+		});
+
+	// The link is written only when it changes. A refund that is more than what's left of its
+	// purchase is refused by the write itself, with nothing saved (spec §8.5).
+	const result = await saveEdit(
 		c.env.DB,
 		tx.id,
 		{
@@ -1675,6 +1681,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		},
 		actor(c),
 	);
+	if (!result.saved)
+		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).
@@ -1685,10 +1693,15 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const saved = category
 		? `Saved. ${name} is now ${category}.`
 		: `Saved ${name}.`;
+	// Linking a refund includes it, whatever the Exclude chip held.
+	const excludedNow =
+		refundOfId !== null && refundOfId !== current
+			? false
+			: parsed.value.excluded;
 	const exclusion =
-		parsed.value.excluded === tx.excluded
+		excludedNow === tx.excluded
 			? ""
-			: parsed.value.excluded
+			: excludedNow
 				? " It's excluded from the budget."
 				: " It counts in the budget again.";
 	c.header(

@@ -1207,20 +1207,27 @@ describe("syncItem", () => {
 			opts,
 			item,
 			plaidFetch(() =>
-				response(page({ added: [transaction({ amount: -12 })] })),
+				response(
+					page({
+						added: [
+							transaction({ amount: -12 }),
+							transaction({ transaction_id: "purchase", amount: 50 }),
+						],
+					}),
+				),
 			),
 		);
 		const tx = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number }>();
 		const purchase = await env.DB.prepare(
-			"SELECT date FROM transactions WHERE id = 1",
-		).first<{ date: string }>();
-		if (!purchase) throw new Error("Expected demo purchase 1");
+			"SELECT id, date FROM transactions WHERE plaid_transaction_id = 'purchase'",
+		).first<{ id: number; date: string }>();
+		if (!purchase) throw new Error("Expected the purchase");
 		await env.DB.prepare(
-			"UPDATE transactions SET refund_of_id = 1, category_source = 'jev', category_confidence = 0.95, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			"UPDATE transactions SET refund_of_id = ?, category_source = 'jev', category_confidence = 0.95, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
 		)
-			.bind(tx?.id)
+			.bind(purchase.id, tx?.id)
 			.run();
 		const monthBefore = await loadMonth(env.DB, purchase.date.slice(0, 7));
 		const budgetTotalBefore = monthBefore.transactions.reduce(
@@ -1249,7 +1256,7 @@ describe("syncItem", () => {
 			amount_cents: -1300,
 			credit_reviewed: 0,
 			credit_reviewed_by: null,
-			refund_of_id: 1,
+			refund_of_id: purchase.id,
 		});
 		const monthAfter = await loadMonth(env.DB, purchase.date.slice(0, 7));
 		expect(
@@ -1260,6 +1267,218 @@ describe("syncItem", () => {
 		expect(
 			monthAfter.transactions.reduce((sum, row) => sum + row.amountCents, 0),
 		).toBe(budgetTotalBefore + 1200);
+	});
+
+	describe("a bank correction that leaves a purchase over-refunded (spec §8.5)", () => {
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		type Refund = { id: string; amount: number; date: string };
+
+		/** A $`purchase` purchase and refunds of the given dollars, all linked to it by a person. */
+		async function linked(purchase: number, refunds: Refund[]) {
+			const item = await addItem();
+			await syncItem(
+				opts,
+				item,
+				plaidFetch(() =>
+					response(
+						page({
+							added: [
+								transaction({
+									transaction_id: "purchase",
+									amount: purchase,
+									name: "REFUND SHOP",
+									date: "2026-09-01",
+								}),
+								...refunds.map((r) =>
+									transaction({
+										transaction_id: r.id,
+										amount: -r.amount,
+										name: "REFUND SHOP",
+										date: r.date,
+									}),
+								),
+							],
+						}),
+					),
+				),
+			);
+			await env.DB.prepare(
+				`UPDATE transactions SET refund_of_id = (SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'),
+					credit_reviewed = 1, credit_reviewed_by = 'user'
+				WHERE plaid_transaction_id IN (${refunds.map(() => "?").join(", ")})`,
+			)
+				.bind(...refunds.map((r) => r.id))
+				.run();
+			return item;
+		}
+
+		/** Which refunds are still linked to the purchase, by Plaid id, oldest id first. */
+		async function stillLinked() {
+			const { results } = await env.DB.prepare(
+				`SELECT r.plaid_transaction_id AS id FROM transactions r
+				WHERE r.refund_of_id = (SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase')
+				ORDER BY r.id`,
+			).all<{ id: string }>();
+			return results.map((r) => r.id);
+		}
+
+		const correct = (
+			item: number,
+			path: "added" | "modified",
+			t: Record<string, unknown>,
+		) =>
+			syncItem(
+				opts,
+				item,
+				plaidFetch(() => response(page({ [path]: [transaction(t)] }))),
+			);
+
+		const refundTx = (id: string, amount: number, date: string) => ({
+			transaction_id: id,
+			amount: -amount,
+			name: "REFUND SHOP",
+			date,
+		});
+
+		it.each(["added", "modified"] as const)(
+			"unlinks a refund the bank corrected to more than its purchase (%s)",
+			async (path) => {
+				const item = await linked(50, [
+					{ id: "refund", amount: 30, date: "2026-09-10" },
+				]);
+				await correct(item, path, refundTx("refund", 60, "2026-09-10"));
+				expect(await stillLinked()).toEqual([]);
+				// Only the link is gone: the refund keeps the bank's new amount and its review.
+				expect(
+					await env.DB.prepare(
+						"SELECT amount_cents, refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'refund'",
+					).first(),
+				).toEqual({
+					amount_cents: -6000,
+					refund_of_id: null,
+					credit_reviewed: 1,
+					credit_reviewed_by: "user",
+				});
+			},
+		);
+
+		it.each(["added", "modified"] as const)(
+			"keeps a refund the bank corrected to a size that still fits (%s)",
+			async (path) => {
+				const item = await linked(50, [
+					{ id: "refund", amount: 30, date: "2026-09-10" },
+				]);
+				await correct(item, path, refundTx("refund", 40, "2026-09-10"));
+				expect(await stillLinked()).toEqual(["refund"]);
+				// Up to the purchase's amount exactly is still a refund of it.
+				await correct(item, path, refundTx("refund", 50, "2026-09-10"));
+				expect(await stillLinked()).toEqual(["refund"]);
+				await correct(item, path, refundTx("refund", 50.01, "2026-09-10"));
+				expect(await stillLinked()).toEqual([]);
+			},
+		);
+
+		it.each(["added", "modified"] as const)(
+			"unlinks a refund when the bank corrected its purchase to less (%s)",
+			async (path) => {
+				const item = await linked(50, [
+					{ id: "refund", amount: 30, date: "2026-09-10" },
+				]);
+				await correct(item, path, {
+					transaction_id: "purchase",
+					amount: 20,
+					name: "REFUND SHOP",
+					date: "2026-09-01",
+				});
+				expect(await stillLinked()).toEqual([]);
+			},
+		);
+
+		it("removes the newest refunds first, until the rest fit", async () => {
+			const item = await linked(50, [
+				{ id: "first", amount: 20, date: "2026-09-10" },
+				{ id: "second", amount: 20, date: "2026-09-12" },
+				{ id: "third", amount: 5, date: "2026-09-14" },
+			]);
+			// $50 down to $30: the newest ($5, then $20) go; $20 stays.
+			await correct(item, "modified", {
+				transaction_id: "purchase",
+				amount: 30,
+				name: "REFUND SHOP",
+				date: "2026-09-01",
+			});
+			expect(await stillLinked()).toEqual(["first"]);
+		});
+
+		it("takes refunds on the same day newest by id", async () => {
+			const item = await linked(50, [
+				{ id: "a", amount: 20, date: "2026-09-10" },
+				{ id: "b", amount: 20, date: "2026-09-10" },
+			]);
+			await correct(item, "modified", {
+				transaction_id: "purchase",
+				amount: 30,
+				name: "REFUND SHOP",
+				date: "2026-09-01",
+			});
+			expect(await stillLinked()).toEqual(["a"]);
+		});
+
+		it("looks only at the purchases the sync changed, leaving other links alone", async () => {
+			const item = await linked(50, [
+				{ id: "refund", amount: 30, date: "2026-09-10" },
+			]);
+			// Another purchase that was over-refunded before this rule: nothing in this sync touches it.
+			await syncItem(
+				opts,
+				item,
+				plaidFetch(() =>
+					response(
+						page({
+							added: [
+								transaction({
+									transaction_id: "old-purchase",
+									amount: 10,
+									name: "OTHER SHOP",
+									date: "2026-08-01",
+								}),
+								transaction({
+									transaction_id: "old-refund",
+									amount: -25,
+									name: "OTHER SHOP",
+									date: "2026-08-05",
+								}),
+							],
+						}),
+					),
+				),
+			);
+			await env.DB.prepare(
+				"UPDATE transactions SET refund_of_id = (SELECT id FROM transactions WHERE plaid_transaction_id = 'old-purchase') WHERE plaid_transaction_id = 'old-refund'",
+			).run();
+			await correct(item, "modified", refundTx("refund", 60, "2026-09-10"));
+			expect(await stillLinked()).toEqual([]);
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE plaid_transaction_id = 'old-refund' AND refund_of_id IS NOT NULL",
+				).first(),
+			).toEqual({ n: 1 });
+		});
+
+		it("a linked income credit doesn't count toward the purchase", async () => {
+			const item = await linked(50, [
+				{ id: "income", amount: 30, date: "2026-09-08" },
+				{ id: "refund", amount: 20, date: "2026-09-10" },
+			]);
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE plaid_transaction_id = 'income'",
+			).run();
+			// $45 of refunds that count, $30 of income credit that doesn't: it fits.
+			await correct(item, "modified", refundTx("refund", 45, "2026-09-10"));
+			expect(await stillLinked()).toEqual(["income", "refund"]);
+			await correct(item, "modified", refundTx("refund", 55, "2026-09-10"));
+			expect(await stillLinked()).toEqual(["income"]);
+		});
 	});
 
 	it("reclassifies an updated non-reviewed purchase as a pending credit when Plaid changes its sign", async () => {
