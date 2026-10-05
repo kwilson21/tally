@@ -10,34 +10,38 @@ const get = async (path: string) => {
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 describe("GET /design-system/proposals", () => {
-	it("shows P15–P22 open with two options each, and lists P1–P14 as decided", async () => {
+	it("shows P23–P33 open, each but P31 with a recommended option, and lists P1–P22 as decided", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
 		expect(html).not.toContain("No open proposals.");
-		expect(html).not.toContain('id="p14-feedback"');
+		expect(html).not.toContain('id="p22-counts"');
 		const open = [
-			"p15-bills",
-			"p16-bill",
-			"p17-split",
-			"p18-found",
-			"p19-refund",
-			"p20-select",
-			"p21-cash",
-			"p22-counts",
+			"p23-trends",
+			"p24-compare",
+			"p25-net-worth",
+			"p26-balances",
+			"p27-documents",
+			"p28-delete",
+			"p29-names",
+			"p30-new-category",
+			"p32-category-maybe",
+			"p33-why",
 		];
 		for (const id of open) expect(html).toContain(`id="${id}"`);
-		// Each proposal marks exactly one option Recommended, with its reason.
+		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh.
+		expect(html).toContain('id="p31-empty"');
+		// Each proposal with options marks exactly one Recommended, with its reason.
 		expect(html.match(/>Recommended</g)?.length).toBe(open.length);
-		expect(html.match(/Why: /g)?.length).toBe(open.length);
+		expect(html.match(/text-muted">Why: /g)?.length).toBe(open.length);
 		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.
 		expect(
 			html.match(/role="img" aria-label="[^"]*, on a phone"/g)?.length,
-		).toBe(23);
+		).toBe(33);
 		expect(
 			html.match(/role="img" aria-label="[^"]*, on desktop"/g)?.length,
 		).toBe(1);
-		expect(DECIDED.length).toBe(14);
+		expect(DECIDED.length).toBe(22);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));

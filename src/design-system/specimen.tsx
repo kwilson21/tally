@@ -118,9 +118,12 @@ export function UseSpec({ spec }: { spec: UseSpecText }) {
  */
 export function PhoneFrame({
 	label,
+	demo = true,
 	children,
 }: {
 	label: string;
+	/** The demo banner on top; false draws the family app. */
+	demo?: boolean;
 	children?: Child;
 }) {
 	// A picture of a screen, not a working one: one labelled image with nothing inside to Tab to.
@@ -132,9 +135,11 @@ export function PhoneFrame({
 				class="h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
 				<div inert>
-					<p class="bg-band py-2 text-center text-sm text-muted">
-						Demo data. Nothing here is real.
-					</p>
+					{demo && (
+						<p class="bg-band py-2 text-center text-sm text-muted">
+							Demo data. Nothing here is real.
+						</p>
+					)}
 					<div class="px-5 pt-6">
 						<div class="mb-4">
 							<Wordmark />
