@@ -77,6 +77,8 @@ type View = {
 	/** Why the change didn't happen, shown above the list. */
 	listError?: string;
 	status?: 200 | 404 | 422;
+	/** The household's date, when the handler already read it, so the request reads it once. */
+	today?: string;
 };
 
 /** The name field, for adding a category or renaming one. Budgets are set on Home (decision 38). */
@@ -225,7 +227,8 @@ function CategoryRow({
 
 /** The whole Settings page. Every swap selects #categories from this same page. */
 async function renderSettings(c: Context<App>, view: View = {}) {
-	const thisMonth = (await householdToday(c.env.DB)).slice(0, 7);
+	const today = view.today ?? (await householdToday(c.env.DB));
+	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const adding = view.open === "new";
 
@@ -531,17 +534,15 @@ settings.post(
 		if (!category || category.archived) return gone(c);
 		const direction = c.req.param("direction") === "up" ? "up" : "down";
 		await moveCategory(c.env.DB, category.id, direction);
-		const { active } = await settingsCategories(
-			c.env.DB,
-			(await householdToday(c.env.DB)).slice(0, 7),
-		);
+		const today = await householdToday(c.env.DB);
+		const { active } = await settingsCategories(c.env.DB, today.slice(0, 7));
 		const position = active.findIndex((x) => x.id === category.id) + 1;
 		return done(
 			c,
 			`Moved ${category.name}`,
 			`Moved ${category.name} ${direction}. It's now ${position} of ${active.length}.`,
 			// Stay open, so the same button can be pressed again.
-			{ open: category.id, focus: category.id },
+			{ open: category.id, focus: category.id, today },
 		);
 	},
 );

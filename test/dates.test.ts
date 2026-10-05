@@ -81,15 +81,29 @@ describe("householdToday", () => {
 		expect(await householdToday(env.DB, NOW)).toBe("2026-10-31");
 	});
 
-	it("falls back to Eastern when the table is unavailable", async () => {
-		const broken = {
+	const failing = (message: string) =>
+		({
 			prepare: () => ({
 				first: async () => {
-					throw new Error("D1_ERROR: no such table: household_settings");
+					throw new Error(message);
 				},
 			}),
-		} as unknown as D1Database;
-		expect(await householdToday(broken, NOW)).toBe("2026-10-31");
+		}) as unknown as D1Database;
+
+	it("falls back to Eastern when the table doesn't exist yet", async () => {
+		const unmigrated = failing(
+			"D1_ERROR: no such table: household_settings: SQLITE_ERROR",
+		);
+		expect(await householdToday(unmigrated, NOW)).toBe("2026-10-31");
+	});
+
+	it("lets any other database error surface, rather than guessing a date", async () => {
+		await expect(
+			householdToday(failing("D1_ERROR: Network connection lost"), NOW),
+		).rejects.toThrow("Network connection lost");
+		await expect(
+			householdToday(failing("D1 DB is overloaded"), NOW),
+		).rejects.toThrow("overloaded");
 	});
 
 	it("reads the real clock when no time is given", async () => {

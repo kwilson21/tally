@@ -77,11 +77,12 @@ type HomeOptions = {
 
 // Home: what's safe to spend this month, and how each category is doing (spec §8, feature 1).
 // Every htmx swap selects a part of this same page.
+// `today` is the household's date, read once by the handler, so the whole request uses one month.
 async function renderHome(
 	c: Context<App>,
+	today: string,
 	{ sheet, focusId, adjusting, nudgeFocus, status = 200 }: HomeOptions = {},
 ) {
-	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
 	const data = await loadMonth(c.env.DB, month);
 	const billData = await loadBillRows(c.env.DB, today);
@@ -355,18 +356,22 @@ function BudgetSheet({
 }
 
 const idOf = (c: Context<App>) => Number(c.req.param("id"));
-/** The active category a budget route is about, with the household's current month, or null. */
+/**
+ * The active category a budget route is about, or null, with the household's date and current
+ * month. This is the one place a budget request reads the date; it passes it on to renderHome.
+ */
 async function activeCategory(c: Context<App>) {
-	const month = (await householdToday(c.env.DB)).slice(0, 7);
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
 	const category = await budgetCategory(c.env.DB, idOf(c), month);
-	return category && !category.archived ? { category, month } : null;
+	return category && !category.archived ? { category, today, month } : null;
 }
 
 // ?focus=<id> puts focus on that row when the sheet closes.
 // ?adjust=1 is Adjust mode (#94).
-home.get("/", (c) => {
+home.get("/", async (c) => {
 	const focus = Number(c.req.query("focus"));
-	return renderHome(c, {
+	return renderHome(c, await householdToday(c.env.DB), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		adjusting: c.req.query("adjust") === "1",
 	});
@@ -376,9 +381,9 @@ home.get("/", (c) => {
 home.get("/budget/:id{[0-9]+}", async (c) => {
 	const active = await activeCategory(c);
 	if (!active) return c.notFound();
-	const { category, month } = active;
+	const { category, today, month } = active;
 	const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
-	return renderHome(c, {
+	return renderHome(c, today, {
 		sheet: (spent) => (
 			<BudgetSheet
 				category={category}
@@ -399,12 +404,12 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 home.post("/budget/:id{[0-9]+}", async (c) => {
 	const active = await activeCategory(c);
 	if (!active) return c.notFound();
-	const { category, month } = active;
+	const { category, today, month } = active;
 	const typed = String((await c.req.formData()).get("budget") ?? "");
 	const parsed = parseBudgetAmount(typed);
 	if (!parsed.ok) {
 		const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
-		return renderHome(c, {
+		return renderHome(c, today, {
 			status: 422,
 			sheet: (spent) => (
 				<BudgetSheet
@@ -428,7 +433,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", "/");
-	return renderHome(c, { focusId: category.id });
+	return renderHome(c, today, { focusId: category.id });
 });
 
 // One tap in Adjust mode (#94, decision 48): the budget moves to the next round $10, from this month
@@ -437,7 +442,7 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 	const active = await activeCategory(c);
 	// Only a budgeted category has buttons; one without a budget gets it from its sheet.
 	if (!active || active.category.budgetCents === null) return c.notFound();
-	const { category, month } = active;
+	const { category, today, month } = active;
 	const direction = c.req.param("direction") === "up" ? "up" : "down";
 	// Read and written in one statement, so two taps at once (two phones) both count.
 	const cents = await nudgeBudget(c.env.DB, category.id, direction, month);
@@ -468,7 +473,7 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 		cents === null ||
 		(direction === "down" && cents === 0) ||
 		(direction === "up" && cents === MAX_BUDGET_CENTS);
-	return renderHome(c, {
+	return renderHome(c, today, {
 		adjusting: true,
 		nudgeFocus: atLimit
 			? { id: category.id, direction: direction === "up" ? "down" : "up" }

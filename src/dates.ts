@@ -43,8 +43,10 @@ export function todayIn(timeZone: string, now: Date = new Date()): string {
 
 /**
  * "Today" for the household: its date in the time zone saved in `household_settings`.
- * It decides the current month and every bill's status. A missing row, an unknown zone or an
- * unavailable table all mean Eastern, so a page never fails because of this setting.
+ * It decides the current month and every bill's status. A missing row, an unknown zone or a
+ * table that doesn't exist yet all mean Eastern; any other database error is thrown, so a
+ * request never runs on a different date than the household's.
+ * A request calls this once and passes the date down, so all of it agrees near midnight.
  */
 export async function householdToday(
 	db: D1Database,
@@ -56,8 +58,11 @@ export async function householdToday(
 			.prepare("SELECT value FROM household_settings WHERE key = 'time_zone'")
 			.first<{ value: string }>();
 		if (row?.value) timeZone = row.value;
-	} catch {
-		// The table may not exist yet (a database not yet migrated); the default zone applies.
+	} catch (error) {
+		// Only a database not yet migrated may use the default zone. Any other failure (a dropped
+		// connection, an overloaded D1) must fail the request, not quietly give it another date.
+		if (!(error instanceof Error && /no such table/i.test(error.message)))
+			throw error;
 	}
 	return todayIn(timeZone, now);
 }

@@ -86,9 +86,13 @@ function listHref(filters: Filters, thisMonth: string) {
 	return `/transactions${query ? `?${query}` : ""}`;
 }
 
-/** The whole Transactions page for these filters. Every htmx swap selects a part of this same page. */
+/**
+ * The whole Transactions page for these filters. Every htmx swap selects a part of this same page.
+ * `today` is the household's date, read once by the handler, so the whole request uses one month.
+ */
 async function renderList(
 	c: Context<App>,
+	today: string,
 	filters: Filters,
 	{
 		sheet,
@@ -101,7 +105,6 @@ async function renderList(
 		focusHeading = false,
 	}: ListOptions = {},
 ) {
-	const today = await householdToday(c.env.DB);
 	const [{ rows, total, page, pages }, months, needs, categories] =
 		await Promise.all([
 			listTransactions(c.env.DB, filters),
@@ -486,8 +489,8 @@ transactions.get("/transactions", async (c) => {
 	const params = new URL(c.req.url).searchParams;
 	const focus = Number(params.get("focus"));
 	const selecting = params.get("select") === "1";
-	const thisMonth = (await householdToday(c.env.DB)).slice(0, 7);
-	return renderList(c, parseFilters(params, thisMonth), {
+	const today = await householdToday(c.env.DB);
+	return renderList(c, today, parseFilters(params, today.slice(0, 7)), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		selecting,
 		checkedIds: selecting
@@ -695,11 +698,12 @@ function SelectCategorySheet({
 /** The select-mode list with the Set category sheet over it; a problem shows inside the sheet. */
 async function categorySheet(
 	c: Context<App>,
+	today: string,
 	back: string,
 	ids: number[],
 	error?: string,
 ) {
-	return renderList(c, await filtersFrom(c, back), {
+	return renderList(c, today, filtersFrom(today, back), {
 		selecting: true,
 		checkedIds: new Set(ids),
 		status: error ? 422 : 200,
@@ -719,10 +723,15 @@ transactions.post("/transactions/select/category", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const { ids, error } = await postedSelection(c, form);
-	return categorySheet(c, back, ids, error);
+	return categorySheet(c, await householdToday(c.env.DB), back, ids, error);
 });
 
-async function finishSelection(c: Context<App>, back: string, message: string) {
+async function finishSelection(
+	c: Context<App>,
+	today: string,
+	back: string,
+	message: string,
+) {
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
@@ -730,14 +739,15 @@ async function finishSelection(c: Context<App>, back: string, message: string) {
 	);
 	// The list is out of select mode, so the address bar is too.
 	c.header("HX-Push-Url", back);
-	return renderList(c, await filtersFrom(c, back), { focusHeading: true });
+	return renderList(c, today, filtersFrom(today, back), { focusHeading: true });
 }
 
 transactions.post("/transactions/select/category/save", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const { ids, error } = await postedSelection(c, form);
-	if (error) return categorySheet(c, back, ids, error);
+	const today = await householdToday(c.env.DB);
+	if (error) return categorySheet(c, today, back, ids, error);
 	const category = Number(form.get("category"));
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
@@ -747,7 +757,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 				.first<{ id: number; name: string }>()
 		: null;
 	if (!cat)
-		return categorySheet(c, back, ids, "Pick a category from the list.");
+		return categorySheet(c, today, back, ids, "Pick a category from the list.");
 	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
@@ -757,15 +767,16 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		),
 	);
 	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
-	return finishSelection(c, back, message);
+	return finishSelection(c, today, back, message);
 });
 
 transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const { ids, error } = await postedSelection(c, form);
+	const today = await householdToday(c.env.DB);
 	if (error)
-		return renderList(c, await filtersFrom(c, back), {
+		return renderList(c, today, filtersFrom(today, back), {
 			selecting: true,
 			checkedIds: new Set(ids),
 			status: 422,
@@ -788,6 +799,7 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	);
 	return finishSelection(
 		c,
+		today,
 		back,
 		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.`,
 	);
@@ -1165,11 +1177,8 @@ function EditSheet({
 	);
 }
 
-const filtersFrom = async (c: Context<App>, url: string) =>
-	parseFilters(
-		new URL(url, "http://tally").searchParams,
-		(await householdToday(c.env.DB)).slice(0, 7),
-	);
+const filtersFrom = (today: string, url: string) =>
+	parseFilters(new URL(url, "http://tally").searchParams, today.slice(0, 7));
 
 const cashValues = (today: string, form?: FormData): CashValues => ({
 	date: form?.get("date")?.toString() ?? today,
@@ -1217,7 +1226,8 @@ transactions.get("/transactions/cash/new", async (c) => {
 	const back = safeBack(
 		new URL(c.req.url).searchParams.get("back") ?? undefined,
 	);
-	return renderList(c, await filtersFrom(c, back), {
+	const today = await householdToday(c.env.DB);
+	return renderList(c, today, filtersFrom(today, back), {
 		pageTitle: "Add cash · Tally",
 		sheet: (categories, today) => (
 			<CashSheet
@@ -1244,7 +1254,7 @@ transactions.post("/transactions/cash", async (c) => {
 		categories.map((x) => x.id),
 	);
 	if (!parsed.ok)
-		return renderList(c, await filtersFrom(c, back), {
+		return renderList(c, today, filtersFrom(today, back), {
 			pageTitle: "Add cash · Tally",
 			status: 422,
 			sheet: () => (
@@ -1267,7 +1277,7 @@ transactions.post("/transactions/cash", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, await filtersFrom(c, back));
+	return renderList(c, today, filtersFrom(today, back));
 });
 
 async function notFound(c: Context<App>) {
@@ -1295,7 +1305,8 @@ async function notFound(c: Context<App>) {
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return notFound(c);
-	const thisMonth = (await householdToday(c.env.DB)).slice(0, 7);
+	const today = await householdToday(c.env.DB);
+	const thisMonth = today.slice(0, 7);
 	const filters = parseFilters(new URL(c.req.url).searchParams, thisMonth);
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
@@ -1309,7 +1320,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		refundOfId: tx.refundOfId ?? null,
 	};
 	const refunds = await refundPurchases(c.env.DB, tx);
-	return renderList(c, filters, {
+	return renderList(c, today, filters, {
 		sheet: (categories, today) => (
 			<EditSheet
 				tx={tx}
@@ -1381,8 +1392,9 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	// Income is never split (decision 62's review): no form for it either.
 	if (!tx || tx.parentId !== null || tx.income) return notFound(c);
 	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
-	const filters = await filtersFrom(c, back);
-	return renderList(c, filters, {
+	const today = await householdToday(c.env.DB);
+	const filters = filtersFrom(today, back);
+	return renderList(c, today, filters, {
 		sheet: (_categories, today) => (
 			<SplitSheet
 				tx={tx}
@@ -1418,6 +1430,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	if (tx.income) return c.text("Income transactions cannot be split.", 400);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
 	const values = categoryValues.map((category, i) => ({
@@ -1438,7 +1451,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		if (result && !result.saved) {
 			// Show the bank's new amount, so the next save checks against it.
 			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
-			return renderList(c, await filtersFrom(c, back), {
+			return renderList(c, today, filtersFrom(today, back), {
 				status: 422,
 				sheet: (_categories, today) => (
 					<SplitSheet
@@ -1454,10 +1467,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		}
 		if (result) {
 			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-			const unlinked = unlinkedSentence(
-				result.unlinked,
-				await householdToday(c.env.DB),
-			);
+			const unlinked = unlinkedSentence(result.unlinked, today);
 			c.header(
 				"HX-Trigger",
 				JSON.stringify({
@@ -1469,9 +1479,9 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				}),
 			);
 			c.header("HX-Push-Url", back);
-			return renderList(c, await filtersFrom(c, back), { focusId: tx.id });
+			return renderList(c, today, filtersFrom(today, back), { focusId: tx.id });
 		}
-		return renderList(c, await filtersFrom(c, back), {
+		return renderList(c, today, filtersFrom(today, back), {
 			status: 422,
 			sheet: (_categories, today) => (
 				<SplitSheet
@@ -1485,7 +1495,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			),
 		});
 	}
-	return renderList(c, await filtersFrom(c, back), {
+	return renderList(c, today, filtersFrom(today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
 				tx={tx}
@@ -1512,9 +1522,10 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	if (!tx?.isSplit) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
 	const unlinked = unlinkedSentence(
 		await removeSplit(c.env.DB, tx.id, actor(c)),
-		await householdToday(c.env.DB),
+		today,
 	);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
@@ -1528,7 +1539,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, await filtersFrom(c, back), { focusId: tx.id });
+	return renderList(c, today, filtersFrom(today, back), { focusId: tx.id });
 });
 
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
@@ -1537,7 +1548,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	if (!tx) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const filters = await filtersFrom(c, back);
+	const today = await householdToday(c.env.DB);
+	const filters = filtersFrom(today, back);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
 	).all<{ id: number; name: string }>();
@@ -1578,7 +1590,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			...(parsed.ok ? {} : parsed.errors),
 			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
 		};
-		return renderList(c, filters, {
+		return renderList(c, today, filters, {
 			status: 422,
 			sheet: (all, today) => (
 				<EditSheet
@@ -1628,7 +1640,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, filters, { focusId: tx.id });
+	return renderList(c, today, filters, { focusId: tx.id });
 });
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
@@ -1636,6 +1648,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	if (tx?.accountType !== "cash" || tx.parentId !== null) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
 	if (form.get("confirm") !== "1") {
 		const values: Edit = {
 			categoryId: tx.categoryId,
@@ -1648,7 +1661,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			refundOfId: tx.refundOfId ?? null,
 		};
 		const refunds = await refundPurchases(c.env.DB, tx);
-		return renderList(c, await filtersFrom(c, back), {
+		return renderList(c, today, filtersFrom(today, back), {
 			sheet: (categories, today) => (
 				<EditSheet
 					tx={tx}
@@ -1676,5 +1689,5 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, await filtersFrom(c, back));
+	return renderList(c, today, filtersFrom(today, back));
 });
