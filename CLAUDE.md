@@ -13,7 +13,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 - Prefer the smallest tool. No new dependency without a decision entry.
 - Server owns all state. Hono JSX + HTMX. No client-side framework. Only custom JS: Plaid Link, the toast listener, the money input's money.js (decision 39), and the catalog-only ds.js (decision 44).
 - Money is integer cents. Never floats. Format to dollars only for display.
-- Plaid sign convention: positive = money out. Dates are Plaid's YYYY-MM-DD strings; no time-zone math.
+- Plaid sign convention: positive = money out. Dates are Plaid's YYYY-MM-DD strings, never converted; only "today" uses the household's time zone (decision 67).
 - AI suggests, code calculates, people decide. Jev only via src/ai/categorize.ts; Workers AI only via src/ai/suggest-name.ts.
 - Call Plaid and Jev with plain fetch; no SDKs. One Jev call per transaction (category + all flags together).
 - Identity: read the user from the verified Cloudflare Access JWT (Cf-Access-Jwt-Assertion), never the plain Cf-Access-Authenticated-User-Email header.
@@ -35,7 +35,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 ## Pull requests
 - `main` only accepts PRs; required checks: `check` (CI) and `Greptile Review`.
 - UI PRs: CI adds a before-and-after table (every page that looks different from `main`) and screenshots of every page (1280×800 and 390×844) to the description; check them and send the owner the pages that changed. Claude merges a PR itself once it's complete (decision 51): CI green, Greptile clean, every comment addressed, and its look and decisions already the owner's (signed off in the catalog or picked on the proposals page). The owner verifies the finished pages from those screenshots after the merge (DESIGN.md step 6); a change they want is a follow-up or a revert. New visual choices, spec changes and reversing a decision go to the owner first.
-- Work split (decisions 51, 52): Codex cloud implements well-specified issues from a brief posted as an `@codex` comment on the issue (tests first), and opens its own PR; an Opus subagent reviews each diff against this file, DESIGN.md and the issue; Codex fixes the findings from an `@codex` comment on its PR. The main session writes the briefs, checks the result in a browser, and owns getting the PR merged. Design and product decisions stay in the main session. Small fixes on Claude's own PRs are made directly.
+- Work split (decisions 51, 52): Codex cloud implements well-specified issues from a brief posted as an `@codex` comment on the issue (tests first), and opens its own PR; an Opus subagent reviews each diff against this file, DESIGN.md and the issue; Codex fixes the findings from an `@codex` comment on its PR. The main session writes the briefs, checks the result in a browser, and owns getting the PR merged. Design and product decisions stay in the main session. Small fixes on Claude's own PRs are made directly. From Phase 3.5 through Phase 5 (decision 69), a Claude Code session builds instead with ultracode workflows: Claude subagents implement from the spec with tests first, an independent reviewer checks each diff, and the session opens the PR and merges under decision 51.
 - If Greptile hasn't reported within 30 minutes or errors: run `/code-review` (high) plus an independent reviewer agent, post findings as a PR comment titled "Fallback review (Greptile unavailable)", fix and re-review. Only the owner merges such a PR; never use a ruleset bypass.
 
 ## Git

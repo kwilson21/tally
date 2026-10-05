@@ -8,6 +8,7 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 | 1. Core demo live | Home + Transactions on seed data at tally-demo.thesuperhuman.us | Demo live over HTTPS, all routes work, no console errors | [milestone](https://github.com/kwilson21/tally/milestone/2) |
 | 2. Family on the core | Plaid sync + Cloudflare Access for the family, plus Settings with default categories and exclusions, so the numbers are right from day one | Family uses it Oct 1–7, then through October (decision 58) | [milestone](https://github.com/kwilson21/tally/milestone/3) |
 | 3. Bills and splits | In both environments, with the four extras (decisions 57, 58) as picked in decision 60. Building starts Oct 4; production gets it after the trial week | Shown in demo, used by family | [milestone](https://github.com/kwilson21/tally/milestone/4) |
+| 3.5 Numbers you can trust | Fix the rule gaps that can make the family's numbers wrong (decision 67, spec §8.5, `docs/reviews/original-app-gaps.md`) | Safe to spend, Spent and bill statuses match the bank (a bill paid in two parts waits for Phase 5) | milestone to come |
 | 4. Trends, balances, name suggestions | Remaining features, plus AI suggestions for merchant names and new categories; Documents moved to the Later list (decision 66) | Features 1–7 live in both | [milestone](https://github.com/kwilson21/tally/milestone/5) |
 | 5. From the original app | Eight features the original app had built (decision 66, spec §8.4), each designed on the proposals page first | Shown in demo, used by family | milestone to come |
 | Design system (track) | A catalog at `/design-system` built from the real components, the process every UI change follows, and the original app's components brought over one at a time ([#76](https://github.com/kwilson21/tally/issues/76)) | The catalog is live on the demo, every existing component is in it at its tier, and the owner has signed off MoneyInput and the first flows there | milestone to come |
@@ -31,17 +32,19 @@ The design system track runs alongside Phase 2 and comes before the audit detail
 
 Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's paid or the next one is due; a bank change to a split purchase's amount removes the split. Phase 3 is complete on `main` and the demo; it reaches production in the one owner-approved deploy after Oct 7 (decision 60). The other session's income work ([#149](https://github.com/kwilson21/tally/pull/149), [#153](https://github.com/kwilson21/tally/pull/153), [#160](https://github.com/kwilson21/tally/pull/160)) is separate; [#153](https://github.com/kwilson21/tally/pull/153) needs its migration renumbered after `0015`, which `main` now uses.
 
-## Where Phase 4 stands (Oct 5: picked, briefed to Codex)
+Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Phases 3.5 to 5 are built in a new session with ultracode workflows (decision 69).
+
+## Where Phase 4 stands (Oct 5: picked; built from Phase 3.5 on, decision 69)
 
 The owner picked every Phase 4 design on the proposals page (decision 64, spec §8.3), and asked for "Why?" links and How Tally works in the family app (decision 65).
 
 | Part | Issue | State |
 |---|---|---|
-| How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Briefed; first, as the parts below use it |
-| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Briefed after #170 |
-| Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Briefed after #170 |
+| How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Briefed to Codex (PR #173, being fixed); first, as the parts below use it |
+| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | To build (decision 69) |
+| Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | To build (decision 69) |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
-| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | Briefed after #170 |
-| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | Briefed after #33 (both use `src/ai/suggest-name.ts`) |
+| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | To build (decision 69) |
+| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 69) |
 
 Later list (not scheduled): see spec §12.
