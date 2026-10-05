@@ -1,5 +1,7 @@
 # Open questions on the AI, Phase 5 and design-system issues (Oct 5)
 
+**Answered on Oct 6 (decisions 77 and 78):** the owner went through every question by seeing a picture of each answer. Where the answer differs from the recommendation below, the Answers section at the end wins.
+
 Writing the issues for decisions 73–76 turned up 53 questions the spec doesn't answer. Each has a recommended answer, in the spirit of the owner's earlier picks: the simplest rule a person can say in a sentence, nothing hidden from the family, and no new script. The owner accepts them all, changes some, or goes through them one by one. Accepted answers become a decision entry and replace the "Open:" lines in the issues.
 
 ## AI (spec §8.6)
@@ -76,3 +78,23 @@ Writing the issues for decisions 73–76 turned up 53 questions the spec doesn't
 51. *Desktop's side panel (#218).* Slides in from the right in 200 ms, backdrop fading in.
 52. *MoneyInput's corners (#219).* They join the squircle rule when #80 settles its corners; until then they stay as they are.
 53. *The P75 drawing after squircles ship (#219).* It stays, with "Today" forced round so the comparison still shows.
+
+## Answers (decisions 77 and 78)
+
+Recommended answers were taken unless listed here.
+
+- **2:** greyed out, with "Needs Guess categories or Spot paychecks on"; and the four switches renamed (P86 A): "Suggest store names", "Guess categories", "Spot paychecks", "Sort right away", each with an example.
+- **5:** P76 A, as recommended.
+- **10:** the bank's own name is still offered with names off, and every name Tally guessed carries a sparkles icon and "Tally's guess" (P87 B); the bank's says "From your bank".
+- **14:** a No is remembered as a "Never suggest" rule, listed with "Always for these merchants" under "Tally's rules" in Settings, each with Remove (P88 A).
+- **15:** a Skip comes back at the end; and Tally asks its AI again right away when a clearer name or a note is added to a transaction that still needs a category.
+- **New (the owner's idea):** Tally fills in a transaction's details, dashed until kept: a clean name, what it was, its kind (subscription, one-off, bill or transfer) and who it was for, from a household people list, with a "Fill in details" switch (P89 A).
+- **20:** P77 A, as recommended.
+- **21–23:** as recommended, and the demo's links read "Tidied by Tally · Straight from the bank".
+- **26:** Cloudflare's email (Resend is already set up if it's ever needed); the template is designed from emailcn's notification blocks (emailcn.run), written in Hono JSX with no new dependency.
+- **28, 40, 41, 45, 46, 47, 51:** P78, P80–P85 A, as recommended.
+- **29:** a Why? link beside Category explains it (P79 E), rather than a line under the chips.
+- **33:** a store whose trips go in different categories (Costco: Groceries and Household) never gets an "always" rule. Tally guesses one category from the trip's details, or, when the details point to more than one, suggests a split with the categories filled in and the amounts left to the person (P90, A combined with B). Rule offers stay for stores with one category.
+- **38:** the CSV gets its own `own_name` column, next to the store's name.
+- **42:** a new date moves a split cash entry's parts; a new amount that no longer matches its parts can't be saved until the parts are corrected ("The parts add up to $90.00. Change them to match $100.00."). The split is never reset.
+- **48:** decided as recommended (it's how the work is split into pull requests).
