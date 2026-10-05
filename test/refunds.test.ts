@@ -797,7 +797,11 @@ describe("splits unlink their refunds", () => {
 			expect(part.credit_reviewed_by).toBe("user");
 		}
 		expect(await refundOf(REFUND)).toBe(linkedRefund);
+		// The budget and the purchase caption count the two $10 parts, never the split parent too.
 		expect(await spent("2026-08", KIDS)).toBe(before);
+		const { html } = await get("/transactions?month=2026-08&q=refund");
+		expect(rowHtml(html, PURCHASE)).toContain("Kids · $20.00 refunded");
+		expect(rowHtml(html, PURCHASE)).not.toContain("$40.00 refunded");
 		expect(trigger?.toast.message).toBe("Split Refund Shop");
 		await post(`/transactions/${REFUND}/split/remove`, [
 			["back", "/transactions"],

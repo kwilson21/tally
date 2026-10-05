@@ -198,6 +198,11 @@ describe("GET /design-system in the demo", () => {
 			/<section role="dialog" aria-labelledby="ds-sheet-title"/,
 		);
 		expect(html).toContain('id="ds-sheet-title"');
+		expect(html).toContain("Count as income");
+		expect(html).toContain("Reviewed as a refund or other non-income credit");
+		expect(design).toMatch(
+			/Edit panel layout[^\n]*Count as income[^\n]*Reviewed as a refund or other non-income credit/,
+		);
 	});
 
 	it("has no links that go nowhere: no specimen links back to the catalog itself", async () => {

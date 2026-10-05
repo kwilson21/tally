@@ -22,10 +22,10 @@ describe("GET / with the demo seed", () => {
 		expect(html).toContain('<html lang="en">');
 	});
 
-	it("leads with budget remaining and the status sentence", async () => {
+	it("leads with safe to spend and the status sentence", async () => {
 		const { html } = await home();
-		expect(html).toContain("Budget remaining this month");
-		expect(html).toMatch(/Budget remaining this month<\/p><p[^>]*>\$[\d,]+/);
+		expect(html).toContain("Safe to spend");
+		expect(html).toMatch(/Safe to spend<\/p><p[^>]*>\$[\d,]+/);
 		expect(html).toContain(
 			"Eating Out is $36 over. Everything else is on track.",
 		);
@@ -49,7 +49,7 @@ describe("GET / with the demo seed", () => {
 		const dollars = (html: string) =>
 			Number(
 				html
-					.match(/Budget remaining this month<\/p><p[^>]*>\$([\d,]+)/)?.[1]
+					.match(/Safe to spend<\/p><p[^>]*>\$([\d,]+)/)?.[1]
 					?.replaceAll(",", "") ?? Number.NaN,
 			);
 		const withBills = dollars((await home()).html);
@@ -131,9 +131,7 @@ describe("GET / with the demo seed", () => {
 		const { html } = await home();
 		const at = (s: string) => html.indexOf(s);
 		expect(html).toMatch(/<h1 class="font-serif text-2xl[^"]*">/);
-		expect(at("Budget remaining this month")).toBeLessThan(
-			at("12 transactions need"),
-		);
+		expect(at("Safe to spend")).toBeLessThan(at("12 transactions need"));
 		expect(at("12 transactions need")).toBeLessThan(at(">Budget<"));
 		expect(at(">Budget<")).toBeLessThan(at("New here? Things to try"));
 	});
@@ -142,7 +140,7 @@ describe("GET / with the demo seed", () => {
 		const { html } = await home();
 		const column = html.indexOf('<div class="lg:max-w-2xl">');
 		expect(column).toBeGreaterThan(-1);
-		expect(column).toBeLessThan(html.indexOf("Budget remaining this month"));
+		expect(column).toBeLessThan(html.indexOf("Safe to spend"));
 		expect(html).not.toContain('<section class="mt-8 lg:max-w-2xl"');
 	});
 });
