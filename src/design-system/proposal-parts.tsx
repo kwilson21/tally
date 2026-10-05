@@ -22,7 +22,10 @@ export type Option = {
 	screen: Child;
 };
 
-/** A proposal's options side by side, each named, described and weighed above its picture. */
+/**
+ * A proposal's options side by side, each named, described and weighed above its picture. The
+ * picture sits in a `data-screen` box, so a test can tell a drawn screen from an empty frame.
+ */
 export function Options({ options }: { options: Option[] }) {
 	return (
 		<div class="flex flex-wrap gap-8">
@@ -55,11 +58,11 @@ export function Options({ options }: { options: Option[] }) {
 					</div>
 					{o.desktop ? (
 						<DesktopFrame label={`${o.name}, on desktop`}>
-							{o.screen}
+							<div data-screen="picture">{o.screen}</div>
 						</DesktopFrame>
 					) : (
 						<PhoneFrame label={`${o.name}, on a phone`} demo={!o.family}>
-							{o.screen}
+							<div data-screen="picture">{o.screen}</div>
 						</PhoneFrame>
 					)}
 				</div>

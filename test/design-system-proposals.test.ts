@@ -21,7 +21,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		// Every proposal from P23 to P71 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 72; n++) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 75; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. Every
 		// other proposal marks exactly one Recommended, with its reason.
@@ -35,7 +35,7 @@ describe("GET /design-system/proposals", () => {
 			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
 				recommended,
 			);
-			// From P34 on, the owner's pick is marked (decisions 72–75); P60 took two options.
+			// From P34 on, each marks the owner's pick (decisions 72–76); P60 took two options.
 			const n = Number(id.match(/^p(\d+)/)?.[1]);
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const expected = n < 34 ? 0 : id === "p60-bills-total" ? 2 : 1;
@@ -47,7 +47,12 @@ describe("GET /design-system/proposals", () => {
 			html.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g)
 				?.length ?? 0;
 		expect(pictures).toBe(options);
-		expect(DECIDED.length).toBe(39);
+		// …and each picture has something drawn in it, not an empty frame.
+		expect(html.match(/<div data-screen="picture">/g)?.length ?? 0).toBe(
+			options,
+		);
+		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
+		expect(DECIDED.length).toBe(42);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));

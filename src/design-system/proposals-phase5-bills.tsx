@@ -369,14 +369,14 @@ const FREQUENCIES = [
 	["monthly", "Monthly"],
 	["yearly", "Yearly"],
 	["weekly", "Weekly"],
-	["every-two-weeks", "Every two weeks"],
+	["biweekly", "Every two weeks"],
 	["quarterly", "Quarterly"],
 ] as const;
 const FORM_CATEGORIES = [KIDS, HOUSEHOLD, GAS];
 /** The bill filled in for each new frequency: one that really repeats that often. */
 const FORM_BILLS = {
 	weekly: { name: "Daycare", amount: "240.00", category: KIDS },
-	"every-two-weeks": {
+	biweekly: {
 		name: "House cleaner",
 		amount: "110.00",
 		category: HOUSEHOLD,
@@ -388,10 +388,7 @@ const FORM_BILLS = {
  * P57: the Add a bill form (src/routes/bills.tsx) with the five frequencies as radio Chips, and the
  * one field each new frequency needs. The field shows by CSS alone, as the yearly Month does today.
  */
-function frequencyForm(
-	id: string,
-	often: "weekly" | "every-two-weeks" | "quarterly",
-) {
+function frequencyForm(id: string, often: "weekly" | "biweekly" | "quarterly") {
 	const { name, amount, category } = FORM_BILLS[often];
 	return (
 		<FormSheet>
@@ -423,7 +420,7 @@ function frequencyForm(
 			{often === "weekly" && (
 				<Pick label="Day of the week" options={DAYS} value="Friday" />
 			)}
-			{often === "every-two-weeks" && (
+			{often === "biweekly" && (
 				<TextInput
 					id={`${id}-paid`}
 					label="A date it was paid"
@@ -1015,7 +1012,7 @@ export function Phase5BillsProposals() {
 						{
 							name: "Both · Every two weeks in the form",
 							note: "It asks for one date it was paid, and counts every 14 days from it.",
-							screen: frequencyForm("p57-fortnight", "every-two-weeks"),
+							screen: frequencyForm("p57-fortnight", "biweekly"),
 						},
 						{
 							name: "Both · Quarterly in the form",

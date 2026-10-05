@@ -4,6 +4,8 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
+import { P75 } from "./proposals-corners";
+import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
@@ -234,6 +236,21 @@ export const DECIDED: readonly {
 		outcome:
 			"Option A, the quiet ledger form, for every form, with a plain big amount field for bills and cash; budgets keep MoneyInput (decision 75).",
 	},
+	{
+		title: "P73 · A new category with its likely transactions",
+		outcome:
+			"Option A: right after a new category is made, the panel offers the others that likely belong, each with its reason; same-merchant ones ticked, Tally's guesses not (decision 76).",
+	},
+	{
+		title: "P74 · Motion",
+		outcome:
+			"Option A: quiet confirmations in CSS only (the switch, the sheet, toasts) and the browser's own cross-fade between pages; B's morphs wait, as they need a script (decision 76).",
+	},
+	{
+		title: "P75 · Squircle corners",
+		outcome:
+			"Option A: squircle corners on every button, field and the sheet, in CSS only; chips stay pills, and Safari and Firefox keep today's corners until they support it (decision 76).",
+	},
 ];
 
 /** The proposals page body. */
@@ -253,7 +270,20 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="trust-title" class="mt-10">
+			<section aria-labelledby="followups-title" class="mt-10">
+				<h2 id="followups-title" class="font-serif text-3xl font-semibold">
+					Picked: follow-ups
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Follow-ups from the owner's picks and the micro-interaction libraries
+					they shared: suggested transactions for a new category (P67), motion,
+					and squircle corners. Picks marked (decision 76).
+				</p>
+				<FollowupProposals />
+				<P75 />
+			</section>
+
+			<section aria-labelledby="trust-title" class="mt-12">
 				<h2 id="trust-title" class="font-serif text-3xl font-semibold">
 					Picked, to build in Phase 3.5
 				</h2>

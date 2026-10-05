@@ -188,6 +188,34 @@ const errorLedger = (
 	</div>
 );
 
+/**
+ * C's 500 page: the same layout as the 404, so a person who knows one knows the other. It says it's
+ * Tally's mistake and that nothing is lost, never shows what failed, and has two ways back: a
+ * secondary Try again (the same address) and a terracotta Go to Home.
+ */
+const errorLedger500 = (
+	<div class="mt-8 flex flex-col items-center text-center">
+		<div class="[&>svg]:size-44">
+			<LedgerIllustration />
+		</div>
+		<h1 class="mt-4 font-serif text-7xl font-semibold tracking-tight">
+			<span class="sr-only">Error </span>500
+		</h1>
+		<p class="mt-2 text-lg">Something went wrong on our side.</p>
+		<p class="mt-1 max-w-xs text-muted">
+			Nothing you did. Your data is safe; try again in a minute.
+		</p>
+		<div class="mt-4 flex flex-wrap items-center justify-center gap-3">
+			<Button kind="secondary" href="#p39-error-pages">
+				Try again
+			</Button>
+			<Button kind="text" href="/">
+				Go to Home
+			</Button>
+		</div>
+	</div>
+);
+
 // ---------------------------------------------------------------------------------------------
 // P40: the first visit's empty Transactions list, in the family app.
 
@@ -591,6 +619,11 @@ export function Phase35StatesProposals() {
 							tradeoff:
 								"an error number means nothing to most people, and the drawing is Home's.",
 							screen: errorLedger,
+						},
+						{
+							name: "Option C · The 500 page",
+							note: "The same drawing over a serif “500”, “Something went wrong on our side.” and a muted hint. Try again loads the same address; Go to Home is the way out. It never shows what failed.",
+							screen: errorLedger500,
 						},
 					]}
 				/>

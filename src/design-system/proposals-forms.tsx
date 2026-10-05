@@ -47,8 +47,12 @@ type Bill = {
 	/** What the field holds ("1500.00"), as the server writes it. */
 	amount: string;
 	day: number;
-	/** Set for a yearly bill: the month it's due in. */
+	/** Set for a yearly bill: the month it's due in; for a quarterly one, its first month. */
 	month?: string;
+	/** The Phase 5 schedules (P57, decision 74); a bill without one is monthly, or yearly with a month. */
+	often?: "weekly" | "biweekly" | "quarterly";
+	/** A weekly bill's weekday, or the one due date an every-two-weeks bill counts from. */
+	on?: string;
 	category: Cat;
 	/** The bank's text for the payment, as it arrives. */
 	paidTo: string;
@@ -74,6 +78,42 @@ const PRIME: Bill = {
 	paidTo: "AMAZON PRIME*RT4K2",
 	nameError: "You already have a bill called Amazon Prime.",
 };
+
+/** P57's weekly bill, to show the Due sentence for the other schedules. */
+const DAYCARE: Bill = {
+	name: "Daycare",
+	amount: "240.00",
+	day: 1,
+	often: "weekly",
+	on: "Friday",
+	category: KIDS,
+	paidTo: "LITTLE SPROUTS DAYCARE",
+};
+const SWIM: Bill = {
+	...DAYCARE,
+	name: "Swim lessons",
+	amount: "60.00",
+	often: "biweekly",
+	on: "2026-10-09",
+};
+const WATER: Bill = {
+	...DAYCARE,
+	name: "Water",
+	amount: "96.00",
+	day: 15,
+	often: "quarterly",
+	month: "January",
+};
+
+const WEEKDAYS = [
+	"Monday",
+	"Tuesday",
+	"Wednesday",
+	"Thursday",
+	"Friday",
+	"Saturday",
+	"Sunday",
+];
 
 const CASH = {
 	amount: "12.50",
@@ -403,35 +443,71 @@ function DueRow({
 }) {
 	const size = big ? "text-2xl" : "text-lg";
 	const select = `min-h-11 border-b border-muted bg-transparent px-1 ${size}`;
+	const often = bill.often ?? (bill.month ? "yearly" : "monthly");
+	// The sentence reads the same way for every schedule: when, then how often (spec §5: a weekly
+	// bill's due_day is its weekday; an every-two-weeks one counts from one date, anchor_date).
 	return (
 		<fieldset class="flex flex-col">
 			<legend class="sr-only">When it's due</legend>
 			<div class={`flex flex-wrap items-center gap-x-2 ${size}`}>
-				<span>{lead}</span>
-				<select
-					name="due_day"
-					aria-label="Day of the month"
-					id={`${id}-day`}
-					class={select}
-				>
-					{DAYS.map((d) => (
-						<option value={d} selected={d === bill.day}>
-							{ordinal(d)}
+				<span>
+					{often === "weekly" || often === "biweekly" ? "Due on" : lead}
+				</span>
+				{often === "weekly" ? (
+					<select
+						name="due_day"
+						aria-label="Day of the week"
+						id={`${id}-day`}
+						class={select}
+					>
+						{WEEKDAYS.map((d, i) => (
+							<option value={i + 1} selected={d === bill.on}>
+								{d}s
+							</option>
+						))}
+					</select>
+				) : often === "biweekly" ? (
+					<input
+						type="date"
+						name="anchor_date"
+						aria-label="One date it's due"
+						id={`${id}-day`}
+						value={bill.on}
+						class={select}
+					/>
+				) : (
+					<select
+						name="due_day"
+						aria-label="Day of the month"
+						id={`${id}-day`}
+						class={select}
+					>
+						{DAYS.map((d) => (
+							<option value={d} selected={d === bill.day}>
+								{ordinal(d)}
+							</option>
+						))}
+					</select>
+				)}
+				<select name="frequency" aria-label="How often" class={select}>
+					{(
+						[
+							["weekly", "every week"],
+							["biweekly", "every two weeks"],
+							["monthly", "every month"],
+							["quarterly", "every quarter"],
+							["yearly", "every year"],
+						] as const
+					).map(([value, label]) => (
+						<option value={value} selected={value === often}>
+							{label}
 						</option>
 					))}
-				</select>
-				<select name="frequency" aria-label="How often" class={select}>
-					<option value="monthly" selected={!bill.month}>
-						every month
-					</option>
-					<option value="yearly" selected={!!bill.month}>
-						every year
-					</option>
 				</select>
 			</div>
 			{bill.month && (
 				<div class={`flex items-center gap-2 ${size}`}>
-					<span>in</span>
+					<span>{often === "quarterly" ? "starting in" : "in"}</span>
 					<select name="anchor_month" aria-label="Month" class={select}>
 						{MONTH_NAMES.map((m) => (
 							<option value={m} selected={m === bill.month}>
@@ -444,6 +520,24 @@ function DueRow({
 		</fieldset>
 	);
 }
+
+/** P57's schedules in the picked form: only the Due sentence changes (decision 74). */
+const otherSchedules = (
+	<TallSheet behind={billsBehind} footer={<Footer save="Save" />}>
+		<h2 class="font-serif text-2xl font-semibold">Add a bill</h2>
+		<p class="text-sm text-muted">How the Due line reads for each schedule</p>
+		<div class="flex flex-col gap-4">
+			{[DAYCARE, SWIM, WATER].map((b) => (
+				<div class="flex flex-col gap-1 border-b border-rule pb-3">
+					<p class="text-sm text-muted">
+						{b.name} · {money(b.amount)}
+					</p>
+					<DueRow id={`p72-due-${b.often}`} bill={b} lead="Due on the" />
+				</div>
+			))}
+		</div>
+	</TallSheet>
+);
 
 // ---------------------------------------------------------------------------------------------
 // Option A: a quiet ledger form.
@@ -1031,6 +1125,11 @@ export function FormsProposals() {
 			</p>
 			<Options
 				options={[
+					{
+						name: "Option A · Weekly, every two weeks, quarterly",
+						note: "P57's schedules in this form: only the Due sentence changes. Weekly picks a weekday, every two weeks picks one date it's due, quarterly adds its first month.",
+						screen: otherSchedules,
+					},
 					{
 						name: "Option A · The longest state",
 						note: "A yearly bill with Category open and a field error. The form scrolls; Save and Cancel don't.",
