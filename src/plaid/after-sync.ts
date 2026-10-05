@@ -11,6 +11,15 @@ import { applyMerchantRules } from "../db/transactions";
  * transactions by Jev belongs after the rules, so Jev isn't asked about what a rule just sorted.
  */
 export async function afterSync(db: D1Database): Promise<void> {
-	await applyMerchantRules(db);
-	await matchBillPayments(db);
+	// Each step runs even if the other fails, so a rule error never leaves a bill unmatched; the
+	// first failure is still thrown afterwards, so the caller can say so.
+	const failures: unknown[] = [];
+	for (const step of [applyMerchantRules, matchBillPayments]) {
+		try {
+			await step(db);
+		} catch (error) {
+			failures.push(error);
+		}
+	}
+	if (failures.length > 0) throw failures[0];
 }

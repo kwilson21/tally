@@ -376,6 +376,30 @@ describe("POST /accounts/sync feedback", () => {
 		});
 	});
 
+	it("still sorts with merchant rules when every bank needs attention", async () => {
+		await addBank("Chase", { status: "needs_attention" });
+		stubPlaid({});
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO accounts (id, name, type, balance_cents) VALUES (901, 'Checking', 'depository', 0)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (901, '2026-09-27', 100, 'CAFE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('CAFE', ?)",
+			).bind(category?.id),
+		]);
+		await sync();
+		const row = await env.DB.prepare(
+			"SELECT category_source FROM transactions WHERE raw_name = 'CAFE'",
+		).first<{ category_source: string }>();
+		expect(row?.category_source).toBe("merchant_rule");
+	});
+
 	it("shows the failure on the Accounts page when the form posts without htmx", async () => {
 		await addBank("Chase");
 		stubPlaid({}, ["Chase"]);

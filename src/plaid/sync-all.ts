@@ -97,17 +97,15 @@ export async function syncAllItems(
 	}
 
 	// Rules and bill matching cover the whole household, so they run once after every bank, not per
-	// bank. They run even when every bank was busy or failed part-way: a bank's saved pages, or a sync
-	// still running elsewhere, may have left transactions a rule can sort.
-	if (items.length > 0) {
-		try {
-			await afterSync(env.DB);
-		} catch (error) {
-			result.afterSyncFailed = true;
-			console.error(
-				`plaid daily sync: after sync failed ${error instanceof Error ? error.name : "unknown"}`,
-			);
-		}
+	// bank. They run even when no bank could sync (busy, failed part-way or needing attention): what
+	// is already stored may still have transactions a rule can sort.
+	try {
+		await afterSync(env.DB);
+	} catch (error) {
+		result.afterSyncFailed = true;
+		console.error(
+			`plaid daily sync: after sync failed ${error instanceof Error ? error.name : "unknown"}`,
+		);
 	}
 	logResult(result);
 	return result;
