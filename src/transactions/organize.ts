@@ -4,6 +4,7 @@ import {
 	FOLLOWS_PURCHASE,
 } from "../db/counted-month";
 import {
+	KEY_ROW_FLAG_ON_CONFLICT,
 	keyRowColumnSql,
 	merchantKeySql,
 	rawTextRowColumnSql,
@@ -165,7 +166,8 @@ export async function saveOrganizeGroup(
 				.prepare(
 					`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)
 					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
-						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END`,
+						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
+						${KEY_ROW_FLAG_ON_CONFLICT}`,
 				)
 				.bind(merchantKey, displayName, categoryId, displayName),
 		);

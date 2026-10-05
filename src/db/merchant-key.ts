@@ -7,10 +7,12 @@
  * It is stored in `merchants.raw_name` and `bills.merchant_raw_name`, whose names are kept.
  *
  * Rows saved before a merchant key existed hold the bank's raw text, and migration 0017 flagged them
- * (`merchants.raw_text`, `bills.merchant_raw_text` = 1); a row saved since holds a key (flag 0). A stored
- * text matches a transaction when it equals the transaction's key, or when its row is flagged and it
- * equals the transaction's raw name, so old rows keep doing what they did before the key. A row saved
- * under the key wins over a flagged row for the same transaction.
+ * (`merchants.raw_text`, `bills.merchant_raw_text` = 1); a row saved since holds a key (flag 0). The two
+ * kinds never mix: a key row (flag 0) matches a transaction whose key equals its text, and a flagged row
+ * matches one whose raw name equals its text, so old rows keep doing what they did before the key, and an
+ * unrelated charge whose Plaid merchant name happens to equal an old bank text never reaches that row.
+ * A transaction with no merchant name has its raw name as its key, so both kinds can match it. A key row
+ * wins over a flagged row for the same transaction.
  *
  * `alias` is the transactions table's name or alias in the query ("t" in most, "transactions" inside
  * an UPDATE of the table itself).
@@ -21,12 +23,12 @@ export function merchantKeySql(alias: string): string {
 
 type MerchantColumn = "display_name" | "suggested_name" | "default_category_id";
 
-/** A `merchants` column on the row saved under the merchant key. */
+/** A `merchants` column on the key row (flag 0) saved under the merchant key. */
 export function keyRowColumnSql(
 	keySql: string,
 	column: MerchantColumn,
 ): string {
-	return `(SELECT m.${column} FROM merchants m WHERE m.raw_name = ${keySql})`;
+	return `(SELECT m.${column} FROM merchants m WHERE m.raw_text = 0 AND m.raw_name = ${keySql})`;
 }
 
 /** A `merchants` column on the flagged row saved under the bank's raw text, if any. */
@@ -50,6 +52,15 @@ export function merchantColumnOfSql(
 	return `COALESCE(${keyRowColumnSql(keySql, column)}, ${rawTextRowColumnSql(rawNameSql, column)})`;
 }
 
+/**
+ * The `raw_text` assignment for an upsert under a key (`ON CONFLICT(raw_name) DO UPDATE SET ...`). A person's
+ * choice about a merchant name takes over a flagged row whose text is also some transaction's merchant name,
+ * so the choice applies to that merchant's charges (flag 0); any other flagged row keeps its flag and keeps
+ * serving the bank texts it was saved under.
+ */
+export const KEY_ROW_FLAG_ON_CONFLICT =
+	"raw_text = CASE WHEN EXISTS (SELECT 1 FROM transactions WHERE merchant_name = merchants.raw_name) THEN 0 ELSE merchants.raw_text END";
+
 /** `merchantColumnOfSql` for a transaction (see `merchantKeySql` for `alias`). */
 export function merchantColumnSql(
 	alias: string,
@@ -67,12 +78,12 @@ export function merchantNotABillSql(
 	keySql: string,
 	rawNameSql: string,
 ): string {
-	return `EXISTS (SELECT 1 FROM merchants m WHERE m.not_a_bill = 1 AND (m.raw_name = ${keySql} OR (m.raw_text = 1 AND m.raw_name = ${rawNameSql})))`;
+	return `EXISTS (SELECT 1 FROM merchants m WHERE m.not_a_bill = 1 AND ((m.raw_text = 0 AND m.raw_name = ${keySql}) OR (m.raw_text = 1 AND m.raw_name = ${rawNameSql})))`;
 }
 
 /**
- * True when a bill's stored merchant text is this merchant: it equals the key, or the bill is flagged as
- * saved under the bank's raw text and it equals the raw name. `textSql` and `flagSql` are SQL for the
+ * True when a bill's stored merchant text is this merchant: a key bill (flag 0) equals the key, or a bill
+ * flagged as saved under the bank's raw text equals the raw name. `textSql` and `flagSql` are SQL for the
  * bill's `merchant_raw_name` and `merchant_raw_text` (a `?` is fine, bound as `merchantTextArgs`).
  */
 export function isMerchantTextOfSql(
@@ -81,7 +92,7 @@ export function isMerchantTextOfSql(
 	textSql: string,
 	flagSql: string,
 ): string {
-	return `(${textSql} = ${keySql} OR (${flagSql} = 1 AND ${textSql} = ${rawNameSql}))`;
+	return `((${flagSql} = 0 AND ${textSql} = ${keySql}) OR (${flagSql} = 1 AND ${textSql} = ${rawNameSql}))`;
 }
 
 /** `isMerchantTextOfSql` for a transaction (see `merchantKeySql` for `alias`), with `?` for the bill's text and flag. */
@@ -94,11 +105,12 @@ export function isMerchantTextSql(alias: string): string {
 	);
 }
 
-/** The values to bind, in order, for the `?`s of `isMerchantTextSql`: the text, the flag, the text. */
+/** The values to bind, in order, for the `?`s of `isMerchantTextSql`: the flag, the text, the flag, the text. */
 export const merchantTextArgs = (bill: {
 	merchant_raw_name: string;
 	merchant_raw_text: number;
-}): [string, number, string] => [
+}): [number, string, number, string] => [
+	bill.merchant_raw_text,
 	bill.merchant_raw_name,
 	bill.merchant_raw_text,
 	bill.merchant_raw_name,

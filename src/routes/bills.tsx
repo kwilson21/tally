@@ -21,6 +21,7 @@ import {
 import { householdToday, ordinal } from "../dates";
 import {
 	isMerchantTextSql,
+	KEY_ROW_FLAG_ON_CONFLICT,
 	merchantColumnSql,
 	merchantTextArgs,
 } from "../db/merchant-key";
@@ -552,7 +553,7 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	if (dismissedIndex < 0) return c.notFound();
 	const result = await c.env.DB.prepare(
 		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
-		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1`,
+		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1, ${KEY_ROW_FLAG_ON_CONFLICT}`,
 	)
 		.bind(merchant)
 		.run();

@@ -12,6 +12,7 @@ import {
 	FOLLOWS_PURCHASE,
 } from "./counted-month";
 import {
+	KEY_ROW_FLAG_ON_CONFLICT,
 	merchantColumnSql,
 	merchantKeySql,
 	sameMerchantSql,
@@ -390,7 +391,7 @@ export async function saveEdit(
 		db
 			.prepare(
 				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
-				ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name`,
+				ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name, ${KEY_ROW_FLAG_ON_CONFLICT}`,
 			)
 			.bind(current.merchantKey, edit.displayName),
 	];
