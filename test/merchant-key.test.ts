@@ -870,3 +870,332 @@ describe("rows saved under the bank's raw text", () => {
 		});
 	});
 });
+
+// The raw-name fallback exists only so rows saved before Plaid's merchant name was stored keep working.
+// It never overrides two known, different merchants: a raw text that is some transaction's merchant name
+// is that merchant's key, not a legacy raw text, and a transaction that has a merchant name is never
+// "the same merchant" as another merchant's by raw text alone.
+describe("the raw-name fallback never overrides two known merchants", () => {
+	const bill = (id: number, text: string, due = 10, cents = 5000) =>
+		db
+			.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (?, ?, ?, ?, 'monthly', 5, ?)",
+			)
+			.bind(id, `Bill ${id}`, cents, due, text)
+			.run();
+
+	it("shows two charges with one key and different old names as one Organize group, saved once", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('COMCAST CABLE', 'Comcast Cable'), ('COMCAST CABLE 2', 'Comcast Two')",
+			),
+		]);
+		await insert(
+			{
+				id: 8701,
+				date: "2026-09-01",
+				cents: 1000,
+				raw: "COMCAST CABLE",
+				merchant: "Comcast",
+			},
+			{
+				id: 8702,
+				date: "2026-09-02",
+				cents: 2000,
+				raw: "COMCAST CABLE",
+				merchant: "Comcast",
+			},
+			{
+				id: 8703,
+				date: "2026-09-03",
+				cents: 3000,
+				raw: "COMCAST CABLE 2",
+				merchant: "Comcast",
+			},
+		);
+
+		const groups = (await organizeGroups(db)).filter((g) =>
+			g.merchantKeys.includes("Comcast"),
+		);
+
+		// One group for the key, named by the old name most of its charges show.
+		expect(groups).toEqual([
+			{
+				name: "Comcast Cable",
+				count: 3,
+				totalCents: 6000,
+				merchantKeys: ["Comcast"],
+			},
+		]);
+
+		const saved = await saveOrganizeGroup(
+			db,
+			groups[0]?.merchantKeys ?? [],
+			GROCERIES,
+			null,
+			"me",
+		);
+		expect(saved).toBe(3);
+		expect((await row(8703))?.category_id).toBe(GROCERIES);
+	});
+
+	it("names an Organize group by its key's row first, then its old names by count and then alphabet", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('B OLD', 'Beta'), ('A OLD', 'Alpha')",
+			),
+		]);
+		await insert(
+			{
+				id: 8711,
+				date: "2026-09-01",
+				cents: 100,
+				raw: "B OLD",
+				merchant: "Zed",
+			},
+			{
+				id: 8712,
+				date: "2026-09-02",
+				cents: 100,
+				raw: "A OLD",
+				merchant: "Zed",
+			},
+		);
+		const name = async () =>
+			(await organizeGroups(db)).find((g) => g.merchantKeys.includes("Zed"))
+				?.name;
+
+		// A tie on count goes to the alphabetically first name.
+		expect(await name()).toBe("Alpha");
+
+		await insert({
+			id: 8713,
+			date: "2026-09-03",
+			cents: 100,
+			raw: "B OLD",
+			merchant: "Zed",
+		});
+		expect(await name()).toBe("Beta");
+
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('Zed', 'Zed Stores')",
+			)
+			.run();
+		expect(await name()).toBe("Zed Stores");
+	});
+
+	it("does not let a bill for one merchant claim another merchant's charge with the same bank text", async () => {
+		await insert(
+			// "Target" is a merchant name here, so a bill saved as "Target" is Target's.
+			{
+				id: 8721,
+				date: "2026-08-10",
+				cents: 5000,
+				raw: "TARGET 1234",
+				merchant: "Target",
+			},
+			{
+				id: 8722,
+				date: "2026-09-10",
+				cents: 5000,
+				raw: "Target",
+				merchant: "Target Optical",
+			},
+		);
+		await bill(8701, "Target");
+
+		await matchBillPayments(db, TODAY);
+
+		expect(
+			(
+				await db
+					.prepare(
+						"SELECT transaction_id FROM bill_payments WHERE bill_id = 8701",
+					)
+					.all()
+			).results,
+		).toEqual([{ transaction_id: 8721 }]);
+	});
+
+	it("still matches a bill saved under bank text that is nobody's merchant name", async () => {
+		await insert(
+			{
+				id: 8731,
+				date: "2026-09-10",
+				cents: 8000,
+				raw: "COMCAST CABLE",
+				merchant: "Comcast",
+			},
+			{
+				id: 8732,
+				date: "2026-08-10",
+				cents: 8000,
+				raw: "COMCAST CABLE",
+				merchant: "Comcast",
+			},
+		);
+		await bill(8702, "COMCAST CABLE", 10, 8000);
+
+		await matchBillPayments(db, TODAY);
+
+		expect(
+			(
+				await db
+					.prepare(
+						"SELECT transaction_id FROM bill_payments WHERE bill_id = 8702 ORDER BY period",
+					)
+					.all()
+			).results,
+		).toEqual([{ transaction_id: 8732 }, { transaction_id: 8731 }]);
+	});
+
+	it("does not rank another merchant's charge as the same merchant when linking by hand", async () => {
+		await insert(
+			{
+				id: 8741,
+				date: "2026-09-12",
+				cents: 9000,
+				raw: "TARGET 1234",
+				merchant: "Target",
+			},
+			// Closer in amount, and the bill's text is its bank text, but it is Target Optical's.
+			{
+				id: 8742,
+				date: "2026-09-10",
+				cents: 5000,
+				raw: "Target",
+				merchant: "Target Optical",
+			},
+		);
+		await bill(8703, "Target");
+
+		const html = await (
+			await exports.default.fetch(`${BASE}/bills/8703/occurrences/2026-09/link`)
+		).text();
+		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
+
+		expect(picker.indexOf('value="8741"')).toBeGreaterThan(-1);
+		expect(picker.indexOf('value="8741"')).toBeLessThan(
+			picker.indexOf('value="8742"'),
+		);
+	});
+
+	it("does not hide another merchant's charges from finding bills because of a bill with the same bank text", async () => {
+		await insert(
+			{
+				id: 8751,
+				date: "2026-08-05",
+				cents: 2500,
+				raw: "TARGET 1234",
+				merchant: "Target",
+			},
+			{
+				id: 8752,
+				date: "2026-08-06",
+				cents: 3500,
+				raw: "Target",
+				merchant: "Target Optical",
+			},
+			{
+				id: 8753,
+				date: "2026-09-05",
+				cents: 3500,
+				raw: "Target",
+				merchant: "Target Optical",
+			},
+		);
+		await bill(8704, "Target");
+
+		const found = (await loadBillSuggestions(db, TODAY)).map((s) => s.rawName);
+
+		expect(found).toEqual(["Target Optical"]);
+	});
+
+	it("does not apply one merchant's rule or name to another merchant that shares its bank text", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('Target', 'Target Stores', ?)",
+			)
+			.bind(GROCERIES)
+			.run();
+		await insert(
+			{
+				id: 8761,
+				date: "2026-09-01",
+				cents: 100,
+				raw: "TARGET 1234",
+				merchant: "Target",
+			},
+			{
+				id: 8762,
+				date: "2026-09-02",
+				cents: 100,
+				raw: "Target",
+				merchant: "Target Optical",
+			},
+		);
+
+		await applyMerchantRules(db);
+
+		expect(await row(8761)).toMatchObject({ category_id: GROCERIES });
+		expect(await row(8762)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+		expect((await getTransaction(db, 8761))?.displayName).toBe("Target Stores");
+		expect((await getTransaction(db, 8762))?.displayName).not.toBe(
+			"Target Stores",
+		);
+	});
+
+	it("does not offer a purchase from another merchant for a refund, though the bank text is the same", async () => {
+		await insert(
+			{
+				id: 8771,
+				date: "2026-09-15",
+				cents: -1000,
+				raw: "TARGET 5678",
+				merchant: "Target",
+			},
+			{
+				id: 8772,
+				date: "2026-09-03",
+				cents: 2000,
+				raw: "TARGET 5678",
+				merchant: "Walmart",
+			},
+			// A purchase from before Plaid's merchant name was stored has only its bank text.
+			{ id: 8773, date: "2026-09-02", cents: 2000, raw: "TARGET 5678" },
+		);
+		const refund = await getTransaction(db, 8771);
+
+		const offered = await refundPurchases(
+			db,
+			refund as NonNullable<typeof refund>,
+		);
+
+		expect(offered.map((p) => p.id)).toEqual([8773]);
+	});
+
+	it("offers a refund that has no merchant name the purchases that share its bank text", async () => {
+		await insert(
+			{ id: 8781, date: "2026-09-15", cents: -1000, raw: "TARGET 5678" },
+			{
+				id: 8782,
+				date: "2026-09-03",
+				cents: 2000,
+				raw: "TARGET 5678",
+				merchant: "Walmart",
+			},
+		);
+		const refund = await getTransaction(db, 8781);
+
+		const offered = await refundPurchases(
+			db,
+			refund as NonNullable<typeof refund>,
+		);
+
+		expect(offered.map((p) => p.id)).toEqual([8782]);
+	});
+});

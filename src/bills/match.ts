@@ -1,5 +1,5 @@
 import { householdToday } from "../dates";
-import { isMerchantTextSql } from "../db/merchant-key";
+import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
 import { billOccurrenceForMonth } from "./status";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
@@ -137,7 +137,7 @@ export async function matchBillPayments(
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed')`,
 					)
 					.bind(
-						bill.merchant_raw_name,
+						...merchantTextArgs(bill.merchant_raw_name),
 						start.toISOString().slice(0, 10),
 						finish.toISOString().slice(0, 10),
 						bill.id,

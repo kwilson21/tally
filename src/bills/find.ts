@@ -1,4 +1,5 @@
 import {
+	isMerchantTextOfSql,
 	merchantColumnOfSql,
 	merchantKeySql,
 	merchantNotABillSql,
@@ -120,7 +121,7 @@ export async function loadBillSuggestions(
 	  LEFT JOIN categories dc ON dc.id=${chargeMerchant("default_category_id")}
 	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.excluded=0 AND t.flag_income=0
 	   AND t.is_split=0 AND NOT ${merchantNotABillSql(CHARGE_KEY, CHARGE_RAW)}
-	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE b.merchant_raw_name IN (${CHARGE_KEY},${CHARGE_RAW}))
+	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE ${isMerchantTextOfSql(CHARGE_KEY, CHARGE_RAW, "b.merchant_raw_name")})
 	  ORDER BY ${CHARGE_KEY},t.date`)
 		.bind(threeMonthsBack(today), today)
 		.all<BillFindingCharge>();

@@ -11,7 +11,11 @@ import {
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
 } from "./counted-month";
-import { merchantColumnSql, merchantKeySql } from "./merchant-key";
+import {
+	merchantColumnSql,
+	merchantKeySql,
+	sameMerchantSql,
+} from "./merchant-key";
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
@@ -203,8 +207,8 @@ export type RefundPurchase = {
 
 /**
  * The purchases a refund can link to: same merchant (by merchant key, so a "TARGET 1234" purchase is
- * offered for a "TARGET 5678" refund; or by raw name, for purchases from before Plaid's merchant name was
- * stored), on or before it, within 90 days; a split purchase gives way to its parts. The purchase it's
+ * offered for a "TARGET 5678" refund; or by raw name when either has no merchant name, as before Plaid's
+ * merchant name was stored, never across two different merchant names), on or before it, within 90 days; a split purchase gives way to its parts. The purchase it's
  * linked to now is always included, so it can be kept.
  */
 export async function refundPurchases(
@@ -220,8 +224,7 @@ export async function refundPurchases(
 		.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents,t.category_id AS categoryId,c.name AS categoryName,t.excluded
 		FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
 		WHERE t.id = ?1 OR (?2 AND t.amount_cents>0 AND t.is_split=0 AND t.excluded=0
-			AND EXISTS (SELECT 1 FROM transactions r WHERE r.id=?4
-				AND (${merchantKeySql("t")} = ${merchantKeySql("r")} OR t.raw_name = r.raw_name))
+			AND EXISTS (SELECT 1 FROM transactions r WHERE r.id=?4 AND ${sameMerchantSql("t", "r")})
 			AND t.date<=?3 AND t.date>=date(?3,'-90 days') AND t.id!=?4)
 		ORDER BY t.date DESC,t.id DESC`)
 		.bind(refund.refundOfId ?? null, isRefund ? 1 : 0, refund.date, refund.id)

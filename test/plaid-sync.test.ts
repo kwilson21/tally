@@ -423,6 +423,123 @@ describe("syncItem", () => {
 		]);
 	});
 
+	it.each(["added", "modified"] as const)(
+		"clears a merchant rule's category when Plaid corrects the merchant (%s), so the new merchant's rule applies",
+		async (path) => {
+			const id = await addItem();
+			const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(
+						page({
+							added: [
+								transaction({
+									transaction_id: "by-rule",
+									merchant_name: "Old Shop",
+								}),
+								transaction({
+									transaction_id: "by-user",
+									merchant_name: "Old Shop",
+								}),
+								transaction({
+									transaction_id: "by-jev",
+									merchant_name: "Old Shop",
+								}),
+								transaction({
+									transaction_id: "same",
+									merchant_name: "Old Shop",
+								}),
+							],
+						}),
+					),
+				),
+			);
+			const [first, second] = (
+				await env.DB.prepare(
+					"SELECT id FROM categories ORDER BY id LIMIT 2",
+				).all<{
+					id: number;
+				}>()
+			).results.map((r) => r.id) as [number, number];
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'merchant_rule' WHERE plaid_transaction_id IN ('by-rule', 'same')",
+				).bind(first),
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE plaid_transaction_id = 'by-user'",
+				).bind(first),
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.9 WHERE plaid_transaction_id = 'by-jev'",
+				).bind(first),
+				env.DB.prepare(
+					"INSERT OR REPLACE INTO merchants (raw_name, default_category_id) VALUES ('New Shop', ?)",
+				).bind(second),
+			]);
+
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(
+						page({
+							[path]: [
+								transaction({
+									transaction_id: "by-rule",
+									merchant_name: "New Shop",
+								}),
+								transaction({
+									transaction_id: "by-user",
+									merchant_name: "New Shop",
+								}),
+								transaction({
+									transaction_id: "by-jev",
+									merchant_name: "New Shop",
+								}),
+								// Same merchant, a new date: its rule's category stays.
+								transaction({
+									transaction_id: "same",
+									merchant_name: "Old Shop",
+									date: "2026-09-28",
+								}),
+							],
+						}),
+					),
+				),
+			);
+
+			const state = async () =>
+				Object.fromEntries(
+					(
+						await env.DB.prepare(
+							"SELECT plaid_transaction_id AS id, category_id, category_source FROM transactions",
+						).all<{
+							id: string;
+							category_id: number | null;
+							category_source: string | null;
+						}>()
+					).results.map((r) => [r.id, [r.category_id, r.category_source]]),
+				);
+			expect(await state()).toEqual({
+				"by-rule": [null, null],
+				"by-user": [first, "user"],
+				"by-jev": [first, "jev"],
+				same: [first, "merchant_rule"],
+			});
+
+			await applyMerchantRules(env.DB);
+			expect(await state()).toMatchObject({
+				"by-rule": [second, "merchant_rule"],
+				"by-user": [first, "user"],
+				"by-jev": [first, "jev"],
+			});
+			await env.DB.prepare(
+				"DELETE FROM merchants WHERE raw_name = 'New Shop'",
+			).run();
+		},
+	);
+
 	it("keeps a bill, a rule and a name saved under the bank's raw text working once Plaid sends a merchant name", async () => {
 		const id = await addItem();
 		await env.DB.batch([

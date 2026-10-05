@@ -3,7 +3,11 @@ import {
 	countedCategorySql,
 	FOLLOWS_PURCHASE,
 } from "../db/counted-month";
-import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
+import {
+	keyRowColumnSql,
+	legacyRowColumnSql,
+	merchantKeySql,
+} from "../db/merchant-key";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
@@ -23,37 +27,71 @@ export type OrganizeGroup = {
 	merchantKeys: string[];
 };
 
-/** Aggregates transactions in SQL by merchant key, then combines merchants that share a shown name. */
+/**
+ * Aggregates transactions in SQL, once per merchant key and bank text, then combines the keys that
+ * share a shown name. A key is one merchant whatever bank texts its charges carry, so it is always one
+ * group, and saving it categorizes all of its charges. Its name is the one saved under the key; failing
+ * that, the name saved under the bank text most of its charges carry (a tie goes to the first alphabetically).
+ */
 export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT ${KEY} AS merchantKey, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
-				${merchantColumnSql("t", "display_name")} AS displayName
+			`SELECT ${KEY} AS merchantKey, t.raw_name AS rawName, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
+				${keyRowColumnSql(KEY, "display_name")} AS keyName,
+				${legacyRowColumnSql("t.raw_name", "display_name")} AS rawRowName
 			FROM transactions t
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_CATEGORY}
-			GROUP BY ${KEY}, displayName`,
+			GROUP BY ${KEY}, t.raw_name`,
 		)
 		.all<{
 			merchantKey: string;
+			rawName: string;
 			count: number;
 			totalCents: number;
-			displayName: string | null;
+			keyName: string | null;
+			rawRowName: string | null;
 		}>();
-	const groups = new Map<string, OrganizeGroup>();
+	const byKey = new Map<
+		string,
+		{
+			count: number;
+			totalCents: number;
+			keyName: string | null;
+			oldNames: Map<string, number>;
+		}
+	>();
 	for (const row of results) {
-		const name = row.displayName ?? tidyName(row.merchantKey);
+		const key = byKey.get(row.merchantKey) ?? {
+			count: 0,
+			totalCents: 0,
+			keyName: row.keyName,
+			oldNames: new Map<string, number>(),
+		};
+		key.count += row.count;
+		key.totalCents += row.totalCents;
+		if (row.rawRowName)
+			key.oldNames.set(
+				row.rawRowName,
+				(key.oldNames.get(row.rawRowName) ?? 0) + row.count,
+			);
+		byKey.set(row.merchantKey, key);
+	}
+	const groups = new Map<string, OrganizeGroup>();
+	for (const [merchantKey, key] of byKey) {
+		const oldName = [...key.oldNames].sort(
+			(a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
+		)[0]?.[0];
+		const name = key.keyName ?? oldName ?? tidyName(merchantKey);
 		const group = groups.get(name) ?? {
 			name,
 			count: 0,
 			totalCents: 0,
 			merchantKeys: [],
 		};
-		group.count += row.count;
-		group.totalCents += row.totalCents;
-		// A key can come twice, once for each name its transactions show.
-		if (!group.merchantKeys.includes(row.merchantKey))
-			group.merchantKeys.push(row.merchantKey);
+		group.count += key.count;
+		group.totalCents += key.totalCents;
+		group.merchantKeys.push(merchantKey);
 		groups.set(name, group);
 	}
 	return [...groups.values()].sort(

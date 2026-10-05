@@ -1,4 +1,5 @@
 import { matchBillPayments } from "../bills/match";
+import { merchantKeySql } from "../db/merchant-key";
 import { plaidAmountToCents } from "../money";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
@@ -316,8 +317,8 @@ export async function syncItem(
 								credit_reviewed = CASE WHEN transactions.credit_reviewed_by = 'user' THEN transactions.credit_reviewed WHEN transactions.amount_cents = excluded.amount_cents THEN transactions.credit_reviewed WHEN excluded.amount_cents < 0 THEN 0 ELSE 1 END,
 								credit_reviewed_by = CASE WHEN transactions.credit_reviewed_by = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.credit_reviewed_by END,
 							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
-							category_id = CASE WHEN (transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_id END,
-							category_source = CASE WHEN (transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_source END,
+							category_id = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_id END,
+							category_source = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_source END,
 							category_confidence = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_confidence END,
 							jev_category_id = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.jev_category_id END,
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
@@ -342,6 +343,8 @@ export async function syncItem(
 			}
 			for (const transaction of page.modified) {
 				const cents = plaidAmountToCents(transaction.amount);
+				// A corrected merchant takes its new rule, not the old merchant's (a person's or Jev's pick stays).
+				const newKey = merchantNameOf(transaction) ?? transaction.name;
 				statements.push(
 					env.DB.prepare(
 						`UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
@@ -374,8 +377,8 @@ export async function syncItem(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,
 							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
-							category_id = CASE WHEN (is_split = 1 OR category_source = 'jev') AND amount_cents != ? THEN NULL ELSE category_id END,
-							category_source = CASE WHEN (is_split = 1 OR category_source = 'jev') AND amount_cents != ? THEN NULL ELSE category_source END,
+							category_id = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_id END,
+							category_source = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_source END,
 							category_confidence = CASE WHEN amount_cents != ? THEN NULL ELSE category_confidence END,
 							jev_category_id = CASE WHEN amount_cents != ? THEN NULL ELSE jev_category_id END,
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
@@ -391,7 +394,9 @@ export async function syncItem(
 						transaction.date,
 						cents,
 						cents,
+						newKey,
 						cents,
+						newKey,
 						cents,
 						cents,
 						cents,
