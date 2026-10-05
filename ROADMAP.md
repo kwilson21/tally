@@ -54,7 +54,7 @@ Each visual piece is drawn on the proposals page (P34–P45) and picked by the o
 | A stale or broken bank flagged on Home | [#184](https://github.com/kwilson21/tally/issues/184) | Waits for P37 |
 | The first visit's empty list | [#185](https://github.com/kwilson21/tally/issues/185) | Waits for P40 |
 
-## Where Phase 4 stands (Oct 5: picked; built after Phase 3.5, decision 71)
+## Where Phase 4 stands (Oct 5: picked; built after Phase 3.5, decision 78)
 
 The owner picked every Phase 4 design on the proposals page (decision 64, spec §8.3), and asked for "Why?" links and How Tally works in the family app (decision 65).
 
