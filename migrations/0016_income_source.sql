@@ -9,6 +9,7 @@ ALTER TABLE transactions ADD COLUMN credit_reviewed_by TEXT CHECK (credit_review
 
 -- Historic person-decided credits already counted before the review queue existed.
 UPDATE transactions
-SET credit_reviewed = 1
+SET credit_reviewed = 1,
+    credit_reviewed_by = 'user'
 WHERE amount_cents < 0
   AND (category_source = 'user' OR refund_of_id IS NOT NULL OR excluded_source = 'user');
