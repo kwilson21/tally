@@ -389,6 +389,16 @@ howItWorks.get("/how-it-works", async (c) => {
 							{BILL_FIND_MAX_DAYS} days apart and within{" "}
 							{BILL_FIND_AMOUNT_PERCENT}% in amount.
 						</li>
+						<li>
+							A payment from the same merchant that is outside that{" "}
+							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% is not matched. Tally
+							asks "Price changed?" on the bill instead, and nothing changes
+							until you update the bill or say it is not this bill.
+						</li>
+						<li>
+							A payment you left out of the budget can still pay a bill, and
+							linking it puts it back in the budget, so it counts once.
+						</li>
 						<li>A payment can pay only one bill occurrence.</li>
 						<li>
 							A late payment counts in the month of the bill it paid, instead of

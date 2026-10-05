@@ -55,8 +55,8 @@ describe("GET / with the demo seed", () => {
 		const withBills = dollars((await home()).html);
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const withoutBills = dollars((await home()).html);
-		// The demo's only unpaid active due/overdue bills are $142 + $65.
-		expect(withoutBills - withBills).toBe(207);
+		// The demo's only unpaid active due/overdue bills are $142 + $65 + $15.49 (Netflix, overdue with a price change on offer).
+		expect(withoutBills - withBills).toBe(222);
 	});
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
