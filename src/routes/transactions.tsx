@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { dayLabel, monthLabel, shortDay, todayUtc } from "../dates";
+import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import {
 	getTransaction,
 	type ListRow,
@@ -67,8 +67,8 @@ const pill =
 	"min-h-11 rounded-full border border-rule bg-paper px-4 text-base text-ink";
 
 type ListOptions = {
-	/** The edit sheet to show over the list. */
-	sheet?: (categories: Category[]) => unknown;
+	/** The edit sheet to show over the list, given the active categories and the household's date. */
+	sheet?: (categories: Category[], today: string) => unknown;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
 	status?: 200 | 404 | 422;
@@ -86,9 +86,13 @@ function listHref(filters: Filters, thisMonth: string) {
 	return `/transactions${query ? `?${query}` : ""}`;
 }
 
-/** The whole Transactions page for these filters. Every htmx swap selects a part of this same page. */
+/**
+ * The whole Transactions page for these filters. Every htmx swap selects a part of this same page.
+ * `today` is the household's date, read once by the handler, so the whole request uses one month.
+ */
 async function renderList(
 	c: Context<App>,
+	today: string,
 	filters: Filters,
 	{
 		sheet,
@@ -101,7 +105,6 @@ async function renderList(
 		focusHeading = false,
 	}: ListOptions = {},
 ) {
-	const today = todayUtc();
 	const [{ rows, total, page, pages }, months, needs, categories] =
 		await Promise.all([
 			listTransactions(c.env.DB, filters),
@@ -392,6 +395,7 @@ async function renderList(
 													<SelectableTransactionRow
 														row={row}
 														checked={checkedIds.has(row.id)}
+														today={today}
 													/>
 												),
 											)}
@@ -472,7 +476,7 @@ async function renderList(
 						{pageNav}
 					</section>
 				)}
-				<div id="sheet">{sheet?.(categories.results)}</div>
+				<div id="sheet">{sheet?.(categories.results, today)}</div>
 			</div>
 		</Layout>,
 		status,
@@ -481,11 +485,12 @@ async function renderList(
 
 // Transactions: search and filter every transaction (spec §8, feature 3).
 // Cancelling the edit panel asks for ?focus=<id> so focus returns to that row (the pushed URL stays clean).
-transactions.get("/transactions", (c) => {
+transactions.get("/transactions", async (c) => {
 	const params = new URL(c.req.url).searchParams;
 	const focus = Number(params.get("focus"));
 	const selecting = params.get("select") === "1";
-	return renderList(c, parseFilters(params, todayUtc().slice(0, 7)), {
+	const today = await householdToday(c.env.DB);
+	return renderList(c, today, parseFilters(params, today.slice(0, 7)), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		selecting,
 		checkedIds: selecting
@@ -691,13 +696,14 @@ function SelectCategorySheet({
 }
 
 /** The select-mode list with the Set category sheet over it; a problem shows inside the sheet. */
-function categorySheet(
+async function categorySheet(
 	c: Context<App>,
+	today: string,
 	back: string,
 	ids: number[],
 	error?: string,
 ) {
-	return renderList(c, filtersFrom(back), {
+	return renderList(c, today, filtersFrom(today, back), {
 		selecting: true,
 		checkedIds: new Set(ids),
 		status: error ? 422 : 200,
@@ -717,10 +723,15 @@ transactions.post("/transactions/select/category", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const { ids, error } = await postedSelection(c, form);
-	return categorySheet(c, back, ids, error);
+	return categorySheet(c, await householdToday(c.env.DB), back, ids, error);
 });
 
-async function finishSelection(c: Context<App>, back: string, message: string) {
+async function finishSelection(
+	c: Context<App>,
+	today: string,
+	back: string,
+	message: string,
+) {
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
@@ -728,14 +739,15 @@ async function finishSelection(c: Context<App>, back: string, message: string) {
 	);
 	// The list is out of select mode, so the address bar is too.
 	c.header("HX-Push-Url", back);
-	return renderList(c, filtersFrom(back), { focusHeading: true });
+	return renderList(c, today, filtersFrom(today, back), { focusHeading: true });
 }
 
 transactions.post("/transactions/select/category/save", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const { ids, error } = await postedSelection(c, form);
-	if (error) return categorySheet(c, back, ids, error);
+	const today = await householdToday(c.env.DB);
+	if (error) return categorySheet(c, today, back, ids, error);
 	const category = Number(form.get("category"));
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
@@ -745,7 +757,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 				.first<{ id: number; name: string }>()
 		: null;
 	if (!cat)
-		return categorySheet(c, back, ids, "Pick a category from the list.");
+		return categorySheet(c, today, back, ids, "Pick a category from the list.");
 	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
@@ -755,15 +767,16 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		),
 	);
 	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
-	return finishSelection(c, back, message);
+	return finishSelection(c, today, back, message);
 });
 
 transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const { ids, error } = await postedSelection(c, form);
+	const today = await householdToday(c.env.DB);
 	if (error)
-		return renderList(c, filtersFrom(back), {
+		return renderList(c, today, filtersFrom(today, back), {
 			selecting: true,
 			checkedIds: new Set(ids),
 			status: 422,
@@ -786,6 +799,7 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	);
 	return finishSelection(
 		c,
+		today,
 		back,
 		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.`,
 	);
@@ -799,6 +813,8 @@ type SheetProps = {
 	errors?: EditErrors;
 	deleteConfirm?: boolean;
 	refunds?: RefundPurchase[];
+	/** The household's date, for the transaction's "Today" label. */
+	today: string;
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -810,6 +826,7 @@ function EditSheet({
 	errors = {},
 	deleteConfirm = false,
 	refunds = [],
+	today,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -851,7 +868,7 @@ function EditSheet({
 				{formatCents(tx.amountCents, { signed: true })}
 			</p>
 			<p class="text-muted">
-				{dayLabel(tx.date, todayUtc())} · {account}
+				{dayLabel(tx.date, today)} · {account}
 			</p>
 			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
 				<p role="status" class="text-sm text-over">
@@ -1160,14 +1177,11 @@ function EditSheet({
 	);
 }
 
-const filtersFrom = (url: string) =>
-	parseFilters(
-		new URL(url, "http://tally").searchParams,
-		todayUtc().slice(0, 7),
-	);
+const filtersFrom = (today: string, url: string) =>
+	parseFilters(new URL(url, "http://tally").searchParams, today.slice(0, 7));
 
-const cashValues = (form?: FormData): CashValues => ({
-	date: form?.get("date")?.toString() ?? todayUtc(),
+const cashValues = (today: string, form?: FormData): CashValues => ({
+	date: form?.get("date")?.toString() ?? today,
 	amount: form?.get("amount")?.toString() ?? "20.00",
 	merchant: form?.get("merchant")?.toString() ?? "",
 	category: form?.get("category")?.toString() ?? "",
@@ -1179,11 +1193,13 @@ function CashSheet({
 	values,
 	errors,
 	back,
+	today,
 }: {
 	categories: Category[];
 	values: CashValues;
 	errors?: import("../transactions/cash").CashErrors;
 	back: string;
+	today: string;
 }) {
 	return (
 		<BottomSheet labelledBy="cash-title" closeHref={back}>
@@ -1199,21 +1215,27 @@ function CashSheet({
 				categories={categories}
 				values={values}
 				errors={errors}
-				today={todayUtc()}
+				today={today}
 				back={back}
 			/>
 		</BottomSheet>
 	);
 }
 
-transactions.get("/transactions/cash/new", (c) => {
+transactions.get("/transactions/cash/new", async (c) => {
 	const back = safeBack(
 		new URL(c.req.url).searchParams.get("back") ?? undefined,
 	);
-	return renderList(c, filtersFrom(back), {
+	const today = await householdToday(c.env.DB);
+	return renderList(c, today, filtersFrom(today, back), {
 		pageTitle: "Add cash · Tally",
-		sheet: (categories) => (
-			<CashSheet categories={categories} values={cashValues()} back={back} />
+		sheet: (categories, today) => (
+			<CashSheet
+				categories={categories}
+				values={cashValues(today)}
+				back={back}
+				today={today}
+			/>
 		),
 	});
 });
@@ -1221,17 +1243,18 @@ transactions.get("/transactions/cash/new", (c) => {
 transactions.post("/transactions/cash", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const values = cashValues(form);
+	const today = await householdToday(c.env.DB);
+	const values = cashValues(today, form);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id,name,icon,color FROM categories WHERE archived=0 ORDER BY sort_order,name",
 	).all<Category>();
 	const parsed = parseCash(
 		values,
-		todayUtc(),
+		today,
 		categories.map((x) => x.id),
 	);
 	if (!parsed.ok)
-		return renderList(c, filtersFrom(back), {
+		return renderList(c, today, filtersFrom(today, back), {
 			pageTitle: "Add cash · Tally",
 			status: 422,
 			sheet: () => (
@@ -1240,6 +1263,7 @@ transactions.post("/transactions/cash", async (c) => {
 					values={values}
 					errors={parsed.errors}
 					back={back}
+					today={today}
 				/>
 			),
 		});
@@ -1253,7 +1277,7 @@ transactions.post("/transactions/cash", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, filtersFrom(back));
+	return renderList(c, today, filtersFrom(today, back));
 });
 
 async function notFound(c: Context<App>) {
@@ -1281,11 +1305,10 @@ async function notFound(c: Context<App>) {
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return notFound(c);
-	const filters = parseFilters(
-		new URL(c.req.url).searchParams,
-		todayUtc().slice(0, 7),
-	);
-	const back = listHref(filters, todayUtc().slice(0, 7));
+	const today = await householdToday(c.env.DB);
+	const thisMonth = today.slice(0, 7);
+	const filters = parseFilters(new URL(c.req.url).searchParams, thisMonth);
+	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
 		alwaysForMerchant: false,
@@ -1297,14 +1320,15 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		refundOfId: tx.refundOfId ?? null,
 	};
 	const refunds = await refundPurchases(c.env.DB, tx);
-	return renderList(c, filters, {
-		sheet: (categories) => (
+	return renderList(c, today, filters, {
+		sheet: (categories, today) => (
 			<EditSheet
 				tx={tx}
 				back={back}
 				categories={categories}
 				values={values}
 				refunds={refunds}
+				today={today}
 			/>
 		),
 	});
@@ -1316,12 +1340,14 @@ function SplitSheet({
 	categories,
 	values,
 	error,
+	today,
 }: {
 	tx: TransactionDetail;
 	back: string;
 	categories: Category[];
 	values: SplitValue[];
 	error?: string;
+	today: string;
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
@@ -1339,7 +1365,7 @@ function SplitSheet({
 				{formatCents(tx.amountCents, { signed: true })}
 			</p>
 			<p class="text-muted">
-				{dayLabel(tx.date, todayUtc())} · {account}
+				{dayLabel(tx.date, today)} · {account}
 			</p>
 			<SplitForm
 				id={tx.id}
@@ -1366,9 +1392,10 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	// Income is never split (decision 62's review): no form for it either.
 	if (!tx || tx.parentId !== null || tx.income) return notFound(c);
 	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
-	const filters = filtersFrom(back);
-	return renderList(c, filters, {
-		sheet: () => (
+	const today = await householdToday(c.env.DB);
+	const filters = filtersFrom(today, back);
+	return renderList(c, today, filters, {
+		sheet: (_categories, today) => (
 			<SplitSheet
 				tx={tx}
 				back={back}
@@ -1377,6 +1404,7 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 					{ category: "", amount: "" },
 					{ category: "", amount: "" },
 				]}
+				today={today}
 			/>
 		),
 	});
@@ -1402,6 +1430,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	if (tx.income) return c.text("Income transactions cannot be split.", 400);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
 	const values = categoryValues.map((category, i) => ({
@@ -1422,22 +1451,23 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		if (result && !result.saved) {
 			// Show the bank's new amount, so the next save checks against it.
 			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
-			return renderList(c, filtersFrom(back), {
+			return renderList(c, today, filtersFrom(today, back), {
 				status: 422,
-				sheet: () => (
+				sheet: (_categories, today) => (
 					<SplitSheet
 						tx={fresh}
 						back={back}
 						categories={categories}
 						values={values}
 						error="The bank just changed this amount. Check the parts and save again."
+						today={today}
 					/>
 				),
 			});
 		}
 		if (result) {
 			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-			const unlinked = unlinkedSentence(result.unlinked);
+			const unlinked = unlinkedSentence(result.unlinked, today);
 			c.header(
 				"HX-Trigger",
 				JSON.stringify({
@@ -1449,34 +1479,41 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				}),
 			);
 			c.header("HX-Push-Url", back);
-			return renderList(c, filtersFrom(back), { focusId: tx.id });
+			return renderList(c, today, filtersFrom(today, back), { focusId: tx.id });
 		}
-		return renderList(c, filtersFrom(back), {
+		return renderList(c, today, filtersFrom(today, back), {
 			status: 422,
-			sheet: () => (
+			sheet: (_categories, today) => (
 				<SplitSheet
 					tx={tx}
 					back={back}
 					categories={categories}
 					values={values}
 					error={parsed.ok ? undefined : parsed.error}
+					today={today}
 				/>
 			),
 		});
 	}
-	return renderList(c, filtersFrom(back), {
-		sheet: () => (
-			<SplitSheet tx={tx} back={back} categories={categories} values={values} />
+	return renderList(c, today, filtersFrom(today, back), {
+		sheet: (_categories, today) => (
+			<SplitSheet
+				tx={tx}
+				back={back}
+				categories={categories}
+				values={values}
+				today={today}
+			/>
 		),
 	});
 });
 
 /** What a split change says about refunds it unlinked: " The refund on Sep 26 is no longer linked.", or "" for none. */
-function unlinkedSentence(dates: string[]): string {
+function unlinkedSentence(dates: string[], today: string): string {
 	const [first] = dates;
 	if (first === undefined) return "";
 	return dates.length === 1
-		? ` The refund on ${shortDay(first, todayUtc())} is no longer linked.`
+		? ` The refund on ${shortDay(first, today)} is no longer linked.`
 		: ` ${dates.length} refunds are no longer linked.`;
 }
 
@@ -1485,8 +1522,10 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	if (!tx?.isSplit) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
 	const unlinked = unlinkedSentence(
 		await removeSplit(c.env.DB, tx.id, actor(c)),
+		today,
 	);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
@@ -1500,7 +1539,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, filtersFrom(back), { focusId: tx.id });
+	return renderList(c, today, filtersFrom(today, back), { focusId: tx.id });
 });
 
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
@@ -1509,7 +1548,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	if (!tx) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const filters = filtersFrom(back);
+	const today = await householdToday(c.env.DB);
+	const filters = filtersFrom(today, back);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
 	).all<{ id: number; name: string }>();
@@ -1550,9 +1590,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			...(parsed.ok ? {} : parsed.errors),
 			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
 		};
-		return renderList(c, filters, {
+		return renderList(c, today, filters, {
 			status: 422,
-			sheet: (all) => (
+			sheet: (all, today) => (
 				<EditSheet
 					tx={tx}
 					back={back}
@@ -1560,6 +1600,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					values={values}
 					refunds={refunds}
 					errors={errors}
+					today={today}
 				/>
 			),
 		});
@@ -1599,7 +1640,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, filters, { focusId: tx.id });
+	return renderList(c, today, filters, { focusId: tx.id });
 });
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
@@ -1607,6 +1648,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	if (tx?.accountType !== "cash" || tx.parentId !== null) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
 	if (form.get("confirm") !== "1") {
 		const values: Edit = {
 			categoryId: tx.categoryId,
@@ -1619,8 +1661,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			refundOfId: tx.refundOfId ?? null,
 		};
 		const refunds = await refundPurchases(c.env.DB, tx);
-		return renderList(c, filtersFrom(back), {
-			sheet: (categories) => (
+		return renderList(c, today, filtersFrom(today, back), {
+			sheet: (categories, today) => (
 				<EditSheet
 					tx={tx}
 					back={back}
@@ -1628,6 +1670,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 					values={values}
 					refunds={refunds}
 					deleteConfirm
+					today={today}
 				/>
 			),
 		});
@@ -1646,5 +1689,5 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, filtersFrom(back));
+	return renderList(c, today, filtersFrom(today, back));
 });

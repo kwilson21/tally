@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { verifiedEmail } from "../src/access";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const encoder = new TextEncoder();
@@ -350,7 +350,7 @@ describe("verifiedEmail", () => {
 
 describe("Access middleware", () => {
 	beforeEach(async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		Object.assign(env, {
 			DEMO: "false",
 			ACCESS_TEAM_DOMAIN: "route.cloudflareaccess.com",

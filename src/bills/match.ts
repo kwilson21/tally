@@ -1,4 +1,4 @@
-import { todayUtc } from "../dates";
+import { householdToday } from "../dates";
 import { billOccurrenceForMonth } from "./status";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
@@ -49,11 +49,15 @@ type Bill = {
 	merchant_raw_name: string;
 };
 
-/** Fills every unlinked occurrence in range; unique indexes remain the final concurrency guard. */
+/**
+ * Fills every unlinked occurrence in range; unique indexes remain the final concurrency guard.
+ * `given` is the household's date when the caller already has it, otherwise it's read here.
+ */
 export async function matchBillPayments(
 	db: D1Database,
-	today = todayUtc(),
+	given?: string,
 ): Promise<number> {
+	const today = given ?? (await householdToday(db));
 	const first = await db
 		.prepare("SELECT MIN(date) AS date FROM transactions")
 		.first<{ date: string | null }>();

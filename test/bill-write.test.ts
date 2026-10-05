@@ -7,7 +7,7 @@ import {
 	insertBill,
 	updateBill,
 } from "../src/bills/write";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 // The writes enforce "no two active bills share a name" themselves (spec §8.5), so two saves that
@@ -37,7 +37,7 @@ const row = (id: number) =>
 		.first<{ name: string; amount_cents: number; active: number }>();
 
 describe("bill writes", () => {
-	beforeEach(() => resetDemo(env.DB, todayUtc()));
+	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
 	describe("insertBill", () => {
 		it("adds a bill with a free name", async () => {
@@ -120,7 +120,7 @@ describe("bill writes", () => {
 				).results;
 				expect(duplicateBillName(active, typed) !== undefined).toBe(same);
 				expect(await insertBill(env.DB, fields({ name: typed }))).toBe(!same);
-				await resetDemo(env.DB, todayUtc());
+				await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 			},
 		);
 	});

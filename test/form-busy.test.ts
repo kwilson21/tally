@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -15,7 +15,7 @@ const htmxForms = (html: string) =>
 	);
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("htmx posting forms", () => {

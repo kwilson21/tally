@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
 import { encryptToken } from "../src/plaid/token-crypto";
@@ -88,7 +88,7 @@ const countFor = async (id: number) =>
 
 describe("disconnect bank", () => {
 	beforeEach(async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		vi.restoreAllMocks();
 	});
 

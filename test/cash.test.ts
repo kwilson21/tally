@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
@@ -13,7 +13,7 @@ async function request(path: string, init?: RequestInit) {
 	return { res, html: await res.text() };
 }
 
-beforeEach(() => resetDemo(env.DB, todayUtc()));
+beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
 describe("adding cash", () => {
 	it("shows the Add cash control and an accessible sheet", async () => {
@@ -25,7 +25,7 @@ describe("adding cash", () => {
 		const form = html.slice(html.indexOf('id="cash-title"'));
 		expect(html).toContain("Add cash spending");
 		expect(html).toContain("<title>Add cash · Tally</title>");
-		expect(html).toContain(`max="${todayUtc()}"`);
+		expect(html).toContain(`max="${todayIn(DEFAULT_TIME_ZONE)}"`);
 		expect(html).not.toContain('name="direction"');
 		expect(html).not.toContain("Money in");
 		expect(html).toContain('name="amount"');
@@ -56,7 +56,7 @@ describe("adding cash", () => {
 					"content-type": "application/x-www-form-urlencoded",
 				},
 				body: new URLSearchParams({
-					date: todayUtc(),
+					date: todayIn(DEFAULT_TIME_ZONE),
 					amount: "20.45",
 					merchant: "Farmers market",
 					category: "1",
@@ -156,7 +156,7 @@ describe("adding cash", () => {
 				"content-type": "application/x-www-form-urlencoded",
 			},
 			body: new URLSearchParams({
-				date: todayUtc(),
+				date: todayIn(DEFAULT_TIME_ZONE),
 				amount: "8",
 				merchant: "Filtered cash",
 				category: "1",
@@ -183,7 +183,7 @@ describe("adding cash", () => {
 				"content-type": "application/x-www-form-urlencoded",
 			},
 			body: new URLSearchParams({
-				date: todayUtc(),
+				date: todayIn(DEFAULT_TIME_ZONE),
 				amount: "9",
 				merchant: "Filtered htmx cash",
 				category: "1",
@@ -360,7 +360,10 @@ describe("cash lifecycle", () => {
 			"SELECT amount_cents FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND category_id=1 LIMIT 1",
 		).first<{ amount_cents: number }>();
 		expect(cash?.amount_cents).toBe(2000);
-		const month = await loadMonth(env.DB, todayUtc().slice(0, 7));
+		const month = await loadMonth(
+			env.DB,
+			todayIn(DEFAULT_TIME_ZONE).slice(0, 7),
+		);
 		expect(month.transactions).toContainEqual(
 			expect.objectContaining({
 				categoryId: 1,
