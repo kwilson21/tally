@@ -56,6 +56,61 @@ afterEach(() => {
 });
 
 describe("categorizePending", () => {
+	it.each([
+		{ enabled: true, income: 1, source: "jev", reviewed: 1 },
+		{ enabled: false, income: 0, source: null, reviewed: 0 },
+	])(
+		"applies the income answer only when the income switch is $enabled",
+		async ({ enabled, income, source, reviewed }) => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			const id = 1;
+			await db.batch([
+				db
+					.prepare(
+						"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = NULL, flag_income = 0, income_source = NULL, credit_reviewed = 0, credit_reviewed_by = NULL, excluded = 0, excluded_source = NULL WHERE id = ?",
+					)
+					.bind(id),
+				db
+					.prepare(
+						"UPDATE transactions SET category_confidence = 0.5 WHERE id != ?",
+					)
+					.bind(id),
+			]);
+			const jev = fakeJev(
+				() =>
+					new Response(
+						JSON.stringify({
+							answers: {
+								category: {
+									type: "choice",
+									choice: "None of these fit",
+									confidence: 0.5,
+								},
+								transfer: { type: "noul", noul: 0.01 },
+								reimbursement: { type: "noul", noul: 0.01 },
+								income: { type: "noul", noul: 0.99 },
+							},
+						}),
+						{ status: 200 },
+					),
+			);
+
+			await categorizePending(withKey, jev.fetchImpl, { income: enabled });
+			expect(
+				await db
+					.prepare(
+						"SELECT flag_income, income_source, credit_reviewed FROM transactions WHERE id = ?",
+					)
+					.bind(id)
+					.first(),
+			).toEqual({
+				flag_income: income,
+				income_source: source,
+				credit_reviewed: reviewed,
+			});
+		},
+	);
+
 	it("does nothing without a key", async () => {
 		const jev = fakeJev(() => reply(0.95));
 		const result = await categorizePending({ DB: db }, jev.fetchImpl);

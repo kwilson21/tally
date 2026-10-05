@@ -6,3 +6,9 @@ ALTER TABLE transactions ADD COLUMN credit_reviewed INTEGER CHECK (credit_review
 
 -- Only a person's explicit choice makes a credit review portable through sign corrections from Plaid.
 ALTER TABLE transactions ADD COLUMN credit_reviewed_by TEXT CHECK (credit_reviewed_by IN ('user'));
+
+-- Historic person-decided credits already counted before the review queue existed.
+UPDATE transactions
+SET credit_reviewed = 1
+WHERE amount_cents < 0
+  AND (category_source = 'user' OR refund_of_id IS NOT NULL OR excluded_source = 'user');

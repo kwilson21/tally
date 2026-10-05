@@ -1,4 +1,4 @@
-import type { JevInput } from "../ai/categorize";
+import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
@@ -494,26 +494,16 @@ export async function saveSplit(
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	const unchanged =
 		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
-	const columns = await db
-		.prepare("PRAGMA table_info(transactions)")
-		.all<{ name: string }>();
-	const hasIncomeReviewColumns = columns.results.some(
-		(column) => column.name === "credit_reviewed_by",
-	);
-	const reviewColumns = hasIncomeReviewColumns
-		? ", income_source, credit_reviewed, credit_reviewed_by"
-		: "";
-	const reviewValues = hasIncomeReviewColumns
-		? ", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)"
-		: "";
+	const reviewColumns = ", income_source, credit_reviewed, credit_reviewed_by";
+	const reviewValues =
+		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
 	const unlinked = await linkedRefundDates(db, parentId, true);
 	const linkedPurchase = await db
 		.prepare("SELECT refund_of_id AS refundOfId FROM transactions WHERE id = ?")
 		.bind(parentId)
 		.first<{ refundOfId: number | null }>();
-	const inheritedRefundLink = hasIncomeReviewColumns
-		? "CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END"
-		: "NULL";
+	const inheritedRefundLink =
+		"CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END";
 	const results = await db.batch([
 		db
 			.prepare(
@@ -534,7 +524,9 @@ export async function saveSplit(
 				.bind(
 					part.amountCents,
 					part.categoryId,
-					...(hasIncomeReviewColumns ? [parentId, parentId, parentId] : []),
+					parentId,
+					parentId,
+					parentId,
 					by,
 					parentId,
 					total,
@@ -648,7 +640,10 @@ export async function saveJevResult(
 	db: D1Database,
 	id: number,
 	d: Decision,
-	options: { categoryOnly?: boolean } = {},
+	options: {
+		categoryOnly?: boolean;
+		switches?: { income: boolean };
+	} = {},
 ): Promise<boolean> {
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
@@ -674,6 +669,7 @@ export async function saveJevResult(
 	}
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise.
 	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
+	const income = options.switches?.income === false ? false : d.flags.income;
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET
@@ -681,7 +677,7 @@ export async function saveJevResult(
 				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_source END,
 			category_confidence = ?,
 			-- A credit counts only after a confident category (non-income classification) or an income decision.
-			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= 0.8) OR ? = 1) THEN 1 ELSE credit_reviewed END,
+			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ?) OR ? = 1) THEN 1 ELSE credit_reviewed END,
 				jev_category_id = ?,
 				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
@@ -704,12 +700,13 @@ export async function saveJevResult(
 			d.confidence,
 			d.categoryId !== null ? 1 : 0,
 			d.confidence,
-			d.flags.income ? 1 : 0,
+			JEV_THRESHOLD,
+			income ? 1 : 0,
 			d.suggestedCategoryId,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
-			d.flags.income ? 1 : 0,
-			d.flags.income ? 1 : 0,
+			income ? 1 : 0,
+			income ? 1 : 0,
 
 			excludes,
 			excludes,

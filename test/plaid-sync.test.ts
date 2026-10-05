@@ -513,6 +513,47 @@ describe("syncItem", () => {
 		});
 	});
 
+	it.each([
+		{ path: "added", amount: -12 },
+		{ path: "added", amount: -13 },
+		{ path: "modified", amount: -12 },
+		{ path: "modified", amount: -13 },
+	] as const)(
+		"preserves user-owned income and review decisions on a $path sync at amount $amount",
+		async ({ path, amount }) => {
+			const id = await addItem();
+			const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(page({ added: [transaction({ amount: -12 })] })),
+				),
+			);
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user', credit_reviewed = 0, credit_reviewed_by = 'user' WHERE plaid_transaction_id = 'transaction-1'",
+			).run();
+
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() => response(page({ [path]: [transaction({ amount })] }))),
+			);
+
+			expect(
+				await env.DB.prepare(
+					"SELECT amount_cents, flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first(),
+			).toEqual({
+				amount_cents: amount * 100,
+				flag_income: 1,
+				income_source: "user",
+				credit_reviewed: 0,
+				credit_reviewed_by: "user",
+			});
+		},
+	);
+
 	it("preserves Jev's reviewed credit on an unchanged replay and invalidates it when amount changes", async () => {
 		const id = await addItem();
 		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
