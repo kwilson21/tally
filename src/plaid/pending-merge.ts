@@ -60,19 +60,26 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.refund_of_id IS NOT NULL AND p.refund_of_id != transactions.id
 	 AND transactions.refund_of_id IS NULL`,
 	// A split: its parts move when the amount is unchanged and the posted row has none of its own. A split
-	// is one bank transaction, so the parts take the posted row's exclusion and review (the columns saving
-	// a split copies from its purchase), now that it's decided: else a purchase a person excluded while
-	// pending but included once posted would have neither it nor its parts counted.
-	`UPDATE transactions SET parent_id = ${POSTED}, date = ?6, raw_name = ?7, merchant_name = ?8,
-		excluded = (SELECT excluded FROM transactions WHERE id = ${POSTED}),
-		excluded_source = (SELECT excluded_source FROM transactions WHERE id = ${POSTED}),
-		income_source = (SELECT income_source FROM transactions WHERE id = ${POSTED}),
-		credit_reviewed = (SELECT credit_reviewed FROM transactions WHERE id = ${POSTED}),
-		credit_reviewed_by = (SELECT credit_reviewed_by FROM transactions WHERE id = ${POSTED})
-	 WHERE parent_id = ${PENDING} AND ${READY}
-	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents = ?3)
-	 AND EXISTS (SELECT 1 FROM transactions n WHERE n.id = ${POSTED} AND n.is_split = 0)
-	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,
+	// is one bank transaction, so a part follows the posted row's exclusion and review (the columns saving
+	// a split copies from its purchase): else a purchase a person excluded while pending but included once
+	// posted would have neither it nor its parts counted. A part keeps a choice made on that part itself,
+	// told by its value differing from the pending purchase's it inherited, per group (exclusion with its
+	// source, income source, credit review with who made it); the pending row is still unchanged here.
+	`UPDATE transactions SET parent_id = ne.id, date = ?6, raw_name = ?7, merchant_name = ?8,
+		excluded = CASE WHEN transactions.excluded IS NOT pe.excluded OR transactions.excluded_source IS NOT pe.excluded_source
+			THEN transactions.excluded ELSE ne.excluded END,
+		excluded_source = CASE WHEN transactions.excluded IS NOT pe.excluded OR transactions.excluded_source IS NOT pe.excluded_source
+			THEN transactions.excluded_source ELSE ne.excluded_source END,
+		income_source = CASE WHEN transactions.income_source IS NOT pe.income_source
+			THEN transactions.income_source ELSE ne.income_source END,
+		credit_reviewed = CASE WHEN transactions.credit_reviewed IS NOT pe.credit_reviewed OR transactions.credit_reviewed_by IS NOT pe.credit_reviewed_by
+			THEN transactions.credit_reviewed ELSE ne.credit_reviewed END,
+		credit_reviewed_by = CASE WHEN transactions.credit_reviewed IS NOT pe.credit_reviewed OR transactions.credit_reviewed_by IS NOT pe.credit_reviewed_by
+			THEN transactions.credit_reviewed_by ELSE ne.credit_reviewed_by END
+	 FROM transactions AS pe, transactions AS ne
+	 WHERE pe.id = ${PENDING} AND ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
+	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0
+	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ne.id)`,
 	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL
 	 WHERE id = ${POSTED} AND is_split = 0 AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,

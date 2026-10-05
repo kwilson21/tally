@@ -991,7 +991,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await refundOf(refundOfPart)).toBeNull();
 	});
 
-	describe("a moved split's parts follow the posted row's exclusion", () => {
+	describe("a moved split's parts follow the posted row, except for a choice made on the part", () => {
 		/** September's counted spending, which counts a split through its parts and skips the parent. */
 		const spent = async () =>
 			summarizeMonth({
@@ -1055,6 +1055,78 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			).toBe(2);
 			expect(await spent()).toBe(0);
 			expect(ids.parts).toHaveLength(2);
+		});
+
+		const partState = async (id: number) =>
+			env.DB.prepare(
+				"SELECT excluded, excluded_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first();
+
+		it("keeps a part's own exclusion, while the parts that only inherited one follow the posted row", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			const parts = await splitInto(ids.pending, 600, 634);
+			// The parts inherited the pending purchase's exclusion state (included); a person then
+			// excluded the second part on its own. The person also included the posted row.
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 0, excluded_source = NULL WHERE id = ? OR parent_id = ?",
+				).bind(ids.pending, ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+				).bind(parts[1]),
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = ?",
+				).bind(ids.posted),
+			]);
+
+			await post(item);
+
+			expect(await partState(parts[0] as number)).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+			});
+			expect(await partState(parts[1] as number)).toMatchObject({
+				excluded: 1,
+				excluded_source: "user",
+			});
+			// Only the first part still counts.
+			expect(await spent()).toBe(600);
+		});
+
+		it("keeps a part a person reviewed as a refund, while the other part follows the posted row", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			const parts = await splitInto(ids.pending, -2000, -2200);
+			// Both parts inherited the pending credit's state (not reviewed); a person then reviewed the
+			// first on its own. The posted row is not reviewed.
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ? OR parent_id = ?",
+				).bind(ids.pending, ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				).bind(parts[0]),
+				env.DB.prepare(
+					"UPDATE transactions SET credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			expect(await spent()).toBe(-2000);
+
+			await post(item, { amount: -42 });
+
+			expect(await partState(parts[0] as number)).toMatchObject({
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			});
+			expect(await partState(parts[1] as number)).toMatchObject({
+				credit_reviewed: 0,
+				credit_reviewed_by: null,
+			});
+			// The reviewed part still counts; the other credit stays held out until someone reviews it.
+			expect(await spent()).toBe(-2000);
 		});
 	});
 
