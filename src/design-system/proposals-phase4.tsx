@@ -103,11 +103,11 @@ function Fixed({ children }: { children?: Child }) {
 	);
 }
 
-/** What the spec doesn't say yet; the owner's answer becomes a spec line. */
+/** A rule the spec didn't settle until the owner's picks (decision 63). */
 function NeedsLine({ children }: { children?: Child }) {
 	return (
 		<p class="max-w-prose text-sm">
-			<span class="font-medium">Needs a spec line: </span>
+			<span class="font-medium">Spec line added (decision 63): </span>
 			{children}
 		</p>
 	);

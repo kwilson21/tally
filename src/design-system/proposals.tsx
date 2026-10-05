@@ -150,12 +150,12 @@ export function Proposals() {
 
 			<section aria-labelledby="open-title" class="mt-10">
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
-					Open, for Phase 4
+					Picked, to build in Phase 4
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Trends, the net-worth chart, Documents and the AI suggestions. Pick
-					one option of each; "Needs a spec line" asks a rule the spec doesn't
-					settle yet.
+					The owner picked the Recommended option of each, and P31 as drawn
+					(decision 63). The drawings stay here as the build reference until
+					each ships.
 				</p>
 				<Phase4Proposals />
 			</section>

@@ -30,4 +30,16 @@ The design system track runs alongside Phase 2 and comes before the audit detail
 
 Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's paid or the next one is due; a bank change to a split purchase's amount removes the split. Phase 3 is complete on `main` and the demo; it reaches production in the one owner-approved deploy after Oct 7 (decision 60). The other session's income work ([#149](https://github.com/kwilson21/tally/pull/149), [#153](https://github.com/kwilson21/tally/pull/153), [#160](https://github.com/kwilson21/tally/pull/160)) is separate; [#153](https://github.com/kwilson21/tally/pull/153) needs its migration renumbered after `0015`, which `main` now uses.
 
+## Where Phase 4 stands (Oct 5: picked, briefed to Codex)
+
+The owner picked every Phase 4 design on the proposals page (decision 63, spec §8.3).
+
+| Part | Issue | State |
+|---|---|---|
+| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Briefed |
+| Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Briefed |
+| Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Briefed |
+| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | Briefed |
+| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | Briefed; after #33 (both use `src/ai/suggest-name.ts`) |
+
 Later list (not scheduled): see spec §12.
