@@ -12,8 +12,6 @@ import {
 	FOLLOWS_PURCHASE,
 } from "./counted-month";
 import {
-	governingRow,
-	hasNoKeyRowSql,
 	merchantColumnSql,
 	merchantKeySql,
 	sameMerchantSql,
@@ -319,12 +317,6 @@ export async function saveEdit(
 			excluded: number;
 		}>();
 	if (!current) throw new Error(`No transaction ${id}`);
-	// A change is saved to the merchants row this charge reads (its governing row), so it shows; a charge
-	// that reads none gets a key row. A flagged row is only ever edited, never created (see governingRow).
-	const target = (await governingRow(db, { transactionId: id })) ?? {
-		name: current.merchantKey,
-		flag: 0 as const,
-	};
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
@@ -397,10 +389,10 @@ export async function saveEdit(
 					),
 		db
 			.prepare(
-				`INSERT INTO merchants (raw_name, raw_text, display_name) VALUES (?, ?, ?)
-				ON CONFLICT(raw_name, raw_text) DO UPDATE SET display_name = excluded.display_name`,
+				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
+				ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name`,
 			)
-			.bind(target.name, target.flag, edit.displayName),
+			.bind(current.merchantKey, edit.displayName),
 	];
 	// An explicit human link is also a review of this credit as a refund. Keep ownership on a
 	// split parent so split children can inherit the reviewed link as one bank transaction.
@@ -451,16 +443,16 @@ export async function saveEdit(
 		statements.push(
 			db
 				.prepare(
-					"UPDATE merchants SET default_category_id = ? WHERE raw_name = ? AND raw_text = ?",
+					"UPDATE merchants SET default_category_id = ? WHERE raw_name = ?",
 				)
-				.bind(edit.categoryId, target.name, target.flag),
+				.bind(edit.categoryId, current.merchantKey),
 			db
 				.prepare(
 					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
 						updated_by = ?, updated_at = datetime('now')
-					WHERE ${target.flag === 1 ? `raw_name = ? AND ${hasNoKeyRowSql("transactions")}` : `${merchantKeySql("transactions")} = ?`} AND id != ? AND COALESCE(category_source, '') != 'user'`,
+					WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
 				)
-				.bind(edit.categoryId, actor, target.name, id),
+				.bind(edit.categoryId, actor, current.merchantKey, id),
 		);
 	}
 	await db.batch(statements);

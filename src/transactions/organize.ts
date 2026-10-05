@@ -3,11 +3,7 @@ import {
 	countedCategorySql,
 	FOLLOWS_PURCHASE,
 } from "../db/counted-month";
-import {
-	governingRow,
-	merchantColumnSql,
-	merchantKeySql,
-} from "../db/merchant-key";
+import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
@@ -36,9 +32,8 @@ const byCountThenName = (a: [string, number], b: [string, number]) =>
 /**
  * Aggregates transactions in SQL, once per merchant key and bank text, then combines the keys that
  * share a shown name. A key is one merchant whatever bank texts its charges carry, so it is always one
- * group, and saving it categorizes all of its charges. Its name is the one its charges show, read from
- * the row that governs each (see governingRow); where they show different names, the one most of them
- * show (a tie goes to the first alphabetically).
+ * group, and saving it categorizes all of its charges. Its name is the one its key's row gives, which
+ * every charge with the key shows.
  */
 export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	const { results } = await db
@@ -157,19 +152,14 @@ export async function saveOrganizeGroup(
 		);
 	}
 	for (const merchantKey of names) {
-		// The row every charge with this key reads, else the key's own (see governingRow).
-		const target = (await governingRow(db, { key: merchantKey })) ?? {
-			name: merchantKey,
-			flag: 0 as const,
-		};
 		statements.push(
 			db
 				.prepare(
-					`INSERT INTO merchants (raw_name, raw_text, display_name, default_category_id) VALUES (?, ?, ?, ?)
-					ON CONFLICT(raw_name, raw_text) DO UPDATE SET default_category_id = excluded.default_category_id,
+					`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)
+					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
 						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END`,
 				)
-				.bind(target.name, target.flag, displayName, categoryId, displayName),
+				.bind(merchantKey, displayName, categoryId, displayName),
 		);
 	}
 	await db.batch(statements);

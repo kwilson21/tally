@@ -69,7 +69,7 @@ describe("GET /transactions/organize", () => {
 	it("shows one merchant's bank texts on its group, so one choice's reach is visible", async () => {
 		await env.DB.batch([
 			env.DB.prepare(
-				"INSERT OR REPLACE INTO merchants (raw_name, display_name, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', 1), ('COMCAST CABLE 2', 'Comcast Two', 1)",
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('Comcast', 'Comcast Cable')",
 			),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 900000, 'COMCAST CABLE', 'Comcast'), (1, ?, 800000, 'COMCAST CABLE 2', 'Comcast')",

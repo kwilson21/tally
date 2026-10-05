@@ -83,6 +83,7 @@ describe("syncItem", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
 		]);
 	});
 
@@ -540,14 +541,14 @@ describe("syncItem", () => {
 		},
 	);
 
-	it("keeps a bill, a rule and a name saved under the bank's raw text working once Plaid sends a merchant name", async () => {
+	it("starts a merchant's settings as a copy of its bank-text row when Plaid first names it, so its rule, name and Not a bill carry over", async () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name, merchant_raw_text) VALUES ('Internet', 1234, 27, 'monthly', 'COMCAST CABLE', 1)",
 			),
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name, default_category_id, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', (SELECT id FROM categories LIMIT 1), 1)",
+				"INSERT INTO merchants (raw_name, display_name, suggested_name, default_category_id, not_a_bill) VALUES ('COMCAST CABLE', 'Comcast Cable', 'Comcast', (SELECT id FROM categories LIMIT 1), 1)",
 			),
 		]);
 
@@ -570,27 +571,180 @@ describe("syncItem", () => {
 		);
 		await applyMerchantRules(env.DB);
 
-		expect(
-			await env.DB.prepare(
-				"SELECT bp.period, t.merchant_name, t.category_source FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id WHERE bp.status = 'linked'",
-			).first(),
-		).toEqual({
-			period: "2026-09",
-			merchant_name: "Comcast",
-			category_source: "merchant_rule",
-		});
+		// The new row is the old row's settings, under the key.
 		expect(
 			(
-				await getTransaction(
-					env.DB,
-					(
-						await env.DB.prepare("SELECT id FROM transactions").first<{
-							id: number;
-						}>()
-					)?.id as number,
-				)
-			)?.displayName,
+				await env.DB.prepare(
+					"SELECT raw_name, display_name, suggested_name, (default_category_id IS NOT NULL) AS ruled, not_a_bill FROM merchants ORDER BY raw_name",
+				).all()
+			).results,
+		).toEqual([
+			{
+				raw_name: "COMCAST CABLE",
+				display_name: "Comcast Cable",
+				suggested_name: "Comcast",
+				ruled: 1,
+				not_a_bill: 1,
+			},
+			{
+				raw_name: "Comcast",
+				display_name: "Comcast Cable",
+				suggested_name: "Comcast",
+				ruled: 1,
+				not_a_bill: 1,
+			},
+		]);
+		const charge = await env.DB.prepare(
+			"SELECT id, category_source FROM transactions",
+		).first<{ id: number; category_source: string | null }>();
+		expect(charge?.category_source).toBe("merchant_rule");
+		expect(
+			(await getTransaction(env.DB, charge?.id as number))?.displayName,
 		).toBe("Comcast Cable");
+		// The bill saved under the bank text still pays from the charge.
+		expect(
+			await env.DB.prepare(
+				"SELECT bp.period FROM bill_payments bp WHERE bp.status = 'linked'",
+			).first(),
+		).toEqual({ period: "2026-09" });
+	});
+
+	it("copies on a modified transaction too, only the first time, and never again from the old row", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('BANK TEXT ONE', 'First'), ('BANK TEXT TWO', 'Second')",
+			),
+		]);
+		// Stored with no merchant name, as before Phase 3.5: nothing is copied.
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								transaction_id: "one",
+								name: "BANK TEXT ONE",
+								merchant_name: null,
+							}),
+						],
+					}),
+				),
+			),
+		);
+		expect(
+			(await env.DB.prepare("SELECT COUNT(*) AS n FROM merchants").first())?.n,
+		).toBe(2);
+
+		// Plaid now names it: the merchant's row starts as a copy of the old row.
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						modified: [
+							transaction({
+								transaction_id: "one",
+								name: "BANK TEXT ONE",
+								merchant_name: "Merchant",
+							}),
+						],
+					}),
+				),
+			),
+		);
+		const name = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT display_name FROM merchants WHERE raw_name = 'Merchant'",
+				).first()
+			)?.display_name;
+		expect(await name()).toBe("First");
+
+		// Another bank text with the same name finds the row there and leaves it be, and a later edit to
+		// an old row never reaches the merchant's.
+		await env.DB.prepare(
+			"UPDATE merchants SET display_name = 'Changed' WHERE raw_name IN ('BANK TEXT ONE', 'BANK TEXT TWO')",
+		).run();
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								transaction_id: "two",
+								name: "BANK TEXT TWO",
+								merchant_name: "Merchant",
+							}),
+						],
+						modified: [
+							transaction({
+								transaction_id: "one",
+								name: "BANK TEXT ONE",
+								merchant_name: "Merchant",
+								date: "2026-09-28",
+							}),
+						],
+					}),
+				),
+			),
+		);
+		expect(await name()).toBe("First");
+	});
+
+	it("copies nothing when the merchant already has a row, the key is the bank text, or no row exists for the bank text", async () => {
+		const id = await addItem();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('HAS ROW', 'Old'), ('Has Row Key', 'Mine'), ('SAME', 'Same')",
+			),
+		]);
+
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								transaction_id: "a",
+								name: "HAS ROW",
+								merchant_name: "Has Row Key",
+							}),
+							transaction({
+								transaction_id: "b",
+								name: "SAME",
+								merchant_name: "SAME",
+							}),
+							transaction({
+								transaction_id: "c",
+								name: "NO ROW FOR THIS TEXT",
+								merchant_name: "Unknown",
+							}),
+						],
+					}),
+				),
+			),
+		);
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT raw_name, display_name FROM merchants ORDER BY raw_name",
+				).all()
+			).results,
+		).toEqual([
+			{ raw_name: "HAS ROW", display_name: "Old" },
+			{ raw_name: "Has Row Key", display_name: "Mine" },
+			{ raw_name: "SAME", display_name: "Same" },
+		]);
 	});
 
 	it("preserves a stored balance when accounts/get returns current null", async () => {

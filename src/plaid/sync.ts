@@ -415,6 +415,20 @@ export async function syncItem(
 					),
 				);
 			}
+			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
+			// starts as a copy of the row saved under the bank text, if there is one: its name, rule and Not a
+			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one.
+			for (const transaction of [...posted, ...page.modified]) {
+				const key = merchantNameOf(transaction);
+				if (!key || key === transaction.name) continue;
+				statements.push(
+					env.DB.prepare(
+						`INSERT INTO merchants (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill)
+						 SELECT ?, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill FROM merchants
+						 WHERE raw_name = ? AND NOT EXISTS (SELECT 1 FROM merchants WHERE raw_name = ?) AND ${OWNS_LOCK}`,
+					).bind(key, transaction.name, key, itemRowId, lockId),
+				);
+			}
 			for (const transaction of page.removed) {
 				statements.push(
 					env.DB.prepare(

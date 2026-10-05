@@ -4,15 +4,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 const db = env.DB;
 
 // The tests' database already has every migration, so migration 0017 runs here against scratch copies of
-// `transactions`, `bill_payments`, `merchants` and `bills` as they were after 0016 (built from the real
+// `transactions`, `bill_payments` and `bills` as they were after 0016 (built from the real
 // migration files, so no column is missed), filled with rows. Every table and index name the migration
 // touches gets this prefix.
 const P = "pre0017_";
 const scratch = (sql: string) =>
-	sql.replaceAll(
-		/\b(transactions|bill_payments|merchants|bills)(_\w+)?\b/g,
-		`${P}$1$2`,
-	);
+	sql.replaceAll(/\b(transactions|bill_payments|bills)(_\w+)?\b/g, `${P}$1$2`);
 
 /** A migration with a single statement keeps its leading comment lines; the others have none. */
 const withoutComments = (query: string) =>
@@ -23,7 +20,7 @@ const withoutComments = (query: string) =>
 		.trim();
 
 const REBUILT_BY_0017 =
-	/^(CREATE TABLE (transactions|bill_payments|merchants|bills)\b|ALTER TABLE (transactions|merchants|bills)\b|CREATE (UNIQUE )?INDEX \w+ ON (transactions|bill_payments)\b)/;
+	/^(CREATE TABLE (transactions|bill_payments|bills)\b|ALTER TABLE (transactions|bills)\b|CREATE (UNIQUE )?INDEX \w+ ON (transactions|bill_payments)\b)/;
 const upTo0016 = env.TEST_MIGRATIONS.filter((m) => m.name < "0017")
 	.flatMap((m) => m.queries)
 	.map(withoutComments)
@@ -34,7 +31,6 @@ const migration0017 = env.TEST_MIGRATIONS.find((m) =>
 
 const TX = `${P}transactions`;
 const BP = `${P}bill_payments`;
-const MERCHANTS = `${P}merchants`;
 const BILLS = `${P}bills`;
 
 async function dropScratch() {
@@ -44,7 +40,6 @@ async function dropScratch() {
 		db.prepare(`DROP TABLE IF EXISTS ${BILLS}`),
 		db.prepare(`DROP TABLE IF EXISTS ${P}transactions_new`),
 		db.prepare(`DROP TABLE IF EXISTS ${TX}`),
-		db.prepare(`DROP TABLE IF EXISTS ${MERCHANTS}`),
 		db.prepare("DELETE FROM categories WHERE id IN (9001, 9002)"),
 		db.prepare("DELETE FROM accounts WHERE id = 9001"),
 	]);
@@ -68,9 +63,6 @@ async function seedBeforeMigration() {
 	await db.batch([
 		db.prepare(
 			`INSERT INTO ${BILLS} (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9001, 'Pre0017 Internet', 8000, 5, 'monthly', 'COMCAST'), (9002, 'Pre0017 Water', 3000, 12, 'monthly', 'CITY WATER')`,
-		),
-		db.prepare(
-			`INSERT INTO ${MERCHANTS} (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill) VALUES ('COMCAST', 'Comcast', 'Comcast Cable', 9001, 'accepted', 0), ('GYM 42', NULL, NULL, NULL, 'none', 1)`,
 		),
 	]);
 	const tx = (row: Record<string, string | number | null>) => {
@@ -358,7 +350,7 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 				`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '${P}%' ORDER BY name`,
 			)
 		).map((r) => r.name);
-		expect(names).toEqual([BP, BILLS, MERCHANTS, TX]);
+		expect(names).toEqual([BP, BILLS, TX]);
 	});
 
 	it("adds the two columns and changes nothing else about the columns", async () => {
@@ -379,111 +371,56 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 		]);
 	});
 
-	it("marks every merchant row and bill saved before it as saved under the bank's raw text, and nothing else changes", async () => {
-		const merchantsBefore = await rows(
-			`SELECT * FROM ${MERCHANTS} ORDER BY raw_name`,
-		);
+	it("marks every bill saved before it as saved under the bank's raw text, and nothing else changes", async () => {
 		const billsBefore = await rows(`SELECT * FROM ${BILLS} ORDER BY id`);
-		expect(merchantsBefore).toHaveLength(2);
 		expect(billsBefore).toHaveLength(2);
-		expect(merchantsBefore[0]).not.toHaveProperty("raw_text");
 		expect(billsBefore[0]).not.toHaveProperty("merchant_raw_text");
 
 		await runMigration();
 
-		expect(await rows(`SELECT * FROM ${MERCHANTS} ORDER BY raw_name`)).toEqual(
-			merchantsBefore.map((row) => ({ ...row, raw_text: 1 })),
-		);
 		expect(await rows(`SELECT * FROM ${BILLS} ORDER BY id`)).toEqual(
 			billsBefore.map((row) => ({ ...row, merchant_raw_text: 1 })),
 		);
 		expect(
 			await rows(
-				`SELECT name, type, "notnull", dflt_value FROM pragma_table_info('${MERCHANTS}') WHERE name = 'raw_text'`,
+				`SELECT name, type, "notnull", dflt_value FROM pragma_table_info('${BILLS}') WHERE name = 'merchant_raw_text'`,
 			),
 		).toEqual([
-			{ name: "raw_text", type: "INTEGER", notnull: 1, dflt_value: "0" },
+			{
+				name: "merchant_raw_text",
+				type: "INTEGER",
+				notnull: 1,
+				dflt_value: "0",
+			},
 		]);
 
-		// A row saved after the migration is a key, not bank text, unless it says otherwise.
-		await db
-			.prepare(`INSERT INTO ${MERCHANTS} (raw_name) VALUES ('Target')`)
-			.run();
+		// A bill saved after the migration holds a key, not bank text.
 		await db
 			.prepare(
 				`INSERT INTO ${BILLS} (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9003, 'Target', 100, 1, 'monthly', 'Target')`,
 			)
 			.run();
 		expect(
-			await rows(`SELECT raw_text FROM ${MERCHANTS} WHERE raw_name = 'Target'`),
-		).toEqual([{ raw_text: 0 }]);
-		expect(
 			await rows(`SELECT merchant_raw_text FROM ${BILLS} WHERE id = 9003`),
 		).toEqual([{ merchant_raw_text: 0 }]);
-		await expect(
-			db.prepare(`UPDATE ${MERCHANTS} SET raw_text = 2`).run(),
-		).rejects.toThrow();
 		await expect(
 			db.prepare(`UPDATE ${BILLS} SET merchant_raw_text = 2`).run(),
 		).rejects.toThrow();
 	});
 
-	it("makes merchants unique on the text and the flag together, so a bank-text row and a key row can share a text", async () => {
+	it("leaves the merchants table alone: unique on raw_name, which holds a key", async () => {
 		await runMigration();
 
-		// The primary key is (raw_name, raw_text), in that order.
 		expect(
 			await rows(
-				`SELECT name, pk FROM pragma_table_info('${MERCHANTS}') WHERE pk > 0 ORDER BY pk`,
+				"SELECT name, pk FROM pragma_table_info('merchants') WHERE pk > 0 ORDER BY pk",
 			),
-		).toEqual([
-			{ name: "raw_name", pk: 1 },
-			{ name: "raw_text", pk: 2 },
-		]);
-
-		// "COMCAST" was saved before the migration, as bank text (1). A key row with the same text is a second row.
-		await db
-			.prepare(
-				`INSERT INTO ${MERCHANTS} (raw_name, display_name) VALUES ('COMCAST', 'The key row')`,
-			)
-			.run();
+		).toEqual([{ name: "raw_name", pk: 1 }]);
 		expect(
-			await rows(
-				`SELECT raw_text, display_name FROM ${MERCHANTS} WHERE raw_name = 'COMCAST' ORDER BY raw_text`,
+			(await rows("SELECT name FROM pragma_table_info('merchants')")).map(
+				(r) => r.name,
 			),
-		).toEqual([
-			{ raw_text: 0, display_name: "The key row" },
-			{ raw_text: 1, display_name: "Comcast Cable" },
-		]);
-
-		// Each kind still holds one row per text.
-		await expect(
-			db
-				.prepare(`INSERT INTO ${MERCHANTS} (raw_name) VALUES ('COMCAST')`)
-				.run(),
-		).rejects.toThrow();
-		await expect(
-			db
-				.prepare(
-					`INSERT INTO ${MERCHANTS} (raw_name, raw_text) VALUES ('COMCAST', 1)`,
-				)
-				.run(),
-		).rejects.toThrow();
-
-		// An upsert on the pair updates the key row and leaves the bank-text row alone.
-		await db
-			.prepare(
-				`INSERT INTO ${MERCHANTS} (raw_name, display_name) VALUES ('COMCAST', 'Renamed') ON CONFLICT(raw_name, raw_text) DO UPDATE SET display_name = excluded.display_name`,
-			)
-			.run();
-		expect(
-			await rows(
-				`SELECT raw_text, display_name FROM ${MERCHANTS} WHERE raw_name = 'COMCAST' ORDER BY raw_text`,
-			),
-		).toEqual([
-			{ raw_text: 0, display_name: "Renamed" },
-			{ raw_text: 1, display_name: "Comcast Cable" },
-		]);
+		).not.toContain("raw_text");
 	});
 
 	it("keeps every index, unique constraint and foreign key, still pointing at the renamed table", async () => {
@@ -504,15 +441,6 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 		expect(strip(await indexes(BP))).toEqual(strip(billIndexesBefore));
 		expect(await foreignKeys(TX)).toEqual(foreignKeysBefore);
 		expect(await foreignKeys(BP)).toEqual(billKeysBefore);
-		expect(await foreignKeys(MERCHANTS)).toEqual([
-			{
-				from: "default_category_id",
-				table: "categories",
-				to: "id",
-				on_update: "NO ACTION",
-				on_delete: "SET NULL",
-			},
-		]);
 		expect(await foreignKeys(TX)).toContainEqual({
 			from: "parent_id",
 			table: TX,
@@ -649,42 +577,24 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 	});
 });
 
-describe("the real merchants and bills tables, after every migration", () => {
-	it("say, with a flag each, whether a row was saved under the bank's raw text, which new rows are not", async () => {
+describe("the real bills table, after every migration", () => {
+	it("says with a flag whether a bill was saved under the bank's raw text, which new bills are not", async () => {
 		await db.batch([
-			db.prepare(
-				"INSERT INTO merchants (raw_name) VALUES ('Zz Real Merchant')",
-			),
 			db.prepare(
 				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9401, 'Zz Real Bill', 100, 1, 'monthly', 'Zz Real Merchant')",
 			),
 		]);
 		try {
 			expect(
-				await rows(
-					"SELECT raw_text FROM merchants WHERE raw_name = 'Zz Real Merchant'",
-				),
-			).toEqual([{ raw_text: 0 }]);
-			expect(
 				await rows("SELECT merchant_raw_text FROM bills WHERE id = 9401"),
 			).toEqual([{ merchant_raw_text: 0 }]);
-			await expect(
-				db
-					.prepare(
-						"UPDATE merchants SET raw_text = 2 WHERE raw_name = 'Zz Real Merchant'",
-					)
-					.run(),
-			).rejects.toThrow();
 			await expect(
 				db
 					.prepare("UPDATE bills SET merchant_raw_text = 2 WHERE id = 9401")
 					.run(),
 			).rejects.toThrow();
 		} finally {
-			await db.batch([
-				db.prepare("DELETE FROM bills WHERE id = 9401"),
-				db.prepare("DELETE FROM merchants WHERE raw_name = 'Zz Real Merchant'"),
-			]);
+			await db.prepare("DELETE FROM bills WHERE id = 9401").run();
 		}
 	});
 });

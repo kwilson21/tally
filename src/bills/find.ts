@@ -99,12 +99,12 @@ const CHARGE_KEY = `COALESCE(${merchantKeySql("p")},${merchantKeySql("t")})`;
 const CHARGE_RAW = "COALESCE(p.raw_name,t.raw_name)";
 const chargeMerchant = (
 	column: "display_name" | "suggested_name" | "default_category_id",
-) => merchantColumnOfSql(CHARGE_KEY, CHARGE_RAW, column);
+) => merchantColumnOfSql(CHARGE_KEY, column);
 
 /**
  * Suggests bills from the last three months of charges, one per merchant key. A charge is left out when
- * an existing bill or a Not a bill mark covers its key or, for older ones saved under the bank's raw text,
- * its raw name.
+ * its key is marked Not a bill, or an existing bill covers it: by its key, or by its raw name for a bill
+ * saved under the bank's raw text, before the key existed.
  */
 export async function loadBillSuggestions(
 	db: D1Database,
@@ -120,7 +120,7 @@ export async function loadBillSuggestions(
 	  LEFT JOIN categories tc ON tc.id=t.category_id
 	  LEFT JOIN categories dc ON dc.id=${chargeMerchant("default_category_id")}
 	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.excluded=0 AND t.flag_income=0
-	   AND t.is_split=0 AND NOT ${merchantNotABillSql(CHARGE_KEY, CHARGE_RAW)}
+	   AND t.is_split=0 AND NOT ${merchantNotABillSql(CHARGE_KEY)}
 	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE ${isMerchantTextOfSql(CHARGE_KEY, CHARGE_RAW, "b.merchant_raw_name", "b.merchant_raw_text")})
 	  ORDER BY ${CHARGE_KEY},t.date`)
 		.bind(threeMonthsBack(today), today)
