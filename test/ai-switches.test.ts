@@ -110,6 +110,20 @@ describe("saveAiSwitches", () => {
 		});
 	});
 
+	it("saves only the switches it's given, leaving the others as they were", async () => {
+		await saveAiSwitches(db, { names: false, sortOnArrival: false });
+		await saveAiSwitches(db, { income: false });
+		expect(await readAiSwitches(db)).toEqual({
+			names: false,
+			categories: true,
+			income: false,
+			sortOnArrival: false,
+		});
+		// Nothing given saves nothing.
+		await saveAiSwitches(db, {});
+		expect(await stored()).toHaveLength(3);
+	});
+
 	it("changes a stored switch in place, never adding a second row, and leaves the time zone alone", async () => {
 		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, income: false });
 		await saveAiSwitches(db, AI_SWITCHES_ALL_ON);

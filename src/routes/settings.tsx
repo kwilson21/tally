@@ -92,9 +92,15 @@ type View = {
 };
 
 /**
- * The AI suggestions switches (spec §8.6, decision 73): the field each posts, its words and its muted
- * line, in the order the group shows them, and how each is read aloud after a save. Screens say
- * "Tally", never the name of the AI behind it.
+ * The AI suggestions switches that have a feature behind them (spec §8.6, decision 73): the field
+ * each posts, its words and its muted line, in the order the group shows them, and how each is read
+ * aloud after a save. Screens say "Tally", never the name of the AI behind it.
+ *
+ * Two more are stored (`names` and `sortOnArrival` in db/ai-switches.ts) but have no row yet, so no
+ * switch promises something that isn't built. Each gets its row here, with its words from the P41
+ * drawing (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant
+ * names" with Workers AI names (#33, #194) and "Sort new transactions as they arrive" with the
+ * Jev run after a sync (#193). Saving this group never changes a switch it doesn't list.
  */
 const AI_FEATURES: {
 	key: keyof AiSwitches;
@@ -103,13 +109,6 @@ const AI_FEATURES: {
 	line: string;
 	spoken: string;
 }[] = [
-	{
-		key: "names",
-		id: "ai-names",
-		label: "Merchant names",
-		line: "Suggests clean names for bank text.",
-		spoken: "Merchant names",
-	},
 	{
 		key: "categories",
 		id: "ai-categories",
@@ -124,16 +123,9 @@ const AI_FEATURES: {
 		line: "Spots paychecks and other money coming in.",
 		spoken: "income",
 	},
-	{
-		key: "sortOnArrival",
-		id: "ai-arrival",
-		label: "Sort new transactions as they arrive",
-		line: "Sorts them right after each sync, not only overnight.",
-		spoken: "sorting new transactions as they arrive",
-	},
 ];
 
-/** Four switches and one Save. Without JavaScript the form posts and Settings reloads at this group. */
+/** The switches above and one Save. Without JavaScript the form posts and Settings reloads at this group. */
 function AiSuggestions({
 	switches,
 	saved,
@@ -571,17 +563,18 @@ settings.get("/settings/export/tally.json", async (c) => {
 });
 
 // A switch that's on posts "on" and one that's off posts nothing, so a field left out is off; the
-// form always carries the whole group, so a save is always all four.
+// form always carries the whole group, so a save is always every switch it shows, and only those.
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
-	) as AiSwitches;
+	) as Partial<AiSwitches>;
 	await saveAiSwitches(c.env.DB, next);
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${next[f.key] ? "on" : "off"}`,
 	).join(", ");
-	return done(c, "Saved AI suggestions", `Saved AI suggestions. ${states}.`, {
+	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
+	return done(c, "Saved AI suggestions", `Saved AI suggestions. ${spoken}.`, {
 		aiSaved: true,
 		hash: "ai-suggestions",
 	});

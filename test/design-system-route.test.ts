@@ -122,8 +122,8 @@ describe("GET /design-system in the demo", () => {
 			Switch({
 				id: "ds-switch-on",
 				name: "ds-switch-on",
-				label: "Income",
-				hint: "Spots paychecks and other money coming in.",
+				label: "Categories and exclusions",
+				hint: "Picks categories, and leaves out transfers and reimbursements.",
 				checked: true,
 			}),
 			...MONEY_STATES.map((s) => MoneyInput(s.props)),
@@ -238,6 +238,10 @@ describe("GET /design-system in the demo", () => {
 		);
 		// Its name for the AI never says Jev, since this is the family's screen too.
 		expect(section).not.toMatch(/jev/i);
+		// It lists only the AI switches that have a feature behind them, as Settings does.
+		expect(design).toMatch(/Categories and exclusions; Income/);
+		expect(section).not.toContain("Merchant names");
+		expect(section).not.toContain("Sort new transactions as they arrive");
 	});
 
 	it("shows the price-changed offer on the bill's row and page, with its whole use spec (P36 B)", async () => {

@@ -390,7 +390,7 @@ const SWITCH_SPEC: UseSpecText = {
 	edges:
 		"A long name or line wraps beside the switch and never under it; the word and the track keep their width. With no muted line it is the name alone. No JavaScript: it's a plain checkbox that posts “on” when on and nothing when off, so the server reads a field left out as off, and the form always carries the whole group. At 320px the row still fits the name, word and track side by side.",
 	words:
-		"The label is the person's word for the feature (“Merchant names”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Merchant names on, categories and exclusions off, ….",
+		"The label is the person's word for the feature (“Categories and exclusions”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Categories and exclusions on, income off.",
 };
 
 // The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
@@ -1165,16 +1165,16 @@ function Controls() {
 							<Switch
 								id="ds-switch-off"
 								name="ds-switch-off"
-								label="Sort new transactions as they arrive"
-								hint="Sorts them right after each sync, not only overnight."
+								label="Income"
+								hint="Spots paychecks and other money coming in."
 							/>
 						</li>
 						<li>
 							<Switch
 								id="ds-switch-on"
 								name="ds-switch-on"
-								label="Income"
-								hint="Spots paychecks and other money coming in."
+								label="Categories and exclusions"
+								hint="Picks categories, and leaves out transfers and reimbursements."
 								checked
 							/>
 						</li>
@@ -1182,7 +1182,7 @@ function Controls() {
 							<Switch
 								id="ds-switch-plain"
 								name="ds-switch-plain"
-								label="Merchant names"
+								label="Income"
 								checked
 							/>
 						</li>

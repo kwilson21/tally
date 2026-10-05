@@ -96,10 +96,8 @@ describe("categorizePending", () => {
 					),
 			);
 
-			await categorizePending(withKey, jev.fetchImpl, {
-				...AI_SWITCHES_ALL_ON,
-				income: enabled,
-			});
+			await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, income: enabled });
+			await categorizePending(withKey, jev.fetchImpl);
 			expect(
 				await db
 					.prepare(
@@ -384,9 +382,7 @@ describe("categorizePending", () => {
 			)
 			.run();
 		const jev = fakeJev(() => reply(0.5));
-		await categorizePending(withKey, jev.fetchImpl, undefined, {
-			rulesApplied: true,
-		});
+		await categorizePending(withKey, jev.fetchImpl, { rulesApplied: true });
 		expect(await countWhere("category_source = 'merchant_rule'")).toBe(0);
 	});
 
@@ -811,5 +807,119 @@ describe("the AI switches", () => {
 		const jev = fakeJev(() => reply(0.95));
 		await categorizePending(withKey, jev.fetchImpl);
 		expect(jev.calls()).toBe(12);
+	});
+
+	// Someone can save the switches while a run is going, so each transaction reads them again: before
+	// it's sent, and before its answer is saved.
+	describe("turned off while a run is going", () => {
+		/** A Jev that runs `during` as its nth answer is on its way back, then answers. */
+		function jevWith(
+			during: (call: number) => Promise<void>,
+			response: () => Response,
+		) {
+			let calls = 0;
+			return {
+				calls: () => calls,
+				fetchImpl: async () => {
+					calls += 1;
+					await during(calls);
+					return response();
+				},
+			};
+		}
+
+		it("stops sending once both Jev switches are off, and saves nothing from the answer on its way back", async () => {
+			const before = await snapshot();
+			const jev = jevWith(
+				async (call) => {
+					if (call === 1)
+						await setSwitches({ categories: false, income: false });
+				},
+				() => reply(0.95),
+			);
+			const result = await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(1);
+			expect(result.applied).toBe(0);
+			expect(await snapshot()).toEqual(before);
+			expect(await needsCategoryCount(db, MONTH)).toBe(12);
+		});
+
+		it("keeps what it saved before they went off, and sends nothing after", async () => {
+			const jev = jevWith(
+				async (call) => {
+					if (call === 2)
+						await setSwitches({ categories: false, income: false });
+				},
+				() => reply(0.95),
+			);
+			const result = await categorizePending(withKey, jev.fetchImpl);
+			// The first answer was saved; the second arrived with the switches off, and no third went out.
+			expect(jev.calls()).toBe(2);
+			expect(result.applied).toBe(1);
+			expect(await needsCategoryCount(db, MONTH)).toBe(11);
+		});
+
+		it("drops a category from the answer on its way back when categories went off, and carries on for income", async () => {
+			const asked = (await pendingForJev(db, 40)).map((t) => t.id);
+			const jev = jevWith(
+				async (call) => {
+					if (call === 2) await setSwitches({ categories: false });
+				},
+				() => reply(0.95),
+			);
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(12);
+			const rows = (
+				await db
+					.prepare(
+						`SELECT category_id, jev_category_id FROM transactions WHERE id IN (${asked.join(",")}) ORDER BY id`,
+					)
+					.all()
+			).results;
+			// Only the first answer, which arrived while categories were on, was applied.
+			expect(rows.filter((r) => r.category_id !== null)).toHaveLength(1);
+			expect(rows.filter((r) => r.jev_category_id !== null)).toHaveLength(1);
+		});
+
+		it("doesn't use an income answer that arrives after income went off", async () => {
+			await onlyOneCreditPending();
+			const jev = jevWith(
+				async () => {
+					await setSwitches({ income: false });
+				},
+				() => flagged({ income: 0.99 }),
+			);
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(
+				await db
+					.prepare(
+						"SELECT category_id, flag_income, income_source FROM transactions WHERE id = 1",
+					)
+					.first(),
+			).toEqual({ category_id: 2, flag_income: 0, income_source: null });
+		});
+
+		it("skips a credit a person reviewed once categories are off, since only its category could be asked", async () => {
+			await db.batch([
+				db.prepare(
+					"UPDATE transactions SET category_confidence = 0.5 WHERE id NOT IN (1, 2)",
+				),
+				db.prepare(
+					"UPDATE transactions SET date = '2026-09-21', amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = NULL, flag_income = 0, income_source = NULL, credit_reviewed = 0, credit_reviewed_by = NULL, excluded = 0, excluded_source = NULL WHERE id = 1",
+				),
+				db.prepare(
+					"UPDATE transactions SET date = '2026-09-20', amount_cents = -700, category_id = NULL, category_source = NULL, category_confidence = NULL, flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user', excluded = 0, excluded_source = NULL WHERE id = 2",
+				),
+			]);
+			expect((await pendingForJev(db, 40)).map((t) => t.id)).toEqual([1, 2]);
+			const jev = jevWith(
+				async (call) => {
+					if (call === 1) await setSwitches({ categories: false });
+				},
+				() => reply(0.97),
+			);
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(1);
+		});
 	});
 });
