@@ -10,8 +10,9 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 | 3. Bills and splits | In both environments, with the four extras (decisions 57, 58) as picked in decision 60. Building starts Oct 4; production gets it after the trial week | Shown in demo, used by family | [milestone](https://github.com/kwilson21/tally/milestone/4) |
 | 3.5 Numbers you can trust | Fix the rule gaps that can make the family's numbers wrong (decision 67, spec §8.5, `docs/reviews/original-app-gaps.md`) | Safe to spend, Spent and bill statuses match the bank (a bill paid in two parts waits for Phase 5) | label [`phase-3.5`](https://github.com/kwilson21/tally/labels/phase-3.5) |
 | 4. Trends, balances, name suggestions | Remaining features, plus AI suggestions for merchant names and new categories; Documents moved to the Later list (decision 66) | Features 1–7 live in both | [milestone](https://github.com/kwilson21/tally/milestone/5) |
-| 5. From the original app | Eight features the original app had built (decision 66, spec §8.4), each designed on the proposals page first | Shown in demo, used by family | milestone to come |
-| Design system (track) | A catalog at `/design-system` built from the real components, the process every UI change follows, and the original app's components brought over one at a time ([#76](https://github.com/kwilson21/tally/issues/76)) | The catalog is live on the demo, every existing component is in it at its tier, and the owner has signed off MoneyInput and the first flows there | milestone to come |
+| AI that earns its place | Each AI feature can be switched off, and Tally shows plainly what it did (decisions 68, 73, spec §8.6) | Switches, one review screen, the monthly tally and the demo's comparison live in both | label [`ai`](https://github.com/kwilson21/tally/labels/ai) |
+| 5. From the original app | Eight features the original app had built, plus the review's gaps (decisions 66, 74, 76, spec §8.4), all picked on the proposals page | Shown in demo, used by family | label [`phase-5`](https://github.com/kwilson21/tally/labels/phase-5) |
+| Design system (track) | A catalog at `/design-system` built from the real components, the process every UI change follows, and the original app's components brought over one at a time ([#76](https://github.com/kwilson21/tally/issues/76)); from decisions 75 and 76, the quiet ledger form, quiet motion and squircle corners (label [`design-system`](https://github.com/kwilson21/tally/labels/design-system)) | The catalog is live on the demo, every existing component is in it at its tier, and the owner has signed off MoneyInput and the first flows there | milestone to come |
 | Onboarding (after the design system track) | What a first visit shows and teaches, in the demo and in the family's first week ([#95](https://github.com/kwilson21/tally/issues/95), decision 49) | Both first visits are designed on the proposals page and signed off, and they do Things to try's job and more | milestone to come |
 
 Phase 1 finished on 2026-09-25: the demo is live. Review: [docs/reviews/phase-1.md](docs/reviews/phase-1.md).
@@ -34,25 +35,25 @@ Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's
 
 Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Codex builds Phases 3.5 to 5 from briefs, and a separate ultracode session handles design and polish (decision 71, superseding 69).
 
-## Where Phase 3.5 stands (Oct 5)
+## Where Phase 3.5 stands (Oct 5, evening)
 
-Each visual piece is drawn on the proposals page (P34–P45) and picked by the owner before it's built; the backend parts go first.
+Every visual piece is picked (P34–P40, P45, decision 72), and each issue has a comment with its pick.
 
 | Part | Issue | State |
 |---|---|---|
-| Income: "Count as income", unreviewed credits held (decision 70) | [#153](https://github.com/kwilson21/tally/pull/153) | Being finished |
-| Income from Plaid's INCOME category | [#177](https://github.com/kwilson21/tally/issues/177) | After #153 |
-| Today in the household's time zone | [#174](https://github.com/kwilson21/tally/issues/174) | Briefed (backend); the Settings field waits for P35 |
-| Plaid's `merchant_name` as the merchant key (migration 0017) | [#175](https://github.com/kwilson21/tally/issues/175) | Briefed |
+| Income: "Count as income", unreviewed credits held (decision 70) | [#153](https://github.com/kwilson21/tally/pull/153) | Merged |
+| Income from Plaid's INCOME category | [#177](https://github.com/kwilson21/tally/issues/177) | To build (after #153, merged) |
+| Today in the household's time zone | [#174](https://github.com/kwilson21/tally/issues/174) | Backend in PR [#189](https://github.com/kwilson21/tally/pull/189); the Settings field (P35 A) next |
+| Plaid's `merchant_name` as the merchant key | [#175](https://github.com/kwilson21/tally/issues/175) | Briefed |
 | Transfers and card payments excluded at sync | [#176](https://github.com/kwilson21/tally/issues/176) | After #175 |
 | Merchant rules after every sync | [#178](https://github.com/kwilson21/tally/issues/178) | After #175 |
-| Pending counted and marked | [#179](https://github.com/kwilson21/tally/issues/179) | After #175; marker waits for P34 |
-| Bill matching: excluded payments, "Price changed?" | [#180](https://github.com/kwilson21/tally/issues/180) | After #175; prompt waits for P36 |
-| Refund guards | [#181](https://github.com/kwilson21/tally/issues/181) | After #153 |
-| Bill guards | [#182](https://github.com/kwilson21/tally/issues/182) | Briefed (duplicate names); the large-amount confirm waits for P45 |
-| A failed save says so; 404 and 500 pages | [#183](https://github.com/kwilson21/tally/issues/183) | Waits for P38, P39 |
-| A stale or broken bank flagged on Home | [#184](https://github.com/kwilson21/tally/issues/184) | Waits for P37 |
-| The first visit's empty list | [#185](https://github.com/kwilson21/tally/issues/185) | Waits for P40 |
+| Pending counted and marked (P34 A) | [#179](https://github.com/kwilson21/tally/issues/179) | After #175 |
+| Bill matching: excluded payments, "Price changed?" (P36 B) | [#180](https://github.com/kwilson21/tally/issues/180) | After #175 |
+| Refund guards | [#181](https://github.com/kwilson21/tally/issues/181) | To build (after #153, merged) |
+| Bill guards (P45 A) | [#182](https://github.com/kwilson21/tally/issues/182) | PR [#188](https://github.com/kwilson21/tally/pull/188) |
+| A failed save says so (P38 A); 404 and 500 pages (P39 C) | [#183](https://github.com/kwilson21/tally/issues/183) | To build |
+| A stale or broken bank flagged on Home (P37 A) | [#184](https://github.com/kwilson21/tally/issues/184) | To build |
+| The first visit's empty list (P40 A) | [#185](https://github.com/kwilson21/tally/issues/185) | To build |
 
 ## Where Phase 4 stands (Oct 5: picked; built after Phase 3.5, decision 71)
 
@@ -60,11 +61,58 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 
 | Part | Issue | State |
 |---|---|---|
-| How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | PR #173, being finished; first, as the parts below use it |
+| How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Merged ([#173](https://github.com/kwilson21/tally/pull/173)) |
 | Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | To build (decision 71) |
 | Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | To build (decision 71) |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
 | Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | To build (decision 71) |
 | New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 71) |
+
+## AI that earns its place (decisions 68, 73; spec §8.6)
+
+| Part | Issue | Depends on |
+|---|---|---|
+| The AI suggestions switches in Settings (P41 B, a new Switch component) | [#191](https://github.com/kwilson21/tally/issues/191) | #189's settings table |
+| Jev's income answer: applied or "Maybe income" | [#192](https://github.com/kwilson21/tally/issues/192) | #177, #51, #191 |
+| Sort new transactions right after each sync | [#193](https://github.com/kwilson21/tally/issues/193) | #178, #191 |
+| Plaid's merchant name as the first name suggestion | [#194](https://github.com/kwilson21/tally/issues/194) | #175, #33 |
+| One review screen for every "Maybe …" (P42 A) | [#195](https://github.com/kwilson21/tally/issues/195) | #33, #51, #192 |
+| What AI did this month (P43 A) | [#196](https://github.com/kwilson21/tally/issues/196) | #191 |
+| The demo's See it without AI (P44 A) | [#197](https://github.com/kwilson21/tally/issues/197) | — |
+
+## Phase 5 (decisions 66, 74, 76; spec §8.4)
+
+| Part | Issue |
+|---|---|
+| Browse past months on Home (P46 A) | [#198](https://github.com/kwilson21/tally/issues/198) |
+| Home's top: over budget, Why?, a daily amount, older uncategorized (P47, P48, P50, P52) | [#199](https://github.com/kwilson21/tally/issues/199) |
+| Budget rows: nearly spent, Not budgeted amounts, a link to transactions (P49, P51, P53) | [#200](https://github.com/kwilson21/tally/issues/200) |
+| A monthly savings goal (P54 A, R1) | [#201](https://github.com/kwilson21/tally/issues/201) |
+| Planned one-time expenses (P55 A) | [#202](https://github.com/kwilson21/tally/issues/202) |
+| Reconnect reminder email (P56 B); needs an email decision first | [#203](https://github.com/kwilson21/tally/issues/203) |
+| Weekly, every-two-weeks and quarterly bills (P57 A) | [#204](https://github.com/kwilson21/tally/issues/204) |
+| Partial bill payments (P58 A) | [#205](https://github.com/kwilson21/tally/issues/205) |
+| A linked payment takes its bill's category (P59 A) | [#206](https://github.com/kwilson21/tally/issues/206) |
+| The monthly bills total (P60 A and B) | [#207](https://github.com/kwilson21/tally/issues/207) |
+| A bill's amount history (P61 A, H1) | [#208](https://github.com/kwilson21/tally/issues/208) |
+| Offer a merchant rule after three saves (P62 B) | [#209](https://github.com/kwilson21/tally/issues/209) |
+| Filter by account and by type (P63 A, P64 B) | [#210](https://github.com/kwilson21/tally/issues/210) |
+| Search by category or amount, in every month (P65 A, P66 A) | [#211](https://github.com/kwilson21/tally/issues/211) |
+| A New category chip, then likely transactions (P67 A, P73 A) | [#212](https://github.com/kwilson21/tally/issues/212) |
+| Rename one transaction only (P68 A) | [#213](https://github.com/kwilson21/tally/issues/213) |
+| "Always for these merchants" in Settings (P69 A) | [#214](https://github.com/kwilson21/tally/issues/214) |
+| Select all in the action bar (P70 A) | [#215](https://github.com/kwilson21/tally/issues/215) |
+| Edit a cash entry's date and amount (P71 A) | [#216](https://github.com/kwilson21/tally/issues/216) |
+
+## Design system: what's next (decisions 75, 76; the design session builds these)
+
+| Part | Issue |
+|---|---|
+| The quiet ledger form, catalog first, then Add a bill and Add cash (P72 A) | [#217](https://github.com/kwilson21/tally/issues/217) |
+| Quiet motion in CSS, with View Transitions between pages (P74 A) | [#218](https://github.com/kwilson21/tally/issues/218) |
+| Squircle corners (P75 A) | [#219](https://github.com/kwilson21/tally/issues/219) |
+| MoneyInput sign-off, the budget, categorize and Settings flows, the component review | [#80](https://github.com/kwilson21/tally/issues/80), [#83](https://github.com/kwilson21/tally/issues/83)–[#86](https://github.com/kwilson21/tally/issues/86) |
+
+The issues above carry 53 questions the spec doesn't answer, each with a recommended answer in [docs/reviews/open-questions-2026-10-05.md](docs/reviews/open-questions-2026-10-05.md). An issue is built once its questions are answered.
 
 Later list (not scheduled): see spec §12.
