@@ -690,18 +690,19 @@ describe("captions on the linked pair", () => {
 	});
 
 	it("shows the refunded amount on a split part", async () => {
-		await link(REFUND, PART_KIDS);
+		// The $20 refund fits the $20 Household part (it would not fit the $10 Kids part).
+		await link(REFUND, PART_HOUSEHOLD);
 		const { html } = await get("/transactions?month=2026-09&q=refund");
-		expect(rowHtml(html, PART_KIDS)).toContain(
-			"Kids · Split from Refund Shop · $20.00 refunded",
+		expect(rowHtml(html, PART_HOUSEHOLD)).toContain(
+			"Household · Split from Refund Shop · $20.00 refunded",
 		);
-		expect(rowHtml(html, REFUND)).toContain("Kids · Refund for Sep 1");
+		expect(rowHtml(html, REFUND)).toContain("Household · Refund for Sep 1");
 	});
 });
 
 describe("splits unlink their refunds", () => {
 	it("removing a split unlinks a refund of a part and says so", async () => {
-		await link(REFUND, PART_KIDS);
+		await link(REFUND, PART_HOUSEHOLD);
 		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
 			["back", "/transactions"],
 		]);
@@ -728,8 +729,8 @@ describe("splits unlink their refunds", () => {
 	});
 
 	it("counts several refunds in the toast", async () => {
-		await link(REFUND, PART_KIDS);
-		await link(SECOND_REFUND, PART_HOUSEHOLD);
+		await link(REFUND, PART_HOUSEHOLD);
+		await link(SECOND_REFUND, PART_KIDS);
 		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
 			["back", "/transactions"],
 		]);
@@ -740,7 +741,7 @@ describe("splits unlink their refunds", () => {
 	});
 
 	it("re-splitting replaces the parts and unlinks their refunds", async () => {
-		await link(REFUND, PART_KIDS);
+		await link(REFUND, PART_HOUSEHOLD);
 		const { res, trigger } = await post(`/transactions/${SPLIT}/split`, [
 			["part_category", String(KIDS)],
 			["part_category", String(GAS)],
@@ -1060,5 +1061,563 @@ describe("splits unlink their refunds", () => {
 			["back", "/transactions"],
 		]);
 		expect(trigger?.toast.message).toBe("Removed split from Refund Shop");
+	});
+});
+
+describe("refund guards", () => {
+	// A refund too big for the $50 purchase, two $30 ones, and a $6 one; a second $50 purchase.
+	const BIG_REFUND = 9011;
+	const THIRTY_A = 9012;
+	const THIRTY_B = 9013;
+	const SIX = 9014;
+	const OTHER_PURCHASE = 9015;
+
+	const TOO_BIG_50 =
+		"This refund is more than what's left of that purchase ($50.00 left).";
+	const tooBig = (left: string) =>
+		`This refund is more than what's left of that purchase (${left} left).`;
+
+	beforeEach(async () => {
+		await db
+			.prepare(`INSERT INTO transactions
+			(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id) VALUES
+			(${BIG_REFUND}, 3, '2026-09-11', -6000, 'REFUND SHOP', ${GROCERIES}, 'user', 0, NULL),
+			(${THIRTY_A}, 3, '2026-09-13', -3000, 'REFUND SHOP', ${GROCERIES}, 'user', 0, NULL),
+			(${THIRTY_B}, 3, '2026-09-14', -3000, 'REFUND SHOP', ${GROCERIES}, 'user', 0, NULL),
+			(${SIX}, 3, '2026-09-16', -600, 'REFUND SHOP', ${GROCERIES}, 'user', 0, NULL),
+			(${OTHER_PURCHASE}, 3, '2026-09-02', 5000, 'REFUND SHOP', ${KIDS}, 'jev', 0, NULL)`)
+			.run();
+	});
+
+	/** The edit panel's alert under "This refunds…", or undefined when there is none. */
+	const refundAlert = (html: string) =>
+		html
+			.match(/<p id="refund-error" role="alert"[^>]*>([^<]*)<\/p>/)?.[1]
+			?.replaceAll("&#39;", "'");
+
+	const row = (id: number) =>
+		db
+			.prepare(
+				"SELECT refund_of_id, note, excluded, excluded_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{
+				refund_of_id: number | null;
+				note: string | null;
+				excluded: number;
+				excluded_source: string | null;
+				credit_reviewed: number | null;
+				credit_reviewed_by: string | null;
+			}>();
+
+	const EDIT = {
+		categoryId: null,
+		alwaysForMerchant: false,
+		displayName: "Refund Shop",
+		note: null,
+		excluded: false,
+		income: false,
+		creditReviewed: false,
+	};
+
+	describe("a refund can't be more than what's left of its purchase", () => {
+		it("refuses a $60 refund of a $50 purchase, with an alert, status 422 and nothing saved", async () => {
+			const { res, html, trigger } = await save(BIG_REFUND, [
+				["refund_of", String(PURCHASE)],
+				["note", "should not save"],
+			]);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(TOO_BIG_50);
+			// The panel is back, with the field and its error tied together and the section open.
+			expect(html).toMatch(
+				/<fieldset[^>]*aria-describedby="refund-error"[^>]*>\s*<legend class="sr-only">Purchase this refunds/,
+			);
+			expect(html).toMatch(
+				/<details[^>]*\bopen\b[^>]*>\s*<summary[^>]*>[\s\S]*?This refunds…/,
+			);
+			// What the person chose and typed is still there to correct.
+			expect(html).toMatch(
+				new RegExp(`name="refund_of" value="${PURCHASE}"[^>]*checked`),
+			);
+			expect(html).toContain("should not save");
+			expect(trigger).toBeNull();
+			expect(await row(BIG_REFUND)).toMatchObject({
+				refund_of_id: null,
+				note: null,
+			});
+		});
+
+		it("lets a refund be exactly what's left", async () => {
+			await db
+				.prepare("UPDATE transactions SET amount_cents = -5000 WHERE id = ?")
+				.bind(BIG_REFUND)
+				.run();
+			const { res } = await link(BIG_REFUND, PURCHASE);
+			expect(res.status).toBe(200);
+			expect(await refundOf(BIG_REFUND)).toBe(PURCHASE);
+		});
+
+		it("refuses the second of two $30 refunds of a $50 purchase, saying $20.00 is left", async () => {
+			const first = await link(THIRTY_A, PURCHASE);
+			expect(first.res.status).toBe(200);
+			const { res, html } = await save(THIRTY_B, [
+				["refund_of", String(PURCHASE)],
+				["note", "second"],
+			]);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$20.00"));
+			expect(await row(THIRTY_B)).toMatchObject({
+				refund_of_id: null,
+				note: null,
+			});
+			// The first is untouched.
+			expect(await refundOf(THIRTY_A)).toBe(PURCHASE);
+		});
+
+		it("counts every refund linked to the purchase, then refuses anything once it's all refunded", async () => {
+			await link(THIRTY_A, PURCHASE);
+			expect((await link(REFUND, PURCHASE)).res.status).toBe(200);
+			// Nothing is left, so the panel no longer offers it, and a save that names it anyway is refused.
+			const { res, html } = await link(SECOND_REFUND, PURCHASE);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe("Pick a purchase from the list.");
+			expect(await refundOf(SECOND_REFUND)).toBeNull();
+			expect(
+				await saveEdit(
+					db,
+					SECOND_REFUND,
+					{ ...EDIT, creditReviewed: true, refundOfId: PURCHASE },
+					"test",
+				),
+			).toEqual({
+				saved: false,
+				refundLeftCents: 0,
+			});
+		});
+
+		it("counts a refund that was excluded after it was linked", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await db
+				.prepare(
+					"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+				)
+				.bind(THIRTY_A)
+				.run();
+			const { res, html } = await link(THIRTY_B, PURCHASE);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$20.00"));
+		});
+
+		it("counts the parts of a split refund once, not the parent too", async () => {
+			await link(REFUND, PURCHASE);
+			await post(`/transactions/${REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "10"],
+				["part_amount", "10"],
+				["back", "/transactions"],
+			]);
+			// $20 is refunded, as two $10 parts: $30 is left, so a $30 refund fits and then nothing does.
+			expect((await link(THIRTY_A, PURCHASE)).res.status).toBe(200);
+			expect(
+				await saveEdit(
+					db,
+					SIX,
+					{ ...EDIT, creditReviewed: true, refundOfId: PURCHASE },
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 0 });
+		});
+
+		it("says $0.00 left, never a negative, for a purchase that was already over-refunded", async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = ?, credit_reviewed = 1 WHERE id IN (?, ?)",
+				)
+				.bind(PURCHASE, BIG_REFUND, THIRTY_A)
+				.run();
+			expect(
+				await saveEdit(
+					db,
+					THIRTY_B,
+					{ ...EDIT, creditReviewed: true, refundOfId: PURCHASE },
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 0 });
+		});
+
+		it("lets a refund be unlinked from an over-refunded purchase", async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = ?, credit_reviewed = 1 WHERE id IN (?, ?)",
+				)
+				.bind(PURCHASE, BIG_REFUND, THIRTY_A)
+				.run();
+			const { res } = await link(BIG_REFUND, "");
+			expect(res.status).toBe(200);
+			expect(await refundOf(BIG_REFUND)).toBeNull();
+		});
+
+		it("compares in integer cents: 334 + 334 + 333 is exactly $10.01", async () => {
+			await db.batch([
+				db
+					.prepare("UPDATE transactions SET amount_cents = 1001 WHERE id = ?")
+					.bind(PURCHASE),
+				db
+					.prepare("UPDATE transactions SET amount_cents = -334 WHERE id = ?")
+					.bind(THIRTY_A),
+				db
+					.prepare("UPDATE transactions SET amount_cents = -334 WHERE id = ?")
+					.bind(THIRTY_B),
+				db
+					.prepare("UPDATE transactions SET amount_cents = -333 WHERE id = ?")
+					.bind(SIX),
+			]);
+			expect((await link(THIRTY_A, PURCHASE)).res.status).toBe(200);
+			expect((await link(THIRTY_B, PURCHASE)).res.status).toBe(200);
+			expect((await link(SIX, PURCHASE)).res.status).toBe(200);
+		});
+
+		it("refuses a refund one cent over what's left, and says so to the cent", async () => {
+			await db.batch([
+				db
+					.prepare("UPDATE transactions SET amount_cents = 1001 WHERE id = ?")
+					.bind(PURCHASE),
+				db
+					.prepare("UPDATE transactions SET amount_cents = -334 WHERE id = ?")
+					.bind(THIRTY_A),
+				db
+					.prepare("UPDATE transactions SET amount_cents = -334 WHERE id = ?")
+					.bind(THIRTY_B),
+				db
+					.prepare("UPDATE transactions SET amount_cents = -334 WHERE id = ?")
+					.bind(SIX),
+			]);
+			await link(THIRTY_A, PURCHASE);
+			await link(THIRTY_B, PURCHASE);
+			const { res, html } = await link(SIX, PURCHASE);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$3.33"));
+		});
+	});
+
+	describe("a refund of a split part is checked against the part", () => {
+		it("refuses a $20 refund of a $10 part, though the whole split is $30", async () => {
+			const { res, html } = await link(REFUND, PART_KIDS);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$10.00"));
+			expect(await refundOf(REFUND)).toBeNull();
+		});
+
+		it("takes a refund that fits the part, then counts it against that part only", async () => {
+			expect((await link(SECOND_REFUND, PART_KIDS)).res.status).toBe(200);
+			// $5 of the $10 part is refunded, so a $6 refund no longer fits, and says $5.00 is left.
+			const { res, html } = await link(SIX, PART_KIDS);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$5.00"));
+			// The other part still has all of its $20.
+			expect((await link(REFUND, PART_HOUSEHOLD)).res.status).toBe(200);
+		});
+	});
+
+	describe("re-linking and saving again", () => {
+		it("re-saving the same link passes, even when the purchase is fully refunded", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			// $50 of $50 is refunded; saving the $30's own link again isn't asking for more.
+			const { res, html } = await save(THIRTY_A, [
+				["refund_of", String(PURCHASE)],
+				["note", "same link"],
+			]);
+			expect(res.status).toBe(200);
+			expect(refundAlert(html)).toBeUndefined();
+			expect(await row(THIRTY_A)).toMatchObject({
+				refund_of_id: PURCHASE,
+				note: "same link",
+			});
+		});
+
+		it("saveEdit with the link it already has is saved, not counted against itself", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			expect(
+				await saveEdit(
+					db,
+					THIRTY_A,
+					{ ...EDIT, creditReviewed: true, refundOfId: PURCHASE },
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await refundOf(THIRTY_A)).toBe(PURCHASE);
+		});
+
+		it("moving a refund to another purchase isn't held back by its old link, and frees the old one", async () => {
+			// $50 is fully refunded by $30 and $20.
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			expect((await link(THIRTY_B, PURCHASE)).res.status).toBe(422);
+			expect(await refundOf(THIRTY_B)).toBeNull();
+			// The $30 moves to the other $50 purchase: its old link isn't counted there.
+			const moved = await link(THIRTY_A, OTHER_PURCHASE);
+			expect(moved.res.status).toBe(200);
+			expect(await refundOf(THIRTY_A)).toBe(OTHER_PURCHASE);
+			// And the first purchase has $30 left again.
+			expect((await link(THIRTY_B, PURCHASE)).res.status).toBe(200);
+		});
+
+		it("is checked against the new purchase when it moves, and stays where it was if refused", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, OTHER_PURCHASE);
+			await link(SIX, OTHER_PURCHASE);
+			// $24 is left of the other purchase; moving a $30 refund there is too much.
+			const { res, html } = await link(THIRTY_A, OTHER_PURCHASE);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$24.00"));
+			expect(await refundOf(THIRTY_A)).toBe(PURCHASE);
+		});
+	});
+
+	describe("linking a refund includes it in the budget", () => {
+		const excludeAsJev = () =>
+			db
+				.prepare(
+					"UPDATE transactions SET flag_reimbursement = 1, excluded = 1, excluded_source = 'jev' WHERE id = ?",
+				)
+				.bind(REFUND)
+				.run();
+
+		it("an excluded refund counts once it's linked, as the person's choice", async () => {
+			await excludeAsJev();
+			const before = await spent("2026-08", KIDS);
+			// The panel posts the Exclude chip as it was drawn, checked.
+			const { res, trigger } = await save(REFUND, [
+				["refund_of", String(PURCHASE)],
+				["excluded", "1"],
+			]);
+			expect(res.status).toBe(200);
+			expect(await row(REFUND)).toMatchObject({
+				refund_of_id: PURCHASE,
+				excluded: 0,
+				excluded_source: "user",
+			});
+			// It counts, in its purchase's month and category.
+			expect(await spent("2026-08", KIDS)).toBe(before - 2000);
+			expect(trigger?.announce).toContain("It counts in the budget again.");
+		});
+
+		it("includes it when the form says nothing about exclusion", async () => {
+			await excludeAsJev();
+			await link(REFUND, PURCHASE);
+			expect(await row(REFUND)).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+			});
+		});
+
+		it("includes an excluded refund through saveEdit too, whatever it is asked to hold", async () => {
+			await excludeAsJev();
+			expect(
+				await saveEdit(
+					db,
+					REFUND,
+					{
+						...EDIT,
+						excluded: true,
+						creditReviewed: true,
+						refundOfId: PURCHASE,
+					},
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await row(REFUND)).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+			});
+		});
+
+		it("leaves an excluded refund excluded when the link is refused", async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET flag_reimbursement = 1, excluded = 1, excluded_source = 'jev' WHERE id = ?",
+				)
+				.bind(BIG_REFUND)
+				.run();
+			const { res } = await save(BIG_REFUND, [
+				["refund_of", String(PURCHASE)],
+				["excluded", "1"],
+			]);
+			expect(res.status).toBe(422);
+			expect(await row(BIG_REFUND)).toMatchObject({
+				refund_of_id: null,
+				excluded: 1,
+				excluded_source: "jev",
+			});
+		});
+
+		it("doesn't touch an included refund's exclusion source when it's linked", async () => {
+			await link(REFUND, PURCHASE);
+			expect(await row(REFUND)).toMatchObject({
+				excluded: 0,
+				excluded_source: null,
+			});
+		});
+
+		it("respects excluding a linked refund afterwards, while the link is unchanged", async () => {
+			await link(REFUND, PURCHASE);
+			await save(REFUND, [
+				["refund_of", String(PURCHASE)],
+				["excluded", "1"],
+			]);
+			expect(await row(REFUND)).toMatchObject({
+				refund_of_id: PURCHASE,
+				excluded: 1,
+				excluded_source: "user",
+			});
+		});
+
+		it("marks the credit reviewed even when the panel's review chip is left unticked", async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+				)
+				.bind(REFUND)
+				.run();
+			const before = await spent("2026-08", KIDS);
+			const { res } = await save(REFUND, [
+				["refund_of", String(PURCHASE)],
+				["creditReviewedVisible", "1"],
+			]);
+			expect(res.status).toBe(200);
+			expect(await row(REFUND)).toMatchObject({
+				refund_of_id: PURCHASE,
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			});
+			expect(await spent("2026-08", KIDS)).toBe(before - 2000);
+		});
+	});
+
+	describe("the write checks the amount itself", () => {
+		it("saveEdit refuses a link that doesn't fit, returning what's left and writing nothing", async () => {
+			const result = await saveEdit(
+				db,
+				BIG_REFUND,
+				{
+					...EDIT,
+					note: "should not save",
+					creditReviewed: true,
+					refundOfId: PURCHASE,
+				},
+				"test",
+			);
+			expect(result).toEqual({ saved: false, refundLeftCents: 5000 });
+			expect(await row(BIG_REFUND)).toMatchObject({
+				refund_of_id: null,
+				note: null,
+				credit_reviewed: null,
+			});
+		});
+
+		it("saveEdit leaves a split refund's parts where they were when the link is refused", async () => {
+			// A $60 refund, split in two $30 parts, can't be moved to the $50 purchase.
+			await post(`/transactions/${BIG_REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "30"],
+				["part_amount", "30"],
+				["back", "/transactions"],
+			]);
+			expect(
+				await saveEdit(
+					db,
+					BIG_REFUND,
+					{ ...EDIT, refundOfId: PURCHASE },
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 5000 });
+			const { results } = await db
+				.prepare("SELECT refund_of_id FROM transactions WHERE parent_id = ?")
+				.bind(BIG_REFUND)
+				.all();
+			expect(results).toEqual([{ refund_of_id: null }, { refund_of_id: null }]);
+		});
+
+		it("of two saves at once, only the one that fits is saved", async () => {
+			const [a, b] = await Promise.all([
+				saveEdit(
+					db,
+					THIRTY_A,
+					{ ...EDIT, creditReviewed: true, refundOfId: PURCHASE },
+					"a",
+				),
+				saveEdit(
+					db,
+					THIRTY_B,
+					{ ...EDIT, creditReviewed: true, refundOfId: PURCHASE },
+					"b",
+				),
+			]);
+			expect([a.saved, b.saved].sort()).toEqual([false, true]);
+			const refused = a.saved ? b : a;
+			expect(refused).toEqual({ saved: false, refundLeftCents: 2000 });
+			const { results } = await db
+				.prepare(
+					"SELECT id FROM transactions WHERE refund_of_id = ? ORDER BY id",
+				)
+				.bind(PURCHASE)
+				.all();
+			expect(results).toHaveLength(1);
+		});
+
+		it("of two panel saves at once, only the one that fits is saved", async () => {
+			const [a, b] = await Promise.all([
+				link(THIRTY_A, PURCHASE),
+				link(THIRTY_B, PURCHASE),
+			]);
+			expect([a.res.status, b.res.status].sort()).toEqual([200, 422]);
+			const { results } = await db
+				.prepare("SELECT id FROM transactions WHERE refund_of_id = ?")
+				.bind(PURCHASE)
+				.all();
+			expect(results).toHaveLength(1);
+		});
+	});
+
+	describe("the purchases a refund is offered", () => {
+		const ids = async (id: number) =>
+			(await refundPurchases(db, await detail(id))).map((p) => p.id);
+
+		it("leaves out a purchase with nothing left to refund", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			expect(await ids(SECOND_REFUND)).not.toContain(PURCHASE);
+			const { html } = await get(`/transactions/${SECOND_REFUND}`);
+			expect(html).not.toContain("Aug 20 · $50.00");
+			expect(html).toContain("Sep 2 · $50.00");
+		});
+
+		it("still offers a purchase with some left, even less than the refund", async () => {
+			await link(THIRTY_A, PURCHASE);
+			expect(await ids(BIG_REFUND)).toContain(PURCHASE);
+			expect(await ids(THIRTY_B)).toContain(PURCHASE);
+		});
+
+		it("always offers the purchase a refund is linked to, even when that purchase is fully refunded", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			expect(await ids(THIRTY_A)).toContain(PURCHASE);
+			expect(await ids(REFUND)).toContain(PURCHASE);
+			const { html } = await get(`/transactions/${THIRTY_A}`);
+			expect(html).toMatch(
+				new RegExp(`name="refund_of" value="${PURCHASE}"[^>]*checked`),
+			);
+		});
+
+		it("offers a purchase again once a refund is unlinked", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			await link(THIRTY_A, "");
+			expect(await ids(SECOND_REFUND)).toContain(PURCHASE);
+		});
 	});
 });
