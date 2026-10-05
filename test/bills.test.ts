@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
+import { matchBillPayments } from "../src/bills/match";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
@@ -292,6 +293,65 @@ describe("Bills", () => {
 		);
 		expect(unlink.headers.get("HX-Trigger")).toContain("Payment unlinked");
 		expect(await state()).toEqual({ excluded: 1, excluded_source: "plaid" });
+	});
+
+	describe("a card payment Plaid excluded that pays a bill", () => {
+		/** A Plaid-excluded LOAN_PAYMENTS payment for a bill due on the 5th, dated the 4th. */
+		const setUp = async (period: string) => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9300,'Mortgage',150000,5,'monthly',5,'LANDLORD LLC')",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,plaid_category,excluded,excluded_source) SELECT 9301,id,?,150000,'LANDLORD LLC','LOAN_PAYMENTS',1,'plaid' FROM accounts LIMIT 1",
+				).bind(`${period}-04`),
+			]);
+		};
+		const state = () =>
+			env.DB.prepare(
+				"SELECT excluded, excluded_source FROM transactions WHERE id=9301",
+			).first();
+		const post = (path: string, body?: Record<string, string>) =>
+			exports.default.fetch(`http://tally.test${path}`, {
+				method: "POST",
+				redirect: "manual",
+				headers: {
+					Origin: "http://tally.test",
+					"HX-Request": "true",
+					...(body
+						? { "content-type": "application/x-www-form-urlencoded" }
+						: {}),
+				},
+				...(body ? { body: new URLSearchParams(body) } : {}),
+			});
+
+		it("is put back by the matcher with no source, and Not this one excludes it again", async () => {
+			await setUp("2026-07");
+			expect(await matchBillPayments(env.DB, "2026-07-12")).toBeGreaterThan(0);
+			expect(
+				await env.DB.prepare(
+					"SELECT matched_by FROM bill_payments WHERE transaction_id=9301 AND status='linked'",
+				).first(),
+			).toEqual({ matched_by: "auto" });
+			expect(await state()).toEqual({ excluded: 0, excluded_source: null });
+
+			await post("/bills/9300/occurrences/2026-07/unlink");
+			expect(await state()).toEqual({ excluded: 1, excluded_source: "plaid" });
+		});
+
+		it("stays included after Not this one when a person linked it by hand", async () => {
+			await setUp("2026-07");
+			await post("/bills/9300/link", {
+				transaction_id: "9301",
+				period: "2026-07",
+				opened_period: "2026-07",
+			});
+			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
+
+			await post("/bills/9300/occurrences/2026-07/unlink");
+			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
+		});
 	});
 
 	it("shows a bill page and lets a person unlink and hand-link a chosen month", async () => {

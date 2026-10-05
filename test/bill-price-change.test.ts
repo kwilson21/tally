@@ -244,10 +244,11 @@ describe("bill matching and price changes", () => {
 			expect(
 				await rows("bill_payments", "status='linked' AND transaction_id=1"),
 			).toHaveLength(1);
+			// The matcher isn't a person, so the put-back leaves no source.
 			expect(
 				await rows(
 					"transactions",
-					"id=1 AND excluded=0 AND excluded_source='user'",
+					"id=1 AND excluded=0 AND excluded_source IS NULL",
 				),
 			).toHaveLength(1);
 

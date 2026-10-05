@@ -2550,6 +2550,18 @@ describe("syncItem", () => {
 				).toBe(1234);
 			});
 
+			it("is kept out of Jev's hands, so a transfer answer doesn't exclude a payment that pays a bill", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
+				await link(await rowId());
+				await jevFlags({ transfer: true });
+				expect(
+					await env.DB.prepare(
+						"SELECT excluded, excluded_source, flag_transfer FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+					).first(),
+				).toEqual({ excluded: 0, excluded_source: null, flag_transfer: 0 });
+			});
+
 			it("keeps a part linked to a bill counted while its sibling is excluded", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
@@ -2641,19 +2653,24 @@ describe("syncItem", () => {
 				});
 			});
 
-			it("lifts Plaid's own exclusion once a person marks the credit income", async () => {
+			it("counts a new transfer credit as soon as a person marks it income, with the exclude toggle left as shown", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
 				expect(await exclusion()).toEqual({
 					excluded: 1,
 					excluded_source: "plaid",
 				});
+				// The panel was drawn with Exclude on, and the save sends it on.
 				await decide("income", true);
-				// Marking it income didn't touch the exclusion, which is still Plaid's.
 				expect(await exclusion()).toEqual({
-					excluded: 1,
-					excluded_source: "plaid",
+					excluded: 0,
+					excluded_source: null,
 				});
+				expect(await decisions()).toMatchObject({
+					flag_income: 1,
+					income_source: "user",
+				});
+				// Plaid sending it again doesn't take it back.
 				await syncAs(
 					id,
 					"modified",
@@ -2662,6 +2679,41 @@ describe("syncItem", () => {
 				expect(await exclusion()).toEqual({
 					excluded: 0,
 					excluded_source: null,
+				});
+			});
+
+			it.each(["user", "jev"])(
+				"leaves a %s exclusion alone when a person marks the credit income",
+				async (source) => {
+					const id = await addItem();
+					await syncAs(
+						id,
+						"added",
+						inCategory("FOOD_AND_DRINK", { amount: -50 }),
+					);
+					await env.DB.prepare(
+						"UPDATE transactions SET excluded = 1, excluded_source = ? WHERE plaid_transaction_id = 'transaction-1'",
+					)
+						.bind(source)
+						.run();
+					await decide("income", true);
+					expect(await exclusion()).toEqual({
+						excluded: 1,
+						excluded_source: source,
+					});
+				},
+			);
+
+			it("leaves Plaid's exclusion when the credit was already income and the save doesn't change that", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				await env.DB.prepare(
+					"UPDATE transactions SET flag_income = 1, income_source = 'jev' WHERE plaid_transaction_id = 'transaction-1'",
+				).run();
+				await decide("income", true);
+				expect(await exclusion()).toEqual({
+					excluded: 1,
+					excluded_source: "plaid",
 				});
 			});
 

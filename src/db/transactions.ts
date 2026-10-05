@@ -17,6 +17,7 @@ import {
 	merchantKeySql,
 	sameMerchantSql,
 } from "./merchant-key";
+import { PAYS_A_BILL } from "./plaid-transfers";
 import {
 	refundedByOthersSql,
 	refundFitsSql,
@@ -495,6 +496,18 @@ export async function saveEdit(
 			" ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
 		),
 	);
+	// A credit a person newly marks as income counts as income, so an exclusion Plaid put on it (a
+	// transfer category) comes off, even though the panel sends its Exclude chip as it was drawn, on.
+	// This runs after the panel's own update: a chip the person turned off already made the exclusion
+	// theirs, and a person's or Jev's exclusion is never Plaid's to lift.
+	if (edit.income && current.income === 0)
+		statements.push(
+			gated(
+				`UPDATE transactions SET excluded = 0, excluded_source = NULL, updated_by = ?, updated_at = datetime('now')
+				WHERE id = ? AND amount_cents < 0 AND excluded_source = 'plaid'`,
+				[actor, id],
+			),
+		);
 	if (newLink === null) {
 		// Unlinking: the parts of a split refund that still follow its link go too, before its own
 		// update changes it; one a person linked to another purchase keeps its own choice. The
@@ -771,7 +784,9 @@ export async function saveJevResult(
 			.run();
 		return category.meta.changes > 0;
 	}
-	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise.
+	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise or it
+	// pays a bill: a linked payment keeps counting, as it does against Plaid's own transfer rule.
+	const keepsExclusion = `(excluded_source = 'user' OR ${PAYS_A_BILL})`;
 	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
 	const income = options.switches?.income === false ? false : d.flags.income;
 	const result = await db
@@ -783,11 +798,11 @@ export async function saveJevResult(
 			-- A credit counts only after a confident category (non-income classification) or an income decision.
 			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ?) OR ? = 1) THEN 1 ELSE credit_reviewed END,
 				jev_category_id = ?,
-				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
+				flag_transfer = CASE WHEN ${keepsExclusion} THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN ${keepsExclusion} THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
 				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
-				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
-				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
+				excluded = CASE WHEN ${keepsExclusion} THEN excluded ELSE MAX(excluded, ?) END,
+				excluded_source = CASE WHEN ${keepsExclusion} OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
 			WHERE id = ? AND category_confidence IS NULL
 				AND excluded = 0 AND is_split = 0

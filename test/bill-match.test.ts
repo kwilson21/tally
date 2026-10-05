@@ -86,7 +86,8 @@ describe("bill payment matching", () => {
 	});
 
 	// Spec §6.1 rule 4 (decision 67): an excluded payment still pays a bill, and linking it puts it back
-	// in the budget as a person's choice, so Jev or a sync never takes it out again.
+	// in the budget. The matcher is not a person, so it leaves no source, and nothing takes the payment out
+	// again while it pays the bill (Plaid's rule and Jev both skip a linked payment).
 	it("lets an excluded payment pay a bill, and puts it back in the budget", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
@@ -108,9 +109,9 @@ describe("bill payment matching", () => {
 			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
 		).all();
 		expect(rows.results).toEqual([
-			{ id: 30, excluded: 0, excluded_source: "user" },
-			{ id: 31, excluded: 0, excluded_source: "user" },
-			{ id: 32, excluded: 0, excluded_source: "user" },
+			{ id: 30, excluded: 0, excluded_source: null },
+			{ id: 31, excluded: 0, excluded_source: null },
+			{ id: 32, excluded: 0, excluded_source: null },
 		]);
 	});
 
@@ -135,7 +136,7 @@ describe("bill payment matching", () => {
 		expect(rows.results).toEqual([
 			{ id: 60, excluded: 1, excluded_source: "user" },
 			{ id: 61, excluded: 0, excluded_source: null },
-			{ id: 62, excluded: 0, excluded_source: "user" },
+			{ id: 62, excluded: 0, excluded_source: null },
 		]);
 	});
 

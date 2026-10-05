@@ -10,7 +10,7 @@ export const isPlaidTransferSql = (category: string) =>
 	`${category} IN (${TRANSFER_CATEGORIES.map((name) => `'${name}'`).join(", ")})`;
 
 /** True when a bill's payment is linked to this transaction: it keeps counting, so the bill isn't paid by something nothing counts. */
-const PAYS_A_BILL =
+export const PAYS_A_BILL =
 	"EXISTS (SELECT 1 FROM bill_payments WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked')";
 
 /**
