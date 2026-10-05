@@ -798,13 +798,16 @@ const RULES: [string, Cat, number][] = [
 	["Blue Bottle Coffee", EATING_OUT, 14],
 ];
 
-/** A: the Rules section, drawn first on Settings so it fits; each row ends in a terracotta Remove. */
+/**
+ * A: the section, drawn first on Settings so it fits; each row ends in a terracotta Remove. It's
+ * named in the toggle's own words, not "Rules" (the owner's pick, decision 74).
+ */
 const rulesList = (
 	<>
 		<h1 class={TITLE}>Settings</h1>
 		<section class="mt-8" aria-labelledby="p69-rules">
 			<h2 id="p69-rules" class="font-serif text-3xl font-semibold">
-				Rules
+				Always for these merchants
 			</h2>
 			<p class="mt-1 text-muted">Tally sorts these merchants for you.</p>
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
@@ -822,10 +825,12 @@ const rulesList = (
 									{cat.name}
 								</span>
 							</span>
-							<span class="block leading-6 text-muted">{n} transactions</span>
+							<span class="block leading-6 text-muted">
+								Always {cat.name} · {n} transactions
+							</span>
 						</span>
 						<Button kind="text" type="button">
-							Remove<span class="sr-only"> the {merchant} rule</span>
+							Remove<span class="sr-only"> {merchant}</span>
 						</Button>
 					</li>
 				))}
@@ -1060,7 +1065,7 @@ export function Phase5TransactionsProposals() {
 						{
 							name: "Option B · A question after the third save",
 							picked: true,
-							note: "The panel stays open with one question, “Always use Groceries for Costco?”, and Yes or Not now.",
+							note: "The panel stays open with one question, “Always use Groceries for Costco?”, and Yes or Not now. Picked to ask on the third matching save and every one after, until there's a rule.",
 							tradeoff:
 								"one more step on the third save, even in a hurry, once for each merchant.",
 							recommended:
@@ -1333,7 +1338,7 @@ export function Phase5TransactionsProposals() {
 						{
 							name: "Option A · A Rules list in Settings",
 							picked: true,
-							note: "Each rule is a row, “Costco → Groceries”, with Remove; the panel's toggle also opens ticked when a rule exists, as in B.",
+							note: "Picked, named “Always for these merchants”: each is a row, “Costco → Groceries”, with Remove; the panel's toggle also opens ticked when a rule exists, as in B.",
 							tradeoff:
 								"one more section on a Settings page that's already long.",
 							recommended:
