@@ -914,6 +914,8 @@ export function SuggestedRow({
 	cat,
 	maybe,
 	plain,
+	mark,
+	tag,
 }: {
 	name: string;
 	cents: number;
@@ -922,9 +924,14 @@ export function SuggestedRow({
 	maybe?: string;
 	/** A name nobody is guessing at (P87): no dashed underline. */
 	plain?: boolean;
+	/** P87 B: before the name, where the sparkles icon goes. */
+	mark?: Child;
+	/** P87 A: after the name, where the "Tally's guess" tag goes. */
+	tag?: Child;
 }) {
+	const nameClass = `text-lg leading-6 ${maybe || plain ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`;
 	return (
-		<li class="flex h-16 items-center gap-4">
+		<li class="flex min-h-16 items-center gap-4 py-1">
 			{cat ? (
 				<CategoryIcon icon={cat.icon} color={cat.color} />
 			) : (
@@ -933,11 +940,15 @@ export function SuggestedRow({
 				</span>
 			)}
 			<span class="min-w-0 flex-1">
-				<span
-					class={`block truncate text-lg leading-6 ${maybe || plain ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`}
-				>
-					{name}
-				</span>
+				{mark || tag ? (
+					<span class="flex min-w-0 flex-wrap items-center gap-x-2">
+						{mark}
+						<span class={`max-w-full truncate ${nameClass}`}>{name}</span>
+						{tag}
+					</span>
+				) : (
+					<span class={`block truncate ${nameClass}`}>{name}</span>
+				)}
 				<span class="block truncate leading-6 text-muted">
 					{cat?.name ?? "Needs category"}
 					{maybe && ` · Maybe “${maybe}”`}
@@ -1009,18 +1020,21 @@ const namesMaybe = (
 
 /**
  * Up to three suggested names as chips, the bank's tidied name, and a field for your own. `names`
- * and `keep` draw another merchant. With `source` (P87 A) the muted line that says where the
- * suggestions came from goes under them, and the tidied name moves below that line.
+ * and `keep` draw another merchant. With `source` (P87) the line that says where the suggestions
+ * came from goes under them, and the tidied name moves below that line.
  */
 export function NameChoices({
 	id,
 	names = ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
 	keep = "Blue bottle cof",
+	count = 9,
 	source,
 }: {
 	id: string;
 	names?: string[];
 	keep?: string;
+	/** How many transactions the name applies to. */
+	count?: number;
 	source?: Child;
 }) {
 	const suggested = names.map((n, i) => (
@@ -1052,7 +1066,7 @@ export function NameChoices({
 			)}
 			<TextInput id={`${id}-own`} label="Or your own" surface="paper" />
 			<p class="text-sm text-muted">
-				For all 9 transactions from this merchant.
+				For all {count} transactions from this merchant.
 			</p>
 		</fieldset>
 	);

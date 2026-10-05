@@ -354,10 +354,16 @@ export function PanelSheet({
 	);
 }
 
-type TopProps = { row: ListRow; raw?: string; account: string };
+type TopProps = {
+	row: ListRow;
+	raw?: string;
+	account: string;
+	/** After the account on the day line (P79 C's "Paid the Rent bill"). */
+	lineEnd?: Child;
+};
 
 /** The panel's top: the bank's text when it differs, the name, the amount, the day and account. */
-export function PanelTop({ row, raw, account }: TopProps) {
+export function PanelTop({ row, raw, account, lineEnd }: TopProps) {
 	return (
 		<div>
 			{raw && <p class="text-sm text-muted">{raw}</p>}
@@ -369,6 +375,7 @@ export function PanelTop({ row, raw, account }: TopProps) {
 			</p>
 			<p class="text-muted">
 				{dayLabel(row.date, TODAY)} · {account}
+				{lineEnd}
 			</p>
 		</div>
 	);
@@ -389,6 +396,10 @@ type CatsProps = {
 	maybe?: Cat;
 	/** Goes last in the chip row (P67's New category). */
 	end?: Child;
+	/** Beside the "Category" label (P79 E's Why?). */
+	labelEnd?: Child;
+	/** After the chosen chip's name, while it's chosen (P79 D's "from the bill"). */
+	selectedEnd?: Child;
 	/** Lines under the chips. */
 	children?: Child;
 };
@@ -400,11 +411,25 @@ export function Categories({
 	selected,
 	maybe,
 	end,
+	labelEnd,
+	selectedEnd,
 	children,
 }: CatsProps) {
 	return (
-		<fieldset class="flex flex-col gap-2">
-			<legend class="text-base text-ink">Category</legend>
+		<fieldset
+			class="flex flex-col gap-2"
+			aria-labelledby={labelEnd ? `${p}-cat-label` : undefined}
+		>
+			{labelEnd ? (
+				<div class="flex items-center gap-2">
+					<p id={`${p}-cat-label`} class="text-base text-ink">
+						Category
+					</p>
+					{labelEnd}
+				</div>
+			) : (
+				<legend class="text-base text-ink">Category</legend>
+			)}
 			<div class="flex flex-wrap gap-2">
 				{maybe && (
 					<span class="rounded-full border border-dashed border-ink">
@@ -428,7 +453,14 @@ export function Categories({
 							checked={c.name === selected}
 							icon={<CategoryIcon icon={c.icon} color={c.color} />}
 						>
-							{c.name}
+							{selectedEnd && c.name === selected ? (
+								<span class="inline-flex items-center gap-1.5">
+									{c.name}
+									{selectedEnd}
+								</span>
+							) : (
+								c.name
+							)}
 						</Chip>
 					))}
 				{end}

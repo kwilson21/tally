@@ -330,7 +330,7 @@ export function Question({
 	children?: Child;
 	line?: string;
 	sure?: number;
-	/** The muted line that says where the suggestion came from (P87), for one with no percentage. */
+	/** The line that says where the suggestion came from (P87), for one with no percentage. */
 	source?: Child;
 }) {
 	return (

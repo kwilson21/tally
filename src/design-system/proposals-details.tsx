@@ -6,7 +6,7 @@
 // Nothing here is decided until the owner picks.
 
 import type { Child } from "hono/jsx";
-import { dayLabel, shortDay } from "../dates";
+import { dayLabel } from "../dates";
 import { formatCents } from "../money";
 import { BillRow, BillStatusHeading } from "../views/bill-row";
 import { Wordmark } from "../views/brand";
@@ -15,7 +15,6 @@ import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { Icon } from "../views/icons";
 import { SIDEBAR_ITEMS } from "../views/nav";
-import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { WhyLink } from "../views/why-link";
 import { Fixed, Options, Title } from "./proposal-parts";
@@ -46,13 +45,9 @@ import {
 	Row,
 	summaryRow,
 	TallSheet,
+	transactionsBehind,
 } from "./proposals-forms";
-import {
-	CATS,
-	NameChoices,
-	NamesPanel,
-	SuggestedRow,
-} from "./proposals-phase4";
+import { CATS, NameChoices, SuggestedRow } from "./proposals-phase4";
 import {
 	bill,
 	CAR,
@@ -333,8 +328,49 @@ const partPaidOwnGroup = (
 
 const HARBOR = tx(41, "2026-10-01", "Harbor Property", 120000, RENT_CAT);
 
+/** The one place a person can tap through to the bill: the link's own look, as Why? has it. */
+const LINK =
+	"inline-flex min-h-11 items-center text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+
+/** C: under the day line, which bill the payment paid; "Rent bill" goes to that bill's page. */
+const paidTheBill = (
+	<span class="-my-2.5 flex items-center">
+		Paid the&nbsp;
+		<a href="/bills/6" class={LINK}>
+			Rent bill
+		</a>
+	</span>
+);
+
+/** D: the chosen chip's mark, a small bills icon and where Rent came from, as P32's "Suggested" marks a guess. */
+const fromTheBill = (
+	<>
+		<span aria-hidden="true">·</span>
+		<Icon name="bills" class="size-4" />
+		from the bill
+	</>
+);
+
+type RentPanelProps = {
+	p: string;
+	/** A: a muted line under the chips. */
+	line?: string;
+	/** C: the day line's link to the bill. */
+	lineEnd?: Child;
+	/** E: beside the "Category" label. */
+	labelEnd?: Child;
+	/** D: on the chosen chip. */
+	selectedEnd?: Child;
+};
+
 /** The rent payment's panel; the row above it, drawn as P59 A has it, already says where Rent came from. */
-function RentPanel({ p, line }: { p: string; line?: string }) {
+function RentPanel({
+	p,
+	line,
+	lineEnd,
+	labelEnd,
+	selectedEnd,
+}: RentPanelProps) {
 	return (
 		<PanelSheet
 			behind={
@@ -352,12 +388,15 @@ function RentPanel({ p, line }: { p: string; line?: string }) {
 				row={HARBOR}
 				raw="HARBOR PROPERTY MGMT"
 				account="Chase Checking ••4410"
+				lineEnd={lineEnd}
 			/>
 			<PanelForm>
 				<Categories
 					p={p}
 					cats={[RENT_CAT, HOUSEHOLD, UTILITIES]}
 					selected="Rent"
+					labelEnd={labelEnd}
+					selectedEnd={selectedEnd}
 				>
 					{line && <p class="text-sm text-muted">{line}</p>}
 				</Categories>
@@ -1065,91 +1104,166 @@ function AiWords({ words, greyed }: { words: SwitchWords; greyed?: boolean }) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// P87: where a suggested name comes from (question 10; P29 A's list and panel, P42 A's question).
+// P87: how a name Tally guessed shows (question 10; P29 A's list and panel, P42 A's question).
 // Blue Bottle Coffee is a name the bank sent (Plaid's merchant_name, so Workers AI is never asked);
-// Lupita's Taqueria is one the bank didn't send, so Tally guesses. Each option is drawn on the edit
-// panel and the review screen, then with the Merchant names switch off.
+// Lupita's Taqueria and Amazon are names the bank didn't send, so Tally guesses. Each option is
+// drawn on the list, the edit panel and the review screen. The Suggest store names switch off is
+// drawn once, because it reads the same in every option.
 
-/** P87 A's muted line under a suggestion: where it came from. A guess says so, with a Why?. */
-function NameSource({ from }: { from: "bank" | "tally" }) {
-	return from === "bank" ? (
-		<p class="text-sm text-muted">From your bank</p>
-	) : (
-		<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+/** A: P32's dashed pill, the one look every guess has, now saying whose guess it is. */
+function GuessTag() {
+	return (
+		<span class="shrink-0 rounded-control border border-dashed border-ink px-2 text-sm leading-5 text-ink">
 			Tally's guess
-			<Why topic="Tally's guess" href="#p87-name-source" />
-		</p>
+		</span>
 	);
 }
 
-const DASHED_ARE_SUGGESTIONS =
-	"Dashed names are suggestions. Tap one to keep it or pick another.";
-const DASHED_ARE_GUESSES =
-	"Dashed names are Tally's guesses. Tap one to keep it or pick another.";
+/** B, in the list: the sparkles icon before the name, and the words for a screen reader. */
+const guessMark = (
+	<>
+		<Icon name="sparkles" class="size-4 shrink-0" />
+		<span class="sr-only">Tally's guess: </span>
+	</>
+);
+
+/** A guess's label in the panel and on the review screen, with the Why? that explains it. */
+function GuessLine({ children }: { children?: Child }) {
+	return (
+		<div class="flex flex-wrap items-center gap-x-2 text-sm">
+			{children}
+			<Why topic="Tally's guess" href="#p87-name-source" />
+		</div>
+	);
+}
+
+const guessTagLine = (
+	<GuessLine>
+		<GuessTag />
+	</GuessLine>
+);
+
+const guessIconLine = (
+	<GuessLine>
+		<span class="inline-flex items-center gap-1.5 text-ink">
+			<Icon name="sparkles" class="size-4" />
+			Tally's guess
+		</span>
+	</GuessLine>
+);
+
+/** The bank's own name says where it came from quietly: muted words, no tag and nothing to explain. */
+const fromBank = <p class="text-sm text-muted">From your bank</p>;
+
+/** How the list draws a name Tally guessed: with A's tag, B's icon, or (C, and switch off) not at all. */
+type Look = "tag" | "icon" | "tidied";
+
+/** A merchant the bank sent no name for: Tally's guess, and the tidied bank text a person sees without it. */
+const GUESSES = [
+	{
+		guess: "Lupita's Taqueria",
+		tidied: "Lupitas taq",
+		cents: 2240,
+		cat: CATS.eatingOut,
+	},
+	{ guess: "Amazon", tidied: "Amzn mktp", cents: 3418, cat: CATS.household },
+];
 
 /**
- * The Transactions list behind the edit panel, with one row for each kind of name: the bank's
- * (Blue Bottle) and Tally's guess (Lupita's), each dashed, or plain when nothing is suggested.
+ * The Transactions list: a row for each kind of name. Blue Bottle is the bank's own (dashed like
+ * every suggestion, but never tagged), Trader Joe's is a name someone kept, and Lupita's and Amazon
+ * are Tally's guesses, drawn as `look` says.
  */
-function NamesBehind({
-	bank,
-	guess,
-	intro,
-}: {
-	bank: { name: string; dashed: boolean };
-	guess: { name: string; dashed: boolean };
-	intro?: string;
-}) {
+function NamesList({ look }: { look: Look }) {
+	const [lupitas, amazon] = GUESSES.map((g) =>
+		look === "tidied" ? (
+			<SuggestedRow name={g.tidied} plain cents={g.cents} cat={g.cat} />
+		) : (
+			<SuggestedRow
+				name={g.guess}
+				cents={g.cents}
+				cat={g.cat}
+				mark={look === "icon" ? guessMark : undefined}
+				tag={look === "tag" ? <GuessTag /> : undefined}
+			/>
+		),
+	);
 	return (
 		<>
 			<Title>Transactions</Title>
-			{intro && <p class="mt-2 text-muted">{intro}</p>}
+			<p class="mt-2 text-muted">Dashed names are suggestions.</p>
 			<ul class="mt-2 divide-y divide-rule">
 				<SuggestedRow
-					name={bank.name}
-					plain={!bank.dashed}
+					name="Blue Bottle Coffee"
 					cents={650}
 					cat={CATS.eatingOut}
 				/>
-				<SuggestedRow
-					name={guess.name}
-					plain={!guess.dashed}
-					cents={2240}
-					cat={CATS.eatingOut}
-				/>
+				{lupitas}
 				<SuggestedRow
 					name="Trader Joe's"
 					plain
 					cents={8217}
 					cat={CATS.groceries}
 				/>
+				{amazon}
 			</ul>
 		</>
 	);
 }
 
-const BLUE_BOTTLE_NAME = { name: "Blue Bottle Coffee", dashed: true };
-const BLUE_BOTTLE_PLAIN = { name: "Blue Bottle Coffee", dashed: false };
-const BLUE_BOTTLE_TIDIED = { name: "Blue bottle cof", dashed: false };
-const LUPITAS_GUESS = { name: "Lupita's Taqueria", dashed: true };
-const LUPITAS_TIDIED = { name: "Lupitas taq", dashed: false };
-
-/** B: a name the bank sent is just the name, so the panel has a name to change, not one to choose. */
-function BankNameField({ id }: { id: string }) {
+/**
+ * The edit panel's name part, in the taller sheet so Save shows: the bank's text and the amount,
+ * then the name choices, which say under the suggestions where they came from (`source`).
+ */
+function NamePanel({
+	raw,
+	amount,
+	children,
+}: {
+	raw: string;
+	amount: string;
+	children?: Child;
+}) {
 	return (
-		<div class="flex flex-col gap-2">
-			<TextInput
-				id={`${id}-name`}
-				label="Name"
-				surface="paper"
-				value="Blue Bottle Coffee"
-			/>
-			<p class="text-sm text-muted">
-				For all 9 transactions from this merchant.
-			</p>
-		</div>
+		<TallSheet
+			behind={transactionsBehind}
+			footer={<Footer save="Save" />}
+			gap="gap-3"
+		>
+			<div>
+				<p class="text-sm text-muted">{raw}</p>
+				<p class="font-serif text-4xl font-semibold">{amount}</p>
+			</div>
+			{children}
+		</TallSheet>
 	);
 }
+
+/** The panel for Lupita's Taqueria, a name Tally guessed; `source` says so under the names. */
+function GuessPanel({ id, source }: { id: string; source: Child }) {
+	return (
+		<NamePanel raw="TST* LUPITAS TAQ" amount="−$22.40">
+			<NameChoices
+				id={id}
+				names={["Lupita's Taqueria", "Lupita's"]}
+				keep="Lupitas taq"
+				count={2}
+				source={source}
+			/>
+		</NamePanel>
+	);
+}
+
+/** The panel for Blue Bottle Coffee, the bank's own name: offered, and labelled quietly. */
+const bankPanel = (
+	<NamePanel raw="SQ *BLUE BOTTLE COF 0412" amount="−$6.50">
+		<NameChoices
+			id="p87-off-panel"
+			names={["Blue Bottle Coffee"]}
+			source={fromBank}
+		/>
+	</NamePanel>
+);
 
 /** A name question on the review screen: Lupita's (Tally's guess) or Blue Bottle (the bank's). */
 function NameQuestion({
@@ -1159,8 +1273,8 @@ function NameQuestion({
 }: {
 	id: string;
 	of: "guess" | "bank";
-	/** A: the line under the question that says where the name came from. */
-	source?: boolean;
+	/** The line under the question that says where the name came from. */
+	source: Child;
 }) {
 	const guess = of === "guess";
 	return (
@@ -1171,10 +1285,7 @@ function NameQuestion({
 				bank={guess ? "TST* LUPITAS TAQ" : "SQ *BLUE BOTTLE COF 0412"}
 				meta={guess ? "2 transactions · $44.80" : "9 transactions · $58.50"}
 			/>
-			<Question
-				icon={<Icon name="tag" class="size-7" />}
-				source={source && <NameSource from={guess ? "tally" : "bank"} />}
-			>
+			<Question icon={<Icon name="tag" class="size-7" />} source={source}>
 				{guess ? "Lupita's Taqueria" : "Blue Bottle Coffee"}
 			</Question>
 			<Answers
@@ -1189,26 +1300,6 @@ function NameQuestion({
 		</>
 	);
 }
-
-/** With the names switch off and no bank names to ask, the review goes straight to the next kind. */
-const nextKind = (
-	<>
-		<ReviewHead
-			place="1 of 8"
-			name="Acme Payroll"
-			bank="ACME PAYROLL PPD"
-			meta={`${formatCents(-245000, { signed: true })} · ${shortDay("2026-10-03", TODAY)}`}
-		/>
-		<Question
-			icon={<Icon name="income" class="size-7" />}
-			line="Count it as income, not spending?"
-			sure={71}
-		>
-			a paycheck
-		</Question>
-		<Answers yes="Yes, it's income" no="No" />
-	</>
-);
 
 /** P76–P87 on the proposals page, open for the owner's pick. */
 export function DetailsProposals() {
@@ -1338,7 +1429,7 @@ export function DetailsProposals() {
 				id="p79-bill-category-line"
 				title="P79 · The category from a bill"
 				tier="visual"
-				sentence="A payment with no category takes its bill's. Pick whether the edit panel says so. Each is drawn with Harbor Property paying the Rent bill, and the row above the panel."
+				sentence="A payment with no category takes its bill's. Pick whether the edit panel says so, and how. Each is drawn with Harbor Property paying the Rent bill, and the row above the panel."
 			>
 				<Fixed>
 					question 29, on decision 74 (P59 A). A linked payment with no category
@@ -1366,6 +1457,34 @@ export function DetailsProposals() {
 							tradeoff:
 								"the panel can't say why a payment is in Rent, and the caption is on the list only.",
 							screen: <RentPanel p="p79-b" />,
+						},
+						{
+							name: "Option C · A link to the bill",
+							note: "Under the day line, “Paid the Rent bill”, with “Rent bill” a terracotta link to the bill's page. Nothing is added under the chips.",
+							tradeoff:
+								"it doubles as navigation, so a tap leaves the panel, and it says the bill was paid, not that Rent came from it.",
+							screen: <RentPanel p="p79-c" lineEnd={paidTheBill} />,
+						},
+						{
+							name: "Option D · A mark on the chip",
+							note: "The chosen chip carries a small bills icon and reads “Rent · from the bill”, marked as P32's “Suggested” marks a guess. Nothing else is added.",
+							tradeoff:
+								"it crowds the chip, and it only shows while that chip is chosen.",
+							screen: <RentPanel p="p79-d" selectedEnd={fromTheBill} />,
+						},
+						{
+							name: "Option E · A Why? link",
+							note: "A terracotta “Why?” follows the label “Category” and leads to How Tally works, as the Why? beside a guess does.",
+							tradeoff:
+								"it hides the answer behind a tap, on another page, and the panel itself never says a bill was involved.",
+							screen: (
+								<RentPanel
+									p="p79-e"
+									labelEnd={
+										<WhyLink section="categorization" topic="this category" />
+									}
+								/>
+							),
 						},
 					]}
 				/>
@@ -1724,7 +1843,7 @@ export function DetailsProposals() {
 				id="p87-name-source"
 				title="P87 · Where a suggested name comes from"
 				tier="visual"
-				sentence="A suggested name is either one your bank sent or Tally's guess. Pick whether the family can tell which, and how it reads with the Merchant names switch off. Each option is drawn on the edit panel and the review screen, then again with the switch off. Blue Bottle Coffee is a name your bank sent; Lupita's Taqueria is one Tally guessed."
+				sentence="A name Tally guessed should be unmistakably a guess, wherever it shows. Pick how it says so. Each option is drawn on the Transactions list, the edit panel and the review screen. Lupita's Taqueria and Amazon are names Tally guessed; Blue Bottle Coffee is a name your bank sent, and stays quieter. The last three pictures show Suggest store names switched off, which reads the same in every option."
 			>
 				<Fixed>
 					question 10, on decisions 64 and 68. Plaid's name is the first
@@ -1733,166 +1852,113 @@ export function DetailsProposals() {
 					Screens never name the AI service or Plaid's brand to the family:
 					“your bank” is fine, and “Tally's guess” is how AI suggestions are
 					named (decision 64). The owner's answer to question 10: help the
-					family tell Tally's guess from the bank's own clean name.
+					family tell Tally's guess from the bank's own clean name. Their note
+					on the first drawing: “I would prefer we make it more obvious that the
+					AI suggested name is just that, an AI suggested name.” So a guess is
+					drawn to be unmistakable wherever it shows, and the bank's own name
+					stays quieter.
 				</Fixed>
 				<Options
 					options={[
 						{
-							name: "Option A · Say the source under the choice",
-							note: "The edit panel for Blue Bottle Coffee: a muted line under the suggested name says “From your bank”. The list row stays dashed for every suggestion, so the list has one sign.",
+							name: "Option A · A “Tally's guess” tag everywhere",
+							note: "A small dashed “Tally's guess” tag follows a name Tally guessed, the same dashed pill as P32's “Maybe …” tags. In the list it sits right after the dashed name. Your bank's name gets no tag: it stays a plain dashed name.",
 							tradeoff:
-								"one more small line in the panel and on the review screen.",
+								"every guessed row carries the tag, which repeats a sign (DESIGN.md: a sign appears once), and on a phone a longer name pushes it onto a line of its own, as Lupita's does.",
 							recommended:
-								"the family can see which names are the bank's own and which are a guess, without a new mark in the list.",
-							screen: (
-								<NamesPanel
-									behind={
-										<NamesBehind
-											bank={BLUE_BOTTLE_NAME}
-											guess={LUPITAS_GUESS}
-											intro={DASHED_ARE_SUGGESTIONS}
-										/>
-									}
-								>
-									<NameChoices
-										id="p87-a-panel"
-										names={["Blue Bottle Coffee"]}
-										source={<NameSource from="bank" />}
-									/>
-								</NamesPanel>
-							),
+								"the word says what it is, everywhere, in the same dashed look as every other guess.",
+							screen: <NamesList look="tag" />,
+						},
+						{
+							name: "Option A, next · The edit panel",
+							note: "Under the suggested names, the tag sits after them, with a Why? that explains it. The bank's text, tidied, is kept below as before.",
+							screen: <GuessPanel id="p87-a-panel" source={guessTagLine} />,
 						},
 						{
 							name: "Option A, next · The review screen",
-							note: "Your bank sent no name for Lupita's, so Tally guessed. The line under the question says “Tally's guess”, with a Why? that explains it, as it already does for a category or a paycheck.",
-							screen: <NameQuestion id="p87-a-review" of="guess" source />,
-						},
-						{
-							name: "Option A, switch off · The edit panel",
-							note: "Blue Bottle's name still comes from your bank, so it's still offered and still labelled. Tally's guesses are gone: Lupita's shows its tidied name.",
+							note: "Your bank sent no name for Lupita's, so Tally guessed. The tag sits under the name, with the Why?.",
 							screen: (
-								<NamesPanel
-									behind={
-										<NamesBehind
-											bank={BLUE_BOTTLE_NAME}
-											guess={LUPITAS_TIDIED}
-											intro={DASHED_ARE_SUGGESTIONS}
-										/>
-									}
-								>
-									<NameChoices
-										id="p87-a-off-panel"
-										names={["Blue Bottle Coffee"]}
-										source={<NameSource from="bank" />}
-									/>
-								</NamesPanel>
+								<NameQuestion
+									id="p87-a-review"
+									of="guess"
+									source={guessTagLine}
+								/>
 							),
-						},
-						{
-							name: "Option A, switch off · The review screen",
-							note: "Your bank's names are still asked, with “From your bank” under them. No “Tally's guess” appears, so there is less to go through.",
-							screen: <NameQuestion id="p87-a-off-review" of="bank" source />,
 						},
 					]}
 				/>
 				<Options
 					options={[
 						{
-							name: "Option B · Bank names aren't suggestions",
-							note: "The edit panel for Blue Bottle Coffee: your bank's name is the name straight away. It isn't dashed and there's nothing to choose, only a name to change. Only Tally's guesses are dashed.",
+							name: "Option B · An icon plus the words",
+							note: "A small sparkles icon comes before a name Tally guessed in the list. Your bank's name gets no icon.",
 							tradeoff:
-								"nobody checks a bank's name before it's used, and a wrong one is fixed only if someone notices it.",
-							screen: (
-								<NamesPanel
-									behind={
-										<NamesBehind
-											bank={BLUE_BOTTLE_PLAIN}
-											guess={LUPITAS_GUESS}
-											intro={DASHED_ARE_GUESSES}
-										/>
-									}
-								>
-									<BankNameField id="p87-b-panel" />
-								</NamesPanel>
-							),
+								"the icon has to be learned, and it reads as decoration.",
+							screen: <NamesList look="icon" />,
+						},
+						{
+							name: "Option B, next · The edit panel",
+							note: "“Tally's guess” has the same icon beside it under the suggested names, with the Why?.",
+							screen: <GuessPanel id="p87-b-panel" source={guessIconLine} />,
 						},
 						{
 							name: "Option B, next · The review screen",
-							note: "Only Tally's guesses are ever asked, so the dashed “Maybe” needs no label.",
-							screen: <NameQuestion id="p87-b-review" of="guess" />,
-						},
-						{
-							name: "Option B, switch off · The edit panel",
-							note: "Only your bank's names are left, still plain names. Tally's guess for Lupita's is gone.",
+							note: "The same icon and words under the name, with the Why?.",
 							screen: (
-								<NamesPanel
-									behind={
-										<NamesBehind
-											bank={BLUE_BOTTLE_PLAIN}
-											guess={LUPITAS_TIDIED}
-										/>
-									}
-								>
-									<BankNameField id="p87-b-off-panel" />
-								</NamesPanel>
+								<NameQuestion
+									id="p87-b-review"
+									of="guess"
+									source={guessIconLine}
+								/>
 							),
-						},
-						{
-							name: "Option B, switch off · The review screen",
-							note: "There's no name question: your bank's names aren't asked and Tally's guesses are off, so it goes on to the next kind.",
-							screen: nextKind,
 						},
 					]}
 				/>
 				<Options
 					options={[
 						{
-							name: "Option C · No source shown (today's spec)",
-							note: "The edit panel for Blue Bottle Coffee: both kinds of name look the same, a dashed suggestion with nothing to say where it came from.",
+							name: "Option C · Keep the tidied name in the list",
+							note: "The list never shows a name Tally guessed until someone keeps it: Lupita's stays “Lupitas taq”, the bank's text tidied. Blue Bottle's own name is still dashed.",
 							tradeoff:
-								"the family can't tell a bank's own name from a guess, and with the switch off the bank's name isn't offered either.",
-							screen: (
-								<NamesPanel
-									behind={
-										<NamesBehind
-											bank={BLUE_BOTTLE_NAME}
-											guess={LUPITAS_GUESS}
-											intro={DASHED_ARE_SUGGESTIONS}
-										/>
-									}
-								>
-									<NameChoices
-										id="p87-c-panel"
-										names={["Blue Bottle Coffee"]}
-									/>
-								</NamesPanel>
-							),
+								"the list reads like a bank statement until names are kept.",
+							screen: <NamesList look="tidied" />,
+						},
+						{
+							name: "Option C, next · The edit panel",
+							note: "The guess shows only here and on the review screen, labelled “Tally's guess”, drawn as in A.",
+							screen: <GuessPanel id="p87-c-panel" source={guessTagLine} />,
 						},
 						{
 							name: "Option C, next · The review screen",
-							note: "The same question for either kind, with no line under it.",
-							screen: <NameQuestion id="p87-c-review" of="guess" />,
-						},
-						{
-							name: "Option C, switch off · The edit panel",
-							note: "No suggested names at all, your bank's included. The tidied name stays, and you can type your own.",
+							note: "The same as A's: the guess, labelled “Tally's guess”, with the Why?.",
 							screen: (
-								<NamesPanel
-									behind={
-										<NamesBehind
-											bank={BLUE_BOTTLE_TIDIED}
-											guess={LUPITAS_TIDIED}
-										/>
-									}
-								>
-									<NameChoices id="p87-c-off-panel" names={[]} />
-								</NamesPanel>
+								<NameQuestion
+									id="p87-c-review"
+									of="guess"
+									source={guessTagLine}
+								/>
 							),
 						},
+					]}
+				/>
+				<Options
+					options={[
 						{
-							name: "Option C, switch off · The review screen",
-							note: "There's no name question, so the review goes on to the next kind.",
-							screen: nextKind,
+							name: "With Suggest store names off · The list",
+							note: "Tally's guesses are gone: Lupita's and Amazon show their tidied names, and no “Tally's guess” appears. Blue Bottle's name still comes from your bank. The same in A, B and C.",
+							screen: <NamesList look="tidied" />,
+						},
+						{
+							name: "With Suggest store names off · The edit panel",
+							note: "Blue Bottle's name is still offered, labelled “From your bank” in muted words, as it is with the switch on.",
+							screen: bankPanel,
+						},
+						{
+							name: "With Suggest store names off · The review screen",
+							note: "Your bank's names are still asked, with “From your bank” under the name. No “Tally's guess” appears, so there is less to go through.",
+							screen: (
+								<NameQuestion id="p87-off-review" of="bank" source={fromBank} />
+							),
 						},
 					]}
 				/>
