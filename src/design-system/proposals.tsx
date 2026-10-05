@@ -4,6 +4,7 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
+import { AutofillProposals } from "./proposals-autofill";
 import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
@@ -15,6 +16,7 @@ import { Phase5PlansProposals } from "./proposals-phase5-plans";
 import { Phase5TransactionsProposals } from "./proposals-phase5-transactions";
 import { Phase35Proposals } from "./proposals-phase35";
 import { Phase35StatesProposals } from "./proposals-phase35-states";
+import { RulesProposals } from "./proposals-rules";
 
 // What the owner decided on 2026-09-26, 2026-09-28 and 2026-09-29 (decisions 46, 48, 50, 54, 55, 59
 // and 60), and the issue each ships in.
@@ -280,6 +282,8 @@ export function Proposals() {
 					how a screen looks, drawn to decide by seeing.
 				</p>
 				<DetailsProposals />
+				<RulesProposals />
+				<AutofillProposals />
 			</section>
 
 			<section aria-labelledby="followups-title" class="mt-12">

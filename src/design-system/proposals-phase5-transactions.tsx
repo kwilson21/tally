@@ -23,7 +23,7 @@ import { Fixed, Options } from "./proposal-parts";
 import { Specimen } from "./specimen";
 
 /** A rule the spec still needs before the feature is built. */
-function NeedsLine({ children }: { children?: Child }) {
+export function NeedsLine({ children }: { children?: Child }) {
 	return (
 		<p class="max-w-prose text-sm">
 			<span class="font-medium">Rule to write before building: </span>
@@ -821,12 +821,47 @@ const renameNote = (
 // ---------------------------------------------------------------------------------------------
 // P69: see and remove merchant rules.
 
-const RULES: [string, Cat, number][] = [
+export const RULES: [string, Cat, number][] = [
 	["Costco", GROCERIES, 23],
 	["Shell", GAS, 31],
 	["Trader Joe's", GROCERIES, 18],
 	["Blue Bottle Coffee", EATING_OUT, 14],
 ];
+
+/** The merchant rules as rows, each ending in a terracotta Remove (P88 draws them beside its own). */
+export function RuleRows({
+	rules = RULES,
+}: {
+	rules?: [string, Cat, number][];
+}) {
+	return (
+		<ul class="mt-3 divide-y divide-rule border-y border-rule">
+			{rules.map(([merchant, cat, n]) => (
+				<li class="flex min-h-16 items-center gap-4 py-2">
+					<CategoryIcon icon={cat.icon} color={cat.color} />
+					<span class="min-w-0 flex-1">
+						{/* No truncation: it would cut off the category, the point of the row. The arrow and
+						    category stay together, so a long merchant name wraps before them. */}
+						<span class="block text-lg leading-6">
+							{merchant}{" "}
+							<span class="whitespace-nowrap">
+								<span aria-hidden="true">→ </span>
+								<span class="sr-only">is always </span>
+								{cat.name}
+							</span>
+						</span>
+						<span class="block leading-6 text-muted">
+							Always {cat.name} · {n} transactions
+						</span>
+					</span>
+					<Button kind="text" type="button">
+						Remove<span class="sr-only"> {merchant}</span>
+					</Button>
+				</li>
+			))}
+		</ul>
+	);
+}
 
 /**
  * A: the section, drawn first on Settings so it fits; each row ends in a terracotta Remove. It's
@@ -840,31 +875,7 @@ const rulesList = (
 				Always for these merchants
 			</h2>
 			<p class="mt-1 text-muted">Tally sorts these merchants for you.</p>
-			<ul class="mt-3 divide-y divide-rule border-y border-rule">
-				{RULES.map(([merchant, cat, n]) => (
-					<li class="flex min-h-16 items-center gap-4 py-2">
-						<CategoryIcon icon={cat.icon} color={cat.color} />
-						<span class="min-w-0 flex-1">
-							{/* No truncation: it would cut off the category, the point of the row. The arrow and
-						    category stay together, so a long merchant name wraps before them. */}
-							<span class="block text-lg leading-6">
-								{merchant}{" "}
-								<span class="whitespace-nowrap">
-									<span aria-hidden="true">→ </span>
-									<span class="sr-only">is always </span>
-									{cat.name}
-								</span>
-							</span>
-							<span class="block leading-6 text-muted">
-								Always {cat.name} · {n} transactions
-							</span>
-						</span>
-						<Button kind="text" type="button">
-							Remove<span class="sr-only"> {merchant}</span>
-						</Button>
-					</li>
-				))}
-			</ul>
+			<RuleRows />
 		</section>
 	</>
 );

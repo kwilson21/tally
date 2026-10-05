@@ -960,10 +960,10 @@ type SwitchWords = {
 };
 
 /** Said once for every option, so the pictures differ only in the switches' own words. */
-const SWITCH_GROUP_LINE =
+export const SWITCH_GROUP_LINE =
 	"Tally only suggests; you can change anything it does. Off means your choices and rules only.";
 
-const SAY_WHAT_IT_DOES: SwitchWords = {
+export const SAY_WHAT_IT_DOES: SwitchWords = {
 	features: [
 		{
 			id: "names",
