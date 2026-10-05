@@ -5,6 +5,7 @@ import type { ListRow } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { ICON_NAMES, Icon } from "../src/views/icons";
 import { PendingNote } from "../src/views/pending-note";
+import { SelectableTransactionRow } from "../src/views/selectable-transaction-row";
 import { TransactionRow } from "../src/views/transaction-row";
 
 // P34 A (decision 72): "Pending" sits on the row's caption line, and the edit panel says the
@@ -153,6 +154,34 @@ describe("Pending on a row's caption line", () => {
 	});
 });
 
+describe("a pending row in select mode", () => {
+	/** What the checkbox is named by: the hidden label its aria-labelledby points at. */
+	async function checkboxName(row: ListRow) {
+		const html = await SelectableTransactionRow({
+			row,
+			today: "2026-10-05",
+		}).toString();
+		const id = html.match(/aria-labelledby="([^"]+)"/)?.[1];
+		const label = html.match(new RegExp(`id="${id}"[^>]*>(.*?)</span>`, "s"));
+		return (label?.[1] ?? "").replaceAll("&#39;", "'");
+	}
+
+	it("is announced as pending by the checkbox's name, which has no other way to say so", async () => {
+		expect(await checkboxName(base)).toBe(
+			"Select Lupita's Taqueria, $22.40, Oct 4, pending",
+		);
+	});
+
+	it("says nothing about pending on a row that isn't", async () => {
+		expect(await checkboxName({ ...base, pending: false })).toBe(
+			"Select Lupita's Taqueria, $22.40, Oct 4",
+		);
+		expect(await checkboxName({ ...base, pending: undefined })).not.toMatch(
+			/pending/i,
+		);
+	});
+});
+
 describe("PendingNote", () => {
 	it("says what pending means, with a clock that isn't announced", async () => {
 		const html = await PendingNote().toString();
@@ -210,9 +239,17 @@ describe("pages for a pending transaction", () => {
 		expect(li(POSTED)).not.toContain("Pending");
 	});
 
-	it("lists it in select mode too", async () => {
+	it("lists it in select mode too, and the checkbox's name says it's pending", async () => {
 		const { html } = await get("/transactions?select=1");
 		expect(html).toContain("· Pending");
+		const label = (id: number) =>
+			html.match(
+				new RegExp(`id="select-${id}-name"[^>]*>(.*?)</span>`, "s"),
+			)?.[1] ?? "";
+		expect(words(label(PENDING)).replace(/\s+/g, " ")).toMatch(
+			/^Select Pantry one, \+?\$11\.00, .+, pending$/,
+		);
+		expect(label(POSTED)).not.toMatch(/pending/i);
 	});
 
 	it("says in its edit panel, under the date, that the bank hasn't finished it", async () => {

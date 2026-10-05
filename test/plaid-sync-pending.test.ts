@@ -991,6 +991,73 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await refundOf(refundOfPart)).toBeNull();
 	});
 
+	describe("a moved split's parts follow the posted row's exclusion", () => {
+		/** September's counted spending, which counts a split through its parts and skips the parent. */
+		const spent = async () =>
+			summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(env.DB, "2026-09")),
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+
+		/** A split pending purchase a person excluded: the parts carry the exclusion, as saving an edit does. */
+		async function excludedPendingSplit(item: number) {
+			const ids = await bothStored(item);
+			const parts = await splitInto(ids.pending, 600, 634);
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ? OR parent_id = ?",
+				).bind(ids.pending, ids.pending),
+			]);
+			return { ...ids, parts };
+		}
+
+		it("counts the charge when a person included the posted row after excluding the pending one", async () => {
+			const item = await addItem();
+			const ids = await excludedPendingSplit(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = ?",
+			)
+				.bind(ids.posted)
+				.run();
+			expect(await spent()).toBe(1234);
+
+			await post(item);
+
+			const { results } = await env.DB.prepare(
+				"SELECT id, parent_id, excluded, excluded_source FROM transactions WHERE parent_id IS NOT NULL ORDER BY id",
+			).all();
+			expect(results).toEqual(
+				ids.parts.map((id) => ({
+					id,
+					parent_id: ids.posted,
+					excluded: 0,
+					excluded_source: "user",
+				})),
+			);
+			expect(await row("posted-1")).toMatchObject({ excluded: 0, is_split: 1 });
+			// The charge still counts, once, through its parts.
+			expect(await spent()).toBe(1234);
+		});
+
+		it("leaves the whole charge out when the person's exclusion moves onto the posted row", async () => {
+			const item = await addItem();
+			const ids = await excludedPendingSplit(item);
+			await post(item);
+			expect(await row("posted-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "user",
+			});
+			expect(
+				await count(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NOT NULL AND excluded = 1 AND excluded_source = 'user'",
+				),
+			).toBe(2);
+			expect(await spent()).toBe(0);
+			expect(ids.parts).toHaveLength(2);
+		});
+	});
+
 	it("keeps a split the posted transaction already has, and drops the pending one's", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);

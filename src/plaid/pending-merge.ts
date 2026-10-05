@@ -59,8 +59,16 @@ const STATEMENTS = [
 	`UPDATE transactions SET refund_of_id = p.refund_of_id
 	 ${FROM_PENDING} AND p.refund_of_id IS NOT NULL AND p.refund_of_id != transactions.id
 	 AND transactions.refund_of_id IS NULL`,
-	// A split: its parts move when the amount is unchanged and the posted row has none of its own...
-	`UPDATE transactions SET parent_id = ${POSTED}, date = ?6, raw_name = ?7, merchant_name = ?8
+	// A split: its parts move when the amount is unchanged and the posted row has none of its own. A split
+	// is one bank transaction, so the parts take the posted row's exclusion and review (the columns saving
+	// a split copies from its purchase), now that it's decided: else a purchase a person excluded while
+	// pending but included once posted would have neither it nor its parts counted.
+	`UPDATE transactions SET parent_id = ${POSTED}, date = ?6, raw_name = ?7, merchant_name = ?8,
+		excluded = (SELECT excluded FROM transactions WHERE id = ${POSTED}),
+		excluded_source = (SELECT excluded_source FROM transactions WHERE id = ${POSTED}),
+		income_source = (SELECT income_source FROM transactions WHERE id = ${POSTED}),
+		credit_reviewed = (SELECT credit_reviewed FROM transactions WHERE id = ${POSTED}),
+		credit_reviewed_by = (SELECT credit_reviewed_by FROM transactions WHERE id = ${POSTED})
 	 WHERE parent_id = ${PENDING} AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents = ?3)
 	 AND EXISTS (SELECT 1 FROM transactions n WHERE n.id = ${POSTED} AND n.is_split = 0)
@@ -68,7 +76,7 @@ const STATEMENTS = [
 	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL
 	 WHERE id = ${POSTED} AND is_split = 0 AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,
-	// ...and when the amount changed, the posted row says its split was removed (the parts go with the pending row).
+	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row).
 	`UPDATE transactions SET split_removed_from_cents = p.amount_cents
 	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
 	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
