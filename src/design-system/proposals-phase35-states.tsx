@@ -5,6 +5,7 @@
 // owner can pick by seeing (decision 47). Nothing here is decided until the owner picks.
 
 import type { Child } from "hono/jsx";
+import { formatCents } from "../money";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
@@ -13,10 +14,19 @@ import { HomeTop } from "../views/home-top";
 import { Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
-import { ProgressRow } from "../views/progress-row";
 import { TextInput } from "../views/text-input";
-import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { Fixed, Options, Sheet } from "./proposal-parts";
 import { Specimen } from "./specimen";
+
+/** A rule the spec still needs before the feature is built: open, not fixed. */
+function NeedsLine({ children }: { children?: Child }) {
+	return (
+		<p class="max-w-prose text-sm">
+			<span class="font-medium">Rule to write before building: </span>
+			{children}
+		</p>
+	);
+}
 
 // ---------------------------------------------------------------------------------------------
 // P38: a failed save, drawn on the budget sheet over Home.
@@ -24,40 +34,36 @@ import { Specimen } from "./specimen";
 /** spec §8.5's words for any htmx request that fails. */
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 
-/** Home behind the sheet, as the demo shows it on Oct 5. Rows aren't links: it's a picture. */
+/**
+ * Home behind the sheet, as the demo shows it on Oct 5 (spec §6), from the seed's numbers:
+ * budgets of $1,700 (Groceries 700, Eating Out 250, Gas 200, Kids 300, Household 250), $522 spent so
+ * far (those five categories $196 + $92 + $48 + $60 + $30 = $426, plus $96 not yet in a category),
+ * and $207 set aside for the bills to pay soon (Electric $142 and Internet $65), so $971 is safe.
+ */
+const SAFE_TO_SPEND = 170000 - 52200 - 20700;
 const homeBehind = (
-	<>
-		<HomeTop
-			month="October"
-			safeToSpendCents={141200}
-			status="Everything is on track so far."
-			demo
-			band={{
-				href: "#p38-failed-save",
-				text: "4 transactions need a category",
-				detail: "$86 of this month's spending",
-			}}
-		/>
-		<ul class="mt-4">
-			<ProgressRow
-				name="Groceries"
-				icon="groceries"
-				color="cat-blue"
-				spentCents={19600}
-				budgetCents={90000}
-			/>
-		</ul>
-	</>
+	<HomeTop
+		month="October"
+		safeToSpendCents={SAFE_TO_SPEND}
+		status="Everything is on track."
+		demo
+		band={{
+			href: "#p38-failed-save",
+			text: "4 transactions need a category",
+			detail: `${formatCents(9600, { wholeDollars: true })} of this month's spending`,
+		}}
+	/>
 );
 
 /**
  * The prototype error toast: toast.js's look (minus its shadow-sm, which the token test allows
- * only in toast.js) with an alert icon before the words, so the failure isn't color alone. While a
- * sheet is open it sits above the sheet, at the top of the screen, so it never covers the form.
+ * only in toast.js) with an alert icon before the words, so the failure isn't color alone. It sits
+ * where every toast does: Layout's #toasts is fixed 9rem above the bottom of the screen, which is
+ * the bottom edge of the sheet here.
  */
 function ErrorToast() {
 	return (
-		<div class="absolute inset-x-4 top-3 flex justify-center">
+		<div class="absolute inset-x-4 bottom-36 flex flex-col items-center gap-2">
 			<p
 				role="alert"
 				class="flex items-start gap-2 rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink"
@@ -105,7 +111,7 @@ function failedBudgetSheet(id: string, look: "toast" | "line" | "both") {
 						lastMonthCents={36500}
 					/>
 					{look !== "toast" && sheetLine}
-					<div class="grid grid-cols-2 gap-3">
+					<div class="mt-2 grid grid-cols-2 gap-3">
 						<Button kind="secondary" type="button" class="w-full">
 							Cancel
 						</Button>
@@ -149,10 +155,12 @@ function errorEmpty(kind: "404" | "500") {
 	);
 }
 
-/** B: a plain page: the serif title, a sentence, and two ways back as terracotta links. */
+/** B: a plain page: the serif page title, a sentence, and two ways back as terracotta links. */
 const errorPlain = (
 	<>
-		<Title>Page not found</Title>
+		<h1 class="font-serif text-5xl font-semibold tracking-tight">
+			Page not found
+		</h1>
 		<p class="mt-3 text-lg">The link may be old or mistyped.</p>
 		<p class="mt-2 flex gap-6">
 			<a href="/" class="inline-flex min-h-11 items-center">
@@ -214,7 +222,7 @@ const firstNoBank = (
 	</>
 );
 
-/** A, while the first import runs: the magnifier (looking), not the tick, which would say "done". */
+/** A, while the first import runs: the magnifier (Tally is looking), not the tick, which would say "done". */
 const firstImporting = (
 	<>
 		{transactionsTop}
@@ -226,12 +234,15 @@ const firstImporting = (
 	</>
 );
 
-/** B, before any bank: one muted sentence with the link in it. */
+/** B, before any bank: one muted sentence with the link in it (its padding makes a 44px target without a taller line). */
 const lineNoBank = (
 	<>
 		{transactionsTop}
 		<p class="mt-6 text-lg text-muted">
-			<a href="/accounts">Link a bank</a> to see transactions.
+			<a href="/accounts" class="-my-3 inline-block py-3">
+				Link a bank
+			</a>{" "}
+			to see transactions.
 		</p>
 	</>
 );
@@ -262,8 +273,10 @@ const lineImporting = (
 
 /**
  * The BottomSheet holding a long form, as it sits on a phone: it grows to 90% of the screen's
- * height (its max-h-[90vh]), so only a strip of the page shows above it. Drawn in place, like Sheet;
- * `scrolled` draws it scrolled down past the title and Name, so Save shows.
+ * height (its max-h-[90vh]), so only a strip of the page shows above it, and the rest of the form
+ * scrolls. Drawn in place, like Sheet, from its top: a form re-rendered by the server starts there.
+ * `scrolled` draws it scrolled down past the title and Name, so Save shows. It ends at the phone
+ * frame's bottom edge (a Sheet runs a little past it), so no sliver of the next field shows there.
  */
 function TallSheet({
 	behind,
@@ -275,10 +288,10 @@ function TallSheet({
 	children?: Child;
 }) {
 	return (
-		<div class="relative -mx-5 h-[686px] overflow-hidden">
+		<div class="relative -mx-5 h-[676px] overflow-hidden">
 			<div class="px-5">{behind}</div>
 			<div class="absolute inset-0 bg-ink/30" />
-			<div class="absolute inset-x-0 bottom-0 top-12 overflow-hidden rounded-t-sheet bg-paper p-5">
+			<div class="absolute inset-x-0 bottom-0 top-12 overflow-hidden rounded-t-sheet bg-paper px-5 pb-5 pt-6">
 				<div class={`flex flex-col gap-3 ${scrolled ? "-mt-36" : ""}`}>
 					{children}
 				</div>
@@ -297,10 +310,13 @@ const billsBehind = (
 	</>
 );
 
+/** The demo's five categories in their order (src/demo/seed.ts), as the form lists them. */
 const BILL_CATEGORIES = [
-	{ name: "Household", icon: "household", color: "cat-brown" },
-	{ name: "Kids", icon: "kids", color: "cat-ochre" },
+	{ name: "Groceries", icon: "groceries", color: "cat-blue" },
+	{ name: "Eating Out", icon: "eating-out", color: "cat-plum" },
 	{ name: "Gas", icon: "gas", color: "cat-slate" },
+	{ name: "Kids", icon: "kids", color: "cat-ochre" },
+	{ name: "Household", icon: "household", color: "cat-brown" },
 ];
 
 type BillForm = {
@@ -310,6 +326,8 @@ type BillForm = {
 	amount: string;
 	day: string;
 	paidTo: string;
+	/** The category the person picked. */
+	category: string;
 	nameError?: string;
 	amountError?: string;
 	/** Drawn right under the amount: A's confirm chip. */
@@ -367,12 +385,12 @@ function billForm(f: BillForm) {
 			<fieldset>
 				<legend>Category</legend>
 				<div class="mt-1 flex flex-wrap gap-2">
-					{BILL_CATEGORIES.map((c, i) => (
+					{BILL_CATEGORIES.map((c) => (
 						<Chip
 							type="radio"
 							name={`${f.id}-category`}
 							value={c.name}
-							checked={i === 0}
+							checked={c.name === f.category}
 							icon={<CategoryIcon icon={c.icon} color={c.color} />}
 						>
 							{c.name}
@@ -386,11 +404,13 @@ function billForm(f: BillForm) {
 				value={f.paidTo}
 				surface="paper"
 			/>
-			<div class="flex gap-3">
-				<Button kind="secondary" type="button">
-					Cancel
-				</Button>
-				<Button type="button">{f.save ?? "Save"}</Button>
+			<div class="flex items-center justify-between gap-3">
+				<div class="flex gap-3">
+					<Button kind="secondary" type="button">
+						Cancel
+					</Button>
+					<Button type="button">{f.save ?? "Save"}</Button>
+				</div>
 			</div>
 		</>
 	);
@@ -404,6 +424,7 @@ const RENT = {
 	name: "Rent",
 	amount: "150000",
 	day: "1",
+	category: "Household",
 	paidTo: "HARBOR PROPERTY MGMT",
 };
 const TOO_BIG = "$150,000.00 is a lot for a bill.";
@@ -417,7 +438,12 @@ const confirmTick = (
 			amountError: TOO_BIG,
 			afterAmount: (
 				<div class="flex justify-center">
-					<Chip type="checkbox" name="p45-a-confirm" value="15000000">
+					<Chip
+						type="checkbox"
+						name="p45-a-confirm"
+						value="15000000"
+						describedBy="p45-a-amount-error"
+					>
 						Yes, $150,000.00 is right
 					</Chip>
 				</div>
@@ -467,6 +493,7 @@ const duplicateName = (
 			name: "Internet",
 			amount: "65.00",
 			day: "8",
+			category: "Household",
 			paidTo: "AMAZON.COM*RT4K2",
 			nameError: "You already have a bill called Internet.",
 		})}
@@ -484,16 +511,23 @@ export function Phase35StatesProposals() {
 				sentence="What you see when a save doesn't reach Tally, here the budget sheet on a bad connection. Pick where the words go."
 			>
 				<Fixed>
-					a failed htmx request shows “{COULDNT_SAVE}” in role="alert", and what
-					you typed stays (§8.5). No new script: toast.js already shows an error
-					toast as an alert.
+					a failed htmx request shows “{COULDNT_SAVE}” in role="alert" (§8.5).
 				</Fixed>
+				<NeedsLine>
+					any failed request (a dropped connection or an error reply) raises the
+					existing toast event with type "error" and these words, and leaves the
+					page as it is, so an open sheet keeps what was typed and Save comes
+					back to rest. For A or C, toast.js also draws the alert icon, and the
+					toast region goes above an open sheet: today it has no z-index and the
+					sheet is z-50, so the toast would sit behind it.
+				</NeedsLine>
 				<Options
 					options={[
 						{
 							name: "Option A · An error toast",
-							note: "The toast you already know, with an alert icon; while a sheet is open it shows above it, and the sheet keeps what you typed.",
-							tradeoff: "it goes after 4 seconds, like every toast.",
+							note: "The toast you already know, with an alert icon, where every toast shows (above the tab bar; drawn flat here, the real one floats a little); the sheet stays open with what was typed.",
+							tradeoff:
+								"it goes after 4 seconds, and over a sheet it covers part of the form until it does.",
 							recommended:
 								"one place for every failed request, including Adjust taps and Sync now, which have no sheet, and the listener already exists.",
 							screen: failedBudgetSheet("p38-a", "toast"),
@@ -502,7 +536,7 @@ export function Phase35StatesProposals() {
 							name: "Option B · A line in the sheet",
 							note: "Above Save, the alert icon and the words; outside a sheet it falls back to the toast.",
 							tradeoff:
-								"two looks for one failure, and the script has to find the sheet to add the line.",
+								"two looks for one failure, and a dropped connection brings no reply to carry the line, so a script has to add it.",
 							screen: failedBudgetSheet("p38-b", "line"),
 						},
 						{
@@ -521,10 +555,12 @@ export function Phase35StatesProposals() {
 				tier="visual"
 				sentence="The page for a link that goes nowhere, and the page for a mistake on Tally's side. Pick their look."
 			>
-				<Fixed>
-					each is Tally's own page inside the Layout, with the navigation, never
-					a bare error (§8.5).
-				</Fixed>
+				<Fixed>the app has its own 404 and 500 pages (§8.5).</Fixed>
+				<NeedsLine>
+					both are drawn inside the Layout, so the navigation and the Feedback
+					button are there and you're never stuck; the 500 page shows nothing
+					technical; Try again loads the same address.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -543,14 +579,14 @@ export function Phase35StatesProposals() {
 						},
 						{
 							name: "Option B · A plain page",
-							note: "A serif title, a sentence and two links back, Home and Transactions; no drawing.",
+							note: "A serif title, a sentence and two links back, Home and Transactions; no drawing. The 500 page changes the words, not the look.",
 							tradeoff:
 								"it looks unlike every other empty or missing thing in Tally.",
 							screen: errorPlain,
 						},
 						{
 							name: "Option C · The ledger drawing",
-							note: "Home's notebook drawing, larger, over a serif 404 and the sentence.",
+							note: "Home's notebook drawing, larger, over a serif 404 and the sentence. The 500 page says “500” and its own sentence.",
 							tradeoff:
 								"an error number means nothing to most people, and the drawing is Home's.",
 							screen: errorLedger,
@@ -566,10 +602,19 @@ export function Phase35StatesProposals() {
 				sentence="Transactions before the bank's first ones arrive, in the family app: before a bank is linked, and while the first import runs. Pick how it says so."
 			>
 				<Fixed>
-					it says “Importing your transactions…” or “Link a bank to see
-					transactions”, never “No transactions match” (§8.5), and an empty list
-					is an EmptyState (decisions 54 and 55).
+					the first visit's empty list says “Importing your transactions…” or
+					“Link a bank to see transactions”, not “No transactions match” (§8.5).
 				</Fixed>
+				<NeedsLine>
+					“nothing at all” means no transaction in any month, so a search or
+					filter with no match still says “No transactions match these
+					filters.”; “Link a bank” shows while no bank is linked and
+					“Importing…” once one is. Link a bank is a secondary link to Accounts,
+					not decision 55's primary button, because Plaid Link loads only on
+					Accounts (§10). For “this page shows them when they're in” to be true,
+					the page has to refresh itself while importing; the “few minutes” is
+					to be checked against a real first sync.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -578,13 +623,13 @@ export function Phase35StatesProposals() {
 							tradeoff:
 								"with no bank yet, Add cash and Link a bank are two outline buttons on one screen.",
 							recommended:
-								"the same EmptyState as every list, and each says the one thing to do or wait for.",
+								"the same EmptyState as every list (decisions 54 and 55), and each says the one thing to do or wait for.",
 							family: true,
 							screen: firstNoBank,
 						},
 						{
 							name: "Option A · Importing",
-							note: "While the first import runs: the magnifier, the sentence and how long it takes; no button.",
+							note: "While the first import runs: the magnifier (Tally is looking; the tick would say done), the sentence and how long it takes; no button.",
 							family: true,
 							screen: firstImporting,
 						},
@@ -592,7 +637,7 @@ export function Phase35StatesProposals() {
 							name: "Option B · Only a line",
 							note: "Before a bank: the title, Add cash and one muted sentence with the link in it.",
 							tradeoff:
-								"a lone muted line is what decision 54 replaced, and a ring turning for minutes looks stuck.",
+								"a lone muted line is what decision 54 replaced, so choosing it means a new decision entry; and a ring turning for minutes looks stuck.",
 							family: true,
 							screen: lineNoBank,
 						},
@@ -614,9 +659,16 @@ export function Phase35StatesProposals() {
 			>
 				<Fixed>
 					an amount over $100,000 needs confirming, and no two active bills
-					share a name (§8.5). The form stays in its sheet (P15), and the server
-					re-renders it with field errors in role="alert" (§10).
+					share a name (§8.5); the form is in a bottom sheet (§8.2), and invalid
+					input comes back as a field error in role="alert" (§10).
 				</Fixed>
+				<NeedsLine>
+					“over” means more than $100,000.00, so exactly that saves without
+					asking, and editing a bill's amount asks too; the confirmation covers
+					that amount only, so changing it asks again; names match ignoring
+					case, as categories do (§7), and reactivating an inactive bill that
+					would duplicate an active one is refused the same way.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -638,7 +690,7 @@ export function Phase35StatesProposals() {
 							name: "Option C · Save anyway",
 							note: "The same line under the amount, and Save becomes “Save $150,000.00 anyway” (drawn scrolled down to it).",
 							tradeoff:
-								"the warning and the button that answers it are a screen apart.",
+								"the same Save button saves it, so a habitual second tap can confirm without reading, and its long label takes two lines on a phone.",
 							screen: saveAnyway,
 						},
 						{

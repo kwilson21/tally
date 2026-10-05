@@ -143,7 +143,10 @@ function Month({ children }: { children?: Child }) {
 	);
 }
 
-/** Safe to spend's amount, at HomeTop's size. */
+/**
+ * Safe to spend's amount, at HomeTop's phone size (60px; the picture is a phone, so no lg: size). It
+ * never breaks, so a "−" can't sit alone on a line.
+ */
 function Headline({
 	tone = "",
 	children,
@@ -153,7 +156,7 @@ function Headline({
 }) {
 	return (
 		<p
-			class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${tone}`}
+			class={`font-serif text-6xl font-semibold tracking-tight whitespace-nowrap ${tone}`}
 		>
 			{children}
 		</p>
@@ -197,7 +200,10 @@ function Top({
 					)}
 					{amount}
 				</div>
-				<LedgerIllustration />
+				{/* The picture is a phone: without this, LedgerIllustration's lg: size crowds the amount at 1024px and up. */}
+				<div class="shrink-0 lg:[&>svg]:size-28">
+					<LedgerIllustration />
+				</div>
 			</div>
 			<p class="mt-3 font-serif text-lg italic">{status}</p>
 			{under}
@@ -406,20 +412,32 @@ function MonthArrows({
 	);
 }
 
-/** P46 A: September as a finished month. How it ended replaces Safe to spend; nothing to act on. */
+/** How a finished month ended, in words under its number: a check and "under budget", or the alert and "over budget". */
+function EndedAs({ cents }: { cents: number }) {
+	return cents >= 0 ? (
+		<p class="flex items-center gap-1 text-lg text-muted">
+			<span class="text-ok">
+				<Icon name="check" class="size-5" />
+			</span>
+			under budget
+		</p>
+	) : (
+		<OverWords>over budget</OverWords>
+	);
+}
+
+/** P46 A: "September ended $86 under budget" in Safe to spend's place; nothing to act on. */
 const pastMonth = (
 	<>
 		<Top
 			heading={<MonthArrows month="September" prev="August" next="October" />}
-			label={
-				<p class="flex items-center gap-2 text-lg text-muted">
-					<span class="text-ok">
-						<Icon name="check" class="size-5" />
-					</span>
-					Under budget
-				</p>
+			label="September ended"
+			amount={
+				<>
+					<Headline>{dollars(Math.abs(SEPTEMBER_LEFT_CENTS))}</Headline>
+					<EndedAs cents={SEPTEMBER_LEFT_CENTS} />
+				</>
 			}
-			amount={<Headline>{dollars(SEPTEMBER_LEFT_CENTS)}</Headline>}
 			status={endedSentence(SEPTEMBER)}
 			after={
 				<a href="#p46-past-months" class="inline-flex min-h-11 items-center">
@@ -536,12 +554,17 @@ const belowZero = (top: Child) => (
 	</>
 );
 
-/** P47 A: the label says it, brick with the icon; the amount stays a plain amount. */
+/** P47 A: no "Safe to spend"; the headline is how far over, a plain amount, with the icon and "over" in brick. */
 const overByLabel = belowZero(
 	<Top
-		label={<OverWords>Over budget by</OverWords>}
-		amount={<Headline>{dollars(OVER_BY_CENTS)}</Headline>}
-		status="Groceries and Eating Out are over. Spending more adds to it."
+		label={null}
+		amount={
+			<>
+				<Headline>{dollars(OVER_BY_CENTS)}</Headline>
+				<OverWords>over</OverWords>
+			</>
+		}
+		status="Over budget this month. Spending more takes it further over."
 		after={null}
 	/>,
 );
@@ -657,9 +680,9 @@ const whyLeads = (
 
 /** The sum, line by line: what the budgets have, and each thing Safe to spend takes off. */
 const SUM_LINES: [string, number][] = [
-	["Spent in budgets", IN_BUDGETS_CENTS],
-	["No category yet", UNCATEGORIZED.cents],
-	["Categories with no budget", NO_BUDGET_CENTS],
+	["Spent in budgeted categories", IN_BUDGETS_CENTS],
+	["Spent, no category yet", UNCATEGORIZED.cents],
+	["Spent, no budget", NO_BUDGET_CENTS],
 	["Bills due", BILLS_DUE_CENTS],
 ];
 
@@ -703,7 +726,8 @@ const sumLine = (
 			under={
 				<p class="mt-1 text-sm text-muted">
 					{dollars(BUDGET_CENTS)} budget − {dollars(SPENT_CENTS)} spent −{" "}
-					{dollars(BILLS_DUE_CENTS)} bills due = {dollars(SAFE_CENTS)}
+					{dollars(BILLS_DUE_CENTS)} bills due{" "}
+					<span class="whitespace-nowrap">= {dollars(SAFE_CENTS)}</span>
 				</p>
 			}
 		/>
@@ -718,33 +742,33 @@ const sumLine = (
 const nearlySpent = (r: Row) =>
 	r.spentCents <= r.budgetCents && r.spentCents * 10 >= r.budgetCents * 8;
 
-/** Home with each nearly spent row drawn by the prototype, and every other row by ProgressRow. */
-function nearHome(under?: (r: Row) => Child, status = STATUS) {
+/**
+ * The Budget list scrolled into view, each nearly spent row drawn by the prototype and every other
+ * row by ProgressRow, so A and B show the row they change (on Home's first screen it's below the fold).
+ */
+function nearList(under: (r: Row) => Child) {
 	return (
-		<>
-			{homeTop(BAND, status)}
-			<Budget>
-				{OCTOBER.map((r, i) =>
-					under && nearlySpent(r) ? (
-						<ProtoRow r={r} href={`/budget/${i + 1}`} under={under(r)} />
-					) : (
-						<ProgressRow {...r} href={`/budget/${i + 1}`} />
-					),
-				)}
-			</Budget>
-		</>
+		<Budget>
+			{OCTOBER.map((r, i) =>
+				nearlySpent(r) ? (
+					<ProtoRow r={r} href={`/budget/${i + 1}`} under={under(r)} />
+				) : (
+					<ProgressRow {...r} href={`/budget/${i + 1}`} />
+				),
+			)}
+		</Budget>
 	);
 }
 
 /** P49 A: where an over row says "$36 over", a nearly spent one says what's left, in ink. */
-const nearLeft = nearHome((r) => (
+const nearLeft = nearList((r) => (
 	<p class="mt-1 text-right text-ink">
 		{dollars(r.budgetCents - r.spentCents)} left
 	</p>
 ));
 
 /** P49 B: a word and the alert icon, in ink. */
-const nearWord = nearHome(() => (
+const nearWord = nearList(() => (
 	<p class="mt-1 flex items-center justify-end gap-1 text-ink">
 		<Icon name="alert" class="size-5" />
 		Nearly spent
@@ -752,9 +776,14 @@ const nearWord = nearHome(() => (
 ));
 
 /** P49 C: rows as today; the sentence names it. */
-const nearSentence = nearHome(
-	undefined,
-	"Eating Out is $36 over and Gas is nearly spent. Everything else is on track.",
+const nearSentence = (
+	<>
+		{homeTop(
+			BAND,
+			"Eating Out is $36 over and Gas is nearly spent. Everything else is on track.",
+		)}
+		<Budget>{progressRows(OCTOBER)}</Budget>
+	</>
 );
 
 // ---------------------------------------------------------------------------------------------
@@ -823,11 +852,11 @@ const olderHome = (band: Child) => (
 	</>
 );
 
-/** P52 A: the Band's second line counts the older ones too. */
+/** P52 A: the Band's second line counts the older ones too; "and 6 more…" wraps as one piece, never "6 / more". */
 const olderOnBand = olderHome(
 	homeTop({
 		...BAND,
-		detail: `${BAND.detail} · ${UNCATEGORIZED.older} more from earlier months`,
+		detail: `${BAND.detail} ${`and ${UNCATEGORIZED.older} more from earlier months`.replaceAll(" ", "\u00a0")}`,
 	}),
 );
 
@@ -853,6 +882,9 @@ const olderLink = olderHome(
 // P53: from a budget row to its transactions (gap B8, beta feedback #39).
 
 const EATING_OUT = OCTOBER[1] as Row;
+/** What Eating Out spent in September, for the money input's "Last month" chip. */
+const LAST_MONTH_CENTS =
+	SEPTEMBER.find((r) => r.name === EATING_OUT.name)?.spentCents ?? 0;
 
 /** Eating Out's 9 transactions so far in October, newest first; they add up to the row's $286. */
 const EATING_OUT_ROWS: ListRow[] = (
@@ -907,7 +939,7 @@ const sheetLink = (
 				name="budget"
 				label="Budget from October on"
 				value="250.00"
-				lastMonthCents={36500}
+				lastMonthCents={LAST_MONTH_CENTS}
 			/>
 			<div class="mt-2 grid grid-cols-2 gap-3">
 				<Button kind="secondary" type="button" class="w-full">
@@ -978,19 +1010,21 @@ export function Phase5HomeProposals() {
 				<Fixed>
 					a month is the YYYY-MM of Plaid's dates, and "today" is the
 					household's date (§6, decision 67). A category's budget for a month is
-					its latest amount set on or before it, and a budget changes from this
-					month on (§6, §7).
+					its latest amount set on or before it, a budget changes from this
+					month on, and an archived category stays on Home for any month it has
+					spending in (§6, §7).
 				</Fixed>
 				<NeedsLine>
 					a finished month's number is its budget minus everything it counted,
-					with no bills set aside; its rows don't open a budget sheet; and it
-					goes back to the first month with transactions.
+					with no bills set aside, and says “over budget” with the alert icon
+					when it ended over; its rows don't open a budget sheet; and it goes
+					back to the first month with transactions.
 				</NeedsLine>
 				<Options
 					options={[
 						{
 							name: "Option A · Arrows by the month",
-							note: "‹ and › beside the month step back and forward (› is hidden on this month); a finished month shows how it ended, with no Band or Adjust, and Back to October.",
+							note: "‹ and › beside the month step back and forward (› is hidden on this month); a finished month reads “September ended $86 under budget” in Safe to spend's place, with no Band or Adjust, and a Back to October link.",
 							tradeoff: "one month at a time, so a year ago is twelve taps.",
 							recommended:
 								"it's where you're already looking, and a finished month reads as finished, not as something to do.",
@@ -998,16 +1032,16 @@ export function Phase5HomeProposals() {
 						},
 						{
 							name: "Option B · A list of past months",
-							note: "More → Past months lists each month and how it ended; each opens that month's Home.",
+							note: "A Past months list, under More or at the foot of Trends, shows each month and how it ended; each opens that month's Home.",
 							tradeoff:
-								"two taps away, and Home never hints that the past is there.",
+								"a few taps from Home, and Home never hints that the past is there.",
 							screen: pastList,
 						},
 						{
 							name: "Option C · A month menu",
 							note: "The phone's own month menu in place of the heading, above Safe to spend.",
 							tradeoff:
-								"a form control on Home's top every day for something done now and then; without htmx it needs a Show button.",
+								"a form control on Home's top every day for something done now and then; without JavaScript it needs a Show button.",
 							screen: monthSelect,
 						},
 					]}
@@ -1026,19 +1060,21 @@ export function Phase5HomeProposals() {
 					only with an icon and a word (DESIGN.md).
 				</Fixed>
 				<NeedsLine>
-					Home's words below $0 (at exactly $0, drawn: “$0” as today), and how a
-					category reads when refunds outweigh its spending (gap E9; today “-$20
-					of $250”).
+					Home's words below $0, including the sentence under the number
+					(today's still names the categories over and says “Everything else is
+					on track”, which B and C keep here); at exactly $0 Home says “$0” as
+					today; and how a category reads when refunds outweigh its spending
+					(gap E9; today “-$20 of $250”).
 				</NeedsLine>
 				<Options
 					options={[
 						{
-							name: "Option A · “Over budget by $120”",
-							note: "The label turns brick with the alert icon, above the amount in ink; the sentence says what more spending does.",
+							name: "Option A · “Over budget this month”",
+							note: "“Safe to spend” goes; the headline is how far over, “$120”, with the alert icon and “over” in brick under it, and the sentence says what more spending does.",
 							tradeoff:
-								"the headline means something else, so the label has to be read.",
+								"the big number now means how far over, not what's safe, so the words under it have to be read.",
 							recommended:
-								"the number stays a plain amount, and the icon and words carry the status, as on a budget row.",
+								"the number stays a plain amount, and the icon and word carry the status, as on a budget row.",
 							screen: overByLabel,
 						},
 						{
@@ -1087,22 +1123,21 @@ export function Phase5HomeProposals() {
 						},
 						{
 							name: "Option A · Where Why? leads",
-							note: "The budget section, with the sum and a line on why it's less than your budgets have left.",
+							note: "The budget section as the family app draws it, with the sum and a line on why it's less than your budgets have left (its other rules are left out of the picture).",
 							family: true,
 							screen: whyLeads,
 						},
 						{
 							name: "Option B · How it's worked out, on tap",
-							note: "A disclosure under the sentence opens the sum on Home, line by line.",
+							note: "A disclosure under the sentence opens the sum on Home, line by line (drawn open).",
 							tradeoff:
-								"the answer is right there, but open it pushes the Band off the first screen.",
+								"the answer is right there, but open it fills a third of the first screen and pushes the Budget list below it.",
 							screen: workedOut,
 						},
 						{
 							name: "Option C · The sum, always",
 							note: "A quiet line under the sentence: budget − spent − bills due = Safe to spend.",
-							tradeoff:
-								"always there, so Home's first screen carries arithmetic every day.",
+							tradeoff: `arithmetic on Home's first screen every day, and its “${dollars(SPENT_CENTS)} spent” is more than the rows add up to (${dollars(IN_BUDGETS_CENTS)}).`,
 							screen: sumLine,
 						},
 					]}
@@ -1113,7 +1148,7 @@ export function Phase5HomeProposals() {
 				id="p49-near-limit"
 				title="P49 · Nearly spent"
 				tier="visual"
-				sentence="A category at 80% or more of its budget gets no warning today; it's green until it's over (gap B3). Pick how a row says it's nearly spent."
+				sentence="A category at 80% or more of its budget gets no warning today; it's green until it's over (gap B3). Pick how a row says it's nearly spent; A and B are drawn scrolled to the Budget list."
 			>
 				<Fixed>
 					status is green or brick only, each with an icon and a word; no new
@@ -1121,8 +1156,8 @@ export function Phase5HomeProposals() {
 					have no limit marker (decision 46).
 				</Fixed>
 				<NeedsLine>
-					when a category is nearly spent (drawn: 80% or more of its budget
-					used, and not over).
+					when a category is nearly spent (gap B3 says 80% or more of its budget
+					used, and not over; drawn that way).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1138,7 +1173,7 @@ export function Phase5HomeProposals() {
 							name: "Option B · “Nearly spent” with the alert icon",
 							note: "The words and the alert icon, in ink, under the bar.",
 							tradeoff:
-								"the alert icon then means two things, told apart only by color.",
+								"the same alert icon then marks nearly spent (in ink) and over (in brick), so the icon alone no longer says which.",
 							screen: nearWord,
 						},
 						{
@@ -1159,7 +1194,7 @@ export function Phase5HomeProposals() {
 			>
 				<Fixed>
 					Safe to spend is the one thing on Home's first screen (decision 46),
-					and code writes Home's sentences from the numbers, never AI.
+					and code calculates every number (§2, rule 6).
 				</Fixed>
 				<NeedsLine>
 					the daily amount is Safe to spend divided by the days left, today
@@ -1173,7 +1208,7 @@ export function Phase5HomeProposals() {
 							note: `“${DAILY}” in quiet text under the status sentence.`,
 							tradeoff: "one more line before the Band.",
 							recommended:
-								"it answers “how much today?” right under the number it comes from.",
+								"it answers “how much can I spend today?” in the same glance as the number it comes from.",
 							screen: dailyUnder,
 						},
 						{
@@ -1234,7 +1269,8 @@ export function Phase5HomeProposals() {
 			>
 				<Fixed>
 					one Band on Home, carrying the count and this month's amount (decision
-					50). It leads to Organize, which already lists every month's.
+					50). It leads to Organize, which groups every transaction that needs a
+					category (§8.1).
 				</Fixed>
 				<NeedsLine>
 					the Band shows when this month or an earlier one has a transaction
@@ -1245,7 +1281,7 @@ export function Phase5HomeProposals() {
 					options={[
 						{
 							name: "Option A · On the Band's second line",
-							note: "“$228 of this month's spending · 6 more from earlier months”.",
+							note: "“$228 of this month's spending and 6 more from earlier months”, on two lines.",
 							tradeoff: "a longer second line.",
 							recommended:
 								"one Band still says everything that's waiting, and it already leads to all of them.",
@@ -1290,7 +1326,7 @@ export function Phase5HomeProposals() {
 							note: "“See the 9 transactions” under what's spent, above the amount.",
 							tradeoff: "one more tap to reach the list.",
 							recommended:
-								"the row keeps its one job, and the link sits beside the amount it explains.",
+								"the row keeps its one job, and the link sits right under the spent amount it explains.",
 							screen: sheetLink,
 						},
 						{

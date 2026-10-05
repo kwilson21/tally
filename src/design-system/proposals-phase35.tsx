@@ -25,7 +25,17 @@ import { Specimen } from "./specimen";
 
 const TODAY = "2026-10-05";
 
-/** The demo's five categories (src/demo/seed.ts), with the budgets Settings shows. */
+/** A rule the spec still needs before the feature is built: open, not fixed. */
+function NeedsLine({ children }: { children?: Child }) {
+	return (
+		<p class="max-w-prose text-sm">
+			<span class="font-medium">Rule to write before building: </span>
+			{children}
+		</p>
+	);
+}
+
+/** The demo's five categories (src/demo/seed.ts). */
 const CATS = {
 	groceries: { name: "Groceries", icon: "groceries", color: "cat-blue" },
 	eatingOut: { name: "Eating Out", icon: "eating-out", color: "cat-plum" },
@@ -303,13 +313,23 @@ function pendingPanel(look: "caption" | "tag") {
 // ---------------------------------------------------------------------------------------------
 // P35: the household's time zone in Settings.
 
-/** Each demo category's monthly budget in cents, as Settings lists it. */
+/** Each demo category's monthly budget this month, in cents (src/demo/seed.ts): $1,700 in all. */
+const BUDGETS = {
+	groceries: 70000,
+	eatingOut: 25000,
+	gas: 20000,
+	kids: 30000,
+	household: 25000,
+};
+const BUDGET_TOTAL = Object.values(BUDGETS).reduce((n, cents) => n + cents, 0);
+
+/**
+ * The end of Settings' Categories list: its last two rows. A phone's first screen can't hold the
+ * whole list and the new piece under it, so the picture starts partway down the list.
+ */
 const SETTINGS_BUDGETS: [Cat, number][] = [
-	[CATS.groceries, 90000],
-	[CATS.eatingOut, 30000],
-	[CATS.gas, 20000],
-	[CATS.kids, 30000],
-	[CATS.household, 15000],
+	[CATS.kids, BUDGETS.kids],
+	[CATS.household, BUDGETS.household],
 ];
 
 // The Settings list's summary row and chevron (src/routes/settings.tsx), so a new row has the same shape.
@@ -323,7 +343,7 @@ const chevron = (
 
 /** Settings' Categories section as the page draws it, every row closed, ending in Add category. */
 const categoriesSection = (
-	<section class="mt-6">
+	<section class="mt-8">
 		<h2 class="font-serif text-3xl font-semibold">Categories</h2>
 		<div class="mt-3 border-t border-rule">
 			{SETTINGS_BUDGETS.map(([c, cents]) => (
@@ -403,10 +423,13 @@ function ZoneSelect({
 	);
 }
 
-/** The labeled select with its hint, through the real FormField. */
-function ZoneField({ id }: { id: string }) {
+/**
+ * The labeled select with its hint, through the real FormField. Inside option A's open row the
+ * summary right above already says "Time zone", so the label stays for screen readers only.
+ */
+function ZoneField({ id, hideLabel }: { id: string; hideLabel?: boolean }) {
 	return (
-		<FormField id={id} label="Time zone" hint={ZONE_HINT}>
+		<FormField id={id} label="Time zone" hideLabel={hideLabel} hint={ZONE_HINT}>
 			{(a11y) => <ZoneSelect id={id} attrs={a11y} />}
 		</FormField>
 	);
@@ -447,7 +470,7 @@ function zoneRow(open: boolean) {
 					{chevron}
 				</summary>
 				<div class="flex flex-col gap-4 pb-5">
-					<ZoneField id={`p35-a-${open ? "open" : "closed"}`} />
+					<ZoneField id={`p35-a-${open ? "open" : "closed"}`} hideLabel />
 					<div class="flex flex-wrap items-center gap-3">
 						<Button type="button">Save</Button>
 						<Button kind="secondary" type="button">
@@ -518,8 +541,8 @@ const NETFLIX_BILL: BillRowData = {
 	icon: "household",
 	color: "cat-brown",
 };
-/** The payment the matcher left alone: the same merchant, in the date window, but 16% more. */
-const NEW_PRICE = { cents: 1799, date: "2026-10-03" };
+/** The payment the matcher left alone: P34's Netflix charge, same merchant and in the date window, but 16% more. */
+const NEW_PRICE = { cents: NETFLIX_TX.amountCents, date: NETFLIX_TX.date };
 
 const DUE: BillRowData[] = [
 	{
@@ -624,19 +647,19 @@ const overdueToday = <BillRow bill={NETFLIX_BILL} today={TODAY} />;
 
 /**
  * P36 B: the Overdue row drawn as BillRow draws it, with its status line asking instead: "Price
- * changed?" in ink, then the payment in muted words.
+ * changed?" in ink, then the payment in muted words. At 390px both don't fit one truncated line
+ * (the date would be cut off), so they take a line each and the row grows by one.
  */
 const overdueAsks = (
 	<li>
-		<span class="flex min-h-16 items-center gap-4">
+		<span class="flex min-h-16 items-center gap-4 py-2">
 			<CategoryIcon icon={NETFLIX_BILL.icon} color={NETFLIX_BILL.color} />
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg leading-6">
 					{NETFLIX_BILL.name}
 				</span>
-				<span class="block truncate leading-6 text-muted">
-					<span class="text-ink">Price changed?</span> {paidOn}
-				</span>
+				<span class="block leading-6">Price changed?</span>
+				<span class="block leading-6 text-muted">{paidOn}</span>
 			</span>
 			<span class="shrink-0 text-lg">
 				{formatCents(NETFLIX_BILL.amountCents)}
@@ -667,7 +690,7 @@ const billPage = (
 			Bills
 		</a>
 		<p class="text-sm text-muted">NETFLIX.COM</p>
-		<Title>Netflix</Title>
+		<h1 class="font-serif text-5xl font-semibold tracking-tight">Netflix</h1>
 		<p class="text-lg">
 			{formatCents(NETFLIX_BILL.amountCents)} a month, due the 2nd
 		</p>
@@ -684,7 +707,7 @@ const billPage = (
 					{formatCents(NETFLIX_BILL.amountCents)}.
 				</p>
 				<p class="text-muted">
-					Updating links that payment and makes Netflix{" "}
+					Updating the bill links that payment and makes it{" "}
 					{formatCents(NEW_PRICE.cents)} a month from October on.
 				</p>
 				<div class="mt-3">
@@ -727,22 +750,43 @@ const billPage = (
 // ---------------------------------------------------------------------------------------------
 // P37: a bank that needs attention or hasn't synced, flagged on Home (family app only).
 
+/**
+ * October's counted spending so far, in cents, by category: Household is P34's Target and Netflix
+ * charges, and the 4 transactions that need a category add up to $96 (the Band says so).
+ */
+const SPENT = {
+	groceries: 19600,
+	eatingOut: 9200,
+	gas: 4800,
+	kids: 6000,
+	household: TARGET.amountCents + NETFLIX_TX.amountCents,
+	uncategorized: 9600,
+};
+/**
+ * Safe to spend as §6 adds it up: the whole budget, less every counted dollar (uncategorized too),
+ * less the bills that are due or overdue and unpaid (P36's three, $217.49): $934 here.
+ */
+const SAFE_TO_SPEND =
+	BUDGET_TOTAL -
+	Object.values(SPENT).reduce((n, cents) => n + cents, 0) -
+	SOON.reduce((n, b) => n + b.amountCents, 0);
+
 const HOME = {
 	month: "October",
-	safeToSpendCents: 110800,
+	safeToSpendCents: SAFE_TO_SPEND,
 	status: "Everything is on track.",
 	demo: false,
 };
 const NEEDS_BAND = {
 	href: "#p37-bank",
 	text: "4 transactions need a category",
-	detail: "$96 of this month's spending",
+	detail: `${formatCents(SPENT.uncategorized, { wholeDollars: true })} of this month's spending`,
 };
 const HOME_ROWS = [
-	{ cat: CATS.groceries, spent: 19600, budget: 90000 },
-	{ cat: CATS.eatingOut, spent: 9200, budget: 30000 },
-	{ cat: CATS.gas, spent: 4800, budget: 20000 },
-	{ cat: CATS.kids, spent: 6000, budget: 30000 },
+	{ cat: CATS.groceries, spent: SPENT.groceries, budget: BUDGETS.groceries },
+	{ cat: CATS.eatingOut, spent: SPENT.eatingOut, budget: BUDGETS.eatingOut },
+	{ cat: CATS.gas, spent: SPENT.gas, budget: BUDGETS.gas },
+	{ cat: CATS.kids, spent: SPENT.kids, budget: BUDGETS.kids },
 ];
 
 const SYNC_LATE = "Chase hasn't synced since Oct 1";
@@ -839,18 +883,22 @@ export function Phase35Proposals() {
 			>
 				<Fixed>
 					a pending transaction counts like any other and shows the word
-					“Pending” (§6, decision 67). When the bank finishes it, your category,
-					note, exclusion and links move to the finished one. Status is words,
-					never color alone, and a dashed outline means a suggestion, so Pending
-					is never dashed.
+					“Pending”. When the bank posts it under a new id, the person's
+					category, note, exclusion and every link move to the posted one, and
+					so does a split if the amount is unchanged (§6, decision 67).
 				</Fixed>
+				<NeedsLine>
+					how Pending sits on a row whose caption already says more (Excluded,
+					Split from…, Refund for…, Counts in…), and the panel's words, which
+					are a draft here.
+				</NeedsLine>
 				<Options
 					options={[
 						{
 							name: "Option A · In the caption line",
 							note: "The line under the name says “Groceries · Pending”, in muted words; it's never cut off.",
 							tradeoff:
-								"quiet, so a pending row is found by reading, not at a glance.",
+								"quiet, so a pending row is found by reading, not at a glance, and a row that also needs a category shows “Pending” where the bank's text would be.",
 							recommended:
 								"it's words, it's quiet, and the sign appears once per row.",
 							screen: transactions("caption"),
@@ -862,9 +910,9 @@ export function Phase35Proposals() {
 						},
 						{
 							name: "Option B · A small tag",
-							note: "A solid-ruled “Pending” tag beside the amount, and the same tag by the amount in the panel.",
+							note: "A small “Pending” tag with a solid rule border beside the amount (a dashed one would mean a suggestion, §7), and the same tag by the amount in the panel.",
 							tradeoff:
-								"easy to spot, but it squeezes the name, and a row needing a category carries two tags.",
+								"easy to spot, but it takes the name's room (Lupita's bank text shrinks to “T…”), and a row needing a category carries two tags.",
 							screen: transactions("tag"),
 						},
 						{
@@ -890,11 +938,17 @@ export function Phase35Proposals() {
 				sentence="Your household's time zone decides which day it is for Tally: when a new month starts and when a bill is due. Pick how the choice sits in Settings."
 			>
 				<Fixed>
-					“today” is the household's date in its time zone, a Settings choice
-					that starts as Eastern (America/New_York); a transaction's own date is
-					never converted (§6, decision 67). No guessing from the browser: that
-					needs its own allowed-JS decision, so it's on the Later list.
+					“today”, which decides the current month and bill status, is the
+					household's date in its time zone, a Settings choice that starts as
+					Eastern (America/New_York); a transaction's own date is never
+					converted (§6, decision 67). Detecting the zone from the browser is on
+					the Later list, because it needs its own allowed-JS decision (§12).
 				</Fixed>
+				<NeedsLine>
+					which zones the list offers (the six US ones first, then others, as
+					drawn), and that a change applies at once, so the month and the bills'
+					statuses can change the moment it's saved.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -932,14 +986,21 @@ export function Phase35Proposals() {
 				id="p36-price"
 				title="P36 · “Price changed? Update the bill”"
 				tier="visual"
-				sentence="When a bill's price goes up, its payment falls outside the ±10% match, so the bill sits Overdue though it's paid. Tally offers the payment instead. Pick where it asks."
+				sentence={`When a bill's price goes up, its payment falls outside the ±10% match, so the bill sits Overdue though it's paid, and Safe to spend sets aside its ${formatCents(NETFLIX_BILL.amountCents)} on top of the ${formatCents(NEW_PRICE.cents)} already spent. Tally offers the payment instead. Pick where it asks.`}
 			>
 				<Fixed>
-					a payment from the same merchant inside the date window but outside
-					±10% is offered as “Price changed? Update the bill” rather than
-					ignored, and nothing changes until a person accepts (§8.5). Editing a
-					bill's amount changes this month and later, never past months (§8.4).
+					a payment from the same merchant outside ±10% is offered as “Price
+					changed? Update the bill” rather than ignored (§8.5). Editing a bill
+					changes this month and later, never past occurrences (§8.4, A9; its
+					amount history is P61).
 				</Fixed>
+				<NeedsLine>
+					the offer only looks at payments inside §6.1's ±5-day window and not
+					already linked; if two qualify, the one closest to the due date, as
+					§6.1 picks. Nothing changes until a person taps Update the bill, which
+					links that payment and sets the new amount from this month on. Not
+					this bill remembers that payment for that month, as Not this one does.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -952,7 +1013,8 @@ export function Phase35Proposals() {
 						{
 							name: "Option B · On the row and the page",
 							note: `The Overdue row says “Price changed? ${paidOn}” and leads to the question on the bill's page.`,
-							tradeoff: "the row no longer says the day it was due.",
+							tradeoff:
+								"the row no longer says the day it was due, and it grows a line.",
 							recommended:
 								"the question appears where the confusing Overdue is, and is answered on the bill's page.",
 							screen: bills({ overdue: overdueAsks }),
@@ -981,11 +1043,17 @@ export function Phase35Proposals() {
 			>
 				<Fixed>
 					a connected bank (not a disconnected one) that needs attention or
-					hasn't synced for 3 days is flagged on Home with a link to Accounts
-					(§8.5), where its own group already says what's wrong and offers Fix
-					connection. The demo has no banks to sync, so it never shows this.
-					Home keeps one Band, the needs-category one (decision 50).
+					hasn't synced for 3 days is flagged on Home with a link to Accounts,
+					because Safe to spend may be too high (§8.5). Accounts already shows
+					each bank's last sync and Fix connection (§8, §8.1). The demo has no
+					Plaid, so it never shows this (§4.1). Home's one Band is the
+					needs-category one (decision 50).
 				</Fixed>
+				<NeedsLine>
+					a bank that both needs signing in and hasn't synced says the sign-in
+					words; with two or more banks, the line names the first and counts the
+					rest; the line goes once the bank is fixed or syncs again.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -1015,7 +1083,7 @@ export function Phase35Proposals() {
 							name: "Option C · A strip above the month",
 							note: `A thin tinted strip at the top, “${SYNC_LATE} · Accounts”, all one link.`,
 							tradeoff:
-								"a second tinted row on Home, far from the number, and it looks like the demo's banner.",
+								"a second band-tinted row beside the Band, against one tinted row per screen, and its words are ink, not a terracotta link.",
 							family: true,
 							screen: bankStrip,
 						},

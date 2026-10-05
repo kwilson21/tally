@@ -4,13 +4,14 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
-import { Phase35Proposals } from "./proposals-phase35";
-import { Phase35StatesProposals } from "./proposals-phase35-states";
+import { FormsProposals } from "./proposals-forms";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
 import { Phase5PlansProposals } from "./proposals-phase5-plans";
 import { Phase5TransactionsProposals } from "./proposals-phase5-transactions";
+import { Phase35Proposals } from "./proposals-phase35";
+import { Phase35StatesProposals } from "./proposals-phase35-states";
 
 // What the owner decided on 2026-09-26, 2026-09-28 and 2026-09-29 (decisions 46, 48, 50, 54, 55, 59
 // and 60), and the issue each ships in.
@@ -176,6 +177,17 @@ export function Proposals() {
 					did (spec §8.6, decision 68).
 				</p>
 				<AiProposals />
+			</section>
+
+			<section aria-labelledby="forms-title" class="mt-12">
+				<h2 id="forms-title" class="font-serif text-3xl font-semibold">
+					Open: forms
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Add a bill felt crowded (the owner, on P45), so every form gets one
+					pattern, picked here before any form changes.
+				</p>
+				<FormsProposals />
 			</section>
 
 			<section aria-labelledby="phase5-title" class="mt-12">

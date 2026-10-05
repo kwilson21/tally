@@ -10,7 +10,6 @@ import { AdjustLink } from "../views/adjust-link";
 import type { BillRowData } from "../views/bill-row";
 import { BillRow, BillStatusHeading } from "../views/bill-row";
 import { Button } from "../views/button";
-import { Chip } from "../views/chip";
 import { HomeTop } from "../views/home-top";
 import { Icon } from "../views/icons";
 import { MoneyInput } from "../views/money-input";
@@ -49,28 +48,29 @@ const GROCERIES: Row = {
 	icon: "groceries",
 	color: "cat-blue",
 	spentCents: 19600,
-	budgetCents: 90000,
+	budgetCents: 70000,
 };
 const EATING_OUT: Row = {
 	name: "Eating Out",
 	icon: "eating-out",
 	color: "cat-plum",
 	spentCents: 9200,
-	budgetCents: 30000,
+	budgetCents: 25000,
 };
 const GAS: Row = {
 	name: "Gas",
 	icon: "gas",
 	color: "cat-slate",
 	spentCents: 4800,
-	budgetCents: 20000,
+	budgetCents: 15000,
 };
+/** Its $60 is the Swim lessons bill, paid Oct 2 (below), so the paid bill is part of the spending. */
 const KIDS: Row = {
 	name: "Kids",
 	icon: "kids",
 	color: "cat-ochre",
 	spentCents: 6000,
-	budgetCents: 30000,
+	budgetCents: 20000,
 };
 const CAR: Row = {
 	name: "Car & Transport",
@@ -81,6 +81,8 @@ const CAR: Row = {
 };
 const ROWS = [GROCERIES, EATING_OUT, GAS, KIDS, CAR];
 
+// $1,400 budgeted and $460 spent, so Safe to spend stays under $1,000 in every picture: HomeTop's
+// headline is wide enough at four digits to push its pencil off a 390px phone.
 const BUDGET = ROWS.reduce((n, r) => n + r.budgetCents, 0);
 const SPENT = ROWS.reduce((n, r) => n + r.spentCents, 0);
 
@@ -214,31 +216,45 @@ const goalSentence = (
 	</>
 );
 
-/** P54 B: the goal is set in Settings, in a section of its own. */
-const goalSettings = (
-	<>
-		<Title>Settings</Title>
-		<section class="mt-6">
-			<h2 class="font-serif text-3xl font-semibold">Savings</h2>
-			<p class="mt-1 text-muted">
-				Set aside from Safe to spend at the start of every month.
-			</p>
-			<div class="mt-4 flex flex-col gap-4 border-t border-rule pt-4">
-				<MoneyInput
-					id="p54-settings-goal"
-					name="goal"
-					label="Save each month, from October on"
-					value="500.00"
-				/>
-				<div>
-					<Button type="button">Save</Button>
-				</div>
+/**
+ * Settings scrolled down to a new section, as P41 draws it: the end of the Categories list, the
+ * section, and the top of Your data. The real Categories list runs a dozen rows or more, so a new
+ * section sits below the first screen.
+ */
+function SettingsScrolled({ children }: { children?: Child }) {
+	return (
+		<>
+			<div class="flex min-h-11 items-center gap-4 border-b border-rule py-2 text-accent">
+				<Icon name="plus" class="size-5" />
+				Add category
 			</div>
-		</section>
-		<section class="mt-8 border-t border-rule pt-6">
-			<h2 class="font-serif text-3xl font-semibold">Categories</h2>
-		</section>
-	</>
+			<section class="mt-8 border-t border-rule pt-6">{children}</section>
+			<section class="mt-8 border-t border-rule pt-6">
+				<h2 class="font-serif text-3xl font-semibold">Your data</h2>
+			</section>
+		</>
+	);
+}
+
+/** P54 B: the goal is set in Settings, in a section of its own after Categories. */
+const goalSettings = (
+	<SettingsScrolled>
+		<h2 class="font-serif text-3xl font-semibold">Savings</h2>
+		<p class="mt-1 text-muted">
+			Set aside from Safe to spend at the start of every month.
+		</p>
+		<div class="mt-4 flex flex-col gap-4">
+			<MoneyInput
+				id="p54-settings-goal"
+				name="goal"
+				label="Save each month, from October on"
+				value="500.00"
+			/>
+			<div>
+				<Button type="button">Save</Button>
+			</div>
+		</div>
+	</SettingsScrolled>
 );
 
 /** P54 C: Savings as a category whose bar fills with transfers to savings. */
@@ -306,16 +322,16 @@ const BILLS: BillRowData[] = [
 	},
 	{
 		id: 3,
-		name: "Rent",
-		amountCents: 180000,
+		name: "Swim lessons",
+		amountCents: KIDS.spentCents,
 		status: "paid",
-		dueDate: "2026-10-01",
-		paidDate: "2026-10-01",
-		icon: "rent",
-		color: "cat-slate",
+		dueDate: "2026-10-02",
+		paidDate: "2026-10-02",
+		icon: KIDS.icon,
+		color: KIDS.color,
 	},
 ];
-const [ELECTRIC, INTERNET, RENT] = BILLS as [
+const [ELECTRIC, INTERNET, SWIM] = BILLS as [
 	BillRowData,
 	BillRowData,
 	BillRowData,
@@ -326,9 +342,9 @@ const PLANS: Plan[] = [
 	{
 		name: "Car registration",
 		cents: PLANNED,
-		line: "Set aside this month",
+		line: "Set aside for October",
 	},
-	{ name: "Holiday gifts", cents: 40000, line: "In December" },
+	{ name: "Holiday gifts", cents: 40000, line: "Set aside from December" },
 ];
 
 /**
@@ -398,11 +414,26 @@ const plannedBills = (
 		<section class="mt-4">
 			<BillStatusHeading status="paid" />
 			<ul class="divide-y divide-rule">
-				<BillRow bill={RENT} today={TODAY} />
+				<BillRow bill={SWIM} today={TODAY} />
 			</ul>
 		</section>
 	</>
 );
+
+const MONTHS = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+];
 
 /** P55 A: Plan an expense opens a sheet like Add a bill's: what it's for, the amount, the month. */
 const planSheet = (
@@ -418,16 +449,19 @@ const planSheet = (
 				surface="paper"
 			/>
 			<MoneyInput id="p55-amount" name="amount" label="Amount" value="180.00" />
-			<fieldset>
-				<legend>Month</legend>
-				<div class="mt-1 flex flex-wrap gap-2">
-					{["October", "November", "December"].map((m, i) => (
-						<Chip type="radio" name="p55-month" value={m} checked={i === 0}>
-							{m}
-						</Chip>
+			<label class="flex flex-col gap-1">
+				<span>Month</span>
+				<select
+					name="p55-month"
+					class="min-h-11 rounded-control border border-rule bg-paper px-3"
+				>
+					{Array.from({ length: 12 }, (_, i) => (
+						<option value={i} selected={i === 0}>
+							{MONTHS[(9 + i) % 12]} {i < 3 ? 2026 : 2027}
+						</option>
 					))}
-				</div>
-			</fieldset>
+				</select>
+			</label>
 		</div>
 		<div class="grid grid-cols-2 gap-3">
 			<Button kind="secondary" type="button" class="w-full">
@@ -486,7 +520,7 @@ const bumpHome = (
 			<ul class="mt-2">
 				<ProgressRow {...CAR} budgetCents={CAR.budgetCents + PLANNED} />
 			</ul>
-			<p class="-mt-1 pb-3 text-muted">
+			<p class="-mt-1 text-pretty pb-3 text-muted">
 				Includes {dollars(PLANNED)} for Car registration, October only
 			</p>
 			<ul class="divide-y divide-rule border-t border-rule">
@@ -521,9 +555,15 @@ function Email({
 				<p class="mt-1 text-xl font-semibold">{subject}</p>
 			</div>
 			<div class="mt-4 flex flex-col items-start gap-4 text-lg">{children}</div>
-			<p class="mt-8 border-t border-rule pt-3 text-sm text-muted">
-				{footer} <a href="#p56-reconnect-email">Turn these emails off</a>
-			</p>
+			<div class="mt-8 border-t border-rule pt-3">
+				<p class="text-sm text-muted">{footer}</p>
+				<a
+					href="#p56-reconnect-email"
+					class="inline-flex min-h-11 items-center text-sm"
+				>
+					Turn these emails off
+				</a>
+			</div>
 		</>
 	);
 }
@@ -537,7 +577,7 @@ const EVERY_3_DAYS = "Tally sends this every 3 days until the bank is fixed.";
 const emailPlain = (
 	<Email
 		subject="Chase needs you to sign in again"
-		sent="Oct 4"
+		sent="Mon, Oct 5"
 		footer={EVERY_3_DAYS}
 	>
 		<p>
@@ -563,7 +603,11 @@ function EmailAccount({
 		<li class="flex min-h-11 items-center gap-3">
 			<Icon name={card ? "card" : "bank"} class="size-6" />
 			{name}
-			<span class="text-muted">••{mask}</span>
+			<span class="text-muted">
+				<span class="sr-only">ending in </span>
+				<span aria-hidden="true">••</span>
+				{mask}
+			</span>
 		</li>
 	);
 }
@@ -572,7 +616,7 @@ function EmailAccount({
 const emailDetail = (
 	<Email
 		subject="Chase needs you to sign in again"
-		sent="Oct 4"
+		sent="Mon, Oct 5"
 		footer={EVERY_3_DAYS}
 	>
 		<p>
@@ -601,10 +645,12 @@ const emailDigest = (
 		<p>Tally can't sync these banks, so Safe to spend may be too high.</p>
 		<ul class="w-full divide-y divide-rule border-y border-rule">
 			<li class="flex min-h-11 items-center justify-between gap-3">
-				Chase<span class="text-muted">since Oct 1</span>
+				<span>Chase</span>
+				<span class="text-muted">since Oct 1</span>
 			</li>
 			<li class="flex min-h-11 items-center justify-between gap-3">
-				Capital One<span class="text-muted">since Oct 4</span>
+				<span>Capital One</span>
+				<span class="text-muted">since Oct 4</span>
 			</li>
 		</ul>
 		<p>Signing in again takes a minute for each.</p>
@@ -612,44 +658,34 @@ const emailDigest = (
 	</Email>
 );
 
-/** Both: the switch in Settings, "On" with a check (never color alone), and where it goes. */
+/**
+ * Both: the switch in Settings, drawn as P41's option A draws a switch (the state in words, and a
+ * button that says what a tap does), so it follows whichever switch the owner picks there. It sits
+ * after Categories, and the line under its name says where the email goes.
+ */
 const reminderSettings = (
-	<>
-		<Title>Settings</Title>
-		<section class="mt-6">
-			<h2 class="font-serif text-3xl font-semibold">Reminders</h2>
-			<div class="mt-3 border-y border-rule py-3">
-				<p class="text-lg">Email me when a bank needs signing in again</p>
-				<p class="text-muted">
-					To dana@example.com, the address you sign in with
-				</p>
-				<div class="mt-1 flex items-center justify-between gap-3">
-					<span class="flex items-center gap-2">
-						<Icon name="check" class="size-5" />
-						On
+	<SettingsScrolled>
+		<h2 class="font-serif text-3xl font-semibold">Reminders</h2>
+		<ul class="mt-3 divide-y divide-rule border-y border-rule">
+			<li class="flex items-center gap-3 py-2">
+				<span class="min-w-0 flex-1">
+					<span class="block text-lg">
+						Email me when a bank needs signing in again
 					</span>
-					<Button kind="text" type="button">
+					<span class="block text-pretty text-muted">
+						Goes to dana@example.com
+					</span>
+				</span>
+				<span class="flex shrink-0 flex-col items-end">
+					<span class="font-medium">On</span>
+					<Button kind="secondary" type="button" class="px-4">
 						Turn off
+						<span class="sr-only"> emails about banks</span>
 					</Button>
-				</div>
-			</div>
-		</section>
-		<section class="mt-8 border-t border-rule pt-6">
-			<h2 class="font-serif text-3xl font-semibold">Your data</h2>
-			<p class="mt-1 text-muted">
-				Everything Tally has stored, to keep or open elsewhere. Bank logins are
-				never included.
-			</p>
-			<div class="mt-4 flex flex-col items-start gap-3">
-				<Button kind="secondary" type="button">
-					Download transactions (CSV)
-				</Button>
-				<Button kind="secondary" type="button">
-					Download everything (JSON)
-				</Button>
-			</div>
-		</section>
-	</>
+				</span>
+			</li>
+		</ul>
+	</SettingsScrolled>
 );
 
 /** P54–P56 on the proposals page, open for the owner's pick. */
@@ -691,19 +727,19 @@ export function Phase5PlansProposals() {
 							name: "Option B · In Settings",
 							note: "Home names the goal only in its status sentence: “after $500 for savings”.",
 							tradeoff:
-								"every other amount is set on Home (decision 38), and the goal is out of sight once set.",
+								"every other amount is set on Home (decision 38), and once it's set the goal shows only as a phrase in that sentence.",
 							screen: goalSentence,
 						},
 						{
 							name: "Option B · Setting it in Settings",
-							note: "A Savings section with the money input and Save.",
+							note: "A Savings section after Categories, with the money input and Save.",
 							screen: goalSettings,
 						},
 						{
 							name: "Option C · A savings category",
 							note: "Savings is a category whose bar fills as you move money to savings.",
 							tradeoff:
-								"transfers would have to count in it, and saving more than $500 would show as brick “over”.",
+								"transfers would have to count in it, saving more than $500 would show as brick “over”, and §6 would have to leave its $500 out of the total budget, or Safe to spend would rise by it.",
 							screen: goalCategory,
 						},
 					]}
@@ -718,9 +754,9 @@ export function Phase5PlansProposals() {
 			>
 				<Fixed>
 					Safe to spend is the month's total budget, minus counted spending,
-					minus bills due or overdue and not paid (§6). A transfer between your
-					own accounts is excluded, so moving money to savings is never spending
-					(§6, §8.5).
+					minus bills due or overdue and not paid (§6). A transaction flagged as
+					a transfer starts excluded, so it isn't counted as spending (§6,
+					§8.5).
 				</Fixed>
 				<NeedsLine>
 					the line §6's Safe to spend gains (drawn as R1: “minus the month's
@@ -730,12 +766,12 @@ export function Phase5PlansProposals() {
 				<Options
 					options={[
 						{
-							name: "Option R1 · The whole goal, from day one",
+							name: "Option R1 · All of it, from day one",
 							note: sum(SAFE_R1, [GOAL, "goal"]),
 							tradeoff:
-								"moving the $200 doesn't change the number, so saving can feel like nothing happened.",
+								"moving the $200 changes nothing, so saving can feel like nothing happened.",
 							recommended:
-								"simple and safe: it never counts on savings you haven't made, and needs nothing new from the bank.",
+								"simple and safe: it never counts on savings not yet made, and needs nothing from the bank.",
 							screen: goalRule(
 								SAFE_R1,
 								aMonth(GOAL),
@@ -745,8 +781,7 @@ export function Phase5PlansProposals() {
 						{
 							name: "Option R2 · Only what's still to move",
 							note: sum(SAFE_R2, [GOAL - MOVED, "still to move"]),
-							tradeoff:
-								"Tally must tell transfers to savings from other transfers; one it misreads moves the number.",
+							tradeoff: `Tally must tell transfers to savings from other transfers, and saving raises Safe to spend by what you move (${dollars(SAFE_R1)} to ${dollars(SAFE_R2)}), which reads backwards.`,
 							screen: goalRule(
 								SAFE_R2,
 								<>
@@ -790,22 +825,22 @@ export function Phase5PlansProposals() {
 					options={[
 						{
 							name: "Option A · Planned, on Bills",
-							note: "A Planned group after Upcoming; “Plan an expense” beside Add a bill opens a sheet with its name, amount and month.",
-							tradeoff: "Bills holds one more kind of thing.",
+							note: "A Planned group after Upcoming, and “Plan an expense” beside Add a bill, which opens the sheet drawn next.",
+							tradeoff: `one more kind of thing on Bills, and once paid its category reads “${dollars(CAR.spentCents + PLANNED - CAR.budgetCents)} over” though planned.`,
 							recommended:
 								"it behaves like a bill that happens once: set aside all its month, until a payment is linked.",
 							screen: plannedBills,
 						},
 						{
 							name: "Option A · Planning one",
-							note: "The sheet: what it's for, the amount and the month. A payment is linked on its page, as on a bill's.",
+							note: "The sheet: what it's for, the amount and the month, picked as Add a bill picks its month. A payment is linked on its page, as on a bill's.",
 							screen: planSheet,
 						},
 						{
 							name: "Option B · Planned this month, on Home",
 							note: "A list under the Budget, like Bills due soon, with “+ Plan an expense” after it; set aside as in A.",
 							tradeoff:
-								"under every budget row it's off a phone's first screen (drawn with two), and later months have nowhere to show.",
+								"under every budget row it's off a phone's first screen (drawn here with only two rows so it shows), and it has no place for later months.",
 							screen: plannedHome,
 						},
 						{
@@ -827,14 +862,15 @@ export function Phase5PlansProposals() {
 				<Fixed>
 					an email when a bank needs signing in again; how Tally sends email is
 					its own decision (§8.4). Fix connection lives on Accounts (§8, §10),
-					and Home already flags a bank that needs attention or hasn't synced
-					for 3 days (§8.5).
+					and Home flags a bank that needs attention or hasn't synced for 3 days
+					(§8.5).
 				</Fixed>
 				<NeedsLine>
-					who it goes to (every family email in Cloudflare Access, or one
-					address set in Settings) and how often it repeats (drawn: once, then
-					every 3 days until it's fixed); and, as logs never do (§10), no email
-					carries amounts or transaction details.
+					who it goes to (every family email in Cloudflare Access, one address
+					set in Settings, or whoever linked the bank, which §5 already stores
+					as linked_by) and how often it repeats (drawn: once, then every 3 days
+					until it's fixed); and, as logs never do (§10), no email carries
+					amounts or transaction details.
 				</NeedsLine>
 				<Options
 					options={[
@@ -843,7 +879,7 @@ export function Phase5PlansProposals() {
 							note: "What's wrong, why it matters, and one link to Accounts. No amounts or transaction details.",
 							tradeoff: "it doesn't say which accounts; Accounts does.",
 							recommended:
-								"one thing and one action, and an inbox never holds your money's details.",
+								"it says what's wrong and gives one action, and nothing about your accounts leaves Tally.",
 							family: true,
 							screen: emailPlain,
 						},
@@ -865,7 +901,7 @@ export function Phase5PlansProposals() {
 						},
 						{
 							name: "Both · Settings",
-							note: "A Reminders section: the email switch, “On” with a check, Turn off, and the address it goes to.",
+							note: "A Reminders section after Categories: the email switch, On or Off in words with a button that turns it, and the address it goes to (drawn for one address).",
 							family: true,
 							screen: reminderSettings,
 						},
