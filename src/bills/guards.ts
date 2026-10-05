@@ -8,8 +8,7 @@ export const BIG_BILL_CENTS = 10_000_000;
 /**
  * What is compared: exactly what the database's `lower(trim(name))` makes of it (src/bills/write.ts),
  * so what the form turns away and what the write turns away are the same names. That is only spaces
- * trimmed from the ends and only A to Z folded, so "Café" and "CAFÉ" are different names, as they
- * are for categories (a NOCASE index).
+ * trimmed from the ends and only A to Z folded, so "Café" and "CAFÉ" are different names.
  */
 const sameName = (name: string) =>
 	name.replace(/^ +| +$/g, "").replace(/[A-Z]/g, (c) => c.toLowerCase());
