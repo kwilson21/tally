@@ -3,6 +3,7 @@ import { verifiedEmail } from "./access";
 import { categorizePending } from "./categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
+import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
@@ -36,6 +37,10 @@ type ScheduledEnv = PlaidEnv & {
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
 };
 export const app = new Hono<App>();
+
+// The app's own 404 and 500 pages (spec §8.5, decision 72); Hono's plain-text ones never show.
+app.notFound(notFoundPage);
+app.onError(serverErrorPage);
 
 export async function runScheduled(
 	env: ScheduledEnv,

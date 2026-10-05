@@ -2,9 +2,11 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { entryKeyOf } from "../src/transactions/cash";
 
 const BASE = "http://tally.test";
 
@@ -414,5 +416,217 @@ describe("cash lifecycle", () => {
 				).all()
 			).results,
 		).toEqual(cashBefore.results);
+	});
+});
+
+describe("adding cash twice by retrying (a lost reply, a failed render)", () => {
+	const KEY = "6f1c2a52-8c0e-4b5f-9d3a-0a1b2c3d4e5f";
+	const post = (fields: Record<string, string>) =>
+		request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				amount: "20.45",
+				date: todayIn(DEFAULT_TIME_ZONE),
+				merchant: "Retried market",
+				category: "1",
+				note: "",
+				...fields,
+			}),
+		});
+	const recorded = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name='Retried market'",
+			).first<{ n: number }>()
+		)?.n;
+
+	it("carries a one-time key in the form, new every time the form is drawn", async () => {
+		const keyOf = (html: string) =>
+			html.match(/<input type="hidden" name="entry_key" value="([^"]+)"/)?.[1];
+		const first = keyOf((await request("/transactions/cash/new")).html);
+		const second = keyOf((await request("/transactions/cash/new")).html);
+		const uuid =
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+		expect(first).toMatch(uuid);
+		expect(second).toMatch(uuid);
+		expect(second).not.toBe(first);
+	});
+
+	it("records one transaction when the same form is posted twice, and both answers are a success", async () => {
+		const first = await post({ entry_key: KEY });
+		const again = await post({ entry_key: KEY });
+		expect(first.res.status).toBe(200);
+		expect(again.res.status).toBe(200);
+		const toast = (res: Response) =>
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(toast(again.res)).toEqual(toast(first.res));
+		expect(toast(again.res).toast.message).toBe("Added Retried market");
+		expect(await recorded()).toBe(1);
+	});
+
+	const ofKey = (key = KEY) =>
+		env.DB.prepare(
+			"SELECT id, date, amount_cents, raw_name, category_id, note, is_split FROM transactions WHERE entry_key = ?",
+		)
+			.bind(key)
+			.all<{
+				id: number;
+				date: string;
+				amount_cents: number;
+				raw_name: string;
+				category_id: number;
+				note: string | null;
+				is_split: number;
+			}>();
+
+	it("changes nothing when the same key is posted again with different values: one row, the first values, and the reply names what was really saved", async () => {
+		const first = await post({
+			entry_key: KEY,
+			note: "Peaches",
+			amount: "20.45",
+		});
+		const saved = (await ofKey()).results;
+		expect(saved).toHaveLength(1);
+		// The reply was lost; the person changes the still-open form and taps Add again.
+		const again = await post({
+			entry_key: KEY,
+			amount: "31.10",
+			merchant: "Retried market, corrected",
+			category: "2",
+			date: "2026-10-02",
+			note: "",
+		});
+		expect(again.res.status).toBe(200);
+		expect((await ofKey()).results).toEqual(saved);
+		expect(saved[0]).toMatchObject({
+			amount_cents: 2045,
+			raw_name: "Retried market",
+			category_id: 1,
+			note: "Peaches",
+		});
+		const triggers = (res: Response) =>
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		// The second reply is the first's: the stored row's words, not the form's.
+		expect(triggers(again.res)).toEqual({
+			toast: { message: "Added Retried market", type: "success" },
+			announce: "Added $20.45 cash spending at Retried market.",
+		});
+		expect(triggers(again.res)).toEqual(triggers(first.res));
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'Retried market%'",
+				).first<{ n: number }>()
+			)?.n,
+		).toBe(1);
+	});
+
+	it("leaves a split entry untouched by a repeat: the parent and its parts keep their amounts", async () => {
+		await post({ entry_key: KEY, amount: "20.00" });
+		const parent = (await ofKey()).results[0];
+		const split = await saveSplit(
+			env.DB,
+			parent?.id as number,
+			[
+				{ categoryId: 1, amountCents: 1200 },
+				{ categoryId: 2, amountCents: 800 },
+			],
+			"test",
+		);
+		expect(split.saved).toBe(true);
+		const parts = () =>
+			env.DB.prepare(
+				"SELECT amount_cents, category_id FROM transactions WHERE parent_id = ? ORDER BY amount_cents",
+			)
+				.bind(parent?.id)
+				.all();
+		const before = await parts();
+		expect(before.results).toHaveLength(2);
+		const again = await post({ entry_key: KEY, amount: "99.00" });
+		expect(again.res.status).toBe(200);
+		const after = (await ofKey()).results;
+		expect(after).toHaveLength(1);
+		expect(after[0]).toMatchObject({
+			id: parent?.id,
+			amount_cents: 2000,
+			is_split: 1,
+		});
+		expect((await parts()).results).toEqual(before.results);
+		// The reply tells the truth about the saved entry, split or not.
+		expect(
+			JSON.parse(again.res.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Added $20.00 cash spending at Retried market.");
+	});
+
+	it("records one transaction when the two posts arrive at once", async () => {
+		const [a, b] = await Promise.all([
+			post({ entry_key: KEY }),
+			post({ entry_key: KEY }),
+		]);
+		expect([a.res.status, b.res.status]).toEqual([200, 200]);
+		expect(await recorded()).toBe(1);
+	});
+
+	it("records a second transaction for a second form, even with the same words", async () => {
+		await post({ entry_key: KEY });
+		await post({ entry_key: "0b9d2f1e-3c4a-4d5e-8f60-71829a3b4c5d" });
+		expect(await recorded()).toBe(2);
+	});
+
+	it("keeps the key to itself: it's a guard, never shown on the list", async () => {
+		await post({ entry_key: KEY });
+		const { html } = await request("/transactions");
+		expect(html).not.toContain(KEY);
+	});
+
+	it.each([
+		["a key that isn't a UUID", "not-a-uuid"],
+		["an empty key", ""],
+		["a key that is too long", `${KEY}${KEY}`],
+	])("doesn't guard a post with %s, so it still saves", async (_label, key) => {
+		await post({ entry_key: key });
+		await post({ entry_key: key });
+		expect(await recorded()).toBe(2);
+	});
+
+	it("doesn't guard a post with no key at all, as before", async () => {
+		await post({});
+		await post({});
+		expect(await recorded()).toBe(2);
+	});
+
+	it("draws a fresh key when it sends the form back with an error", async () => {
+		const { res, html } = await post({ entry_key: KEY, merchant: "" });
+		expect(res.status).toBe(422);
+		const key = html.match(
+			/<input type="hidden" name="entry_key" value="([^"]+)"/,
+		)?.[1];
+		expect(key).toBeTruthy();
+		expect(key).not.toBe(KEY);
+		expect(await recorded()).toBe(0);
+	});
+});
+
+describe("entryKeyOf", () => {
+	it("accepts a UUID in either case and gives it back in lower case", () => {
+		expect(entryKeyOf("6F1C2A52-8C0E-4B5F-9D3A-0A1B2C3D4E5F")).toBe(
+			"6f1c2a52-8c0e-4b5f-9d3a-0a1b2c3d4e5f",
+		);
+	});
+
+	it.each([
+		null,
+		undefined,
+		"",
+		"abc",
+		" 6f1c2a52-8c0e-4b5f-9d3a-0a1b2c3d4e5f",
+		5,
+	])("gives nothing for %j", (raw) => {
+		expect(entryKeyOf(raw)).toBeNull();
 	});
 });
