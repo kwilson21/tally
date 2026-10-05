@@ -1,5 +1,6 @@
 import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
+import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
@@ -416,6 +417,19 @@ export async function syncItem(
 						cents,
 						cents,
 						cents,
+						transaction.transaction_id,
+						itemRowId,
+						lockId,
+					),
+				);
+			}
+			// A corrected amount can leave a purchase refunded for more than it is worth (spec §8.5). Once this
+			// page's amounts are written, in the same batch, the refunds that no longer fit lose their link,
+			// newest first; a person can link them again. Only the purchases these transactions touch are checked.
+			for (const transaction of [...posted, ...page.modified]) {
+				statements.push(
+					env.DB.prepare(unlinkOverRefundedSql(OWNS_LOCK)).bind(
+						transaction.transaction_id,
 						transaction.transaction_id,
 						itemRowId,
 						lockId,
