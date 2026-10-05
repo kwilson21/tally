@@ -136,6 +136,9 @@ function syncOutcome(
 		return {
 			alert: `Couldn't sync ${result.failedBanks.join(", ")}. Try again later.`,
 		};
+	// The banks synced, but sorting what arrived didn't finish, so the list may not be right yet.
+	if (result.afterSyncFailed)
+		return { alert: "Couldn't sync accounts. Try again later." };
 	if (result.synced === 0 && result.busy > 0)
 		return { message: "Already synced a moment ago.", type: "info" };
 	if (result.synced === 0 && banks.every((b) => b.needsAttention))

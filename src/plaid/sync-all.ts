@@ -13,6 +13,8 @@ export type SyncAllResult = {
 	busy: number;
 	failed: number;
 	failedBanks: string[];
+	/** Set when the household-wide step after the banks (rules, then bill matching) failed. */
+	afterSyncFailed?: true;
 };
 
 /** Syncs each healthy Plaid Item in turn so one failure cannot stop the daily catch-up. */
@@ -94,12 +96,14 @@ export async function syncAllItems(
 		}
 	}
 
-	// Rules and bill matching cover the whole household, so they run once after every bank, not per bank.
-	// A bank that failed part-way may still have saved pages, so they get rules too.
-	if (result.synced + result.failed > 0) {
+	// Rules and bill matching cover the whole household, so they run once after every bank, not per
+	// bank. They run even when every bank was busy or failed part-way: a bank's saved pages, or a sync
+	// still running elsewhere, may have left transactions a rule can sort.
+	if (items.length > 0) {
 		try {
 			await afterSync(env.DB);
 		} catch (error) {
+			result.afterSyncFailed = true;
 			console.error(
 				`plaid daily sync: after sync failed ${error instanceof Error ? error.name : "unknown"}`,
 			);
