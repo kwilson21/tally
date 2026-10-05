@@ -220,7 +220,8 @@ function MonthBars({
 			))}
 			{cents.map((c, i) => {
 				const barH = Math.max(2, ((bottom - top) * c) / max);
-				const x = i * slot + slot * 0.2;
+				// A short history sits at the right, where the latest months are.
+				const x = (i + 6 - cents.length) * slot + slot * 0.2;
 				const bw = slot * 0.6;
 				const last = i === cents.length - 1;
 				return (
@@ -855,9 +856,9 @@ function DocRow({ doc, end }: { doc: Doc; end?: Child }) {
 	return (
 		<li class="flex min-h-16 items-center gap-3 py-2">
 			<span class="min-w-0 flex-1">
-				<span class="block truncate text-lg leading-6 text-accent">
+				<a href="#p27-documents" class="block truncate text-lg leading-6">
 					{doc.name}
-				</span>
+				</a>
 				{doc.note && <span class="block leading-6">{doc.note}</span>}
 				<span class="block leading-6 text-muted">{doc.meta}</span>
 			</span>
@@ -997,10 +998,12 @@ const deletePage = (
 		<p class="mt-3 text-lg">chase-statement-sep.pdf</p>
 		<p class="text-muted">September statement · Added Oct 2 · 412 KB</p>
 		<p class="mt-3">The file is deleted for good. This can't be undone.</p>
-		<div class="mt-5 flex items-center gap-3">
-			<Button type="button">Delete it</Button>
-			<Button kind="text" type="button">
+		<div class="mt-5 grid grid-cols-2 gap-3">
+			<Button kind="secondary" type="button" class="w-full">
 				Keep it
+			</Button>
+			<Button type="button" class="w-full">
+				Delete it
 			</Button>
 		</div>
 	</>
@@ -1391,7 +1394,7 @@ const categoryPage = (
 			surface="paper"
 			class="mt-1"
 		/>
-		<div class="mt-4 flex items-center gap-3">
+		<div class="mt-4 flex items-center justify-between gap-3">
 			<Button type="button">Create category</Button>
 			<Button kind="text" type="button">
 				Dismiss
