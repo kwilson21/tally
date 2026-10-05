@@ -24,6 +24,7 @@ import {
 	merchantColumnSql,
 	merchantTextArgs,
 } from "../db/merchant-key";
+import { plaidTransferRuleStatement } from "../db/plaid-transfers";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
@@ -1133,6 +1134,8 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 		c.env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','dismissed')",
 		).bind(id, period, linked.transaction_id),
+		// Freed from the bill, a transfer Plaid called one stops counting (spec §8.5).
+		plaidTransferRuleStatement(c.env.DB, [linked.transaction_id]),
 	]);
 	return feedbackRedirect(c, id, "Payment unlinked");
 });

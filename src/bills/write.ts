@@ -12,6 +12,8 @@
 // Only a name that is new is checked: adding, reactivating and renaming. Editing a bill under the
 // name it already has isn't, so two bills that already share a name stay editable.
 
+import { plaidTransferRuleStatement } from "../db/plaid-transfers";
+
 export type BillFields = {
 	name: string;
 	amountCents: number;
@@ -92,6 +94,14 @@ export async function updateBill(
 			f.name,
 		);
 	if (!dropDismissals) return (await update.run()).meta.changes > 0;
+	// The schedule form allows this only without linked payments; if one is dropped here anyway, what
+	// it paid goes back under Plaid's transfer rule (spec §8.5), in the same batch.
+	const { results: links } = await db
+		.prepare(
+			"SELECT transaction_id FROM bill_payments WHERE bill_id=? AND status='linked'",
+		)
+		.bind(id)
+		.all<{ transaction_id: number }>();
 	// The bill has its new name exactly when the update just applied (it set it, and a refused update
 	// leaves a name that differs), so the dismissals go only then.
 	const [result] = await db.batch([
@@ -101,6 +111,10 @@ export async function updateBill(
 				"DELETE FROM bill_payments WHERE bill_id=? AND EXISTS (SELECT 1 FROM bills WHERE id=? AND name=?)",
 			)
 			.bind(id, id, f.name),
+		plaidTransferRuleStatement(
+			db,
+			links.map((link) => link.transaction_id),
+		),
 	]);
 	return (result?.meta.changes ?? 0) > 0;
 }

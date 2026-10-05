@@ -27,12 +27,14 @@ const add = (
 		source?: string | null;
 		split?: boolean;
 		parent?: number;
+		incomeSource?: string;
+		reviewedBy?: string;
 	} = {},
 ) =>
 	db
 		.prepare(
-			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, excluded, excluded_source, is_split, parent_id)
-			 SELECT ?, id, '2026-09-10', 5000, 'SYNTHETIC', ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, excluded, excluded_source, is_split, parent_id, income_source, credit_reviewed_by)
+			 SELECT ?, id, '2026-09-10', 5000, 'SYNTHETIC', ?, ?, ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
 		)
 		.bind(
 			id,
@@ -41,6 +43,8 @@ const add = (
 			options.source ?? null,
 			options.split ? 1 : 0,
 			options.parent ?? null,
+			options.incomeSource ?? null,
+			options.reviewedBy ?? null,
 		);
 
 /** Links a bill's payment to a transaction. */
@@ -94,12 +98,16 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			add(9023, null),
 			// A payment linked to a bill stays counted.
 			add(9031, "LOAN_PAYMENTS"),
-			// A split's parent and parts follow it, except a part a person set and a part that pays a bill.
+			// Income a person chose, or a credit a person reviewed, stays counted.
+			add(9032, "TRANSFER_IN", { incomeSource: "user" }),
+			add(9033, "TRANSFER_IN", { reviewedBy: "user" }),
+			// A split's parent and parts follow it, except a part a person set, a part with income a person chose, and a part that pays a bill.
 			add(9041, "TRANSFER_OUT", { split: true }),
 			add(9042, null, { parent: 9041 }),
 			add(9043, null, { parent: 9041 }),
 			add(9044, null, { parent: 9041, source: "user" }),
 			add(9045, null, { parent: 9041 }),
+			add(9046, null, { parent: 9041, incomeSource: "user" }),
 			// A split a person included keeps its parts as they are.
 			add(9051, "TRANSFER_OUT", { split: true, source: "user" }),
 			add(9052, null, { parent: 9051 }),
@@ -128,11 +136,14 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			9022: COUNTED,
 			9023: COUNTED,
 			9031: COUNTED,
+			9032: COUNTED,
+			9033: COUNTED,
 			9041: PLAID,
 			9042: PLAID,
 			9043: PLAID,
 			9044: [0, "user"],
 			9045: COUNTED,
+			9046: COUNTED,
 			9051: [0, "user"],
 			9052: COUNTED,
 			9061: COUNTED,

@@ -265,6 +265,35 @@ describe("Bills", () => {
 		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
 	});
 
+	it("excludes a payment Plaid called a transfer once a person unlinks it", async () => {
+		const linked = await env.DB.prepare(
+			"SELECT period, transaction_id FROM bill_payments WHERE bill_id=1 AND status='linked'",
+		).first<{ period: string; transaction_id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category='TRANSFER_OUT' WHERE id=?",
+		)
+			.bind(linked?.transaction_id)
+			.run();
+		const state = () =>
+			env.DB.prepare(
+				"SELECT excluded, excluded_source FROM transactions WHERE id=?",
+			)
+				.bind(linked?.transaction_id)
+				.first();
+		// While it pays the bill it counts.
+		expect(await state()).toEqual({ excluded: 0, excluded_source: null });
+		const unlink = await exports.default.fetch(
+			`http://tally.test/bills/1/occurrences/${linked?.period}/unlink`,
+			{
+				method: "POST",
+				redirect: "manual",
+				headers: { Origin: "http://tally.test", "HX-Request": "true" },
+			},
+		);
+		expect(unlink.headers.get("HX-Trigger")).toContain("Payment unlinked");
+		expect(await state()).toEqual({ excluded: 1, excluded_source: "plaid" });
+	});
+
 	it("shows a bill page and lets a person unlink and hand-link a chosen month", async () => {
 		let html = await (
 			await exports.default.fetch("http://tally.test/bills/1")

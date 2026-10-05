@@ -233,6 +233,33 @@ describe("bill writes", () => {
 			).toBe(true);
 		});
 
+		it("excludes a Plaid transfer again when a changed schedule drops its link", async () => {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9200,'Mortgage',150000,1,'monthly',5,'LANDLORD LLC')",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,plaid_category) SELECT 9201,id,'2026-09-01',150000,'LANDLORD LLC','TRANSFER_OUT' FROM accounts LIMIT 1",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9200,'2026-09',9201,'user','linked')",
+				),
+			]);
+			expect(
+				await updateBill(
+					env.DB,
+					9200,
+					fields({ name: "Mortgage", frequency: "yearly", anchorMonth: 3 }),
+					true,
+				),
+			).toBe(true);
+			expect(
+				await env.DB.prepare(
+					"SELECT excluded, excluded_source FROM transactions WHERE id=9201",
+				).first(),
+			).toEqual({ excluded: 1, excluded_source: "plaid" });
+		});
+
 		it("keeps the old dismissals when a changed schedule's rename is refused", async () => {
 			const transaction = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
