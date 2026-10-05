@@ -4,7 +4,8 @@ export type WhySection =
 	| "transactions"
 	| "exclusions"
 	| "categorization"
-	| "bills";
+	| "bills"
+	| "trends";
 
 /** A small link beside a rule's result to the exact section that explains it. */
 export function WhyLink({

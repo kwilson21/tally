@@ -3,6 +3,7 @@ const NAMES = {
 	transactions: "transactions",
 	categorization: "categories",
 	exclusions: "excluding",
+	trends: "trends",
 } as const;
 
 /** A small "How this works" link from a screen to its section of How Tally works (spec §9). */

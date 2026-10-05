@@ -2,6 +2,16 @@
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
+import {
+	buildTrends,
+	type ChangeData,
+	compareSentence,
+	type MonthPoint,
+	monthsLabel,
+	type TrendRowData,
+	type TrendsPage,
+	trendsAmount,
+} from "../trends";
 import { AccountRow } from "../views/account-row";
 import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
@@ -40,6 +50,14 @@ import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TransactionRow } from "../views/transaction-row";
+import {
+	ChangeRow,
+	MonthBars,
+	TrendGroup,
+	TrendRow,
+	TrendsScreen,
+	TrendsTop,
+} from "../views/trends";
 import { WhyLink } from "../views/why-link";
 import {
 	ADJUST_ROWS,
@@ -58,6 +76,10 @@ import {
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
+	TRENDS_EARLY_INPUT,
+	TRENDS_EMPTY_INPUT,
+	TRENDS_FIRST_MONTH_INPUT,
+	TRENDS_INPUT,
 } from "./mock";
 import {
 	PhoneFrame,
@@ -75,6 +97,7 @@ const SECTIONS = [
 	["shell", "Page shell"],
 	["home", "Home's top"],
 	["accounts", "Accounts"],
+	["trends", "Trends"],
 	["rows", "Rows"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
@@ -1315,7 +1338,7 @@ function Demo() {
 			>
 				<p class="flex items-center gap-2">
 					Going well <span aria-hidden="true">·</span>{" "}
-					<WhyLink section="budget" topic="going well" />
+					<WhyLink section="trends" topic="going well" />
 				</p>
 			</Specimen>
 		</Group>
@@ -1479,6 +1502,328 @@ function AccountsGroup() {
 	);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Trends (spec §8.3; P23 D, P24 A, P31, P33 A): every part drawn from the same page the app builds.
+
+/** The catalog's full Trends sample, narrowed: a sample that isn't a full page is a mistake here. */
+function fullTrends(): Extract<TrendsPage, { kind: "full" }> {
+	const page = buildTrends(TRENDS_INPUT);
+	if (page.kind !== "full")
+		throw new Error("The catalog's Trends sample must be a full page");
+	return page;
+}
+const TRENDS_FULL = fullTrends();
+const GOING_WELL_ROW = TRENDS_FULL.goingWell[0] as TrendRowData;
+const WORTH_A_LOOK_ROW = TRENDS_FULL.worthALook[0] as TrendRowData;
+const OTHER_ROW = TRENDS_FULL.others[0] as TrendRowData;
+
+const monthPoints = (cents: number[]): MonthPoint[] =>
+	cents.map((c, i) => ({
+		month: `2026-${String(10 - cents.length + 1 + i).padStart(2, "0")}`,
+		cents: c,
+		partial: i === cents.length - 1,
+	}));
+const rowOf = (
+	name: string,
+	cents: number[],
+	line: string,
+	icon = "groceries",
+	color = "cat-blue",
+): TrendRowData => {
+	const months = monthPoints(cents);
+	return {
+		id: 0,
+		name,
+		icon,
+		color,
+		line,
+		run: 0,
+		months,
+		label: monthsLabel(months, "Spending"),
+	};
+};
+const TREND_ROW_STATES = [
+	{
+		label: "Going well: under budget three or more months running",
+		row: GOING_WELL_ROW,
+	},
+	{
+		label: "Worth a look: up three or more months running",
+		row: WORTH_A_LOOK_ROW,
+	},
+	{ label: "Every other category: last month's amount", row: OTHER_ROW },
+	{
+		label: "A short history: three months in, the bars sit at the right",
+		row: rowOf("Groceries", [81000, 86000, 19600], "$860 in September"),
+	},
+	{
+		label:
+			"Refunds outweighed spending one month: a thin line, the amount in words",
+		row: rowOf(
+			"Kids",
+			[24000, 26000, -2000, 6000],
+			"-$20 in August",
+			"kids",
+			"cat-ochre",
+		),
+	},
+	{
+		label: "A long name truncates; the line stays whole",
+		row: rowOf(
+			"Dog walking, boarding and vet visits for Biscuit",
+			[9000, 12000, 15000, 3000],
+			"$150 in September",
+			"list",
+			"cat-slate",
+		),
+	},
+];
+
+/** What a picture of Trends shows, in words, built from the page it draws. */
+function describeTrends(page: TrendsPage): string {
+	if (page.kind === "empty")
+		return "Trends with nothing to show yet: No spending to show yet. Trends fill in as your transactions arrive. Open Accounts";
+	if (page.kind === "early")
+		return `Trends before there's a month to compare: All spending. ${page.label} Trends fill in as months pass. Tally started in ${page.startMonthName}.`;
+	const rows = (list: { name: string; line: string }[]) =>
+		list.map((r) => `${r.name} ${r.line}`).join(", ");
+	const parts = [
+		`Spent so far in ${page.monthName} ${trendsAmount(page.soFarCents)}`,
+		page.sentence,
+		`${page.caption}: ${page.changes.map((c) => `${c.name} ${c.words}`).join(", ")}`,
+		...(page.goingWell.length > 0
+			? [`Going well: ${rows(page.goingWell)}`]
+			: []),
+		...(page.worthALook.length > 0
+			? [`Worth a look: ${rows(page.worthALook)}`]
+			: []),
+		...(page.others.length > 0
+			? [`Every other category, ${page.rangeLabel}: ${rows(page.others)}`]
+			: []),
+	];
+	return parts.join(". ").replaceAll("..", ".");
+}
+
+/** An early-state page, for its bars; the catalog's samples are known to be early. */
+function earlyPage(input: typeof TRENDS_EARLY_INPUT) {
+	const page = buildTrends(input);
+	if (page.kind !== "early")
+		throw new Error("The catalog's early Trends sample must be an early page");
+	return page;
+}
+
+// What's spent so far, and the sentence the same function the page uses writes for it.
+const TRENDS_TOP_STATES = [
+	["Less than by this time last month", 124000, 133000],
+	["More", 168800, 155600],
+	["Within a dollar, in words: never “$0 less”", 0, 0],
+] as const;
+
+function TrendsGroup() {
+	const early = earlyPage(TRENDS_EARLY_INPUT);
+	const firstMonth = earlyPage(TRENDS_FIRST_MONTH_INPUT);
+	const empty = buildTrends(TRENDS_EMPTY_INPUT);
+	return (
+		<Group id="trends" title="Trends">
+			<Specimen
+				id="trends-top"
+				title="TrendsTop"
+				tier="visual"
+				components={["TrendsTop"]}
+				sentence="The one thing on Trends (P23 D, P24 A): what's spent so far this month as the serif number, then a sentence written by code comparing it with the same days last month, with a Why? to the rule behind it."
+			>
+				{TRENDS_TOP_STATES.map(([label, now, then]) => {
+					const sentence = compareSentence(now, then, "2026-09");
+					return (
+						<State label={label}>
+							<Picture
+								label={`Spent so far in October ${trendsAmount(now)}. ${sentence}`}
+							>
+								<TrendsTop
+									month="October"
+									spent={trendsAmount(now)}
+									sentence={sentence}
+								/>
+							</Picture>
+						</State>
+					);
+				})}
+			</Specimen>
+			<Specimen
+				id="trend-group"
+				title="TrendGroup"
+				tier="visual"
+				components={["TrendGroup"]}
+				sentence="A small muted heading over a ruled list: Going well takes a check in ok, Worth a look an up arrow in ink, each with a Why? (a word and an icon, never color alone); the changes and every other category have a plain heading."
+			>
+				<State label="Going well, with its Why?">
+					<div class="max-w-xl">
+						<Picture label="Going well, with a Why? link, over one category row.">
+							<TrendGroup
+								id="ds-going-well"
+								title="Going well"
+								icon="check"
+								tone="text-ok"
+								why="going well"
+							>
+								<TrendRow {...GOING_WELL_ROW} />
+							</TrendGroup>
+						</Picture>
+					</div>
+				</State>
+				<State label="Worth a look, with its Why?">
+					<div class="max-w-xl">
+						<Picture label="Worth a look, with a Why? link, over one category row.">
+							<TrendGroup
+								id="ds-worth-a-look"
+								title="Worth a look"
+								icon="arrow-up"
+								tone="text-ink"
+								why="worth a look"
+							>
+								<TrendRow {...WORTH_A_LOOK_ROW} />
+							</TrendGroup>
+						</Picture>
+					</div>
+				</State>
+				<State label="A plain heading: the range the changes cover">
+					<div class="max-w-xl">
+						<Picture label="Oct 1–5 against Sep 1–5, over one category's change.">
+							<TrendGroup id="ds-changes" title={TRENDS_FULL.caption}>
+								<ChangeRow {...(TRENDS_FULL.changes[0] as ChangeData)} />
+							</TrendGroup>
+						</Picture>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="trend-row"
+				title="TrendRow"
+				tier="visual"
+				components={["TrendRow"]}
+				sentence="One category on Trends: its icon, name, a line of words (“4 months under budget”, “Up 3 months running”, “$150 in September”) and six small ink bars, scaled to the row's tallest month; the last, the month still going, is a dashed outline. The bars carry their amounts in words for a screen reader."
+			>
+				{TREND_ROW_STATES.map((s) => (
+					<State label={s.label}>
+						<Picture label={`${s.row.name}, ${s.row.line}. ${s.row.label}`}>
+							<ul>
+								<TrendRow {...s.row} />
+							</ul>
+						</Picture>
+					</State>
+				))}
+			</Specimen>
+			<Specimen
+				id="change-row"
+				title="ChangeRow"
+				tier="visual"
+				components={["ChangeRow"]}
+				sentence="One category's change since the same days last month, in words with an arrow (“Up $31”). Spending more isn't a status, so it stays ink: green and brick mean on track and over budget. Equal amounts say “No change” with no arrow."
+			>
+				{TRENDS_FULL.changes.slice(0, 2).map((change) => (
+					<State label={change.direction === "up" ? "Up" : "Down"}>
+						<Picture
+							label={`${change.name}, ${change.detail}. ${change.words}`}
+						>
+							<ul>
+								<ChangeRow {...change} />
+							</ul>
+						</Picture>
+					</State>
+				))}
+				<State label="Money counted but in no category, with its own muted icon">
+					<Picture label="Uncategorized, $23, was $0. Up $23">
+						<ul>
+							<ChangeRow
+								name="Uncategorized"
+								icon="list"
+								color=""
+								detail="$23, was $0"
+								direction="up"
+								words="Up $23"
+							/>
+						</ul>
+					</Picture>
+				</State>
+				<State label="The same amount: no arrow">
+					<Picture label="Gas, $48, was $48. No change">
+						<ul>
+							<ChangeRow
+								name="Gas"
+								icon="gas"
+								color="cat-slate"
+								detail="$48, was $48"
+								direction="same"
+								words="No change"
+							/>
+						</ul>
+					</Picture>
+				</State>
+			</Specimen>
+			<Specimen
+				id="month-bars"
+				title="MonthBars"
+				tier="visual"
+				components={["MonthBars"]}
+				sentence="All spending by month as bars on ledger rules with each amount above it: Trends' early state, before there's a full month to compare (P31). The month still going is a dashed outline that says “so far”."
+			>
+				<State label="Tally started last month">
+					<Picture label={early.label}>
+						<MonthBars months={early.months} label={early.label} />
+					</Picture>
+				</State>
+				<State label="Tally's very first month">
+					<Picture label={firstMonth.label}>
+						<MonthBars months={firstMonth.months} label={firstMonth.label} />
+					</Picture>
+				</State>
+				<State label="Nothing spent yet this month: a sliver, never a missing bar">
+					<Picture label="All spending by month: October so far $0.">
+						<MonthBars
+							months={monthPoints([0])}
+							label="All spending by month: October so far $0."
+						/>
+					</Picture>
+				</State>
+			</Specimen>
+			<Specimen
+				id="trends-screen"
+				title="Trends, as a page"
+				tier="visual"
+				sentence="The page built from those parts (P23 D, P24 A, P31, P33 A): the one number and its sentence first, each category's change biggest first, then Going well, Worth a look and every other category with six small bars. One column, as wide as the Budget list on desktop."
+			>
+				<State label="A phone's first screen (390×844, less the tab bar)">
+					<PhoneFrame
+						label={`Trends on a phone's first screen, top to bottom: ${describeTrends(TRENDS_FULL)}`}
+					>
+						<TrendsScreen page={TRENDS_FULL} />
+					</PhoneFrame>
+				</State>
+				<State label="Desktop: one column, wider">
+					<Picture label={`Trends on desktop: ${describeTrends(TRENDS_FULL)}`}>
+						<TrendsScreen page={TRENDS_FULL} />
+					</Picture>
+				</State>
+				<State label="One month in: all spending by month, and when Tally started">
+					<PhoneFrame label={`Trends: ${describeTrends(early)}`}>
+						<TrendsScreen page={early} />
+					</PhoneFrame>
+				</State>
+				<State label="Tally's very first month">
+					<Picture label={`Trends: ${describeTrends(firstMonth)}`}>
+						<TrendsScreen page={firstMonth} />
+					</Picture>
+				</State>
+				<State label="No transactions yet">
+					<Picture label={`Trends: ${describeTrends(empty)}`}>
+						<TrendsScreen page={empty} />
+					</Picture>
+				</State>
+			</Specimen>
+		</Group>
+	);
+}
+
 /** The whole catalog page body. */
 export function Catalog() {
 	return (
@@ -1489,6 +1834,7 @@ export function Catalog() {
 			<Shell />
 			<HomeTopGroup />
 			<AccountsGroup />
+			<TrendsGroup />
 			<Rows />
 			<Controls />
 			<Feedback />

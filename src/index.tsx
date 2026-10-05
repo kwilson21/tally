@@ -19,6 +19,7 @@ import { organize } from "./routes/organize";
 import { plaid, enabled as plaidEnabled } from "./routes/plaid";
 import { settings } from "./routes/settings";
 import { transactions } from "./routes/transactions";
+import { trends } from "./routes/trends";
 import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
 
@@ -123,6 +124,7 @@ app.route("/", howItWorks);
 app.route("/", plaid);
 app.route("/", organize);
 app.route("/", transactions);
+app.route("/", trends);
 app.route("/", settings);
 app.route("/", accounts);
 app.route("/", bills);

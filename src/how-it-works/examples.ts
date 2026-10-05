@@ -1,7 +1,9 @@
 // The worked examples on the How Tally works page (spec §9), written by code from the demo's own
 // numbers. Exact cents, so budget − spent always equals the result shown.
 import type { MonthSummary } from "../budget";
+import { monthName } from "../dates";
 import { formatCents } from "../money";
+import { type TrendsPage, trendsAmount } from "../trends";
 
 const plural = (n: number, one: string, many: string) =>
 	`${n} ${n === 1 ? one : many}`;
@@ -37,6 +39,34 @@ const listed = (items: string[]) =>
 	items.length < 2
 		? items.join("")
 		: `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
+/**
+ * The Trends section's example, from the page's own numbers: the first category that's going well,
+ * else the first worth a look, else this month so far against the same days last month. Null before
+ * there's a full month to compare, when the section says so in a plain sentence instead.
+ */
+export function trendsExample(page: TrendsPage): string | null {
+	if (page.kind !== "full") return null;
+	const [good] = page.goingWell;
+	if (good) {
+		// The run is the months before the last point (this month, still going).
+		const end = good.months.length - 1;
+		const names = good.months
+			.slice(end - good.run, end)
+			.map((m) => monthName(m.month));
+		return `${good.name} stayed under its budget in ${listed(names)}, so it's going well.`;
+	}
+	const [watch] = page.worthALook;
+	if (watch) {
+		const last = watch.months.length - 2;
+		const from = watch.months[last - watch.run];
+		const to = watch.months[last];
+		if (from && to)
+			return `${watch.name} spent more each month from ${monthName(from.month)} to ${monthName(to.month)}, so it's worth a look.`;
+	}
+	const [now = "", then = ""] = page.caption.split(" against ");
+	return `${now}: ${trendsAmount(page.sameDaysCents.now)} spent, against ${trendsAmount(page.sameDaysCents.last)} for ${then}.`;
+}
 
 /** This month's excluded transactions by why: flagged transfer, flagged reimbursement, or a person's choice. */
 export type ExcludedBreakdown = {
