@@ -37,7 +37,7 @@ const dollars = (cents: number) => formatCents(cents, { wholeDollars: true });
 
 const MONTHS = ["May", "Jun", "Jul", "Aug", "Sep", "Oct"];
 
-const CATS = {
+export const CATS = {
 	groceries: { name: "Groceries", icon: "groceries", color: "cat-blue" },
 	eatingOut: { name: "Eating Out", icon: "eating-out", color: "cat-plum" },
 	kids: { name: "Kids", icon: "kids", color: "cat-ochre" },
@@ -908,17 +908,20 @@ const deletePage = (
 // P29–P30: AI suggestions in Settings.
 
 /** A list row whose merchant has a suggested name: the suggestion shows with a dashed underline (not decided yet). */
-function SuggestedRow({
+export function SuggestedRow({
 	name,
 	cents,
 	cat,
 	maybe,
+	plain,
 }: {
 	name: string;
 	cents: number;
 	cat?: Cat;
 	/** P29 B: the tidied name stays and the caption line offers the suggestion. */
 	maybe?: string;
+	/** A name nobody is guessing at (P87): no dashed underline. */
+	plain?: boolean;
 }) {
 	return (
 		<li class="flex h-16 items-center gap-4">
@@ -931,7 +934,7 @@ function SuggestedRow({
 			)}
 			<span class="min-w-0 flex-1">
 				<span
-					class={`block truncate text-lg leading-6 ${maybe ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`}
+					class={`block truncate text-lg leading-6 ${maybe || plain ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`}
 				>
 					{name}
 				</span>
@@ -1004,25 +1007,49 @@ const namesMaybe = (
 	</>
 );
 
-/** Up to three suggested names as chips, the bank's tidied name, and a field for your own. */
-function NameChoices({ id }: { id: string }) {
+/**
+ * Up to three suggested names as chips, the bank's tidied name, and a field for your own. `names`
+ * and `keep` draw another merchant. With `source` (P87 A) the muted line that says where the
+ * suggestions came from goes under them, and the tidied name moves below that line.
+ */
+export function NameChoices({
+	id,
+	names = ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
+	keep = "Blue bottle cof",
+	source,
+}: {
+	id: string;
+	names?: string[];
+	keep?: string;
+	source?: Child;
+}) {
+	const suggested = names.map((n, i) => (
+		<Chip type="radio" name={id} value={String(i + 1)} checked={i === 0}>
+			{n}
+		</Chip>
+	));
+	const tidied = (
+		<Chip type="radio" name={id} value="tidied" checked={names.length === 0}>
+			Keep “{keep}”
+		</Chip>
+	);
 	return (
 		<fieldset class="flex flex-col gap-2">
 			<legend class="text-base text-ink">Name</legend>
-			<div class="flex flex-wrap gap-2">
-				<Chip type="radio" name={id} value="1" checked>
-					Blue Bottle Coffee
-				</Chip>
-				<Chip type="radio" name={id} value="2">
-					Blue Bottle
-				</Chip>
-				<Chip type="radio" name={id} value="3">
-					Blue Bottle Cafe
-				</Chip>
-				<Chip type="radio" name={id} value="tidied">
-					Keep “Blue bottle cof”
-				</Chip>
-			</div>
+			{source ? (
+				<>
+					<div class="flex flex-col gap-1">
+						<div class="flex flex-wrap gap-2">{suggested}</div>
+						{source}
+					</div>
+					<div class="flex flex-wrap gap-2 pt-1">{tidied}</div>
+				</>
+			) : (
+				<div class="flex flex-wrap gap-2">
+					{suggested}
+					{tidied}
+				</div>
+			)}
 			<TextInput id={`${id}-own`} label="Or your own" surface="paper" />
 			<p class="text-sm text-muted">
 				For all 9 transactions from this merchant.
@@ -1031,23 +1058,38 @@ function NameChoices({ id }: { id: string }) {
 	);
 }
 
+/** The edit panel over a list: the bank's text and the amount, the name's part as `children`, Cancel and Save. */
+export function NamesPanel({
+	behind,
+	children,
+}: {
+	behind: Child;
+	children?: Child;
+}) {
+	return (
+		<Sheet behind={behind}>
+			<div>
+				<p class="text-sm text-muted">SQ *BLUE BOTTLE COF 0412</p>
+				<p class="font-serif text-4xl font-semibold">−$6.50</p>
+			</div>
+			{children}
+			<div class="grid grid-cols-2 gap-3">
+				<Button kind="secondary" type="button" class="w-full">
+					Cancel
+				</Button>
+				<Button type="button" class="w-full">
+					Save
+				</Button>
+			</div>
+		</Sheet>
+	);
+}
+
 /** Both: the edit panel's name choice. */
 const namesPanel = (
-	<Sheet behind={namesInList}>
-		<div>
-			<p class="text-sm text-muted">SQ *BLUE BOTTLE COF 0412</p>
-			<p class="font-serif text-4xl font-semibold">−$6.50</p>
-		</div>
+	<NamesPanel behind={namesInList}>
 		<NameChoices id="p29-panel" />
-		<div class="grid grid-cols-2 gap-3">
-			<Button kind="secondary" type="button" class="w-full">
-				Cancel
-			</Button>
-			<Button type="button" class="w-full">
-				Save
-			</Button>
-		</div>
-	</Sheet>
+	</NamesPanel>
 );
 
 /** Both: when there's time, a Band on Settings leads to one merchant at a time, like Organize. */

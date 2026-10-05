@@ -61,7 +61,7 @@ function NeedsLine({ children }: { children?: Child }) {
 // ---------------------------------------------------------------------------------------------
 // P41: the AI suggestions switches in Settings.
 
-type Feature = { id: string; name: string; line: string };
+export type Feature = { id: string; name: string; line: string };
 
 /** The four switches (spec §8.6), each with the one muted line that says what it does. */
 export const FEATURES: Feature[] = [
@@ -171,28 +171,53 @@ const switchButtons = (
 /**
  * Prototype switch: a real checkbox, hidden but reachable, with a track and knob drawn from it. Ink
  * and the knob on the right when on, a ruled track and the knob on the left when off, and the word
- * beside it says which. The whole 44px-tall row is its label.
+ * beside it says which. The whole 44px-tall row is its label. With `needs`, the switch is greyed
+ * out (P86): disabled, off, in muted text and a rule-coloured track, with the words it needs on
+ * under it, so the greying never rests on color alone.
  */
-export function SwitchRow({ f, on }: { f: Feature; on: boolean }) {
+export function SwitchRow({
+	f,
+	on,
+	needs,
+}: {
+	f: Feature;
+	on: boolean;
+	needs?: string;
+}) {
+	const greyed = needs !== undefined;
 	return (
 		<li>
 			<label class="group flex min-h-11 cursor-pointer items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
 				<input
 					type="checkbox"
 					name={`p41b-${f.id}`}
-					checked={on}
+					checked={on && !greyed}
+					disabled={greyed}
 					class="sr-only"
 				/>
 				<span class="min-w-0 flex-1">
-					<span class="block text-lg">{f.name}</span>
+					<span class={`block text-lg ${greyed ? "text-muted" : ""}`}>
+						{f.name}
+					</span>
 					<span class="block text-pretty text-muted">{f.line}</span>
+					{greyed && (
+						<span class="mt-1 block text-pretty text-sm font-medium text-muted">
+							{needs}
+						</span>
+					)}
 				</span>
-				<span class="w-8 shrink-0 text-right font-medium">
+				<span
+					class={`w-8 shrink-0 text-right font-medium ${greyed ? "text-muted" : ""}`}
+				>
 					<span class="hidden group-has-[:checked]:inline">On</span>
 					<span class="group-has-[:checked]:hidden">Off</span>
 				</span>
-				<span class="flex h-7 w-12 shrink-0 items-center rounded-full border border-ink bg-rule px-0.5 group-has-[:checked]:justify-end group-has-[:checked]:bg-ink">
-					<span class="size-5 rounded-full bg-ink group-has-[:checked]:bg-paper" />
+				<span
+					class={`flex h-7 w-12 shrink-0 items-center rounded-full border bg-rule px-0.5 group-has-[:checked]:justify-end ${greyed ? "border-rule" : "border-ink group-has-[:checked]:bg-ink"}`}
+				>
+					<span
+						class={`size-5 rounded-full ${greyed ? "bg-muted" : "bg-ink group-has-[:checked]:bg-paper"}`}
+					/>
 				</span>
 			</label>
 		</li>
@@ -265,7 +290,7 @@ function Back() {
 }
 
 /** The top of one review item: where you are, then what's being asked about, like Organize's group. */
-function ReviewHead({
+export function ReviewHead({
 	place,
 	name,
 	bank,
@@ -294,16 +319,19 @@ function ReviewHead({
  * The suggestion as the one question: P32's dashed "Maybe …" tag at question size, in sans (the
  * screen's one serif headline is the name above it), with how sure Tally was when it can say.
  */
-function Question({
+export function Question({
 	icon,
 	children,
 	line,
 	sure,
+	source,
 }: {
 	icon: Child;
 	children?: Child;
 	line?: string;
 	sure?: number;
+	/** The muted line that says where the suggestion came from (P87), for one with no percentage. */
+	source?: Child;
 }) {
 	return (
 		<div class="mt-5 border-t border-rule pt-5">
@@ -320,6 +348,7 @@ function Question({
 					<Why topic="Tally's guess" href="#p42-review" />
 				</p>
 			)}
+			{source && <div class="mt-2">{source}</div>}
 		</div>
 	);
 }
@@ -346,7 +375,7 @@ function SomethingElse({
 }
 
 /** A's answers: the primary yes, a secondary no (or Something else), and Skip, each 44px. */
-function Answers({
+export function Answers({
 	yes,
 	no,
 	open,
@@ -501,6 +530,44 @@ const askChips = (
 	</>
 );
 
+/**
+ * What "Something else" opens on a name: the other suggested names, the bank's text tidied, a field
+ * for your own, then Save and next (P29's choices, one merchant at a time).
+ */
+export function ElseNames({
+	id,
+	names,
+	keep,
+}: {
+	id: string;
+	names: string[];
+	keep: string;
+}) {
+	return (
+		<div class="mt-3 flex flex-col gap-3">
+			<fieldset class="flex flex-col gap-2">
+				<legend class="sr-only">Other names</legend>
+				<div class="flex flex-wrap gap-2">
+					{names.map((n) => (
+						<Chip type="radio" name={id} value={n}>
+							{n}
+						</Chip>
+					))}
+					<Chip type="radio" name={id} value="tidied">
+						Keep “{keep}”
+					</Chip>
+				</div>
+			</fieldset>
+			<TextInput id={`${id}-own`} label="Or your own" surface="paper" />
+			<div>
+				<Button kind="secondary" type="button">
+					Save and next
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 /** Both: a merchant name, with P29's choices opened by Something else. */
 const askName = (
 	<>
@@ -514,28 +581,11 @@ const askName = (
 			Blue Bottle Coffee
 		</Question>
 		<Answers yes="Yes, Blue Bottle Coffee" open>
-			<div class="mt-3 flex flex-col gap-3">
-				<fieldset class="flex flex-col gap-2">
-					<legend class="sr-only">Other names</legend>
-					<div class="flex flex-wrap gap-2">
-						<Chip type="radio" name="p42-name" value="2">
-							Blue Bottle
-						</Chip>
-						<Chip type="radio" name="p42-name" value="3">
-							Blue Bottle Cafe
-						</Chip>
-						<Chip type="radio" name="p42-name" value="tidied">
-							Keep “Blue bottle cof”
-						</Chip>
-					</div>
-				</fieldset>
-				<TextInput id="p42-own" label="Or your own" surface="paper" />
-				<div>
-					<Button kind="secondary" type="button">
-						Save and next
-					</Button>
-				</div>
-			</div>
+			<ElseNames
+				id="p42-name"
+				names={["Blue Bottle", "Blue Bottle Cafe"]}
+				keep="Blue bottle cof"
+			/>
 		</Answers>
 	</>
 );

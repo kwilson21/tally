@@ -1,4 +1,4 @@
-// P76–P85: the open questions in docs/reviews/open-questions-2026-10-05.md that change how a screen
+// P76–P87: the open questions in docs/reviews/open-questions-2026-10-05.md that change how a screen
 // looks, each drawn so the owner decides by seeing (decision 47). Every picture is the screen the
 // earlier picked drawing made, with only the detail in question changing: the real components in
 // src/views/, and the picked drawings' own prototypes (imported from the proposals-*.tsx files that
@@ -6,7 +6,7 @@
 // Nothing here is decided until the owner picks.
 
 import type { Child } from "hono/jsx";
-import { dayLabel } from "../dates";
+import { dayLabel, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { BillRow, BillStatusHeading } from "../views/bill-row";
 import { Wordmark } from "../views/brand";
@@ -15,14 +15,20 @@ import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { Icon } from "../views/icons";
 import { SIDEBAR_ITEMS } from "../views/nav";
+import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { WhyLink } from "../views/why-link";
 import { Fixed, Options, Title } from "./proposal-parts";
 import {
 	AiGroup,
+	Answers,
 	askIncome,
+	ElseNames,
 	FEATURES,
+	type Feature,
 	OFF_MEANS,
+	Question,
+	ReviewHead,
 	SwitchRow,
 	Why,
 } from "./proposals-ai";
@@ -41,6 +47,12 @@ import {
 	summaryRow,
 	TallSheet,
 } from "./proposals-forms";
+import {
+	CATS,
+	NameChoices,
+	NamesPanel,
+	SuggestedRow,
+} from "./proposals-phase4";
 import {
 	bill,
 	CAR,
@@ -937,7 +949,268 @@ function DesktopPanel({ enter }: { enter: Enter }) {
 	);
 }
 
-/** P76–P85 on the proposals page, open for the owner's pick. */
+// ---------------------------------------------------------------------------------------------
+// P86: clearer words for the AI switches (question 2, P41 B). Three sets of names and lines for the
+// four switches, each drawn on P41 B's switch, then again with Categories and Income off.
+
+type SwitchWords = {
+	features: Feature[];
+	/** The line under the last switch when it is greyed out (question 2). */
+	needs: string;
+};
+
+/** Said once for every option, so the pictures differ only in the switches' own words. */
+const SWITCH_GROUP_LINE =
+	"Tally only suggests; you can change anything it does. Off means your choices and rules only.";
+
+const SAY_WHAT_IT_DOES: SwitchWords = {
+	features: [
+		{
+			id: "names",
+			name: "Suggest store names",
+			line: "Turns bank text like SQ *BLUE BOTTLE COF into Blue Bottle Coffee. You pick the name.",
+		},
+		{
+			id: "categories",
+			name: "Guess categories",
+			line: "Puts a transaction in a category when Tally is sure, and leaves transfers between your accounts out of the budget.",
+		},
+		{
+			id: "income",
+			name: "Spot paychecks",
+			line: "Marks money coming in as income when Tally is sure.",
+		},
+		{
+			id: "arrival",
+			name: "Sort right away",
+			line: "Sorts new transactions as soon as the bank sends them, not overnight.",
+		},
+	],
+	needs: "Needs Guess categories or Spot paychecks on.",
+};
+
+const B_QUESTION_EACH: SwitchWords = {
+	features: [
+		{
+			id: "names",
+			name: "Suggest names for stores?",
+			line: "Tally offers a clean name for bank text, and you pick it.",
+		},
+		{
+			id: "categories",
+			name: "Guess categories?",
+			line: "Tally picks a category when it's sure, and keeps transfers and reimbursements out of your budget.",
+		},
+		{
+			id: "income",
+			name: "Spot paychecks?",
+			line: "Tally marks money coming in as income when it's sure.",
+		},
+		{
+			id: "arrival",
+			name: "Sort as soon as transactions arrive?",
+			line: "Tally sorts them right after your bank sends them, not only overnight.",
+		},
+	],
+	needs: "Needs “Guess categories?” or “Spot paychecks?” on.",
+};
+
+const TODAYS_NAMES: SwitchWords = {
+	features: [
+		{
+			id: "names",
+			name: "Merchant names",
+			line: "Offers a clean name for the text your bank sends. You pick the name.",
+		},
+		{
+			id: "categories",
+			name: "Categories and exclusions",
+			line: "Picks a category when Tally is sure, and leaves transfers and money you were paid back out of your budget.",
+		},
+		{
+			id: "income",
+			name: "Income",
+			line: "Marks money coming in, like a paycheck, as income when Tally is sure.",
+		},
+		{
+			id: "arrival",
+			name: "Sort new transactions as they arrive",
+			line: "Sorts them right after your bank sends them, not only overnight.",
+		},
+	],
+	needs: "Needs Categories and exclusions or Income on.",
+};
+
+/**
+ * Settings' AI suggestions group as P41 B draws it, in one option's words: all on to start, or
+ * (greyed) with Categories and Income off, so the last switch has nothing to sort and is greyed out.
+ */
+function AiWords({ words, greyed }: { words: SwitchWords; greyed?: boolean }) {
+	return (
+		<AiGroup intro={SWITCH_GROUP_LINE}>
+			<ul class="mt-3 divide-y divide-rule border-y border-rule">
+				{words.features.map((f) => (
+					<SwitchRow
+						f={f}
+						on={!greyed || f.id === "names"}
+						needs={greyed && f.id === "arrival" ? words.needs : undefined}
+					/>
+				))}
+			</ul>
+			<div class="mt-4">
+				<Button type="button">Save</Button>
+			</div>
+		</AiGroup>
+	);
+}
+
+// ---------------------------------------------------------------------------------------------
+// P87: where a suggested name comes from (question 10; P29 A's list and panel, P42 A's question).
+// Blue Bottle Coffee is a name the bank sent (Plaid's merchant_name, so Workers AI is never asked);
+// Lupita's Taqueria is one the bank didn't send, so Tally guesses. Each option is drawn on the edit
+// panel and the review screen, then with the Merchant names switch off.
+
+/** P87 A's muted line under a suggestion: where it came from. A guess says so, with a Why?. */
+function NameSource({ from }: { from: "bank" | "tally" }) {
+	return from === "bank" ? (
+		<p class="text-sm text-muted">From your bank</p>
+	) : (
+		<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+			Tally's guess
+			<Why topic="Tally's guess" href="#p87-name-source" />
+		</p>
+	);
+}
+
+const DASHED_ARE_SUGGESTIONS =
+	"Dashed names are suggestions. Tap one to keep it or pick another.";
+const DASHED_ARE_GUESSES =
+	"Dashed names are Tally's guesses. Tap one to keep it or pick another.";
+
+/**
+ * The Transactions list behind the edit panel, with one row for each kind of name: the bank's
+ * (Blue Bottle) and Tally's guess (Lupita's), each dashed, or plain when nothing is suggested.
+ */
+function NamesBehind({
+	bank,
+	guess,
+	intro,
+}: {
+	bank: { name: string; dashed: boolean };
+	guess: { name: string; dashed: boolean };
+	intro?: string;
+}) {
+	return (
+		<>
+			<Title>Transactions</Title>
+			{intro && <p class="mt-2 text-muted">{intro}</p>}
+			<ul class="mt-2 divide-y divide-rule">
+				<SuggestedRow
+					name={bank.name}
+					plain={!bank.dashed}
+					cents={650}
+					cat={CATS.eatingOut}
+				/>
+				<SuggestedRow
+					name={guess.name}
+					plain={!guess.dashed}
+					cents={2240}
+					cat={CATS.eatingOut}
+				/>
+				<SuggestedRow
+					name="Trader Joe's"
+					plain
+					cents={8217}
+					cat={CATS.groceries}
+				/>
+			</ul>
+		</>
+	);
+}
+
+const BLUE_BOTTLE_NAME = { name: "Blue Bottle Coffee", dashed: true };
+const BLUE_BOTTLE_PLAIN = { name: "Blue Bottle Coffee", dashed: false };
+const BLUE_BOTTLE_TIDIED = { name: "Blue bottle cof", dashed: false };
+const LUPITAS_GUESS = { name: "Lupita's Taqueria", dashed: true };
+const LUPITAS_TIDIED = { name: "Lupitas taq", dashed: false };
+
+/** B: a name the bank sent is just the name, so the panel has a name to change, not one to choose. */
+function BankNameField({ id }: { id: string }) {
+	return (
+		<div class="flex flex-col gap-2">
+			<TextInput
+				id={`${id}-name`}
+				label="Name"
+				surface="paper"
+				value="Blue Bottle Coffee"
+			/>
+			<p class="text-sm text-muted">
+				For all 9 transactions from this merchant.
+			</p>
+		</div>
+	);
+}
+
+/** A name question on the review screen: Lupita's (Tally's guess) or Blue Bottle (the bank's). */
+function NameQuestion({
+	id,
+	of,
+	source,
+}: {
+	id: string;
+	of: "guess" | "bank";
+	/** A: the line under the question that says where the name came from. */
+	source?: boolean;
+}) {
+	const guess = of === "guess";
+	return (
+		<>
+			<ReviewHead
+				place={guess ? "4 of 14" : "2 of 9"}
+				name={guess ? "Lupitas taq" : "Blue bottle cof"}
+				bank={guess ? "TST* LUPITAS TAQ" : "SQ *BLUE BOTTLE COF 0412"}
+				meta={guess ? "2 transactions · $44.80" : "9 transactions · $58.50"}
+			/>
+			<Question
+				icon={<Icon name="tag" class="size-7" />}
+				source={source && <NameSource from={guess ? "tally" : "bank"} />}
+			>
+				{guess ? "Lupita's Taqueria" : "Blue Bottle Coffee"}
+			</Question>
+			<Answers
+				yes={`Yes, ${guess ? "Lupita's Taqueria" : "Blue Bottle Coffee"}`}
+			>
+				<ElseNames
+					id={id}
+					names={guess ? ["Lupitas Taqueria", "Lupita's"] : []}
+					keep={guess ? "Lupitas taq" : "Blue bottle cof"}
+				/>
+			</Answers>
+		</>
+	);
+}
+
+/** With the names switch off and no bank names to ask, the review goes straight to the next kind. */
+const nextKind = (
+	<>
+		<ReviewHead
+			place="1 of 8"
+			name="Acme Payroll"
+			bank="ACME PAYROLL PPD"
+			meta={`${formatCents(-245000, { signed: true })} · ${shortDay("2026-10-03", TODAY)}`}
+		/>
+		<Question
+			icon={<Icon name="income" class="size-7" />}
+			line="Count it as income, not spending?"
+			sure={71}
+		>
+			a paycheck
+		</Question>
+		<Answers yes="Yes, it's income" no="No" />
+	</>
+);
+
+/** P76–P87 on the proposals page, open for the owner's pick. */
 export function DetailsProposals() {
 	return (
 		<>
@@ -1374,6 +1647,252 @@ export function DetailsProposals() {
 							tradeoff:
 								"calmest, but it doesn't say where the panel came from, and it isn't the phone's rise.",
 							screen: <DesktopPanel enter="fade" />,
+						},
+					]}
+				/>
+			</Specimen>
+
+			<Specimen
+				id="p86-switch-words"
+				title="P86 · Clearer words for the AI switches"
+				tier="visual"
+				sentence="The names and lines under the four AI switches are confusing. Pick the words. Each option is drawn on Settings' AI suggestions group, then again with Categories and Income off, so the last switch is greyed out."
+			>
+				<Fixed>
+					question 2, on decisions 68 and 73. The four switches do what §8.6
+					says: names for merchants; a category, with transfers and
+					reimbursements left out of the budget; income; and sorting new
+					transactions right after a sync, not only overnight. All are on to
+					start. Off means Tally works from your rules and choices alone, and
+					nothing already decided changes. The look is P41 B's: switches made
+					from real checkboxes, On or Off in words beside each, and one Save
+					under the group. When Categories and Income are both off, the last
+					switch is greyed out, with a line saying it needs one of them on (the
+					owner's pick for question 2).
+				</Fixed>
+				<Options
+					options={[
+						{
+							name: "Option A · Say what it does for you",
+							note: "Each switch is named for its job, in the words the family uses, with an example where one helps: Suggest store names, Guess categories, Spot paychecks, Sort right away.",
+							tradeoff:
+								"the lines are longer than today's, so the group is taller and Save sits lower on the screen.",
+							recommended:
+								"each name is the job, in the words the family uses, with an example.",
+							tall: true,
+							screen: <AiWords words={SAY_WHAT_IT_DOES} />,
+						},
+						{
+							name: "Option A, next · Categories and Income off",
+							note: "Nothing is left to sort, so “Sort right away” is greyed out and says what it needs.",
+							tall: true,
+							screen: <AiWords words={SAY_WHAT_IT_DOES} greyed />,
+						},
+						{
+							name: "Option B · A question each",
+							note: "Each switch is a question, with a one-line answer under it.",
+							tradeoff:
+								"the switch answers with On or Off, not Yes or No, and the last question is the longest name.",
+							tall: true,
+							screen: <AiWords words={B_QUESTION_EACH} />,
+						},
+						{
+							name: "Option B, next · Categories and Income off",
+							note: "The last question is greyed out, and says which two it needs.",
+							tall: true,
+							screen: <AiWords words={B_QUESTION_EACH} greyed />,
+						},
+						{
+							name: "Option C · Today's names, clearer lines",
+							note: "The four names stay as they are now. Only the lines under them are rewritten.",
+							tradeoff:
+								"“Categories and exclusions” and “Income” stay as the names, so the lines have all the explaining to do.",
+							tall: true,
+							screen: <AiWords words={TODAYS_NAMES} />,
+						},
+						{
+							name: "Option C, next · Categories and Income off",
+							note: "The last switch is greyed out, and says which two it needs.",
+							tall: true,
+							screen: <AiWords words={TODAYS_NAMES} greyed />,
+						},
+					]}
+				/>
+			</Specimen>
+
+			<Specimen
+				id="p87-name-source"
+				title="P87 · Where a suggested name comes from"
+				tier="visual"
+				sentence="A suggested name is either one your bank sent or Tally's guess. Pick whether the family can tell which, and how it reads with the Merchant names switch off. Each option is drawn on the edit panel and the review screen, then again with the switch off. Blue Bottle Coffee is a name your bank sent; Lupita's Taqueria is one Tally guessed."
+			>
+				<Fixed>
+					question 10, on decisions 64 and 68. Plaid's name is the first
+					suggestion and Workers AI only runs when Plaid sends none (decision
+					68). A suggestion shows dashed until a person chooses (decision 64).
+					Screens never name the AI service or Plaid's brand to the family:
+					“your bank” is fine, and “Tally's guess” is how AI suggestions are
+					named (decision 64). The owner's answer to question 10: help the
+					family tell Tally's guess from the bank's own clean name.
+				</Fixed>
+				<Options
+					options={[
+						{
+							name: "Option A · Say the source under the choice",
+							note: "The edit panel for Blue Bottle Coffee: a muted line under the suggested name says “From your bank”. The list row stays dashed for every suggestion, so the list has one sign.",
+							tradeoff:
+								"one more small line in the panel and on the review screen.",
+							recommended:
+								"the family can see which names are the bank's own and which are a guess, without a new mark in the list.",
+							screen: (
+								<NamesPanel
+									behind={
+										<NamesBehind
+											bank={BLUE_BOTTLE_NAME}
+											guess={LUPITAS_GUESS}
+											intro={DASHED_ARE_SUGGESTIONS}
+										/>
+									}
+								>
+									<NameChoices
+										id="p87-a-panel"
+										names={["Blue Bottle Coffee"]}
+										source={<NameSource from="bank" />}
+									/>
+								</NamesPanel>
+							),
+						},
+						{
+							name: "Option A, next · The review screen",
+							note: "Your bank sent no name for Lupita's, so Tally guessed. The line under the question says “Tally's guess”, with a Why? that explains it, as it already does for a category or a paycheck.",
+							screen: <NameQuestion id="p87-a-review" of="guess" source />,
+						},
+						{
+							name: "Option A, switch off · The edit panel",
+							note: "Blue Bottle's name still comes from your bank, so it's still offered and still labelled. Tally's guesses are gone: Lupita's shows its tidied name.",
+							screen: (
+								<NamesPanel
+									behind={
+										<NamesBehind
+											bank={BLUE_BOTTLE_NAME}
+											guess={LUPITAS_TIDIED}
+											intro={DASHED_ARE_SUGGESTIONS}
+										/>
+									}
+								>
+									<NameChoices
+										id="p87-a-off-panel"
+										names={["Blue Bottle Coffee"]}
+										source={<NameSource from="bank" />}
+									/>
+								</NamesPanel>
+							),
+						},
+						{
+							name: "Option A, switch off · The review screen",
+							note: "Your bank's names are still asked, with “From your bank” under them. No “Tally's guess” appears, so there is less to go through.",
+							screen: <NameQuestion id="p87-a-off-review" of="bank" source />,
+						},
+					]}
+				/>
+				<Options
+					options={[
+						{
+							name: "Option B · Bank names aren't suggestions",
+							note: "The edit panel for Blue Bottle Coffee: your bank's name is the name straight away. It isn't dashed and there's nothing to choose, only a name to change. Only Tally's guesses are dashed.",
+							tradeoff:
+								"nobody checks a bank's name before it's used, and a wrong one is fixed only if someone notices it.",
+							screen: (
+								<NamesPanel
+									behind={
+										<NamesBehind
+											bank={BLUE_BOTTLE_PLAIN}
+											guess={LUPITAS_GUESS}
+											intro={DASHED_ARE_GUESSES}
+										/>
+									}
+								>
+									<BankNameField id="p87-b-panel" />
+								</NamesPanel>
+							),
+						},
+						{
+							name: "Option B, next · The review screen",
+							note: "Only Tally's guesses are ever asked, so the dashed “Maybe” needs no label.",
+							screen: <NameQuestion id="p87-b-review" of="guess" />,
+						},
+						{
+							name: "Option B, switch off · The edit panel",
+							note: "Only your bank's names are left, still plain names. Tally's guess for Lupita's is gone.",
+							screen: (
+								<NamesPanel
+									behind={
+										<NamesBehind
+											bank={BLUE_BOTTLE_PLAIN}
+											guess={LUPITAS_TIDIED}
+										/>
+									}
+								>
+									<BankNameField id="p87-b-off-panel" />
+								</NamesPanel>
+							),
+						},
+						{
+							name: "Option B, switch off · The review screen",
+							note: "There's no name question: your bank's names aren't asked and Tally's guesses are off, so it goes on to the next kind.",
+							screen: nextKind,
+						},
+					]}
+				/>
+				<Options
+					options={[
+						{
+							name: "Option C · No source shown (today's spec)",
+							note: "The edit panel for Blue Bottle Coffee: both kinds of name look the same, a dashed suggestion with nothing to say where it came from.",
+							tradeoff:
+								"the family can't tell a bank's own name from a guess, and with the switch off the bank's name isn't offered either.",
+							screen: (
+								<NamesPanel
+									behind={
+										<NamesBehind
+											bank={BLUE_BOTTLE_NAME}
+											guess={LUPITAS_GUESS}
+											intro={DASHED_ARE_SUGGESTIONS}
+										/>
+									}
+								>
+									<NameChoices
+										id="p87-c-panel"
+										names={["Blue Bottle Coffee"]}
+									/>
+								</NamesPanel>
+							),
+						},
+						{
+							name: "Option C, next · The review screen",
+							note: "The same question for either kind, with no line under it.",
+							screen: <NameQuestion id="p87-c-review" of="guess" />,
+						},
+						{
+							name: "Option C, switch off · The edit panel",
+							note: "No suggested names at all, your bank's included. The tidied name stays, and you can type your own.",
+							screen: (
+								<NamesPanel
+									behind={
+										<NamesBehind
+											bank={BLUE_BOTTLE_TIDIED}
+											guess={LUPITAS_TIDIED}
+										/>
+									}
+								>
+									<NameChoices id="p87-c-off-panel" names={[]} />
+								</NamesPanel>
+							),
+						},
+						{
+							name: "Option C, switch off · The review screen",
+							note: "There's no name question, so the review goes on to the next kind.",
+							screen: nextKind,
 						},
 					]}
 				/>
