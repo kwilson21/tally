@@ -9,6 +9,32 @@ type App = { Bindings: Env; Variables: { actor: string } };
 /** The address that was asked for, which a person can load again. */
 const addressOf = (c: Context<App>) => c.req.path + new URL(c.req.url).search;
 
+/**
+ * Where the 500 page's Try again goes, or nothing when no safe place is known. A GET tries its own
+ * address again. Any other method can't (a form post's address is often a 404 when fetched), so it
+ * goes back to the page the form was on: the Referer's path and query, only when the Referer is
+ * this site's. A path that starts with "//" is never used, since it would leave the site.
+ */
+export function retryHref(
+	method: string,
+	url: string,
+	referer: string | undefined,
+): string | undefined {
+	const here = new URL(url);
+	let from = here;
+	if (method !== "GET") {
+		if (!referer) return undefined;
+		try {
+			from = new URL(referer);
+		} catch {
+			return undefined;
+		}
+		if (from.origin !== here.origin) return undefined;
+	}
+	if (from.pathname.startsWith("//")) return undefined;
+	return from.pathname + from.search;
+}
+
 // An htmx request swaps its reply into a part of a page, so a whole page would land inside a page:
 // it gets one plain sentence, announced as an alert (spec §8.5).
 const isHtmx = (c: Context<App>) => Boolean(c.req.header("HX-Request"));
@@ -51,7 +77,10 @@ export const serverErrorPage: ErrorHandler<App> = (err, c) => {
 			demo={c.env.DEMO === "true"}
 			currentPath={addressOf(c)}
 		>
-			<ErrorPage kind="500" retryHref={addressOf(c)} />
+			<ErrorPage
+				kind="500"
+				retryHref={retryHref(c.req.method, c.req.url, c.req.header("Referer"))}
+			/>
 		</Layout>,
 		500,
 	);

@@ -15,6 +15,7 @@ it("only maps the trusted feedback confirmation and clears it", () => {
 // body that are real event targets, so the events travel the way htmx's do.
 
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
+const COULDNT_LOAD = "Couldn't load. Check your connection and try again.";
 
 class FakeNode {
 	children: FakeNode[] = [];
@@ -78,7 +79,15 @@ async function page() {
 const fire = (target: EventTarget, name: string, detail: unknown) =>
 	target.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
 
-const status = (code: number) => ({ ctx: { response: { status: code } } });
+/** htmx 4's ctx for a reply: the request's method (upper case, as htmx makes it) and the status. */
+const status = (code: number, method = "POST") => ({
+	ctx: { request: { method }, response: { status: code } },
+});
+/** ...and for a request that never got an answer. */
+const dropped = (method = "POST") => ({
+	ctx: { request: { method } },
+	error: new TypeError("Failed to fetch"),
+});
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -167,6 +176,60 @@ describe("a reply from Tally's server", () => {
 		const { document, toasts } = await page();
 		fire(document, "htmx:response:error", {});
 		expect(toasts.children).toHaveLength(0);
+	});
+});
+
+describe("what the toast says depends on what was being done", () => {
+	it("says it couldn't load when a GET fails: a filter, or opening a sheet", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:error", dropped("GET"));
+		expect(toasts.children).toHaveLength(1);
+		const toast = toasts.children[0] as FakeNode;
+		expect(toast.words()).toBe(COULDNT_LOAD);
+		expect(toast.attrs.get("role")).toBe("alert");
+		// Still the alert icon: an error is never colour alone.
+		expect(toast.all().some((n) => n.tag === "svg")).toBe(true);
+	});
+
+	it("says it couldn't load when a GET gets a 500", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:response:error", status(500, "GET"));
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_LOAD);
+	});
+
+	it.each(["POST", "PUT", "PATCH", "DELETE"])(
+		"says it couldn't save when a %s fails, dropped or answered with a 500",
+		async (method) => {
+			const { document, toasts } = await page();
+			fire(document, "htmx:error", dropped(method));
+			vi.advanceTimersByTime(4000);
+			fire(document, "htmx:response:error", status(500, method));
+			expect(toasts.children).toHaveLength(1);
+			expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_SAVE);
+		},
+	);
+
+	it("says it couldn't save when the method isn't known", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:error", { ctx: {}, error: new TypeError("x") });
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_SAVE);
+	});
+
+	it("reads the method however htmx cased it", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:error", dropped("get"));
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_LOAD);
+	});
+
+	it("shows a load failure and a save failure together, each once", async () => {
+		const { document, toasts } = await page();
+		for (const method of ["GET", "POST", "GET", "POST"]) {
+			fire(document, "htmx:error", dropped(method));
+		}
+		expect(toasts.children.map((t) => t.words())).toEqual([
+			COULDNT_LOAD,
+			COULDNT_SAVE,
+		]);
 	});
 });
 

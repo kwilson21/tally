@@ -1173,9 +1173,14 @@ function Feedback() {
 							<ErrorPage kind="404" />
 						</Picture>
 					</State>
-					<State label="500: a mistake on Tally's side. Try again loads the address that failed.">
+					<State label="500: a mistake on Tally's side. Try again retries a failed page on its address, or a failed form post on the page the form was on.">
 						<Picture label="The 500 page: the ledger drawing, 500, Something went wrong on our side. Nothing you did. Your data is safe; try again in a minute. and the buttons Try again and Go to Home.">
 							<ErrorPage kind="500" retryHref="#error-pages" />
+						</Picture>
+					</State>
+					<State label="500 with no page to retry: a form post that sent no usable Referer. Go to Home is the one button.">
+						<Picture label="The 500 page with no Try again: the ledger drawing, 500, Something went wrong on our side. Nothing you did. Your data is safe; try again in a minute. and a Go to Home button.">
+							<ErrorPage kind="500" />
 						</Picture>
 					</State>
 				</div>
@@ -1184,7 +1189,8 @@ function Feedback() {
 					page isn't here.", as an alert. One that gets a 500 swaps nothing in:
 					the page stays as it was, so an open sheet keeps what was typed, and
 					the error toast above says "Couldn't save. Check your connection and
-					try again." A dropped connection says the same.
+					try again." (or "Couldn't load…" when the request was a GET, such as a
+					filter or opening a sheet). A dropped connection says the same.
 				</p>
 			</Specimen>
 			<Specimen

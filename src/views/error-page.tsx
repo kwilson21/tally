@@ -3,8 +3,8 @@ import { LedgerIllustration } from "./illustration";
 
 type ErrorPageProps =
 	| { kind: "404" }
-	/** The 500 page's Try again loads this address, the one that failed. */
-	| { kind: "500"; retryHref: string };
+	/** The 500 page's Try again loads this address; without one, there is no Try again. */
+	| { kind: "500"; retryHref?: string };
 
 /**
  * The page for a link that goes nowhere (404) or a mistake on Tally's side (500), drawn inside the
@@ -37,12 +37,20 @@ export function ErrorPage(props: ErrorPageProps) {
 						Nothing you did. Your data is safe; try again in a minute.
 					</p>
 					<div class="mt-4 flex flex-wrap items-center justify-center gap-3">
-						<Button kind="secondary" href={props.retryHref}>
-							Try again
-						</Button>
-						<Button kind="text" href="/">
-							Go to Home
-						</Button>
+						{props.retryHref ? (
+							<>
+								<Button kind="secondary" href={props.retryHref}>
+									Try again
+								</Button>
+								<Button kind="text" href="/">
+									Go to Home
+								</Button>
+							</>
+						) : (
+							<Button kind="secondary" href="/">
+								Go to Home
+							</Button>
+						)}
 					</div>
 				</>
 			)}

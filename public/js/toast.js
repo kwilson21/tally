@@ -5,6 +5,7 @@
 	const DISPLAY_MS = 4000;
 	const SVG_NS = "http://www.w3.org/2000/svg";
 	const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
+	const COULDNT_LOAD = "Couldn't load. Check your connection and try again.";
 	// The alert icon from src/views/icons.tsx (test/toast-js.test.ts checks they match).
 	const ALERT_PATHS = [
 		"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
@@ -63,25 +64,26 @@
 		});
 	});
 
-	// A failed request shows the same error toast, and the page is left as it is, so an open sheet
-	// keeps what was typed. htmx 4's names: htmx:error is a request that never got an answer (the
-	// network dropped); htmx:response:error is any 4xx or 5xx reply, and only a 500 is a failure
-	// here: it's what an unhandled error sends, and Layout's noSwap keeps it out of the page. Every
-	// other 4xx and 5xx carries its own message on purpose, such as a field's error (422) or a bank
-	// that couldn't be reached (502), so it's swapped in and says its own words. The events go to
-	// document, because htmx sends them there when their element has left the page. Several at once
-	// (queued taps on a dead connection) show one toast, not a stack of them.
-	let failureShowing = false;
-	function failed() {
-		if (failureShowing) return;
-		failureShowing = true;
-		setTimeout(() => {
-			failureShowing = false;
-		}, DISPLAY_MS);
+	// A failed request shows an error toast, and the page is left as it is, so an open sheet keeps
+	// what was typed. htmx 4's names: htmx:error is a request that never got an answer (the network
+	// dropped); htmx:response:error is any 4xx or 5xx reply, and only a 500 is a failure here: it's
+	// what an unhandled error sends, and Layout's noSwap keeps it out of the page. Every other 4xx
+	// and 5xx carries its own message on purpose, such as a field's error (422) or a bank that
+	// couldn't be reached (502), so it's swapped in and says its own words. The words follow what
+	// was being done: a GET (a filter, opening a sheet) couldn't load; anything else couldn't save.
+	// The events go to document, because htmx sends them there when their element has left the
+	// page. Several at once (queued taps on a dead connection) show each message once, not a stack.
+	const showing = new Set();
+	function failed(ctx) {
+		const message =
+			String(ctx?.request?.method).toUpperCase() === "GET"
+				? COULDNT_LOAD
+				: COULDNT_SAVE;
+		if (showing.has(message)) return;
+		showing.add(message);
+		setTimeout(() => showing.delete(message), DISPLAY_MS);
 		document.body.dispatchEvent(
-			new CustomEvent("toast", {
-				detail: { message: COULDNT_SAVE, type: "error" },
-			}),
+			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);
 	}
 	document.addEventListener("htmx:error", (event) => {
@@ -90,10 +92,11 @@
 		if (!ctx) return;
 		// A request replaced by a newer one, or cancelled, is not a failure.
 		if (error?.name === "AbortError") return;
-		failed();
+		failed(ctx);
 	});
 	document.addEventListener("htmx:response:error", (event) => {
-		if (event.detail?.ctx?.response?.status === 500) failed();
+		const { ctx } = event.detail ?? {};
+		if (ctx?.response?.status === 500) failed(ctx);
 	});
 
 	// A normal form redirect carries the same feedback as an HTMX response.

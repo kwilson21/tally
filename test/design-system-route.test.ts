@@ -96,6 +96,7 @@ describe("GET /design-system in the demo", () => {
 			LedgerIllustration(),
 			ErrorPage({ kind: "404" }),
 			ErrorPage({ kind: "500", retryHref: "#error-pages" }),
+			ErrorPage({ kind: "500" }),
 			Sidebar({}),
 			BottomTabs({}),
 			...PROGRESS_ROWS.map((s) => ProgressRow(s.props)),

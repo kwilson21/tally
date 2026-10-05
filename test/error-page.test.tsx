@@ -51,6 +51,16 @@ describe("ErrorPage", () => {
 		);
 	});
 
+	it("leaves out Try again when there is no address to retry, and Go to Home is then the one secondary button", () => {
+		const html = render({ kind: "500" });
+		expect(html).toContain("Something went wrong on our side.");
+		expect(html).not.toContain("Try again");
+		expect(html).toMatch(
+			/<a href="\/"[^>]*class="[^"]*border-ink[^"]*"[^>]*>Go to Home<\/a>/,
+		);
+		expect(html.match(/min-h-11/g)).toHaveLength(1);
+	});
+
 	it("keeps both buttons at least 44px tall", () => {
 		const html = render({ kind: "500", retryHref: "/" });
 		expect(html.match(/min-h-11/g)).toHaveLength(2);
