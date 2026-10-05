@@ -483,7 +483,7 @@ export async function syncItem(
 			// A corrected amount can leave a purchase refunded for more than it is worth (spec §8.5). Once this
 			// page's amounts are written, in the same batch, the refunds that no longer fit lose their link,
 			// newest first; a person can link them again. Only the purchases these transactions touch are checked.
-			for (const transaction of [...posted, ...page.modified]) {
+			for (const transaction of [...added, ...page.modified]) {
 				statements.push(
 					env.DB.prepare(unlinkOverRefundedSql(OWNS_LOCK)).bind(
 						transaction.transaction_id,
