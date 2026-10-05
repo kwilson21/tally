@@ -1062,6 +1062,68 @@ describe("splits unlink their refunds", () => {
 		]);
 		expect(trigger?.toast.message).toBe("Removed split from Refund Shop");
 	});
+
+	describe("a split refund whose purchase has since been taken by another refund", () => {
+		const ANOTHER = 9020;
+
+		// A $20 refund linked to the $50 purchase and split in two $10 parts; one part is then moved off
+		// the purchase, and a $40 refund takes most of it, so the whole $20 refund no longer fits.
+		beforeEach(async () => {
+			await link(REFUND, PURCHASE);
+			await post(`/transactions/${REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "10"],
+				["part_amount", "10"],
+				["back", "/transactions"],
+			]);
+			await db.batch([
+				db
+					.prepare(
+						"UPDATE transactions SET refund_of_id = NULL WHERE id = (SELECT MAX(id) FROM transactions WHERE parent_id = ?)",
+					)
+					.bind(REFUND),
+				db.prepare(`INSERT INTO transactions
+					(id, account_id, date, amount_cents, raw_name, category_id, category_source, refund_of_id, credit_reviewed, credit_reviewed_by)
+					VALUES (${ANOTHER}, 3, '2026-09-13', -4000, 'REFUND SHOP', ${GROCERIES}, 'user', ${PURCHASE}, 1, 'user')`),
+			]);
+		});
+
+		it("is unlinked when its split is removed, and says so", async () => {
+			const { trigger } = await post(`/transactions/${REFUND}/split/remove`, [
+				["back", "/transactions"],
+			]);
+			expect(await refundOf(REFUND)).toBeNull();
+			expect(await refundOf(ANOTHER)).toBe(PURCHASE);
+			expect(trigger?.toast.message).toBe(
+				"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
+			);
+			expect(trigger?.announce).toBe(
+				"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
+			);
+		});
+
+		it("is unlinked when it is split again, and says so", async () => {
+			const { trigger } = await post(`/transactions/${REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "5"],
+				["part_amount", "15"],
+				["back", "/transactions"],
+			]);
+			expect(trigger?.toast.message).toBe(
+				"Split Refund Shop. The refund on Sep 10 is no longer linked.",
+			);
+			expect(await refundOf(REFUND)).toBeNull();
+			const linkedParts = await db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ? AND refund_of_id IS NOT NULL",
+				)
+				.bind(REFUND)
+				.first<{ n: number }>();
+			expect(linkedParts?.n).toBe(0);
+		});
+	});
 });
 
 describe("refund guards", () => {
