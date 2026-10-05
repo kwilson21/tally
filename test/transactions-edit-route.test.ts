@@ -92,6 +92,22 @@ describe("GET /transactions/:id", () => {
 		const { res, html } = await get("/transactions/999999");
 		expect(res.status).toBe(404);
 		expect(html).toContain('aria-label="Main"');
+		// The app's own 404 page (spec §8.5), not a page of this route's own.
+		expect(html).toContain("This page isn&#39;t here.");
+		expect(html).not.toContain("Back to Transactions");
+	});
+
+	it("is that same 404 page for a missing split form and a missing cash delete", async () => {
+		const split = await get("/transactions/999999/split");
+		expect(split.res.status).toBe(404);
+		expect(split.html).toContain("This page isn&#39;t here.");
+		const gone = await post(
+			"/transactions/999999/delete",
+			{ back: "/transactions" },
+			false,
+		);
+		expect(gone.res.status).toBe(404);
+		expect(gone.html).toContain("This page isn&#39;t here.");
 	});
 });
 
