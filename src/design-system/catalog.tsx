@@ -18,6 +18,7 @@ import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
+import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { HomeTop } from "../views/home-top";
@@ -1223,7 +1224,7 @@ function Feedback() {
 				id="toast"
 				title="Toast"
 				tier="interactive"
-				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds and the announcer reads it. These buttons send the same events."
+				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds and the announcer reads it. An error toast speaks as an alert and leads with the alert icon in the over token, so it is never colour alone; the same toast appears, over an open sheet too, when a request fails (the connection drops or the server sends a 500). These buttons send the same events."
 			>
 				<div class="flex flex-wrap gap-3">
 					<Button
@@ -1238,11 +1239,44 @@ function Feedback() {
 						type="button"
 						kind="secondary"
 						data-ds-toast="error"
-						data-ds-message="That didn't save. Try again."
+						data-ds-message="Couldn't save. Check your connection and try again."
 					>
 						Show an error toast
 					</Button>
 				</div>
+			</Specimen>
+			<Specimen
+				id="error-pages"
+				title="ErrorPage"
+				tier="visual"
+				components={["ErrorPage"]}
+				sentence="The app's own 404 and 500 pages (decision 72, P39 C), drawn inside the Layout so the navigation is there and nobody is stuck: the ledger drawing large, a serif number, one sentence and a way back. The 500 never shows what failed."
+			>
+				<div class="grid gap-6 lg:grid-cols-2">
+					<State label="404: a link that goes nowhere. Go to Home is the way back.">
+						<Picture label="The 404 page: the ledger drawing, 404, This page isn't here. and a Go to Home button.">
+							<ErrorPage kind="404" />
+						</Picture>
+					</State>
+					<State label="500: a mistake on Tally's side. Try again retries a failed page on its address, or a failed form post on the page the form was on.">
+						<Picture label="The 500 page: the ledger drawing, 500, Something went wrong on our side. Nothing you did. Your data is safe; try again in a minute. and the buttons Try again and Go to Home.">
+							<ErrorPage kind="500" retryHref="#error-pages" />
+						</Picture>
+					</State>
+					<State label="500 with no page to retry: a form post that sent no usable Referer. Go to Home is the one button.">
+						<Picture label="The 500 page with no Try again: the ledger drawing, 500, Something went wrong on our side. Nothing you did. Your data is safe; try again in a minute. and a Go to Home button.">
+							<ErrorPage kind="500" />
+						</Picture>
+					</State>
+				</div>
+				<p class="max-w-prose text-muted">
+					An htmx request that gets a 404 or a 500 swaps nothing in: the page
+					stays as it was, so an open sheet stays open with what was typed. The
+					404 says "This page isn't here." in the error toast; the 500 says, in
+					the same toast, "Couldn't save. Check your connection and try again."
+					(or "Couldn't load…" when the request was a GET, such as a filter or
+					opening a sheet). A dropped connection says the same.
+				</p>
 			</Specimen>
 			<Specimen
 				id="bottom-sheet"

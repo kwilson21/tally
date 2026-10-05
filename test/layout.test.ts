@@ -56,4 +56,33 @@ describe("app shell", () => {
 		expect(html).toContain('aria-live="polite"');
 		expect(html).toContain('id="toasts"');
 	});
+
+	it("puts the toast region above an open sheet (z-50), so a failed save can be read", async () => {
+		const html = await home();
+		const region = html.match(/<div id="toasts" class="([^"]*)"/)?.[1] ?? "";
+		const layer = Number(region.match(/(?:^| )z-(\d+)(?: |$)/)?.[1]);
+		expect(layer).toBeGreaterThan(50);
+		// Taps pass through the region, so a toast over Save never eats the tap that tries again.
+		expect(region).toContain("pointer-events-none");
+	});
+
+	it("doesn't swap a server error's reply into the page, so a sheet keeps what was typed", async () => {
+		const html = await home();
+		const content =
+			html.match(/<meta name="htmx-config" content="([^"]*)"/)?.[1] ?? "{}";
+		const config = JSON.parse(content.replaceAll("&quot;", '"'));
+		// htmx 4 swaps every reply but 204 and 304; a 500 joins them. A 4xx (a field's error) and a
+		// 502 (a bank that couldn't be reached, which Tally sends with its own message) still swap.
+		expect(config.noSwap).toEqual([204, 304, 500]);
+	});
+
+	it("turns htmx's own request timeout off, since toast.js keeps the 60 seconds itself", async () => {
+		const html = await home();
+		const content =
+			html.match(/<meta name="htmx-config" content="([^"]*)"/)?.[1] ?? "{}";
+		// htmx 4 aborts a timed-out request the same way it aborts a replaced one, so it can't be told apart.
+		expect(JSON.parse(content.replaceAll("&quot;", '"')).defaultTimeout).toBe(
+			0,
+		);
+	});
 });

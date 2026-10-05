@@ -1,6 +1,6 @@
-import { matchBillPayments } from "../bills/match";
 import { merchantKeySql } from "../db/merchant-key";
 import { plaidAmountToCents } from "../money";
+import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
 import { decryptToken } from "./token-crypto";
@@ -138,6 +138,8 @@ export async function syncItem(
 	env: SyncEnv,
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
+	// The daily catch-up and Sync now sync every bank, then run the after-sync step once for all of them.
+	{ runAfterSync = true }: { runAfterSync?: boolean } = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
@@ -552,7 +554,7 @@ export async function syncItem(
 				);
 			}
 			if (!page.has_more) {
-				await matchBillPayments(env.DB);
+				if (runAfterSync) await afterSync(env.DB);
 				return summary;
 			}
 		}

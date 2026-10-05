@@ -372,6 +372,20 @@ describe("categorizePending", () => {
 		expect(await countWhere("category_source = 'merchant_rule'")).toBe(1);
 	});
 
+	it("skips its own rules pass when the sync just ran it", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db
+			.prepare(
+				"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'SQ *FARMERS MKT'",
+			)
+			.run();
+		const jev = fakeJev(() => reply(0.5));
+		await categorizePending(withKey, jev.fetchImpl, undefined, {
+			rulesApplied: true,
+		});
+		expect(await countWhere("category_source = 'merchant_rule'")).toBe(0);
+	});
+
 	it("caps a run at 40 calls in the demo and 500 in production (decision 56)", () => {
 		expect(jevCallLimit({ DEMO: "true" })).toBe(40);
 		expect(jevCallLimit({})).toBe(40);
