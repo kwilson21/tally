@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
@@ -468,44 +469,54 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 		expect(await recorded()).toBe(1);
 	});
 
-	it("saves what the form says now when the same key is posted again with changes, still as one transaction", async () => {
-		const ofKey = () =>
-			env.DB.prepare(
-				"SELECT id, date, amount_cents, raw_name, category_id, note, category_source, flag_income, updated_by FROM transactions WHERE entry_key = ?",
-			)
-				.bind(KEY)
-				.all();
-		const yesterday = "2026-10-02";
-		await post({ entry_key: KEY, note: "Peaches" });
-		const first = (await ofKey()).results;
-		expect(first).toHaveLength(1);
-		// The reply was lost; the person fixes the still-open form and taps Add again.
+	const ofKey = (key = KEY) =>
+		env.DB.prepare(
+			"SELECT id, date, amount_cents, raw_name, category_id, note, is_split FROM transactions WHERE entry_key = ?",
+		)
+			.bind(key)
+			.all<{
+				id: number;
+				date: string;
+				amount_cents: number;
+				raw_name: string;
+				category_id: number;
+				note: string | null;
+				is_split: number;
+			}>();
+
+	it("changes nothing when the same key is posted again with different values: one row, the first values, and the reply names what was really saved", async () => {
+		const first = await post({
+			entry_key: KEY,
+			note: "Peaches",
+			amount: "20.45",
+		});
+		const saved = (await ofKey()).results;
+		expect(saved).toHaveLength(1);
+		// The reply was lost; the person changes the still-open form and taps Add again.
 		const again = await post({
 			entry_key: KEY,
 			amount: "31.10",
 			merchant: "Retried market, corrected",
 			category: "2",
-			date: yesterday,
+			date: "2026-10-02",
 			note: "",
 		});
 		expect(again.res.status).toBe(200);
-		expect(
-			JSON.parse(again.res.headers.get("HX-Trigger") ?? "{}").toast.message,
-		).toBe("Added Retried market, corrected");
-		const rows = (await ofKey()).results;
-		expect(rows).toHaveLength(1);
-		expect(rows[0]).toMatchObject({
-			// Still the same transaction.
-			id: first[0]?.id,
-			amount_cents: 3110,
-			raw_name: "Retried market, corrected",
-			category_id: 2,
-			date: yesterday,
-			note: null,
-			category_source: "user",
-			flag_income: 0,
-			updated_by: "demo",
+		expect((await ofKey()).results).toEqual(saved);
+		expect(saved[0]).toMatchObject({
+			amount_cents: 2045,
+			raw_name: "Retried market",
+			category_id: 1,
+			note: "Peaches",
 		});
+		const triggers = (res: Response) =>
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		// The second reply is the first's: the stored row's words, not the form's.
+		expect(triggers(again.res)).toEqual({
+			toast: { message: "Added Retried market", type: "success" },
+			announce: "Added $20.45 cash spending at Retried market.",
+		});
+		expect(triggers(again.res)).toEqual(triggers(first.res));
 		expect(
 			(
 				await env.DB.prepare(
@@ -513,6 +524,43 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 				).first<{ n: number }>()
 			)?.n,
 		).toBe(1);
+	});
+
+	it("leaves a split entry untouched by a repeat: the parent and its parts keep their amounts", async () => {
+		await post({ entry_key: KEY, amount: "20.00" });
+		const parent = (await ofKey()).results[0];
+		const split = await saveSplit(
+			env.DB,
+			parent?.id as number,
+			[
+				{ categoryId: 1, amountCents: 1200 },
+				{ categoryId: 2, amountCents: 800 },
+			],
+			"test",
+		);
+		expect(split.saved).toBe(true);
+		const parts = () =>
+			env.DB.prepare(
+				"SELECT amount_cents, category_id FROM transactions WHERE parent_id = ? ORDER BY amount_cents",
+			)
+				.bind(parent?.id)
+				.all();
+		const before = await parts();
+		expect(before.results).toHaveLength(2);
+		const again = await post({ entry_key: KEY, amount: "99.00" });
+		expect(again.res.status).toBe(200);
+		const after = (await ofKey()).results;
+		expect(after).toHaveLength(1);
+		expect(after[0]).toMatchObject({
+			id: parent?.id,
+			amount_cents: 2000,
+			is_split: 1,
+		});
+		expect((await parts()).results).toEqual(before.results);
+		// The reply tells the truth about the saved entry, split or not.
+		expect(
+			JSON.parse(again.res.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Added $20.00 cash spending at Retried market.");
 	});
 
 	it("records one transaction when the two posts arrive at once", async () => {

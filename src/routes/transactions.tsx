@@ -1334,8 +1334,9 @@ transactions.post("/transactions/cash", async (c) => {
 			),
 		});
 	const wasFirstVisit = (await firstVisitFor(c)) !== null;
-	// The same form posted again (a lost reply, a failed render) answers as a success and saves once.
-	await saveCash(
+	// The same form posted again (a lost reply, a failed render) changes nothing and saves once. The
+	// reply names the entry as stored, not as the form now says, so it tells the truth about it.
+	const saved = await saveCash(
 		c.env.DB,
 		parsed.value,
 		actor(c),
@@ -1345,8 +1346,8 @@ transactions.post("/transactions/cash", async (c) => {
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
-			toast: { message: `Added ${parsed.value.merchant}`, type: "success" },
-			announce: `Added ${formatCents(parsed.value.amountCents)} cash spending at ${parsed.value.merchant}.`,
+			toast: { message: `Added ${saved.merchant}`, type: "success" },
+			announce: `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`,
 		}),
 	);
 	c.header("HX-Push-Url", back);
