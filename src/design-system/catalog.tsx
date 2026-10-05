@@ -371,6 +371,25 @@ const BANK_LINE_SPEC: UseSpecText = {
 		"“{bank} hasn't synced since {Oct 1}, so Safe to spend may be too high.” · “{bank} needs you to sign in again, so Safe to spend may be too high.” · “{bank} needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high.” (“2 other banks need a look” for more) · Link: Check Accounts.",
 };
 
+// The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
+const BILL_PRICE_SPEC: UseSpecText = {
+	purpose:
+		"Tell a person a payment from a bill's merchant came at another price, and let them update the bill to it or say it isn't that bill's.",
+	affordance:
+		"On Bills the row says “Price changed?” in ink with what was paid under it in muted words, so it reads without color, and the whole row is still the link to the bill's page. On the page the month asks in a sentence, with one primary button, “Update the bill to $17.99”, and “Not this bill” as terracotta text under it. Nothing changes until one is pressed.",
+	states:
+		"Shown: an active bill whose current month has no payment, and a payment from the same merchant within 5 days of its due date, money out, outside ±10% of the bill's amount, not linked to another bill and not already turned away for that month. Not shown: a payment inside ±10% (the matcher links it), a paid month, an inactive bill, a month already answered. Buttons: rest, hover, the focus-visible ring and pressed; the primary shows “Updating…” with the spinner and is disabled while it saves. Error: “That price change isn't on offer any more.” in role=alert, when the offer went away after the page was drawn.",
+	feedback:
+		"Update: the page comes back with the month Paid and the new amount under the name, a toast “Bill updated to $17.99”, and the announcer says “Bill updated to $17.99 and the payment linked”. Not this bill: the month is an ordinary unpaid one again, with Link a payment; the toast says “Left the bill at $15.49” and the announcer “Price change dismissed. The bill stays $15.49.” The payment isn't offered again for that month.",
+	input:
+		"Touch: both actions are 44px tall. Keyboard: Tab reaches Update the bill, then Not this bill; Enter or Space presses. Screen reader: on Bills, “Netflix, Price changed?, Paid $17.99 on Oct 3, $15.49, link”; on the page, the sentence, then “Update the bill to $17.99, button” and “Not this bill, button”.",
+	motion: "None added. Reduced motion changes nothing.",
+	edges:
+		"Two payments qualify: the closest to the due date, then the closest in amount, then the earliest. A payment over $100,000 is never offered; a bill that large is confirmed in its own form. An excluded payment can be offered, and updating puts it back in the budget. A refund or other money in is never offered. A long name or a phone's width: the two caption lines wrap instead of being cut off, and the row grows a line. The amount changes for the whole bill, since amount history comes with Phase 5. No JavaScript: both actions are forms that post and come back to the bill's page.",
+	words:
+		"Price changed? · Paid {$17.99} on {Oct 3} · {Netflix} charged {$17.99} on {Oct 3}, not {$15.49}. · Updating the bill links that payment and makes it {$17.99} a month. · Update the bill to {$17.99} · Updating… · Not this bill · Toasts: Bill updated to {$17.99} · Left the bill at {$15.49} · Error: That price change isn't on offer any more.",
+};
+
 /**
  * A picture of part of a page: HomeTop draws the page's h1 and real links, so here it's one labelled
  * image with nothing inside to Tab to, and the catalog keeps its own h1.
@@ -513,7 +532,7 @@ function Rows() {
 				title="Bill occurrence and payment picker"
 				tier="visual"
 				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, due, upcoming and not-paid occurrences and offers eligible payments in an inert picker."
+				sentence="A bill page shows paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker."
 			>
 				<State label="Paid occurrence">
 					<div inert>
@@ -545,6 +564,26 @@ function Rows() {
 						</ul>
 					</div>
 				</State>
+				<State label="Price changed? (the newest month asks)">
+					<div inert>
+						<ul>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-10"
+								label="October"
+								status="overdue"
+								priceOffer={{
+									transactionId: 7,
+									merchant: "Netflix",
+									amountCents: 1799,
+									dateLabel: "Oct 3",
+									billAmountCents: 1549,
+									frequency: "monthly",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
 				<State label="Picker">
 					<div inert>
 						<BillPaymentPicker
@@ -560,6 +599,14 @@ function Rows() {
 									date: "2026-09-24",
 									dateLabel: "Sep 24",
 									amountCents: 14150,
+								},
+								{
+									id: 2,
+									displayName: "Zelle",
+									date: "2026-09-23",
+									dateLabel: "Sep 23",
+									amountCents: 14200,
+									excluded: true,
 								},
 							]}
 							periods={[
@@ -592,13 +639,14 @@ function Rows() {
 						/>
 					</div>
 				</State>
+				<UseSpec spec={BILL_PRICE_SPEC} />
 			</Specimen>
 			<Specimen
 				id="bill-row"
 				title="BillRow and bill status heading"
 				tier="visual"
 				components={["BillRow", "BillStatusHeading"]}
-				sentence="A bill group names its status with an icon and words; each bill shows its category, name, status sentence and amount."
+				sentence="A bill group names its status with an icon and words; each bill shows its category, name, status sentence and amount, and asks “Price changed?” when a payment came at another price."
 			>
 				<State label="Overdue">
 					<div class="max-w-xl">
@@ -612,6 +660,26 @@ function Rows() {
 									amountCents: 14200,
 									status: "overdue",
 									dueDate: "2026-09-24",
+									icon: "household",
+									color: "cat-brown",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Overdue, price changed? (P36 B)">
+					<div class="max-w-xl">
+						<BillStatusHeading status="overdue" />
+						<ul>
+							<BillRow
+								today="2026-10-05"
+								bill={{
+									id: 6,
+									name: "Netflix",
+									amountCents: 1549,
+									status: "overdue",
+									dueDate: "2026-10-02",
+									priceOffer: { amountCents: 1799, date: "2026-10-03" },
 									icon: "household",
 									color: "cat-brown",
 								}}

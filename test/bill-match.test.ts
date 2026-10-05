@@ -64,12 +64,12 @@ describe("bill payment matching", () => {
 		]);
 	});
 
-	it("skips excluded rows, split parents, the wrong merchant, claimed rows, and dismissals", async () => {
+	it("skips split parents, the wrong merchant, claimed rows, and dismissals", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare(
-				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,is_split) VALUES(10,1,'2026-05-10',10000,'LANDLORD',1,0),(11,1,'2026-06-10',10000,'LANDLORD',0,1),(12,1,'2026-07-10',10000,'OTHER',0,0),(13,1,'2026-08-10',10000,'LANDLORD',0,0),(14,1,'2026-09-10',10000,'LANDLORD',0,0)",
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,is_split) VALUES(11,1,'2026-06-10',10000,'LANDLORD',0,1),(12,1,'2026-07-10',10000,'OTHER',0,0),(13,1,'2026-08-10',10000,'LANDLORD',0,0),(14,1,'2026-09-10',10000,'LANDLORD',0,0)",
 			),
 			env.DB.prepare(
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(2,'Other',10000,10,'monthly','OTHER')",
@@ -83,6 +83,75 @@ describe("bill payment matching", () => {
 			"SELECT period,transaction_id FROM bill_payments WHERE bill_id=1 AND status='linked'",
 		).all();
 		expect(links.results).toEqual([]);
+	});
+
+	// Spec §6.1 rule 4 (decision 67): an excluded payment still pays a bill, and linking it puts it back
+	// in the budget as a person's choice, so Jev or a sync never takes it out again.
+	it("lets an excluded payment pay a bill, and puts it back in the budget", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,flag_transfer,excluded,excluded_source) VALUES(30,1,'2026-05-10',10000,'LANDLORD',1,1,'jev'),(31,1,'2026-06-10',10000,'LANDLORD',0,1,'plaid'),(32,1,'2026-07-10',10000,'LANDLORD',0,1,'user')",
+			),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-07-12")).toBe(3);
+		const links = await env.DB.prepare(
+			"SELECT period,transaction_id,matched_by FROM bill_payments WHERE status='linked' ORDER BY period",
+		).all();
+		expect(links.results).toEqual([
+			{ period: "2026-05", transaction_id: 30, matched_by: "auto" },
+			{ period: "2026-06", transaction_id: 31, matched_by: "auto" },
+			{ period: "2026-07", transaction_id: 32, matched_by: "auto" },
+		]);
+		const rows = await env.DB.prepare(
+			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
+		).all();
+		expect(rows.results).toEqual([
+			{ id: 30, excluded: 0, excluded_source: "user" },
+			{ id: 31, excluded: 0, excluded_source: "user" },
+			{ id: 32, excluded: 0, excluded_source: "user" },
+		]);
+	});
+
+	it("leaves a payment excluded when no bill takes it", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source) VALUES(40,1,'2026-05-10',10000,'OTHER',1,'jev'),(41,1,'2026-06-10',10000,'LANDLORD',1,'jev')",
+			),
+			// The person already said this one isn't June's payment.
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,'2026-06',41,'user','dismissed')",
+			),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-06-12")).toBe(0);
+		const rows = await env.DB.prepare(
+			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
+		).all();
+		expect(rows.results).toEqual([
+			{ id: 40, excluded: 1, excluded_source: "jev" },
+			{ id: 41, excluded: 1, excluded_source: "jev" },
+		]);
+	});
+
+	it("puts a whole excluded split back, as the edit panel excludes one", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,is_split) VALUES(50,1,'2026-05-10',15000,'LANDLORD',1,'user',1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,parent_id) VALUES(51,1,'2026-05-10',10000,'LANDLORD',1,'user',50),(52,1,'2026-05-10',5000,'ELSEWHERE',1,'user',50)",
+			),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-05-12")).toBe(1);
+		const rows = await env.DB.prepare(
+			"SELECT id,excluded FROM transactions ORDER BY id",
+		).all();
+		expect(rows.results.map((r) => r.excluded)).toEqual([0, 0, 0]);
 	});
 
 	it("skips inactive bills", async () => {

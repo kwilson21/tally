@@ -201,6 +201,35 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows the price-changed offer on the bill's row and page, with its whole use spec (P36 B)", async () => {
+		const { html } = await get("/design-system");
+		// Each specimen up to the next one (the picker inside the first has a section of its own).
+		const part = (id: string, next: string) =>
+			html.split(`id="${id}"`)[1]?.split(`id="${next}"`)[0] ?? "";
+		// The row: "Price changed?" in ink, then what was paid in muted words.
+		const row = part("bill-row", "bill-finding");
+		expect(row).toContain(
+			'<span class="block leading-6">Price changed?</span>',
+		);
+		expect(row).toContain("Paid $17.99 on Oct 3");
+		// The page: the sentence, the one primary action and the terracotta text one, as inert forms.
+		const page = part("bill-occurrence", "bill-row");
+		expect(page).toContain("Netflix charged $17.99 on Oct 3, not $15.49.");
+		expect(page).toContain("Update the bill to $17.99");
+		expect(page).toContain("Not this bill");
+		// An excluded payment in the picker says so in words.
+		expect(page).toContain("Zelle · Sep 23 · $142.00 · Excluded");
+		expect(page).toContain("How it&#39;s used");
+		for (const [, label] of USE_SPEC_PARTS)
+			expect(page).toContain(`<dt class="font-medium">${label}</dt>`);
+		// DESIGN.md says what each component does with it.
+		expect(design).toMatch(/\| BillRow \|[^\n]*Price changed\?[^\n]*in ink/);
+		expect(design).toMatch(
+			/\| BillOccurrenceRow \|[^\n]*Update the bill to \$17\.99[^\n]*Not this bill/,
+		);
+		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
+	});
+
 	it("shows Adjust mode with its whole use spec, for sign-off (#94)", async () => {
 		const { html } = await get("/design-system");
 		const section =
