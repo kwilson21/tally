@@ -27,6 +27,41 @@ describe("data exports", () => {
 		});
 	});
 
+	it("includes Plaid's merchant name and the pending flag in the JSON transaction export", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Target', pending = 1 WHERE id = 1",
+		).run();
+		const data = (await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).json()) as { transactions: Record<string, unknown>[] };
+
+		expect(data.transactions[0]).toMatchObject({
+			merchant_name: "Target",
+			pending: 1,
+		});
+	});
+
+	it("shows a merchant's chosen name beside every raw name that shares its merchant name in the CSV", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET raw_name = 'ZETA MART 1234', merchant_name = 'Zeta Mart' WHERE id = 1",
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET raw_name = 'ZETA MART 5678', merchant_name = 'Zeta Mart' WHERE id = 2",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('Zeta Mart', 'Zeta Stores')",
+			),
+		]);
+
+		const csv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+
+		expect(csv).toMatch(/ZETA MART 1234,Zeta Stores,/);
+		expect(csv).toMatch(/ZETA MART 5678,Zeta Stores,/);
+	});
+
 	it("neutralizes formulas in CSV text fields without changing numeric amounts", async () => {
 		await env.DB.prepare("UPDATE accounts SET name = ? WHERE id = 1")
 			.bind("@checking")
@@ -207,8 +242,10 @@ describe("data exports", () => {
 				"is_split",
 				"jev_category_id",
 				"jev_failed_at",
+				"merchant_name",
 				"note",
 				"parent_id",
+				"pending",
 				"plaid_category",
 				"plaid_transaction_id",
 				"raw_name",
@@ -226,6 +263,7 @@ describe("data exports", () => {
 				"frequency",
 				"id",
 				"merchant_raw_name",
+				"merchant_raw_text",
 				"name",
 			],
 			bill_payments: [

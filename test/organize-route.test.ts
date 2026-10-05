@@ -66,6 +66,23 @@ describe("GET /transactions/organize", () => {
 		expect(html).toContain("Future Target transactions get this category too.");
 	});
 
+	it("shows one merchant's bank texts on its group, so one choice's reach is visible", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('Comcast', 'Comcast Cable')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 900000, 'COMCAST CABLE', 'Comcast'), (1, ?, 800000, 'COMCAST CABLE 2', 'Comcast')",
+			).bind(todayIn(DEFAULT_TIME_ZONE), todayIn(DEFAULT_TIME_ZONE)),
+		]);
+
+		const { html } = await get();
+
+		expect(html).toMatch(/<h2[^>]*>Comcast Cable<\/h2>/);
+		expect(html).toContain("2 transactions · $17,000.00");
+		expect(html).toContain("From COMCAST CABLE, COMCAST CABLE 2");
+	});
+
 	it("skips a group without saving it", async () => {
 		const first = (await get()).html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1];
 		const skipped = await get(

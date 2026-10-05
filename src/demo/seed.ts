@@ -26,8 +26,9 @@ export type SeedAccount = {
 	isLiability: boolean;
 	balanceCents: number;
 };
+/** One `merchants` row, keyed by merchant key: Plaid's merchant name when a transaction has one, else its raw name. */
 export type SeedMerchant = {
-	rawName: string;
+	key: string;
 	displayName: string | null;
 	defaultCategoryId: number | null;
 };
@@ -38,6 +39,8 @@ export type SeedTransaction = {
 	date: string;
 	amountCents: number;
 	rawName: string;
+	/** Plaid's cleaned merchant name; null for a hand-entered cash transaction and most of the demo. */
+	merchantName?: string | null;
 	categoryId: number | null;
 	categorySource: "jev" | "user" | null;
 	categoryConfidence: number | null;
@@ -174,6 +177,21 @@ const MERCHANTS: Record<number, [string, string][]> = {
 	],
 };
 
+// Plaid's merchant_name for a few raw names, as it would send them (spec §5, decision 67). Two raw names
+// share Amazon, so they are one merchant for rules, bills and refunds. Every other transaction has none.
+const PLAID_MERCHANT_NAMES: Record<string, string> = {
+	"TARGET T-1432": "Target",
+	"STARBUCKS STORE 5521": "Starbucks",
+	"SHELL OIL 57442": "Shell",
+	"CHEVRON 0098812": "Chevron",
+	"AMAZON.COM*RT4K2": "Amazon",
+	"AMZN MKTP US*2K4": "Amazon",
+};
+
+/** The merchant key of a seeded raw name (spec §6.1): Plaid's merchant name, otherwise the raw name. */
+export const seedMerchantKey = (rawName: string) =>
+	PLAID_MERCHANT_NAMES[rawName] ?? rawName;
+
 // This month, categorized: [targetDay, rawName, categoryId, cents]. Totals per the plan's table.
 const THIS_MONTH: [number, string, number, number][] = [
 	[2, "TRADER JOE'S #552", GROCERIES, 6418],
@@ -244,6 +262,7 @@ function spend(
 		date,
 		amountCents,
 		rawName,
+		merchantName: PLAID_MERCHANT_NAMES[rawName] ?? null,
 		categoryId,
 		categorySource: categoryId === null ? null : "jev",
 		categoryConfidence: categoryId === null ? null : 0.94,
@@ -417,41 +436,41 @@ export function buildSeed(today: string): Seed {
 		{ categoryId: HOUSEHOLD, effectiveMonth: startMonth, amountCents: 25000 },
 	];
 
-	const merchants: SeedMerchant[] = [
+	const merchantRows: SeedMerchant[] = [
 		...Object.values(MERCHANTS)
 			.flat()
 			.map(([rawName, displayName]) => ({
-				rawName,
+				key: seedMerchantKey(rawName),
 				displayName,
 				defaultCategoryId: null,
 			})),
 		...UNCATEGORIZED.map(([, rawName, , displayName]) => ({
-			rawName,
+			key: seedMerchantKey(rawName),
 			displayName,
 			defaultCategoryId: null,
 		})),
 		{
-			rawName: "Farmers market",
+			key: "Farmers market",
 			displayName: "Farmers market",
 			defaultCategoryId: null,
 		},
 		{
-			rawName: "ACME CORP PAYROLL",
+			key: "ACME CORP PAYROLL",
 			displayName: "Paycheck, Acme Corp",
 			defaultCategoryId: null,
 		},
 		{
-			rawName: "ONLINE TRANSFER TO SAV ...5678",
+			key: "ONLINE TRANSFER TO SAV ...5678",
 			displayName: "Transfer to Savings",
 			defaultCategoryId: null,
 		},
 		{
-			rawName: "DR MARTIN FAMILY PRACTICE REFUND",
+			key: "DR MARTIN FAMILY PRACTICE REFUND",
 			displayName: "Reimbursement, doctor's office",
 			defaultCategoryId: null,
 		},
 		...subscriptions.map(([rawName]) => ({
-			rawName,
+			key: rawName,
 			displayName:
 				rawName === "GOOGLE *YOUTUBE PREMIUM"
 					? "YouTube Premium"
@@ -461,6 +480,10 @@ export function buildSeed(today: string): Seed {
 			defaultCategoryId: HOUSEHOLD,
 		})),
 	];
+	// One row per merchant key. Raw names that share a key (the two Amazons) share its row, the first one's name winning.
+	const merchants = merchantRows.filter(
+		(m, i) => merchantRows.findIndex((o) => o.key === m.key) === i,
+	);
 
 	return {
 		categories: CATEGORIES,
