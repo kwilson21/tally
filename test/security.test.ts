@@ -42,4 +42,16 @@ describe("Plaid Content Security Policy", () => {
 			expect(await cspFor(path)).not.toContain("plaid.com");
 		}
 	});
+
+	it("allows inline styles on Accounts only, so Link's overlay can cover the screen", async () => {
+		expect(await cspFor("/accounts")).toContain(
+			"style-src 'self' 'unsafe-inline'",
+		);
+		expect(await cspFor("/accounts/1/disconnect")).toContain(
+			"style-src 'self' 'unsafe-inline'",
+		);
+		for (const path of ["/", "/transactions", "/settings", "/accountsx"]) {
+			expect(await cspFor(path)).not.toContain("unsafe-inline");
+		}
+	});
 });

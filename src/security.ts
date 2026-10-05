@@ -20,7 +20,10 @@ export const security = secureHeaders({
 			(c) =>
 				onAccounts(c.req.path) ? "'self' https://cdn.plaid.com" : "'self'",
 		],
-		styleSrc: ["'self'"],
+		// Plaid Link styles its full-screen overlay inline; without this it renders in the page flow.
+		styleSrc: [
+			(c) => (onAccounts(c.req.path) ? "'self' 'unsafe-inline'" : "'self'"),
+		],
 		fontSrc: ["'self'"],
 		imgSrc: ["'self'", "data:"],
 		connectSrc: [
