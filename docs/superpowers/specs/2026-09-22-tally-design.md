@@ -373,6 +373,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - Statement upload (CSV or PDF) as a second transaction source
 - **Receipts** (decision 66), from the original app's draft design (`superhuman-personal-finance` `docs/designs/RECEIPT-01-tech-design.md` and `RECEIPT-01-user-flows.md`, Feb 2026): (1) attach a photo or PDF of a receipt to a transaction; (2) scan a receipt so AI reads it and makes a cash transaction or matches a bank one, proposing a split from its line items; (3) forward receipts by email. A plain shelf of stored PDFs (the old feature 8, P27/P28) comes back only as part of this. R2 buckets `tally-demo-docs` and `tally-prod-docs` already exist.
 - From the original app, not picked for Phase 5 (decision 66): deleting a transaction (with undo), resetting a category to automatic, grouping the list by week, and merging two categories
+- Interaction sounds (the owner's pick, Oct 5): a soft cue on a toggle, a save or an error, as in Cuelume (synthesized with Web Audio, no audio files). It needs its own allowed-JS decision and an off switch, and comes after motion (P74)
 - A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
 - A close (×) button on the demo's Things to try block, remembered with a cookie
