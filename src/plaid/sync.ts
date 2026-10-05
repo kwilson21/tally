@@ -309,7 +309,7 @@ export async function syncItem(
 					env.DB.prepare(
 						`INSERT INTO transactions
 							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, flag_income)
-						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' THEN 1 ELSE 0 END FROM accounts
+						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' AND ? < 0 THEN 1 ELSE 0 END FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
@@ -337,6 +337,7 @@ export async function syncItem(
 						transaction.personal_finance_category?.primary ?? null,
 						plaidAmountToCents(transaction.amount),
 						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						transaction.account_id,
 						itemRowId,
 						lockId,
@@ -407,6 +408,7 @@ export async function syncItem(
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						cents,
 						cents,
 						cents,

@@ -23,6 +23,8 @@ type Row = {
 	confidence?: number | null;
 	isSplit?: number;
 	parentId?: number | null;
+	/** Plaid's sign: negative is money in. Defaults to a $3,000 paycheck. */
+	amountCents?: number;
 };
 
 // Each row is a transaction already stored before sync marked income, with the flag it should end with.
@@ -141,6 +143,17 @@ const rows: (Row & { name: string; marked: number })[] = [
 		parentId: 9011,
 		marked: 0,
 	},
+	{
+		// Plaid's sign: positive is money out, which is never income.
+		id: 9013,
+		name: "outgoing payment labeled INCOME",
+		category: "INCOME",
+		flag: 0,
+		source: null,
+		reviewed: 1,
+		amountCents: 50000,
+		marked: 0,
+	},
 ];
 
 async function insert(row: Row & { name: string }) {
@@ -149,10 +162,11 @@ async function insert(row: Row & { name: string }) {
 			`INSERT INTO transactions
 				(id, account_id, date, amount_cents, raw_name, plaid_category, flag_income, income_source,
 				 credit_reviewed, credit_reviewed_by, category_confidence, is_split, parent_id)
-			 SELECT ?, id, '2026-09-15', -300000, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
+			 SELECT ?, id, '2026-09-15', ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
 		)
 		.bind(
 			row.id,
+			row.amountCents ?? -300000,
 			row.name,
 			row.category,
 			row.flag,

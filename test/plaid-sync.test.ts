@@ -2133,6 +2133,71 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 		},
 	);
 
+	it.each(["added", "modified"] as const)(
+		"does not flag an outgoing payment Plaid labels INCOME, so it stays in Spent, on a %s sync",
+		async (path) => {
+			const id = await addItem();
+			if (path === "modified") {
+				await send(id, "added", payroll({ amount: 500, ...notIncomeByPlaid }));
+			}
+			await send(id, path, payroll({ amount: 500 }));
+
+			expect(await income()).toEqual({
+				flag_income: 0,
+				income_source: null,
+				plaid_category: "INCOME",
+			});
+			const month = summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(env.DB, "2026-09")),
+				unpaidDueBillsCents: 0,
+			});
+			expect(month.incomeCents).toBe(0);
+			expect(month.totalSpentCents).toBe(50000);
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"clears a Plaid-set flag when a %s sync turns the amount into money out",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+			});
+
+			await send(id, path, payroll({ amount: 3000 }));
+			expect(await income()).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+			});
+			// Money in again, it is marked again.
+			await send(id, path, payroll());
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+			});
+		},
+	);
+
+	it.each(["added", "modified"] as const)(
+		"leaves a person's income flag alone when a %s sync turns the amount into money out",
+		async (path) => {
+			const id = await addItem();
+			await send(id, "added", payroll());
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE plaid_transaction_id = 'payroll'",
+			).run();
+
+			await send(id, path, payroll({ amount: 3000 }));
+			expect(await income()).toMatchObject({
+				flag_income: 1,
+				income_source: "user",
+			});
+		},
+	);
+
 	it("still lets Jev set income where Plaid did not", async () => {
 		const id = await addItem();
 		await send(id, "added", payroll(notIncomeByPlaid));
