@@ -10,8 +10,9 @@
  * (that purchase's bill payment).
  */
 
-/** True when a transaction is a refund that follows its purchase: linked, and the purchase counts. */
-export const FOLLOWS_PURCHASE = "(rp.id IS NOT NULL AND rp.excluded = 0)";
+/** True when a transaction is a refund that follows its purchase and its review is still valid. */
+export const FOLLOWS_PURCHASE =
+	"(rp.id IS NOT NULL AND rp.excluded = 0 AND t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(t.credit_reviewed, 0) = 1)";
 
 /** The month a transaction's own date and bill payment put it in. */
 function billMonthSql(transaction: string, payment: string, bill: string) {

@@ -396,12 +396,25 @@ export async function saveEdit(
 			)
 			.bind(current.rawName, edit.displayName),
 	];
-	// Linking only sets the link: the refund's own category stays, so unlinking brings it back.
+	// An explicit human link is also a review of this credit as a refund. Keep ownership on a
+	// split parent so split children can inherit the reviewed link as one bank transaction.
 	if (edit.refundOfId !== undefined)
 		statements.push(
 			db
-				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
-				.bind(edit.refundOfId, id),
+				.prepare(
+					`UPDATE transactions SET refund_of_id = ?,
+						credit_reviewed = CASE WHEN ? IS NOT NULL AND amount_cents < 0 AND refund_of_id IS NOT ? THEN 1 ELSE credit_reviewed END,
+						credit_reviewed_by = CASE WHEN ? IS NOT NULL AND amount_cents < 0 AND refund_of_id IS NOT ? THEN 'user' ELSE credit_reviewed_by END
+					WHERE id = ?`,
+				)
+				.bind(
+					edit.refundOfId,
+					edit.refundOfId,
+					edit.refundOfId,
+					edit.refundOfId,
+					edit.refundOfId,
+					id,
+				),
 		);
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
@@ -438,7 +451,7 @@ export async function saveEdit(
 }
 
 /**
- * Dates of the refunds linked to a purchase or its parts, oldest first: the ones a split change unlinks.
+ * Dates of the refunds linked to a purchase or its parts, oldest first: the ones a split change affects.
  * `self` includes refunds of the purchase itself.
  */
 async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
@@ -452,8 +465,8 @@ async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
 }
 
 /**
- * Creates every child and marks its parent in one D1 batch. Refunds linked to the purchase or to
- * parts being replaced are unlinked in the same batch; their dates are returned for the toast.
+ * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows
+ * each new part; refunds linked to replaced parts are unlinked in the same batch.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -484,6 +497,13 @@ export async function saveSplit(
 		? ", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)"
 		: "";
 	const unlinked = await linkedRefundDates(db, parentId, true);
+	const linkedPurchase = await db
+		.prepare("SELECT refund_of_id AS refundOfId FROM transactions WHERE id = ?")
+		.bind(parentId)
+		.first<{ refundOfId: number | null }>();
+	const inheritedRefundLink = hasIncomeReviewColumns
+		? "CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END"
+		: "NULL";
 	const results = await db.batch([
 		db
 			.prepare(
@@ -498,7 +518,8 @@ export async function saveSplit(
 			db
 				.prepare(`INSERT INTO transactions
 			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, excluded_source${reviewColumns}, refund_of_id, parent_id, plaid_transaction_id, updated_by)
-			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, excluded_source${reviewValues}, NULL, id, NULL, ?
+			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, excluded_source${reviewValues},
+				${inheritedRefundLink}, id, NULL, ?
 			FROM transactions WHERE id = ? AND amount_cents = ?`)
 				.bind(
 					part.amountCents,
@@ -516,7 +537,10 @@ export async function saveSplit(
 			.bind(by, parentId, total),
 	]);
 	const saved = (results.at(-1)?.meta.changes ?? 0) > 0;
-	return { saved, unlinked: saved ? unlinked : [] };
+	return {
+		saved,
+		unlinked: saved && !linkedPurchase?.refundOfId ? unlinked : [],
+	};
 }
 
 /** Deletes a split and restores its parent atomically, unlinking refunds of its parts; returns their dates. */

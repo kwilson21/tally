@@ -642,6 +642,68 @@ describe("syncItem", () => {
 		});
 	});
 
+	it("preserves explicit refund accounting after Plaid changes its amount", async () => {
+		const item = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			item,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: -12 })] })),
+			),
+		);
+		const tx = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number }>();
+		const purchase = await env.DB.prepare(
+			"SELECT date FROM transactions WHERE id = 1",
+		).first<{ date: string }>();
+		if (!purchase) throw new Error("Expected demo purchase 1");
+		await env.DB.prepare(
+			"UPDATE transactions SET refund_of_id = 1, category_source = 'jev', category_confidence = 0.95, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(tx?.id)
+			.run();
+		const monthBefore = await loadMonth(env.DB, purchase.date.slice(0, 7));
+		const budgetTotalBefore = monthBefore.transactions.reduce(
+			(sum, row) => sum + row.amountCents,
+			0,
+		);
+		expect(
+			monthBefore.transactions.some(
+				(row) => row.amountCents === -1200 && row.linked,
+			),
+		).toBe(true);
+		await syncItem(
+			opts,
+			item,
+			plaidFetch(() =>
+				response(page({ modified: [transaction({ amount: -13 })] })),
+			),
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, credit_reviewed, credit_reviewed_by, refund_of_id FROM transactions WHERE id = ?",
+			)
+				.bind(tx?.id)
+				.first(),
+		).toEqual({
+			amount_cents: -1300,
+			credit_reviewed: 0,
+			credit_reviewed_by: null,
+			refund_of_id: 1,
+		});
+		const monthAfter = await loadMonth(env.DB, purchase.date.slice(0, 7));
+		expect(
+			monthAfter.transactions.some(
+				(row) => row.amountCents === -1300 && row.linked,
+			),
+		).toBe(false);
+		expect(
+			monthAfter.transactions.reduce((sum, row) => sum + row.amountCents, 0),
+		).toBe(budgetTotalBefore + 1200);
+	});
+
 	it("reclassifies an updated non-reviewed purchase as a pending credit when Plaid changes its sign", async () => {
 		const id = await addItem();
 		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };

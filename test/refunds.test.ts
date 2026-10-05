@@ -6,6 +6,7 @@ import {
 	COUNTED_JOINS,
 	countedCategorySql,
 	countedMonthSql,
+	FOLLOWS_PURCHASE,
 } from "../src/db/counted-month";
 import { loadMonth } from "../src/db/month";
 import {
@@ -138,17 +139,20 @@ describe("counted month and category (one shared expression)", () => {
 	type Side = {
 		date: string;
 		category: number | null;
+		amount?: number;
+		income?: boolean;
 		period?: string | null;
 		frequency?: "monthly" | "yearly";
 		anchor?: number | null;
 		excluded?: boolean;
+		reviewed?: boolean;
 	};
 	/** Evaluates the expressions over one transaction and the purchase it refunds (if any), no tables. */
 	async function counted(t: Side, purchase?: Side) {
 		const row = (side: Side | undefined, id: number | null) =>
 			side
-				? `SELECT ${id} AS id, '${side.date}' AS date, ${side.category ?? "NULL"} AS category_id, ${purchase && id === 1 ? 2 : "NULL"} AS refund_of_id, ${side.excluded ? 1 : 0} AS excluded`
-				: "SELECT NULL AS id, NULL AS date, NULL AS category_id, NULL AS refund_of_id, NULL AS excluded";
+				? `SELECT ${id} AS id, '${side.date}' AS date, ${side.amount ?? -2000} AS amount_cents, ${side.category ?? "NULL"} AS category_id, ${side.income ? 1 : 0} AS flag_income, ${purchase && id === 1 ? 2 : "NULL"} AS refund_of_id, ${side.excluded ? 1 : 0} AS excluded, ${side.reviewed ? 1 : 0} AS credit_reviewed, ${side.reviewed ? "'user'" : "NULL"} AS credit_reviewed_by`
+				: "SELECT NULL AS id, NULL AS date, NULL AS amount_cents, NULL AS category_id, 0 AS flag_income, NULL AS refund_of_id, NULL AS excluded, 0 AS credit_reviewed, NULL AS credit_reviewed_by";
 		const pay = (side: Side | undefined) =>
 			side?.period
 				? `SELECT '${side.period}' AS period`
@@ -157,17 +161,17 @@ describe("counted month and category (one shared expression)", () => {
 			`SELECT '${side?.frequency ?? "monthly"}' AS frequency, ${side?.anchor ?? "NULL"} AS anchor_month`;
 		return db
 			.prepare(
-				`SELECT ${countedMonthSql()} AS month, ${countedCategorySql()} AS category
+				`SELECT ${countedMonthSql()} AS month, ${countedCategorySql()} AS category, ${FOLLOWS_PURCHASE} AS follows
 				FROM (${row(t, 1)}) t
 				CROSS JOIN (${pay(t)}) bp CROSS JOIN (${bill(t)}) b
 				CROSS JOIN (${row(purchase, purchase ? 2 : null)}) rp
 				CROSS JOIN (${pay(purchase)}) rbp CROSS JOIN (${bill(purchase)}) rb`,
 			)
-			.first<{ month: string; category: number | null }>();
+			.first<{ month: string; category: number | null; follows: number }>();
 	}
 
 	it("an unlinked transaction counts in its own month and category", async () => {
-		expect(await counted({ date: "2026-09-10", category: 1 })).toEqual({
+		expect(await counted({ date: "2026-09-10", category: 1 })).toMatchObject({
 			month: "2026-09",
 			category: 1,
 		});
@@ -179,61 +183,86 @@ describe("counted month and category (one shared expression)", () => {
 				{ date: "2026-09-10", category: 1 },
 				{ date: "2026-08-20", category: 4, excluded: true },
 			),
-		).toEqual({ month: "2026-09", category: 1 });
+		).toMatchObject({ month: "2026-09", category: 1 });
 	});
 
 	it("a linked refund counts in its purchase's month and category", async () => {
 		expect(
 			await counted(
-				{ date: "2026-09-10", category: 1 },
-				{ date: "2026-08-20", category: 4 },
+				{ date: "2026-09-10", category: 1, reviewed: true },
+				{ date: "2026-08-20", category: 4, reviewed: true },
 			),
-		).toEqual({ month: "2026-08", category: 4 });
+		).toMatchObject({ month: "2026-08", category: 4, follows: 1 });
 	});
 
-	it("a refund linked to a split part takes that part's category", async () => {
+	it("a linked credit stops following an AI-owned purchase after Plaid invalidates review", async () => {
 		expect(
 			await counted(
-				{ date: "2026-09-10", category: null },
-				{ date: "2026-09-01", category: 5 },
+				{ date: "2026-09-10", category: 1, reviewed: false },
+				{ date: "2026-08-20", category: 4 },
 			),
-		).toEqual({ month: "2026-09", category: 5 });
+		).toMatchObject({ month: "2026-09", category: 1, follows: 0 });
+	});
+
+	it.each([
+		{ amount: -2000, income: true },
+		{ amount: 2000, income: false },
+	])(
+		"a linked transaction does not follow its purchase after its role changes: $amount, income $income",
+		async ({ amount, income }) => {
+			expect(
+				await counted(
+					{ date: "2026-09-10", category: 1, amount, income, reviewed: true },
+					{ date: "2026-08-20", category: 4, reviewed: true },
+				),
+			).toMatchObject({ month: "2026-09", category: 1, follows: 0 });
+		},
+	);
+
+	it("a refund linked to a reviewed split part takes that part's category", async () => {
+		expect(
+			await counted(
+				{ date: "2026-09-10", category: null, reviewed: true },
+				{ date: "2026-09-01", category: 5, reviewed: true },
+			),
+		).toMatchObject({ month: "2026-09", category: 5, follows: 1 });
 	});
 
 	it("a refund of an uncategorized purchase has no counted category", async () => {
 		expect(
 			await counted(
-				{ date: "2026-09-10", category: 1 },
-				{ date: "2026-08-20", category: null },
+				{ date: "2026-09-10", category: 1, reviewed: true },
+				{ date: "2026-08-20", category: null, reviewed: true },
 			),
-		).toEqual({ month: "2026-08", category: null });
+		).toMatchObject({ month: "2026-08", category: null, follows: 1 });
 	});
 
 	it("follows a purchase that is a late bill payment into its bill's month", async () => {
 		expect(
 			await counted(
-				{ date: "2026-10-12", category: 1 },
-				{ date: "2026-10-02", category: 4, period: "2026-09" },
+				{ date: "2026-10-12", category: 1, reviewed: true },
+				{ date: "2026-10-02", category: 4, period: "2026-09", reviewed: true },
 			),
-		).toEqual({ month: "2026-09", category: 4 });
+		).toMatchObject({ month: "2026-09", category: 4 });
 		expect(
 			await counted(
-				{ date: "2026-10-12", category: 1 },
+				{ date: "2026-10-12", category: 1, reviewed: true },
 				{
 					date: "2026-10-02",
 					category: 4,
+					reviewed: true,
 					period: "2026",
 					frequency: "yearly",
 					anchor: 9,
 				},
 			),
-		).toEqual({ month: "2026-09", category: 4 });
+		).toMatchObject({ month: "2026-09", category: 4 });
 	});
 
 	it("keeps a bill payment's own rule when it isn't a linked refund", async () => {
 		expect(
 			await counted({ date: "2026-10-02", category: 4, period: "2026-09" }),
-		).toEqual({ month: "2026-09", category: 4 });
+		).toMatchObject({ month: "2026-09", category: 4 });
 	});
 
 	it("names every alias its joins provide", () => {
@@ -299,6 +328,39 @@ describe("which purchases a refund can link to", () => {
 });
 
 describe("linking a refund", () => {
+	it("a note-only save keeps Jev ownership of an unchanged reviewed refund link", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_of_id = ?, category_source = 'jev', category_confidence = 0.95, flag_income = 0, income_source = NULL, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(PURCHASE, REFUND)
+			.run();
+		const { res } = await post(`/transactions/${REFUND}`, [
+			["merchant", "Refund Shop"],
+			["note", "Reviewed refund note"],
+			["back", "/transactions"],
+			["income", "0"],
+			["creditReviewedVisible", "1"],
+			["creditReviewed", "1"],
+			["refund_of", String(PURCHASE)],
+		]);
+		expect(res.status).toBe(200);
+		expect(
+			await db
+				.prepare(
+					"SELECT note, income_source, credit_reviewed, credit_reviewed_by, refund_of_id FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({
+			note: "Reviewed refund note",
+			income_source: null,
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+			refund_of_id: PURCHASE,
+		});
+	});
+
 	it("moves its spending into the purchase's month and category, and unlinking moves it back", async () => {
 		const before = {
 			augKids: await spent("2026-08", KIDS),
@@ -307,6 +369,14 @@ describe("linking a refund", () => {
 		};
 		const { res, trigger } = await link(REFUND, PURCHASE);
 		expect(res.status).toBe(200);
+		expect(
+			await db
+				.prepare(
+					"SELECT credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ credit_reviewed: 1, credit_reviewed_by: "user" });
 		expect(trigger?.toast.message).toBeTruthy();
 		expect(trigger?.announce).toBeTruthy();
 		expect(await spent("2026-08", KIDS)).toBe(before.augKids - 2000);
@@ -320,8 +390,30 @@ describe("linking a refund", () => {
 		await link(REFUND, "");
 		expect(await refundOf(REFUND)).toBeNull();
 		expect(await spent("2026-08", KIDS)).toBe(before.augKids);
-		expect(await spent("2026-09", GROCERIES)).toBe(before.sepGroceries);
+		expect(await spent("2026-09", GROCERIES)).toBe(before.sepGroceries - 2000);
 		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+	});
+
+	it("a manual refund link takes ownership after Jev reviewed the credit", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET category_source = 'jev', category_confidence = 0.95, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const beforeSeptember = await spent("2026-09", GROCERIES);
+		const beforeAugust = await spent("2026-08", KIDS);
+		await link(REFUND, PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ credit_reviewed: 1, credit_reviewed_by: "user" });
+		expect(await spent("2026-09", GROCERIES)).toBe(beforeSeptember + 2000);
+		expect(await spent("2026-08", KIDS)).toBe(beforeAugust - 2000);
 	});
 
 	it("lists the refund under the purchase's month and category filter", async () => {
@@ -448,22 +540,24 @@ describe("linking a refund", () => {
 			.bind(PURCHASE)
 			.run();
 		// Back in its own month (September), waiting for a category of its own.
-		expect(await needsCategoryCount(db, "2026-09")).toBe(before);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(before + 1);
 		const home = summarizeMonth({
 			...(await loadMonth(db, "2026-09")),
 			month: "2026-09",
 			unpaidDueBillsCents: 0,
 		});
-		expect(home.uncategorized.count).toBe(before);
+		expect(home.uncategorized.count).toBe(before + 1);
 		const { html } = await get("/transactions?month=2026-09&q=refund");
-		expect(rowHtml(html, REFUND)).toContain("Refund Shop");
+		expect(rowHtml(html, REFUND)).toContain("Needs category");
 		// Its category can be set again, and it counts there.
 		const sheet = await get(`/transactions/${REFUND}`);
 		expect(sheet.html).not.toMatch(/<fieldset[^>]*disabled/);
 		const gasBefore = await spent("2026-09", GAS);
 		await save(REFUND, [["category", String(GAS)]]);
 		expect(await ownCategory(REFUND)).toBe(GAS);
-		expect(await spent("2026-09", GAS)).toBe(gasBefore);
+		expect(await spent("2026-09", GAS)).toBe(
+			gasBefore + (await detail(REFUND)).amountCents,
+		);
 		expect(await refundOf(REFUND)).toBe(PURCHASE);
 	});
 
@@ -517,7 +611,7 @@ describe("linking a refund", () => {
 				`INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (95, '2026-09', ${PURCHASE}, 'user', 'linked')`,
 			),
 			db.prepare(
-				`UPDATE transactions SET refund_of_id = ${PURCHASE} WHERE id = ${REFUND}`,
+				`UPDATE transactions SET refund_of_id = ${PURCHASE}, credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ${REFUND}`,
 			),
 		]);
 		const september = await loadMonth(db, "2026-09");
@@ -620,10 +714,17 @@ describe("splits unlink their refunds", () => {
 		);
 		// It counts on its own date and category again.
 		expect(
-			(await loadMonth(db, "2026-09")).transactions.some(
+			(await loadMonth(db, "2026-09")).transactions.filter(
 				(t) => t.amountCents === -2000,
 			),
-		).toBe(false);
+		).toEqual([
+			{
+				categoryId: GROCERIES,
+				amountCents: -2000,
+				income: false,
+				linked: false,
+			},
+		]);
 	});
 
 	it("counts several refunds in the toast", async () => {
@@ -657,19 +758,198 @@ describe("splits unlink their refunds", () => {
 		);
 	});
 
-	it("splitting a linked purchase unlinks its refund", async () => {
+	it("splitting a linked refund transfers its purchase link to each part", async () => {
 		await link(REFUND, PURCHASE);
-		const { trigger } = await post(`/transactions/${PURCHASE}/split`, [
+		const before = await spent("2026-08", KIDS);
+		const linkedRefund = await refundOf(REFUND);
+		expect(linkedRefund).toBe(PURCHASE);
+		const { trigger } = await post(`/transactions/${REFUND}/split`, [
 			["part_category", String(KIDS)],
 			["part_category", String(GAS)],
-			["part_amount", "25"],
-			["part_amount", "25"],
+			["part_amount", "10"],
+			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+		expect(await refundOf(PURCHASE)).toBeNull();
+		expect(
+			await db
+				.prepare(
+					"SELECT id, amount_cents, is_split, refund_of_id FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toMatchObject({
+			id: REFUND,
+			amount_cents: -2000,
+			is_split: 1,
+			refund_of_id: PURCHASE,
+		});
+		const parts = await db
+			.prepare(
+				"SELECT id, refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all();
+		expect(parts.results).toHaveLength(2);
+		for (const part of parts.results as Array<Record<string, unknown>>) {
+			expect(part.refund_of_id).toBe(linkedRefund);
+			expect(part.credit_reviewed).toBe(1);
+			expect(part.credit_reviewed_by).toBe("user");
+		}
+		expect(await refundOf(REFUND)).toBe(linkedRefund);
+		expect(await spent("2026-08", KIDS)).toBe(before);
+		expect(trigger?.toast.message).toBe("Split Refund Shop");
+		await post(`/transactions/${REFUND}/split/remove`, [
+			["back", "/transactions"],
+		]);
+		expect(await refundOf(REFUND)).toBe(linkedRefund);
+		expect(await spent("2026-08", KIDS)).toBe(before);
+	});
+
+	it("splitting a formerly linked refund does not link parts to its split parent", async () => {
+		await link(REFUND, PURCHASE);
+		await link(REFUND, "");
+		const beforeKids = await spent("2026-09", KIDS);
+		const beforeGas = await spent("2026-09", GAS);
+		const { trigger } = await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const parts = await db
+			.prepare(
+				"SELECT refund_of_id, category_id FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all();
+		expect(parts.results).toEqual([
+			{ refund_of_id: null, category_id: KIDS },
+			{ refund_of_id: null, category_id: GAS },
+		]);
 		expect(await refundOf(REFUND)).toBeNull();
-		expect(trigger?.toast.message).toBe(
-			"Split Refund Shop. The refund on Sep 10 is no longer linked.",
-		);
+		expect(await spent("2026-09", KIDS)).toBe(beforeKids - 1000);
+		expect(await spent("2026-09", GAS)).toBe(beforeGas - 1000);
+		expect(trigger?.toast.message).toBe("Split Refund Shop");
+	});
+
+	it("splitting a Jev-reviewed linked refund preserves its purchase link", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_of_id = ?, category_source = 'jev', category_confidence = 0.95, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(PURCHASE, REFUND)
+			.run();
+		const before = await spent("2026-08", KIDS);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const parts = await db
+			.prepare(
+				"SELECT refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all();
+		expect(parts.results).toEqual([
+			{
+				refund_of_id: PURCHASE,
+				credit_reviewed: 1,
+				credit_reviewed_by: null,
+			},
+			{
+				refund_of_id: PURCHASE,
+				credit_reviewed: 1,
+				credit_reviewed_by: null,
+			},
+		]);
+		expect(await spent("2026-08", KIDS)).toBe(before);
+	});
+
+	it("preserves a refund link when its purchase is temporarily excluded", async () => {
+		await link(REFUND, PURCHASE);
+		const before = await spent("2026-08", KIDS);
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+			)
+			.bind(PURCHASE)
+			.run();
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const parts = await db
+			.prepare(
+				"SELECT refund_of_id FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all();
+		expect(parts.results).toEqual([
+			{ refund_of_id: PURCHASE },
+			{ refund_of_id: PURCHASE },
+		]);
+		await db
+			.prepare("UPDATE transactions SET excluded = 0 WHERE id = ?")
+			.bind(PURCHASE)
+			.run();
+		expect(await spent("2026-08", KIDS)).toBe(before);
+	});
+
+	it("retains the link of an invalidated refund until its split parts are rereviewed", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_of_id = ?, credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(PURCHASE, REFUND)
+			.run();
+		const before = await spent("2026-08", KIDS);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const parts = await db
+			.prepare(
+				"SELECT id, refund_of_id, credit_reviewed FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all<{
+				id: number;
+				refund_of_id: number | null;
+				credit_reviewed: number;
+			}>();
+		expect(parts.results).toEqual([
+			{ id: expect.any(Number), refund_of_id: PURCHASE, credit_reviewed: 0 },
+			{ id: expect.any(Number), refund_of_id: PURCHASE, credit_reviewed: 0 },
+		]);
+		expect(await spent("2026-08", KIDS)).toBe(before);
+		for (const part of parts.results) {
+			await saveEdit(
+				db,
+				part.id,
+				{
+					categoryId: null,
+					alwaysForMerchant: false,
+					displayName: null,
+					note: null,
+					excluded: false,
+					income: false,
+					creditReviewed: true,
+				},
+				"synthetic-person",
+			);
+		}
+		expect(await spent("2026-08", KIDS)).toBe(before - 2000);
 	});
 
 	it("says nothing extra when no refund was linked", async () => {
