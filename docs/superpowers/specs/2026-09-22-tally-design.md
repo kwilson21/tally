@@ -118,7 +118,9 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 **Sign convention (Plaid's):** a positive amount is money out, and a negative amount is money in. Account balances on debt accounts (`is_liability`) display as negative.
 
-**Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date.
+**Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date. "Today", which decides the current month and bill status, is the household's date in its time zone, a Settings choice that starts as Eastern (`America/New_York`); a transaction's own date is never converted (decision 67).
+
+**Pending (decision 67):** a pending transaction counts like any other and shows the word "Pending". When the bank posts it under a new id, the person's category, note, exclusion, split and every link (bill, refund, counts in) move to the posted transaction. A pending one the bank drops is removed with its links.
 
 "Counted transactions" for a month means: date in that month (or, from Phase 3, a payment linked to an earlier month's bill occurrence counts in that occurrence's month instead, never both; decision 58, #26; and a refund linked to its purchase counts in the purchase's counted month and current category instead of its own, never both, while the purchase counts; if the purchase is excluded, the refund counts on its own date and category again; a refund of a split purchase links to one of its parts, decision 60), `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. Transactions flagged `income` are counted only toward **Income**. They're left out of Spent, Uncategorized, and Safe to spend. A refund that follows its purchase has no category of its own to set, so only the purchase shows Needs category; its amount stays in Uncategorized until the purchase has a category.
 
@@ -247,7 +249,7 @@ Picked on `/design-system/proposals` (P23–P32), where the drawings stay as the
 
 ### 8.4 Phase 5: from the original app (decision 66)
 
-Each is drawn on `/design-system/proposals` and picked by the owner before it's built; until then, this is what each is for.
+Each is drawn on `/design-system/proposals` and picked by the owner before it's built; until then, this is what each is for. Decision 67 adds from `docs/reviews/original-app-gaps.md`: B1–B3 and B5–B8 (Home wording, why Safe to spend is lower, a near-limit warning, a daily allowance, unbudgeted spending, older uncategorized, a row leading to its transactions), C2–C8 (type filter, a new category while categorizing, search by category or amount, search all months, rename one transaction, see and remove rules, select all) and D1–D3 (partial payments, a bill's category on its payments, monthly bills total).
 - **Browse past months:** see how an earlier month ended on Home.
 - **A savings goal:** a monthly amount to save, which Safe to spend sets aside. Before it's built, §6's Safe to spend rule gains the line that subtracts it, and the goal's table joins §5.
 - **More bill frequencies:** weekly, every two weeks and quarterly bills, besides monthly and yearly. Before it's built, §6.1 gains how such a bill's occurrence is identified (today `period` is `YYYY-MM` or `YYYY`, one per month or year, so a weekly bill needs its own period key), and how bill status counts several occurrences in one month.
@@ -256,6 +258,22 @@ Each is drawn on `/design-system/proposals` and picked by the owner before it's 
 - **Filter by account:** show only one account's transactions.
 - **Edit a cash transaction's date or amount:** only hand-entered (Cash account) transactions; a bank transaction always keeps the bank's date and amount, so sync never fights a person (split, exclude and "counts in" cover a bank that's wrong).
 - **Reconnect reminder email:** an email when a bank needs signing in again, so sync doesn't stop unnoticed. How Tally sends email is its own decision.
+
+### 8.5 Numbers you can trust (decision 67)
+
+Before more Phase 4 features, the rule gaps that can make the family's numbers wrong are fixed (`docs/reviews/original-app-gaps.md` section A, plus B4, C1, C9 and D7). Each fix states its rule here first.
+- **Income:** a person can mark a transaction as income from the edit panel, and Plaid's own INCOME category marks it at sync (the other session's #149/#153 hold unreviewed credits out of spending).
+- **Pending:** counted and marked, as in §6.
+- **Transfers and card payments:** Plaid's TRANSFER_IN, TRANSFER_OUT and LOAN_PAYMENTS categories exclude a transaction at sync (`excluded_source = 'plaid'`), which a person can undo; Jev still decides the rest.
+- **Today:** the household's time zone, as in §6.
+- **Bill matching:** an excluded payment can still pay a bill, by hand or by the matcher; a payment from the same merchant outside ±10% is offered as "Price changed? Update the bill" rather than ignored.
+- **Merchant:** Plaid's `merchant_name` is stored, and rules, bill matching, refunds and finding bills match on it when present, the raw name otherwise.
+- **Rules after every sync:** merchant rules run after each sync, not only on Sync now and overnight.
+- **Refunds:** linking a refund includes it in the budget; a refund can't be larger than what's left of its purchase, and a purchase is refunded at most to its amount.
+- **Bills:** no two active bills with the same name; an amount over $100,000 needs confirming; a yearly bill needs its anchor month.
+- **A failed save says so:** an htmx error shows "Couldn't save. Check your connection and try again." in `role="alert"`, and the app has its own 404 and 500 pages.
+- **A bank that needs attention or hasn't synced for 3 days** is flagged on Home with a link to Accounts, because Safe to spend may be too high.
+- **The first visit's empty list** says "Importing your transactions…" or "Link a bank to see transactions" rather than "No transactions match".
 
 ## 9. Demo experience
 
@@ -279,7 +297,7 @@ The "How Tally works" page has two parts:
 1. **Architecture:** the system diagram (built as SVG) and the one-sentence explanation of each part (§4).
 2. **One section per feature (all 8),** each with the feature's one-sentence explanation, its rule in plain words (taken from §6 and §6.1), a small diagram of the rule, and a small worked example using the demo's own numbers. Code draws the diagram from the same numbers as the example (#61), as inline SVG with a title and description for screen readers. For example: "Safe to spend = $1,850 budget − $424 spent − $142 overdue bill."
 
-Every screen has a small "How this works" link to its feature's section. From Phase 4, anything a rule decides also gets a small terracotta "Why?" link (the word, P33 A) beside it to its exact section: Going well and Worth a look on Trends, the net-worth sentence, a dashed suggested name, a "Maybe …" tag, "Tally's guess" and a suggested category (decision 65). In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
+Every screen has a small "How this works" link to its feature's section. From Phase 4, anything a rule decides also gets a small terracotta "Why?" link (the word, P33 A) beside it to its exact section: Going well and Worth a look on Trends, the net-worth sentence, a dashed suggested name, a "Maybe …" tag, "Tally's guess" and a suggested category, and a bill's status (decisions 65 and 67). In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
 
 **In both environments (decision 65, replacing #13's demo-only rule):** the "How Tally works" page (`/how-it-works`), the "How this works" links and the "Why?" links appear in the demo and the family app. In the family app the page leaves out the architecture part, and each worked example uses the household's own numbers ("With your numbers: …" instead of "In the demo: …"). **Demo only (#13):** the Things to try block. **Things to try** is a short block on Home, below the Budget list (#92, decision 46: safe to spend comes first on a phone), with three items, each linking to where it's done: "Give a transaction a category" (the Needs category list), "Set a rule for a merchant" and "Rename a merchant" (the Local Bakery edit panel), plus a "How Tally works" link. It has no close button: the demo resets nightly and remembering a dismissal would need saved state. It is the demo's only onboarding for now; onboarding (#95, decision 49) replaces it. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
 
@@ -310,6 +328,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 | **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection, Settings for categories and budget amounts with the default categories (decision 32), and exclusions (decision 33), so the family's numbers are right from the first week; Organize, Disconnect a bank, Sync now, Download your data and Send feedback (decisions 57 and 58, §8.1) | The family uses it for a week (Oct 1–7), then keeps using it through October; the month-end review feeds Phase 3's review (decision 58). Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
 | **3. Bills and splits** | In both environments, with seed data for each (exclusions moved to Phase 2, decision 33). Also (decisions 57 and 58): finding bills from recurring charges, linking a refund to its purchase, selecting several transactions at once, adding a cash transaction by hand, and counting a bill payment toward its bill's month (a payment linked to an earlier month's bill occurrence counts in that month's spending *instead of* its own date's month, never both; the bank's date is unchanged) | Building starts Oct 4 while production stays frozen for the trial week (fixes only); Phase 3 reaches production after Oct 7 in one owner-approved deploy (decision 60). Shown in the demo, used by the family |
 | **4. Trends, balances, name suggestions** | Trends, net-worth history, Workers AI name suggestions (merchant names and new categories), and How Tally works in the family app (decision 65). Documents moved to the Later list (decision 66) | Features 1–7 live in both environments |
+| **3.5 Numbers you can trust** | The fixes in §8.5 (decision 67), before more Phase 4 features | The family's Safe to spend, Spent and bill statuses match their bank |
 | **5. From the original app** | Eight features the original app had built (decision 66, §8.4): browsing past months, a savings goal, more bill frequencies, planned one-time expenses, rule suggestions, a filter by account, editing a cash transaction's date or amount, and a reminder email when a bank needs reconnecting. Each is designed on the proposals page and picked by the owner before it's built | Shown in the demo, used by the family |
 
 ### Testing
@@ -322,6 +341,8 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - **Deploy:** manual at first, with `npx wrangler deploy --env demo` or `--env production`, documented in the README.
 
 ## 12. Later list (not built)
+
+- Everything `docs/reviews/original-app-gaps.md` marks Later (decision 67), and detecting the household's time zone from the browser (it needs its own allowed-JS decision)
 
 - An "ask a question" box (LLM-written read-only queries)
 - Deploying automatically from CI
