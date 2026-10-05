@@ -33,6 +33,14 @@ export function Layout({
 					content="width=device-width, initial-scale=1, viewport-fit=cover"
 				/>
 				<title>{title}</title>
+				{/* htmx 4 swaps every reply but 204 and 304. A 500 (an unhandled error) must not land in the page, so a sheet keeps what was typed and toast.js says what happened. Every other 4xx and 5xx still swaps: it carries its own message on purpose, such as a field's error (422) or a bank that couldn't be reached (502). defaultTimeout 0 turns htmx's own 60-second timeout off: it aborts a timed-out request exactly as it aborts a replaced one, so toast.js keeps the 60 seconds itself and can tell them apart. */}
+				<meta
+					name="htmx-config"
+					content={JSON.stringify({
+						noSwap: [204, 304, 500],
+						defaultTimeout: 0,
+					})}
+				/>
 				<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 				<link rel="stylesheet" href="/assets/app.css" />
 				<script src="/vendor/htmx.min.js" defer></script>
@@ -74,9 +82,10 @@ export function Layout({
 				</div>
 				<BottomTabs active={active} />
 				{!currentPath.startsWith("/feedback") && <FeedbackButton />}
+				{/* z-60: above the BottomSheet (z-50), so a failed save's toast shows over an open sheet. Taps pass through it, so a toast over Save never eats the tap that tries again. */}
 				<div
 					id="toasts"
-					class="fixed inset-x-4 bottom-36 flex flex-col items-center gap-2 lg:bottom-6"
+					class="pointer-events-none fixed inset-x-4 bottom-36 z-60 flex flex-col items-center gap-2 lg:bottom-6"
 				/>
 				<div
 					id="announcer"
