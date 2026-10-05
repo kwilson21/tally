@@ -2,6 +2,7 @@
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
+import type { NetWorthView } from "../net-worth";
 import { AccountRow } from "../views/account-row";
 import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
@@ -33,6 +34,7 @@ import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
+import { NetWorthChart } from "../views/net-worth-chart";
 import { ProgressRow } from "../views/progress-row";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
@@ -55,6 +57,7 @@ import {
 	HOME_TOP,
 	MONEY_STATES,
 	NET_WORTH_CENTS,
+	NET_WORTH_VIEWS,
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
@@ -1373,12 +1376,18 @@ function Diagrams() {
 	);
 }
 
+/** What the chart space says, in words: a line's text alternative, or the early note and its sentence. */
+const chartWords = (view: NetWorthView) =>
+	view.kind === "line"
+		? view.description
+		: [view.sentence, view.note].filter(Boolean).join(" ");
+
 /** What a picture of Accounts shows, in words, from the same data it draws. */
 function describeAccounts() {
 	return [
 		"Accounts",
 		`Net worth ${whole(NET_WORTH_CENTS)}`,
-		"Net worth over time arrives later",
+		chartWords(NET_WORTH_VIEWS.rising),
 		"Sync now",
 		...BANKS.map(
 			(b) =>
@@ -1404,6 +1413,7 @@ function AccountsSketch({ syncId }: { syncId?: string }) {
 		<>
 			<AccountsTop
 				netWorthCents={NET_WORTH_CENTS}
+				history={NET_WORTH_VIEWS.rising}
 				action={
 					<div class="mt-4">
 						<Button
@@ -1442,7 +1452,7 @@ function AccountsGroup() {
 				title="AccountsTop, SyncNow, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "SyncNow", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank, each with a muted Synced … line, and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action; a disconnected bank keeps its accounts and says Disconnected in muted words, with no Synced line, Manage or Fix connection. Link a bank is the primary button. Sync now, a secondary button under the title, syncs every healthy bank at most once a minute; while pending it says Syncing…, success shows a toast of what arrived (N new transactions, Nothing new, or Already synced a moment ago) and refreshes the banks, and failure puts one alert naming the bank above the summary. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
+				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over the net-worth chart (P25 A, below), then accounts grouped by bank, each with a muted Synced … line, and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action; a disconnected bank keeps its accounts and says Disconnected in muted words, with no Synced line, Manage or Fix connection. Link a bank is the primary button. Sync now, a secondary button under the title, syncs every healthy bank at most once a minute; while pending it says Syncing…, success shows a toast of what arrived (N new transactions, Nothing new, or Already synced a moment ago) and refreshes the banks, and failure puts one alert naming the bank above the summary. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame
@@ -1473,6 +1483,58 @@ function AccountsGroup() {
 						<AccountRow {...CHECKING} />
 						<AccountRow {...CREDIT_CARD} />
 					</ul>
+				</State>
+			</Specimen>
+			<Specimen
+				id="net-worth-chart"
+				title="NetWorthChart"
+				tier="visual"
+				components={["NetWorthChart"]}
+				sentence="The line under Accounts' headline (P25 A, P26 A, P31). Code writes the change in a sentence in the status sentence's voice (Up $3,600 since May., Down $1,200 since May., or No change since May.; a history that began this month names the day, Up $120 since Oct 1.), then one server-drawn line through the last 6 months of net worth on the ledger rules, with its first and last day under it in muted words (May, Today). It has no amounts, axis or hover: the headline and the sentence carry the numbers, and the picture is an SVG with a text alternative that says the same in dollars. Net worth is every account's balance with debt subtracted, leaving out the Cash account and disconnected banks, read from one balance a day recorded when a sync refreshes balances; it starts on the first day every account has one, so linking another bank never looks like growth. Under two days of balances it is the five empty rules with a sentence and a note on when the chart starts (as P31 drew it). There is nothing to tap: a sync redraws it with the rest of Accounts, and the sync's toast is what is announced. Account rows keep today's balance only."
+			>
+				<State label="Six months, up (P25 A), at a phone's width">
+					<div class="w-[358px] max-w-full">
+						<Picture
+							label={`Net worth chart on a phone: ${chartWords(NET_WORTH_VIEWS.rising)}`}
+						>
+							<NetWorthChart view={NET_WORTH_VIEWS.rising} />
+						</Picture>
+					</div>
+				</State>
+				<State label="The same on desktop: the line stretches to the page's width, and its strokes and dot stay the same size">
+					<Picture
+						label={`Net worth chart on desktop: ${chartWords(NET_WORTH_VIEWS.rising)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.rising} />
+					</Picture>
+				</State>
+				<State label="Six months, down">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.falling)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.falling} />
+					</Picture>
+				</State>
+				<State label="A history that began this month: the line starts on a day">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.startedThisMonth)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.startedThisMonth} />
+					</Picture>
+				</State>
+				<State label="The first day (P31): when the chart starts">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.firstDay)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.firstDay} />
+					</Picture>
+				</State>
+				<State label="Before any balance is recorded">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.none)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.none} />
+					</Picture>
 				</State>
 			</Specimen>
 		</Group>

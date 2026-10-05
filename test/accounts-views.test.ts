@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { netWorthView } from "../src/net-worth";
 import { AccountRow } from "../src/views/account-row";
 import { AccountsTop } from "../src/views/accounts-top";
 import { BankGroup } from "../src/views/bank-group";
+import { NetWorthChart } from "../src/views/net-worth-chart";
 
 const render = async (node: unknown) => String(await node);
 
@@ -153,23 +155,102 @@ describe("BankGroup", () => {
 	});
 });
 
+const TODAY = "2026-10-05";
+const rising = netWorthView(
+	[
+		{ date: "2026-05-01", cents: 1200000 },
+		{ date: "2026-07-15", cents: 1400000 },
+		{ date: TODAY, cents: 1560000 },
+	],
+	TODAY,
+);
+const firstDay = netWorthView([{ date: TODAY, cents: 1560000 }], TODAY);
+const noDays = netWorthView([], TODAY);
+
 describe("AccountsTop", () => {
 	it("puts the title, then Net worth and its amount in whole dollars", async () => {
-		const html = await render(AccountsTop({ netWorthCents: 1438200 }));
+		const html = await render(
+			AccountsTop({ netWorthCents: 1438200, history: rising }),
+		);
 		expect(html).toMatch(/<h1[^>]*>Accounts<\/h1>/);
 		expect(html.indexOf("Net worth")).toBeLessThan(html.indexOf("$14,382"));
 		expect(html).not.toContain("$14,382.00");
 	});
 
 	it("shows negative net worth with a minus sign", async () => {
-		const html = await render(AccountsTop({ netWorthCents: -50000 }));
+		const html = await render(
+			AccountsTop({ netWorthCents: -50000, history: noDays }),
+		);
 		expect(html).toContain("-$500");
 	});
 
-	it("keeps a ruled space for the Phase 4 chart, hidden from screen readers, with a note that it comes later", async () => {
-		const html = await render(AccountsTop({ netWorthCents: 0 }));
-		expect(html).toMatch(/<div data-chart-space[^>]*aria-hidden="true"/);
-		expect(html).toContain("Net worth over time arrives later");
+	it("puts the net-worth chart under the headline, where the ruled space was", async () => {
+		const html = await render(
+			AccountsTop({ netWorthCents: 1560000, history: rising }),
+		);
+		expect(html.indexOf("$15,600")).toBeLessThan(
+			html.indexOf("Up $3,600 since May."),
+		);
+		expect(html.indexOf("Up $3,600 since May.")).toBeLessThan(
+			html.indexOf("<svg"),
+		);
+		expect(html).not.toContain("arrives later");
+	});
+});
+
+describe("NetWorthChart", () => {
+	it("writes the change in the status sentence's voice, then draws one line on the ledger rules", async () => {
+		const html = await render(NetWorthChart({ view: rising }));
+		expect(html).toContain(
+			'<p class="mt-1 font-serif text-lg italic">Up $3,600 since May.</p>',
+		);
+		expect(html.match(/<polyline/g)).toHaveLength(1);
+		expect(html.match(/<line /g)).toHaveLength(4);
+		expect(html).toContain('class="stroke-rule"');
+		expect(html).toContain('class="stroke-ink"');
+	});
+
+	it("gives the picture a text alternative in numbers, and hides the labels under it as the same words", async () => {
+		const html = await render(NetWorthChart({ view: rising }));
+		expect(html).toMatch(
+			/<svg[^>]*role="img"[^>]*aria-label="Net worth over time\. Up \$3,600 since May\. It was \$12,000 on May 1 and is \$15,600 today\."/,
+		);
+		expect(html).toMatch(
+			/<p[^>]*aria-hidden="true"[^>]*><span>May<\/span><span>Today<\/span><\/p>/,
+		);
+	});
+
+	it("stays one color of ink on paper: no amounts on the chart, no status colors", async () => {
+		const html = await render(NetWorthChart({ view: rising }));
+		expect(html).not.toMatch(/stroke-(ok|over|accent)|fill-(ok|over|accent)/);
+		expect(html).not.toContain("<text");
+	});
+
+	it("fills the width at any size without distorting its line or dot", async () => {
+		const html = await render(NetWorthChart({ view: rising }));
+		expect(html).toContain('preserveAspectRatio="none"');
+		expect(html).toContain('vector-effect="non-scaling-stroke"');
+		// The dot is a round-capped point, so it stays round when the box stretches.
+		expect(html).toMatch(
+			/<path d="M100 [\d.]+h0\.01"[^>]*stroke-linecap="round"/,
+		);
+	});
+
+	it("before two days, shows the ruled space with when the chart starts, as P31 draws it", async () => {
+		const html = await render(NetWorthChart({ view: firstDay }));
+		expect(html).toContain("Tally started following your balances today.");
+		expect(html).toContain(
+			"The chart starts tomorrow, with a second day of balances.",
+		);
+		expect(html).toMatch(/<div[^>]*aria-hidden="true"[^>]*h-20/);
+		expect(html.match(/border-t border-rule/g)).toHaveLength(5);
+		expect(html).not.toContain("<svg");
+	});
+
+	it("with no balances yet, has no sentence, only the note", async () => {
+		const html = await render(NetWorthChart({ view: noDays }));
+		expect(html).not.toContain("font-serif");
+		expect(html).toContain("The chart starts with the next sync.");
 	});
 });
 
