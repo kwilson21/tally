@@ -22,6 +22,7 @@ describe("trendsExample", () => {
 		color: "cat-blue",
 		line: "",
 		run,
+		note: null,
 		months: months(cents),
 		label: "",
 	});

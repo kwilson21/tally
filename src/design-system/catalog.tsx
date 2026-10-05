@@ -1597,6 +1597,7 @@ const rowOf = (
 	line: string,
 	icon = "groceries",
 	color = "cat-blue",
+	note: string | null = null,
 ): TrendRowData => {
 	const months = monthPoints(cents);
 	return {
@@ -1606,6 +1607,7 @@ const rowOf = (
 		color,
 		line,
 		run: 0,
+		note,
 		months,
 		label: monthsLabel(months, "Spending"),
 	};
@@ -1618,6 +1620,18 @@ const TREND_ROW_STATES = [
 	{
 		label: "Worth a look: up three or more months running",
 		row: WORTH_A_LOOK_ROW,
+	},
+	{
+		label:
+			"Worth a look and also under budget three or more months running: a muted second line says it still is",
+		row: rowOf(
+			"Groceries",
+			[64000, 65500, 67000, 68500, 69000, 20000],
+			"Up 3 months running",
+			"groceries",
+			"cat-blue",
+			"Still under budget",
+		),
 	},
 	{ label: "Every other category: last month's amount", row: OTHER_ROW },
 	{
@@ -1799,11 +1813,11 @@ function TrendsGroup() {
 						</Picture>
 					</State>
 				))}
-				<State label="Money counted but in no category, with its own muted icon">
-					<Picture label="Uncategorized, $23, was $0. Up $23">
+				<State label="Money counted but in no category, in Home's words, with its own muted icon">
+					<Picture label="Needs a category, $23, was $0. Up $23">
 						<ul>
 							<ChangeRow
-								name="Uncategorized"
+								name="Needs a category"
 								icon="list"
 								color=""
 								detail="$23, was $0"
@@ -1833,21 +1847,30 @@ function TrendsGroup() {
 				title="MonthBars"
 				tier="visual"
 				components={["MonthBars"]}
-				sentence="All spending by month as bars on ledger rules with each amount above it: Trends' early state, before there's a full month to compare (P31). The month still going is a dashed outline that says “so far”."
+				sentence="All spending by month as bars on ledger rules with each amount above it: Trends' early state, before there's a full month to compare (P31). The month still going is a dashed outline that says “so far”. The first month of history may be only part of a month, so its bar is striped and its text alternative says it's a part month and from when."
 			>
-				<State label="Tally started last month">
+				<State label="Tally started last month: its first month, September, is striped (a part month, from Sep 12)">
 					<Picture label={early.label}>
-						<MonthBars months={early.months} label={early.label} />
+						<MonthBars
+							id="ds-bars-early"
+							months={early.months}
+							label={early.label}
+						/>
 					</Picture>
 				</State>
-				<State label="Tally's very first month">
+				<State label="Tally's very first month: striped, and still going, so dashed">
 					<Picture label={firstMonth.label}>
-						<MonthBars months={firstMonth.months} label={firstMonth.label} />
+						<MonthBars
+							id="ds-bars-first"
+							months={firstMonth.months}
+							label={firstMonth.label}
+						/>
 					</Picture>
 				</State>
 				<State label="Nothing spent yet this month: a sliver, never a missing bar">
 					<Picture label="All spending by month: October so far $0.">
 						<MonthBars
+							id="ds-bars-sliver"
 							months={monthPoints([0])}
 							label="All spending by month: October so far $0."
 						/>
@@ -1874,12 +1897,12 @@ function TrendsGroup() {
 				</State>
 				<State label="One month in: all spending by month, and when Tally started">
 					<PhoneFrame label={`Trends: ${describeTrends(early)}`}>
-						<TrendsScreen page={early} />
+						<TrendsScreen id="ds-screen-early" page={early} />
 					</PhoneFrame>
 				</State>
 				<State label="Tally's very first month">
 					<Picture label={`Trends: ${describeTrends(firstMonth)}`}>
-						<TrendsScreen page={firstMonth} />
+						<TrendsScreen id="ds-screen-first" page={firstMonth} />
 					</Picture>
 				</State>
 				<State label="No transactions yet">

@@ -20,6 +20,22 @@ const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
 
 /**
+ * Counted spending by the month it counts in and its category, for months ?1 to ?2, reading only
+ * transactions dated on or after ?3 (the first day of ?1), which `transactions_date` can seek.
+ * The month a transaction counts in is never later than its own date's month: a late bill's payment
+ * counts in its occurrence's month (a payment is picked within 30 days of the due date), and a
+ * refund in its purchase's month (the picker offers only purchases dated on or before the refund),
+ * both earlier, never later. So a transaction that
+ * counts in ?1 or later is dated on or after ?1's first day, and the bound needs no margin: rows it
+ * lets in that count in an earlier month are left out by the month test, as before.
+ */
+export const TREND_SPEND_SQL = `SELECT ${COUNTED_MONTH} AS month, ${COUNTED_CATEGORY} AS categoryId, SUM(t.amount_cents) AS cents
+	FROM transactions t
+	${COUNTED_JOINS}
+	WHERE t.date >= ?3 AND ${COUNTED_SPENDING} AND ${COUNTED_MONTH} BETWEEN ?1 AND ?2
+	GROUP BY month, categoryId`;
+
+/**
  * The rows Trends builds from, for the household's `today` (YYYY-MM-DD): counted spending by the
  * month it counts in and its category for the six months ending with this one, last month's
  * counted spending dated on days 1 to today's day-of-month, and the categories and budgets.
@@ -39,15 +55,7 @@ export async function loadTrends(
 		db.prepare(
 			"SELECT category_id AS categoryId, effective_month AS effectiveMonth, amount_cents AS amountCents FROM budget_amounts",
 		),
-		db
-			.prepare(
-				`SELECT ${COUNTED_MONTH} AS month, ${COUNTED_CATEGORY} AS categoryId, SUM(t.amount_cents) AS cents
-				 FROM transactions t
-				 ${COUNTED_JOINS}
-				 WHERE ${COUNTED_SPENDING} AND ${COUNTED_MONTH} BETWEEN ?1 AND ?2
-				 GROUP BY month, categoryId`,
-			)
-			.bind(from, days.month),
+		db.prepare(TREND_SPEND_SQL).bind(from, days.month, `${from}-01`),
 		// Last month's days by the date a transaction is dated: one that counts in last month but is
 		// dated this month (a late bill's payment) wasn't spent by this time last month.
 		db

@@ -237,6 +237,52 @@ describe("monthsLabel", () => {
 			),
 		).toBe("Spending by month: September $860, October so far $196.");
 	});
+
+	it("says a part month is one, and from when", () => {
+		expect(
+			monthsLabel(
+				[
+					{
+						month: "2026-05",
+						cents: 21000,
+						partial: false,
+						part: { from: "2026-05-12" },
+					},
+					{ month: "2026-06", cents: 32000, partial: false },
+				],
+				"All spending",
+			),
+		).toBe("All spending by month: May (from May 12) $210, June $320.");
+	});
+
+	it("says part month when it can't say from when, and 'so far' for a part month still going", () => {
+		expect(
+			monthsLabel(
+				[
+					{
+						month: "2026-09",
+						cents: 1000,
+						partial: false,
+						part: { from: null },
+					},
+				],
+				"All spending",
+			),
+		).toBe("All spending by month: September (part month) $10.");
+		expect(
+			monthsLabel(
+				[
+					{
+						month: "2026-10",
+						cents: 3000,
+						partial: true,
+						part: { from: "2026-10-02" },
+					},
+				],
+				"All spending",
+			),
+		).toBe("All spending by month: October so far (from Oct 2) $30.");
+	});
 });
 
 describe("miniBars", () => {
@@ -292,6 +338,20 @@ describe("monthBars", () => {
 	it("keeps a bar for no spending as a sliver", () => {
 		const [bar] = monthBars([{ month: "2026-10", cents: 0, partial: true }]);
 		expect(bar?.height).toBe(2);
+	});
+	it("marks a part month, the first month of history, to be drawn striped", () => {
+		const bars = monthBars([
+			{
+				month: "2026-09",
+				cents: 286000,
+				partial: false,
+				part: { from: "2026-09-12" },
+			},
+			{ month: "2026-10", cents: 124000, partial: true },
+		]);
+		expect(bars.map((b) => b.part)).toEqual([true, false]);
+		// Still a month that's over: a solid edge, not dashed.
+		expect(bars[0]?.dashed).toBe(false);
 	});
 });
 
@@ -398,12 +458,12 @@ describe("buildTrends: the headline", () => {
 });
 
 describe("buildTrends: each category's change, biggest first", () => {
-	it("sorts by the size of the change, ties in category order, uncategorized last", () => {
+	it("sorts by the size of the change, ties in category order, money with no category last (Home's words)", () => {
 		expect(full().changes.map((c) => [c.name, c.words, c.direction])).toEqual([
 			["Eating Out", "Up $31", "up"],
 			["Groceries", "Down $28", "down"],
 			["Household", "Down $28", "down"],
-			["Uncategorized", "Up $23", "up"],
+			["Needs a category", "Up $23", "up"],
 			["Kids", "Up $15", "up"],
 			["Gas", "Down $4", "down"],
 		]);
@@ -419,15 +479,51 @@ describe("buildTrends: each category's change, biggest first", () => {
 		});
 	});
 
-	it("leaves out a category with nothing in either window, and Uncategorized when it has nothing", () => {
+	it("leaves out a category with nothing in either window, and Needs a category when it has nothing", () => {
 		const page = full({
 			spend: spendRows(SERIES).filter((r) => r.categoryId !== GAS),
 			sameDays: [{ categoryId: GROCERIES, cents: 22400 }],
 		});
 		const names = page.changes.map((c) => c.name);
 		expect(names).not.toContain("Gas");
-		expect(names).not.toContain("Uncategorized");
+		expect(names).not.toContain("Needs a category");
 		expect(names).toContain("Groceries");
+	});
+
+	it("keeps an archived category whose compared days had spending that netted out over the whole month", () => {
+		// Bought Sep 1 for $50 and refunded Sep 20: $0 for September, but $50 by Sep 5.
+		const page = full({
+			spend: [
+				...input().spend,
+				{ month: "2026-09", categoryId: OLD, cents: 0 },
+			],
+			sameDays: [...input().sameDays, { categoryId: OLD, cents: 5000 }],
+		});
+		expect(page.changes.find((c) => c.name === "Old")).toMatchObject({
+			nowCents: 0,
+			thenCents: 5000,
+			words: "Down $50",
+		});
+		// So the changes still add up to both sides of the comparison.
+		expect(page.changes.reduce((sum, c) => sum + c.nowCents, 0)).toBe(
+			page.sameDaysCents.now,
+		);
+		expect(page.changes.reduce((sum, c) => sum + c.thenCents, 0)).toBe(
+			page.sameDaysCents.last,
+		);
+		// It has no bars to draw and is in neither group.
+		const rows = [...page.goingWell, ...page.worthALook, ...page.others];
+		expect(rows.map((r) => r.name)).not.toContain("Old");
+	});
+
+	it("adds up to the headline and the comparison with every kind of category", () => {
+		const page = full();
+		expect(page.changes.reduce((sum, c) => sum + c.nowCents, 0)).toBe(
+			page.sameDaysCents.now,
+		);
+		expect(page.changes.reduce((sum, c) => sum + c.thenCents, 0)).toBe(
+			page.sameDaysCents.last,
+		);
 	});
 
 	it("keeps a category whose last month's days had spending but this month has none", () => {
@@ -506,6 +602,54 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 		]);
 		expect(page.goingWell.map((r) => r.name)).not.toContain("Groceries");
 		expect(page.others.map((r) => r.name)).not.toContain("Groceries");
+		// Its row says it's still under budget, so it doesn't look like bad news only.
+		expect(page.worthALook.find((r) => r.name === "Groceries")?.note).toBe(
+			"Still under budget",
+		);
+		// Eating Out is rising and over budget: nothing to add.
+		expect(
+			page.worthALook.find((r) => r.name === "Eating Out")?.note,
+		).toBeNull();
+	});
+
+	it("gives no note to a row that isn't in Worth a look", () => {
+		const page = full();
+		for (const row of [...page.goingWell, ...page.others])
+			expect(row.note).toBeNull();
+	});
+
+	it("says 'Still under budget' only for a category that would otherwise be Going well", () => {
+		const groceries = (months: number[], budgets: [string, number][]) =>
+			full({
+				spend: spendRows({ ...SERIES, [GROCERIES]: months }),
+				amounts: [
+					...BUDGETS.filter((a) => a.categoryId !== GROCERIES),
+					...budgets.map(([effectiveMonth, amountCents]) => ({
+						categoryId: GROCERIES,
+						effectiveMonth,
+						amountCents,
+					})),
+				],
+			}).worthALook.find((r) => r.name === "Groceries");
+		const rising = [64000, 65500, 95000, 96000, 97000, 20000];
+		// Under $980 four months running, and up three: the note.
+		expect(groceries(rising, [["2026-01", 98000]])?.note).toBe(
+			"Still under budget",
+		);
+		// September's $990 is over $980: up, over budget, no note.
+		expect(
+			groceries(
+				[64000, 65500, 95000, 96000, 99000, 20000],
+				[["2026-01", 98000]],
+			)?.note,
+		).toBeNull();
+		// Over $600 in June and July and under $1,000 only since August: two months under, no note.
+		expect(
+			groceries(rising, [
+				["2026-01", 60000],
+				["2026-08", 100000],
+			])?.note,
+		).toBeNull();
 	});
 
 	it("doesn't count months before a category had a budget", () => {
@@ -624,11 +768,39 @@ describe("buildTrends: months before there's history", () => {
 		expect(page).toEqual({
 			kind: "early",
 			startMonthName: "September",
+			// September is where history starts, so it may be only part of a month.
 			months: [
-				{ month: "2026-09", cents: 26000, partial: false },
+				{
+					month: "2026-09",
+					cents: 26000,
+					partial: false,
+					part: { from: "2026-09-12" },
+				},
 				{ month: "2026-10", cents: 3000, partial: true },
 			],
-			label: "All spending by month: September $260, October so far $30.",
+			label:
+				"All spending by month: September (from Sep 12) $260, October so far $30.",
+		});
+	});
+
+	it("says part month when a payment counts in an earlier month than the first date", () => {
+		const page = buildTrends(
+			input({
+				firstDate: "2026-10-02",
+				spend: [
+					{ month: "2026-09", categoryId: HOUSEHOLD, cents: 9000 },
+					{ month: "2026-10", categoryId: GROCERIES, cents: 3000 },
+				],
+			}),
+		);
+		expect(page).toMatchObject({
+			kind: "early",
+			months: [
+				{ month: "2026-09", cents: 9000, part: { from: null } },
+				{ month: "2026-10", cents: 3000, partial: true },
+			],
+			label:
+				"All spending by month: September (part month) $90, October so far $30.",
 		});
 	});
 
@@ -642,7 +814,15 @@ describe("buildTrends: months before there's history", () => {
 		expect(page).toMatchObject({
 			kind: "early",
 			startMonthName: "October",
-			months: [{ month: "2026-10", cents: 3000, partial: true }],
+			months: [
+				{
+					month: "2026-10",
+					cents: 3000,
+					partial: true,
+					part: { from: "2026-10-02" },
+				},
+			],
+			label: "All spending by month: October so far (from Oct 2) $30.",
 		});
 	});
 

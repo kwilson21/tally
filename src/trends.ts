@@ -2,7 +2,13 @@
 // in, words and geometry out. Nothing here reads a database or draws markup. All money is integer
 // cents, formatted only into the sentences; code writes every sentence, never AI.
 import { type BudgetAmount, budgetForMonth } from "./budget";
-import { daysInMonth, monthName, monthsBefore, shortMonthName } from "./dates";
+import {
+	daysInMonth,
+	monthName,
+	monthsBefore,
+	shortDay,
+	shortMonthName,
+} from "./dates";
 import { formatCents } from "./money";
 
 /** How many months Trends draws: the five before this one, and this one so far. */
@@ -25,8 +31,18 @@ export type MonthSpend = {
 	cents: number;
 };
 
-/** One month of a series. The month still going is `partial`: it's drawn dashed and never judged. */
-export type MonthPoint = { month: string; cents: number; partial: boolean };
+/**
+ * One month of a series. The month still going is `partial`: it's drawn dashed and never judged.
+ * The first month of history is a part month (`part`): Tally can't tell how much of it is there, so
+ * it's drawn striped and never judged or compared. `from` is the date history starts, when it's
+ * known to be in that month.
+ */
+export type MonthPoint = {
+	month: string;
+	cents: number;
+	partial: boolean;
+	part?: { from: string | null };
+};
 
 /** "$1,240", or "$0.30" under a dollar so a small amount never reads "$0" (as Home's Band does). */
 export function trendsAmount(cents: number): string {
@@ -134,10 +150,12 @@ export function shownMonths(today: string, startMonth: string): string[] {
 
 /** A chart's numbers in words, for a screen reader: "Spending by month: May $820, …, October so far $196." */
 export function monthsLabel(points: MonthPoint[], subject: string): string {
-	const parts = points.map(
-		(p) =>
-			`${monthName(p.month)}${p.partial ? " so far" : ""} ${trendsAmount(p.cents)}`,
-	);
+	const parts = points.map((p) => {
+		const started = p.part
+			? ` (${p.part.from ? `from ${shortDay(p.part.from, p.part.from)}` : "part month"})`
+			: "";
+		return `${monthName(p.month)}${p.partial ? " so far" : ""}${started} ${trendsAmount(p.cents)}`;
+	});
 	return `${subject} by month: ${parts.join(", ")}.`;
 }
 
@@ -190,6 +208,8 @@ export type MonthBar = {
 	width: number;
 	height: number;
 	dashed: boolean;
+	/** A part month (the first month of history): drawn striped. */
+	part: boolean;
 	/** "$2,860", drawn above the bar. */
 	amount: string;
 	/** "Sep", or "Oct so far" for the month still going. */
@@ -213,6 +233,7 @@ export function monthBars(points: MonthPoint[]): MonthBar[] {
 			width: round1(slot * 0.6),
 			height,
 			dashed: p.partial,
+			part: p.part !== undefined,
 			amount: trendsAmount(p.cents),
 			label: p.partial
 				? `${shortMonthName(p.month)} so far`
@@ -247,6 +268,8 @@ export type TrendRowData = {
 	line: string;
 	/** The months in a row the line counts (3 or more), or 0 for a row in no group. */
 	run: number;
+	/** A muted second line: "Still under budget" under a Worth a look row that is also under budget. */
+	note: string | null;
 	months: MonthPoint[];
 	/** The months' amounts in words, for a screen reader. */
 	label: string;
@@ -294,7 +317,8 @@ export type TrendsPage =
 			rangeLabel: string;
 	  };
 
-const UNCATEGORIZED = { name: "Uncategorized", icon: "list", color: "" };
+/** Money counted but in no category, in Home's words ("N transactions need a category"). */
+const NEEDS_A_CATEGORY = { name: "Needs a category", icon: "list", color: "" };
 
 /**
  * The Trends page from its rows. Tally can't tell whether the month its history starts in is
@@ -304,13 +328,14 @@ const UNCATEGORIZED = { name: "Uncategorized", icon: "list", color: "" };
  * never in either group.
  */
 export function buildTrends(input: TrendsInput): TrendsPage {
-	if (input.firstDate === null) return { kind: "empty" };
+	const { firstDate } = input;
+	if (firstDate === null) return { kind: "empty" };
 	const thisMonth = input.today.slice(0, 7);
 	const { lastMonth } = sameDays(input.today);
 	// The month history starts in: the first transaction's, or an earlier month a payment counts in.
 	const startMonth = input.spend.reduce(
 		(first, row) => (row.month < first ? row.month : first),
-		input.firstDate.slice(0, 7),
+		firstDate.slice(0, 7),
 	);
 	const months = shownMonths(input.today, startMonth);
 	const judged = months.filter((m) => m > startMonth && m < thisMonth);
@@ -331,11 +356,17 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 			cents: cents(m, id),
 			partial: m === thisMonth,
 		}));
-	const allPoints = months.map((m) => ({
-		month: m,
-		cents: total(m),
-		partial: m === thisMonth,
-	}));
+	// The first month of history may be only part of a month: say so, and from when if it's known.
+	const firstMonth = firstDate.slice(0, 7);
+	const allPoints = months.map((m): MonthPoint => {
+		const point = { month: m, cents: total(m), partial: m === thisMonth };
+		return m === startMonth
+			? {
+					...point,
+					part: { from: m === firstMonth ? firstDate : null },
+				}
+			: point;
+	});
 
 	if (judged.length === 0) {
 		return {
@@ -346,10 +377,16 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 		};
 	}
 
-	// Active categories, and an archived one only while it has spending in the months drawn.
+	const before = new Map<number | null, number>();
+	for (const row of input.sameDays)
+		before.set(row.categoryId, (before.get(row.categoryId) ?? 0) + row.cents);
+
+	// Active categories, and an archived one only while it has spending in the months drawn or in
+	// last month's compared days. A purchase and its refund in different halves of last month net
+	// $0 for the month but not for those days, and the changes must still add up to the comparison.
 	const hasSpending = (id: number) => points(id).some((p) => p.cents !== 0);
 	const shown = input.categories.filter(
-		(c) => !c.archived || hasSpending(c.id),
+		(c) => !c.archived || hasSpending(c.id) || (before.get(c.id) ?? 0) !== 0,
 	);
 
 	const goingWell: TrendRowData[] = [];
@@ -357,13 +394,18 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	const others: TrendRowData[] = [];
 	for (const c of shown) {
 		const series = points(c.id);
-		const row = (line: string, run = 0): TrendRowData => ({
+		const row = (
+			line: string,
+			run = 0,
+			note: string | null = null,
+		): TrendRowData => ({
 			id: c.id,
 			name: c.name,
 			icon: c.icon,
 			color: c.color,
 			line,
 			run,
+			note,
 			months: series,
 			label: monthsLabel(series, "Spending"),
 		});
@@ -374,7 +416,14 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 			judged.map((m) => budgetForMonth(input.amounts, c.id, m)),
 		);
 		if (!c.archived && rising >= RUN_MONTHS) {
-			worthALook.push(row(`Up ${rising} months running`, rising));
+			// Also under budget three months running: it would be Going well, so say it still is.
+			worthALook.push(
+				row(
+					`Up ${rising} months running`,
+					rising,
+					under >= RUN_MONTHS ? "Still under budget" : null,
+				),
+			);
 		} else if (!c.archived && under >= RUN_MONTHS) {
 			goingWell.push(row(`${under} months under budget`, under));
 		} else if (hasSpending(c.id)) {
@@ -386,12 +435,9 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 		}
 	}
 
-	const before = new Map<number | null, number>();
-	for (const row of input.sameDays)
-		before.set(row.categoryId, (before.get(row.categoryId) ?? 0) + row.cents);
 	const changes = [
 		...shown.map((c) => ({ ...c })),
-		{ id: null, ...UNCATEGORIZED },
+		{ id: null, ...NEEDS_A_CATEGORY },
 	]
 		.map((c, order) => {
 			const nowCents = cents(thisMonth, c.id);

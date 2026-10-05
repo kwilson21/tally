@@ -136,6 +136,7 @@ export function TrendRow({
 	icon,
 	color,
 	line,
+	note,
 	months,
 	label,
 }: {
@@ -143,6 +144,8 @@ export function TrendRow({
 	icon: string;
 	color: string;
 	line: string;
+	/** A muted second line under the first: "Still under budget" under a Worth a look row. */
+	note?: string | null;
 	months: MonthPoint[];
 	label: string;
 }) {
@@ -152,6 +155,7 @@ export function TrendRow({
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg leading-6">{name}</span>
 				<span class="block leading-6 text-muted">{line}</span>
+				{note && <span class="block leading-6 text-muted">{note}</span>}
 			</span>
 			<MiniBars months={months} label={label} />
 		</li>
@@ -201,16 +205,22 @@ export function ChangeRow({
 /**
  * All spending by month as bars on ledger rules, each month's amount above it: Trends' early
  * state, before there's a full month to compare. The month still going is dashed and says "so far".
+ * The first month of history may be only part of a month, so its bar is striped (diagonal ink
+ * stripes on paper) and its text alternative says it's a part month.
  */
 export function MonthBars({
+	id = "month-bars",
 	months,
 	label,
 }: {
+	/** Names the stripe pattern; two charts on one page need two ids. */
+	id?: string;
 	months: MonthPoint[];
 	label: string;
 }) {
 	const { width, height, top, bottom, rules } = MONTH_BARS;
 	const bars = monthBars(months);
+	const stripes = `${id}-part`;
 	return (
 		<svg
 			viewBox={`0 0 ${width} ${height}`}
@@ -218,6 +228,20 @@ export function MonthBars({
 			aria-label={label}
 			class="w-full max-w-lg"
 		>
+			{bars.some((b) => b.part) && (
+				<defs>
+					<pattern
+						id={stripes}
+						width="5"
+						height="5"
+						patternUnits="userSpaceOnUse"
+						patternTransform="rotate(45)"
+					>
+						<rect width="5" height="5" class="fill-paper" />
+						<rect width="2.5" height="5" class="fill-ink" />
+					</pattern>
+				</defs>
+			)}
 			{Array.from({ length: rules }, (_, i) => {
 				const y = Number((top + ((bottom - top) / (rules - 1)) * i).toFixed(1));
 				return <line x1="0" x2={width} y1={y} y2={y} class="stroke-rule" />;
@@ -231,7 +255,14 @@ export function MonthBars({
 							y={b.y}
 							width={b.width}
 							height={b.height}
-							class={b.dashed ? "fill-paper stroke-ink" : "fill-ink"}
+							fill={b.part ? `url(#${stripes})` : undefined}
+							class={
+								b.part
+									? "stroke-ink"
+									: b.dashed
+										? "fill-paper stroke-ink"
+										: "fill-ink"
+							}
 							stroke-dasharray={b.dashed ? "3 3" : undefined}
 						/>
 						<text
@@ -264,7 +295,14 @@ export function MonthBars({
  * category's change, then Going well, Worth a look and every other category with six small bars.
  * Before there's a full month to compare it shows all spending by month and when Tally started (P31).
  */
-export function TrendsScreen({ page }: { page: TrendsPage }) {
+export function TrendsScreen({
+	page,
+	id = "trends",
+}: {
+	page: TrendsPage;
+	/** Names the early state's stripe pattern; two pages in one document (the catalog) need two ids. */
+	id?: string;
+}) {
 	return (
 		<div class="lg:max-w-2xl">
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Trends</h1>
@@ -280,7 +318,11 @@ export function TrendsScreen({ page }: { page: TrendsPage }) {
 			{page.kind === "early" && (
 				<>
 					<h2 class="mt-4 text-lg">All spending</h2>
-					<MonthBars months={page.months} label={page.label} />
+					<MonthBars
+						id={`${id}-bars`}
+						months={page.months}
+						label={page.label}
+					/>
 					<p class="mt-2 text-muted">
 						Trends fill in as months pass. Tally started in{" "}
 						{page.startMonthName}.
@@ -322,6 +364,7 @@ export function TrendsScreen({ page }: { page: TrendsPage }) {
 									icon={row.icon}
 									color={row.color}
 									line={row.line}
+									note={row.note}
 									months={row.months}
 									label={row.label}
 								/>
@@ -342,6 +385,7 @@ export function TrendsScreen({ page }: { page: TrendsPage }) {
 									icon={row.icon}
 									color={row.color}
 									line={row.line}
+									note={row.note}
 									months={row.months}
 									label={row.label}
 								/>
@@ -359,6 +403,7 @@ export function TrendsScreen({ page }: { page: TrendsPage }) {
 									icon={row.icon}
 									color={row.color}
 									line={row.line}
+									note={row.note}
 									months={row.months}
 									label={row.label}
 								/>

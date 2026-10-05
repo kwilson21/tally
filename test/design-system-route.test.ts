@@ -140,7 +140,10 @@ describe("GET /design-system in the demo", () => {
 			CategoriesDiagram(CATEGORIES_EXAMPLE),
 			// Trends' parts, drawn as the page draws them: full, one month in, and empty.
 			TrendsScreen({ page: buildTrends(TRENDS_INPUT) }),
-			TrendsScreen({ page: buildTrends(TRENDS_EARLY_INPUT) }),
+			TrendsScreen({
+				id: "ds-screen-early",
+				page: buildTrends(TRENDS_EARLY_INPUT),
+			}),
 			TrendsScreen({ page: buildTrends(TRENDS_EMPTY_INPUT) }),
 		];
 		for (const output of outputs) {

@@ -85,6 +85,9 @@ describe("GET /trends with the demo seed", () => {
 		expect(words.length).toBeGreaterThan(2);
 		const sizes = words.map((m) => Number((m[2] ?? "").replaceAll(",", "")));
 		expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
+		// Money with no category has its own row, in Home's words.
+		expect(changes).toContain("Needs a category");
+		expect(changes).not.toContain("Uncategorized");
 		// An arrow beside each (decorative: the words carry it).
 		expect(
 			changes.match(/<svg[^>]*aria-hidden="true"/g)?.length,
@@ -235,9 +238,12 @@ describe("early and empty states (P31)", () => {
 		expect(html).toContain(
 			`Trends fill in as months pass. Tally started in ${monthName(last)}.`,
 		);
+		// The first month of history may be only part of a month: striped, and said so in words.
 		expect(html).toMatch(
-			/<svg[^>]*role="img"[^>]*aria-label="All spending by month: \w+ \$[\d,]+, \w+ so far \$[\d,]+\."/,
+			/<svg[^>]*role="img"[^>]*aria-label="All spending by month: \w+ \(from \w{3} \d+\) \$[\d,]+, \w+ so far \$[\d,]+\."/,
 		);
+		expect(html).toContain("<pattern");
+		expect(html).toMatch(/fill="url\(#[a-z-]+-part\)"/);
 		expect(html).not.toContain("Going well");
 		expect(html).not.toContain("Spent so far in");
 	});

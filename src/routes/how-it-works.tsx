@@ -464,7 +464,7 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							The month still going is drawn dashed and isn't judged against its
 							budget until it's over. The month Tally started in may be only
-							partly there, so it's drawn but never judged or compared.
+							partly there, so it's drawn striped but never judged or compared.
 						</li>
 						<li>Code writes these sentences, not AI.</li>
 					</ul>

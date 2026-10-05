@@ -2,9 +2,9 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { monthsBefore } from "../src/dates";
 import { loadMonth } from "../src/db/month";
-import { loadTrends } from "../src/db/trends";
+import { loadTrends, TREND_SPEND_SQL } from "../src/db/trends";
 import { resetDemo } from "../src/demo/reset";
-import { TREND_MONTHS } from "../src/trends";
+import { buildTrends, TREND_MONTHS } from "../src/trends";
 
 const db = env.DB;
 const TODAY = "2026-10-05";
@@ -148,6 +148,79 @@ describe("loadTrends counts spending as Home does", () => {
 		it("gives the earliest date of any transaction", async () => {
 			expect((await loadTrends(db, TODAY)).firstDate).toBe("2026-04-10");
 		});
+	});
+});
+
+describe("the six-month window's edge", () => {
+	// Today is Oct 5, so the window is May to October. Every row here is dated at or after the
+	// window's first day (the bound that lets the date index seek), or counts in an earlier month.
+	beforeEach(async () => {
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM transactions"),
+			db.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (94, 'Edge A', 3000, 30, 'monthly', 'EDGE A'), (95, 'Edge B', 4000, 30, 'monthly', 'EDGE B')",
+			),
+			db.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, credit_reviewed, refund_of_id) VALUES
+				(300, 1, '2026-04-30', 1111, 'THE DAY BEFORE', ${GROCERIES}, 'user', NULL, NULL),
+				(301, 1, '2026-05-01', 2000, 'THE FIRST DAY', ${GROCERIES}, 'user', NULL, NULL),
+				(302, 1, '2026-06-02', 3000, 'EDGE A', ${GAS}, 'user', NULL, NULL),
+				(303, 1, '2026-06-02', 4000, 'EDGE B', ${GAS}, 'user', NULL, NULL),
+				(304, 1, '2026-05-02', 5000, 'KIDS PURCHASE', ${KIDS}, 'user', NULL, NULL),
+				(305, 1, '2026-06-10', -1500, 'KIDS REFUND', ${GROCERIES}, 'user', 1, 304),
+				(306, 1, '2026-04-28', 6000, 'OLD KIDS PURCHASE', ${KIDS}, 'user', NULL, NULL),
+				(307, 1, '2026-05-20', -2000, 'OLD KIDS REFUND', ${GROCERIES}, 'user', 1, 306),
+				(308, 1, '2026-09-01', 5000, 'HOUSEHOLD PURCHASE', ${HOUSEHOLD}, 'user', NULL, NULL),
+				(309, 1, '2026-09-20', -5000, 'HOUSEHOLD REFUND', ${GROCERIES}, 'user', 1, 308)`),
+			// June's payment of May's bill counts in May, inside the window; June's payment of
+			// April's bill counts in April, outside it, though it's dated inside.
+			db.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (94, '2026-05', 302, 'user', 'linked'), (95, '2026-04', 303, 'user', 'linked')",
+			),
+			db.prepare("UPDATE categories SET archived = 1 WHERE id = 5"),
+		]);
+	});
+
+	it("counts a late payment dated after the edge that counts in the window's first month, and nothing that counts before it", async () => {
+		const { spend } = await loadTrends(db, TODAY);
+		expect(byKey(spend)).toEqual({
+			// May 1 itself; the day before (April) and a refund of an April purchase are out.
+			[`2026-05|${GROCERIES}`]: 2000,
+			// The bill paid in June for May counts in May; the one paid for April doesn't count.
+			[`2026-05|${GAS}`]: 3000,
+			// A May purchase refunded in June: $50 less $15, counting in May.
+			[`2026-05|${KIDS}`]: 3500,
+			// A purchase and its refund net to nothing for September.
+			[`2026-09|${HOUSEHOLD}`]: 0,
+		});
+		expect(byKey(spend)).toEqual(await homeSpending());
+	});
+
+	it("keeps an archived category in the changes when what it spent by Sep 5 netted out by Sep 20", async () => {
+		const data = await loadTrends(db, TODAY);
+		expect(data.sameDays).toEqual([{ categoryId: HOUSEHOLD, cents: 5000 }]);
+		const page = buildTrends(data);
+		if (page.kind !== "full")
+			throw new Error(`expected full, got ${page.kind}`);
+		expect(page.changes.find((c) => c.name === "Household")).toMatchObject({
+			nowCents: 0,
+			thenCents: 5000,
+			words: "Down $50",
+		});
+		expect(page.changes.reduce((sum, c) => sum + c.thenCents, 0)).toBe(
+			page.sameDaysCents.last,
+		);
+	});
+
+	it("reads old transactions through the date index, not a scan", async () => {
+		const { results } = await db
+			.prepare(`EXPLAIN QUERY PLAN ${TREND_SPEND_SQL}`)
+			.bind("2026-05", "2026-10", "2026-05-01")
+			.all<{ detail: string }>();
+		const plan = results.map((r) => r.detail).join("\n");
+		expect(plan).toMatch(/SEARCH t USING (COVERING )?INDEX transactions_date/);
+		expect(plan).not.toMatch(/SCAN t(?! USING)/);
 	});
 });
 
