@@ -279,7 +279,7 @@ Every screen has a small "How this works" link to its feature's section. In Phas
 | Sync fails partway | Save transactions and the new `sync_cursor` together, in one D1 batch. A retry resumes from the last saved cursor, so nothing is duplicated or skipped. |
 | Plaid webhook | Plaid signs every webhook, and the Worker checks the signature against Plaid's published key before trusting it. The `Plaid-Verification` header is a JWT: reject it unless `alg` is `ES256`, fetch the key for its `kid` from `/webhook_verification_key/get` (cached), and verify with Web Crypto (ECDSA P-256). `SYNC_UPDATES_AVAILABLE` starts that Item's transaction sync; permanent `ITEM` errors, pending expiration or disconnect, and revoked user permission mark it as needing attention. The webhook path is the only path excluded from Cloudflare Access, via an Access **Bypass** policy scoped to `/webhooks/plaid`. |
 | Jev unavailable or slow | Leave the transaction uncategorized; the nightly job retries it. AI calls never block a page. |
-| Workers AI unavailable | No suggestion; retried the next time the merchant list is opened. |
+| Workers AI unavailable | No suggestion; retried the next night (suggestions are made in the nightly job, after Jev, within its cap). |
 | Invalid input (split doesn't add up, bad amount) | Re-render the form with a field error (`role="alert"`). |
 | Logging | Never log tokens, secrets, or transaction details. |
 | Plaid access tokens | Encrypted with AES-GCM (Web Crypto) using `TOKEN_ENCRYPTION_KEY` before they're stored. |
