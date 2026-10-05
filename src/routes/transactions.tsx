@@ -1045,7 +1045,8 @@ function EditSheet({
 						</p>
 					)}
 				</fieldset>
-				{(refunds.length > 0 || tx.refundOfId != null) && (
+				{/* An error keeps the section, even when no purchase is offered any more. */}
+				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
 					<details
 						class="group border-t border-rule"
 						open={Boolean(errors.refund)}

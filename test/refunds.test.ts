@@ -1934,4 +1934,173 @@ describe("refund guards", () => {
 			expect(offered).toContain(PURCHASE);
 		});
 	});
+
+	describe("turning off Count as income on a linked credit is checked like a link", () => {
+		// $40 of refunds on the $50 purchase, and a $30 credit linked to it that's marked as income.
+		async function incomeCreditOnFullishPurchase() {
+			await db
+				.prepare("UPDATE transactions SET amount_cents = -2000 WHERE id = ?")
+				.bind(THIRTY_A)
+				.run();
+			await link(REFUND, PURCHASE);
+			await link(THIRTY_A, PURCHASE);
+			await db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = ?, flag_income = 1, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				)
+				.bind(PURCHASE, THIRTY_B)
+				.run();
+		}
+		const flags = (id: number) =>
+			db
+				.prepare(
+					"SELECT flag_income, income_source, note, refund_of_id FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first();
+
+		it("refuses a $30 credit that would join $40 of refunds on a $50 purchase, saving nothing", async () => {
+			await incomeCreditOnFullishPurchase();
+			// The panel, with Count as income unticked and a note typed.
+			const { res, html } = await save(THIRTY_B, [
+				["refund_of", String(PURCHASE)],
+				["note", "should not save"],
+				["creditReviewedVisible", "1"],
+				["creditReviewed", "1"],
+			]);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$10.00"));
+			expect(await flags(THIRTY_B)).toEqual({
+				flag_income: 1,
+				income_source: "user",
+				note: null,
+				refund_of_id: PURCHASE,
+			});
+		});
+
+		it("saveEdit refuses it too, returning what's left", async () => {
+			await incomeCreditOnFullishPurchase();
+			expect(
+				await saveEdit(
+					db,
+					THIRTY_B,
+					{ ...EDIT, note: "should not save", creditReviewed: true },
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 1000 });
+			expect(await flags(THIRTY_B)).toMatchObject({
+				flag_income: 1,
+				note: null,
+			});
+		});
+
+		it("saves it when it fits, up to the purchase's amount exactly", async () => {
+			await incomeCreditOnFullishPurchase();
+			// $20 of refunds beside the $30 credit: $50 of $50.
+			await link(THIRTY_A, "");
+			expect(
+				await saveEdit(
+					db,
+					THIRTY_B,
+					{ ...EDIT, note: "counts now", creditReviewed: true },
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await flags(THIRTY_B)).toMatchObject({
+				flag_income: 0,
+				note: "counts now",
+				refund_of_id: PURCHASE,
+			});
+		});
+
+		it("doesn't check a credit that stays income, or one that is being unlinked", async () => {
+			await incomeCreditOnFullishPurchase();
+			expect(
+				await saveEdit(
+					db,
+					THIRTY_B,
+					{ ...EDIT, income: true, note: "still income", creditReviewed: true },
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(
+				await saveEdit(
+					db,
+					THIRTY_B,
+					{ ...EDIT, creditReviewed: true, refundOfId: null },
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await flags(THIRTY_B)).toMatchObject({
+				flag_income: 0,
+				refund_of_id: null,
+			});
+		});
+
+		it("doesn't hold back a split refund's parent, whose parts are what count", async () => {
+			// $30 and a $20 refund split in two $10 parts fill the $50 purchase.
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			await post(`/transactions/${REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "10"],
+				["part_amount", "10"],
+				["back", "/transactions"],
+			]);
+			await db
+				.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+				.bind(REFUND)
+				.run();
+			expect(
+				await saveEdit(
+					db,
+					REFUND,
+					{ ...EDIT, note: "parent", creditReviewed: true },
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await flags(REFUND)).toMatchObject({
+				flag_income: 0,
+				note: "parent",
+			});
+		});
+	});
+
+	describe("a stale refund error stays visible", () => {
+		it("shows the error under 'This refunds…' even when no purchase is offered any more", async () => {
+			// One purchase from a merchant, fully refunded by one refund; a second refund finds nothing.
+			await db.batch([
+				db.prepare(`INSERT INTO transactions
+					(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id) VALUES
+					(9101, 3, '2026-09-01', 1000, 'LONE SHOP', ${KIDS}, 'jev', 0, NULL),
+					(9102, 3, '2026-09-10', -1000, 'LONE SHOP', ${GROCERIES}, 'user', 0, NULL),
+					(9103, 3, '2026-09-11', -500, 'LONE SHOP', ${GROCERIES}, 'user', 0, NULL)`),
+			]);
+			await post("/transactions/9102", [
+				["back", "/transactions"],
+				["merchant", "Lone Shop"],
+				["refund_of", "9101"],
+			]);
+			expect(await refundOf(9102)).toBe(9101);
+			// Nothing is offered for the second refund: the panel has no "This refunds…" section.
+			const empty = await get("/transactions/9103");
+			expect(empty.html).not.toContain("This refunds…");
+			// A save that still names the purchase (a panel opened before it was fully refunded).
+			const { res, html } = await post("/transactions/9103", [
+				["back", "/transactions"],
+				["merchant", "Lone Shop"],
+				["refund_of", "9101"],
+			]);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe("Pick a purchase from the list.");
+			expect(html).toMatch(
+				/<details[^>]*\bopen\b[^>]*>\s*<summary[^>]*>[\s\S]*?This refunds…/,
+			);
+			expect(html).toMatch(
+				/<fieldset[^>]*aria-describedby="refund-error"[^>]*>/,
+			);
+			expect(await refundOf(9103)).toBeNull();
+		});
+	});
 });
