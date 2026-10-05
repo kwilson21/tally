@@ -52,6 +52,7 @@ describe("schema", () => {
 			"categories",
 			"documents",
 			"feedback",
+			"household_settings",
 			"merchants",
 			"plaid_items",
 			"transactions",

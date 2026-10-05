@@ -1,4 +1,4 @@
-import { dayLabel, todayUtc } from "../dates";
+import { DEFAULT_TIME_ZONE, dayLabel, todayIn } from "../dates";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { Icon } from "./icons";
@@ -8,10 +8,13 @@ import { TransactionRow } from "./transaction-row";
 export function SelectableTransactionRow({
 	row,
 	checked = false,
+	today = todayIn(DEFAULT_TIME_ZONE),
 }: {
 	row: ListRow;
 	/** Ticked already (coming back from the Set category sheet). */
 	checked?: boolean;
+	/** The household's date. Pages pass it; the catalog, which has no household, takes Eastern's. */
+	today?: string;
 }) {
 	const nameId = `select-${row.id}-name`;
 	return (
@@ -34,7 +37,7 @@ export function SelectableTransactionRow({
 				<span id={nameId} class="sr-only">
 					Select {row.displayName},{" "}
 					{formatCents(row.amountCents, { signed: true })},{" "}
-					{dayLabel(row.date, todayUtc())}
+					{dayLabel(row.date, today)}
 				</span>
 				<span class="min-w-0 flex-1">
 					<TransactionRow row={row} bare />

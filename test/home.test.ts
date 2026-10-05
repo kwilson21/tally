@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 
@@ -11,7 +11,7 @@ async function home() {
 
 describe("GET / with the demo seed", () => {
 	beforeEach(async () => {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	});
 
 	it("renders an HTML page titled Tally", async () => {
@@ -71,7 +71,7 @@ describe("GET / with the demo seed", () => {
 	});
 
 	it("counts the seeded split's children, not its parent, in Home and Budget data", async () => {
-		const month = todayUtc().slice(0, 7);
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const parent = await env.DB.prepare(
 			"SELECT amount_cents FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
 		).first<{ amount_cents: number }>();
@@ -110,7 +110,7 @@ describe("GET / with the demo seed", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents = -5000 WHERE id = (SELECT MIN(id) FROM transactions WHERE category_id IS NULL AND excluded = 0 AND flag_income = 0 AND date LIKE ?)",
 		)
-			.bind(`${todayUtc().slice(0, 7)}%`)
+			.bind(`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}%`)
 			.run();
 		const { html } = await home();
 		expect(html).toContain("$50 more refunded than spent");
@@ -122,7 +122,7 @@ describe("GET / with the demo seed", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents = -30 WHERE id = (SELECT MIN(id) FROM transactions WHERE category_id IS NULL AND excluded = 0 AND flag_income = 0 AND date LIKE ?)",
 		)
-			.bind(`${todayUtc().slice(0, 7)}%`)
+			.bind(`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}%`)
 			.run();
 		expect((await home()).html).toContain("$0.30 more refunded than spent");
 	});

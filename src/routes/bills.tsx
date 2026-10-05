@@ -6,7 +6,7 @@ import {
 	billOccurrence,
 	billOccurrenceForMonth,
 } from "../bills/status";
-import { ordinal, todayUtc } from "../dates";
+import { householdToday, ordinal } from "../dates";
 import { isMerchantTextSql, merchantColumnSql } from "../db/merchant-key";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
@@ -67,7 +67,8 @@ function previousMonth(today: string) {
 		: `${year}-${String(month - 1).padStart(2, "0")}`;
 }
 
-export async function loadBillRows(db: D1Database, today = todayUtc()) {
+/** Every bill with its status, as of `today`: the household's date, read once by the request. */
+export async function loadBillRows(db: D1Database, today: string) {
 	const rows = await db
 		.prepare(
 			`SELECT b.*, c.icon, c.color, bp.period AS payment_period, t.date AS payment_date
@@ -130,11 +131,14 @@ const sheetAttrs = (href: string) => ({
 	"hx-push-url": "true",
 });
 
+// `given` is the household's date when the handler already read it, so a request reads it once.
 async function page(
 	c: Context<App>,
 	sheet?: { bill?: DbBill; values?: Values; errors?: Record<string, string> },
+	given?: string,
 ) {
-	const { today, rows } = await loadBillRows(c.env.DB);
+	const today = given ?? (await householdToday(c.env.DB));
+	const { rows } = await loadBillRows(c.env.DB, today);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
@@ -419,7 +423,10 @@ bills.get("/bills/new", (c) => {
 	return page(c, { values });
 });
 bills.get("/bills/find", async (c) => {
-	const suggestions = await loadBillSuggestions(c.env.DB, todayUtc());
+	const suggestions = await loadBillSuggestions(
+		c.env.DB,
+		await householdToday(c.env.DB),
+	);
 	return c.html(
 		<Layout
 			title="Possible bills · Tally"
@@ -472,7 +479,8 @@ function billFindingList(suggestions: BillSuggestion[], focusRawName?: string) {
 bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	// Hono has already decoded the name once.
 	const merchant = c.req.param("merchant");
-	const before = await loadBillSuggestions(c.env.DB, todayUtc());
+	const today = await householdToday(c.env.DB);
+	const before = await loadBillSuggestions(c.env.DB, today);
 	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
 	if (dismissedIndex < 0) return c.notFound();
 	const result = await c.env.DB.prepare(
@@ -489,7 +497,7 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 		}),
 	};
 	if (c.req.header("HX-Request")) {
-		const remaining = await loadBillSuggestions(c.env.DB, todayUtc());
+		const remaining = await loadBillSuggestions(c.env.DB, today);
 		const focus = remaining[dismissedIndex] ?? remaining[0];
 		return c.html(
 			billFindingList(remaining, focus?.rawName ?? ""),
@@ -603,10 +611,11 @@ async function save(c: Context<App>, id?: number) {
 		)
 			.bind(...args)
 			.run();
-	await matchBillPayments(c.env.DB);
+	const today = await householdToday(c.env.DB);
+	await matchBillPayments(c.env.DB, today);
 	const message = id ? "Bill saved" : "Bill added";
 	if (c.req.header("HX-Request")) {
-		const res = await page(c);
+		const res = await page(c, undefined, today);
 		res.headers.set(
 			"HX-Trigger",
 			JSON.stringify({
@@ -655,7 +664,7 @@ type LinkedPayment = {
 	raw_name: string;
 	display_name: string | null;
 };
-const monthName = (period: string, today = todayUtc()) =>
+const monthName = (period: string, today: string) =>
 	new Intl.DateTimeFormat("en-US", {
 		month: "long",
 		...(period.slice(0, 4) === today.slice(0, 4)
@@ -739,10 +748,11 @@ async function billPage(
 	pickerPeriod?: string,
 	error?: string,
 	selectedTransactionId?: number,
+	given?: string,
 ) {
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
-	const today = todayUtc();
+	const today = given ?? (await householdToday(c.env.DB));
 	const periods = await billPeriods(c.env.DB, bill, today);
 	if (pickerPeriod && !periods.includes(pickerPeriod)) return c.notFound();
 	const payments = (
@@ -855,7 +865,9 @@ async function billPage(
 								billId={id}
 								period={period}
 								label={
-									bill.frequency === "monthly" ? monthName(period) : period
+									bill.frequency === "monthly"
+										? monthName(period, today)
+										: period
 								}
 								status={status}
 								payment={
@@ -923,7 +935,9 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 	const bill = await dbBill(c, id);
 	if (
 		!bill ||
-		!(await billPeriods(c.env.DB, bill, todayUtc())).includes(period)
+		!(
+			await billPeriods(c.env.DB, bill, await householdToday(c.env.DB))
+		).includes(period)
 	)
 		return c.notFound();
 	if (!Number.isInteger(transactionId))
@@ -958,11 +972,19 @@ bills.post("/bills/:id/link", async (c) => {
 	const opened = String(form.opened_period ?? period);
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
+	const today = await householdToday(c.env.DB);
 	if (
 		!(Number.isInteger(transaction) && transaction > 0) ||
-		!(await billPeriods(c.env.DB, bill, todayUtc())).includes(period)
+		!(await billPeriods(c.env.DB, bill, today)).includes(period)
 	)
-		return billPage(c, id, opened, "Choose a payment and month.");
+		return billPage(
+			c,
+			id,
+			opened,
+			"Choose a payment and month.",
+			undefined,
+			today,
+		);
 	const due = occurrenceDate(bill, period);
 	const eligible = await c.env.DB.prepare(
 		"SELECT 1 FROM transactions WHERE id=? AND excluded=0 AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30",
@@ -974,12 +996,15 @@ bills.post("/bills/:id/link", async (c) => {
 			bill.frequency === "monthly"
 				? period
 				: `${period}-${String(bill.anchor_month).padStart(2, "0")}`,
+			today,
 		);
 		return billPage(
 			c,
 			id,
 			opened,
 			`That payment isn't within 30 days of ${label}'s bill.`,
+			undefined,
+			today,
 		);
 	}
 	const result = await c.env.DB.prepare(
@@ -988,8 +1013,15 @@ bills.post("/bills/:id/link", async (c) => {
 		.bind(id, period, transaction, transaction, due)
 		.run();
 	if (!result.meta.changes)
-		return billPage(c, id, opened, "That payment is already linked.");
-	return feedbackRedirect(c, id, "Payment linked");
+		return billPage(
+			c,
+			id,
+			opened,
+			"That payment is already linked.",
+			undefined,
+			today,
+		);
+	return feedbackRedirect(c, id, "Payment linked", today);
 });
 bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 	const id = Number(c.req.param("id"));
@@ -1010,9 +1042,21 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 	]);
 	return feedbackRedirect(c, id, "Payment unlinked");
 });
-async function feedbackRedirect(c: Context<App>, id: number, message: string) {
+async function feedbackRedirect(
+	c: Context<App>,
+	id: number,
+	message: string,
+	today?: string,
+) {
 	if (c.req.header("HX-Request")) {
-		const response = await billPage(c, id);
+		const response = await billPage(
+			c,
+			id,
+			undefined,
+			undefined,
+			undefined,
+			today,
+		);
 		response.headers.set(
 			"HX-Trigger",
 			JSON.stringify({
