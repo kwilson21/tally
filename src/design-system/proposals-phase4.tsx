@@ -14,6 +14,7 @@ import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
 import { Icon } from "../views/icons";
+import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { PhoneFrame, Specimen } from "./specimen";
@@ -1008,23 +1009,6 @@ const deletePage = (
 // ---------------------------------------------------------------------------------------------
 // P29–P30: AI suggestions in Settings.
 
-/** A sample Categories section above, as Settings draws it, shortened. */
-const settingsTop = (
-	<>
-		<Title>Settings</Title>
-		<h2 class="mt-5 font-serif text-3xl font-semibold">Categories</h2>
-		<ul class="mt-2 divide-y divide-rule border-y border-rule">
-			{[CATS.groceries, CATS.eatingOut].map((c) => (
-				<li class="flex min-h-11 items-center gap-4 py-2">
-					<CategoryIcon icon={c.icon} color={c.color} />
-					<span class="flex-1 text-lg">{c.name}</span>
-					<Icon name="chevron-right" class="size-5" />
-				</li>
-			))}
-		</ul>
-	</>
-);
-
 /** A list row whose merchant has a suggested name: the suggestion shows with a dashed underline (not decided yet). */
 function SuggestedRow({
 	name,
@@ -1231,13 +1215,17 @@ const PET_ROWS = [
 	pet(3, "Petsmart", 2399),
 ];
 
+const AMAZON_GIFT = { ...pet(4, "Amazon", 4520), date: "2026-09-20" };
+
 /**
  * P30 A: the suggestion as a dashed row (not decided yet) under Categories, open to its
- * transactions. Create asks whether to move them in; left unticked, Jev sorts them again right away.
+ * transactions, each ticked to go in. An unticked one is sorted again right away, with an optional
+ * note to help; the note field shows only while it's unticked (CSS, no script).
  */
 const categoryInline = (
 	<>
-		{settingsTop}
+		<Title>Settings</Title>
+		<h2 class="mt-4 font-serif text-3xl font-semibold">Categories</h2>
 		<details
 			open
 			class="mt-3 rounded-control border border-dashed border-ink px-3"
@@ -1246,29 +1234,29 @@ const categoryInline = (
 				<Icon name="tag" class="size-6" />
 				<span class="min-w-0 flex-1">
 					<span class="block text-lg">Suggested: Pet Care</span>
-					<span class="block text-muted">From 3 transactions, $277</span>
+					<span class="block text-muted">Untick any that don't belong.</span>
 				</span>
 			</summary>
 			<ul class="divide-y divide-rule border-t border-rule">
 				{PET_ROWS.map((r) => (
-					<TransactionRow row={r} />
+					<SelectableTransactionRow row={r} checked />
 				))}
+				<SelectableTransactionRow row={AMAZON_GIFT} />
 			</ul>
-			<div class="flex flex-col gap-3 border-t border-rule py-3">
-				<Chip type="checkbox" name="p30-move" value="1" checked>
-					Put these 3 in Pet Care
-				</Chip>
-				<p class="text-sm text-muted">
-					Unticked, Jev sorts them again right away.
-				</p>
-				<div class="flex items-center gap-3">
-					<Button kind="secondary" type="button">
-						Create Pet Care
-					</Button>
-					<Button kind="text" type="button">
-						Dismiss
-					</Button>
-				</div>
+			<TextInput
+				id="p30-note"
+				label="A note for Amazon (optional)"
+				value="Birthday present"
+				hint="Tally sorts it again right away, with your note."
+				surface="paper"
+			/>
+			<div class="flex items-center gap-3 py-3">
+				<Button kind="secondary" type="button">
+					Create Pet Care with 3
+				</Button>
+				<Button kind="text" type="button">
+					Dismiss
+				</Button>
 			</div>
 		</details>
 	</>
@@ -1377,7 +1365,7 @@ const maybePanel = (
 					</Chip>
 				))}
 			</div>
-			<p class="text-sm text-muted">Jev's guess · 64% sure</p>
+			<p class="text-sm text-muted">Tally's guess · 64% sure</p>
 		</fieldset>
 	</Sheet>
 );
@@ -1756,7 +1744,7 @@ export function Phase4Proposals() {
 				id="p30-new-category"
 				title="P30 · A suggested new category"
 				tier="visual"
-				sentence="When Jev says none of the categories fit, Workers AI suggests a new one from those transactions; a person creates it or dismisses it. Your pick (A), with Create now asking about the transactions."
+				sentence="When Jev says none of the categories fit, Workers AI suggests a new one from those transactions; a person creates it or dismisses it. Your pick (A), now with a tick on each transaction."
 			>
 				<Fixed>
 					Settings shows each suggestion with the transactions behind it, and
@@ -1764,18 +1752,20 @@ export function Phase4Proposals() {
 					icon and the next color, and Jev offers it from then on.
 				</Fixed>
 				<NeedsLine>
-					Create asks whether to put those transactions in it (ticked to start);
-					unticked, Jev is asked about them again right away, after the page has
-					answered, instead of waiting for the night (§7 runs Jev only nightly
-					today).
+					each transaction is ticked to go in the new category (a person's
+					choice); an unticked one is asked about again right away, after the
+					page has answered, not overnight (§7 runs Jev only nightly), with its
+					note if one is added (Jev isn't told the note today). Product words
+					never name Jev; it's "Tally".
 				</NeedsLine>
 				<Options
 					options={[
 						{
 							name: "Option A · Under Categories",
-							note: "A dashed row under the categories, open to its transactions, with a tick for moving them and Create or Dismiss.",
+							note: "A dashed row under the categories, open to its transactions, each ticked to go in; untick one and add a note to have it sorted again.",
 							tradeoff: "it sits in the list, so a long list hides it.",
-							recommended: "your pick; the tick asks before moving anything.",
+							recommended:
+								"your pick; a wrong one is one untick away, and the note helps it land somewhere better.",
 							screen: categoryInline,
 						},
 						{
