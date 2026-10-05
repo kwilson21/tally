@@ -1620,4 +1620,318 @@ describe("refund guards", () => {
 			expect(await ids(SECOND_REFUND)).toContain(PURCHASE);
 		});
 	});
+
+	describe("the panel is saved whole or not at all", () => {
+		/** Everything a save of the panel can change, for one refund and the rest of its merchant. */
+		const everything = async (id: number) => ({
+			refund: await db
+				.prepare(
+					"SELECT refund_of_id, category_id, category_source, note, excluded, excluded_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+			merchant: await db
+				.prepare(
+					"SELECT display_name, default_category_id FROM merchants WHERE raw_name = 'REFUND SHOP'",
+				)
+				.first(),
+			others: (
+				await db
+					.prepare(
+						"SELECT id, category_id, category_source FROM transactions WHERE raw_name = 'REFUND SHOP' AND id != ? ORDER BY id",
+					)
+					.bind(id)
+					.all()
+			).results,
+		});
+
+		it("a refused link saves none of the panel's other changes", async () => {
+			const before = await everything(BIG_REFUND);
+			expect(
+				await saveEdit(
+					db,
+					BIG_REFUND,
+					{
+						categoryId: GAS,
+						alwaysForMerchant: true,
+						displayName: "Renamed",
+						note: "should not save",
+						excluded: true,
+						income: false,
+						creditReviewed: true,
+						refundOfId: PURCHASE,
+					},
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 5000 });
+			// The refund, the merchant's name and rule, and the merchant's other transactions.
+			expect(await everything(BIG_REFUND)).toEqual(before);
+			expect(before.refund).toMatchObject({
+				refund_of_id: null,
+				category_id: GROCERIES,
+				note: null,
+				excluded: 0,
+			});
+			expect(before.merchant).toEqual({
+				display_name: "Refund Shop",
+				default_category_id: null,
+			});
+		});
+
+		it("if the rest of the panel can't be saved, the link isn't saved either", async () => {
+			const before = await everything(THIRTY_A);
+			// A category that doesn't exist fails the panel's own UPDATE, after the link would have taken.
+			await expect(
+				saveEdit(
+					db,
+					THIRTY_A,
+					{ ...EDIT, categoryId: 987654, refundOfId: PURCHASE },
+					"test",
+				),
+			).rejects.toThrow();
+			expect(await everything(THIRTY_A)).toEqual(before);
+			expect(await refundOf(THIRTY_A)).toBeNull();
+		});
+
+		it("a refused link leaves the rest of a split's exclusion alone", async () => {
+			await post(`/transactions/${BIG_REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "55"],
+				["part_amount", "5"],
+				["back", "/transactions"],
+			]);
+			const { results: parts } = await db
+				.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+				.bind(BIG_REFUND)
+				.all<{ id: number }>();
+			const big = parts[0]?.id as number;
+			// The $55 part can't link to the $50 purchase, and excluding it must not reach its parent
+			// or its other part either.
+			expect(
+				await saveEdit(
+					db,
+					big,
+					{ ...EDIT, excluded: true, refundOfId: PURCHASE },
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 5000 });
+			const { results } = await db
+				.prepare(
+					"SELECT id, excluded, refund_of_id FROM transactions WHERE id = ?1 OR parent_id = ?1 ORDER BY id",
+				)
+				.bind(BIG_REFUND)
+				.all();
+			expect(results.map((r) => [r.excluded, r.refund_of_id])).toEqual([
+				[0, null],
+				[0, null],
+				[0, null],
+			]);
+		});
+
+		it("an accepted link saves all of the panel's changes", async () => {
+			expect(
+				await saveEdit(
+					db,
+					THIRTY_A,
+					{
+						categoryId: GAS,
+						alwaysForMerchant: true,
+						displayName: "Renamed",
+						note: "all saved",
+						excluded: false,
+						income: false,
+						creditReviewed: false,
+						refundOfId: PURCHASE,
+					},
+					"test",
+				),
+			).toEqual({ saved: true });
+			const after = await everything(THIRTY_A);
+			expect(after.refund).toEqual({
+				refund_of_id: PURCHASE,
+				category_id: GAS,
+				category_source: "user",
+				note: "all saved",
+				excluded: 0,
+				excluded_source: null,
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			});
+			expect(after.merchant).toEqual({
+				display_name: "Renamed",
+				default_category_id: GAS,
+			});
+			// The merchant's rule recategorized its other transactions, except a person's choices.
+			const byId = new Map(after.others.map((r) => [r.id, r]));
+			expect(byId.get(TOO_OLD)).toMatchObject({
+				category_id: GAS,
+				category_source: "merchant_rule",
+			});
+			expect(byId.get(REFUND)).toMatchObject({
+				category_id: GROCERIES,
+				category_source: "user",
+			});
+		});
+
+		it("an accepted link of an excluded part includes the whole split", async () => {
+			await post(`/transactions/${BIG_REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "20"],
+				["part_amount", "40"],
+				["back", "/transactions"],
+			]);
+			await db
+				.prepare(
+					"UPDATE transactions SET excluded = 1, excluded_source = 'jev' WHERE id = ?1 OR parent_id = ?1",
+				)
+				.bind(BIG_REFUND)
+				.run();
+			const { results: parts } = await db
+				.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+				.bind(BIG_REFUND)
+				.all<{ id: number }>();
+			expect(
+				await saveEdit(
+					db,
+					parts[0]?.id as number,
+					{ ...EDIT, excluded: true, refundOfId: PURCHASE },
+					"test",
+				),
+			).toEqual({ saved: true });
+			const { results } = await db
+				.prepare(
+					"SELECT excluded, excluded_source FROM transactions WHERE id = ?1 OR parent_id = ?1 ORDER BY id",
+				)
+				.bind(BIG_REFUND)
+				.all();
+			expect(results).toEqual([
+				{ excluded: 0, excluded_source: "user" },
+				{ excluded: 0, excluded_source: "user" },
+				{ excluded: 0, excluded_source: "user" },
+			]);
+		});
+	});
+
+	describe("moving a split refund checks only the parts that move", () => {
+		// A $20 refund split in two $10 parts, linked (through its parent) to the $50 purchase.
+		async function splitLinkedRefund() {
+			await link(REFUND, PURCHASE);
+			await post(`/transactions/${REFUND}/split`, [
+				["part_category", String(KIDS)],
+				["part_category", String(GAS)],
+				["part_amount", "10"],
+				["part_amount", "10"],
+				["back", "/transactions"],
+			]);
+			const { results } = await db
+				.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+				.bind(REFUND)
+				.all<{ id: number }>();
+			return results.map((r) => r.id);
+		}
+		// A purchase of $15, nothing refunded yet, so $15 is left.
+		async function purchaseWith15Left() {
+			await db
+				.prepare(
+					"UPDATE transactions SET amount_cents = 1500, category_id = ? WHERE id = ?",
+				)
+				.bind(KIDS, OTHER_PURCHASE)
+				.run();
+			return OTHER_PURCHASE;
+		}
+
+		it("moves the parts that still follow it, when a part linked elsewhere would not fit", async () => {
+			const [first, second] = await splitLinkedRefund();
+			// A person linked the first part to another purchase of its own.
+			await db
+				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+				.bind(AFTER_REFUND, first)
+				.run();
+			const target = await purchaseWith15Left();
+			// The whole $20 refund wouldn't fit $15, but only the $10 part that follows it moves.
+			expect(
+				await saveEdit(
+					db,
+					REFUND,
+					{ ...EDIT, creditReviewed: true, refundOfId: target },
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await refundOf(REFUND)).toBe(target);
+			expect(await refundOf(second as number)).toBe(target);
+			expect(await refundOf(first as number)).toBe(AFTER_REFUND);
+		});
+
+		it("still refuses it, moving nothing, when the parts that move don't fit", async () => {
+			await splitLinkedRefund();
+			const target = await purchaseWith15Left();
+			// Both $10 parts follow the parent: $20 against $15.
+			expect(
+				await saveEdit(
+					db,
+					REFUND,
+					{ ...EDIT, creditReviewed: true, refundOfId: target },
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 1500 });
+			expect(await refundOf(REFUND)).toBe(PURCHASE);
+			const { results } = await db
+				.prepare("SELECT refund_of_id FROM transactions WHERE parent_id = ?")
+				.bind(REFUND)
+				.all();
+			expect(results).toEqual([
+				{ refund_of_id: PURCHASE },
+				{ refund_of_id: PURCHASE },
+			]);
+		});
+
+		it("counts a part already linked to the target against it", async () => {
+			const [first] = await splitLinkedRefund();
+			const target = await purchaseWith15Left();
+			// The first part is already linked to the $15 purchase; the other $10 would make $20.
+			await db
+				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+				.bind(target, first)
+				.run();
+			expect(
+				await saveEdit(
+					db,
+					REFUND,
+					{ ...EDIT, creditReviewed: true, refundOfId: target },
+					"test",
+				),
+			).toEqual({ saved: false, refundLeftCents: 500 });
+			expect(await refundOf(REFUND)).toBe(PURCHASE);
+		});
+	});
+
+	describe("a linked credit marked as income doesn't use up the purchase", () => {
+		it("isn't counted when another refund is linked", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await db
+				.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+				.bind(THIRTY_A)
+				.run();
+			// $50 is still left, as the income credit doesn't follow the purchase.
+			expect((await link(THIRTY_B, PURCHASE)).res.status).toBe(200);
+			const { res: refused, html } = await link(BIG_REFUND, PURCHASE);
+			expect(refused.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$20.00"));
+		});
+
+		it("is offered again in the picker", async () => {
+			await link(THIRTY_A, PURCHASE);
+			await link(REFUND, PURCHASE);
+			await db
+				.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+				.bind(THIRTY_A)
+				.run();
+			const offered = (
+				await refundPurchases(db, await detail(SECOND_REFUND))
+			).map((p) => p.id);
+			expect(offered).toContain(PURCHASE);
+		});
+	});
 });
