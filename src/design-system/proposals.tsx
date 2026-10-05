@@ -9,6 +9,7 @@ import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
+import { MixedStoreProposals } from "./proposals-mixed";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
@@ -284,6 +285,7 @@ export function Proposals() {
 				<DetailsProposals />
 				<RulesProposals />
 				<AutofillProposals />
+				<MixedStoreProposals />
 			</section>
 
 			<section aria-labelledby="followups-title" class="mt-12">

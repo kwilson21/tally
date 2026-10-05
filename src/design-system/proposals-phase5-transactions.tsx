@@ -325,14 +325,19 @@ function Transactions(props: TxProps) {
 
 export function PanelSheet({
 	behind,
+	tall,
 	children,
 }: {
 	/** The page above the panel, when it isn't the list's top. */
 	behind?: Child;
+	/** For a panel that doesn't fit in 686px: draw it on a tall phone (the option's `tall`), 766px. */
+	tall?: boolean;
 	children?: Child;
 }) {
 	return (
-		<div class="relative -mx-5 h-[686px] overflow-hidden">
+		<div
+			class={`relative -mx-5 ${tall ? "h-[766px]" : "h-[686px]"} overflow-hidden`}
+		>
 			<div class="px-5">
 				{behind ?? (
 					<>
@@ -380,6 +385,8 @@ type CatsProps = {
 	p: string;
 	cats: Cat[];
 	selected?: string;
+	/** Tally's guess: the first chip, dashed and marked Suggested until a person picks (P32 A). */
+	maybe?: Cat;
 	/** Goes last in the chip row (P67's New category). */
 	end?: Child;
 	/** Lines under the chips. */
@@ -387,22 +394,43 @@ type CatsProps = {
 };
 
 /** The category chips (the app shows every category; the pictures show a few). */
-export function Categories({ p, cats, selected, end, children }: CatsProps) {
+export function Categories({
+	p,
+	cats,
+	selected,
+	maybe,
+	end,
+	children,
+}: CatsProps) {
 	return (
 		<fieldset class="flex flex-col gap-2">
 			<legend class="text-base text-ink">Category</legend>
 			<div class="flex flex-wrap gap-2">
-				{cats.map((c) => (
-					<Chip
-						type="radio"
-						name={`${p}-cat`}
-						value={c.name}
-						checked={c.name === selected}
-						icon={<CategoryIcon icon={c.icon} color={c.color} />}
-					>
-						{c.name}
-					</Chip>
-				))}
+				{maybe && (
+					<span class="rounded-full border border-dashed border-ink">
+						<Chip
+							type="radio"
+							name={`${p}-cat`}
+							value={maybe.name}
+							icon={<CategoryIcon icon={maybe.icon} color={maybe.color} />}
+						>
+							{maybe.name} · Suggested
+						</Chip>
+					</span>
+				)}
+				{cats
+					.filter((c) => c.name !== maybe?.name)
+					.map((c) => (
+						<Chip
+							type="radio"
+							name={`${p}-cat`}
+							value={c.name}
+							checked={c.name === selected}
+							icon={<CategoryIcon icon={c.icon} color={c.color} />}
+						>
+							{c.name}
+						</Chip>
+					))}
 				{end}
 			</div>
 			{children}
@@ -505,30 +533,52 @@ const ruleDashed = (
 	/>
 );
 
-/** B: the third save keeps the panel open with one question. */
-const ruleQuestion = (
-	<PanelSheet>
-		<p role="status" class="flex items-center gap-2 text-muted">
-			<Icon name="check" class="size-5" />
-			Saved as Groceries
-		</p>
-		<h2 class="font-serif text-4xl font-semibold tracking-tight">
-			Always use Groceries for Costco?
-		</h2>
-		<p>
-			You've picked Groceries for Costco 3 times. Say yes and Tally sorts the
-			next one for you.
-		</p>
-		<div class="grid grid-cols-2 gap-3">
-			<Button kind="secondary" type="button" class="w-full">
-				Not now
-			</Button>
-			<Button type="button" class="w-full">
-				Yes
-			</Button>
-		</div>
-	</PanelSheet>
-);
+type RuleQuestionProps = {
+	/** What the save just did, in the quiet line at the top. */
+	saved?: string;
+	/** The one question, in the serif. */
+	question?: string;
+	/** What the question rests on, one plain line. */
+	evidence?: string;
+	/** The secondary answer and the primary one. */
+	no?: string;
+	yes?: string;
+};
+
+/**
+ * B: the third save keeps the panel open with one question. P90 C asks a different question in
+ * the same place, so its words are props; the defaults are P62 B's.
+ */
+export function RuleQuestion({
+	saved = "Saved as Groceries",
+	question = "Always use Groceries for Costco?",
+	evidence = "You've picked Groceries for Costco 3 times. Say yes and Tally sorts the next one for you.",
+	no = "Not now",
+	yes = "Yes",
+}: RuleQuestionProps) {
+	return (
+		<PanelSheet>
+			<p role="status" class="flex items-center gap-2 text-muted">
+				<Icon name="check" class="size-5" />
+				{saved}
+			</p>
+			<h2 class="font-serif text-4xl font-semibold tracking-tight">
+				{question}
+			</h2>
+			<p>{evidence}</p>
+			<div class="grid grid-cols-2 gap-3">
+				<Button kind="secondary" type="button" class="w-full">
+					{no}
+				</Button>
+				<Button type="button" class="w-full">
+					{yes}
+				</Button>
+			</div>
+		</PanelSheet>
+	);
+}
+
+const ruleQuestion = <RuleQuestion />;
 
 /** C: one item on the review screen, as P42 A asks it: the dashed "Maybe …" is the question. */
 const ruleReview = (

@@ -34,6 +34,7 @@ import {
 } from "./proposals-forms";
 import {
 	CARD,
+	type Cat,
 	Categories,
 	FOUR,
 	LUPITAS,
@@ -54,7 +55,7 @@ function NeedsLine({ children }: { children?: Child }) {
 }
 
 /** A guess is dashed until a person keeps or changes it (decision 64), as P29 A's list draws it. */
-const DASHED =
+export const DASHED =
 	"underline decoration-muted decoration-dashed underline-offset-4";
 
 type From = "bank" | "tally";
@@ -65,7 +66,7 @@ const SOURCE: Record<From, string> = {
 	tally: "Tally's guess",
 };
 
-type Detail = { label: string; value: string; from?: From };
+export type Detail = { label: string; value: string; from?: From };
 
 /** What Tally filled in for Blue Bottle Coffee. The bank sent the name; Tally guessed the rest. */
 const BLUE_BOTTLE: Detail[] = [
@@ -84,7 +85,7 @@ const BLUE_BOTTLE: Detail[] = [
  * is never the dash alone. A row has no source and no dash once a person has kept or changed it.
  * Tapped, it opens in place to its choices (chips for Kind and For, a field for the others).
  */
-function DetailRow({ label, value, from }: Detail) {
+export function DetailRow({ label, value, from }: Detail) {
 	return (
 		<Row
 			label={label}
@@ -96,13 +97,22 @@ function DetailRow({ label, value, from }: Detail) {
 	);
 }
 
-/** The panel's top with the name left out: it's a row now, as in P87 A, so the amount is the one big thing. */
-function PanelHead() {
+/**
+ * The panel's top with the name left out: it's a row now, as in P87 A, so the amount is the one
+ * big thing. It's Blue Bottle's unless given another store's bank text and amount (P90 B).
+ */
+export function PanelHead({
+	raw = "SQ *BLUE BOTTLE COF 0412",
+	cents = 650,
+}: {
+	raw?: string;
+	cents?: number;
+}) {
 	return (
 		<div>
-			<p class="text-sm text-muted">SQ *BLUE BOTTLE COF 0412</p>
+			<p class="text-sm text-muted">{raw}</p>
 			<p class="font-serif text-4xl font-semibold">
-				{formatCents(650, { signed: true })}
+				{formatCents(cents, { signed: true })}
 			</p>
 			<p class="text-muted">
 				{dayLabel(TODAY, TODAY)} · {CARD}
@@ -116,14 +126,26 @@ function PanelHead() {
  * picture crops what doesn't fit above the pinned Cancel and Save, as P72's forms do). One secondary
  * Looks right keeps every detail still dashed; Save is the sheet's one primary.
  */
-function DetailsPanel({ id, rows }: { id: string; rows: Detail[] }) {
+export function DetailsPanel({
+	id,
+	rows,
+	head = <PanelHead />,
+	maybe,
+}: {
+	id: string;
+	rows: Detail[];
+	/** The panel's top, for a purchase that isn't Blue Bottle's. */
+	head?: Child;
+	/** Tally's category guess, the first chip, dashed (P32 A). */
+	maybe?: Cat;
+}) {
 	return (
 		<TallSheet
 			behind={transactionsBehind}
 			footer={<Footer save="Save" />}
 			gap="gap-3"
 		>
-			<PanelHead />
+			{head}
 			<div class="border-t border-rule">
 				{rows.map((r) => (
 					<DetailRow {...r} />
@@ -139,7 +161,7 @@ function DetailsPanel({ id, rows }: { id: string; rows: Detail[] }) {
 					<Why topic="Tally's guess" href="#p89-autofill" />
 				</p>
 			</div>
-			<Categories p={id} cats={FOUR} />
+			<Categories p={id} cats={FOUR} maybe={maybe} />
 			<Toggles p={id} />
 		</TallSheet>
 	);

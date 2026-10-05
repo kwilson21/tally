@@ -1206,25 +1206,44 @@ const categoryInline = (
 // ---------------------------------------------------------------------------------------------
 // P32: category suggestions where people already are (the owner's ask on P29).
 
-/** A row needing a category, with Jev's best guess (below its threshold) or a new category on its caption line. */
-function MaybeRow({
+/**
+ * A row needing a category, with Jev's best guess (below its threshold) or a new category on its
+ * caption line. With a `line` (P89's "what it was", P90 B), the caption runs on after the guess
+ * and wraps instead of being cut off, so the row grows past 64px when it needs to.
+ */
+export function MaybeRow({
 	name,
 	cents,
 	maybe,
+	line,
 }: {
 	name: string;
 	cents: number;
 	maybe?: string;
+	line?: string;
 }) {
 	return (
-		<li class="flex h-16 items-center gap-4">
+		<li
+			class={
+				maybe && line
+					? "flex min-h-16 items-center gap-4 py-2"
+					: "flex h-16 items-center gap-4"
+			}
+		>
 			<span class="shrink-0 text-muted">
 				<Icon name="circle-dashed" class="size-7" />
 			</span>
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg leading-6">{name}</span>
 				<span class="flex min-w-0 items-center gap-2 leading-6">
-					{maybe ? (
+					{maybe && line ? (
+						<span class="min-w-0 text-sm leading-6">
+							<span class="rounded-control border border-dashed border-ink px-2 text-ink">
+								Maybe {maybe}
+							</span>
+							<span class="text-muted"> · {line}</span>
+						</span>
+					) : maybe ? (
 						<span class="truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
 							Maybe {maybe}
 						</span>
