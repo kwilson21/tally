@@ -17,6 +17,7 @@ import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
+import { DocumentRow } from "../views/document-row";
 import { EmptyState } from "../views/empty-state";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
@@ -437,6 +438,30 @@ function HomeTopGroup() {
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
+			<Specimen
+				id="document-row"
+				title="DocumentRow"
+				tier="visual"
+				components={["DocumentRow"]}
+				sentence="One stored PDF: its linked file name, optional note, added date and size, with its delete action at the right."
+			>
+				<ul class="max-w-xl divide-y divide-rule border-y border-rule">
+					<DocumentRow
+						document={{
+							id: 1,
+							filename: "chase-statement-sep.pdf",
+							note: "September statement",
+							sizeBytes: 421888,
+							uploadedAt: "2026-10-02 12:00:00",
+						}}
+						action={
+							<Button kind="text" type="button">
+								Delete
+							</Button>
+						}
+					/>
+				</ul>
+			</Specimen>
 			<Specimen
 				id="bill-occurrence"
 				title="Bill occurrence and payment picker"

@@ -29,7 +29,11 @@ export function canResetDemo(env: {
 }
 
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
-export async function resetDemo(db: D1Database, today: string): Promise<void> {
+export async function resetDemo(
+	db: D1Database,
+	today: string,
+	docs?: R2Bucket,
+): Promise<void> {
 	const seed = buildSeed(today);
 	const todayDay = Number(today.slice(8, 10));
 	if (todayDay < 4) {
@@ -125,6 +129,59 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		),
 	]);
 	await matchBillPayments(db, today);
+	if (docs) await resetDemoDocuments(db, docs, today);
+}
+
+const SAMPLE_PDF = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 400 200]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj
+4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold>>endobj
+5 0 obj<</Length 68>>stream
+BT /F1 18 Tf 40 110 Td (Sample statement, not real) Tj ET
+endstream endobj
+xref
+0 6
+0000000000 65535 f
+trailer<</Root 1 0 R/Size 6>>
+startxref
+0
+%%EOF
+`;
+
+async function resetDemoDocuments(
+	db: D1Database,
+	docs: R2Bucket,
+	today: string,
+) {
+	let cursor: string | undefined;
+	do {
+		const page = await docs.list({ cursor });
+		if (page.objects.length)
+			await docs.delete(page.objects.map((object) => object.key));
+		cursor = page.truncated ? page.cursor : undefined;
+	} while (cursor);
+	const samples = [
+		["demo-statement", "sample-statement.pdf", "Sample monthly statement"],
+		["demo-receipt", "sample-receipt.pdf", "Sample receipt"],
+	] as const;
+	for (const [key, filename, note] of samples) {
+		await docs.put(key, SAMPLE_PDF, {
+			httpMetadata: { contentType: "application/pdf" },
+		});
+		await db
+			.prepare(
+				"INSERT INTO documents (r2_key, filename, size_bytes, uploaded_by, uploaded_at, note) VALUES (?, ?, ?, 'demo', ?, ?)",
+			)
+			.bind(
+				key,
+				filename,
+				new TextEncoder().encode(SAMPLE_PDF).byteLength,
+				`${today} 08:00:00`,
+				note,
+			)
+			.run();
+	}
 }
 
 function demoBills(

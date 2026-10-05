@@ -171,6 +171,13 @@ howItWorks.get("/how-it-works", async (c) => {
 					</dl>
 				</Section>
 
+				<Section id="documents" title="Documents">
+					<p class="mt-2">
+						PDFs up to 10 MB are kept privately; deleting one removes it for
+						good.
+					</p>
+				</Section>
+
 				<Section id="budget" title="Budget and safe to spend">
 					<p class="mt-2">
 						Home shows how much of this month's budget is left, for each

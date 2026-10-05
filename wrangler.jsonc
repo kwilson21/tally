@@ -23,6 +23,7 @@
 			"migrations_dir": "migrations"
 		}
 	],
+	"r2_buckets": [{ "binding": "DOCS", "bucket_name": "tally-local-docs" }],
 	// "true" shows the demo banner and lets the nightly job reset the data. Production sets "false" below.
 	"vars": {
 		"DEMO": "true"
@@ -30,6 +31,7 @@
 	"env": {
 		// The public demo (decision 26). Deploy with: npx wrangler deploy --env demo
 		"demo": {
+			"r2_buckets": [{ "binding": "DOCS", "bucket_name": "tally-demo-docs" }],
 			// Served only here. Cloudflare creates the DNS record and certificate on deploy.
 			"routes": [
 				{ "pattern": "tally-demo.thesuperhuman.us", "custom_domain": true }
@@ -57,6 +59,7 @@
 		// Cloudflare Access guards every path but /webhooks/plaid. Secrets and Plaid settings are set with
 		// `wrangler secret put --env production`, never here.
 		"production": {
+			"r2_buckets": [{ "binding": "DOCS", "bucket_name": "tally-prod-docs" }],
 			"routes": [
 				{ "pattern": "tally.thesuperhuman.us", "custom_domain": true }
 			],

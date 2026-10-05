@@ -10,6 +10,7 @@ import { accounts } from "./routes/accounts";
 import { bills } from "./routes/bills";
 import { designSystem } from "./routes/design-system";
 import { destinations } from "./routes/destinations";
+import { documents } from "./routes/documents";
 import { feedback, retryFeedback } from "./routes/feedback";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
@@ -29,6 +30,7 @@ type AppEnv = Env & {
 type App = { Bindings: AppEnv; Variables: { actor: string } };
 type ScheduledEnv = PlaidEnv & {
 	DB: D1Database;
+	DOCS: R2Bucket;
 	DEMO?: string;
 	JEV_API_KEY?: string;
 	FEEDBACK_GITHUB_TOKEN?: string;
@@ -43,7 +45,7 @@ export async function runScheduled(
 ) {
 	// The nightly job resets the demo first; production then catches up every healthy Plaid Item.
 	if (canResetDemo(env)) {
-		await resetDemo(env.DB, todayUtc());
+		await resetDemo(env.DB, todayUtc(), env.DOCS);
 	}
 	await syncAllItems(env, fetchImpl);
 	// Merchant rules and Jev run after sync so newly fetched transactions are sorted tonight.
@@ -117,6 +119,7 @@ app.route("/", transactions);
 app.route("/", settings);
 app.route("/", accounts);
 app.route("/", bills);
+app.route("/", documents);
 app.route("/", destinations);
 app.route("/", feedback);
 app.route("/", designSystem);

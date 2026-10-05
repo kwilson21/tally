@@ -108,6 +108,7 @@ Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (
 | BillFindingBand | The Bills screen’s terracotta-ruled Band shows how many repeat-charge suggestions need review. |
 | BillFindingRow | One possible bill with its latest amount and timing, plus Add and permanent Not a bill actions. |
 | EmptyState | Where a list would be when it's empty: a small line drawing (magnifier: no results; tick: nothing to do; add sign: one thing to start), one sentence, a muted hint and at most one button, centred (decisions 54, 55). The button is a secondary link, or, for an add, the screen's own primary control passed in. |
+| DocumentRow | One stored PDF: its linked file name, optional note, added date and size, with its delete action at the right. |
 | BillOccurrenceRow | One bill occurrence with its status, linked-payment detail, and link or “Not this one” action. Older unpaid occurrences are neutral. |
 | BillPaymentPicker | Eligible payments and unpaid occurrence choices as Chip radios; no payment is chosen in advance, so the person picks one. Its empty state has no submit action. |
 | Chip | A pill-shaped checkbox or radio (optionally with an icon); the real input is visually hidden but keyboard-reachable. A checkbox chip is a toggle and shows a check mark while on, so its state isn't color alone. `required` on one radio makes its group required. |
