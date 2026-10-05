@@ -29,6 +29,18 @@ const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 /** A person's choice, as the posted row `transactions` takes it from the pending row `p`. */
 const FROM_PENDING = `FROM transactions AS p WHERE p.id = ${PENDING} AND transactions.id = ${POSTED} AND ${READY}`;
 
+// A split part (`transactions`) has a choice of its own only when a person made it on that part (its source
+// is 'user', as saving the edit panel on the part records it) and it differs from the pending purchase's
+// (`pe`). Anything else is what the part was made with, or what a machine said, and follows the posted row.
+// Saving the panel on the purchase changes the purchase and not its parts, so a part still holding what it
+// inherited is never its own choice.
+const OWN_EXCLUSION = `transactions.excluded_source = 'user'
+	AND (transactions.excluded IS NOT pe.excluded OR pe.excluded_source IS NOT 'user')`;
+const OWN_INCOME =
+	"transactions.income_source = 'user' AND pe.income_source IS NOT 'user'";
+const OWN_REVIEW = `transactions.credit_reviewed_by = 'user'
+	AND (transactions.credit_reviewed IS NOT pe.credit_reviewed OR pe.credit_reviewed_by IS NOT 'user')`;
+
 const STATEMENTS = [
 	// Category: a person's pick on the pending row wins over anything but a person's pick on the posted one.
 	`UPDATE transactions SET category_id = p.category_id, category_source = 'user', category_confidence = NULL
@@ -62,20 +74,15 @@ const STATEMENTS = [
 	// A split: its parts move when the amount is unchanged and the posted row has none of its own. A split
 	// is one bank transaction, so a part follows the posted row's exclusion and review (the columns saving
 	// a split copies from its purchase): else a purchase a person excluded while pending but included once
-	// posted would have neither it nor its parts counted. A part keeps a choice made on that part itself,
-	// told by its value differing from the pending purchase's it inherited, per group (exclusion with its
-	// source, income source, credit review with who made it); the pending row is still unchanged here.
+	// posted would have neither it nor its parts counted. A part keeps a choice of its own (above), per group:
+	// exclusion with its source, income source, credit review with who made it. The pending row is still
+	// unchanged here.
 	`UPDATE transactions SET parent_id = ne.id, date = ?6, raw_name = ?7, merchant_name = ?8,
-		excluded = CASE WHEN transactions.excluded IS NOT pe.excluded OR transactions.excluded_source IS NOT pe.excluded_source
-			THEN transactions.excluded ELSE ne.excluded END,
-		excluded_source = CASE WHEN transactions.excluded IS NOT pe.excluded OR transactions.excluded_source IS NOT pe.excluded_source
-			THEN transactions.excluded_source ELSE ne.excluded_source END,
-		income_source = CASE WHEN transactions.income_source IS NOT pe.income_source
-			THEN transactions.income_source ELSE ne.income_source END,
-		credit_reviewed = CASE WHEN transactions.credit_reviewed IS NOT pe.credit_reviewed OR transactions.credit_reviewed_by IS NOT pe.credit_reviewed_by
-			THEN transactions.credit_reviewed ELSE ne.credit_reviewed END,
-		credit_reviewed_by = CASE WHEN transactions.credit_reviewed IS NOT pe.credit_reviewed OR transactions.credit_reviewed_by IS NOT pe.credit_reviewed_by
-			THEN transactions.credit_reviewed_by ELSE ne.credit_reviewed_by END
+		excluded = CASE WHEN ${OWN_EXCLUSION} THEN transactions.excluded ELSE ne.excluded END,
+		excluded_source = CASE WHEN ${OWN_EXCLUSION} THEN transactions.excluded_source ELSE ne.excluded_source END,
+		income_source = CASE WHEN ${OWN_INCOME} THEN transactions.income_source ELSE ne.income_source END,
+		credit_reviewed = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed ELSE ne.credit_reviewed END,
+		credit_reviewed_by = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed_by ELSE ne.credit_reviewed_by END
 	 FROM transactions AS pe, transactions AS ne
 	 WHERE pe.id = ${PENDING} AND ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
 	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0

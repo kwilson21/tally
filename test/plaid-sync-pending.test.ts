@@ -1128,6 +1128,66 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			// The reviewed part still counts; the other credit stays held out until someone reviews it.
 			expect(await spent()).toBe(-2000);
 		});
+
+		it("follows the posted row when the credit was reviewed after it was split, which leaves the parts as they were", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			const parts = await splitInto(ids.pending, -2000, -2200);
+			// Saving the edit panel on a split credit reviews the parent and not its parts, so the parts
+			// still hold what they inherited when they were made (not reviewed, nobody's choice).
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET credit_reviewed = 0, credit_reviewed_by = NULL WHERE parent_id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+				).bind(ids.posted),
+			]);
+
+			await post(item, { amount: -42 });
+
+			// The review moved onto the posted row, and the parts follow it, so both count.
+			expect(await row("posted-1")).toMatchObject({
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			});
+			for (const id of parts) {
+				expect(await partState(id)).toMatchObject({
+					credit_reviewed: 1,
+					credit_reviewed_by: "user",
+				});
+			}
+			expect(await spent()).toBe(-4200);
+		});
+
+		it("follows the posted row for a difference nobody chose on the part", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			const parts = await splitInto(ids.pending, 600, 634);
+			// A part that differs from the pending purchase only by a machine's flag isn't a person's choice.
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 0, excluded_source = NULL WHERE id = ? OR parent_id = ?",
+				).bind(ids.pending, ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 1, excluded_source = 'jev' WHERE id = ?",
+				).bind(parts[0]),
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = ?",
+				).bind(ids.posted),
+			]);
+
+			await post(item);
+
+			expect(await partState(parts[0] as number)).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+			});
+			expect(await spent()).toBe(1234);
+		});
 	});
 
 	it("keeps a split the posted transaction already has, and drops the pending one's", async () => {
