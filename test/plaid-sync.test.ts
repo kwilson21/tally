@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
 import { loadMonth } from "../src/db/month";
-import { saveEdit, saveJevResult } from "../src/db/transactions";
+import {
+	applyMerchantRules,
+	getTransaction,
+	saveEdit,
+	saveJevResult,
+} from "../src/db/transactions";
 import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -416,6 +421,59 @@ describe("syncItem", () => {
 			{ period: "2026-08", raw_name: "TARGET 1234" },
 			{ period: "2026-09", raw_name: "TARGET 5678" },
 		]);
+	});
+
+	it("keeps a bill, a rule and a name saved under the bank's raw text working once Plaid sends a merchant name", async () => {
+		const id = await addItem();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Internet', 1234, 27, 'monthly', 'COMCAST CABLE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('COMCAST CABLE', 'Comcast Cable', (SELECT id FROM categories LIMIT 1))",
+			),
+		]);
+
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								name: "COMCAST CABLE",
+								merchant_name: "Comcast",
+								date: "2026-09-27",
+							}),
+						],
+					}),
+				),
+			),
+		);
+		await applyMerchantRules(env.DB);
+
+		expect(
+			await env.DB.prepare(
+				"SELECT bp.period, t.merchant_name, t.category_source FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id WHERE bp.status = 'linked'",
+			).first(),
+		).toEqual({
+			period: "2026-09",
+			merchant_name: "Comcast",
+			category_source: "merchant_rule",
+		});
+		expect(
+			(
+				await getTransaction(
+					env.DB,
+					(
+						await env.DB.prepare("SELECT id FROM transactions").first<{
+							id: number;
+						}>()
+					)?.id as number,
+				)
+			)?.displayName,
+		).toBe("Comcast Cable");
 	});
 
 	it("preserves a stored balance when accounts/get returns current null", async () => {

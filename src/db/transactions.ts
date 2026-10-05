@@ -11,7 +11,7 @@ import {
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
 } from "./counted-month";
-import { merchantKeySql } from "./merchant-key";
+import { merchantColumnSql, merchantKeySql } from "./merchant-key";
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
@@ -73,7 +73,7 @@ export async function listTransactions(
 		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
 		// "google youtube" finds "GOOGLE *YOUTUBE".
 		where.push(
-			"(COALESCE(m.display_name, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')",
+			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')`,
 		);
 		const pattern = likePattern(f.q);
 		args.push(pattern, pattern, pattern, pattern);
@@ -81,11 +81,9 @@ export async function listTransactions(
 
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
 	const from = `FROM transactions t
-			LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 			${COUNTED_JOINS}
 			LEFT JOIN categories c ON c.id = ${COUNTED_CATEGORY}
 			LEFT JOIN transactions p ON p.id = t.parent_id
-			LEFT JOIN merchants pm ON pm.raw_name = ${merchantKeySql("p")}
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
 	const counted = await db
@@ -99,8 +97,8 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
-				t.is_split AS isSplit, pm.display_name AS parentMerchantName, p.raw_name AS parentRawName,
+				${merchantColumnSql("t", "display_name")} AS merchantName, t.note, t.parent_id AS parentId,
+				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
@@ -205,8 +203,9 @@ export type RefundPurchase = {
 
 /**
  * The purchases a refund can link to: same merchant (by merchant key, so a "TARGET 1234" purchase is
- * offered for a "TARGET 5678" refund), on or before it, within 90 days; a split purchase gives way to
- * its parts. The purchase it's linked to now is always included, so it can be kept.
+ * offered for a "TARGET 5678" refund; or by raw name, for purchases from before Plaid's merchant name was
+ * stored), on or before it, within 90 days; a split purchase gives way to its parts. The purchase it's
+ * linked to now is always included, so it can be kept.
  */
 export async function refundPurchases(
 	db: D1Database,
@@ -221,7 +220,8 @@ export async function refundPurchases(
 		.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents,t.category_id AS categoryId,c.name AS categoryName,t.excluded
 		FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
 		WHERE t.id = ?1 OR (?2 AND t.amount_cents>0 AND t.is_split=0 AND t.excluded=0
-			AND ${merchantKeySql("t")} = (SELECT ${merchantKeySql("r")} FROM transactions r WHERE r.id=?4)
+			AND EXISTS (SELECT 1 FROM transactions r WHERE r.id=?4
+				AND (${merchantKeySql("t")} = ${merchantKeySql("r")} OR t.raw_name = r.raw_name))
 			AND t.date<=?3 AND t.date>=date(?3,'-90 days') AND t.id!=?4)
 		ORDER BY t.date DESC,t.id DESC`)
 		.bind(refund.refundOfId ?? null, isRefund ? 1 : 0, refund.date, refund.id)
@@ -237,7 +237,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				m.display_name AS merchantName, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -249,7 +249,6 @@ export async function getTransaction(
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
-			LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
 			${COUNTED_JOINS}
@@ -568,11 +567,11 @@ export async function removeSplit(
  * Applies merchant rules to transactions nobody has categorized yet (spec §7: a merchant rule
  * comes before Jev). A person's choice, or a category from anywhere else, is never touched.
  * A rule whose category is archived is skipped, and works again once the category is restored.
+ * A rule saved under the merchant key wins over one saved under the raw name (spec §6.1).
  */
 export async function applyMerchantRules(db: D1Database): Promise<void> {
-	const rule = `SELECT m.default_category_id FROM merchants m
-		JOIN categories c ON c.id = m.default_category_id AND c.archived = 0
-		WHERE m.raw_name = ${merchantKeySql("transactions")}`;
+	const rule = `SELECT c.id FROM categories c
+		WHERE c.archived = 0 AND c.id = ${merchantColumnSql("transactions", "default_category_id")}`;
 	await db
 		.prepare(
 			`UPDATE transactions SET
@@ -595,13 +594,12 @@ export async function pendingForJev(
 ): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName, m.display_name AS displayName,
+			`SELECT t.id, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory,
 				(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')) AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
-			LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND NOT ${FOLLOWS_PURCHASE}
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.

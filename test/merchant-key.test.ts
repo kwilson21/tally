@@ -6,11 +6,15 @@ import { merchantKeySql } from "../src/db/merchant-key";
 import {
 	applyMerchantRules,
 	getTransaction,
+	listTransactions,
+	pendingForJev,
 	refundPurchases,
 	saveEdit,
 	saveSplit,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { transactionsCsv } from "../src/settings/export";
+import { parseFilters } from "../src/transactions/filters";
 import {
 	organizeGroups,
 	saveOrganizeGroup,
@@ -356,15 +360,15 @@ describe("bill matching", () => {
 		]);
 	});
 
-	it("matches the merchant key, not the bank's text", async () => {
+	it("does not match another merchant, whatever its bank text", async () => {
 		await insert({
 			id: 8104,
 			date: "2026-09-10",
 			cents: 7700,
 			raw: "TARGET 1234",
-			merchant: "Target",
+			merchant: "Target Optical",
 		});
-		await bill(8003, "TARGET 1234", 10, 7700);
+		await bill(8003, "Target", 10, 7700);
 
 		await matchBillPayments(db, TODAY);
 
@@ -457,7 +461,7 @@ describe("refunds", () => {
 				id: 8304,
 				date: "2026-09-03",
 				cents: 2000,
-				raw: "TARGET 5678",
+				raw: "WALMART 42",
 				merchant: "Walmart",
 			},
 		);
@@ -593,5 +597,276 @@ describe("finding bills", () => {
 				.first(),
 		).toEqual({ not_a_bill: 1 });
 		expect(await found(/target/i)).toEqual([]);
+	});
+});
+
+// Production's rules, names and bills were saved under the bank's raw text, before Plaid's merchant name
+// was stored. Once sync stores it, a new transaction's key is that name, yet those rows must keep working:
+// a transaction is also the same merchant as a row saved under its own raw name. A row under its key wins.
+describe("rows saved under the bank's raw text", () => {
+	const NEW_COMCAST = {
+		id: 8601,
+		date: "2026-09-10",
+		cents: 8000,
+		raw: "COMCAST CABLE",
+		merchant: "Comcast",
+	};
+	const OLD_COMCAST = {
+		id: 8602,
+		date: "2026-08-10",
+		cents: 8000,
+		raw: "COMCAST CABLE",
+	};
+	const HOUSEHOLD = 5;
+
+	beforeEach(async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('COMCAST CABLE', 'Comcast Cable', ?)",
+			)
+			.bind(HOUSEHOLD)
+			.run();
+		await insert(OLD_COMCAST, NEW_COMCAST);
+	});
+
+	it("applies a rule saved under the raw name to a transaction that now has a merchant name", async () => {
+		await applyMerchantRules(db);
+
+		expect(await row(8601)).toMatchObject({
+			category_id: HOUSEHOLD,
+			category_source: "merchant_rule",
+		});
+		expect(await row(8602)).toMatchObject({
+			category_id: HOUSEHOLD,
+			category_source: "merchant_rule",
+		});
+	});
+
+	it("shows a name saved under the raw name everywhere the merchant name is shown", async () => {
+		expect((await getTransaction(db, 8601))?.displayName).toBe("Comcast Cable");
+		const { rows } = await listTransactions(
+			db,
+			parseFilters(
+				new URLSearchParams("month=all&q=comcast"),
+				TODAY.slice(0, 7),
+			),
+		);
+		expect(rows.map((r) => [r.id, r.displayName])).toEqual([
+			[8601, "Comcast Cable"],
+			[8602, "Comcast Cable"],
+		]);
+		expect(
+			(await pendingForJev(db, 500)).find((t) => t.id === 8601)?.displayName,
+		).toBe("Comcast Cable");
+		expect(await transactionsCsv(db)).toMatch(/COMCAST CABLE,Comcast Cable,/);
+		const group = (await organizeGroups(db)).find((g) =>
+			g.merchantKeys.includes("Comcast"),
+		);
+		expect(group).toMatchObject({ name: "Comcast Cable", count: 2 });
+		expect([...(group?.merchantKeys ?? [])].sort()).toEqual([
+			"COMCAST CABLE",
+			"Comcast",
+		]);
+	});
+
+	it("searches by a name saved under the raw name", async () => {
+		await db
+			.prepare(
+				"UPDATE merchants SET display_name = 'The Cable Guy' WHERE raw_name = 'COMCAST CABLE'",
+			)
+			.run();
+
+		const { rows } = await listTransactions(
+			db,
+			parseFilters(
+				new URLSearchParams("month=all&q=cable guy"),
+				TODAY.slice(0, 7),
+			),
+		);
+
+		expect(rows.map((r) => r.id).sort()).toEqual([8601, 8602]);
+	});
+
+	it("matches a bill saved under the raw name, automatically and when linking by hand", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (8601, 'Internet', 8000, 10, 'monthly', 5, 'COMCAST CABLE')",
+			)
+			.run();
+		await insert({
+			id: 8603,
+			date: "2026-09-10",
+			cents: 8000,
+			raw: "ZZ OTHER SHOP",
+		});
+
+		await matchBillPayments(db, TODAY);
+
+		expect(
+			(
+				await db
+					.prepare(
+						"SELECT period, transaction_id FROM bill_payments WHERE bill_id = 8601 AND status = 'linked' ORDER BY period",
+					)
+					.all()
+			).results,
+		).toEqual([
+			{ period: "2026-08", transaction_id: 8602 },
+			{ period: "2026-09", transaction_id: 8601 },
+		]);
+
+		await db.prepare("DELETE FROM bill_payments").run();
+		await db
+			.prepare(
+				"UPDATE transactions SET date = '2026-09-12', amount_cents = 9000 WHERE id = 8601",
+			)
+			.run();
+		const html = await (
+			await exports.default.fetch(`${BASE}/bills/8601/occurrences/2026-09/link`)
+		).text();
+		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
+		expect(picker.indexOf('value="8601"')).toBeGreaterThan(-1);
+		expect(picker.indexOf('value="8601"')).toBeLessThan(
+			picker.indexOf('value="8603"'),
+		);
+	});
+
+	it("lists purchases from the same bank text for a refund that now has a merchant name", async () => {
+		await insert({
+			id: 8604,
+			date: "2026-09-20",
+			cents: -500,
+			raw: "COMCAST CABLE",
+			merchant: "Comcast",
+		});
+		const refund = await getTransaction(db, 8604);
+
+		const offered = await refundPurchases(
+			db,
+			refund as NonNullable<typeof refund>,
+		);
+
+		// The old purchase has no merchant name (key "COMCAST CABLE"), but the same bank text.
+		expect(offered.map((p) => p.id)).toEqual([8601, 8602]);
+	});
+
+	it("does not suggest a bill the raw name already has, or a merchant marked Not a bill under it", async () => {
+		await insert({
+			id: 8605,
+			date: "2026-08-11",
+			cents: 8000,
+			raw: "COMCAST CABLE",
+			merchant: "Comcast",
+		});
+		const found = async () =>
+			(await loadBillSuggestions(db, TODAY)).filter((s) =>
+				/comcast/i.test(s.rawName),
+			);
+		expect(await found()).toMatchObject([{ rawName: "Comcast" }]);
+
+		await db
+			.prepare(
+				"UPDATE merchants SET not_a_bill = 1 WHERE raw_name = 'COMCAST CABLE'",
+			)
+			.run();
+		expect(await found()).toEqual([]);
+
+		await db.prepare("UPDATE merchants SET not_a_bill = 0").run();
+		await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES ('Internet', 8000, 10, 'monthly', 5, 'COMCAST CABLE')",
+			)
+			.run();
+		expect(await found()).toEqual([]);
+	});
+
+	it("lets a rule and a name saved under the merchant name win over the raw name's", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('Comcast', 'Comcast Internet', ?)",
+			)
+			.bind(GAS)
+			.run();
+
+		await applyMerchantRules(db);
+
+		expect(await row(8601)).toMatchObject({
+			category_id: GAS,
+			category_source: "merchant_rule",
+		});
+		// The older transaction has no merchant name, so its key is the raw name and the old rule is its own.
+		expect(await row(8602)).toMatchObject({
+			category_id: HOUSEHOLD,
+			category_source: "merchant_rule",
+		});
+		expect((await getTransaction(db, 8601))?.displayName).toBe(
+			"Comcast Internet",
+		);
+		expect((await getTransaction(db, 8602))?.displayName).toBe("Comcast Cable");
+	});
+
+	it("falls back to the raw name's name when the merchant name's row has only a rule", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Comcast', ?)",
+			)
+			.bind(GAS)
+			.run();
+
+		await applyMerchantRules(db);
+
+		expect(await row(8601)).toMatchObject({ category_id: GAS });
+		expect((await getTransaction(db, 8601))?.displayName).toBe("Comcast Cable");
+	});
+
+	it("writes new rules and names under the merchant name, leaving the old row alone", async () => {
+		await saveEdit(
+			db,
+			8601,
+			edit({
+				categoryId: GAS,
+				alwaysForMerchant: true,
+				displayName: "Comcast Internet",
+			}),
+			"me@example.com",
+		);
+
+		expect(
+			(
+				await db
+					.prepare(
+						"SELECT raw_name, display_name, default_category_id FROM merchants ORDER BY raw_name",
+					)
+					.all()
+			).results,
+		).toEqual([
+			{
+				raw_name: "COMCAST CABLE",
+				display_name: "Comcast Cable",
+				default_category_id: HOUSEHOLD,
+			},
+			{
+				raw_name: "Comcast",
+				display_name: "Comcast Internet",
+				default_category_id: GAS,
+			},
+		]);
+	});
+
+	it("ignores another merchant's rule that merely shares a word", async () => {
+		await insert({
+			id: 8606,
+			date: "2026-09-11",
+			cents: 100,
+			raw: "COMCAST OTHER",
+			merchant: "Xfinity Mobile",
+		});
+
+		await applyMerchantRules(db);
+
+		expect(await row(8606)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
 	});
 });

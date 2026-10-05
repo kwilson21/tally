@@ -1,4 +1,4 @@
-import { merchantKeySql } from "../db/merchant-key";
+import { merchantColumnSql } from "../db/merchant-key";
 import { tidyName } from "../transactions/tidy-name";
 
 const EXPORT_COLUMNS = {
@@ -52,11 +52,10 @@ type CsvRow = {
 export async function transactionsCsv(db: D1Database): Promise<string> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.date, t.raw_name, m.display_name, t.amount_cents,
+			`SELECT t.date, t.raw_name, ${merchantColumnSql("t", "display_name")} AS display_name, t.amount_cents,
 				c.name AS category, t.excluded, t.note, a.name AS account
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
-			LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 			LEFT JOIN categories c ON c.id = t.category_id
 			WHERE t.is_split = 0
 			ORDER BY t.date DESC, t.id DESC`,

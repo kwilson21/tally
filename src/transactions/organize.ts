@@ -3,7 +3,7 @@ import {
 	countedCategorySql,
 	FOLLOWS_PURCHASE,
 } from "../db/counted-month";
-import { merchantKeySql } from "../db/merchant-key";
+import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
@@ -28,11 +28,11 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT ${KEY} AS merchantKey, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
-				m.display_name AS displayName
-			FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${KEY}
+				${merchantColumnSql("t", "display_name")} AS displayName
+			FROM transactions t
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_CATEGORY}
-			GROUP BY ${KEY}, m.display_name`,
+			GROUP BY ${KEY}, displayName`,
 		)
 		.all<{
 			merchantKey: string;
@@ -51,7 +51,9 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 		};
 		group.count += row.count;
 		group.totalCents += row.totalCents;
-		group.merchantKeys.push(row.merchantKey);
+		// A key can come twice, once for each name its transactions show.
+		if (!group.merchantKeys.includes(row.merchantKey))
+			group.merchantKeys.push(row.merchantKey);
 		groups.set(name, group);
 	}
 	return [...groups.values()].sort(

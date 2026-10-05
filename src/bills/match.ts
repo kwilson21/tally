@@ -1,5 +1,5 @@
 import { todayUtc } from "../dates";
-import { merchantKeySql } from "../db/merchant-key";
+import { isMerchantTextSql } from "../db/merchant-key";
 import { billOccurrenceForMonth } from "./status";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
@@ -47,7 +47,7 @@ type Bill = {
 	due_day: number;
 	frequency: "monthly" | "yearly";
 	anchor_month: number | null;
-	/** The bill's merchant key: what a payment's merchant key must equal (spec §6.1 rule 1). */
+	/** The bill's merchant key, which a payment's merchant key (or its raw name, for older bills) must equal (spec §6.1 rule 1). */
 	merchant_raw_name: string;
 };
 
@@ -126,7 +126,7 @@ export async function matchBillPayments(
 				await db
 					.prepare(
 						`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
-				 WHERE ${merchantKeySql("t")}=? AND t.excluded=0 AND t.is_split=0
+				 WHERE ${isMerchantTextSql("t", "?")} AND t.excluded=0 AND t.is_split=0
 					 AND t.date BETWEEN ? AND ?
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments occurrence WHERE occurrence.bill_id=? AND occurrence.period=? AND occurrence.status='linked')
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
