@@ -1,8 +1,10 @@
+import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import {
 	isPlaidTransferSql,
 	plaidTransferRuleSql,
 } from "../db/plaid-transfers";
+import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
@@ -334,14 +336,14 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, excluded, excluded_source)
-						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END,
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, flag_income, excluded, excluded_source)
+						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' AND ? < 0 THEN 1 ELSE 0 END,
 							CASE WHEN ${isPlaidTransferSql("?")} THEN 1 ELSE 0 END,
 							CASE WHEN ${isPlaidTransferSql("?")} THEN 'plaid' ELSE NULL END FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
-								flag_income = CASE WHEN transactions.income_source = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.flag_income END,
+								flag_income = ${syncedIncomeFlagSql("transactions", "excluded.plaid_category", "excluded.amount_cents")},
 								income_source = CASE WHEN transactions.income_source = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.income_source END,
 								credit_reviewed = CASE WHEN transactions.credit_reviewed_by = 'user' THEN transactions.credit_reviewed WHEN transactions.amount_cents = excluded.amount_cents THEN transactions.credit_reviewed WHEN excluded.amount_cents < 0 THEN 0 ELSE 1 END,
 								credit_reviewed_by = CASE WHEN transactions.credit_reviewed_by = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.credit_reviewed_by END,
@@ -365,6 +367,8 @@ export async function syncItem(
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						plaidAmountToCents(transaction.amount),
+						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						transaction.personal_finance_category?.primary ?? null,
 						transaction.personal_finance_category?.primary ?? null,
 						transaction.account_id,
@@ -418,7 +422,7 @@ export async function syncItem(
 							amount_cents = ?, raw_name = ?, merchant_name = ?,
 							plaid_category = ?,
 							${plaidTransferRuleSql("?", "?")},
-							flag_income = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN 0 ELSE flag_income END,
+							flag_income = ${syncedIncomeFlagSql("transactions", "?", "?")},
 							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
 							credit_reviewed = CASE WHEN credit_reviewed_by = 'user' THEN credit_reviewed WHEN amount_cents = ? THEN credit_reviewed WHEN ? < 0 THEN 0 ELSE 1 END,
 							credit_reviewed_by = CASE WHEN credit_reviewed_by = 'jev' AND amount_cents != ? THEN NULL ELSE credit_reviewed_by END,
@@ -442,11 +446,26 @@ export async function syncItem(
 						cents,
 						transaction.personal_finance_category?.primary ?? null,
 						cents,
+						transaction.personal_finance_category?.primary ?? null,
 						cents,
 						cents,
 						cents,
 						cents,
 						cents,
+						cents,
+						transaction.transaction_id,
+						itemRowId,
+						lockId,
+					),
+				);
+			}
+			// A corrected amount can leave a purchase refunded for more than it is worth (spec §8.5). Once this
+			// page's amounts are written, in the same batch, the refunds that no longer fit lose their link,
+			// newest first; a person can link them again. Only the purchases these transactions touch are checked.
+			for (const transaction of [...posted, ...page.modified]) {
+				statements.push(
+					env.DB.prepare(unlinkOverRefundedSql(OWNS_LOCK)).bind(
+						transaction.transaction_id,
 						transaction.transaction_id,
 						itemRowId,
 						lockId,
