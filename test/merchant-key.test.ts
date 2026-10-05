@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { matchBillPayments } from "../src/bills/match";
+import { insertBill, updateBill } from "../src/bills/write";
 import { merchantKeySql } from "../src/db/merchant-key";
 import {
 	applyMerchantRules,
@@ -1316,6 +1317,44 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 					.all()
 			).results,
 		).toEqual([{ transaction_id: 8831 }]);
+	});
+
+	it("saves a bill's text as a key, and keeps a legacy flag only while the text is unchanged", async () => {
+		const fields = {
+			name: "Internet",
+			amountCents: 8000,
+			dueDay: 10,
+			frequency: "monthly" as const,
+			anchorMonth: null,
+			categoryId: 5,
+			merchantRawName: "COMCAST CABLE",
+		};
+		const flagOf = async (id: number) =>
+			await db
+				.prepare(
+					"SELECT merchant_raw_name AS text, merchant_raw_text AS flag FROM bills WHERE id = ?",
+				)
+				.bind(id)
+				.first();
+		await insertBill(db, fields);
+		const id = (
+			await db.prepare("SELECT id FROM bills WHERE name = 'Internet'").first<{
+				id: number;
+			}>()
+		)?.id as number;
+		expect(await flagOf(id)).toEqual({ text: "COMCAST CABLE", flag: 0 });
+
+		// A bill from before Phase 3.5 keeps its flag while its text stays.
+		await db
+			.prepare("UPDATE bills SET merchant_raw_text = 1 WHERE id = ?")
+			.bind(id)
+			.run();
+		await updateBill(db, id, { ...fields, amountCents: 9000 }, false);
+		expect(await flagOf(id)).toEqual({ text: "COMCAST CABLE", flag: 1 });
+
+		// A new text is a new write: a key.
+		await updateBill(db, id, { ...fields, merchantRawName: "Comcast" }, false);
+		expect(await flagOf(id)).toEqual({ text: "Comcast", flag: 0 });
 	});
 
 	it("saves a new row under the key with the flag off, and leaves a legacy row's flag alone", async () => {
