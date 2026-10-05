@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -34,7 +34,7 @@ async function post(
 }
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("GET /transactions/organize", () => {
@@ -48,10 +48,10 @@ describe("GET /transactions/organize", () => {
 			),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'RAW TWO')",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
 		const { res, html } = await get();
 		expect(res.status).toBe(200);
@@ -208,7 +208,7 @@ describe("POST /transactions/organize", () => {
 				).bind(raw),
 				env.DB.prepare(
 					"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 100000, ?)",
-				).bind(todayUtc(), raw),
+				).bind(todayIn(DEFAULT_TIME_ZONE), raw),
 			);
 		}
 		await env.DB.batch(statements);
@@ -230,16 +230,16 @@ describe("POST /transactions/organize", () => {
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, excluded) VALUES (1, ?, 1, 'HIDDEN EXCLUDED', 1)",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, is_split) VALUES (1, ?, 1, 'HIDDEN SPLIT', 1)",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, flag_income) VALUES (1, ?, 1, 'HIDDEN INCOME', 1)",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 			env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1, 'HIDDEN CATEGORIZED', 2, 'user')",
-			).bind(todayUtc()),
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
 		const { html } = await get();
 		expect(html).not.toMatch(/HIDDEN (EXCLUDED|SPLIT|INCOME|CATEGORIZED)/);
@@ -249,7 +249,7 @@ describe("POST /transactions/organize", () => {
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, credit_reviewed) VALUES (1, ?, -1200, 'PENDING CREDIT', 0)",
 		)
-			.bind(todayUtc())
+			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.run();
 		const { html } = await get();
 		expect(html).not.toContain("PENDING CREDIT");

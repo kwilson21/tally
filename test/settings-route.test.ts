@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { monthName, todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -29,7 +29,7 @@ const trigger = (res: Response) =>
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, "").replaceAll("&#39;", "'");
-const THIS_MONTH = () => monthName(todayUtc().slice(0, 7));
+const THIS_MONTH = () => monthName(todayIn(DEFAULT_TIME_ZONE).slice(0, 7));
 /** The names in the Categories list, in order. */
 const rowNames = (html: string) =>
 	[
@@ -39,7 +39,7 @@ const rowNames = (html: string) =>
 	].map((m) => m[1]);
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("GET /settings", () => {

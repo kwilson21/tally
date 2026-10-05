@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { monthName, todayUtc } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { setBudget } from "../src/db/budgets";
 import { resetDemo } from "../src/demo/reset";
 
@@ -23,7 +23,7 @@ const trigger = (res: Response) =>
 		toast?: { message: string; type: string };
 		announce?: string;
 	};
-const THIS_MONTH = () => todayUtc().slice(0, 7);
+const THIS_MONTH = () => todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 const groceriesBudget = async () =>
 	(await env.DB.prepare(
 		"SELECT amount_cents, effective_month FROM budget_amounts WHERE category_id = 1 ORDER BY effective_month DESC LIMIT 1",
@@ -33,7 +33,7 @@ const groceriesBudget = async () =>
 	};
 
 beforeEach(async () => {
-	await resetDemo(env.DB, todayUtc());
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
 describe("Home day to day", () => {

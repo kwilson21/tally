@@ -1,4 +1,5 @@
 import { matchBillPayments } from "../bills/match";
+import { DEFAULT_TIME_ZONE } from "../dates";
 import { buildSeed, monthOffset } from "./seed";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
@@ -13,6 +14,7 @@ const TABLES_CHILD_FIRST = [
 	"categories",
 	"accounts",
 	"plaid_items",
+	"household_settings",
 ];
 
 /**
@@ -44,6 +46,12 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 
 	await db.batch([
 		...TABLES_CHILD_FIRST.map((t) => db.prepare(`DELETE FROM ${t}`)),
+		// The demo's time zone goes back to the default, like everything else a visitor can change.
+		db
+			.prepare(
+				"INSERT INTO household_settings (key, value) VALUES ('time_zone', ?)",
+			)
+			.bind(DEFAULT_TIME_ZONE),
 		...seed.categories.map((c) =>
 			db
 				.prepare(
