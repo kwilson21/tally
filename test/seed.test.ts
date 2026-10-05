@@ -6,6 +6,7 @@ import { merchantKeySql } from "../src/db/merchant-key";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { buildSeed, monthOffset } from "../src/demo/seed";
+import { chartStart, netWorthSeries, netWorthView } from "../src/net-worth";
 
 describe("buildSeed", () => {
 	it.each(["2026-09-22", "2026-09-01", "2026-02-28", "2027-01-31"])(
@@ -122,7 +123,90 @@ describe("buildSeed", () => {
 	});
 });
 
+describe("buildSeed's balance history (spec §9, feature 7)", () => {
+	const TODAYS = ["2026-10-05", "2026-09-01", "2026-03-31", "2027-01-31"];
+	/** The seed's Plaid accounts: the Cash account has no balance history. */
+	const bankAccounts = (today: string) =>
+		buildSeed(today).accounts.filter((a) => a.bankId !== null);
+
+	it.each(TODAYS)(
+		"has every bank account's balance on every day from the chart's first day to today, on %s",
+		(today) => {
+			const { balanceHistory } = buildSeed(today);
+			const dates = [...new Set(balanceHistory.map((r) => r.date))];
+			expect(dates[0]).toBe(chartStart(today));
+			expect(dates.at(-1)).toBe(today);
+			// No day is missing, and no day is after today.
+			for (const [i, date] of dates.entries())
+				if (i > 0) expect(daysBefore(date, 1)).toBe(dates[i - 1]);
+			const accountIds = bankAccounts(today).map((a) => a.id);
+			expect(accountIds).toEqual([1, 2, 3]);
+			expect(balanceHistory).toHaveLength(dates.length * accountIds.length);
+			expect(
+				balanceHistory.every((r) => accountIds.includes(r.accountId)),
+			).toBe(true);
+			expect(
+				balanceHistory.every(
+					(r) => Number.isInteger(r.balanceCents) && r.balanceCents > 0,
+				),
+			).toBe(true);
+		},
+	);
+
+	it.each(TODAYS)(
+		"ends on each account's balance today, so the line meets the headline, on %s",
+		(today) => {
+			const { balanceHistory } = buildSeed(today);
+			for (const account of bankAccounts(today)) {
+				expect(
+					balanceHistory.find(
+						(r) => r.accountId === account.id && r.date === today,
+					)?.balanceCents,
+				).toBe(account.balanceCents);
+			}
+		},
+	);
+
+	it("is the same every time it is built", () => {
+		expect(buildSeed("2026-10-05").balanceHistory).toEqual(
+			buildSeed("2026-10-05").balanceHistory,
+		);
+	});
+
+	it.each(TODAYS)(
+		"makes a net-worth line that rose, ending on today's net worth, on %s",
+		(today) => {
+			const seed = buildSeed(today);
+			const liability = new Map(
+				seed.accounts.map((a) => [a.id, a.isLiability]),
+			);
+			const points = netWorthSeries(
+				seed.balanceHistory.map((r) => ({
+					...r,
+					isLiability: liability.get(r.accountId) ?? false,
+				})),
+				chartStart(today),
+			);
+			// $4,210.55 + $12,400.00 − $842.17
+			expect(points.at(-1)).toEqual({ date: today, cents: 1576838 });
+			const view = netWorthView(points, today);
+			expect(view.kind).toBe("line");
+			expect(view).toMatchObject({ sentence: expect.stringMatching(/^Up \$/) });
+		},
+	);
+});
+
 describe("resetDemo", () => {
+	it("stores the seed's balance history, and running it twice gives the same rows", async () => {
+		const history = buildSeed("2026-10-05").balanceHistory;
+		await resetDemo(env.DB, "2026-10-05");
+		await resetDemo(env.DB, "2026-10-05");
+		const { results } = await env.DB.prepare(
+			"SELECT account_id AS accountId, date, balance_cents AS balanceCents FROM balance_history ORDER BY date, account_id",
+		).all();
+		expect(results).toEqual(history);
+	});
+
 	it("gives Local Bakery id 110, which the edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		const row = await env.DB.prepare(
