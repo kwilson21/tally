@@ -270,7 +270,7 @@ Each is drawn on `/design-system/proposals` and picked by the owner before it's 
 ### 8.5 Numbers you can trust (decision 67)
 
 Before more Phase 4 features, the rule gaps that can make the family's numbers wrong are fixed (`docs/reviews/original-app-gaps.md` section A, plus B4, C1 and C9). Each fix states its rule here first.
-- **Income:** a person can mark or unmark a transaction as income from the edit panel, and a person's choice always wins over later syncs; Plaid's own INCOME category marks it at sync only when no person has chosen (the other session's #149/#153 hold unreviewed credits out of spending).
+- **Income:** a person can mark or unmark a transaction as income from the edit panel, and a person's choice always wins over later syncs; Plaid's own INCOME category marks it at sync only when no person has chosen (the other session's #149/#153 hold unreviewed credits out of spending). A transaction stored with INCOME before that won't come through sync again, so migration 0021 marks those once, by the same rule: only ones nobody has decided (no `income_source`, no person's credit review), with `income_source` left null.
 - **Pending:** counted and marked, as in §6.
 - **Transfers and card payments:** Plaid's TRANSFER_IN, TRANSFER_OUT and LOAN_PAYMENTS categories exclude a transaction at sync (`excluded_source = 'plaid'`), which a person can undo; Jev still decides the rest.
 - **Today:** the household's time zone, as in §6.
