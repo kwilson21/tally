@@ -51,7 +51,7 @@ async function renderOrganize(
 	if (group) skipParams.append("skip", group.name);
 	const skipHref = `/transactions/organize?${skipParams}`;
 	const sources = group
-		? `${group.rawNames.slice(0, 3).join(", ")}${group.rawNames.length > 3 ? ` and ${group.rawNames.length - 3} more` : ""}`
+		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
 
 	return c.html(
@@ -208,7 +208,7 @@ organize.post("/transactions/organize", async (c) => {
 	const selectedCategory = category as NonNullable<typeof category>;
 	const count = await saveOrganizeGroup(
 		c.env.DB,
-		currentGroup.rawNames,
+		currentGroup.merchantKeys,
 		selectedCategory.id,
 		name && name !== currentGroup.name ? name : null,
 		actor(c),

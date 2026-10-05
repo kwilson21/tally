@@ -26,15 +26,18 @@ export type BillFields = {
 const FREE =
 	"NOT EXISTS (SELECT 1 FROM bills other WHERE other.active=1 AND other.id IS NOT ? AND lower(trim(other.name))=lower(trim(?)))";
 
-/** Adds a bill. False, with nothing written, when an active bill already has its name. */
+/**
+ * Adds a bill. False, with nothing written, when an active bill already has its name. Its merchant text
+ * is a key, not the bank's raw text from before Phase 3.5, so `merchant_raw_text` is 0 (spec §6.1).
+ */
 export async function insertBill(
 	db: D1Database,
 	f: BillFields,
 ): Promise<boolean> {
 	const { meta } = await db
 		.prepare(
-			`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name)
-			 SELECT ?,?,?,?,?,?,? WHERE ${FREE}`,
+			`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,merchant_raw_text)
+			 SELECT ?,?,?,?,?,?,?,0 WHERE ${FREE}`,
 		)
 		.bind(
 			f.name,
@@ -56,6 +59,8 @@ export async function insertBill(
  * that is the bill's own, as it is stored (spaces and A to Z case aside), is never checked, so a
  * bill that already shares its name with another one (the data may hold such pairs from before this
  * rule) can still have its amount or day changed; only a new name has to be free.
+ * A changed merchant text is a new write, saved as a key (`merchant_raw_text` 0); an unchanged one keeps
+ * its flag, so a bill from before Phase 3.5 keeps matching on the bank's raw text (spec §6.1).
  * `dropDismissals` is for a changed schedule: old dismissals no longer apply (period keys have
  * different shapes, YYYY-MM against YYYY), and they go in the same batch, once the update applied.
  */
@@ -68,7 +73,8 @@ export async function updateBill(
 	// In an UPDATE's WHERE, `name` is the row's name as it is now, before the SET.
 	const update = db
 		.prepare(
-			`UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,merchant_raw_name=?
+			`UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,
+			   merchant_raw_text=CASE WHEN merchant_raw_name=? THEN merchant_raw_text ELSE 0 END,merchant_raw_name=?
 			 WHERE id=? AND (lower(trim(name))=lower(trim(?)) OR ${FREE})`,
 		)
 		.bind(
@@ -78,6 +84,7 @@ export async function updateBill(
 			f.frequency,
 			f.anchorMonth,
 			f.categoryId,
+			f.merchantRawName,
 			f.merchantRawName,
 			id,
 			f.name,

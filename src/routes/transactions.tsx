@@ -2,6 +2,8 @@ import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import {
+	type FirstVisit,
+	firstVisitState,
 	getTransaction,
 	type ListRow,
 	listTransactions,
@@ -92,6 +94,46 @@ function listHref(filters: Filters, thisMonth: string) {
 }
 
 /**
+ * Whether the household has nothing at all yet, and what it is waiting for (spec §8.5). The demo
+ * always has its seeded household and no Plaid, so it never shows the first visit's lists.
+ */
+async function firstVisitFor(c: Context<App>): Promise<FirstVisit | null> {
+	return c.env.DEMO === "true" ? null : firstVisitState(c.env.DB);
+}
+
+/**
+ * The first visit's list (P40 A, decision 72): before a bank is linked, the add sign and a link to
+ * Accounts (Plaid Link loads only there); once one is, the magnifier, because Tally is looking.
+ */
+function FirstVisitList({ state }: { state: FirstVisit }) {
+	return state === "no-bank" ? (
+		<EmptyState
+			kind="add"
+			sentence="Link a bank to see transactions."
+			hint="Tally can only read them; it can't move money."
+			action={{ href: "/accounts", label: "Link a bank" }}
+		/>
+	) : (
+		<EmptyState
+			kind="search"
+			sentence="Importing your transactions…"
+			hint="Your bank sends about 90 days. It usually takes a few minutes."
+		/>
+	);
+}
+
+/**
+ * The first visit's page has no search, filters or Select, and those sit outside #page. So a change
+ * that ends it (the first cash entry) or brings it back (deleting the last transaction) swaps all of
+ * <main>, not only #page.
+ */
+function swapWholePage(c: Context<App>) {
+	c.header("HX-Retarget", "#main");
+	c.header("HX-Reswap", "innerHTML");
+	c.header("HX-Reselect", "#main > *");
+}
+
+/**
  * The whole Transactions page for these filters. Every htmx swap selects a part of this same page.
  * `today` is the household's date, read once by the handler, so the whole request uses one month.
  */
@@ -104,7 +146,7 @@ async function renderList(
 		focusId,
 		status = 200,
 		pageTitle,
-		selecting = false,
+		selecting: selectRequested = false,
 		checkedIds = new Set<number>(),
 		selectionError,
 		focusHeading = false,
@@ -119,6 +161,11 @@ async function renderList(
 				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 			).all<Category>(),
 		]);
+
+	// Only an empty list asks whether it is the first visit's (one cheap statement).
+	const firstVisit = rows.length === 0 ? await firstVisitFor(c) : null;
+	// With nothing at all to select, the page is the first visit's whatever the address says.
+	const selecting = selectRequested && firstVisit === null;
 
 	// Keep the active month in the picker even when it has no transactions.
 	if (filters.month !== "all" && !months.includes(filters.month)) {
@@ -148,7 +195,9 @@ async function renderList(
 	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	const focusCount =
-		focusId !== undefined && !rows.some((r) => r.id === focusId);
+		firstVisit === null &&
+		focusId !== undefined &&
+		!rows.some((r) => r.id === focusId);
 	const allCategorized =
 		filters.uncategorized &&
 		filters.q === "" &&
@@ -223,14 +272,17 @@ async function renderList(
 				>
 					Transactions
 				</h1>
-				{/* Swapped out-of-band on filter and page changes, so it keeps the current filters. */}
-				<Button
-					id="select-toggle"
-					kind="text"
-					href={selecting ? doneHref : selectHref}
-				>
-					{selecting ? "Done" : "Select"}
-				</Button>
+				{/* Swapped out-of-band on filter and page changes, so it keeps the current filters. Select
+				    waits for the first transaction (P40 A). */}
+				{firstVisit === null && (
+					<Button
+						id="select-toggle"
+						kind="text"
+						href={selecting ? doneHref : selectHref}
+					>
+						{selecting ? "Done" : "Select"}
+					</Button>
+				)}
 			</div>
 			{selecting && (
 				<p class="mt-2 text-sm text-muted">Tap rows to select them.</p>
@@ -253,110 +305,115 @@ async function renderList(
 			</div>
 			<HowLink section="transactions" />
 
-			{/* Works as a plain GET form; htmx re-requests the same URL and swaps in only the results. */}
-			<form
-				id="filters"
-				method="get"
-				action="/transactions"
-				class="mt-4 flex flex-col gap-3 lg:max-w-3xl"
-				hx-get="/transactions"
-				hx-trigger="input delay:300ms, submit"
-				// The newest request replaces any in flight, so results always match the controls.
-				hx-sync="replace"
-				hx-target="#results"
-				hx-select="#results > *"
-				hx-select-oob={`#needs-count:innerHTML, ${LIST_OOB}`}
-				hx-swap="innerHTML"
-				hx-push-url="true"
-				{...includeTicked}
-			>
-				{selecting && <input type="hidden" name="select" value="1" />}
-				<FormField id="q" label="Search transactions" hideLabel>
-					{(a11y) => (
-						<div class="relative">
-							<span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
-								<Icon name="search" class="size-5" />
+			{/* Works as a plain GET form; htmx re-requests the same URL and swaps in only the results.
+			    Like the result count and Select, it waits for the first transaction (P40 A). */}
+			{firstVisit === null && (
+				<form
+					id="filters"
+					method="get"
+					action="/transactions"
+					class="mt-4 flex flex-col gap-3 lg:max-w-3xl"
+					hx-get="/transactions"
+					hx-trigger="input delay:300ms, submit"
+					// The newest request replaces any in flight, so results always match the controls.
+					hx-sync="replace"
+					hx-target="#results"
+					hx-select="#results > *"
+					hx-select-oob={`#needs-count:innerHTML, ${LIST_OOB}`}
+					hx-swap="innerHTML"
+					hx-push-url="true"
+					{...includeTicked}
+				>
+					{selecting && <input type="hidden" name="select" value="1" />}
+					<FormField id="q" label="Search transactions" hideLabel>
+						{(a11y) => (
+							<div class="relative">
+								<span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
+									<Icon name="search" class="size-5" />
+								</span>
+								<input
+									id="q"
+									name="q"
+									type="search"
+									value={filters.q}
+									placeholder="Search transactions"
+									autocomplete="off"
+									class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
+									{...a11y}
+								/>
+							</div>
+						)}
+					</FormField>
+					<div class="flex flex-wrap gap-2">
+						<label for="month" class="sr-only">
+							Month
+						</label>
+						<select id="month" name="month" class={pill}>
+							{months.map((m) => (
+								<option value={m} selected={filters.month === m}>
+									{monthLabel(m, today)}
+								</option>
+							))}
+							<option value="all" selected={filters.month === "all"}>
+								All months
+							</option>
+						</select>
+						<label for="category" class="sr-only">
+							Category
+						</label>
+						<select id="category" name="category" class={pill}>
+							<option value="">All categories</option>
+							{categories.results.map((cat) => (
+								<option value={cat.id} selected={filters.category === cat.id}>
+									{cat.name}
+								</option>
+							))}
+						</select>
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<Chip
+							type="checkbox"
+							name="uncategorized"
+							value="1"
+							checked={filters.uncategorized}
+						>
+							{/* One span, so the chip's flex gap doesn't split the text around the count. */}
+							<span>
+								Needs category (<span id="needs-count">{needs}</span>)
 							</span>
-							<input
-								id="q"
-								name="q"
-								type="search"
-								value={filters.q}
-								placeholder="Search transactions"
-								autocomplete="off"
-								class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
-								{...a11y}
-							/>
-						</div>
-					)}
-				</FormField>
-				<div class="flex flex-wrap gap-2">
-					<label for="month" class="sr-only">
-						Month
-					</label>
-					<select id="month" name="month" class={pill}>
-						{months.map((m) => (
-							<option value={m} selected={filters.month === m}>
-								{monthLabel(m, today)}
-							</option>
-						))}
-						<option value="all" selected={filters.month === "all"}>
-							All months
-						</option>
-					</select>
-					<label for="category" class="sr-only">
-						Category
-					</label>
-					<select id="category" name="category" class={pill}>
-						<option value="">All categories</option>
-						{categories.results.map((cat) => (
-							<option value={cat.id} selected={filters.category === cat.id}>
-								{cat.name}
-							</option>
-						))}
-					</select>
-				</div>
-				<div class="flex flex-wrap gap-2">
-					<Chip
-						type="checkbox"
-						name="uncategorized"
-						value="1"
-						checked={filters.uncategorized}
-					>
-						{/* One span, so the chip's flex gap doesn't split the text around the count. */}
-						<span>
-							Needs category (<span id="needs-count">{needs}</span>)
-						</span>
-					</Chip>
-					<Chip
-						type="checkbox"
-						name="excluded"
-						value="1"
-						checked={filters.excluded}
-					>
-						Excluded
-					</Chip>
-				</div>
-				{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}
-				<noscript>
-					<Button type="submit" class="self-start px-4">
-						Apply filters
-					</Button>
-				</noscript>
-			</form>
+						</Chip>
+						<Chip
+							type="checkbox"
+							name="excluded"
+							value="1"
+							checked={filters.excluded}
+						>
+							Excluded
+						</Chip>
+					</div>
+					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}
+					<noscript>
+						<Button type="submit" class="self-start px-4">
+							Apply filters
+						</Button>
+					</noscript>
+				</form>
+			)}
 
 			<div id="page" class="lg:max-w-3xl">
 				{/* Stays in place while htmx replaces its text, so screen readers announce each new count (spec §8). */}
-				<p
-					id="result-count"
-					aria-live="polite"
-					tabindex={focusCount ? -1 : undefined}
-					autofocus={focusCount}
-					class="mt-4 text-sm text-muted"
-				>
-					{count}
-				</p>
-				{filters.uncategorized && (
+				{firstVisit === null && (
+					<p
+						id="result-count"
+						aria-live="polite"
+						tabindex={focusCount ? -1 : undefined}
+						autofocus={focusCount}
+						class="mt-4 text-sm text-muted"
+					>
+						{count}
+					</p>
+				)}
+				{firstVisit === null && filters.uncategorized && (
 					<Button kind="text" href="/transactions/organize">
 						Organize by merchant
 					</Button>
@@ -435,7 +492,9 @@ async function renderList(
 				) : (
 					<section id="results" class="mt-2" aria-label="Results">
 						{rows.length === 0 ? (
-							allCategorized ? (
+							firstVisit !== null ? (
+								<FirstVisitList state={firstVisit} />
+							) : allCategorized ? (
 								<EmptyState
 									kind="done"
 									sentence="Every transaction has a category."
@@ -1274,6 +1333,7 @@ transactions.post("/transactions/cash", async (c) => {
 				/>
 			),
 		});
+	const wasFirstVisit = (await firstVisitFor(c)) !== null;
 	// The same form posted again (a lost reply, a failed render) answers as a success and saves once.
 	await saveCash(
 		c.env.DB,
@@ -1290,7 +1350,11 @@ transactions.post("/transactions/cash", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filtersFrom(today, back));
+	// The pressed button leaves with the swap, so focus goes to the title instead.
+	if (wasFirstVisit) swapWholePage(c);
+	return renderList(c, today, filtersFrom(today, back), {
+		focusHeading: wasFirstVisit,
+	});
 });
 
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
@@ -1681,5 +1745,9 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filtersFrom(today, back));
+	const nowFirstVisit = (await firstVisitFor(c)) !== null;
+	if (nowFirstVisit) swapWholePage(c);
+	return renderList(c, today, filtersFrom(today, back), {
+		focusHeading: nowFirstVisit,
+	});
 });
