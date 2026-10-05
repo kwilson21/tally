@@ -1,5 +1,5 @@
 import type { BillStatus } from "../bills/status";
-import { dayLabel } from "../dates";
+import { dayLabel, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
@@ -11,6 +11,8 @@ export type BillRowData = {
 	status: BillStatus;
 	dueDate: string;
 	paidDate?: string | null;
+	/** A payment from this bill's merchant at another price, offered instead of matched (spec §8.5, P36 B). */
+	priceOffer?: { amountCents: number; date: string } | null;
 	icon: string;
 	color: string;
 };
@@ -56,7 +58,12 @@ function calendarDay(value: string) {
 	);
 }
 
-/** One bill: category, name, status sentence, and its amount. */
+/**
+ * One bill: category, name, status sentence, and its amount. When a payment from the same merchant came at
+ * another price, the status sentence is two caption lines instead (P36 B, decision 72): "Price changed?" in
+ * ink, then what was paid in muted words. The row grows a line, so they aren't truncated on a phone, and it
+ * keeps its place under its status heading and its own amount.
+ */
 export function BillRow({
 	bill,
 	today,
@@ -66,29 +73,37 @@ export function BillRow({
 	today: string;
 	href?: string;
 }) {
+	const offer = bill.priceOffer;
 	const content = (
 		<>
 			<CategoryIcon icon={bill.icon} color={bill.color} />
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg leading-6">{bill.name}</span>
-				<span class="block truncate leading-6 text-muted">
-					{billStatusLine(bill, today)}
-				</span>
+				{offer ? (
+					<>
+						<span class="block leading-6">Price changed?</span>
+						<span class="block leading-6 text-muted">
+							{`Paid ${formatCents(offer.amountCents)} on ${shortDay(offer.date, today)}`}
+						</span>
+					</>
+				) : (
+					<span class="block truncate leading-6 text-muted">
+						{billStatusLine(bill, today)}
+					</span>
+				)}
 			</span>
 			<span class="shrink-0 text-lg">{formatCents(bill.amountCents)}</span>
 		</>
 	);
+	const look = `flex min-h-16 items-center gap-4${offer ? " py-2" : ""}`;
 	return (
 		<li>
 			{href ? (
-				<a
-					href={href}
-					class="flex min-h-16 items-center gap-4 text-ink no-underline"
-				>
+				<a href={href} class={`${look} text-ink no-underline`}>
 					{content}
 				</a>
 			) : (
-				<span class="flex min-h-16 items-center gap-4">{content}</span>
+				<span class={look}>{content}</span>
 			)}
 		</li>
 	);
