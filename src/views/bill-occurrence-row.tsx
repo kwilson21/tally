@@ -88,6 +88,9 @@ function PriceChanged({
 					name="transaction_id"
 					value={offer.transactionId}
 				/>
+				{/* The two prices shown above, in whole cents: the server saves only while both still hold. */}
+				<input type="hidden" name="bill_cents" value={offer.billAmountCents} />
+				<input type="hidden" name="charge_cents" value={offer.amountCents} />
 				<Button type="submit" busyLabel="Updating…">
 					{`Update the bill to ${charged}`}
 				</Button>

@@ -20,7 +20,7 @@ import {
 	withinBillAmount,
 } from "./match";
 import type { BillStatus } from "./status";
-import { putBackInBudget, setBillAmountStatement } from "./write";
+import { putBackInBudget } from "./write";
 
 /** The payment on offer for a bill's occurrence. */
 export type PriceOffer = {
@@ -157,33 +157,62 @@ export async function loadPriceOffers(
 }
 
 /**
+ * What must still be true for an accept to go through, as one condition every statement of it shares:
+ * linking the payment to the occurrence would be new (nothing is linked to the payment, and nothing to
+ * the occurrence), the payment is still the charge the person saw, and the bill is still at the amount
+ * they saw. (The bill may also be at the charge already: the amount update below runs before the link and
+ * moves it there, and the link is then checked against the same condition.) Numbered parameters: ?1
+ * payment, ?2 bill, ?3 period, and the charge and the amount seen, named by `charge` and `seen`.
+ */
+const stillOffered = (charge: string, seen: string) =>
+	`NOT EXISTS (SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
+	   AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3)))
+	 AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ${charge})
+	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ${seen}))`;
+
+/**
  * A person says yes: the payment pays the occurrence (`matched_by = user`, and an excluded payment is put
- * back in the budget) and the bill's amount becomes what was charged, in one batch. False, with nothing
- * written, when the occurrence or the payment was taken since the offer was drawn.
+ * back in the budget) and the bill's amount becomes what was charged, in one batch. `seenBillCents` is the
+ * bill's amount on the page they answered, and the offer's amount is the charge on it.
+ *
+ * All three statements carry the same condition (`stillOffered`), checked as the batch runs, so they
+ * write together or not at all: if another tab linked this payment or this month in the meantime, or the
+ * bill was edited, or the charge corrected, nothing is written and this returns false. The amount update
+ * goes before the link on purpose, since it is the one that has to see the amount as it was.
  */
 export async function acceptPriceOffer(
 	db: D1Database,
 	billId: number,
 	period: string,
 	offer: PriceOffer,
+	seenBillCents: number,
 	actor: string,
 ): Promise<boolean> {
+	const binds = [
+		offer.transactionId,
+		billId,
+		period,
+		offer.amountCents,
+		seenBillCents,
+	];
 	const results = await db.batch([
-		putBackInBudget(db, billId, period, offer.transactionId, actor),
+		putBackInBudget(db, billId, period, offer.transactionId, actor, {
+			sql: stillOffered("?5", "?6"),
+			binds: [offer.amountCents, seenBillCents],
+		}),
 		db
 			.prepare(
-				"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','linked')",
+				`UPDATE bills SET amount_cents = ?4 WHERE id = ?2 AND ${stillOffered("?4", "?5")}`,
 			)
-			.bind(billId, period, offer.transactionId),
-		setBillAmountStatement(
-			db,
-			billId,
-			offer.amountCents,
-			period,
-			offer.transactionId,
-		),
+			.bind(...binds),
+		db
+			.prepare(
+				`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
+				 SELECT ?2, ?3, ?1, 'user', 'linked' WHERE ${stillOffered("?4", "?5")}`,
+			)
+			.bind(...binds),
 	]);
-	return (results[1]?.meta.changes ?? 0) > 0;
+	return (results[2]?.meta.changes ?? 0) > 0;
 }
 
 /**

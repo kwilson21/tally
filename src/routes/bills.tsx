@@ -1255,12 +1255,17 @@ async function currentOffer(
 
 // "Price changed?" (P36 B, decision 72): a payment from the bill's merchant at another price is offered
 // on the bill's page. Yes links it and sets the bill's amount to what was charged; "Not this bill"
-// remembers the payment for that month. Both answer for the very payment the page showed, so a page
-// that has gone stale can't change the bill to a different amount.
+// remembers the payment for that month. Both answer for the very payment the page showed, and Yes also
+// for the two prices it showed (the bill's amount and the charge's, in whole cents): once either has
+// changed, a page that has gone stale saves nothing and the person is told, so no one is made to accept
+// a price they didn't see.
+const wholeCents = (value: unknown) =>
+	typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
 async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 	const id = Number(c.req.param("id"));
 	const period = c.req.param("period");
-	const transaction = Number((await c.req.parseBody()).transaction_id);
+	const form = await c.req.parseBody();
+	const transaction = Number(form.transaction_id);
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
 	const today = await householdToday(c.env.DB);
@@ -1277,7 +1282,12 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 	if (!offer || offer.period !== period || offer.transactionId !== transaction)
 		return gone();
 	if (verb === "accept") {
-		if (!(await acceptPriceOffer(c.env.DB, id, period, offer, actor(c))))
+		const seenBill = wholeCents(form.bill_cents);
+		if (
+			seenBill !== bill.amount_cents ||
+			wholeCents(form.charge_cents) !== offer.amountCents ||
+			!(await acceptPriceOffer(c.env.DB, id, period, offer, seenBill, actor(c)))
+		)
 			return gone();
 	} else {
 		await dismissPriceOffer(c.env.DB, id, period, transaction);

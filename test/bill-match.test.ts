@@ -114,6 +114,31 @@ describe("bill payment matching", () => {
 		]);
 	});
 
+	it("never matches a transaction flagged as income, excluded or not, and leaves it as it was", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			// A positive amount marked income by a person or Jev, once excluded and once not, beside an
+			// ordinary excluded payment that does match.
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,flag_income,income_source,excluded,excluded_source) VALUES(60,1,'2026-05-10',10000,'LANDLORD',1,'user',1,'user'),(61,1,'2026-06-10',10000,'LANDLORD',1,'jev',0,NULL),(62,1,'2026-07-10',10000,'LANDLORD',0,NULL,1,'jev')",
+			),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-07-12")).toBe(1);
+		const links = await env.DB.prepare(
+			"SELECT period,transaction_id FROM bill_payments WHERE status='linked'",
+		).all();
+		expect(links.results).toEqual([{ period: "2026-07", transaction_id: 62 }]);
+		const rows = await env.DB.prepare(
+			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
+		).all();
+		expect(rows.results).toEqual([
+			{ id: 60, excluded: 1, excluded_source: "user" },
+			{ id: 61, excluded: 0, excluded_source: null },
+			{ id: 62, excluded: 0, excluded_source: "user" },
+		]);
+	});
+
 	it("leaves a payment excluded when no bill takes it", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),

@@ -117,6 +117,10 @@ export async function updateBill(
  * explains why. A split is one bank transaction (the edit panel excludes it whole), so its parent and
  * parts come back together. `actor` is who is linking by hand; the matcher passes null and leaves
  * `updated_by` as it was.
+ *
+ * `also` is a further condition for a caller whose link is conditional too (accepting a price change,
+ * which must put nothing back when the offer has gone stale). Its SQL may use ?1 to ?3 as above and
+ * numbers its own parameters from ?5, after `actor` (?4); its `binds` are those values, in order.
  */
 export function putBackInBudget(
 	db: D1Database,
@@ -124,6 +128,7 @@ export function putBackInBudget(
 	period: string,
 	transactionId: number,
 	actor: string | null,
+	also?: { sql: string; binds: (string | number)[] },
 ): D1PreparedStatement {
 	return db
 		.prepare(
@@ -137,31 +142,9 @@ export function putBackInBudget(
 			 AND NOT EXISTS (
 				SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
 				  AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3))
-			 )`,
+			 )${also ? ` AND (${also.sql})` : ""}`,
 		)
-		.bind(transactionId, billId, period, actor);
-}
-
-/**
- * Changes only a bill's amount: the plain edit the bill form already does (amount history comes with
- * Phase 5). It applies only while `transactionId` is the payment linked to `period`, so an accepted
- * price change moves the amount only together with its link, in the same batch.
- */
-export function setBillAmountStatement(
-	db: D1Database,
-	billId: number,
-	cents: number,
-	period: string,
-	transactionId: number,
-): D1PreparedStatement {
-	return db
-		.prepare(
-			`UPDATE bills SET amount_cents = ?1
-			 WHERE id = ?2 AND EXISTS (
-				SELECT 1 FROM bill_payments WHERE bill_id = ?2 AND period = ?3 AND transaction_id = ?4 AND status = 'linked'
-			 )`,
-		)
-		.bind(cents, billId, period, transactionId);
+		.bind(transactionId, billId, period, actor, ...(also?.binds ?? []));
 }
 
 /**

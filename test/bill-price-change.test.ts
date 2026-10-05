@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { BIG_BILL_CENTS } from "../src/bills/guards";
 import { matchBillPayments } from "../src/bills/match";
 import {
+	acceptPriceOffer,
 	findPriceOffer,
 	loadPriceOffers,
 	pickPriceOffer,
@@ -166,10 +167,16 @@ describe("bill matching and price changes", () => {
 	const rows = async (table: string, where = "1=1") =>
 		(await env.DB.prepare(`SELECT * FROM ${table} WHERE ${where}`).all())
 			.results;
-	const accept = (transaction: number, htmx = true) =>
+	/** What the page showed, in integer cents: the bill's amount and the charge's (a payment at a new price: $100.00, $115.00). */
+	const SEEN = { bill_cents: "10000", charge_cents: "11500" };
+	const accept = (
+		transaction: number,
+		htmx = true,
+		seen: Record<string, string> = SEEN,
+	) =>
 		post(
 			`/bills/1/occurrences/${period}/price/accept`,
-			{ transaction_id: String(transaction) },
+			{ transaction_id: String(transaction), ...seen },
 			htmx,
 		);
 	const dismiss = (transaction: number, htmx = true) =>
@@ -417,6 +424,7 @@ describe("bill matching and price changes", () => {
 			expect(page).toContain(`/bills/1/occurrences/${year}/price/accept`);
 			const res = await post(`/bills/1/occurrences/${year}/price/accept`, {
 				transaction_id: "1",
+				...SEEN,
 			});
 			expect(res.status).toBe(200);
 			expect(await rows("bill_payments", `period='${year}'`)).toHaveLength(1);
@@ -551,9 +559,159 @@ describe("bill matching and price changes", () => {
 			const res = await post(`/bills/1/occurrences/${period}/price/accept`, {
 				transaction_id: "1",
 				amount: "1.00",
+				...SEEN,
 			});
 			expect(res.status).toBe(200);
 			expect((await billRow())?.amount_cents).toBe(11500);
+		});
+
+		describe("a page that has gone stale", () => {
+			const untouched = async () => {
+				expect(await rows("bill_payments")).toEqual([]);
+				expect(
+					await rows(
+						"transactions",
+						"id=1 AND excluded=1 AND excluded_source='jev'",
+					),
+				).toHaveLength(1);
+			};
+			beforeEach(() =>
+				env.DB.prepare(
+					"UPDATE transactions SET excluded=1,excluded_source='jev' WHERE id=1",
+				).run(),
+			);
+
+			it("can't save a price over a bill that was edited after the offer showed", async () => {
+				// The page showed $100.00 against $115.00; the bill became $200.00 since. $115.00 is still far
+				// enough from it to be on offer, but the person never saw that.
+				await env.DB.prepare("UPDATE bills SET amount_cents=20000").run();
+				expect(await get("/bills/1")).toContain("not $200.00.");
+				const res = await accept(1);
+				const html = await res.text();
+				expect(html).toContain('role="alert"');
+				expect(html).toContain("isn&#39;t on offer");
+				expect(res.headers.get("HX-Trigger")).toBeNull();
+				expect((await billRow())?.amount_cents).toBe(20000);
+				await untouched();
+			});
+
+			it("can't save a charge that was corrected after the offer showed", async () => {
+				await env.DB.prepare(
+					"UPDATE transactions SET amount_cents=12000 WHERE id=1",
+				).run();
+				const res = await accept(1);
+				expect(await res.text()).toContain("isn&#39;t on offer");
+				expect((await billRow())?.amount_cents).toBe(10000);
+				await untouched();
+				// What the page shows now, $120.00, is what it saves.
+				const fresh = await accept(1, true, {
+					bill_cents: "10000",
+					charge_cents: "12000",
+				});
+				expect(fresh.headers.get("HX-Trigger")).toContain("Bill updated");
+				expect((await billRow())?.amount_cents).toBe(12000);
+			});
+
+			it("needs the prices it was drawn with, and takes only whole cents", async () => {
+				const stale: Record<string, string>[] = [
+					{},
+					{ bill_cents: "10000" },
+					{ charge_cents: "11500" },
+					{ bill_cents: "100.00", charge_cents: "115.00" },
+					{ bill_cents: "10000.5", charge_cents: "11500" },
+					{ bill_cents: "", charge_cents: "" },
+				];
+				for (const seen of stale) {
+					const res = await accept(1, true, seen);
+					expect(await res.text()).toContain("isn&#39;t on offer");
+				}
+				expect((await billRow())?.amount_cents).toBe(10000);
+				await untouched();
+			});
+
+			it("draws the prices into the form, as integer cents", async () => {
+				const page = await get("/bills/1");
+				expect(page).toContain('name="bill_cents" value="10000"');
+				expect(page).toContain('name="charge_cents" value="11500"');
+			});
+		});
+
+		describe("accepting when the offer goes stale between the check and the write", () => {
+			const offer = {
+				transactionId: 1,
+				date: paidOn,
+				amountCents: 11500,
+				merchant: "Netflix",
+			};
+			const accepts = () =>
+				acceptPriceOffer(env.DB, 1, period, offer, 10000, "demo");
+			const unchanged = async (excluded = 1) => {
+				expect((await billRow())?.amount_cents).toBe(10000);
+				expect(
+					await rows("transactions", `id=1 AND excluded=${excluded}`),
+				).toHaveLength(1);
+			};
+			beforeEach(() =>
+				env.DB.prepare(
+					"UPDATE transactions SET excluded=1,excluded_source='jev' WHERE id=1",
+				).run(),
+			);
+
+			it("links, un-excludes and updates the amount together when it still holds", async () => {
+				expect(await accepts()).toBe(true);
+				expect(await rows("bill_payments", "status='linked'")).toHaveLength(1);
+				expect((await billRow())?.amount_cents).toBe(11500);
+				expect(
+					await rows(
+						"transactions",
+						"id=1 AND excluded=0 AND excluded_source='user'",
+					),
+				).toHaveLength(1);
+			});
+
+			it("changes nothing when another tab already linked this payment to this month", async () => {
+				await env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,?,1,'user','linked')",
+				)
+					.bind(period)
+					.run();
+				expect(await accepts()).toBe(false);
+				await unchanged();
+				expect(await rows("bill_payments")).toHaveLength(1);
+			});
+
+			it("changes nothing when another payment already pays this month", async () => {
+				await env.DB.batch([
+					env.DB.prepare(
+						"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(2,1,?,10000,'NETFLIX.COM')",
+					).bind(paidOn),
+					env.DB.prepare(
+						"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,?,2,'user','linked')",
+					).bind(period),
+				]);
+				expect(await accepts()).toBe(false);
+				await unchanged();
+			});
+
+			it("changes nothing when the bill's amount was edited, or the charge corrected", async () => {
+				await env.DB.prepare("UPDATE bills SET amount_cents=20000").run();
+				expect(await accepts()).toBe(false);
+				expect((await billRow())?.amount_cents).toBe(20000);
+				expect(await rows("bill_payments")).toEqual([]);
+				expect(await rows("transactions", "id=1 AND excluded=1")).toHaveLength(
+					1,
+				);
+
+				await env.DB.batch([
+					env.DB.prepare("UPDATE bills SET amount_cents=10000"),
+					env.DB.prepare(
+						"UPDATE transactions SET amount_cents=12000 WHERE id=1",
+					),
+				]);
+				expect(await accepts()).toBe(false);
+				await unchanged();
+				expect(await rows("bill_payments")).toEqual([]);
+			});
 		});
 	});
 

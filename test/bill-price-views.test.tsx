@@ -117,6 +117,11 @@ describe("BillOccurrenceRow with a price change", () => {
 			`method="post" action="${dismiss}" hx-post="${dismiss}"`,
 		);
 		expect(html.match(/name="transaction_id" value="7"/g)).toHaveLength(2);
+		// Yes carries the prices the person saw, in integer cents, so a stale page can't save others.
+		const yes = html.slice(html.indexOf(accept), html.indexOf(dismiss));
+		expect(yes).toContain('name="bill_cents" value="1549"');
+		expect(yes).toContain('name="charge_cents" value="1799"');
+		expect(html.match(/name="bill_cents"/g)).toHaveLength(1);
 		expect(html).toContain("Update the bill to $17.99");
 		expect(html).toMatch(/bg-ink[^>]*>[\s\S]*Update the bill to \$17\.99/);
 		expect(html).toMatch(/text-accent[^>]*>\s*Not this bill\s*</);
