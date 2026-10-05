@@ -428,6 +428,64 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 		).rejects.toThrow();
 	});
 
+	it("makes merchants unique on the text and the flag together, so a bank-text row and a key row can share a text", async () => {
+		await runMigration();
+
+		// The primary key is (raw_name, raw_text), in that order.
+		expect(
+			await rows(
+				`SELECT name, pk FROM pragma_table_info('${MERCHANTS}') WHERE pk > 0 ORDER BY pk`,
+			),
+		).toEqual([
+			{ name: "raw_name", pk: 1 },
+			{ name: "raw_text", pk: 2 },
+		]);
+
+		// "COMCAST" was saved before the migration, as bank text (1). A key row with the same text is a second row.
+		await db
+			.prepare(
+				`INSERT INTO ${MERCHANTS} (raw_name, display_name) VALUES ('COMCAST', 'The key row')`,
+			)
+			.run();
+		expect(
+			await rows(
+				`SELECT raw_text, display_name FROM ${MERCHANTS} WHERE raw_name = 'COMCAST' ORDER BY raw_text`,
+			),
+		).toEqual([
+			{ raw_text: 0, display_name: "The key row" },
+			{ raw_text: 1, display_name: "Comcast Cable" },
+		]);
+
+		// Each kind still holds one row per text.
+		await expect(
+			db
+				.prepare(`INSERT INTO ${MERCHANTS} (raw_name) VALUES ('COMCAST')`)
+				.run(),
+		).rejects.toThrow();
+		await expect(
+			db
+				.prepare(
+					`INSERT INTO ${MERCHANTS} (raw_name, raw_text) VALUES ('COMCAST', 1)`,
+				)
+				.run(),
+		).rejects.toThrow();
+
+		// An upsert on the pair updates the key row and leaves the bank-text row alone.
+		await db
+			.prepare(
+				`INSERT INTO ${MERCHANTS} (raw_name, display_name) VALUES ('COMCAST', 'Renamed') ON CONFLICT(raw_name, raw_text) DO UPDATE SET display_name = excluded.display_name`,
+			)
+			.run();
+		expect(
+			await rows(
+				`SELECT raw_text, display_name FROM ${MERCHANTS} WHERE raw_name = 'COMCAST' ORDER BY raw_text`,
+			),
+		).toEqual([
+			{ raw_text: 0, display_name: "Renamed" },
+			{ raw_text: 1, display_name: "Comcast Cable" },
+		]);
+	});
+
 	it("keeps every index, unique constraint and foreign key, still pointing at the renamed table", async () => {
 		const indexesBefore = await indexes(TX);
 		const billIndexesBefore = await indexes(BP);

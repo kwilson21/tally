@@ -12,7 +12,7 @@ import {
 	FOLLOWS_PURCHASE,
 } from "./counted-month";
 import {
-	KEY_ROW_FLAG_ON_CONFLICT,
+	bankTextRowKeys,
 	merchantColumnSql,
 	merchantKeySql,
 	sameMerchantSql,
@@ -318,6 +318,14 @@ export async function saveEdit(
 			excluded: number;
 		}>();
 	if (!current) throw new Error(`No transaction ${id}`);
+	// A merchant's rule and name are saved on its key row, except where the key is only ever bank text from
+	// before Plaid's merchant name and a flagged row governs it: that row is edited, so every charge with
+	// that bank text follows, with or without a Plaid name. A flagged row is never otherwise written.
+	const rowFlag = (await bankTextRowKeys(db, [current.merchantKey])).has(
+		current.merchantKey,
+	)
+		? 1
+		: 0;
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
@@ -390,10 +398,10 @@ export async function saveEdit(
 					),
 		db
 			.prepare(
-				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
-				ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name, ${KEY_ROW_FLAG_ON_CONFLICT}`,
+				`INSERT INTO merchants (raw_name, raw_text, display_name) VALUES (?, ?, ?)
+				ON CONFLICT(raw_name, raw_text) DO UPDATE SET display_name = excluded.display_name`,
 			)
-			.bind(current.merchantKey, edit.displayName),
+			.bind(current.merchantKey, rowFlag, edit.displayName),
 	];
 	// An explicit human link is also a review of this credit as a refund. Keep ownership on a
 	// split parent so split children can inherit the reviewed link as one bank transaction.
@@ -444,14 +452,14 @@ export async function saveEdit(
 		statements.push(
 			db
 				.prepare(
-					"UPDATE merchants SET default_category_id = ? WHERE raw_name = ?",
+					"UPDATE merchants SET default_category_id = ? WHERE raw_name = ? AND raw_text = ?",
 				)
-				.bind(edit.categoryId, current.merchantKey),
+				.bind(edit.categoryId, current.merchantKey, rowFlag),
 			db
 				.prepare(
 					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
 						updated_by = ?, updated_at = datetime('now')
-					WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
+					WHERE ${rowFlag === 1 ? "raw_name" : merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
 				)
 				.bind(edit.categoryId, actor, current.merchantKey, id),
 		);

@@ -1362,7 +1362,97 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 			).toEqual(["COMCAST CABLE"]);
 		});
 
-		it("is hidden from finding bills by a Not a bill mark saved under its own key", async () => {
+		const merchantRows = async () =>
+			(
+				await db
+					.prepare(
+						"SELECT raw_name, raw_text, display_name, default_category_id AS category, not_a_bill FROM merchants ORDER BY raw_name, raw_text",
+					)
+					.all()
+			).results;
+
+		it("keeps a legacy row and gives the merchant name a row of its own when a person renames it", async () => {
+			await saveEdit(db, 8903, edit({ displayName: "XYZ Payments" }), "me");
+
+			// Two rows with one text: the legacy bank text's, untouched, and the merchant name's.
+			expect(await merchantRows()).toEqual([
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 0,
+					display_name: "XYZ Payments",
+					category: null,
+					not_a_bill: 0,
+				},
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 1,
+					display_name: "Comcast Cable",
+					category: 5,
+					not_a_bill: 0,
+				},
+			]);
+			expect((await getTransaction(db, 8903))?.displayName).toBe(
+				"XYZ Payments",
+			);
+			// The real bank-text charges, named Comcast by Plaid, keep the legacy row's name and rule.
+			expect((await getTransaction(db, 8901))?.displayName).toBe(
+				"Comcast Cable",
+			);
+			await applyMerchantRules(db);
+			expect(await row(8901)).toMatchObject({
+				category_id: 5,
+				category_source: "merchant_rule",
+			});
+		});
+
+		it("keeps a legacy row's rule and gives the merchant name a rule of its own when a person sets one", async () => {
+			await saveEdit(
+				db,
+				8903,
+				edit({ categoryId: GAS, alwaysForMerchant: true }),
+				"me",
+			);
+
+			expect(await merchantRows()).toMatchObject([
+				{ raw_name: "COMCAST CABLE", raw_text: 0, category: GAS },
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 1,
+					category: 5,
+					display_name: "Comcast Cable",
+				},
+			]);
+			expect(await row(8903)).toMatchObject({
+				category_id: GAS,
+				category_source: "user",
+			});
+			await applyMerchantRules(db);
+			expect(await row(8901)).toMatchObject({
+				category_id: 5,
+				category_source: "merchant_rule",
+			});
+		});
+
+		it("saves Organize's rule for the merchant name under its own row, leaving the legacy row's alone", async () => {
+			await saveOrganizeGroup(db, ["COMCAST CABLE"], GAS, "XYZ Payments", "me");
+
+			expect(await merchantRows()).toMatchObject([
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 0,
+					category: GAS,
+					display_name: "XYZ Payments",
+				},
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 1,
+					category: 5,
+					display_name: "Comcast Cable",
+				},
+			]);
+		});
+
+		it("is hidden from finding bills by a Not a bill mark saved under its own key, and the legacy row is left alone", async () => {
 			await insert(
 				{
 					id: 8904,
@@ -1379,8 +1469,6 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 					merchant: "COMCAST CABLE",
 				},
 			);
-			// The old row is flagged, so a person's choice about the merchant named "COMCAST CABLE"
-			// takes over that row, which is then the merchant name's, not the bank text's.
 			const res = await exports.default.fetch(
 				`${BASE}/bills/find/${encodeURIComponent("COMCAST CABLE")}/dismiss`,
 				{
@@ -1395,23 +1483,122 @@ describe("the raw-name fallback never overrides two known merchants", () => {
 
 			expect(res.status).toBe(200);
 			expect(await loadBillSuggestions(db, TODAY)).toEqual([]);
+			expect(await merchantRows()).toMatchObject([
+				{ raw_name: "COMCAST CABLE", raw_text: 0, not_a_bill: 1 },
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 1,
+					not_a_bill: 0,
+					display_name: "Comcast Cable",
+					category: 5,
+				},
+			]);
+		});
+	});
+
+	describe("a legacy row, edited through a charge only its bank text reaches", () => {
+		beforeEach(async () => {
+			await db.batch([
+				db.prepare(
+					"INSERT INTO merchants (raw_name, display_name, default_category_id, raw_text) VALUES ('COMCAST CABLE', 'Comcast Cable', 5, 1)",
+				),
+			]);
+			await insert(
+				{
+					id: 8911,
+					date: "2026-09-10",
+					cents: 8000,
+					raw: "COMCAST CABLE",
+					merchant: "Comcast",
+				},
+				{ id: 8912, date: "2026-08-10", cents: 8000, raw: "COMCAST CABLE" },
+			);
+			await applyMerchantRules(db);
 		});
 
-		it("takes a person's rename for the merchant name over the flagged row, so it applies to the charge", async () => {
-			await saveEdit(db, 8903, edit({ displayName: "XYZ Payments" }), "me");
-
-			expect((await getTransaction(db, 8903))?.displayName).toBe(
-				"XYZ Payments",
+		it("updates that legacy row in place, for the charges with and without Plaid's name alike", async () => {
+			await saveEdit(
+				db,
+				8912,
+				edit({
+					categoryId: GAS,
+					alwaysForMerchant: true,
+					displayName: "Comcast Cable Co",
+				}),
+				"me",
 			);
+
 			expect(
 				(
 					await db
 						.prepare(
-							"SELECT raw_text FROM merchants WHERE raw_name = 'COMCAST CABLE'",
+							"SELECT raw_name, raw_text, display_name, default_category_id AS category FROM merchants",
 						)
-						.first()
-				)?.raw_text,
-			).toBe(0);
+						.all()
+				).results,
+			).toEqual([
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 1,
+					display_name: "Comcast Cable Co",
+					category: GAS,
+				},
+			]);
+			expect((await getTransaction(db, 8911))?.displayName).toBe(
+				"Comcast Cable Co",
+			);
+			// The charge Plaid named Comcast follows the rule it was sorted by, now changed.
+			expect(await row(8911)).toMatchObject({
+				category_id: GAS,
+				category_source: "merchant_rule",
+			});
+			expect(await row(8912)).toMatchObject({
+				category_id: GAS,
+				category_source: "user",
+			});
+		});
+
+		it("updates it in place from Organize too, and from Not a bill", async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = NULL, category_source = NULL",
+				)
+				.run();
+			await saveOrganizeGroup(db, ["COMCAST CABLE"], GAS, "Cable", "me");
+			await insert(
+				{ id: 8913, date: "2026-07-10", cents: 8000, raw: "COMCAST CABLE" },
+				{ id: 8914, date: "2026-09-12", cents: 8000, raw: "COMCAST CABLE" },
+			);
+			const res = await exports.default.fetch(
+				`${BASE}/bills/find/${encodeURIComponent("COMCAST CABLE")}/dismiss`,
+				{
+					method: "POST",
+					headers: {
+						Origin: BASE,
+						"HX-Request": "true",
+						"content-type": "application/x-www-form-urlencoded",
+					},
+				},
+			);
+
+			expect(res.status).toBe(200);
+			expect(
+				(
+					await db
+						.prepare(
+							"SELECT raw_name, raw_text, display_name, default_category_id AS category, not_a_bill FROM merchants",
+						)
+						.all()
+				).results,
+			).toEqual([
+				{
+					raw_name: "COMCAST CABLE",
+					raw_text: 1,
+					display_name: "Cable",
+					category: GAS,
+					not_a_bill: 1,
+				},
+			]);
 		});
 	});
 

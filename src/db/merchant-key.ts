@@ -53,13 +53,32 @@ export function merchantColumnOfSql(
 }
 
 /**
- * The `raw_text` assignment for an upsert under a key (`ON CONFLICT(raw_name) DO UPDATE SET ...`). A person's
- * choice about a merchant name takes over a flagged row whose text is also some transaction's merchant name,
- * so the choice applies to that merchant's charges (flag 0); any other flagged row keeps its flag and keeps
- * serving the bank texts it was saved under.
+ * Which of these keys a person's write goes to the flagged bank-text row for: those with a flagged row
+ * that no transaction has as its Plaid merchant name, so the text is only ever bank text, and the row is
+ * the one that already governs those charges. Every other key's write goes to its key row (flag 0), which
+ * shares the text with a flagged row when an unrelated merchant name equals an old bank text, and a key
+ * row's write never touches a flagged row. Merchant rows are written only through this choice.
  */
-export const KEY_ROW_FLAG_ON_CONFLICT =
-	"raw_text = CASE WHEN EXISTS (SELECT 1 FROM transactions WHERE merchant_name = merchants.raw_name) THEN 0 ELSE merchants.raw_text END";
+export async function bankTextRowKeys(
+	db: D1Database,
+	keys: string[],
+): Promise<Set<string>> {
+	const found = new Set<string>();
+	const unique = [...new Set(keys)];
+	for (let i = 0; i < unique.length; i += 90) {
+		const chunk = unique.slice(i, i + 90);
+		const { results } = await db
+			.prepare(
+				`SELECT m.raw_name AS key FROM merchants m
+				 WHERE m.raw_text = 1 AND m.raw_name IN (${chunk.map(() => "?").join(", ")})
+				   AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.merchant_name = m.raw_name)`,
+			)
+			.bind(...chunk)
+			.all<{ key: string }>();
+		for (const row of results) found.add(row.key);
+	}
+	return found;
+}
 
 /** `merchantColumnOfSql` for a transaction (see `merchantKeySql` for `alias`). */
 export function merchantColumnSql(

@@ -6,7 +6,8 @@
 --   merchants.raw_text and bills.merchant_raw_text say that a row was saved under the bank's raw text,
 --   before a merchant key existed. Every row that exists now was, so each starts at 1, and a row written
 --   from now on is a key and starts at 0. Matching reads the flag, so old rows keep working without
---   guessing which ones are old (spec 6.1).
+--   guessing which ones are old (spec 6.1). merchants is unique on (raw_name, raw_text), so a bank-text
+--   row and a key row can share a text.
 --
 -- SQLite can't change a CHECK, so `transactions` is rebuilt, keeping every row and id, column, index,
 -- unique constraint and foreign key. Foreign keys are enforced and can't be switched off in D1, and
@@ -96,8 +97,26 @@ DROP TABLE bill_payments_keep;
 CREATE UNIQUE INDEX bill_payments_one_per_period ON bill_payments(bill_id, period) WHERE status = 'linked';
 CREATE UNIQUE INDEX bill_payments_one_bill_per_transaction ON bill_payments(transaction_id) WHERE status = 'linked';
 
--- Every merchants row and bill saved before this migration is keyed by the bank's raw text.
-ALTER TABLE merchants ADD COLUMN raw_text INTEGER NOT NULL DEFAULT 0 CHECK (raw_text IN (0, 1));
-UPDATE merchants SET raw_text = 1;
+-- Every bill saved before this migration is keyed by the bank's raw text.
 ALTER TABLE bills ADD COLUMN merchant_raw_text INTEGER NOT NULL DEFAULT 0 CHECK (merchant_raw_text IN (0, 1));
 UPDATE bills SET merchant_raw_text = 1;
+
+-- Every merchants row saved before this migration is keyed by the bank's raw text, so each is copied with
+-- the flag at 1. A bank-text row and a key row can share a text (an unrelated merchant name can equal an
+-- old bank text), so the table is unique on the text and the flag together, which needs a rebuild.
+-- Nothing points at merchants, so nothing else is touched. The categories link is kept.
+CREATE TABLE merchants_new (
+  raw_name TEXT NOT NULL,
+  suggested_name TEXT,
+  display_name TEXT,
+  default_category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+  suggestion_status TEXT NOT NULL DEFAULT 'none'
+    CHECK (suggestion_status IN ('none', 'pending', 'accepted', 'rejected')),
+  not_a_bill INTEGER NOT NULL DEFAULT 0 CHECK (not_a_bill IN (0, 1)),
+  raw_text INTEGER NOT NULL DEFAULT 0 CHECK (raw_text IN (0, 1)),
+  PRIMARY KEY (raw_name, raw_text)
+);
+INSERT INTO merchants_new (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill, raw_text)
+SELECT raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill, 1 FROM merchants;
+DROP TABLE merchants;
+ALTER TABLE merchants_new RENAME TO merchants;

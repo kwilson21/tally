@@ -20,8 +20,8 @@ import {
 } from "../bills/write";
 import { householdToday, ordinal } from "../dates";
 import {
+	bankTextRowKeys,
 	isMerchantTextSql,
-	KEY_ROW_FLAG_ON_CONFLICT,
 	merchantColumnSql,
 	merchantTextArgs,
 } from "../db/merchant-key";
@@ -552,10 +552,13 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
 	if (dismissedIndex < 0) return c.notFound();
 	const result = await c.env.DB.prepare(
-		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
-		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1, ${KEY_ROW_FLAG_ON_CONFLICT}`,
+		`INSERT INTO merchants(raw_name,raw_text,not_a_bill) VALUES(?,?,1)
+		 ON CONFLICT(raw_name,raw_text) DO UPDATE SET not_a_bill=1`,
 	)
-		.bind(merchant)
+		.bind(
+			merchant,
+			(await bankTextRowKeys(c.env.DB, [merchant])).has(merchant) ? 1 : 0,
+		)
 		.run();
 	if (!result.meta.changes) return c.notFound();
 	const headers = {

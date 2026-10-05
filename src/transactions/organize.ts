@@ -4,7 +4,7 @@ import {
 	FOLLOWS_PURCHASE,
 } from "../db/counted-month";
 import {
-	KEY_ROW_FLAG_ON_CONFLICT,
+	bankTextRowKeys,
 	keyRowColumnSql,
 	merchantKeySql,
 	rawTextRowColumnSql,
@@ -160,16 +160,23 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
+	// A key that is only bank text takes its flagged row, anything else its key row (see bankTextRowKeys).
+	const bankText = await bankTextRowKeys(db, names);
 	for (const merchantKey of names) {
 		statements.push(
 			db
 				.prepare(
-					`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)
-					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
-						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
-						${KEY_ROW_FLAG_ON_CONFLICT}`,
+					`INSERT INTO merchants (raw_name, raw_text, display_name, default_category_id) VALUES (?, ?, ?, ?)
+					ON CONFLICT(raw_name, raw_text) DO UPDATE SET default_category_id = excluded.default_category_id,
+						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END`,
 				)
-				.bind(merchantKey, displayName, categoryId, displayName),
+				.bind(
+					merchantKey,
+					bankText.has(merchantKey) ? 1 : 0,
+					displayName,
+					categoryId,
+					displayName,
+				),
 		);
 	}
 	await db.batch(statements);
