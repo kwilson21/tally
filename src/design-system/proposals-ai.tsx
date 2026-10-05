@@ -938,7 +938,7 @@ function ViewLinks({ current }: { current: "made" | "bank" }) {
 				aria-current={current === "made" ? "page" : undefined}
 				class={current === "made" ? here : link}
 			>
-				What Tally made of it
+				Tidied by Tally
 			</a>
 			<span aria-hidden="true" class="text-muted">
 				·
@@ -948,7 +948,7 @@ function ViewLinks({ current }: { current: "made" | "bank" }) {
 				aria-current={current === "bank" ? "page" : undefined}
 				class={current === "bank" ? here : link}
 			>
-				As the bank sends it
+				Straight from the bank
 			</a>
 		</nav>
 	);
@@ -1007,11 +1007,11 @@ const viewSideBySide = (
 		</p>
 		<div class="mt-4 grid grid-cols-2 gap-6">
 			<section>
-				<h2 class="text-sm text-muted">As the bank sends it</h2>
+				<h2 class="text-sm text-muted">Straight from the bank</h2>
 				{BANK}
 			</section>
 			<section>
-				<h2 class="text-sm text-muted">What Tally made of it</h2>
+				<h2 class="text-sm text-muted">Tidied by Tally</h2>
 				{MADE}
 			</section>
 		</div>
@@ -1221,7 +1221,7 @@ export function AiProposals() {
 						{
 							name: "Option A · Two links under the title",
 							picked: true,
-							note: "“What Tally made of it · As the bank sends it”: two 44px links, the current one in ink; the list swaps on a page with ?raw=1.",
+							note: "“Tidied by Tally · Straight from the bank”: two 44px links, the current one in ink; the list swaps on a page with ?raw=1.",
 							tradeoff: "two more links under the title.",
 							recommended:
 								"plain words, and it's a link, so it needs no script.",
@@ -1229,7 +1229,7 @@ export function AiProposals() {
 						},
 						{
 							name: "Option A · Without AI",
-							note: "The same page with “As the bank sends it” chosen, and one line saying what's missing.",
+							note: "The same page with “Straight from the bank” chosen, and one line saying what's missing.",
 							screen: viewLinksBank,
 						},
 						{

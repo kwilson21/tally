@@ -35,25 +35,25 @@ Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's
 
 Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Codex builds Phases 3.5 to 5 from briefs, and a separate ultracode session handles design and polish (decision 71, superseding 69).
 
-## Where Phase 3.5 stands (Oct 5, evening)
+## Where Phase 3.5 stands (Oct 6)
 
-Every visual piece is picked (P34–P40, P45, decision 72), and each issue has a comment with its pick.
+Every visual piece is picked (P34–P40, P45, decision 72).
 
 | Part | Issue | State |
 |---|---|---|
 | Income: "Count as income", unreviewed credits held (decision 70) | [#153](https://github.com/kwilson21/tally/pull/153) | Merged |
-| Income from Plaid's INCOME category | [#177](https://github.com/kwilson21/tally/issues/177) | To build (after #153, merged) |
-| Today in the household's time zone | [#174](https://github.com/kwilson21/tally/issues/174) | Backend in PR [#189](https://github.com/kwilson21/tally/pull/189); the Settings field (P35 A) next |
-| Plaid's `merchant_name` as the merchant key | [#175](https://github.com/kwilson21/tally/issues/175) | Briefed |
-| Transfers and card payments excluded at sync | [#176](https://github.com/kwilson21/tally/issues/176) | After #175 |
-| Merchant rules after every sync | [#178](https://github.com/kwilson21/tally/issues/178) | After #175 |
-| Pending counted and marked (P34 A) | [#179](https://github.com/kwilson21/tally/issues/179) | After #175 |
-| Bill matching: excluded payments, "Price changed?" (P36 B) | [#180](https://github.com/kwilson21/tally/issues/180) | After #175 |
-| Refund guards | [#181](https://github.com/kwilson21/tally/issues/181) | To build (after #153, merged) |
-| Bill guards (P45 A) | [#182](https://github.com/kwilson21/tally/issues/182) | PR [#188](https://github.com/kwilson21/tally/pull/188) |
-| A failed save says so (P38 A); 404 and 500 pages (P39 C) | [#183](https://github.com/kwilson21/tally/issues/183) | To build |
-| A stale or broken bank flagged on Home (P37 A) | [#184](https://github.com/kwilson21/tally/issues/184) | To build |
-| The first visit's empty list (P40 A) | [#185](https://github.com/kwilson21/tally/issues/185) | To build |
+| Income from Plaid's INCOME category | [#177](https://github.com/kwilson21/tally/issues/177) | Merged ([#225](https://github.com/kwilson21/tally/pull/225)) |
+| Today in the household's time zone | [#174](https://github.com/kwilson21/tally/issues/174) | Backend merged ([#189](https://github.com/kwilson21/tally/pull/189)); the Settings field (P35 A) next |
+| Plaid's `merchant_name` as the merchant key | [#175](https://github.com/kwilson21/tally/issues/175) | Merged ([#190](https://github.com/kwilson21/tally/pull/190)) |
+| Transfers and card payments excluded at sync | [#176](https://github.com/kwilson21/tally/issues/176) | To build |
+| Merchant rules after every sync | [#178](https://github.com/kwilson21/tally/issues/178) | Merged ([#223](https://github.com/kwilson21/tally/pull/223)) |
+| Pending counted and marked (P34 A) | [#179](https://github.com/kwilson21/tally/issues/179) | To build |
+| Bill matching: excluded payments, "Price changed?" (P36 B) | [#180](https://github.com/kwilson21/tally/issues/180) | Merged ([#228](https://github.com/kwilson21/tally/pull/228)) |
+| Refund guards | [#181](https://github.com/kwilson21/tally/issues/181) | Merged ([#226](https://github.com/kwilson21/tally/pull/226)) |
+| Bill guards (P45 A) | [#182](https://github.com/kwilson21/tally/issues/182) | Merged ([#188](https://github.com/kwilson21/tally/pull/188)) |
+| A failed save says so (P38 A); 404 and 500 pages (P39 C) | [#183](https://github.com/kwilson21/tally/issues/183) | Merged ([#222](https://github.com/kwilson21/tally/pull/222)) |
+| A stale or broken bank flagged on Home (P37 A) | [#184](https://github.com/kwilson21/tally/issues/184) | Merged ([#221](https://github.com/kwilson21/tally/pull/221)) |
+| The first visit's empty list (P40 A) | [#185](https://github.com/kwilson21/tally/issues/185) | Merged ([#220](https://github.com/kwilson21/tally/pull/220)) |
 
 ## Where Phase 4 stands (Oct 5: picked; built after Phase 3.5, decision 71)
 
@@ -78,7 +78,8 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Plaid's merchant name as the first name suggestion | [#194](https://github.com/kwilson21/tally/issues/194) | #175, #33 |
 | One review screen for every "Maybe …" (P42 A) | [#195](https://github.com/kwilson21/tally/issues/195) | #33, #51, #192 |
 | What AI did this month (P43 A) | [#196](https://github.com/kwilson21/tally/issues/196) | #191 |
-| The demo's See it without AI (P44 A) | [#197](https://github.com/kwilson21/tally/issues/197) | — |
+| The demo's See it without AI (P44 A, "Tidied by Tally · Straight from the bank") | [#197](https://github.com/kwilson21/tally/issues/197) | — |
+| Tally fills in a transaction's details (P89 A) | [#232](https://github.com/kwilson21/tally/issues/232) | #191, #194 |
 
 ## Phase 5 (decisions 66, 74, 76; spec §8.4)
 
@@ -103,6 +104,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | "Always for these merchants" in Settings (P69 A) | [#214](https://github.com/kwilson21/tally/issues/214) |
 | Select all in the action bar (P70 A) | [#215](https://github.com/kwilson21/tally/issues/215) |
 | Edit a cash entry's date and amount (P71 A) | [#216](https://github.com/kwilson21/tally/issues/216) |
+| A store that sells many kinds of things (P90) | [#233](https://github.com/kwilson21/tally/issues/233) |
 
 ## Design system: what's next (decisions 75, 76; the design session builds these)
 
@@ -113,6 +115,6 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Squircle corners (P75 A) | [#219](https://github.com/kwilson21/tally/issues/219) |
 | MoneyInput sign-off, the budget, categorize and Settings flows, the component review | [#80](https://github.com/kwilson21/tally/issues/80), [#83](https://github.com/kwilson21/tally/issues/83)–[#86](https://github.com/kwilson21/tally/issues/86) |
 
-The issues above carry 53 questions the spec doesn't answer, each with a recommended answer in [docs/reviews/open-questions-2026-10-05.md](docs/reviews/open-questions-2026-10-05.md). An issue is built once its questions are answered.
+The owner answered every open question on these issues by seeing a picture of each answer (decisions 77 and 78, [docs/reviews/open-questions-2026-10-05.md](docs/reviews/open-questions-2026-10-05.md)), and each issue now states its answers, so nothing waits on a question. #74's pace line is covered by #199 and closed.
 
 Later list (not scheduled): see spec §12.

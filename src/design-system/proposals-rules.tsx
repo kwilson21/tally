@@ -304,6 +304,7 @@ export function RulesProposals() {
 				options={[
 					{
 						name: "Option A · One “Tally's rules” place in Settings",
+						picked: true,
 						note: "Two lists under one heading: “Always for these merchants”, as picked in P69 A, and “Never suggest”. Every No lands in the second as one line, and each line has Remove, which takes the line away and says so in a toast.",
 						tradeoff:
 							"Settings gets longer, and “Always for these merchants” moves one level down, under a new heading.",

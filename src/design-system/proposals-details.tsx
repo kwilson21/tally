@@ -3,7 +3,7 @@
 // earlier picked drawing made, with only the detail in question changing: the real components in
 // src/views/, and the picked drawings' own prototypes (imported from the proposals-*.tsx files that
 // drew them) where a component doesn't exist yet. Today is Mon Oct 5, as in every proposal.
-// Nothing here is decided until the owner picks.
+// The owner's picks are marked Picked (decision 78).
 
 import type { Child } from "hono/jsx";
 import { dayLabel } from "../dates";
@@ -1301,7 +1301,7 @@ function NameQuestion({
 	);
 }
 
-/** P76–P87 on the proposals page, open for the owner's pick. */
+/** P76–P87 on the proposals page, picked (decision 78). */
 export function DetailsProposals() {
 	return (
 		<>
@@ -1324,6 +1324,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · On the row",
+							picked: true,
 							note: "A dashed “Maybe income” takes the place of “Review credit” on the row, the dashed look “Maybe Eating Out” already has. The panel and the review screen carry it too (next two pictures).",
 							tradeoff: "the guess is in three places to keep in step.",
 							recommended:
@@ -1368,6 +1369,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · The line says Off",
+							picked: true,
 							note: "The paychecks line stays, in muted words: “Paychecks · Off”, beside a switch that says Off too.",
 							tradeoff: "a line with no number in a list of numbers.",
 							recommended:
@@ -1407,6 +1409,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · Where its date puts it",
+							picked: true,
 							note: "Rent stays in Due in the next 7 days, its row saying “Part paid: $600 of $1,200”. After the 7th it moves to Overdue with the same words, as P58 A drew it.",
 							tradeoff:
 								"the heading says it's due and the row says it's part paid: two things about one bill.",
@@ -1474,6 +1477,7 @@ export function DetailsProposals() {
 						},
 						{
 							name: "Option E · A Why? link",
+							picked: true,
 							note: "A terracotta “Why?” follows the label “Category” and leads to How Tally works, as the Why? beside a guess does.",
 							tradeoff:
 								"it hides the answer behind a tap, on another page, and the panel itself never says a bill was involved.",
@@ -1508,6 +1512,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · A–Z, with a search box",
+							picked: true,
 							note: "Merchants A to Z. With 20 or fewer there is no search box; with more, a box above the list filters it by name, and the count says what's shown (next picture).",
 							tradeoff:
 								"one more control, though only once the list is long enough to need it.",
@@ -1557,6 +1562,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · The link says how many",
+							picked: true,
 							note: "“Select all 112 in October” ticks every transaction the filters match, not only this page, and says so in its words.",
 							tradeoff:
 								"a long link in a bar that already has a count and two buttons.",
@@ -1602,6 +1608,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · Save at the end of the form",
+							picked: true,
 							note: "Cancel and Send follow the last field, not pinned. Drawn with the page scrolled to its end.",
 							tradeoff:
 								"on a long page you scroll to find Send, as you do today.",
@@ -1643,6 +1650,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · Closed, saying None yet",
+							picked: true,
 							note: "The row stays closed: “Match payments from · None yet”, and under it “The first payment you link fills it in.”",
 							tradeoff:
 								"someone who knows the bank's text has one more tap to type it.",
@@ -1696,6 +1704,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · Under the amount's line",
+							picked: true,
 							note: "The chip sits right under “$150,000.00 is a lot for a bill.”, in the form, as P45 A had it.",
 							tradeoff: "the form is a chip taller, so less of it is in view.",
 							recommended:
@@ -1751,6 +1760,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · Slides in from the right",
+							picked: true,
 							desktop: true,
 							note: "The panel slides in from the right edge in 200 ms ease-out while the backdrop fades in, the desktop twin of the phone's sheet rising.",
 							tradeoff:
@@ -1793,6 +1803,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option A · Say what it does for you",
+							picked: true,
 							note: "Each switch is named for its job, in the words the family uses, with an example where one helps: Suggest store names, Guess categories, Spot paychecks, Sort right away.",
 							tradeoff:
 								"the lines are longer than today's, so the group is taller and Save sits lower on the screen.",
@@ -1891,6 +1902,7 @@ export function DetailsProposals() {
 					options={[
 						{
 							name: "Option B · An icon plus the words",
+							picked: true,
 							note: "A small sparkles icon comes before a name Tally guessed in the list. Your bank's name gets no icon.",
 							tradeoff:
 								"the icon has to be learned, and it reads as decoration.",

@@ -13,7 +13,7 @@ export type Option = {
 	tradeoff?: string;
 	/** Why it's the recommended one, in one line. */
 	recommended?: string;
-	/** The owner picked this one (decisions 72–75). */
+	/** The owner picked this one (decisions 72–78). */
 	picked?: boolean;
 	/** Drawn at desktop width instead of on a phone. */
 	desktop?: boolean;

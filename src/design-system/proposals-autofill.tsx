@@ -368,7 +368,7 @@ const askFor = (
 	</>
 );
 
-/** P89 on the proposals page, open until the owner picks. */
+/** P89 on the proposals page, picked (decision 78). */
 export function AutofillProposals() {
 	return (
 		<Specimen
@@ -406,6 +406,7 @@ export function AutofillProposals() {
 				options={[
 					{
 						name: "Option A · Filled in, dashed, in the panel",
+						picked: true,
 						note: "Four quiet ledger rows under the amount (P72 A): Name, What it was, Kind and For, each with its guess dashed and a muted line saying where it came from. One Looks right keeps all four; changing a row makes that row the person's. Name is the merchant's, as in P29 A; the other three are for this purchase only. The rows take the place of today's “Rename or add a note”.",
 						tradeoff:
 							"the panel is longer, and its category chips sit under the four rows instead of first (the owner's pick C).",
@@ -425,7 +426,7 @@ export function AutofillProposals() {
 					},
 					{
 						name: "Option A, next · Where it's switched off",
-						note: "A fifth switch, “Fill in details”, after the store names, because each AI feature has its own switch (decision 68); the words are P86 A's, still open. Off, Tally guesses none of the three and the panel's rows stay empty for a person to fill in by hand; the Name guesses follow “Suggest store names”, and nothing already kept changes. Folding it under “Guess categories” would make one switch do two jobs.",
+						note: "A fifth switch, “Fill in details”, after the store names, because each AI feature has its own switch (decision 68); the words are P86 A's, picked in decision 78. Off, Tally guesses none of the three and the panel's rows stay empty for a person to fill in by hand; the Name guesses follow “Suggest store names”, and nothing already kept changes. Folding it under “Guess categories” would make one switch do two jobs.",
 						tall: true,
 						screen: switchOff,
 					},

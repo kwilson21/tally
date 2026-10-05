@@ -238,7 +238,7 @@ const askOnce = (
 	/>
 );
 
-/** P90 on the proposals page, open until the owner picks. */
+/** P90 on the proposals page, picked (decision 78). */
 export function MixedStoreProposals() {
 	return (
 		<Specimen
@@ -276,7 +276,8 @@ export function MixedStoreProposals() {
 				options={[
 					{
 						name: "Option A · A nudge to split, with the parts suggested",
-						note: "At a mixed store the panel never asks “Always use …?”. Under the category chips a quiet line says “Costco trips go in Groceries and Household. Split this one?”, with Split this one? in terracotta, on every Costco trip. Each trip's own category is still guessed from its “what it was” line (P89), as at any store.",
+						picked: true,
+						note: "Picked, combined with B: Tally guesses one category from the trip's details, or suggests a split when they point to more than one. At a mixed store the panel never asks “Always use …?”. Under the category chips a quiet line says “Costco trips go in Groceries and Household. Split this one?”, with Split this one? in terracotta, on every Costco trip. Each trip's own category is still guessed from its “what it was” line (P89), as at any store.",
 						tradeoff:
 							"the panel has one more line, and the person types the amounts, because the bank's total is all Tally has.",
 						recommended:
