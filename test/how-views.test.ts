@@ -47,8 +47,10 @@ describe("WhyLink", () => {
 			await WhyLink({ section: "categorization", topic: "Tally's guess" }),
 		);
 		expect(html).toContain('href="/how-it-works#categorization"');
-		expect(html).toContain('aria-label="Why: Tally&#39;s guess"');
+		expect(html).toContain('aria-label="Why? Tally&#39;s guess"');
 		expect(html).toContain("min-h-11");
+		expect(html).toContain("min-w-11");
+		expect(html).toContain("justify-center");
 		expect(html).toContain(">Why?</a>");
 	});
 });

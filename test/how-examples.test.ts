@@ -111,6 +111,15 @@ describe("categorizationExample", () => {
 		);
 	});
 
+	it("says Tally instead of Jev when asked to", () => {
+		expect(categorizationExample({ ...none, jev: 2, unsure: 1 }, "Tally")).toBe(
+			"This month, Tally categorized 2 transactions. It left 1 it wasn't sure about for a person.",
+		);
+		expect(categorizationExample({ ...none, unsure: 1 }, "Tally")).toBe(
+			"This month, Tally left 1 it wasn't sure about for a person.",
+		);
+	});
+
 	it("says so when there's nothing to show", () => {
 		expect(categorizationExample(none)).toBe(
 			"Nothing has been categorized yet this month.",

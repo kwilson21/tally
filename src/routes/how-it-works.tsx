@@ -100,12 +100,22 @@ function Diagram({ children }: { children?: Child }) {
 	return <div class="mt-4">{children}</div>;
 }
 
-/** A worked example: the rule applied to this household's numbers. */
-function Example({ children, demo }: { children?: Child; demo: boolean }) {
+/** A worked example: the rule applied to this household's numbers, naming the month it uses. */
+function Example({
+	children,
+	demo,
+	monthName,
+}: {
+	children?: Child;
+	demo: boolean;
+	monthName: string;
+}) {
 	return (
 		<p class="mt-3 bg-band px-4 py-3">
 			<span class="font-semibold">
-				{demo ? "In the demo: " : "With your numbers: "}
+				{demo
+					? `In the demo for ${monthName}: `
+					: `With your numbers for ${monthName}: `}
 			</span>
 			{children}
 		</p>
@@ -117,12 +127,28 @@ howItWorks.get("/how-it-works", async (c) => {
 	const demo = c.env.DEMO === "true";
 
 	const month = todayUtc().slice(0, 7);
-	const [data, counts, excluded, billData] = await Promise.all([
+	const monthName = new Intl.DateTimeFormat("en-US", {
+		month: "long",
+		timeZone: "UTC",
+	}).format(new Date(`${month}-01T00:00:00Z`));
+	// Screens call the AI "Tally"; only the demo's page names Jev (decision 64).
+	const ai = demo ? "Jev" : "Tally";
+	const [data, counts, excluded, billData, bankDated] = await Promise.all([
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
 		excludedBreakdown(c.env.DB, month),
 		loadBillRows(c.env.DB),
+		// By the bank's date: a refund or late payment from this month can count in an earlier one.
+		c.env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ?",
+		)
+			.bind(month)
+			.first<{ n: number }>(),
 	]);
+	const hasTransactions =
+		demo ||
+		counts.counted + excludedTotal(excluded) > 0 ||
+		(bankDated?.n ?? 0) > 0;
 	const unpaidDueBillsCents = billData.rows
 		.filter(
 			(bill) =>
@@ -150,9 +176,11 @@ howItWorks.get("/how-it-works", async (c) => {
 				</h1>
 				<p class="mt-4 text-lg">
 					Tally is a small family budgeting app. One server builds every page
-					and a database keeps the numbers. AI helps with names and categories:
-					Jev picks categories today, and Workers AI will suggest merchant names
-					later. Code does all the math.
+					and a database keeps the numbers.{" "}
+					{demo
+						? "AI helps with names and categories: Jev picks categories today, and Workers AI will suggest merchant names later."
+						: "AI helps by suggesting categories, and a person can always change them."}{" "}
+					Code does all the math.
 				</p>
 				{demo && (
 					<p class="mt-2 text-muted">
@@ -203,20 +231,24 @@ howItWorks.get("/how-it-works", async (c) => {
 							that are due or overdue and not yet paid.
 						</li>
 					</ul>
-					{demo || summary.categories.length > 0 ? (
+					{!demo && summary.categories.length === 0 && (
+						<p class="mt-3">No budgets have been set yet.</p>
+					)}
+					{demo ||
+					summary.categories.length > 0 ||
+					summary.totalSpentCents !== 0 ||
+					unpaidDueBillsCents > 0 ? (
 						<>
 							<Diagram>
 								<BudgetDiagram {...summary} />
 							</Diagram>
-							<Example demo={demo}>
+							<Example demo={demo} monthName={monthName}>
 								{budgetExample(summary)} This includes{" "}
 								{demo ? "the demo's " : ""}
 								due and overdue, unpaid bills.
 							</Example>
 						</>
-					) : (
-						<p class="mt-3">No budgets have been set yet.</p>
-					)}
+					) : null}
 				</Section>
 
 				<Section id="transactions" title="Transactions">
@@ -241,7 +273,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							Search matches the merchant name, the bank's name, and the note.
 						</li>
 					</ul>
-					{demo || counts.counted + excludedTotal(excluded) > 0 ? (
+					{hasTransactions ? (
 						<>
 							<Diagram>
 								<TransactionsDiagram
@@ -250,7 +282,9 @@ howItWorks.get("/how-it-works", async (c) => {
 									needsCategory={counts.needsCategory}
 								/>
 							</Diagram>
-							<Example demo={demo}>{transactionsExample(counts)}</Example>
+							<Example demo={demo} monthName={monthName}>
+								{transactionsExample(counts)}
+							</Example>
 						</>
 					) : (
 						<p class="mt-3">There are no transactions this month yet.</p>
@@ -278,7 +312,7 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>
-					{demo || counts.counted + excludedTotal(excluded) > 0 ? (
+					{hasTransactions ? (
 						<>
 							<Diagram>
 								<ExclusionsDiagram
@@ -286,7 +320,9 @@ howItWorks.get("/how-it-works", async (c) => {
 									breakdown={excluded}
 								/>
 							</Diagram>
-							<Example demo={demo}>{exclusionsExample(excluded)}</Example>
+							<Example demo={demo} monthName={monthName}>
+								{exclusionsExample(excluded)}
+							</Example>
 						</>
 					) : (
 						<p class="mt-3">There are no transactions this month yet.</p>
@@ -305,13 +341,12 @@ howItWorks.get("/how-it-works", async (c) => {
 							with "Always for this merchant" in the edit panel.
 						</li>
 						<li>
-							Jev, an AI model, which each night picks a category for what's
-							left. Tally applies Jev's pick only when Jev is at least{" "}
-							{threshold} sure, and never when Jev says none of the categories
-							fit; anything else waits for a person.
+							{demo
+								? `Jev, an AI model, which each night picks a category for what's left. Tally applies Jev's pick only when Jev is at least ${threshold} sure, and never when Jev says none of the categories fit; anything else waits for a person.`
+								: `An AI model, which each night picks a category for what's left. Tally applies its pick only when it is at least ${threshold} sure, and never when it says none of the categories fit; anything else waits for a person.`}
 						</li>
 					</ol>
-					{demo || counts.counted + excludedTotal(excluded) > 0 ? (
+					{hasTransactions ? (
 						<>
 							<Diagram>
 								<CategoriesDiagram
@@ -321,9 +356,12 @@ howItWorks.get("/how-it-works", async (c) => {
 									waiting={counts.needsCategory + counts.linkedWaiting}
 									income={counts.income}
 									threshold={threshold}
+									ai={ai}
 								/>
 							</Diagram>
-							<Example demo={demo}>{categorizationExample(counts)}</Example>
+							<Example demo={demo} monthName={monthName}>
+								{categorizationExample(counts, ai)}
+							</Example>
 						</>
 					) : (
 						<p class="mt-3">There are no transactions this month yet.</p>
@@ -368,7 +406,7 @@ howItWorks.get("/how-it-works", async (c) => {
 									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
 								/>
 							</Diagram>
-							<Example demo={demo}>
+							<Example demo={demo} monthName={monthName}>
 								{paidBill.name} is {formatCents(paidBill.amountCents)}, due{" "}
 								{shortBillDate(paidBill.dueDate)}; its{" "}
 								{demo ? "demo payment" : "payment"} is{" "}

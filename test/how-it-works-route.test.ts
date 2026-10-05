@@ -21,6 +21,10 @@ const decodeHtml = (html: string) =>
 		.replaceAll("&quot;", '"')
 		.replaceAll("&amp;", "&");
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+const monthName = () =>
+	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
+		new Date(`${todayUtc().slice(0, 7)}-01T00:00:00Z`),
+	);
 
 beforeEach(async () => {
 	await resetDemo(env.DB, todayUtc());
@@ -114,8 +118,8 @@ describe("outside the demo", () => {
 		const res = await howItWorks.request("/how-it-works", {}, notDemo);
 		const html = await res.text();
 		expect(res.status).toBe(200);
-		expect(html).toContain("With your numbers:");
-		expect(html).not.toContain("In the demo:");
+		expect(html).toContain(`With your numbers for ${monthName()}:`);
+		expect(html).not.toContain("In the demo");
 		expect(html).not.toContain('id="architecture"');
 		expect(html).not.toContain("system-diagram");
 		expect(html).not.toContain("Cloudflare Worker (Hono, TypeScript)");
@@ -136,7 +140,7 @@ describe("outside the demo", () => {
 				/(?:There are no transactions this month yet|No bill has been paid yet this month)\./g,
 			),
 		).toHaveLength(4);
-		expect(html).not.toContain("With your numbers: This month has");
+		expect(html).not.toContain("This month has");
 		expect(html).not.toContain('id="transactions-diagram-title"');
 		expect(html).not.toContain('id="exclusions-diagram-title"');
 		expect(html).not.toContain('id="categories-diagram-title"');
@@ -147,7 +151,7 @@ describe("outside the demo", () => {
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
-		expect(html).toContain("With your numbers:");
+		expect(html).toContain(`With your numbers for ${monthName()}:`);
 		expect(html).toContain("Electricity is");
 		expect(html).toContain('id="bills-diagram-title"');
 		expect(html).not.toContain("No bill has been paid yet this month.");
@@ -162,13 +166,64 @@ describe("outside the demo", () => {
 		expect(html).not.toContain('id="bills-diagram-title"');
 	});
 
-	it("uses a plain sentence and no diagram when no budgets are set", async () => {
+	it("uses a plain sentence and no diagram when no budgets, spending or bills are set", async () => {
 		await env.DB.prepare("DELETE FROM budget_amounts").run();
+		await env.DB.prepare("DELETE FROM transactions").run();
+		await env.DB.prepare("UPDATE bills SET active = 0").run();
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
 		expect(html).toContain("No budgets have been set yet.");
 		expect(html).not.toContain('id="budget-diagram-title"');
+	});
+
+	it("never names Jev (decision 64)", async () => {
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).not.toMatch(/jev/i);
+		expect(decodeHtml(html)).toContain("Tally, if 80% or more sure");
+	});
+
+	it("shows the calculation when there's spending but no budget", async () => {
+		await env.DB.prepare("DELETE FROM budget_amounts").run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain("No budgets have been set yet.");
+		expect(html).toContain('id="budget-diagram-title"');
+		expect(html).toMatch(/safe to spend\./);
+	});
+
+	it("keeps the transaction examples when this month's only transaction counts in an earlier month", async () => {
+		const month = todayUtc().slice(0, 7);
+		const { results } = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE substr(date, 1, 7) = ? ORDER BY id",
+		)
+			.bind(month)
+			.all<{ id: number }>();
+		const keep = results[0]?.id;
+		expect(keep).toBeDefined();
+		await env.DB.prepare(
+			"DELETE FROM transactions WHERE substr(date, 1, 7) = ? AND id != ?",
+		)
+			.bind(month, keep)
+			.run();
+		// It refunds a purchase from an earlier month, so it counts there instead.
+		const earlier = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE substr(date, 1, 7) < ? AND excluded = 0 AND is_split = 0 ORDER BY date DESC LIMIT 1",
+		)
+			.bind(month)
+			.first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET refund_of_id = ?, excluded = 0, is_split = 0, amount_cents = -500 WHERE id = ?",
+		)
+			.bind(earlier?.id, keep)
+			.run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).toContain('id="transactions-diagram-title"');
 	});
 
 	it("shows no Things to try but does show How this works on Home", async () => {
