@@ -962,6 +962,35 @@ function Controls() {
 						</Chip>
 					</div>
 				</fieldset>
+				<fieldset>
+					<legend class="text-sm font-medium text-muted">
+						A checkbox chip that answers an alert: unticked, tied to the alert
+						line, then ticked, with the line gone (a bill over $100,000)
+					</legend>
+					<div class="mt-2 flex flex-col gap-2">
+						<p id="ds-confirm-alert" role="alert" class="text-sm text-over">
+							$150,000.00 is a lot for a bill.
+						</p>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="checkbox"
+								name="ds-confirm"
+								value="15000000"
+								describedBy="ds-confirm-alert"
+							>
+								Yes, $150,000.00 is right
+							</Chip>
+							<Chip
+								type="checkbox"
+								name="ds-confirmed"
+								value="15000000"
+								checked
+							>
+								Yes, $150,000.00 is right
+							</Chip>
+						</div>
+					</div>
+				</fieldset>
 			</Specimen>
 			<Specimen
 				id="form-field"

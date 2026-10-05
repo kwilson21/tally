@@ -1,11 +1,23 @@
 import { type Context, Hono } from "hono";
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
+import {
+	BIG_BILL_CENTS,
+	duplicateBillName,
+	needsBigAmountConfirm,
+	sameBillName,
+} from "../bills/guards";
 import { matchBillPayments } from "../bills/match";
 import {
 	type BillStatus,
 	billOccurrence,
 	billOccurrenceForMonth,
 } from "../bills/status";
+import {
+	activateBill,
+	type BillFields,
+	insertBill,
+	updateBill,
+} from "../bills/write";
 import { householdToday, ordinal } from "../dates";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
@@ -48,6 +60,8 @@ type DbBill = {
 	payment_date?: string | null;
 };
 type Category = { id: number; name: string; icon: string; color: string };
+/** An amount over $100,000.00 that the form asks about with a "Yes, $X is right" chip (P45 A). */
+type BigAmount = { cents: number; confirmed: boolean };
 type Values = {
 	name: string;
 	amount: string;
@@ -133,7 +147,12 @@ const sheetAttrs = (href: string) => ({
 // `given` is the household's date when the handler already read it, so a request reads it once.
 async function page(
 	c: Context<App>,
-	sheet?: { bill?: DbBill; values?: Values; errors?: Record<string, string> },
+	sheet?: {
+		bill?: DbBill;
+		values?: Values;
+		errors?: Record<string, string>;
+		bigAmount?: BigAmount;
+	},
 	given?: string,
 ) {
 	const today = given ?? (await householdToday(c.env.DB));
@@ -229,6 +248,25 @@ async function dbBill(c: Context<App>, id: number) {
 		.bind(id)
 		.first<DbBill>();
 }
+async function activeBills(c: Context<App>) {
+	return (
+		await c.env.DB.prepare(
+			"SELECT id,name,active FROM bills WHERE active=1",
+		).all<{ id: number; name: string; active: number }>()
+	).results;
+}
+/** The sheet again, with the Name error for a name another active bill has (`values.name` is the name). */
+async function nameTaken(
+	c: Context<App>,
+	sheet: { bill?: DbBill; values: Values; bigAmount?: BigAmount },
+) {
+	const name = sheet.values.name;
+	const taken = duplicateBillName(await activeBills(c), name, sheet.bill?.id);
+	// Whoever held the name may have let go of it already; the person is still told it was taken.
+	return page(c, { ...sheet, errors: { name: alreadyCalled(taken ?? name) } });
+}
+const alreadyCalled = (name: string) =>
+	`You already have a bill called ${name}.`;
 function valuesOf(b?: DbBill): Values {
 	return {
 		name: b?.name ?? "",
@@ -245,14 +283,21 @@ function BillSheet({
 	bill,
 	values = valuesOf(bill),
 	errors = {},
+	bigAmount,
 	categories,
 }: {
 	bill?: DbBill;
 	values?: Values;
 	errors?: Record<string, string>;
+	bigAmount?: BigAmount;
 	categories: Category[];
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
+	// Once a name has been refused, Reactivate also sends the Name field, so renaming the bill is how
+	// to get it back (P45 A's duplicate name has no other way out).
+	const activeAction = bill
+		? `${action}/${bill.active ? "deactivate" : `reactivate${errors.name ? "?rename=1" : ""}`}`
+		: "";
 	return (
 		<BottomSheet labelledBy="bill-sheet-title" closeHref="/bills">
 			<h2
@@ -287,6 +332,23 @@ function BillSheet({
 					value={values.amount}
 					error={errors.amount}
 				/>
+				{bigAmount && (
+					<div class="flex justify-center">
+						{/* Its value is the cents it confirms, so a changed amount isn't covered by it. Ticked
+						    already (another field needed fixing): the alert line is gone, so nothing to describe. */}
+						<Chip
+							type="checkbox"
+							name="confirm_amount"
+							value={String(bigAmount.cents)}
+							checked={bigAmount.confirmed}
+							describedBy={
+								bigAmount.confirmed ? undefined : "bill-amount-error"
+							}
+						>
+							{`Yes, ${formatCents(bigAmount.cents)} is right`}
+						</Chip>
+					</div>
+				)}
 				<div class="flex flex-wrap items-end gap-3">
 					<TextInput
 						id="bill-day"
@@ -393,8 +455,8 @@ function BillSheet({
 						<Button
 							kind="text"
 							type="submit"
-							formaction={`/bills/${bill.id}/${bill.active ? "deactivate" : "reactivate"}`}
-							hx-post={`/bills/${bill.id}/${bill.active ? "deactivate" : "reactivate"}`}
+							formaction={activeAction}
+							hx-post={activeAction}
 						>
 							{bill.active ? "Deactivate" : "Reactivate"}
 						</Button>
@@ -555,6 +617,22 @@ async function save(c: Context<App>, id?: number) {
 		errors.anchor_month = "Choose a month.";
 	const bill = id ? await dbBill(c, id) : undefined;
 	if (id && !bill) return c.notFound();
+	// Only a new name is checked: a bill that already shares its name can still be edited.
+	if (!errors.name && !(bill && sameBillName(bill.name, values.name))) {
+		const duplicate = duplicateBillName(await activeBills(c), values.name, id);
+		if (duplicate) errors.name = alreadyCalled(duplicate);
+	}
+	// P45 A: a very large amount, added or edited, is saved only once its own "Yes, $X is right" chip
+	// is ticked.
+	let bigAmount: BigAmount | undefined;
+	if (!errors.amount && cents > BIG_BILL_CENTS) {
+		bigAmount = {
+			cents,
+			confirmed: !needsBigAmountConfirm(cents, raw("confirm_amount")),
+		};
+		if (!bigAmount.confirmed)
+			errors.amount = `${formatCents(cents)} is a lot for a bill.`;
+	}
 	// Linked payments are budget history, so a bill that has them keeps its schedule.
 	if (bill && bill.frequency !== values.frequency) {
 		const linked = await c.env.DB.prepare(
@@ -582,34 +660,28 @@ async function save(c: Context<App>, id?: number) {
 				"This bill has payments linked. To change when it's due, deactivate it and add a new bill.";
 	}
 	if (Object.keys(errors).length)
-		return page(c, { bill: bill ?? undefined, values, errors });
-	const args = [
-		values.name,
-		cents,
-		due,
-		values.frequency,
-		values.frequency === "yearly" ? Number(values.anchor_month) : null,
-		Number(values.category_id),
-		values.merchant_raw_name,
-	];
-	if (id) {
-		const update = c.env.DB.prepare(
-			"UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,merchant_raw_name=? WHERE id=?",
-		).bind(...args, id);
-		if (bill && bill.frequency !== values.frequency)
-			// Period keys have different shapes (YYYY-MM vs YYYY), so old dismissals
-			// no longer apply; links can't exist here (checked above).
-			await c.env.DB.batch([
-				update,
-				c.env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=?").bind(id),
-			]);
-		else await update.run();
-	} else
-		await c.env.DB.prepare(
-			"INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(?,?,?,?,?,?,?)",
-		)
-			.bind(...args)
-			.run();
+		return page(c, { bill: bill ?? undefined, values, errors, bigAmount });
+	const fields: BillFields = {
+		name: values.name,
+		amountCents: cents,
+		dueDay: due,
+		frequency: values.frequency,
+		anchorMonth: values.frequency === "yearly" ? anchor : null,
+		categoryId: Number(values.category_id),
+		merchantRawName: values.merchant_raw_name,
+	};
+	// Old dismissals have no meaning once the schedule changes (links can't exist here, checked above).
+	const written = id
+		? await updateBill(
+				c.env.DB,
+				id,
+				fields,
+				!!bill && bill.frequency !== values.frequency,
+			)
+		: await insertBill(c.env.DB, fields);
+	// Another save took the name since the check above, and the write refused it.
+	if (!written)
+		return nameTaken(c, { bill: bill ?? undefined, values, bigAmount });
 	const today = await householdToday(c.env.DB);
 	await matchBillPayments(c.env.DB, today);
 	const message = id ? "Bill saved" : "Bill added";
@@ -629,30 +701,47 @@ async function save(c: Context<App>, id?: number) {
 }
 bills.post("/bills", (c) => save(c));
 bills.post("/bills/:id", (c) => save(c, Number(c.req.param("id"))));
-for (const action of ["deactivate", "reactivate"] as const)
-	bills.post(`/bills/:id/${action}`, async (c) => {
-		const { meta } = await c.env.DB.prepare(
-			"UPDATE bills SET active=? WHERE id=?",
-		)
-			.bind(action === "reactivate" ? 1 : 0, Number(c.req.param("id")))
-			.run();
-		if (!meta.changes) return c.notFound();
-		const message =
-			action === "reactivate" ? "Bill reactivated" : "Bill deactivated";
-		if (c.req.header("HX-Request")) {
-			const res = await page(c);
-			res.headers.set(
-				"HX-Trigger",
-				JSON.stringify({
-					toast: { message, type: "success" },
-					announce: message,
-				}),
-			);
-			res.headers.set("HX-Push-Url", "/bills");
-			return res;
-		}
-		return c.redirect("/bills", 303);
-	});
+/** What a person gets after a bill is switched on or off: Bills again, with the toast. */
+async function activeChanged(c: Context<App>, message: string) {
+	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
+	const res = await page(c);
+	res.headers.set(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message, type: "success" },
+			announce: message,
+		}),
+	);
+	res.headers.set("HX-Push-Url", "/bills");
+	return res;
+}
+bills.post("/bills/:id/deactivate", async (c) => {
+	const { meta } = await c.env.DB.prepare(
+		"UPDATE bills SET active=0 WHERE id=?",
+	)
+		.bind(Number(c.req.param("id")))
+		.run();
+	if (!meta.changes) return c.notFound();
+	return activeChanged(c, "Bill deactivated");
+});
+bills.post("/bills/:id/reactivate", async (c) => {
+	const id = Number(c.req.param("id"));
+	const bill = await dbBill(c, id);
+	if (!bill) return c.notFound();
+	// After a refusal the sheet's Reactivate sends ?rename=1: the Name field is then the way out, so
+	// what it holds is the name the bill comes back under. Otherwise the bill keeps its own name.
+	const name =
+		c.req.query("rename") === "1"
+			? String((await c.req.parseBody()).name ?? "").trim()
+			: bill.name;
+	const values = { ...valuesOf(bill), name };
+	if (!name)
+		return page(c, { bill, values, errors: { name: "Enter a name." } });
+	// A bill that would repeat an active bill's name comes back as the same Name error as adding.
+	if (!bill.active && !(await activateBill(c.env.DB, id, name)))
+		return nameTaken(c, { bill, values });
+	return activeChanged(c, "Bill reactivated");
+});
 
 type LinkedPayment = {
 	period: string;
