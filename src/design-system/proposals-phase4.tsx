@@ -107,11 +107,11 @@ function Fixed({ children }: { children?: Child }) {
 	);
 }
 
-/** A rule the spec didn't settle until the owner's picks (decision 63). */
+/** A rule the spec didn't settle until the owner's picks (decision 64). */
 function NeedsLine({ children }: { children?: Child }) {
 	return (
 		<p class="max-w-prose text-sm">
-			<span class="font-medium">Spec line added (decision 63): </span>
+			<span class="font-medium">Spec line added (decision 64): </span>
 			{children}
 		</p>
 	);
@@ -1462,7 +1462,7 @@ const netEarly = (
 );
 
 // ---------------------------------------------------------------------------------------------
-// P33: "Why?" links beside what a rule decides, and How Tally works in the family app (decision 64).
+// P33: "Why?" links beside what a rule decides, and How Tally works in the family app (decision 65).
 
 type WhyLook = "word" | "mark";
 
@@ -1649,7 +1649,63 @@ const howFamily = (
 	</>
 );
 
-/** P23–P33 on the proposals page. */
+/** P33, open: how the "Why?" link looks (decision 65). */
+export function Phase4Open() {
+	return (
+		<Specimen
+			id="p33-why"
+			title="P33 · Why? links"
+			tier="visual"
+			sentence="A small link beside anything a rule decides, to the part of How Tally works that explains it (decision 65). Pick how it looks."
+		>
+			<Fixed>
+				where they go (decision 65): How this works under each screen's title,
+				and a Why? after the trends sentence, Going well, Worth a look, the
+				net-worth sentence, the suggested-names line, Tally's guess and a
+				suggested category. Each is a 44px link with its own name for screen
+				readers ("Why: going well"). How Tally works is in the family app too,
+				with your numbers and without the architecture part.
+			</Fixed>
+			<Options
+				options={[
+					{
+						name: "Option A · The word “Why?”",
+						note: "Terracotta “Why?” after the label, separated by a dot, like How this works.",
+						tradeoff: "a few more words on the screen.",
+						recommended:
+							"terracotta already means “you can tap this”, and a word says what it does without guessing.",
+						screen: trendsWhy("word"),
+					},
+					{
+						name: "Option A · Transactions and the panel",
+						note: "The same word after the suggested-names line and Tally's guess.",
+						screen: transactionsWhy("word"),
+					},
+					{
+						name: "Option B · A small circled ?",
+						note: "A terracotta question mark in a circle after the label.",
+						tradeoff:
+							"quieter, but an icon alone has to be learned, and a ? can read as help or an error.",
+						screen: trendsWhy("mark"),
+					},
+					{
+						name: "Option B · Transactions and the panel",
+						note: "The same mark after the suggested-names line and Tally's guess.",
+						screen: transactionsWhy("mark"),
+					},
+					{
+						name: "Both · Where a Why? leads",
+						note: "How Tally works in the family app: the rule in plain words and a worked example with your numbers.",
+						family: true,
+						screen: howFamily,
+					},
+				]}
+			/>
+		</Specimen>
+	);
+}
+
+/** P23–P32 on the proposals page, picked (decision 64). */
 export function Phase4Proposals() {
 	return (
 		<>
@@ -2010,57 +2066,6 @@ export function Phase4Proposals() {
 							name: "Both · The edit panel",
 							note: "The suggestion is the first chip, dashed and marked Suggested, with how sure Jev was.",
 							screen: maybePanel,
-						},
-					]}
-				/>
-			</Specimen>
-
-			<Specimen
-				id="p33-why"
-				title="P33 · Why? links"
-				tier="visual"
-				sentence="A small link beside anything a rule decides, to the part of How Tally works that explains it (decision 64). Pick how it looks."
-			>
-				<Fixed>
-					where they go (decision 64): How this works under each screen's title,
-					and a Why? after the trends sentence, Going well, Worth a look, the
-					net-worth sentence, the suggested-names line, Tally's guess and a
-					suggested category. Each is a 44px link with its own name for screen
-					readers ("Why: going well"). How Tally works is in the family app too,
-					with your numbers and without the architecture part.
-				</Fixed>
-				<Options
-					options={[
-						{
-							name: "Option A · The word “Why?”",
-							note: "Terracotta “Why?” after the label, separated by a dot, like How this works.",
-							tradeoff: "a few more words on the screen.",
-							recommended:
-								"terracotta already means “you can tap this”, and a word says what it does without guessing.",
-							screen: trendsWhy("word"),
-						},
-						{
-							name: "Option A · Transactions and the panel",
-							note: "The same word after the suggested-names line and Tally's guess.",
-							screen: transactionsWhy("word"),
-						},
-						{
-							name: "Option B · A small circled ?",
-							note: "A terracotta question mark in a circle after the label.",
-							tradeoff:
-								"quieter, but an icon alone has to be learned, and a ? can read as help or an error.",
-							screen: trendsWhy("mark"),
-						},
-						{
-							name: "Option B · Transactions and the panel",
-							note: "The same mark after the suggested-names line and Tally's guess.",
-							screen: transactionsWhy("mark"),
-						},
-						{
-							name: "Both · Where a Why? leads",
-							note: "How Tally works in the family app: the rule in plain words and a worked example with your numbers.",
-							family: true,
-							screen: howFamily,
 						},
 					]}
 				/>

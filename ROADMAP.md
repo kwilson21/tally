@@ -32,11 +32,11 @@ Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's
 
 ## Where Phase 4 stands (Oct 5: picked, briefed to Codex)
 
-The owner picked every Phase 4 design on the proposals page (decision 63, spec §8.3), and asked for "Why?" links and How Tally works in the family app (decision 64).
+The owner picked every Phase 4 design on the proposals page (decision 64, spec §8.3), and asked for "Why?" links and How Tally works in the family app (decision 65).
 
 | Part | Issue | State |
 |---|---|---|
-| How Tally works in the family app, and the "Why?" link (decision 64) | [#170](https://github.com/kwilson21/tally/issues/170) | Briefed; first, as the parts below use it |
+| How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Briefed; first, as the parts below use it |
 | Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Briefed after #170 |
 | Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Briefed after #170 |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Briefed |

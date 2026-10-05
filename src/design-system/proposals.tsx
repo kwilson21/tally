@@ -3,7 +3,7 @@
 // accepted one moves into the real component in its own PR, and a decided one leaves this page
 // for the Decided list.
 
-import { Phase4Proposals } from "./proposals-phase4";
+import { Phase4Open, Phase4Proposals } from "./proposals-phase4";
 
 // What the owner decided on 2026-09-26, 2026-09-28 and 2026-09-29 (decisions 46, 48, 50, 54, 55, 59
 // and 60), and the issue each ships in.
@@ -148,13 +148,21 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="open-title" class="mt-10">
+			<section aria-labelledby="pick-title" class="mt-10">
+				<h2 id="pick-title" class="font-serif text-3xl font-semibold">
+					Open
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">Waiting for the owner's pick.</p>
+				<Phase4Open />
+			</section>
+
+			<section aria-labelledby="open-title" class="mt-12">
 				<h2 id="open-title" class="font-serif text-3xl font-semibold">
 					Picked, to build in Phase 4
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
 					The owner picked the Recommended option of each, and P31 as drawn
-					(decision 63). The drawings stay here as the build reference until
+					(decision 64). The drawings stay here as the build reference until
 					each ships.
 				</p>
 				<Phase4Proposals />
