@@ -39,6 +39,7 @@ import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TransactionRow } from "../views/transaction-row";
+import { WhyLink } from "../views/why-link";
 import {
 	ADJUST_ROWS,
 	BAND,
@@ -75,7 +76,7 @@ const SECTIONS = [
 	["rows", "Rows"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
-	["demo", "Demo only"],
+	["demo", "Guidance"],
 	["diagrams", "Diagrams"],
 ] as const;
 
@@ -387,7 +388,7 @@ function describeHome({ band = true, rows = true } = {}) {
 function HomeSketch({ band = true }: { band?: boolean }) {
 	return (
 		<>
-			<HomeTop {...HOME_TOP} demo band={band ? HOME_TOP.band : undefined} />
+			<HomeTop {...HOME_TOP} band={band ? HOME_TOP.band : undefined} />
 			<h2 class="mt-8 font-serif text-3xl font-semibold">Budget</h2>
 			<ul class="mt-2 divide-y divide-rule">
 				{HOME_ROWS.map((row) => (
@@ -406,7 +407,7 @@ function HomeTopGroup() {
 				title="HomeTop"
 				tier="visual"
 				components={["HomeTop"]}
-				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works (demo only) and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
 					<PhoneFrame
@@ -426,7 +427,7 @@ function HomeTopGroup() {
 					<Picture
 						label={`Home's top when nothing needs a category, with no Band: ${describeHome({ band: false, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} demo band={undefined} />
+						<HomeTop {...HOME_TOP} band={undefined} />
 					</Picture>
 				</State>
 			</Specimen>
@@ -1153,7 +1154,7 @@ function Feedback() {
 
 function Demo() {
 	return (
-		<Group id="demo" title="Demo only">
+		<Group id="demo" title="Guidance">
 			<Specimen
 				id="things-to-try"
 				title="ThingsToTry"
@@ -1168,9 +1169,21 @@ function Demo() {
 				title="HowLink"
 				tier="visual"
 				components={["HowLink"]}
-				sentence="A small “How this works” link under a screen's title to its section of How Tally works; renders nothing outside the demo."
+				sentence="A small “How this works” link under a screen's title to its section of How Tally works in both environments."
 			>
-				<HowLink section="budget" demo />
+				<HowLink section="budget" />
+			</Specimen>
+			<Specimen
+				id="why-link"
+				title="WhyLink"
+				tier="visual"
+				components={["WhyLink"]}
+				sentence="A small terracotta “Why?” link beside a label goes to the exact section that explains the rule, with a distinct accessible name and a 44px target."
+			>
+				<p class="flex items-center gap-2">
+					Going well <span aria-hidden="true">·</span>{" "}
+					<WhyLink section="budget" topic="going well" />
+				</p>
 			</Specimen>
 		</Group>
 	);

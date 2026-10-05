@@ -1917,7 +1917,7 @@ export function Phase4Proposals() {
 					and a Why? after the trends sentence, Going well, Worth a look, the
 					net-worth sentence, the suggested-names line, Tally's guess and a
 					suggested category. Each is a 44px link with its own name for screen
-					readers ("Why: going well"). How Tally works is in the family app too,
+					readers ("Why? going well"). How Tally works is in the family app too,
 					with your numbers and without the architecture part.
 				</Fixed>
 				<Options

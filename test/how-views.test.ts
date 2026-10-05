@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HowLink } from "../src/views/how-link";
 import { SystemDiagram } from "../src/views/system-diagram";
 import { ThingsToTry } from "../src/views/things-to-try";
+import { WhyLink } from "../src/views/why-link";
 
 describe("ThingsToTry", () => {
 	it("is a labeled section with the three things to do and the How it works link", async () => {
@@ -30,17 +31,27 @@ describe("ThingsToTry", () => {
 });
 
 describe("HowLink", () => {
-	it("links to its section of How Tally works in the demo", async () => {
-		const html = String(await HowLink({ section: "budget", demo: true }));
+	it("links to its section of How Tally works", async () => {
+		const html = String(await HowLink({ section: "budget" }));
 		expect(html).toMatch(/href="\/how-it-works#budget"/);
 		expect(html).toContain("How this works");
 		expect(html).toContain("min-h-11");
 		// Each link says where it goes, so several on one page stay distinct (WCAG 2.4.4).
 		expect(html).toContain('aria-label="How this works: the budget"');
 	});
+});
 
-	it("renders nothing outside the demo", async () => {
-		expect(HowLink({ section: "budget", demo: false })).toBeNull();
+describe("WhyLink", () => {
+	it("links to the exact explanation with a distinct name and 44px target", async () => {
+		const html = String(
+			await WhyLink({ section: "categorization", topic: "Tally's guess" }),
+		);
+		expect(html).toContain('href="/how-it-works#categorization"');
+		expect(html).toContain('aria-label="Why? Tally&#39;s guess"');
+		expect(html).toContain("min-h-11");
+		expect(html).toContain("min-w-11");
+		expect(html).toContain("justify-center");
+		expect(html).toContain(">Why?</a>");
 	});
 });
 

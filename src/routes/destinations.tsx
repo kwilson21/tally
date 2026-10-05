@@ -32,11 +32,10 @@ for (const item of SIDEBAR_ITEMS.filter(
 }
 
 destinations.get("/more", (c) => {
-	// The demo also lists How Tally works (spec §9); it doesn't exist outside the demo.
-	const items =
-		c.env.DEMO === "true"
-			? [...MORE_ITEMS, { label: "How Tally works", href: "/how-it-works" }]
-			: MORE_ITEMS;
+	const items = [
+		...MORE_ITEMS,
+		{ label: "How Tally works", href: "/how-it-works" },
+	];
 	return c.html(
 		<Layout
 			title="More · Tally"
