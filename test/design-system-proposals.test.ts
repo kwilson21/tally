@@ -10,7 +10,7 @@ const get = async (path: string) => {
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 describe("GET /design-system/proposals", () => {
-	it("shows P23–P31 open, P23–P30 each with a recommended option, and lists P1–P22 as decided", async () => {
+	it("shows P23–P32 open, each but P31 with a recommended option, and lists P1–P22 as decided", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -25,6 +25,7 @@ describe("GET /design-system/proposals", () => {
 			"p28-delete",
 			"p29-names",
 			"p30-new-category",
+			"p32-category-maybe",
 		];
 		for (const id of open) expect(html).toContain(`id="${id}"`);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh.
@@ -35,7 +36,7 @@ describe("GET /design-system/proposals", () => {
 		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.
 		expect(
 			html.match(/role="img" aria-label="[^"]*, on a phone"/g)?.length,
-		).toBe(22);
+		).toBe(28);
 		expect(
 			html.match(/role="img" aria-label="[^"]*, on desktop"/g)?.length,
 		).toBe(1);

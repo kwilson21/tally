@@ -1,4 +1,4 @@
-// P23–P31 (spec §11 Phase 4, features 6–8 and the AI suggestions): Trends, the net-worth chart,
+// P23–P32 (spec §11 Phase 4, features 6–8 and the AI suggestions): Trends, the net-worth chart,
 // Documents, and merchant-name and new-category suggestions. Each option is drawn on a phone's
 // first screen from the real components with demo-style data (today is Oct 5), so the owner can
 // pick them all in one pass. Charts are inline SVG in tokens only, as the app will draw them
@@ -281,41 +281,11 @@ function MiniBars({ cents }: { cents: number[] }) {
 	);
 }
 
-/** P23 A: one big chart, with chips to pick what it shows. */
-const trendsPick = (
-	<>
-		<Title>Trends</Title>
-		<fieldset class="mt-4">
-			<legend class="sr-only">Show</legend>
-			<div class="flex flex-wrap gap-2">
-				<Chip type="radio" name="p23a" value="all">
-					All spending
-				</Chip>
-				{Object.values(CATS).map((c) => (
-					<Chip
-						type="radio"
-						name="p23a"
-						value={c.name}
-						checked={c === CATS.eatingOut}
-						icon={<CategoryIcon icon={c.icon} color={c.color} />}
-					>
-						{c.name}
-					</Chip>
-				))}
-			</div>
-		</fieldset>
-		<p class="mt-5 text-lg">Eating Out, last 6 months</p>
-		<div class="mt-2">
-			<MonthBars cents={TRENDS[1]?.months ?? []} />
-		</div>
-	</>
-);
-
 /** P23 B: every category in a row, each with its own six small bars. */
-function TrendRows({ head = true }: { head?: boolean }) {
+function TrendRows() {
 	return (
 		<>
-			{head && <Title>Trends</Title>}
+			<Title>Trends</Title>
 			<p class="mt-4 text-sm text-muted">By category, May to October</p>
 			<ul class="divide-y divide-rule border-y border-rule">
 				{TRENDS.map((t) => (
@@ -335,59 +305,217 @@ function TrendRows({ head = true }: { head?: boolean }) {
 	);
 }
 
-const STACK_COLORS = [
-	"fill-cat-blue",
-	"fill-cat-plum",
-	"fill-cat-ochre",
-	"fill-cat-slate",
-	"fill-cat-brown",
+/** Each category's monthly budget in cents (unchanged since May in the sample). */
+const BUDGET: Record<string, number> = {
+	Groceries: 90000,
+	"Eating Out": 30000,
+	Kids: 30000,
+	Gas: 20000,
+	Household: 15000,
+};
+
+/** The five full months (May to September) of a trend: this month isn't over, so it isn't judged. */
+const full = (t: Trend) => t.months.slice(0, 5);
+const under = (t: Trend) =>
+	full(t).filter((c) => c <= (BUDGET[t.cat.name] ?? 0));
+const overMonths = (t: Trend) =>
+	full(t)
+		.map((c, i) => (c > (BUDGET[t.cat.name] ?? 0) ? MONTHS[i] : null))
+		.filter((m): m is string => m !== null);
+
+/** A small heading for a group of rows, its icon first (a word and an icon, never color alone). */
+function GroupHeading({
+	icon,
+	tone,
+	children,
+}: {
+	icon: "check" | "arrow-up";
+	tone: string;
+	children?: Child;
+}) {
+	return (
+		<h2 class="mt-5 flex items-center gap-2 text-sm text-muted">
+			<span class={tone}>
+				<Icon name={icon} class="size-4" />
+			</span>
+			{children}
+		</h2>
+	);
+}
+
+/** One category with a sentence about it and its six small bars. */
+function InsightRow({ t, line }: { t: Trend; line: string }) {
+	return (
+		<li class="flex h-16 items-center gap-4">
+			<CategoryIcon icon={t.cat.icon} color={t.cat.color} />
+			<span class="min-w-0 flex-1">
+				<span class="block truncate text-lg leading-6">{t.cat.name}</span>
+				<span class="block truncate leading-6 text-muted">{line}</span>
+			</span>
+			<MiniBars cents={t.months} />
+		</li>
+	);
+}
+
+const [GROCERIES, EATING_OUT, KIDS, GAS] = TRENDS as [
+	Trend,
+	Trend,
+	Trend,
+	Trend,
 ];
 
-/** P23 C: one bar per month, stacked by category, with a legend. */
-const trendsStacked = (
+/** P23 D: good news first, then what's worth a look, then every category. */
+const insightsBody = (
+	<>
+		<GroupHeading icon="check" tone="text-ok">
+			Going well
+		</GroupHeading>
+		<ul class="divide-y divide-rule border-y border-rule">
+			<InsightRow t={GROCERIES} line="5 months under budget" />
+			<InsightRow t={KIDS} line="5 months under budget" />
+			<InsightRow t={GAS} line="5 months under budget" />
+		</ul>
+		<GroupHeading icon="arrow-up" tone="text-ink">
+			Worth a look
+		</GroupHeading>
+		<ul class="divide-y divide-rule border-y border-rule">
+			<InsightRow t={EATING_OUT} line="Up 4 months running" />
+		</ul>
+		<p class="mt-5 text-sm text-muted">Every category, May to October</p>
+		<ul class="divide-y divide-rule border-y border-rule">
+			{TRENDS.slice(4).map((t) => (
+				<InsightRow t={t} line={`${dollars(t.months[4] ?? 0)} in September`} />
+			))}
+		</ul>
+	</>
+);
+
+const trendsInsights = (
 	<>
 		<Title>Trends</Title>
-		<p class="mt-4 text-lg">Spending by category</p>
-		<svg viewBox="0 0 350 170" class="mt-2 w-full" aria-hidden="true">
-			{MONTHS.map((m, i) => {
-				let y = 146;
-				const totals = TRENDS.map((t) => t.months[i] ?? 0);
-				const scale = 124 / 130000;
+		{insightsBody}
+	</>
+);
+
+/** Tally marks for good months: one stroke each, and the fifth crosses the four, as in the brand mark. */
+function Tally({ n }: { n: number }) {
+	return (
+		<svg
+			viewBox="0 0 28 28"
+			class="size-8 shrink-0"
+			fill="none"
+			stroke-width="2.25"
+			stroke-linecap="round"
+			aria-hidden="true"
+		>
+			{[6, 11, 16, 21].slice(0, Math.min(n, 4)).map((x) => (
+				<line x1={x} y1="5" x2={x} y2="23" class="stroke-ink" />
+			))}
+			{n >= 5 && <line x1="2" y1="19" x2="26" y2="9" class="stroke-accent" />}
+		</svg>
+	);
+}
+
+const goodMonths = TRENDS.reduce((s, t) => s + under(t).length, 0);
+
+/** P23 E: a tally of the months each category stayed under its budget. */
+const trendsTally = (
+	<>
+		<Title>Trends</Title>
+		<p class="mt-4 text-lg text-muted">Months under budget since May</p>
+		<p class="font-serif text-6xl font-semibold tracking-tight">
+			{goodMonths} of {TRENDS.length * 5}
+		</p>
+		<p class="mt-1 font-serif text-lg italic">
+			Groceries, Kids and Gas haven't gone over once.
+		</p>
+		<ul class="mt-4 divide-y divide-rule border-y border-rule">
+			{TRENDS.map((t) => {
+				const over = overMonths(t);
 				return (
-					<>
-						{totals.map((c, k) => {
-							const bh = c * scale;
-							y -= bh;
-							return (
-								<rect
-									x={i * 58 + 12}
-									y={y}
-									width="34"
-									height={bh}
-									class={STACK_COLORS[k]}
-								/>
-							);
-						})}
-						<text
-							x={i * 58 + 29}
-							y="164"
-							text-anchor="middle"
-							font-size="12"
-							class="fill-muted"
-						>
-							{m}
-						</text>
-					</>
+					<li class="flex h-16 items-center gap-4">
+						<CategoryIcon icon={t.cat.icon} color={t.cat.color} />
+						<span class="min-w-0 flex-1">
+							<span class="block truncate text-lg leading-6">{t.cat.name}</span>
+							<span class="block truncate leading-6 text-muted">
+								{over.length === 0
+									? "Every month"
+									: `Over in ${over.join(" and ")}`}
+							</span>
+						</span>
+						<Tally n={under(t).length} />
+					</li>
 				);
 			})}
+		</ul>
+	</>
+);
+
+/** Six small bars against a dashed budget line; a month over it is brick, and the words say so. */
+function BudgetBars({ t }: { t: Trend }) {
+	const budget = BUDGET[t.cat.name] ?? 1;
+	const max = Math.max(budget, ...t.months) * 1.05;
+	const y = (c: number) => 31 - (30 * c) / max;
+	return (
+		<svg viewBox="0 0 96 32" class="h-8 w-24 shrink-0" aria-hidden="true">
+			{t.months.map((c, i) => {
+				const last = i === t.months.length - 1;
+				const over = !last && c > budget;
+				return (
+					<rect
+						x={i * 16 + 3}
+						y={y(c)}
+						width="10"
+						height={31 - y(c)}
+						class={
+							last ? "fill-paper stroke-ink" : over ? "fill-over" : "fill-ink"
+						}
+						stroke-dasharray={last ? "2 2" : undefined}
+					/>
+				);
+			})}
+			<line
+				x1="0"
+				x2="96"
+				y1={y(budget)}
+				y2={y(budget)}
+				stroke-dasharray="3 2"
+				class="stroke-muted"
+			/>
 		</svg>
-		<ul class="mt-3 grid grid-cols-2 gap-2">
-			{TRENDS.map((t) => (
-				<li class="flex items-center gap-2">
-					<CategoryIcon icon={t.cat.icon} color={t.cat.color} />
-					{t.cat.name}
-				</li>
-			))}
+	);
+}
+
+/** P23 F: each category's months against its budget line. */
+const trendsBudgetLine = (
+	<>
+		<Title>Trends</Title>
+		<p class="mt-4 text-sm text-muted">
+			Each month against its budget (dashed), May to October
+		</p>
+		<ul class="divide-y divide-rule border-y border-rule">
+			{TRENDS.map((t) => {
+				const over = overMonths(t);
+				return (
+					<li class="flex h-16 items-center gap-4">
+						<CategoryIcon icon={t.cat.icon} color={t.cat.color} />
+						<span class="min-w-0 flex-1">
+							<span class="block truncate text-lg leading-6">{t.cat.name}</span>
+							<span class="flex items-center gap-1 truncate leading-6 text-muted">
+								{over.length > 0 && (
+									<span class="text-over">
+										<Icon name="alert" class="size-4" />
+									</span>
+								)}
+								{over.length === 0
+									? "Under every month"
+									: `Over in ${over.join(" and ")}`}
+							</span>
+						</span>
+						<BudgetBars t={t} />
+					</li>
+				);
+			})}
 		</ul>
 	</>
 );
@@ -502,7 +630,7 @@ const trendsDesktop = (
 	<>
 		<Title>Trends</Title>
 		{soFarTop}
-		<TrendRows head={false} />
+		{insightsBody}
 	</>
 );
 
@@ -880,33 +1008,6 @@ const deletePage = (
 // ---------------------------------------------------------------------------------------------
 // P29–P30: AI suggestions in Settings.
 
-type NameSuggestion = {
-	raw: string;
-	tidied: string;
-	suggested: string;
-	count: number;
-};
-const NAMES: NameSuggestion[] = [
-	{
-		raw: "SQ *BLUE BOTTLE COF 0412",
-		tidied: "Blue bottle cof",
-		suggested: "Blue Bottle Coffee",
-		count: 9,
-	},
-	{
-		raw: "AMZN MKTP US*2K4L19",
-		tidied: "Amzn mktp",
-		suggested: "Amazon",
-		count: 14,
-	},
-	{
-		raw: "TST* LUPITAS TAQ",
-		tidied: "Lupitas taq",
-		suggested: "Lupita's Taqueria",
-		count: 4,
-	},
-];
-
 /** A sample Categories section above, as Settings draws it, shortened. */
 const settingsTop = (
 	<>
@@ -924,58 +1025,164 @@ const settingsTop = (
 	</>
 );
 
-/** P29 A: a Merchant names section, each row with its suggestion, Accept and Reject. */
-const namesList = (
+/** A list row whose merchant has a suggested name: the suggestion shows with a dashed underline (not decided yet). */
+function SuggestedRow({
+	name,
+	cents,
+	cat,
+	maybe,
+}: {
+	name: string;
+	cents: number;
+	cat?: Cat;
+	/** P29 B: the tidied name stays and the caption line offers the suggestion. */
+	maybe?: string;
+}) {
+	return (
+		<li class="flex h-16 items-center gap-4">
+			{cat ? (
+				<CategoryIcon icon={cat.icon} color={cat.color} />
+			) : (
+				<span class="shrink-0 text-muted">
+					<Icon name="circle-dashed" class="size-7" />
+				</span>
+			)}
+			<span class="min-w-0 flex-1">
+				<span
+					class={`block truncate text-lg leading-6 ${maybe ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`}
+				>
+					{name}
+				</span>
+				<span class="block truncate leading-6 text-muted">
+					{cat?.name ?? "Needs category"}
+					{maybe && ` · Maybe “${maybe}”`}
+				</span>
+			</span>
+			<span class="shrink-0 text-lg">
+				{formatCents(cents, { signed: true })}
+			</span>
+		</li>
+	);
+}
+
+/** P29 A: suggested names show in the list, dashed, until someone keeps or changes them. */
+const namesInList = (
 	<>
-		<Title>Settings</Title>
-		<h2 class="mt-5 font-serif text-3xl font-semibold">Merchant names</h2>
-		<p class="mt-1 text-muted">
-			3 names to check. Accepting renames every transaction from it.
+		<Title>Transactions</Title>
+		<p class="mt-2 text-muted">
+			Dashed names are suggestions. Tap one to keep it or pick another.
 		</p>
-		<ul class="mt-2 divide-y divide-rule border-y border-rule">
-			{NAMES.map((n) => (
-				<li class="py-3">
-					<p class="text-sm text-muted">{n.raw}</p>
-					<p class="text-lg">{n.suggested}</p>
-					<p class="text-muted">Suggested · {n.count} transactions</p>
-					<div class="mt-2 flex items-center gap-3">
-						<Button kind="secondary" type="button">
-							Accept
-						</Button>
-						<Button kind="text" type="button">
-							Reject
-						</Button>
-					</div>
-				</li>
-			))}
+		<ul class="mt-2 divide-y divide-rule">
+			<SuggestedRow
+				name="Blue Bottle Coffee"
+				cents={650}
+				cat={CATS.eatingOut}
+			/>
+			<SuggestedRow name="Amazon" cents={3418} cat={CATS.household} />
+			<li class="flex h-16 items-center gap-4">
+				<CategoryIcon icon="groceries" color="cat-blue" />
+				<span class="min-w-0 flex-1">
+					<span class="block truncate text-lg leading-6">Trader Joe's</span>
+					<span class="block leading-6 text-muted">Groceries</span>
+				</span>
+				<span class="shrink-0 text-lg">$82.17</span>
+			</li>
+			<SuggestedRow name="Lupita's Taqueria" cents={2240} />
 		</ul>
 	</>
 );
 
-/** P29 B: a Band on Settings leading to one name at a time, as Organize does (decision 59). */
+/** P29 B: the tidied name stays, and the caption line offers the suggestion. */
+const namesMaybe = (
+	<>
+		<Title>Transactions</Title>
+		<ul class="mt-2 divide-y divide-rule">
+			<SuggestedRow
+				name="Blue bottle cof"
+				cents={650}
+				cat={CATS.eatingOut}
+				maybe="Blue Bottle Coffee"
+			/>
+			<SuggestedRow
+				name="Amzn mktp"
+				cents={3418}
+				cat={CATS.household}
+				maybe="Amazon"
+			/>
+			<li class="flex h-16 items-center gap-4">
+				<CategoryIcon icon="groceries" color="cat-blue" />
+				<span class="min-w-0 flex-1">
+					<span class="block truncate text-lg leading-6">Trader Joe's</span>
+					<span class="block leading-6 text-muted">Groceries</span>
+				</span>
+				<span class="shrink-0 text-lg">$82.17</span>
+			</li>
+			<SuggestedRow name="Lupitas taq" cents={2240} maybe="Lupita's Taqueria" />
+		</ul>
+	</>
+);
+
+/** Up to three suggested names as chips, the bank's tidied name, and a field for your own. */
+function NameChoices({ id }: { id: string }) {
+	return (
+		<fieldset class="flex flex-col gap-2">
+			<legend class="text-base text-ink">Name</legend>
+			<div class="flex flex-wrap gap-2">
+				<Chip type="radio" name={id} value="1" checked>
+					Blue Bottle Coffee
+				</Chip>
+				<Chip type="radio" name={id} value="2">
+					Blue Bottle
+				</Chip>
+				<Chip type="radio" name={id} value="3">
+					Blue Bottle Cafe
+				</Chip>
+				<Chip type="radio" name={id} value="tidied">
+					Keep “Blue bottle cof”
+				</Chip>
+			</div>
+			<TextInput id={`${id}-own`} label="Or your own" surface="paper" />
+			<p class="text-sm text-muted">
+				For all 9 transactions from this merchant.
+			</p>
+		</fieldset>
+	);
+}
+
+/** Both: the edit panel's name choice. */
+const namesPanel = (
+	<Sheet behind={namesInList}>
+		<div>
+			<p class="text-sm text-muted">SQ *BLUE BOTTLE COF 0412</p>
+			<p class="font-serif text-4xl font-semibold">−$6.50</p>
+		</div>
+		<NameChoices id="p29-panel" />
+		<div class="grid grid-cols-2 gap-3">
+			<Button kind="secondary" type="button" class="w-full">
+				Cancel
+			</Button>
+			<Button type="button" class="w-full">
+				Save
+			</Button>
+		</div>
+	</Sheet>
+);
+
+/** Both: when there's time, a Band on Settings leads to one merchant at a time, like Organize. */
 const namesOneAtATime = (
 	<>
 		<p class="inline-flex min-h-11 items-center text-accent">Settings</p>
 		<Title>Merchant names</Title>
-		<p class="mt-1 text-muted">1 of 3</p>
-		<p class="mt-6 text-sm text-muted">The bank says</p>
-		<p class="text-lg">SQ *BLUE BOTTLE COF 0412</p>
-		<p class="mt-4 text-sm text-muted">Suggested name</p>
-		<p class="font-serif text-4xl font-semibold tracking-tight">
-			Blue Bottle Coffee
-		</p>
-		<p class="mt-1 text-muted">On 9 transactions</p>
-		<div class="mt-6 grid grid-cols-2 gap-3">
+		<p class="mt-1 text-muted">1 of 12 · 9 transactions</p>
+		<p class="mt-4 text-sm text-muted">The bank says</p>
+		<p class="mb-4 text-lg">SQ *BLUE BOTTLE COF 0412</p>
+		<NameChoices id="p29-flow" />
+		<div class="mt-4 grid grid-cols-2 gap-3">
 			<Button kind="secondary" type="button" class="w-full">
-				Reject
+				Skip
 			</Button>
 			<Button type="button" class="w-full">
-				Accept and next
-			</Button>
-		</div>
-		<div class="mt-2">
-			<Button kind="text" type="button">
-				Skip for now
+				Save and next
 			</Button>
 		</div>
 	</>
@@ -985,8 +1192,8 @@ const namesBand = (
 	<>
 		<Title>Settings</Title>
 		<div class="mt-4">
-			<Band href="#p29-names" detail="Suggested by AI; you decide">
-				3 merchant names to check
+			<Band href="#p29-names" detail="Suggested names; you choose">
+				12 merchant names to check
 			</Band>
 		</div>
 		<h2 class="mt-5 font-serif text-3xl font-semibold">Categories</h2>
@@ -1024,7 +1231,10 @@ const PET_ROWS = [
 	pet(3, "Petsmart", 2399),
 ];
 
-/** P30 A: the suggestion as a dashed row (not decided yet) under Categories, open to its transactions. */
+/**
+ * P30 A: the suggestion as a dashed row (not decided yet) under Categories, open to its
+ * transactions. Create asks whether to move them in; left unticked, Jev sorts them again right away.
+ */
 const categoryInline = (
 	<>
 		{settingsTop}
@@ -1036,7 +1246,7 @@ const categoryInline = (
 				<Icon name="tag" class="size-6" />
 				<span class="min-w-0 flex-1">
 					<span class="block text-lg">Suggested: Pet Care</span>
-					<span class="block text-muted">From 3 transactions, $254</span>
+					<span class="block text-muted">From 3 transactions, $277</span>
 				</span>
 			</summary>
 			<ul class="divide-y divide-rule border-t border-rule">
@@ -1044,16 +1254,132 @@ const categoryInline = (
 					<TransactionRow row={r} />
 				))}
 			</ul>
-			<div class="flex items-center gap-3 border-t border-rule py-3">
-				<Button kind="secondary" type="button">
-					Create Pet Care
-				</Button>
-				<Button kind="text" type="button">
-					Dismiss
-				</Button>
+			<div class="flex flex-col gap-3 border-t border-rule py-3">
+				<Chip type="checkbox" name="p30-move" value="1" checked>
+					Put these 3 in Pet Care
+				</Chip>
+				<p class="text-sm text-muted">
+					Unticked, Jev sorts them again right away.
+				</p>
+				<div class="flex items-center gap-3">
+					<Button kind="secondary" type="button">
+						Create Pet Care
+					</Button>
+					<Button kind="text" type="button">
+						Dismiss
+					</Button>
+				</div>
 			</div>
 		</details>
 	</>
+);
+
+// ---------------------------------------------------------------------------------------------
+// P32: category suggestions where people already are (the owner's ask on P29).
+
+/** A row needing a category, with Jev's best guess (below its threshold) or a new category on its caption line. */
+function MaybeRow({
+	name,
+	cents,
+	maybe,
+}: {
+	name: string;
+	cents: number;
+	maybe?: string;
+}) {
+	return (
+		<li class="flex h-16 items-center gap-4">
+			<span class="shrink-0 text-muted">
+				<Icon name="circle-dashed" class="size-7" />
+			</span>
+			<span class="min-w-0 flex-1">
+				<span class="block truncate text-lg leading-6">{name}</span>
+				<span class="flex min-w-0 items-center gap-2 leading-6">
+					{maybe ? (
+						<span class="truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
+							Maybe {maybe}
+						</span>
+					) : (
+						<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
+							Needs category
+						</span>
+					)}
+				</span>
+			</span>
+			<span class="shrink-0 text-lg">
+				{formatCents(cents, { signed: true })}
+			</span>
+		</li>
+	);
+}
+
+const maybeList = (
+	<>
+		<Title>Transactions</Title>
+		<p class="mt-2 text-muted">4 transactions needing a category in October</p>
+		<ul class="mt-2 divide-y divide-rule">
+			<MaybeRow name="Lupita's Taqueria" cents={2240} maybe="Eating Out" />
+			<MaybeRow
+				name="Banfield Pet Hospital"
+				cents={18900}
+				maybe="new: Pet Care"
+			/>
+			<MaybeRow name="Shell" cents={4410} maybe="Gas" />
+			<MaybeRow name="Venmo" cents={6000} />
+		</ul>
+	</>
+);
+
+const plainList = (
+	<>
+		<Title>Transactions</Title>
+		<p class="mt-2 text-muted">4 transactions needing a category in October</p>
+		<ul class="mt-2 divide-y divide-rule">
+			<MaybeRow name="Lupita's Taqueria" cents={2240} />
+			<MaybeRow name="Banfield Pet Hospital" cents={18900} />
+			<MaybeRow name="Shell" cents={4410} />
+			<MaybeRow name="Venmo" cents={6000} />
+		</ul>
+	</>
+);
+
+/** Both: in the edit panel the suggestion is the first chip, marked Suggested, with how sure Jev was. */
+const maybePanel = (
+	<Sheet behind={maybeList}>
+		<div>
+			<p class="text-sm text-muted">TST* LUPITAS TAQ</p>
+			<h2 class="font-serif text-4xl font-semibold tracking-tight">
+				Lupita's Taqueria
+			</h2>
+			<p class="font-serif text-4xl font-semibold">−$22.40</p>
+		</div>
+		<fieldset class="flex flex-col gap-2">
+			<legend class="text-base text-ink">Category</legend>
+			<div class="flex flex-wrap gap-2">
+				<span class="rounded-full border border-dashed border-ink">
+					<Chip
+						type="radio"
+						name="p32"
+						value="2"
+						icon={<CategoryIcon icon="eating-out" color="cat-plum" />}
+					>
+						Eating Out · Suggested
+					</Chip>
+				</span>
+				{[CATS.groceries, CATS.kids, CATS.gas, CATS.household].map((c) => (
+					<Chip
+						type="radio"
+						name="p32"
+						value={c.name}
+						icon={<CategoryIcon icon={c.icon} color={c.color} />}
+					>
+						{c.name}
+					</Chip>
+				))}
+			</div>
+			<p class="text-sm text-muted">Jev's guess · 64% sure</p>
+		</fieldset>
+	</Sheet>
 );
 
 /** P30 B: its own page from a Band on Settings. */
@@ -1140,7 +1466,7 @@ const netEarly = (
 	</>
 );
 
-/** P23–P31 on the proposals page. */
+/** P23–P32 on the proposals page. */
 export function Phase4Proposals() {
 	return (
 		<>
@@ -1148,45 +1474,53 @@ export function Phase4Proposals() {
 				id="p23-trends"
 				title="P23 · The 6-month chart on Trends"
 				tier="visual"
-				sentence="Spending by category over the last 6 months. Pick how it's drawn."
+				sentence="Spending by category over the last 6 months, drawn to make budgeting feel worth it. Pick how it's drawn."
 			>
 				<Fixed>
 					the server draws charts as inline SVG, no library (§8), with a title,
 					a description and the numbers for screen readers (§9). Category colors
-					are for icons only (DESIGN.md), so bars are ink. This month is only
-					part of a month, so it's dashed and says "so far".
+					are for icons only (DESIGN.md), so bars are ink. The 6 months include
+					this one so far, dashed (the owner's pick); it isn't judged against
+					its budget until it's over.
 				</Fixed>
 				<NeedsLine>
-					whether the 6 months include this month so far (drawn: yes, May to
-					October).
+					the sentences in D and E are worked out by code, not AI: "under budget
+					N months running" (3 or more) and "up N months in a row" (3 or more).
 				</NeedsLine>
 				<Options
 					options={[
 						{
-							name: "Option A · One chart, pick a category",
-							note: "One large chart with chips above it: All spending, or one category.",
-							tradeoff:
-								"one category at a time, so a trend in another is a tap away.",
-							screen: trendsPick,
-						},
-						{
 							name: "Option B · A small chart per category",
-							note: "Every category in a row like Home's, with six small bars and last month's total.",
-							tradeoff: "small bars show the shape, not the exact months.",
-							recommended:
-								"Eating Out creeping up shows without a tap, and it reads like Home's list.",
+							note: "The one you liked: every category as a row, with six small bars and last month's total.",
+							tradeoff:
+								"it shows the shape, but says nothing about how you did.",
 							screen: <TrendRows />,
 						},
 						{
-							name: "Option C · Stacked bars",
-							note: "One bar per month, split by category color, with a legend.",
+							name: "Option D · Going well, then worth a look",
+							note: "Good news first (under budget 5 months running), then the one trend to watch, then every category with its bars.",
 							tradeoff:
-								"the 5 category colors repeat past 5 categories, and colors would leave icons (a token change).",
-							screen: trendsStacked,
+								"the order changes as months pass, so a category moves around.",
+							recommended:
+								"it opens with what's going right, which is what brings someone back tomorrow, and still shows every trend.",
+							screen: trendsInsights,
 						},
 						{
-							name: "B with P24 A, on desktop",
-							note: "Desktop keeps the one column (DESIGN.md), only wider.",
+							name: "Option E · A tally of good months",
+							note: "Each category earns a tally mark for every month under budget; five closes the gate in terracotta, like the logo.",
+							tradeoff:
+								"playful and on-brand, but it shows wins, not amounts (P24 has those).",
+							screen: trendsTally,
+						},
+						{
+							name: "Option F · Against the budget line",
+							note: "Each category's six bars against a dashed budget line; a month over it is brick, and the words say which.",
+							tradeoff: "honest at a glance, but more brick on the page.",
+							screen: trendsBudgetLine,
+						},
+						{
+							name: "D with P24 A, on desktop",
+							note: "Desktop keeps the one column (DESIGN.md), only wider; P24's headline comes first.",
 							desktop: true,
 							screen: trendsDesktop,
 						},
@@ -1368,34 +1702,50 @@ export function Phase4Proposals() {
 				id="p29-names"
 				title="P29 · Merchant name suggestions"
 				tier="visual"
-				sentence="Workers AI suggests a clean name for a merchant; a person accepts or rejects it in Settings. Pick how they're reviewed."
+				sentence="Suggested names show where you already are, and you choose one (or your own) whenever it suits you; a review flow in Settings is there when you have time. Pick how a suggestion shows in the list."
 			>
 				<Fixed>
-					one suggestion per bank name, made once and kept, only through
-					src/ai/suggest-name.ts (§7). Accepting renames every transaction from
-					that merchant; rejecting keeps the tidied name. A person's own rename
-					always wins. Nothing changes without a tap.
+					suggestions come only through src/ai/suggest-name.ts, made once per
+					bank name and kept (§7). A name applies to every transaction from that
+					merchant, and a person's own name always wins. Nothing is renamed
+					without a tap.
 				</Fixed>
+				<NeedsLine>
+					up to three suggested names per merchant (§5 has room for one), and a
+					suggestion showing in the list before anyone accepts it (§7 says
+					Settings only).
+				</NeedsLine>
 				<Options
 					options={[
 						{
-							name: "Option A · A list in Settings",
-							note: "A Merchant names section: the bank's text, the suggestion, and Accept or Reject on each.",
+							name: "Option A · The suggestion as the name, dashed",
+							note: "The list shows the suggested name with a dashed underline (not decided yet); tapping opens the choice.",
 							tradeoff:
-								"a long list on day one, with ~90 days of new merchants.",
+								"the list reads well from day one, but a guess shows before anyone agrees to it.",
 							recommended:
-								"the spec puts them in Settings as a list, and a quick scan with one tap each is fastest.",
-							screen: namesList,
+								"clean names straight away, the dash says it's only a suggestion, and keeping it is one tap.",
+							screen: namesInList,
 						},
 						{
-							name: "Option B · One at a time",
-							note: "A Band on Settings leads to one name at a time, like Organize.",
-							tradeoff: "calm, but slower for many quick yeses.",
+							name: "Option B · “Maybe …” on the caption line",
+							note: "The tidied name stays; the line under it says “Maybe Blue Bottle Coffee”.",
+							tradeoff:
+								"nothing shown is a guess, but the list still reads like a bank statement.",
+							screen: namesMaybe,
+						},
+						{
+							name: "Both · Choosing in the edit panel",
+							note: "Up to three suggestions as chips, keep the bank's name, or type your own.",
+							screen: namesPanel,
+						},
+						{
+							name: "Both · When you have time",
+							note: "A Band on Settings leads to one merchant at a time, like Organize, with the same choices.",
 							screen: namesOneAtATime,
 						},
 						{
-							name: "Option B, before · The Band on Settings",
-							note: "How B is found.",
+							name: "Both · The Band on Settings",
+							note: "How the review is found; it shows only while names are waiting.",
 							screen: namesBand,
 						},
 					]}
@@ -1406,25 +1756,26 @@ export function Phase4Proposals() {
 				id="p30-new-category"
 				title="P30 · A suggested new category"
 				tier="visual"
-				sentence="When Jev says none of the categories fit, Workers AI suggests a new one from those transactions; a person creates it or dismisses it. Pick where it appears."
+				sentence="When Jev says none of the categories fit, Workers AI suggests a new one from those transactions; a person creates it or dismisses it. Your pick (A), with Create now asking about the transactions."
 			>
 				<Fixed>
 					Settings shows each suggestion with the transactions behind it, and
 					nothing is created without a person (§7). A new category gets the tag
-					icon and the next color, and Jev offers it from its next run.
+					icon and the next color, and Jev offers it from then on.
 				</Fixed>
 				<NeedsLine>
-					whether Create also puts those transactions in it (drawn: yes, as a
-					person's choice).
+					Create asks whether to put those transactions in it (ticked to start);
+					unticked, Jev is asked about them again right away, after the page has
+					answered, instead of waiting for the night (§7 runs Jev only nightly
+					today).
 				</NeedsLine>
 				<Options
 					options={[
 						{
 							name: "Option A · Under Categories",
-							note: "A dashed row (not decided yet) under the categories, open to its transactions, with Create and Dismiss.",
+							note: "A dashed row under the categories, open to its transactions, with a tick for moving them and Create or Dismiss.",
 							tradeoff: "it sits in the list, so a long list hides it.",
-							recommended:
-								"it's next to the categories it would join, and suggestions are rare.",
+							recommended: "your pick; the tick asks before moving anything.",
 							screen: categoryInline,
 						},
 						{
@@ -1433,6 +1784,47 @@ export function Phase4Proposals() {
 							tradeoff:
 								"the name can be changed first, but it's one more page.",
 							screen: categoryPage,
+						},
+					]}
+				/>
+			</Specimen>
+
+			<Specimen
+				id="p32-category-maybe"
+				title="P32 · Category suggestions where you are"
+				tier="visual"
+				sentence="Like names, a category suggestion shows in the list as you use the app: Jev's best guess when it wasn't sure enough, or a suggested new category. Pick whether the list shows it."
+			>
+				<Fixed>
+					Jev's pick is already kept with its confidence when it's below the
+					threshold (§7, #49), so showing it needs no new AI call. Rows stay one
+					link to their panel, so the choice is made in the panel.
+				</Fixed>
+				<NeedsLine>
+					a guess below the threshold shows as a suggestion, never applied
+					without a tap.
+				</NeedsLine>
+				<Options
+					options={[
+						{
+							name: "Option A · “Maybe …” on the row",
+							note: "A row needing a category swaps its tag for a dashed “Maybe Eating Out” (or “Maybe new: Pet Care”); the dashed icon still says it needs one.",
+							tradeoff: "one more thing on the row.",
+							recommended:
+								"you see the guess while scanning, and saying yes is two taps.",
+							screen: maybeList,
+						},
+						{
+							name: "Option B · Only in the panel",
+							note: "Rows stay as today; the suggestion waits in the panel.",
+							tradeoff:
+								"a calmer list, but the help is hidden until you open a row.",
+							screen: plainList,
+						},
+						{
+							name: "Both · The edit panel",
+							note: "The suggestion is the first chip, dashed and marked Suggested, with how sure Jev was.",
+							screen: maybePanel,
 						},
 					]}
 				/>
