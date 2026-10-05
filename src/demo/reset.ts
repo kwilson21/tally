@@ -92,11 +92,12 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		...seed.transactions.map((t) =>
 			db
 				.prepare(
-					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence,
-					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, parent_id, updated_by, credit_reviewed)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo', 1)`,
+					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence,
+					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, parent_id, refund_of_id, income_source, credit_reviewed, credit_reviewed_by, updated_by)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, 'demo')`,
 				)
 				.bind(
+					t.id,
 					t.accountId,
 					t.date,
 					t.amountCents,
@@ -112,6 +113,8 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					b(t.excluded),
 					b(t.isSplit),
 					t.parentId ?? null,
+					t.refundOfId ?? null,
+					t.flagIncome ? "jev" : null,
 				),
 		),
 		...demoBills(today, seed.transactions).map((bill) =>

@@ -217,6 +217,10 @@ howItWorks.get("/how-it-works", async (c) => {
 							split parent (its parts count instead).
 						</li>
 						<li>
+							A refund linked to its purchase counts in that purchase's month
+							and category.
+						</li>
+						<li>
 							"Needs a category" counts exactly the transactions Home counts as
 							uncategorized.
 						</li>
@@ -289,7 +293,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							user={counts.user}
 							merchantRule={counts.merchantRule}
 							jev={counts.jev}
-							waiting={counts.needsCategory}
+							waiting={counts.needsCategory + counts.linkedWaiting}
 							income={counts.income}
 							threshold={threshold}
 						/>

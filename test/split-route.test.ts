@@ -86,7 +86,7 @@ describe("transaction splits", () => {
 				],
 				"synthetic-test",
 			),
-		).toBe(true);
+		).toMatchObject({ saved: true });
 		expect(
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
@@ -162,7 +162,7 @@ describe("transaction splits", () => {
 				],
 				"synthetic-test",
 			),
-		).toBe(true);
+		).toMatchObject({ saved: true });
 		expect(
 			await env.DB.prepare(
 				"SELECT date, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
@@ -269,7 +269,10 @@ describe("transaction splits", () => {
 			{ categoryId: 1, amountCents: 500 },
 			{ categoryId: 5, amountCents: (bakery?.cents as number) - 400 },
 		];
-		expect(await saveSplit(env.DB, id, stale, "test")).toBe(false);
+		expect(await saveSplit(env.DB, id, stale, "test")).toEqual({
+			saved: false,
+			unlinked: [],
+		});
 		expect(
 			await env.DB.prepare(
 				"SELECT is_split AS split, (SELECT COUNT(*) FROM transactions WHERE parent_id = ?1) AS parts FROM transactions WHERE id = ?1",

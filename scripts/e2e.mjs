@@ -243,6 +243,45 @@ await page
 assert.equal(await rows(), 1);
 step("removing the split restores the transaction");
 
+// The demo's Target refund is linked to its purchase (P19): its row says so, and its panel shows the link.
+await page.goto(`${BASE}/transactions?q=Target&month=all`, {
+	waitUntil: "networkidle",
+});
+const refundRow = page
+	.locator("#results li[data-transaction]")
+	.filter({ hasText: "Refund for" });
+assert.equal(await refundRow.count(), 1);
+assert.match(
+	await refundRow.innerText(),
+	/Kids · Refund for [A-Z][a-z]{2} \d{1,2}/,
+);
+assert.equal(
+	await page
+		.locator("#results li[data-transaction]")
+		.filter({ hasText: "$24.99 refunded" })
+		.count(),
+	1,
+);
+await refundRow.locator("a").click();
+await page.locator('[role="dialog"]').waitFor();
+await page.locator("#sheet summary", { hasText: "This refunds…" }).click();
+const linked = page.locator('input[name="refund_of"]:checked');
+assert.equal(await page.locator("#sheet").locator(linked).count(), 1);
+assert.notEqual(
+	await page.locator("#sheet").locator(linked).getAttribute("value"),
+	"",
+);
+assert.match(
+	await page.locator("#sheet label", { has: linked }).innerText(),
+	/\$84\.99 · Kids/,
+);
+await page
+	.getByText(/^Counts in Kids with the [A-Z][a-z]{2} \d{1,2} purchase\.$/)
+	.waitFor();
+step(
+	"the demo refund shows its linked purchase, checked, and Refund for on its row",
+);
+
 // Reorder through htmx: the button inside the edit form must send its own direction.
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.locator('summary[data-category="3"]').click();
@@ -260,6 +299,36 @@ assert.deepEqual(
 	["Groceries", "Gas", "Eating Out"],
 );
 step("Move up in Settings moves Gas up one place");
+
+// Select several uncategorized rows, then set their category in one action (P20 A).
+assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);
+await page.goto(`${BASE}/transactions?uncategorized=1`, {
+	waitUntil: "networkidle",
+});
+await page.getByRole("link", { name: "Select" }).click();
+// The checkbox is visually hidden, so tap the row (its label) as a person would.
+const selections = page.locator("#selection-form label:has(input[name=ids])");
+await selections.nth(0).click();
+await selections.nth(1).click();
+assert.equal(
+	await page.locator("#selection-form input[name=ids]:checked").count(),
+	2,
+);
+await page.getByText("2 selected", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Set category" }).click();
+await page
+	.locator('[role="dialog"]')
+	.getByText("Groceries", { exact: true })
+	.click();
+await page.getByRole("button", { name: "Save", exact: true }).click();
+await page
+	.locator("#toasts")
+	.getByText("Set 2 transactions to Groceries.")
+	.waitFor();
+await page.getByText("Needs category (10)", { exact: true }).waitFor();
+step(
+	"selecting two rows sets Groceries and lowers the uncategorized count by two",
+);
 
 await browser.close();
 assert.deepEqual(errors, [], `console errors:\n${errors.join("\n")}`);

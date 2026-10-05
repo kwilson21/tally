@@ -40,6 +40,67 @@ describe("rowCaption", () => {
 		expect(html).toContain("Review credit");
 		expect(html).not.toContain("Needs category");
 	});
+	const kids = {
+		categoryId: 4,
+		categoryName: "Kids",
+		categoryIcon: "kids",
+		categoryColor: "cat-ochre",
+	};
+	it("names the purchase a linked refund is for, with the year only when it differs", () => {
+		expect(
+			rowCaption({
+				...base,
+				...kids,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			}),
+		).toEqual({
+			kind: "category",
+			caption: "Kids · Refund for Sep 5",
+			tag: false,
+		});
+		expect(
+			rowCaption({
+				...base,
+				...kids,
+				date: "2027-01-02",
+				refundOfId: 3,
+				refundPurchaseDate: "2026-12-20",
+			}).caption,
+		).toBe("Kids · Refund for Dec 20, 2026");
+	});
+
+	it("leaves the Needs category tag to the purchase of a linked refund", () => {
+		expect(
+			rowCaption({
+				...base,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+				followsPurchase: true,
+			}),
+		).toEqual({ kind: "needs", caption: "Refund for Sep 5", tag: false });
+		// Once the purchase is excluded, the refund counts on its own and asks for its own category.
+		expect(
+			rowCaption({ ...base, refundOfId: 3, refundPurchaseDate: "2026-09-05" })
+				.tag,
+		).toBe(true);
+	});
+
+	it("shows how much of a purchase or a split part was refunded", () => {
+		expect(rowCaption({ ...base, ...kids, refundedCents: 2499 }).caption).toBe(
+			"Kids · $24.99 refunded",
+		);
+		expect(
+			rowCaption({
+				...base,
+				...kids,
+				parentId: 9,
+				parentName: "Target",
+				refundedCents: 2499,
+			}).caption,
+		).toBe("Kids · Split from Target · $24.99 refunded");
+	});
+
 	it("shows the category when there is one", () => {
 		expect(
 			rowCaption({
@@ -102,6 +163,37 @@ describe("rowCaption", () => {
 });
 
 describe("TransactionRow", () => {
+	it("leaves Counts in off a linked refund, whose caption already explains it", async () => {
+		const row = {
+			...base,
+			date: "2026-09-26",
+			countsInMonth: "2026-08",
+			refundOfId: 3,
+			refundPurchaseDate: "2026-08-20",
+		};
+		const html = await TransactionRow({ row }).toString();
+		expect(html).toContain("Refund for Aug 20");
+		expect(html).not.toContain("Counts in");
+		const payment = await TransactionRow({
+			row: { ...base, countsInMonth: "2026-08" },
+		}).toString();
+		expect(payment).toContain("Counts in");
+	});
+
+	it("keeps Counts in on a linked refund when a bill moved its purchase's month", async () => {
+		const html = await TransactionRow({
+			row: {
+				...base,
+				date: "2026-10-12",
+				countsInMonth: "2026-09",
+				refundOfId: 3,
+				refundPurchaseDate: "2026-10-02",
+			},
+		}).toString();
+		expect(html).toContain("Refund for Oct 2");
+		expect(html).toContain("Counts in September");
+	});
+
 	it("is one link to the edit URL when given one, with the signed amount", async () => {
 		const html = await TransactionRow({
 			row: { ...base, income: true, amountCents: -245000 },

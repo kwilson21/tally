@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { dayLabel, monthLabel, todayUtc } from "../dates";
+import { dayLabel, monthLabel, shortDay, todayUtc } from "../dates";
 import {
 	getTransaction,
 	type ListRow,
@@ -8,6 +8,8 @@ import {
 	monthsWithTransactions,
 	needsCategoryCount,
 	PAGE_SIZE,
+	type RefundPurchase,
+	refundPurchases,
 	removeSplit,
 	saveEdit,
 	saveSplit,
@@ -39,6 +41,8 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { ABOVE_TABS } from "../views/nav";
+import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
@@ -69,6 +73,11 @@ type ListOptions = {
 	focusId?: number;
 	status?: 200 | 404 | 422;
 	pageTitle?: string;
+	selecting?: boolean;
+	/** In select mode: the rows to show ticked (back from the Set category sheet, or kept across a list change). */
+	checkedIds?: Set<number>;
+	selectionError?: string;
+	focusHeading?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -81,7 +90,16 @@ function listHref(filters: Filters, thisMonth: string) {
 async function renderList(
 	c: Context<App>,
 	filters: Filters,
-	{ sheet, focusId, status = 200, pageTitle }: ListOptions = {},
+	{
+		sheet,
+		focusId,
+		status = 200,
+		pageTitle,
+		selecting = false,
+		checkedIds = new Set<number>(),
+		selectionError,
+		focusHeading = false,
+	}: ListOptions = {},
 ) {
 	const today = todayUtc();
 	const [{ rows, total, page, pages }, months, needs, categories] =
@@ -130,8 +148,14 @@ async function renderList(
 		!filters.excluded;
 	const pageHref = (n: number) => {
 		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
-		return `/transactions${query ? `?${query}` : ""}`;
+		const params = new URLSearchParams(query);
+		if (selecting) params.set("select", "1");
+		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
+	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked.
+	const includeTicked = selecting
+		? { "hx-include": "#selection-form input[name=ids]:checked" }
+		: {};
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
 		<a
@@ -142,14 +166,34 @@ async function renderList(
 			hx-sync="#filters:replace"
 			hx-target="#results"
 			hx-select="#results > *"
-			hx-select-oob="#result-count:innerHTML, #add-cash:outerHTML"
+			hx-select-oob={LIST_OOB}
 			hx-swap="innerHTML show:top"
 			hx-push-url="true"
+			{...includeTicked}
 		>
 			{label}
 		</a>
 	);
+	const pageNav = pages > 1 && (
+		<nav
+			aria-label="Pages"
+			class="mt-4 flex items-center justify-between border-t border-rule pt-2"
+		>
+			<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
+			<span class="text-sm text-muted">
+				Page {page} of {pages}
+			</span>
+			<span>{page < pages && pageLink(page + 1, "next", "Older")}</span>
+		</nav>
+	);
 	const back = listHref(filters, today.slice(0, 7));
+	// Select and Done keep every filter and the page; Done drops only select mode.
+	const doneHref = `/transactions${listQuery ? `?${listQuery}` : ""}`;
+	const selectHref = `/transactions?${listQuery ? `${listQuery}&` : ""}select=1`;
+	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
+	// shows the no-JS hint, and htmx re-counts on load.
+	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	const htmx = c.req.header("HX-Request") === "true";
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
 	return c.html(
@@ -162,9 +206,27 @@ async function renderList(
 			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
-			<h1 class="font-serif text-5xl font-semibold tracking-tight">
-				Transactions
-			</h1>
+			<div class="flex items-center justify-between gap-3">
+				<h1
+					id="transactions-title"
+					tabindex={focusHeading ? -1 : undefined}
+					autofocus={focusHeading}
+					class="font-serif text-5xl font-semibold tracking-tight outline-none"
+				>
+					Transactions
+				</h1>
+				{/* Swapped out-of-band on filter and page changes, so it keeps the current filters. */}
+				<Button
+					id="select-toggle"
+					kind="text"
+					href={selecting ? doneHref : selectHref}
+				>
+					{selecting ? "Done" : "Select"}
+				</Button>
+			</div>
+			{selecting && (
+				<p class="mt-2 text-sm text-muted">Tap rows to select them.</p>
+			)}
 			<div class="mt-3">
 				{/* Swapped out-of-band on filter and page changes, so its back URL keeps the current filters. */}
 				<Button
@@ -195,10 +257,12 @@ async function renderList(
 				hx-sync="replace"
 				hx-target="#results"
 				hx-select="#results > *"
-				hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #add-cash:outerHTML"
+				hx-select-oob={`#needs-count:innerHTML, ${LIST_OOB}`}
 				hx-swap="innerHTML"
 				hx-push-url="true"
+				{...includeTicked}
 			>
+				{selecting && <input type="hidden" name="select" value="1" />}
 				<FormField id="q" label="Search transactions" hideLabel>
 					{(a11y) => (
 						<div class="relative">
@@ -289,62 +353,125 @@ async function renderList(
 						Organize by merchant
 					</Button>
 				)}
-				<section id="results" class="mt-2" aria-label="Results">
-					{rows.length === 0 ? (
-						allCategorized ? (
-							<EmptyState
-								kind="done"
-								sentence="Every transaction has a category."
-								hint="New ones appear here as they come in."
-							/>
-						) : (
-							<EmptyState
-								kind="search"
-								sentence="No transactions match these filters."
-								hint="Try a wider month, or clear the search."
-								action={{ href: "/transactions", label: "Clear filters" }}
-							/>
-						)
-					) : (
-						byDay(rows).map(([date, dayRows]) => (
-							<>
-								<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
-								<ul class="divide-y divide-rule">
-									{dayRows.map((row) => {
-										const href = `/transactions/${row.id}${listQuery ? `?${listQuery}` : ""}`;
-										return (
-											<TransactionRow
-												row={row}
-												href={href}
-												autofocus={row.id === focusId}
-												// Opening swaps in only the sheet, so the list keeps its place.
-												attrs={{
-													"hx-get": href,
-													"hx-target": "#sheet",
-													"hx-select": "#sheet",
-													"hx-swap": "outerHTML",
-													"hx-push-url": "true",
-												}}
-											/>
-										);
-									})}
-								</ul>
-							</>
-						))
-					)}
-					{pages > 1 && (
-						<nav
-							aria-label="Pages"
-							class="mt-4 flex items-center justify-between border-t border-rule pt-2"
+				{selecting ? (
+					<form
+						id="selection-form"
+						aria-label="Select transactions"
+						method="post"
+						class="pb-28"
+						hx-get="/transactions/select/count"
+						hx-trigger="load, change"
+						hx-target="#selected-count"
+						hx-swap="innerHTML"
+					>
+						<input id="selection-back" type="hidden" name="back" value={back} />
+						<section id="results" class="mt-2" aria-label="Results">
+							{selectionError && (
+								<p role="alert" class="my-3 text-sm text-over">
+									{selectionError}
+								</p>
+							)}
+							{rows.length === 0 ? (
+								<EmptyState
+									kind="search"
+									sentence="No transactions match these filters."
+									hint="Try a wider month, or clear the search."
+									action={{ href: "/transactions", label: "Clear filters" }}
+								/>
+							) : (
+								byDay(rows).map(([date, dayRows]) => (
+									<>
+										<h2 class="mt-3 text-sm text-muted">
+											{dayLabel(date, today)}
+										</h2>
+										<ul class="divide-y divide-rule">
+											{dayRows.map((row) =>
+												row.isSplit ? (
+													<TransactionRow row={row} />
+												) : (
+													<SelectableTransactionRow
+														row={row}
+														checked={checkedIds.has(row.id)}
+													/>
+												),
+											)}
+										</ul>
+									</>
+								))
+							)}
+							{pageNav}
+						</section>
+						{/* On phones it sits on the tab bar. On desktop it pins to the bottom of the content column:
+						    left comes from its place in the page, and the width is the column's (the layout's
+						    max-w-6xl less its px-8 sides, w-56 sidebar and gap-10 = 20.5rem, up to max-w-3xl). */}
+						<div
+							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
 						>
-							<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
-							<span class="text-sm text-muted">
-								Page {page} of {pages}
-							</span>
-							<span>{page < pages && pageLink(page + 1, "next", "Older")}</span>
-						</nav>
-					)}
-				</section>
+							<div class="flex flex-wrap items-center gap-2">
+								<span
+									id="selected-count"
+									aria-live="polite"
+									class="mr-auto text-lg"
+								>
+									{htmx
+										? selectedLabel(ticked.length)
+										: "Choose rows, then an action"}
+								</span>
+								<SelectionActionButtons
+									disabled={htmx && ticked.length === 0}
+								/>
+							</div>
+						</div>
+					</form>
+				) : (
+					<section id="results" class="mt-2" aria-label="Results">
+						{rows.length === 0 ? (
+							allCategorized ? (
+								<EmptyState
+									kind="done"
+									sentence="Every transaction has a category."
+									hint="New ones appear here as they come in."
+								/>
+							) : (
+								<EmptyState
+									kind="search"
+									sentence="No transactions match these filters."
+									hint="Try a wider month, or clear the search."
+									action={{ href: "/transactions", label: "Clear filters" }}
+								/>
+							)
+						) : (
+							byDay(rows).map(([date, dayRows]) => (
+								<>
+									<h2 class="mt-3 text-sm text-muted">
+										{dayLabel(date, today)}
+									</h2>
+									<ul class="divide-y divide-rule">
+										{dayRows.map((row) => {
+											const href = `/transactions/${row.id}${listQuery ? `?${listQuery}` : ""}`;
+											return (
+												<TransactionRow
+													row={row}
+													href={href}
+													autofocus={row.id === focusId}
+													// Opening swaps in only the sheet, so the list keeps its place.
+													attrs={{
+														"hx-get": href,
+														"hx-target": "#sheet",
+														"hx-select": "#sheet",
+														"hx-swap": "outerHTML",
+														"hx-push-url": "true",
+													}}
+												/>
+											);
+										})}
+									</ul>
+								</>
+							))
+						)}
+						{pageNav}
+					</section>
+				)}
 				<div id="sheet">{sheet?.(categories.results)}</div>
 			</div>
 		</Layout>,
@@ -357,9 +484,311 @@ async function renderList(
 transactions.get("/transactions", (c) => {
 	const params = new URL(c.req.url).searchParams;
 	const focus = Number(params.get("focus"));
+	const selecting = params.get("select") === "1";
 	return renderList(c, parseFilters(params, todayUtc().slice(0, 7)), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		selecting,
+		checkedIds: selecting
+			? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
+			: undefined,
 	});
+});
+
+/** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
+const LIST_OOB = [
+	"#result-count:innerHTML",
+	"#add-cash:outerHTML",
+	"#select-toggle:outerHTML",
+	"#selection-back:outerHTML",
+	"#selected-count:innerHTML",
+	"#set-category-selection:outerHTML",
+	"#exclude-selection:outerHTML",
+].join(", ");
+
+/** Most ids one bulk action takes (D1 binds at most 100 parameters per statement). */
+const MAX_SELECTED = 100;
+const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
+const NONE_SELECTED = "Select at least one transaction.";
+
+const selectedLabel = (count: number) => `${count} selected`;
+
+/** Positive whole-number ids, once each; each value may be one id or "1,2,3". */
+function parseIds(values: (string | File)[]) {
+	const ids = new Set<number>();
+	for (const value of values) {
+		if (typeof value !== "string") continue;
+		for (const part of value.split(",")) {
+			const id = /^\d{1,15}$/.test(part.trim()) ? Number(part) : 0;
+			if (id > 0) ids.add(id);
+		}
+	}
+	return [...ids];
+}
+
+function SelectionActionButtons({
+	disabled = false,
+	oob = false,
+}: {
+	disabled?: boolean;
+	oob?: boolean;
+}) {
+	// Only the count fragment's copy swaps itself in out of band; each button's own request
+	// keeps its normal swap.
+	const oobSwap = oob ? "outerHTML" : undefined;
+	return (
+		<>
+			<Button
+				id="set-category-selection"
+				kind="secondary"
+				type="submit"
+				class="px-3"
+				formaction="/transactions/select/category"
+				formmethod="post"
+				disabled={disabled}
+				hx-post="/transactions/select/category"
+				hx-target="#sheet"
+				hx-select="#sheet"
+				hx-swap="outerHTML"
+				hx-swap-oob={oobSwap}
+			>
+				Set category
+			</Button>
+			<Button
+				id="exclude-selection"
+				kind="secondary"
+				type="submit"
+				class="px-3"
+				formaction="/transactions/select/exclude"
+				formmethod="post"
+				disabled={disabled}
+				hx-post="/transactions/select/exclude"
+				hx-target="#main"
+				hx-select="#main > *"
+				hx-swap="innerHTML"
+				hx-swap-oob={oobSwap}
+			>
+				Exclude
+			</Button>
+		</>
+	);
+}
+
+async function selectableIds(db: D1Database, ids: number[]) {
+	if (ids.length === 0 || ids.length > MAX_SELECTED) return [];
+	const marks = ids.map(() => "?").join(",");
+	const rows = await db
+		.prepare(
+			`SELECT id FROM transactions WHERE is_split = 0 AND id IN (${marks})`,
+		)
+		.bind(...ids)
+		.all<{ id: number }>();
+	return rows.results.map((row) => row.id);
+}
+
+/** The bar's count (swapped into the live region's text) and its buttons, out of band. */
+transactions.get("/transactions/select/count", (c) => {
+	const count = parseIds(new URL(c.req.url).searchParams.getAll("ids")).length;
+	return c.html(
+		<>
+			{selectedLabel(count)}
+			<SelectionActionButtons disabled={count === 0} oob />
+		</>,
+	);
+});
+
+/** The posted ids, or why they can't be acted on. */
+async function postedSelection(c: Context<App>, form: FormData) {
+	const posted = parseIds(form.getAll("ids"));
+	if (posted.length > MAX_SELECTED) return { ids: [], error: TOO_MANY };
+	const ids = await selectableIds(c.env.DB, posted);
+	return { ids, error: ids.length === 0 ? NONE_SELECTED : undefined };
+}
+
+/** The select-mode list with these rows ticked (Cancel and close on the sheet). */
+const selectModeHref = (back: string, ids: number[]) =>
+	`${back}${back.includes("?") ? "&" : "?"}select=1${ids.length ? `&ids=${ids.join(",")}` : ""}`;
+
+function SelectCategorySheet({
+	ids,
+	back,
+	categories,
+	error,
+}: {
+	ids: number[];
+	back: string;
+	categories: Category[];
+	error?: string;
+}) {
+	const cancelHref = selectModeHref(back, ids);
+	const alert = error && (
+		<p id="select-category-error" role="alert" class="text-sm text-over">
+			{error}
+		</p>
+	);
+	return (
+		<BottomSheet labelledBy="select-category-title" closeHref={cancelHref}>
+			<h2
+				id="select-category-title"
+				tabindex={-1}
+				autofocus
+				class="font-serif text-4xl font-semibold tracking-tight outline-none"
+			>
+				{ids.length ? `Set category for ${ids.length}` : "Set category"}
+			</h2>
+			{ids.length === 0 ? (
+				// Nothing to save: say why, and go back to choosing rows.
+				<div class="mt-4 flex flex-col gap-4">
+					{alert}
+					<Button kind="secondary" href={cancelHref} class="w-full">
+						Cancel
+					</Button>
+				</div>
+			) : (
+				<form
+					method="post"
+					action="/transactions/select/category/save"
+					class="mt-4 flex flex-col gap-4"
+					hx-post="/transactions/select/category/save"
+					hx-target="#main"
+					hx-select="#main > *"
+					hx-swap="innerHTML"
+				>
+					{ids.map((id) => (
+						<input type="hidden" name="ids" value={id} />
+					))}
+					<input type="hidden" name="back" value={back} />
+					<fieldset
+						aria-describedby={error ? "select-category-error" : undefined}
+					>
+						<legend class="mb-2">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							{categories.map((cat, index) => (
+								<Chip
+									type="radio"
+									name="category"
+									value={String(cat.id)}
+									required={index === 0}
+									icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
+								>
+									{cat.name}
+								</Chip>
+							))}
+						</div>
+						{alert && <div class="mt-2">{alert}</div>}
+					</fieldset>
+					<div class="grid grid-cols-2 gap-3">
+						<Button kind="secondary" href={cancelHref} class="w-full">
+							Cancel
+						</Button>
+						<Button type="submit" class="w-full">
+							Save
+						</Button>
+					</div>
+				</form>
+			)}
+		</BottomSheet>
+	);
+}
+
+/** The select-mode list with the Set category sheet over it; a problem shows inside the sheet. */
+function categorySheet(
+	c: Context<App>,
+	back: string,
+	ids: number[],
+	error?: string,
+) {
+	return renderList(c, filtersFrom(back), {
+		selecting: true,
+		checkedIds: new Set(ids),
+		status: error ? 422 : 200,
+		pageTitle: "Set category · Tally",
+		sheet: (categories) => (
+			<SelectCategorySheet
+				ids={ids}
+				back={back}
+				categories={categories}
+				error={error}
+			/>
+		),
+	});
+}
+
+transactions.post("/transactions/select/category", async (c) => {
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const { ids, error } = await postedSelection(c, form);
+	return categorySheet(c, back, ids, error);
+});
+
+async function finishSelection(c: Context<App>, back: string, message: string) {
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	);
+	// The list is out of select mode, so the address bar is too.
+	c.header("HX-Push-Url", back);
+	return renderList(c, filtersFrom(back), { focusHeading: true });
+}
+
+transactions.post("/transactions/select/category/save", async (c) => {
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const { ids, error } = await postedSelection(c, form);
+	if (error) return categorySheet(c, back, ids, error);
+	const category = Number(form.get("category"));
+	const cat = Number.isInteger(category)
+		? await c.env.DB.prepare(
+				"SELECT id,name FROM categories WHERE id=? AND archived=0",
+			)
+				.bind(category)
+				.first<{ id: number; name: string }>()
+		: null;
+	if (!cat)
+		return categorySheet(c, back, ids, "Pick a category from the list.");
+	// The same write as the edit panel's category change (saveEdit).
+	await c.env.DB.batch(
+		ids.map((id) =>
+			c.env.DB.prepare(
+				"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, updated_by=?, updated_at=datetime('now') WHERE id=?",
+			).bind(cat.id, actor(c), id),
+		),
+	);
+	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
+	return finishSelection(c, back, message);
+});
+
+transactions.post("/transactions/select/exclude", async (c) => {
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const { ids, error } = await postedSelection(c, form);
+	if (error)
+		return renderList(c, filtersFrom(back), {
+			selecting: true,
+			checkedIds: new Set(ids),
+			status: 422,
+			selectionError: error,
+		});
+	// As in the edit panel (saveEdit): a split is one bank transaction, so excluding a part
+	// excludes the purchase and all its parts. Rows already excluded keep who excluded them.
+	await c.env.DB.batch(
+		ids.map((id) =>
+			c.env.DB.prepare(
+				`UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
+				WHERE excluded=0 AND (
+					id=?1
+					OR parent_id=?1
+					OR id=(SELECT parent_id FROM transactions WHERE id=?1)
+					OR parent_id=(SELECT parent_id FROM transactions WHERE id=?1)
+				)`,
+			).bind(id, actor(c)),
+		),
+	);
+	return finishSelection(
+		c,
+		back,
+		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.`,
+	);
 });
 
 type SheetProps = {
@@ -370,6 +799,7 @@ type SheetProps = {
 	errors?: EditErrors;
 	demo: boolean;
 	deleteConfirm?: boolean;
+	refunds?: RefundPurchase[];
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -381,6 +811,7 @@ function EditSheet({
 	errors = {},
 	demo,
 	deleteConfirm = false,
+	refunds = [],
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -392,6 +823,14 @@ function EditSheet({
 		"hx-push-url": back,
 	};
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
+	// A refund that follows its purchase counts in that purchase's category, so its own can't be
+	// picked until it's unlinked (or the purchase is excluded, when it counts on its own).
+	const purchase = refunds.find(
+		(p) => p.id === values.refundOfId && !p.excluded,
+	);
+	const purchaseCategory = categories.find(
+		(cat) => cat.id === purchase?.categoryId,
+	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -487,6 +926,7 @@ function EditSheet({
 				<input type="hidden" name="back" value={back} />
 				<fieldset
 					class="flex flex-col gap-2"
+					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
 					<legend class="text-base text-ink">Category</legend>
@@ -496,34 +936,98 @@ function EditSheet({
 								type="radio"
 								name="category"
 								value={String(cat.id)}
-								checked={values.categoryId === cat.id}
+								checked={
+									purchase
+										? purchase.categoryId === cat.id
+										: values.categoryId === cat.id
+								}
 								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
 							>
 								{cat.name}
 							</Chip>
 						))}
 					</div>
-					{tx.categorySource === "jev" && tx.categoryConfidence !== null && (
+					{purchase && (
 						<p class="text-sm text-muted">
-							Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
+							{purchaseCategory
+								? `Counts in ${purchaseCategory.name} with the ${shortDay(purchase.date, tx.date)} purchase.`
+								: `Counts with the ${shortDay(purchase.date, tx.date)} purchase.`}
 						</p>
 					)}
+					{!purchase &&
+						tx.categorySource === "jev" &&
+						tx.categoryConfidence !== null && (
+							<p class="text-sm text-muted">
+								Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
+							</p>
+						)}
 					{errors.category && (
 						<p id="category-error" role="alert" class="text-sm text-over">
 							{errors.category}
 						</p>
 					)}
 				</fieldset>
+				{(refunds.length > 0 || tx.refundOfId != null) && (
+					<details
+						class="group border-t border-rule"
+						open={Boolean(errors.refund)}
+					>
+						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+							<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
+								<Icon name="chevron-right" class="size-5" />
+							</span>
+							This refunds…
+						</summary>
+						<div class="flex flex-col gap-3 pt-1">
+							<p class="text-sm text-muted">
+								{tx.displayName} purchases in the last 90 days
+							</p>
+							<fieldset
+								class="flex flex-col gap-3"
+								aria-describedby={errors.refund ? "refund-error" : undefined}
+							>
+								<legend class="sr-only">Purchase this refunds</legend>
+								<Chip
+									type="radio"
+									name="refund_of"
+									value=""
+									checked={values.refundOfId == null}
+								>
+									Not linked
+								</Chip>
+								{refunds.map((p) => (
+									<Chip
+										type="radio"
+										name="refund_of"
+										value={String(p.id)}
+										checked={values.refundOfId === p.id}
+									>
+										{shortDay(p.date, tx.date)} · {formatCents(p.amountCents)} ·{" "}
+										{p.categoryName ?? "No category"}
+									</Chip>
+								))}
+							</fieldset>
+							{errors.refund && (
+								<p id="refund-error" role="alert" class="text-sm text-over">
+									{errors.refund}
+								</p>
+							)}
+						</div>
+					</details>
+				)}
 				{/* The two things people change most after the category, one tap each (owner's pick C). */}
 				<div class="flex flex-wrap gap-2">
-					<Chip
-						type="checkbox"
-						name="always"
-						value="1"
-						checked={values.alwaysForMerchant}
-					>
-						Always for this merchant
-					</Chip>
+					{/* A linked refund has no category of its own to make a rule from. */}
+					{!purchase && (
+						<Chip
+							type="checkbox"
+							name="always"
+							value="1"
+							checked={values.alwaysForMerchant}
+						>
+							Always for this merchant
+						</Chip>
+					)}
 					<Chip
 						type="checkbox"
 						name="excluded"
@@ -794,7 +1298,9 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		excluded: tx.excluded,
 		income: tx.income,
 		creditReviewed: tx.income ? false : tx.creditReviewed,
+		refundOfId: tx.refundOfId ?? null,
 	};
+	const refunds = await refundPurchases(c.env.DB, tx);
 	return renderList(c, filters, {
 		sheet: (categories) => (
 			<EditSheet
@@ -802,6 +1308,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				back={back}
 				categories={categories}
 				values={values}
+				refunds={refunds}
 				demo={c.env.DEMO === "true"}
 			/>
 		),
@@ -914,9 +1421,10 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			tx.amountCents,
 			categories.map((cat) => cat.id),
 		);
-		const saved =
-			parsed.ok && (await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c)));
-		if (parsed.ok && !saved) {
+		const result = parsed.ok
+			? await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c))
+			: null;
+		if (result && !result.saved) {
 			// Show the bank's new amount, so the next save checks against it.
 			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 			return renderList(c, filtersFrom(back), {
@@ -932,13 +1440,17 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				),
 			});
 		}
-		if (parsed.ok) {
+		if (result) {
 			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+			const unlinked = unlinkedSentence(result.unlinked);
 			c.header(
 				"HX-Trigger",
 				JSON.stringify({
-					toast: { message: `Split ${tx.displayName}`, type: "success" },
-					announce: `Saved split for ${tx.displayName}.`,
+					toast: {
+						message: `Split ${tx.displayName}${unlinked ? `.${unlinked}` : ""}`,
+						type: "success",
+					},
+					announce: `Saved split for ${tx.displayName}.${unlinked}`,
 				}),
 			);
 			c.header("HX-Push-Url", back);
@@ -952,7 +1464,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					back={back}
 					categories={categories}
 					values={values}
-					error={parsed.error}
+					error={parsed.ok ? undefined : parsed.error}
 				/>
 			),
 		});
@@ -964,21 +1476,32 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	});
 });
 
+/** What a split change says about refunds it unlinked: " The refund on Sep 26 is no longer linked.", or "" for none. */
+function unlinkedSentence(dates: string[]): string {
+	const [first] = dates;
+	if (first === undefined) return "";
+	return dates.length === 1
+		? ` The refund on ${shortDay(first, todayUtc())} is no longer linked.`
+		: ` ${dates.length} refunds are no longer linked.`;
+}
+
 transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx?.isSplit) return notFound(c);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	await removeSplit(c.env.DB, tx.id, actor(c));
+	const unlinked = unlinkedSentence(
+		await removeSplit(c.env.DB, tx.id, actor(c)),
+	);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: {
-				message: `Removed split from ${tx.displayName}`,
+				message: `Removed split from ${tx.displayName}${unlinked ? `.${unlinked}` : ""}`,
 				type: "success",
 			},
-			announce: `Removed split from ${tx.displayName}.`,
+			announce: `Removed split from ${tx.displayName}.${unlinked}`,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -995,12 +1518,27 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
 	).all<{ id: number; name: string }>();
+	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
+	// must be one the panel offers (the current link always is).
+	const refunds = await refundPurchases(c.env.DB, tx);
+	const current = tx.refundOfId ?? null;
+	const posted = form.get("refund_of");
+	const refundOfId =
+		posted === null ? current : posted === "" ? null : Number(posted);
+	const refundOk =
+		refundOfId === null || refunds.some((p) => p.id === refundOfId);
+	// A refund that follows its purchase counts in that purchase's category, so a posted category
+	// (and a merchant rule made from it) is ignored.
+	if (refundOk && refunds.some((p) => p.id === refundOfId && !p.excluded)) {
+		form.delete("category");
+		form.delete("always");
+	}
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),
 	);
 
-	if (!parsed.ok) {
+	if (!parsed.ok || !refundOk) {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -1011,6 +1549,11 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			creditReviewed: form.get("creditReviewed") === "1",
 			creditReviewedProvided:
 				form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
+			refundOfId,
+		};
+		const errors: EditErrors = {
+			...(parsed.ok ? {} : parsed.errors),
+			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
 		};
 		return renderList(c, filters, {
 			status: 422,
@@ -1020,14 +1563,24 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					back={back}
 					categories={all}
 					values={values}
-					errors={parsed.errors}
+					refunds={refunds}
+					errors={errors}
 					demo={c.env.DEMO === "true"}
 				/>
 			),
 		});
 	}
 
-	await saveEdit(c.env.DB, tx.id, parsed.value, actor(c));
+	// The link is written only when it changes.
+	await saveEdit(
+		c.env.DB,
+		tx.id,
+		{
+			...parsed.value,
+			refundOfId: refundOfId === current ? undefined : refundOfId,
+		},
+		actor(c),
+	);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).
@@ -1069,7 +1622,9 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			displayName: tx.merchantName,
 			note: tx.note,
 			excluded: tx.excluded,
+			refundOfId: tx.refundOfId ?? null,
 		};
+		const refunds = await refundPurchases(c.env.DB, tx);
 		return renderList(c, filtersFrom(back), {
 			sheet: (categories) => (
 				<EditSheet
@@ -1077,6 +1632,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 					back={back}
 					categories={categories}
 					values={values}
+					refunds={refunds}
 					demo={c.env.DEMO === "true"}
 					deleteConfirm
 				/>

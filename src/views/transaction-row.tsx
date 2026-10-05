@@ -1,3 +1,4 @@
+import { shortDay } from "../dates";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
@@ -13,12 +14,23 @@ type Caption = {
 export function rowCaption(row: ListRow): Caption {
 	if (row.excluded)
 		return { kind: "excluded", caption: "Excluded", tag: false };
-	if (!row.creditReviewed && row.amountCents < 0 && !row.income)
+	if (
+		!row.followsPurchase &&
+		!row.creditReviewed &&
+		row.amountCents < 0 &&
+		!row.income
+	)
 		return { kind: "needs", caption: "Review credit", tag: false };
 	if (row.parentId)
 		return {
 			kind: "category",
-			caption: `${row.categoryName ? `${row.categoryName} · ` : ""}Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
+			caption: [
+				row.categoryName,
+				`Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
+				refunded(row),
+			]
+				.filter(Boolean)
+				.join(" · "),
 			tag: false,
 		};
 	if (row.isSplit)
@@ -47,14 +59,28 @@ export function rowCaption(row: ListRow): Caption {
 			tag: true,
 		};
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
+	// A linked refund and its purchase each say so after the category (P19).
+	const pair = row.refundPurchaseDate
+		? `Refund for ${shortDay(row.refundPurchaseDate, row.date)}`
+		: refunded(row);
 	if (row.categoryName)
-		return { kind: "category", caption: row.categoryName, tag: false };
+		return {
+			kind: "category",
+			caption: pair ? `${row.categoryName} · ${pair}` : row.categoryName,
+			tag: false,
+		};
+	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
+	if (row.followsPurchase) return { kind: "needs", caption: pair, tag: false };
 	return {
 		kind: "needs",
-		caption: row.rawName === row.displayName ? null : row.rawName,
+		caption: pair ?? (row.rawName === row.displayName ? null : row.rawName),
 		tag: true,
 	};
 }
+
+/** "$24.99 refunded" when refunds are linked to this purchase. */
+const refunded = (row: ListRow) =>
+	row.refundedCents ? `${formatCents(row.refundedCents)} refunded` : null;
 
 const tidyFallback = (name: string) =>
 	name.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -86,6 +112,7 @@ export function TransactionRow({
 	href,
 	attrs,
 	autofocus,
+	bare = false,
 }: {
 	row: ListRow;
 	href?: string;
@@ -93,11 +120,13 @@ export function TransactionRow({
 	attrs?: Record<string, string>;
 	/** Move focus here after a swap (the row just saved). */
 	autofocus?: boolean;
+	/** Leave out the list item when another interactive row owns the wrapper. */
+	bare?: boolean;
 }) {
 	const { kind, caption, tag } = rowCaption(row);
 	const Row = href ? "a" : "div";
-	return (
-		<li data-transaction={row.id}>
+	const content = (
+		<>
 			{/* Every row is the same height: two lines (name, then caption and tag), long text truncated. */}
 			<Row
 				href={href}
@@ -114,15 +143,17 @@ export function TransactionRow({
 					</span>
 					<span class="flex min-w-0 items-center gap-2 leading-6">
 						{caption && <span class="truncate text-muted">{caption}</span>}
-						{row.countsInMonth && (
-							<span class="shrink-0 text-muted">
-								{caption && "· "}Counts in{" "}
-								{new Intl.DateTimeFormat("en-US", {
-									month: "long",
-									timeZone: "UTC",
-								}).format(new Date(`${row.countsInMonth}-01T00:00:00Z`))}
-							</span>
-						)}
+						{/* A linked refund's caption names its purchase; the month shows only when a bill moved it. */}
+						{row.countsInMonth &&
+							row.countsInMonth !== row.refundPurchaseDate?.slice(0, 7) && (
+								<span class="shrink-0 text-muted">
+									{caption && "· "}Counts in{" "}
+									{new Intl.DateTimeFormat("en-US", {
+										month: "long",
+										timeZone: "UTC",
+									}).format(new Date(`${row.countsInMonth}-01T00:00:00Z`))}
+								</span>
+							)}
 						{tag && (
 							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
 								Needs category
@@ -134,6 +165,7 @@ export function TransactionRow({
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
 			</Row>
-		</li>
+		</>
 	);
+	return bare ? content : <li data-transaction={row.id}>{content}</li>;
 }

@@ -272,6 +272,11 @@ export async function syncItem(
 				const cents = plaidAmountToCents(transaction.amount);
 				// A corrected amount invalidates a person's parts; a date-only correction follows them.
 				statements.push(
+					env.DB.prepare(
+						`UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
+					).bind(transaction.transaction_id, cents, itemRowId, lockId),
+				);
+				statements.push(
 					env.DB.prepare(`DELETE FROM transactions WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ?
 				) AND ${OWNS_LOCK}`).bind(
@@ -330,6 +335,11 @@ export async function syncItem(
 			}
 			for (const transaction of page.modified) {
 				const cents = plaidAmountToCents(transaction.amount);
+				statements.push(
+					env.DB.prepare(
+						`UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
+					).bind(transaction.transaction_id, cents, itemRowId, lockId),
+				);
 				statements.push(
 					env.DB.prepare(`DELETE FROM transactions WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ?
@@ -412,7 +422,7 @@ export async function syncItem(
 			let inserted = 0;
 			for (const [index, transaction] of posted.entries()) {
 				const changed =
-					results[firstAddedStatement + index * 3 + 2]?.meta.changes ?? 0;
+					results[firstAddedStatement + index * 4 + 3]?.meta.changes ?? 0;
 				if (
 					changed > 0 &&
 					(!existingTransactionIds.has(transaction.transaction_id) ||

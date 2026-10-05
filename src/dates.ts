@@ -40,12 +40,23 @@ const SHORT = [
 	"Dec",
 ];
 
+/** "Sep 5", or "Dec 31, 2025" when its year isn't the year of `beside` (both YYYY-MM-DD). */
+export function shortDay(date: string, beside: string): string {
+	const label = `${SHORT[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
+	const year = date.slice(0, 4);
+	return year === beside.slice(0, 4) ? label : `${label}, ${year}`;
+}
+
 /** "Today, Sep 22", "Sep 21", or "Dec 31, 2025", from YYYY-MM-DD strings. */
 export function dayLabel(date: string, today: string): string {
-	const label = `${SHORT[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
-	if (date === today) return `Today, ${label}`;
-	const year = date.slice(0, 4);
-	return year === today.slice(0, 4) ? label : `${label}, ${year}`;
+	const label = shortDay(date, today);
+	return date === today ? `Today, ${label}` : label;
+}
+
+/** The calendar date `days` days before a YYYY-MM-DD date (calendar arithmetic only, no time zones). */
+export function daysBefore(date: string, days: number): string {
+	const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+	return new Date(Date.UTC(y, m - 1, d - days)).toISOString().slice(0, 10);
 }
 
 /** "September", or "December 2025" when it isn't this year. */

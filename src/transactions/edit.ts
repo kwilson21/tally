@@ -15,10 +15,11 @@ export type Edit = {
 	creditReviewed: boolean;
 	/** False when the edit form omitted the credit-review control for an income credit. */
 	creditReviewedProvided?: boolean;
+	refundOfId?: number | null;
 };
 
 export type EditErrors = Partial<
-	Record<"category" | "merchant" | "note", string>
+	Record<"category" | "merchant" | "note" | "refund", string>
 >;
 
 const MAX_NAME = 80;
