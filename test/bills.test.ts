@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { todayUtc } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { app } from "../src/index";
 import { loadBillRows } from "../src/routes/bills";
 
 describe("Bills", () => {
@@ -731,6 +732,202 @@ describe("Bill guards", () => {
 			expect(
 				(await post("/bills/999999/reactivate", new URLSearchParams())).status,
 			).toBe(404);
+		});
+	});
+
+	// Two saves can both pass the form's check; the write itself then refuses the second.
+	describe("a duplicate that lands between the check and the write", () => {
+		const competing = (name: string) =>
+			`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES('${name}',1000,1,'monthly',5,'RIVAL CO')`;
+		/** The worker's env with a DB that runs `rival` just before the first statement starting with `sql` runs. */
+		const racing = (sql: string, rival: string) => {
+			let raced = false;
+			const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
+				new Proxy(statement, {
+					get(target, prop) {
+						if (prop === "bind")
+							return (...values: unknown[]) => guard(target.bind(...values));
+						if (prop === "run")
+							return async () => {
+								if (!raced) {
+									raced = true;
+									await env.DB.prepare(rival).run();
+								}
+								return target.run();
+							};
+						const value = Reflect.get(target, prop);
+						return typeof value === "function" ? value.bind(target) : value;
+					},
+				});
+			const DB = new Proxy(env.DB, {
+				get(target, prop) {
+					if (prop === "prepare")
+						return (text: string) =>
+							text.startsWith(sql)
+								? guard(target.prepare(text))
+								: target.prepare(text);
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+			return { ...env, DB };
+		};
+		const send = (path: string, body: URLSearchParams, worker: Env) =>
+			app.request(
+				`http://tally.test${path}`,
+				{
+					method: "POST",
+					headers: {
+						"content-type": "application/x-www-form-urlencoded",
+						"HX-Request": "true",
+						Origin: "http://tally.test",
+					},
+					body,
+				},
+				worker,
+			);
+		const gyms = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT name FROM bills WHERE lower(name)='gym' AND active=1",
+				).all<{ name: string }>()
+			).results.map((r) => r.name);
+
+		it("refuses an add, and shows the Name error", async () => {
+			const res = await send(
+				"/bills",
+				fields({ name: "Gym" }),
+				racing("INSERT INTO bills", competing("gym")),
+			);
+			const html = await res.text();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(html).toContain("You already have a bill called gym.");
+			expect(html).toMatch(/<p id="bill-name-error" role="alert"/);
+			expect(await gyms()).toEqual(["gym"]);
+		});
+
+		it("refuses an edit, and leaves the bill as it was", async () => {
+			const res = await send(
+				"/bills/1",
+				fields({ name: "Gym", merchant_raw_name: "APPLE.COM/BILL" }),
+				racing("UPDATE bills SET name", competing("gym")),
+			);
+			const html = await res.text();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(html).toContain("You already have a bill called gym.");
+			expect(await nameOf(1)).toBe("Streaming");
+			expect(await amountOf(1)).toBe(299);
+			expect(await gyms()).toEqual(["gym"]);
+		});
+
+		it("refuses a reactivation", async () => {
+			const res = await send(
+				"/bills/7/reactivate",
+				new URLSearchParams(),
+				racing("UPDATE bills SET active", competing("Old phone plan")),
+			);
+			const html = await res.text();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(html).toContain("You already have a bill called Old phone plan.");
+			expect(
+				await env.DB.prepare("SELECT active FROM bills WHERE id=7").first(
+					"active",
+				),
+			).toBe(0);
+		});
+	});
+
+	// When reactivating is refused, the Name field is the way out: rename it, then Reactivate.
+	describe("renaming while reactivating", () => {
+		const repeatActive = () =>
+			env.DB.prepare(
+				`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
+				 VALUES('old phone plan',4000,3,'monthly',5,'PHONE CO')`,
+			).run();
+		const statusOf = (id: number) =>
+			env.DB.prepare("SELECT name,active FROM bills WHERE id=?")
+				.bind(id)
+				.first<{ name: string; active: number }>();
+
+		it("makes Reactivate send the typed name only after a refusal", async () => {
+			const plain = await (
+				await exports.default.fetch("http://tally.test/bills/7/edit")
+			).text();
+			expect(plain).toContain('formaction="/bills/7/reactivate"');
+			expect(plain).not.toContain("reactivate?rename");
+			await repeatActive();
+			const refused = await (
+				await post("/bills/7/reactivate", new URLSearchParams())
+			).text();
+			expect(refused).toContain('formaction="/bills/7/reactivate?rename=1"');
+			expect(refused).toContain('hx-post="/bills/7/reactivate?rename=1"');
+			// The sheet's Name field holds the bill's name, ready to be changed.
+			expect(refused).toMatch(
+				/<input[^>]*id="bill-name"[^>]*value="Old phone plan"/,
+			);
+		});
+
+		it("renames and reactivates in one step when the new name is free", async () => {
+			await repeatActive();
+			const res = await post(
+				"/bills/7/reactivate?rename=1",
+				new URLSearchParams({ name: "  Old phone plan (2022) " }),
+			);
+			expect(res.headers.get("HX-Trigger")).toContain(
+				'"announce":"Bill reactivated"',
+			);
+			expect(await statusOf(7)).toEqual({
+				name: "Old phone plan (2022)",
+				active: 1,
+			});
+		});
+
+		it("redirects the same way without JavaScript", async () => {
+			await repeatActive();
+			const res = await post(
+				"/bills/7/reactivate?rename=1",
+				new URLSearchParams({ name: "Old phone plan (2022)" }),
+				false,
+			);
+			expect(res.status).toBe(303);
+			expect(res.headers.get("location")).toBe("/bills");
+			expect(await statusOf(7)).toEqual({
+				name: "Old phone plan (2022)",
+				active: 1,
+			});
+		});
+
+		it("refuses again when the typed name is also taken, keeping what was typed", async () => {
+			await repeatActive();
+			const res = await post(
+				"/bills/7/reactivate?rename=1",
+				new URLSearchParams({ name: "WATER" }),
+			);
+			const html = await res.text();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(html).toContain("You already have a bill called Water.");
+			expect(html).toMatch(/<input[^>]*id="bill-name"[^>]*value="WATER"/);
+			expect(html).toContain('formaction="/bills/7/reactivate?rename=1"');
+			expect(await statusOf(7)).toEqual({ name: "Old phone plan", active: 0 });
+		});
+
+		it("asks for a name when the Name field was emptied", async () => {
+			const res = await post(
+				"/bills/7/reactivate?rename=1",
+				new URLSearchParams({ name: "  " }),
+			);
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(await res.text()).toContain("Enter a name.");
+			expect(await statusOf(7)).toEqual({ name: "Old phone plan", active: 0 });
+		});
+
+		it("does not rename on a plain Reactivate", async () => {
+			const res = await post(
+				"/bills/7/reactivate",
+				new URLSearchParams({ name: "Something else" }),
+			);
+			expect(res.headers.get("HX-Trigger")).toContain("Bill reactivated");
+			expect(await statusOf(7)).toEqual({ name: "Old phone plan", active: 1 });
 		});
 	});
 
