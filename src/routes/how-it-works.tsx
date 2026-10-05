@@ -50,7 +50,6 @@ const PARTS: [string, string][] = [
 	],
 	["Workers static assets", "Serves the CSS file, htmx.js, and icons."],
 	["D1 (SQLite)", "Stores all data."],
-	["R2", "Stores document PDFs; D1 keeps only each file's name and details."],
 	[
 		"Plaid (REST over fetch)",
 		"Supplies accounts, transactions, and balances from the family's banks.",

@@ -26,7 +26,7 @@ Tally replaces the owner's Django app (`personal-finance-app`). That app stays i
 
 ## 3. Scope
 
-All eight features are in scope and ship across phases (§11):
+The first seven features ship across phases (§11); the eighth moved to the Later list (decision 66):
 
 | # | Feature |
 |---|---|
@@ -37,7 +37,7 @@ All eight features are in scope and ship across phases (§11):
 | 5 | Excluding transactions from the budget (transfers, reimbursements, one-offs) |
 | 6 | Spending trends: month over month, by category |
 | 7 | Account balances and net worth over time |
-| 8 | Documents: stored statements and receipts (PDF) |
+| 8 | ~~Documents: stored statements and receipts (PDF)~~ Moved to the Later list as part of receipts (§12, decision 66) |
 
 Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggested new categories when none of the household's categories fit (a person creates or dismisses them), the demo banner, a "Things to try" list, a "How it works" page, and onboarding: what a first visit shows and teaches, in the demo and in the family's first week (decision 49, #95).
 
@@ -56,7 +56,6 @@ Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggest
 | **Tailwind CSS** | Styles the pages with utility classes, compiled into one CSS file. |
 | **Workers static assets** | Serves the CSS file, `htmx.js`, and icons. |
 | **D1 (SQLite)** | Stores all data. |
-| **R2** | Stores document PDFs; D1 keeps only each file's name and details. |
 | **Plaid (REST over `fetch`)** | Supplies accounts, transactions, and balances from the family's banks. |
 | **Jev (TypeSafe AI)** | Picks a category and flags for each transaction, with a confidence score. |
 | **Workers AI** | Suggests a clean merchant name, which a person accepts or rejects. |
@@ -72,7 +71,7 @@ Wrangler environments deploy the same code twice:
 |---|---|---|
 | Hostname | `tally.thesuperhuman.us` (decision 34); may later take over `finance.thesuperhuman.us` as its own decision (decision 16) | `tally-demo.thesuperhuman.us` |
 | D1 database | `tally-prod` | `tally-demo` |
-| R2 bucket | `tally-prod-docs` | `tally-demo-docs` (fake PDFs) |
+| R2 bucket (unused until receipts, decision 66) | `tally-prod-docs` | `tally-demo-docs` |
 | Plaid | On | **Off.** No Plaid secrets exist in this environment. |
 | Jev / Workers AI | On | On |
 | Login | Cloudflare Access | Public, with a demo banner on every page |
@@ -105,11 +104,11 @@ All money is stored as **integer cents**, because SQLite has no exact decimal ty
 | `balance_history` | One balance per account per day, for the net-worth chart. | `account_id`, `date`, `balance_cents` (unique on account + date) |
 | `categories` | The household's category list. | `id`, `name` (unique), `icon`, `color` (token name, e.g. `cat-blue`), `sort_order`, `archived` |
 | `budget_amounts` | How much a category gets per month, starting from a given month. | `category_id`, `effective_month` (`YYYY-MM`), `amount_cents` (unique on category + month) |
-| `merchants` | One row per raw name Plaid sends, with its suggested and chosen display names. | `raw_name` (unique), `suggested_name`, `display_name`, `default_category_id` (nullable), `suggestion_status` (`none` / `pending` / `accepted` / `rejected`) ; from Phase 3, `not_a_bill` (0/1: never suggest this merchant as a bill again, decision 60) |
-| `transactions` | Every transaction and how it's categorized. | `id`, `plaid_transaction_id` (unique, nullable for split children), `account_id`, `date` (`YYYY-MM-DD` as Plaid sends it), `amount_cents`, `raw_name`, `plaid_category` (Plaid's `personal_finance_category.primary`, a hint for Jev), `category_id` (nullable), `category_source` (`user` / `merchant_rule` / `jev` / null), `category_confidence`, `jev_category_id` (Jev's pick, kept even when it's below the threshold; null when Jev said none fit), `jev_failed_at` (when Jev last failed on this transaction; asked last), `flag_transfer`, `flag_reimbursement`, `flag_income` (0/1), `income_source` (`jev` / `user` / null), `credit_reviewed` (nullable 0/1), `credit_reviewed_by` (`user` / null), `excluded`, `excluded_source` (`user` / `jev` / null: who last decided the exclusion; Jev never overrides a person, #27), `parent_id` (nullable), `is_split`, `refund_of_id` (nullable, from Phase 3: the purchase this refund refunds, decision 60), `note`, `updated_by`, `updated_at`. A hand-entered cash transaction has no `plaid_transaction_id` |
+| `merchants` | One row per raw name Plaid sends, with its suggested and chosen display names. | `raw_name` (unique), `suggested_name` (from Phase 4, up to three suggested names, decision 64), `display_name`, `default_category_id` (nullable), `suggestion_status` (`none` / `pending` / `accepted` / `rejected`) ; from Phase 3, `not_a_bill` (0/1: never suggest this merchant as a bill again, decision 60) |
+| `transactions` | Every transaction and how it's categorized. | `id`, `plaid_transaction_id` (unique, nullable for split children), `account_id`, `date` (`YYYY-MM-DD` as Plaid sends it), `amount_cents`, `raw_name`, `plaid_category` (Plaid's `personal_finance_category.primary`, a hint for Jev), `category_id` (nullable), `category_source` (`user` / `merchant_rule` / `jev` / null), `category_confidence`, `jev_category_id` (Jev's pick, kept even when it's below the threshold; null when Jev said none fit), `jev_failed_at` (when Jev last failed on this transaction; asked last), `flag_transfer`, `flag_reimbursement`, `flag_income` (0/1), `income_source` (`jev` / `user` / null: who last decided the income flag, decision 70), `credit_reviewed` (nullable 0/1), `credit_reviewed_by` (`user` / null), `excluded`, `excluded_source` (`user` / `jev` / null, and from Phase 3.5 `plaid`, which needs a migration to its check:  who last decided the exclusion; Jev never overrides a person, #27), `parent_id` (nullable), `is_split`, `refund_of_id` (nullable, from Phase 3: the purchase this refund refunds, decision 60), `note`, `updated_by`, `updated_at`. A hand-entered cash transaction has no `plaid_transaction_id`; from Phase 3.5 (decision 67), `merchant_name` (Plaid's cleaned merchant, nullable) and `pending` (0/1) |
 | `bills` | Recurring bills and how to recognize their payment. | `id`, `name`, `amount_cents`, `due_day`, `frequency` (`monthly` / `yearly`), `anchor_month` (for yearly), `category_id`, `merchant_raw_name`, `active` |
 | `bill_payments` | Links one bill occurrence to the one transaction that paid it. | `bill_id`, `period` (`YYYY-MM` or `YYYY`), `transaction_id`, `matched_by` (`auto` / `user`), `status` (`linked` / `dismissed`), `created_at`. Among `linked` rows: unique on (`bill_id`, `period`) and unique on `transaction_id` |
-| `documents` | Details of each stored PDF, whose file lives in R2. | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
+| `documents` | Details of each stored PDF, whose file lives in R2. Unused until receipts are built (decision 66). | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
 
 `updated_by`, `linked_by`, and `uploaded_by` hold the email claim from Cloudflare Access's signed login token. The Worker verifies the `Cf-Access-Jwt-Assertion` JWT against the team's public keys (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, cached) and never trusts the plain `Cf-Access-Authenticated-User-Email` header. In one sentence: we read who you are from Cloudflare's signed login token, not from a header anyone could fake. In the demo they hold `demo`.
 
@@ -119,17 +118,19 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 **Sign convention (Plaid's):** a positive amount is money out, and a negative amount is money in. Account balances on debt accounts (`is_liability`) display as negative.
 
-**Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date.
+**Dates:** transaction dates are stored and compared exactly as Plaid sends them (`YYYY-MM-DD`), with no time-zone conversion. A month is the `YYYY-MM` prefix of the date. "Today", which decides the current month and bill status, is the household's date in its time zone, a Settings choice that starts as Eastern (`America/New_York`); a transaction's own date is never converted (decision 67).
 
-"Counted transactions" for a month means: date in that month (or, from Phase 3, a payment linked to an earlier month's bill occurrence counts in that occurrence's month instead, never both; decision 58, #26; and a refund linked to its purchase counts in the purchase's counted month and current category instead of its own, never both, while the purchase counts; if the purchase is excluded, the refund counts on its own date and category again; a refund of a split purchase links to one of its parts, decision 60), `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. An unreviewed negative bank credit (`COALESCE(credit_reviewed, 0) = 0`, not flagged as income) is held out of spending, Uncategorized, and Safe to spend. A negative credit counts as spending after Jev confidently categorizes it as non-income or a person explicitly marks it reviewed as a refund or other non-income credit. Transactions flagged `income` are counted only toward **Income** and are left out of Spent, Uncategorized, and Safe to spend. A refund that follows its purchase has no category of its own to set, so only the purchase shows Needs category; its amount stays in Uncategorized until the purchase has a category. If the purchase is excluded, its linked refund counts on its own date and category again.
+**Pending (decision 67):** a pending transaction counts like any other and shows the word "Pending". When the bank posts it under a new id, the person's category, note, exclusion and every link (bill, refund, counts in) move to the posted transaction, and so does a split if the amount is unchanged; if the posted amount differs, the split is removed as in §6.1 (decision 62). A pending one the bank drops is removed with its links.
+
+"Counted transactions" for a month means: date in that month (or, from Phase 3, a payment linked to an earlier month's bill occurrence counts in that occurrence's month instead, never both; decision 58, #26; and a refund linked to its purchase counts in the purchase's counted month and current category instead of its own, never both, while the purchase counts; if the purchase is excluded, the refund counts on its own date and category again; a refund of a split purchase links to one of its parts, decision 60), `excluded = false`, and `is_split = false`, so split parents are skipped and their children count instead. An unreviewed negative bank credit (`COALESCE(credit_reviewed, 0) = 0`, not flagged as income) is held out of Spent, Uncategorized, and Safe to spend until Jev confidently categorizes it as non-income or a person marks it reviewed as a refund or other non-income credit (decision 70). Transactions flagged `income` are counted only toward **Income** and are left out of Spent, Uncategorized, and Safe to spend. A refund that follows its purchase has no category of its own to set, so only the purchase shows Needs category; its amount stays in Uncategorized until the purchase has a category.
 
 | Number | Rule |
 |---|---|
 | **Budget for a category in month M** | `amount_cents` from the `budget_amounts` row for that category with the latest `effective_month <= M`. No row means no budget. |
-| **Spent** | Sum of `amount_cents` over counted transactions in the category. Refunds are negative, so they reduce it. |
+| **Spent** | Sum of `amount_cents` over counted transactions in the category. Refunds are negative, so they reduce it. When refunds outweigh purchases, Spent is negative and the bar is empty (its wording is designed with Phase 5's Home wording, decision 67). |
 | **Left** | Budget minus spent. |
 | **Uncategorized** | Counted transactions with `category_id` null, shown as their own row and never hidden. |
-| **Income** | Absolute value of the sum of counted transactions flagged `income`. Jev's confident income classification is stored with its source and can be changed in the Transactions edit panel (decision 63). |
+| **Income** | Absolute value of the sum of counted transactions flagged `income`. Who set the flag is stored in `income_source`, and a person's choice always wins over Plaid and Jev (decision 70). |
 | **Bill status** | A bill shows its latest occurrence due by a week from now. *Paid* if that occurrence has a linked `bill_payments` row (see §6.1); a paid occurrence from an earlier month gives way to the next one. Otherwise *overdue* if the due date has passed, *due* if it falls within the next 7 days, or *upcoming*. So a missed bill stays overdue until it is paid or the next one is due, which then takes its place, for monthly and yearly bills alike (decision 62). |
 | **Safe to spend** | Total budget for the month, minus all counted spending (every category, including uncategorized and unbudgeted; income excluded), minus the amounts of bills that are *due* or *overdue* and not *paid*. In one sentence: what's left of the whole budget after setting aside money for bills that are due. |
 
@@ -140,10 +141,10 @@ Schema changes use numbered D1 migration files in `migrations/`.
 **The key:** a bill *occurrence* is identified by `(bill_id, period)`, where `period` is `YYYY-MM` for monthly bills and `YYYY` for yearly bills. Unique constraints in `bill_payments` let the database itself rule out double matches in either direction, so re-running the matcher changes nothing.
 
 **A transaction is a candidate for a bill occurrence only if all of these hold:**
-1. **Merchant:** its `raw_name` equals the bill's `merchant_raw_name`.
+1. **Merchant:** its merchant key equals the bill's. A transaction's merchant key is Plaid's `merchant_name` when present, otherwise its `raw_name`; a bill's is the key of the payment it was made from or linked to (from Phase 3.5, decision 67; before that, `raw_name` against `merchant_raw_name`).
 2. **Amount:** it's within ±10% of `amount_cents`, so a bill that varies a little (like utilities) still matches.
 3. **Date:** it falls within ±5 days of that occurrence's due date. This keeps a late payment from last month from being mistaken for this month's.
-4. **Unclaimed:** it isn't already linked to a bill occurrence, isn't excluded, isn't a split parent, and hasn't been dismissed for this occurrence.
+4. **Unclaimed:** it isn't already linked to a bill occurrence, isn't a split parent (from Phase 3.5 an excluded payment qualifies, decision 67), and hasn't been dismissed for this occurrence.
 
 **If several candidates qualify,** the matcher picks the one closest to the due date, then the one closest in amount, then the earliest by `id`, so the result is always the same.
 
@@ -167,9 +168,9 @@ The amount tolerance (10%) and date window (±5 days) are single config values. 
 
 The confidence threshold is a single config value, set during Phase 1 after checking Jev's output on the seed data.
 
-**When Jev runs (Phase 1, #12):** only in the nightly job, never while a page loads. In the demo it runs right after the reset. The job applies merchant rules to uncategorized transactions first, then asks Jev about the rest: at most 40 calls a night in the demo, and 500 in production, so a newly linked bank's backfill is sorted in a night (decision 56). A failure that would hit every call (rate limit, server error, timeout, bad key) stops that night's run, and the next night retries; a failure about one transaction (Jev rejects it, or answers with something that isn't one of the options) skips just that transaction, which stays pending; three such failures in a row stop the run, since they point at every call. A transaction Jev failed on is asked about last from then on (`jev_failed_at`, decision 31), so it can never block the others. With no categories to offer, Jev isn't asked at all. The threshold starts at 0.80 and applies to the category's confidence and to each flag's probability. Below the threshold, the category stays empty but its confidence is stored, so Jev isn't asked about the same transaction again (decision 27). Jev is told the raw name, the merchant's display name, the amount in cents with its direction (money out or in), and the account type. The category question also offers "None of these fit", which never applies a category. Jev's pick is kept in `jev_category_id` either way, next to its confidence, so the threshold can be tuned from real picks (#49). Jev's transfer and reimbursement flags exclude the transaction (§6), which a person can undo with the edit panel's exclude toggle (#27). When an income answer meets the confidence threshold, Jev's `flag_income` and `income_source` are stored; the Transactions edit panel exposes "Count as income" so a person can correct it (decision 63). An unreviewed negative credit remains held out of spending until Jev confidently classifies it as non-income or a person marks it reviewed in the edit panel. A person can clear income and mark a credit reviewed as non-income in the same save. The edit panel shows "Picked by Jev · N% sure" when Jev chose the category. Only the log line `jev: <status> <request id>` is ever logged.
+**When Jev runs (Phase 1, #12):** only in the nightly job, never while a page loads; from decision 68, also right after each sync for that sync's new transactions (within the same nightly cap), when the household's "Sort new transactions as they arrive" switch is on; and the one exception (from Phase 4, decision 64) is a transaction a person unticks from a suggested category, which is asked about again right after the page has answered. In the demo it runs right after the reset. The job applies merchant rules to uncategorized transactions first, then asks Jev about the rest: at most 40 calls a night in the demo, and 500 in production, so a newly linked bank's backfill is sorted in a night (decision 56). A failure that would hit every call (rate limit, server error, timeout, bad key) stops that night's run, and the next night retries; a failure about one transaction (Jev rejects it, or answers with something that isn't one of the options) skips just that transaction, which stays pending; three such failures in a row stop the run, since they point at every call. A transaction Jev failed on is asked about last from then on (`jev_failed_at`, decision 31), so it can never block the others. With no categories to offer, Jev isn't asked at all. The threshold starts at 0.80 and applies to the category's confidence and to each flag's probability. Below the threshold, the category stays empty but its confidence is stored, so Jev isn't asked about the same transaction again (decision 27), except as above when a person unticks it from a suggested category. Jev is told the raw name, the merchant's display name, the amount in cents with its direction (money out or in), and the account type. The category question also offers "None of these fit", which never applies a category. Jev's pick is kept in `jev_category_id` either way, next to its confidence, so the threshold can be tuned from real picks (#49). Jev's transfer and reimbursement flags exclude the transaction (§6), which a person can undo with the edit panel's exclude toggle (#27). Jev's income answer is stored (decision 68, replacing decision 28's "not stored") only while the household's income switch is on (§8.6) and no person has chosen: at or above the threshold it sets `flag_income` with `income_source = jev`; the edit panel's "Count as income" lets a person correct it, and a person's choice (`income_source = user`) is never overwritten. An unreviewed negative credit stays held out of spending until Jev confidently classifies it as non-income or a person marks it reviewed in the edit panel; a person can clear income and mark a credit reviewed in the same save (decision 70). The edit panel shows "Picked by Tally · N% sure" when Jev chose the category; no screen names Jev, which is "Tally" to the people using it, and only the demo's How Tally works page names it, where it explains how Tally is built (decision 64). From Phase 4, Jev's pick below the threshold shows as a suggestion ("Maybe Eating Out"), never applied without a tap (decision 64). Only the log line `jev: <status> <request id>` is ever logged.
 
-**Jev input:** the raw name, merchant display name, amount, account type, and Plaid's own category hint if present (from Phase 2, once sync stores it, #18).
+**Jev input:** the raw name, merchant display name, amount, account type, and Plaid's own category hint if present (from Phase 2, once sync stores it, #18); from Phase 4, the transaction's note too, so a note can help it sort (decision 64).
 
 **Boundary:** all Jev calls go through one module (`src/ai/categorize.ts`) with one function signature. Switching providers changes only that file.
 
@@ -177,11 +178,11 @@ The confidence threshold is a single config value, set during Phase 1 after chec
 
 **Default categories (decision 32, #55):** every new database starts with the same categories, adapted from the owner's earlier app: Groceries, Eating Out, Gas, Car & Transport, Rent, Utilities, Subscriptions, Shopping, Personal Care, Health, Entertainment, Kids, Date Night, and Donations & Charity. None has a budget until the family sets one. Income, transfers, payments, savings and refunds aren't categories, because flags and exclusions handle them (§6); there's no "Other", because "None of these fit" and new-category suggestions do that job. The demo uses its seed's categories instead.
 
-**New category suggestions (Phase 4, owner-approved 2026-09-25, #51):** when Jev says "None of these fit", Workers AI suggests a new category name from the transactions Jev couldn't place, through `src/ai/suggest-name.ts`. The Settings screen shows each suggestion with the transactions behind it. A person creates the category (it then works like any other, and Jev offers it from the next run) or dismisses the suggestion. Nothing is created automatically.
+**New category suggestions (Phase 4, owner-approved 2026-09-25, #51):** when Jev says "None of these fit", Workers AI suggests a new category name from the transactions Jev couldn't place, through `src/ai/suggest-name.ts`. The Settings screen shows each suggestion with the transactions behind it, each ticked to go in. A person creates the category (it then works like any other, and Jev offers it from then on) with the ticked transactions in it (`category_source = user`), or dismisses the suggestion. An unticked transaction can get a note, and Jev is asked about it again right away, after the page has answered, rather than waiting for the night; this and the nightly job are the only times Jev runs (decision 64). Nothing is created automatically.
 
-**Merchant names:** the Settings screen lists merchants without a chosen name. Workers AI generates a `suggested_name` once per `raw_name` and caches it. A person accepts it (it becomes `display_name`) or rejects it. Renaming a merchant renames every transaction from that merchant, because display names are looked up from `merchants`. All Workers AI calls go through `src/ai/suggest-name.ts`.
+**Merchant names:** Workers AI suggests up to three names once per `raw_name` and caches them. Until a person chooses, the first suggestion shows in place of the tidied name with a dashed underline (not decided yet). A person chooses one of the suggestions, keeps the tidied name, or types their own (it becomes `display_name`), from the edit panel or, when they have time, from a one-at-a-time review that a Band on Settings leads to (decision 64). Renaming a merchant renames every transaction from that merchant, because display names are looked up from `merchants`. All Workers AI calls go through `src/ai/suggest-name.ts`.
 
-**Tidied names (decision 46, #93):** until a person names a merchant, its raw bank text is tidied by code for display only — card and processor prefixes, codes and store numbers removed, a `*` between words read as a space, sentence case, with a short list of acronyms kept in capitals — while `raw_name` itself is never touched, so search still matches it. A Workers AI name suggestion (#33) replaces it only when a person accepts it, and a person's own rename always wins.
+**Tidied names (decision 46, #93):** until a person names a merchant, its raw bank text is tidied by code for display only — card and processor prefixes, codes and store numbers removed, a `*` between words read as a space, sentence case, with a short list of acronyms kept in capitals — while `raw_name` itself is never touched, so search still matches it. From Phase 4, a Workers AI suggestion (#33) is shown in its place with a dashed underline until a person chooses, and is saved as `display_name` only when they choose it (decision 64), and a person's own rename always wins.
 
 ## 8. Screens
 
@@ -190,14 +191,15 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 | Screen | Contents | Features |
 |---|---|---|
 | **Home** | Safe to spend as the headline number; a spent/left bar per category, each opening its budget sheet; a quiet "Not budgeted" list of categories with no budget; a "N transactions need a category" prompt, with how much they add up to, linking to a filtered list (decision 50); bills due in the next 7 days | 1, 2 |
-| **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note, and for negative bank credits, "Count as income" and "Reviewed as a refund or other non-income credit." "Needs category" counts the same transactions as Home. The Excluded filter shows only excluded transactions. Search matches the merchant name, raw name, and note. The list shows 25 transactions per page. | 3, 4, 5 |
+| **Transactions** | Search, plus filters for month, category, uncategorized, and excluded. Tapping a row opens an edit panel: category, "always for this merchant," exclude toggle, split, rename merchant, note, and for negative bank credits, "Count as income" and "Reviewed as a refund or other non-income credit" (decision 70). "Needs category" counts the same transactions as Home. The Excluded filter shows only excluded transactions. Search matches the merchant name, raw name, and note. The list shows 25 transactions per page. | 3, 4, 5 |
 | **Bills** | Each bill with its status, plus add, edit, and deactivate | 2 |
-| **Trends** | Spending by category over the last 6 months, and this month vs. last month | 6 |
+| **Trends** | Spending by category over the last 6 months, and this month vs. last month (§8.3) | 6 |
 | **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, Fix connection for items that need attention, Disconnect a bank, and Sync now with when each bank last synced (§8.1) | 7 |
-| **More → Documents** | Upload, list, download, and delete PDFs | 8 |
+| **More → Documents** | Not built; moved to the Later list with receipts (decision 66) | — |
 | **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review; Download your data (§8.1) | — |
 | **Transactions → Organize** | Transactions that need a category, grouped by merchant, each group categorized in one go (§8.1) | 3 |
-| **Demo only** | A banner on every page ("Demo data. Nothing here is real."), a "Things to try" list, and a "How it works" page | — |
+| **How Tally works** | One section per feature, in the demo and the family app; the architecture part is demo only (decision 65) | — |
+| **Demo only** | A banner on every page ("Demo data. Nothing here is real.") and a "Things to try" list | — |
 
 ### 8.1 Brought back from the original app (decision 57)
 
@@ -224,7 +226,7 @@ Generated design studies (phone 390×844, desktop 1280×800) are selected by the
 
 ### 8.2 Phase 3 screens (decision 60)
 
-Picked on `/design-system/proposals` (P15–P22), where the drawings stay as the build reference until each ships.
+Picked on `/design-system/proposals` (P15–P22); all shipped by Oct 4, so the page lists them as decided.
 - **Bills (P15):** grouped by status, each group once under its heading: Overdue, Due in the next 7 days, Upcoming, Paid this month. Add a bill opens the form in a bottom sheet; Deactivate is its text action, and inactive bills wait under Inactive (N).
 - **A bill's page (P16):** its own page with each month's occurrence and the payment linked to it, Link a payment (the picker in §6.1) and Not this one (records a dismissal).
 - **Split (P17):** in the edit panel, parts of category plus amount with a live "$X left to assign" line and Add a part. The line is computed by the server as you type (htmx), so it needs no new script; a save that doesn't add up exactly is rejected with a field error.
@@ -233,6 +235,56 @@ Picked on `/design-system/proposals` (P15–P22), where the drawings stay as the
 - **Select several (P20):** a Select button on Transactions turns rows into checkboxes with an action bar pinned at the bottom (set category, exclude).
 - **Cash (P21):** an "Add cash" button on Transactions opens the edit-panel form (date, amount, merchant, category, note) and saves to the Cash account.
 - **A late bill payment (P22):** the month is chosen when linking the payment on the bill's page; the transaction row then shows a muted "Counts in April" on its caption line.
+
+### 8.3 Phase 4 screens (decision 64)
+
+Picked on `/design-system/proposals` (P23–P32), where the drawings stay as the build reference until each ships.
+- **Trends (P23 D, P24 A):** first, what's spent so far this month as the serif number and a sentence comparing it with the same days last month ("$90 less than by this time in September"), then each category's change in words and an arrow, biggest first. Then "Going well" (categories under budget 3 or more months running), "Worth a look" (categories up 3 or more months running), and every other category, each a row with six small bars. The 6 months include this one so far, dashed; it isn't judged against its budget until it's over. Code writes the sentences, not AI.
+- **Net worth (P25 A, P26 A):** a line through the last 6 months of net worth, in the ruled space under the headline, with "Up $3,600 since May."; account rows keep today's balance only. Before two days of balances, the space says when the chart starts.
+- **Documents (P27 A, P28 A):** not built; moved to the Later list with receipts (decision 66). The drawings stay on the proposals page for when receipts are designed.
+- **Merchant names (P29 A):** see §7: suggested names show dashed in the list until chosen in the edit panel or the Settings review.
+- **A new category (P30 A):** a dashed row under Settings' categories, open to its transactions with a tick each (§7).
+- **Category suggestions in the list (P32 A):** a row needing a category shows a dashed "Maybe Eating Out" (or "Maybe new: Pet Care") tag; the edit panel puts that category first, marked Suggested, with "Tally's guess · N% sure".
+- **Empty and early states (P31):** as drawn.
+
+### 8.4 Phase 5: from the original app (decision 66)
+
+Each is drawn on `/design-system/proposals` and picked by the owner before it's built; until then, this is what each is for. Decision 67 adds from `docs/reviews/original-app-gaps.md`: B1–B3 and B5–B8 (Home wording, why Safe to spend is lower, a near-limit warning, a daily allowance, unbudgeted spending, older uncategorized, a row leading to its transactions), C2–C8 (type filter, a new category while categorizing, search by category or amount, search all months, rename one transaction, see and remove rules, select all) D1–D3 (partial payments, a bill's category on its payments, monthly bills total), and a bill's amount history, so editing a bill changes this month and later, never past occurrences (A9).
+- **Browse past months:** see how an earlier month ended on Home.
+- **A savings goal:** a monthly amount to save, which Safe to spend sets aside. Before it's built, §6's Safe to spend rule gains the line that subtracts it, and the goal's table joins §5.
+- **More bill frequencies:** weekly, every two weeks and quarterly bills, besides monthly and yearly. Before it's built, §6.1 gains how such a bill's occurrence is identified (today `period` is `YYYY-MM` or `YYYY`, one per month or year, so a weekly bill needs its own period key), and how bill status counts several occurrences in one month.
+- **Planned one-time expenses:** money set aside in a month for a known one-off cost.
+- **Rule suggestions:** after a person gives the same merchant the same category three times, Tally offers to make it the merchant's rule.
+- **Filter by account:** show only one account's transactions.
+- **Edit a cash transaction's date or amount:** only hand-entered (Cash account) transactions; a bank transaction always keeps the bank's date and amount, so sync never fights a person (split, exclude and "counts in" cover a bank that's wrong).
+- **Reconnect reminder email:** an email when a bank needs signing in again, so sync doesn't stop unnoticed. How Tally sends email is its own decision.
+
+### 8.5 Numbers you can trust (decision 67)
+
+Before more Phase 4 features, the rule gaps that can make the family's numbers wrong are fixed (`docs/reviews/original-app-gaps.md` section A, plus B4, C1 and C9). Each fix states its rule here first.
+- **Income:** a person can mark or unmark a transaction as income from the edit panel, and a person's choice always wins over later syncs; Plaid's own INCOME category marks it at sync only when no person has chosen (the other session's #149/#153 hold unreviewed credits out of spending).
+- **Pending:** counted and marked, as in §6.
+- **Transfers and card payments:** Plaid's TRANSFER_IN, TRANSFER_OUT and LOAN_PAYMENTS categories exclude a transaction at sync (`excluded_source = 'plaid'`), which a person can undo; Jev still decides the rest.
+- **Today:** the household's time zone, as in §6.
+- **Bill matching:** an excluded payment can still pay a bill, by hand or by the matcher, and linking it puts it back in the budget (`excluded = 0`, `excluded_source = 'user'`), so the bill stops being set aside only because the payment now counts as spending; a payment from the same merchant outside ±10% is offered as "Price changed? Update the bill" rather than ignored.
+- **Merchant:** Plaid's `merchant_name` is stored, and rules, bill matching, refunds and finding bills match on it when present, the raw name otherwise.
+- **Rules after every sync:** merchant rules run after each sync, not only on Sync now and overnight.
+- **Refunds:** linking a refund includes it in the budget; a refund can't be larger than what's left of its purchase, and a purchase is refunded at most to its amount.
+- **Bills:** no two active bills with the same name; an amount over $100,000 needs confirming. (A yearly bill already requires its anchor month, in the form and the schema.)
+- **A failed save says so:** an htmx error shows "Couldn't save. Check your connection and try again." in `role="alert"`, and the app has its own 404 and 500 pages.
+- **A connected bank (not disconnected) that needs attention or hasn't synced for 3 days** is flagged on Home with a link to Accounts, because Safe to spend may be too high.
+- **The first visit's empty list** says "Importing your transactions…" or "Link a bank to see transactions" rather than "No transactions match".
+
+### 8.6 AI that earns its place (decision 68)
+
+Each AI feature can be switched off, and Tally shows plainly what it did. Each piece below is drawn on the proposals page before it's built.
+- **Switches in Settings.** An "AI suggestions" group has one switch per feature: merchant names, categories and exclusions (Jev's category and its transfer and reimbursement flags), income, and sorting new transactions as they arrive. All are on to start. Off means Tally works from rules and people's choices alone; nothing already decided changes. Every run honors them, nightly and at sync alike: with categories and exclusions off, Jev's category answer is neither applied nor shown and its transfer and reimbursement flags exclude nothing; with income off, its income answer isn't used; with every Jev-backed switch off, Jev isn't asked at all; with names off, Workers AI isn't called.
+- **Jev's income answer is used.** It's stored once the edit panel can mark income (§8.5). At or above the threshold it applies, and a person can undo it; below the threshold it shows as "Maybe income". This replaces decision 28's "not stored".
+- **Sorting as transactions arrive.** Jev is asked right after a sync, not only overnight, within the nightly cap.
+- **Plaid's name first.** Plaid's `merchant_name` is the first name suggestion; Workers AI is asked only when Plaid sends none.
+- **One "Maybe" pattern.** Name, category, new-category, income and transfer suggestions all show as the same dashed "Maybe …" and are reviewed on one screen, one item at a time, like Organize.
+- **What AI did this month.** A short, honest tally: how many transactions it sorted, names it cleaned and paychecks it found, and how many a person changed.
+- **The demo's "See it without AI".** A toggle shows the same Transactions list as the bank sends it, next to what Tally made of it.
 
 ## 9. Demo experience
 
@@ -247,7 +299,7 @@ The seed data tells the story of a fictional household ("the Rivera family") wit
 | 5 | A transfer between accounts and a reimbursement, both excluded |
 | 6 | Six months with a visible trend (Eating Out creeping up) |
 | 7 | Checking, savings, and a credit card, with daily balance history |
-| 8 | Two sample statement PDFs, clearly watermarked as fake |
+| 8 | None until receipts are built (decision 66) |
 
 Seed dates are relative to the current month, so the demo always looks current. The nightly job rebuilds the demo database and bucket from the seed. Visitors can edit anything; their changes are gone the next morning.
 
@@ -256,9 +308,9 @@ The "How Tally works" page has two parts:
 1. **Architecture:** the system diagram (built as SVG) and the one-sentence explanation of each part (§4).
 2. **One section per feature (all 8),** each with the feature's one-sentence explanation, its rule in plain words (taken from §6 and §6.1), a small diagram of the rule, and a small worked example using the demo's own numbers. Code draws the diagram from the same numbers as the example (#61), as inline SVG with a title and description for screen readers. For example: "Safe to spend = $1,850 budget − $424 spent − $142 overdue bill."
 
-Every screen has a small "How this works" link to its feature's section. In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
+Every screen has a small "How this works" link to its feature's section. From Phase 4, anything a rule decides also gets a small terracotta "Why?" link (the word, P33 A) beside it to its exact section: Going well and Worth a look on Trends, the net-worth sentence, a dashed suggested name, a "Maybe …" tag, "Tally's guess" and a suggested category, and a bill's status (decisions 65 and 67). In Phase 1 (#13) the links sit under the page title on Home (budget), Transactions (transactions) and the edit panel (categorization); screens whose features ship later get theirs with the feature.
 
-**Demo only (#13):** the "How Tally works" page (`/how-it-works`), the Things to try block and the "How this works" links appear only when `DEMO` is `"true"`; outside the demo the page is a 404. **Things to try** is a short block on Home, below the Budget list (#92, decision 46: safe to spend comes first on a phone), with three items, each linking to where it's done: "Give a transaction a category" (the Needs category list), "Set a rule for a merchant" and "Rename a merchant" (the Local Bakery edit panel), plus a "How Tally works" link. It has no close button: the demo resets nightly and remembering a dismissal would need saved state. It is the demo's only onboarding for now; onboarding (#95, decision 49) replaces it. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
+**In both environments (decision 65, replacing #13's demo-only rule):** the "How Tally works" page (`/how-it-works`), the "How this works" links and the "Why?" links appear in the demo and the family app. In the family app the page leaves out the architecture part, and each worked example uses the household's own numbers ("With your numbers: …" instead of "In the demo: …"). **Demo only (#13):** the Things to try block. **Things to try** is a short block on Home, below the Budget list (#92, decision 46: safe to spend comes first on a phone), with three items, each linking to where it's done: "Give a transaction a category" (the Needs category list), "Set a rule for a merchant" and "Rename a merchant" (the Local Bakery edit panel), plus a "How Tally works" link. It has no close button: the demo resets nightly and remembering a dismissal would need saved state. It is the demo's only onboarding for now; onboarding (#95, decision 49) replaces it. Each section ships in the same phase as its feature, and its text must match the rules in this spec. If a rule changes, the section changes in the same pull request.
 
 ## 10. Errors, security, and operations
 
@@ -268,7 +320,7 @@ Every screen has a small "How this works" link to its feature's section. In Phas
 | Sync fails partway | Save transactions and the new `sync_cursor` together, in one D1 batch. A retry resumes from the last saved cursor, so nothing is duplicated or skipped. |
 | Plaid webhook | Plaid signs every webhook, and the Worker checks the signature against Plaid's published key before trusting it. The `Plaid-Verification` header is a JWT: reject it unless `alg` is `ES256`, fetch the key for its `kid` from `/webhook_verification_key/get` (cached), and verify with Web Crypto (ECDSA P-256). `SYNC_UPDATES_AVAILABLE` starts that Item's transaction sync; permanent `ITEM` errors, pending expiration or disconnect, and revoked user permission mark it as needing attention. The webhook path is the only path excluded from Cloudflare Access, via an Access **Bypass** policy scoped to `/webhooks/plaid`. |
 | Jev unavailable or slow | Leave the transaction uncategorized; the nightly job retries it. AI calls never block a page. |
-| Workers AI unavailable | No suggestion; retried the next time the merchant list is opened. |
+| Workers AI unavailable | No suggestion; retried the next night (suggestions are made in the nightly job, after Jev, within its cap). |
 | Invalid input (split doesn't add up, bad amount) | Re-render the form with a field error (`role="alert"`). |
 | Logging | Never log tokens, secrets, or transaction details. |
 | Plaid access tokens | Encrypted with AES-GCM (Web Crypto) using `TOKEN_ENCRYPTION_KEY` before they're stored. |
@@ -286,7 +338,9 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 | **1. Core demo live** | Wireframes; D1 schema; seed household; Home; Transactions (recategorize, merchant rules, rename); Jev categorization; demo banner, Things to try, How it works; nightly reset; `demo` deploy | `https://tally-demo.thesuperhuman.us` loads over HTTPS, all Phase 1 routes work, and there are no console errors. DNS records are shown to the owner and approved before they're created. |
 | **2. Family on the core** | Plaid Link, sync (webhook plus daily cron), token encryption, Cloudflare Access, `production` deploy, Fix connection, Settings for categories and budget amounts with the default categories (decision 32), and exclusions (decision 33), so the family's numbers are right from the first week; Organize, Disconnect a bank, Sync now, Download your data and Send feedback (decisions 57 and 58, §8.1) | The family uses it for a week (Oct 1–7), then keeps using it through October; the month-end review feeds Phase 3's review (decision 58). Retiring the Django app and moving `finance.thesuperhuman.us` is a separate decision the owner approves; records are shown first. |
 | **3. Bills and splits** | In both environments, with seed data for each (exclusions moved to Phase 2, decision 33). Also (decisions 57 and 58): finding bills from recurring charges, linking a refund to its purchase, selecting several transactions at once, adding a cash transaction by hand, and counting a bill payment toward its bill's month (a payment linked to an earlier month's bill occurrence counts in that month's spending *instead of* its own date's month, never both; the bank's date is unchanged) | Building starts Oct 4 while production stays frozen for the trial week (fixes only); Phase 3 reaches production after Oct 7 in one owner-approved deploy (decision 60). Shown in the demo, used by the family |
-| **4. Trends, balances, documents, name suggestions** | Trends, net-worth history, R2 documents, Workers AI name suggestions (merchant names and new categories) | All 8 features live in both environments |
+| **4. Trends, balances, name suggestions** | Trends, net-worth history, Workers AI name suggestions (merchant names and new categories), and How Tally works in the family app (decision 65). Documents moved to the Later list (decision 66) | Features 1–7 live in both environments |
+| **3.5 Numbers you can trust** | The fixes in §8.5 (decision 67), before more Phase 4 features | The family's Safe to spend, Spent and bill statuses match their bank |
+| **5. From the original app** | Eight features the original app had built (decision 66, §8.4): browsing past months, a savings goal, more bill frequencies, planned one-time expenses, rule suggestions, a filter by account, editing a cash transaction's date or amount, and a reminder email when a bank needs reconnecting. Each is designed on the proposals page and picked by the owner before it's built | Shown in the demo, used by the family |
 
 ### Testing
 
@@ -299,11 +353,14 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 
 ## 12. Later list (not built)
 
+- Everything `docs/reviews/original-app-gaps.md` marks Later (decision 67), and detecting the household's time zone from the browser (it needs its own allowed-JS decision)
+
 - An "ask a question" box (LLM-written read-only queries)
 - Deploying automatically from CI
-- Planned one-time expenses
 - Private per-person accounts
 - Statement upload (CSV or PDF) as a second transaction source
+- **Receipts** (decision 66), from the original app's draft design (`superhuman-personal-finance` `docs/designs/RECEIPT-01-tech-design.md` and `RECEIPT-01-user-flows.md`, Feb 2026): (1) attach a photo or PDF of a receipt to a transaction; (2) scan a receipt so AI reads it and makes a cash transaction or matches a bank one, proposing a split from its line items; (3) forward receipts by email. A plain shelf of stored PDFs (the old feature 8, P27/P28) comes back only as part of this. R2 buckets `tally-demo-docs` and `tally-prod-docs` already exist.
+- From the original app, not picked for Phase 5 (decision 66): deleting a transaction (with undo), resetting a category to automatic, grouping the list by week, and merging two categories
 - A "More…" category chip when a household has more categories than the edit panel fits
 - Pruning old PR screenshots from the screenshots branch
 - A close (×) button on the demo's Things to try block, remembered with a cookie
