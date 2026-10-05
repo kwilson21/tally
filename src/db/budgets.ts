@@ -6,6 +6,7 @@ import {
 	COUNTED_JOINS,
 	countedCategorySql,
 	countedMonthSql,
+	FOLLOWS_PURCHASE,
 } from "./counted-month";
 
 /** Sets a category's budget from `month` on, replacing one already set for that month. */
@@ -118,7 +119,8 @@ export async function lastMonthSpentCents(
 		.prepare(
 			`SELECT COALESCE(SUM(t.amount_cents), 0) AS cents FROM transactions t
 			 ${COUNTED_JOINS}
-			 WHERE ${countedCategorySql()} = ? AND ${countedMonthSql()} = ? AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0`,
+			 WHERE ${countedCategorySql()} = ? AND ${countedMonthSql()} = ? AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0
+				AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR ${FOLLOWS_PURCHASE})`,
 		)
 		.bind(categoryId, previousMonth(month))
 		.first<{ cents: number }>();

@@ -9,6 +9,12 @@ export type Edit = {
 	note: string | null;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
 	excluded: boolean;
+	/** Whether this transaction is income; a person can correct Jev's suggestion. */
+	income: boolean;
+	/** Whether a bank credit was reviewed as a refund or other non-income credit. */
+	creditReviewed: boolean;
+	/** False when the edit form omitted the credit-review control for an income credit. */
+	creditReviewedProvided?: boolean;
 	refundOfId?: number | null;
 };
 
@@ -34,6 +40,10 @@ export function parseEdit(
 	const displayName = text(form, "merchant");
 	const note = text(form, "note");
 	const excluded = form.get("excluded") === "1";
+	const income = form.get("income") === "1";
+	const creditReviewed = form.get("creditReviewed") === "1";
+	const creditReviewedProvided =
+		form.get("creditReviewedVisible") === "1" || form.has("creditReviewed");
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
 		errors.category = "Pick a category from the list.";
@@ -54,6 +64,9 @@ export function parseEdit(
 			displayName: displayName || null,
 			note: note || null,
 			excluded,
+			income,
+			creditReviewed,
+			creditReviewedProvided,
 		},
 	};
 }

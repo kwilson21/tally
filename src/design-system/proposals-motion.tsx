@@ -45,6 +45,7 @@ const COSTCO: ListRow = {
 	note: null,
 	excluded: false,
 	income: false,
+	creditReviewed: true,
 	categoryId: 1,
 	categoryName: "Groceries",
 	categoryIcon: "groceries",

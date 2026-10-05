@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending, jevCallLimit } from "../src/categorize-pending";
-import { needsCategoryCount, pendingForJev } from "../src/db/transactions";
+import { loadMonth } from "../src/db/month";
+import {
+	monthCounts,
+	needsCategoryCount,
+	pendingForJev,
+} from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const db = env.DB;
@@ -51,12 +56,151 @@ afterEach(() => {
 });
 
 describe("categorizePending", () => {
+	it.each([
+		{ enabled: true, income: 1, source: "jev", reviewed: 1 },
+		{ enabled: false, income: 0, source: null, reviewed: 0 },
+	])(
+		"applies the income answer only when the income switch is $enabled",
+		async ({ enabled, income, source, reviewed }) => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			const id = 1;
+			await db.batch([
+				db
+					.prepare(
+						"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = NULL, flag_income = 0, income_source = NULL, credit_reviewed = 0, credit_reviewed_by = NULL, excluded = 0, excluded_source = NULL WHERE id = ?",
+					)
+					.bind(id),
+				db
+					.prepare(
+						"UPDATE transactions SET category_confidence = 0.5 WHERE id != ?",
+					)
+					.bind(id),
+			]);
+			const jev = fakeJev(
+				() =>
+					new Response(
+						JSON.stringify({
+							answers: {
+								category: {
+									type: "choice",
+									choice: "None of these fit",
+									confidence: 0.5,
+								},
+								transfer: { type: "noul", noul: 0.01 },
+								reimbursement: { type: "noul", noul: 0.01 },
+								income: { type: "noul", noul: 0.99 },
+							},
+						}),
+						{ status: 200 },
+					),
+			);
+
+			await categorizePending(withKey, jev.fetchImpl, { income: enabled });
+			expect(
+				await db
+					.prepare(
+						"SELECT flag_income, income_source, credit_reviewed FROM transactions WHERE id = ?",
+					)
+					.bind(id)
+					.first(),
+			).toEqual({
+				flag_income: income,
+				income_source: source,
+				credit_reviewed: reviewed,
+			});
+		},
+	);
+
 	it("does nothing without a key", async () => {
 		const jev = fakeJev(() => reply(0.95));
 		const result = await categorizePending({ DB: db }, jev.fetchImpl);
 		expect(jev.calls()).toBe(0);
 		expect(result).toEqual({ asked: 0, applied: 0 });
 		expect(await needsCategoryCount(db, MONTH)).toBe(12);
+	});
+
+	it("offers category-only help for a user-reviewed credit and never overwrites the decision", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const id = 1;
+		await db
+			.prepare(
+				"UPDATE transactions SET raw_name = 'SYNTHETIC USER REVIEWED CREDIT', category_id = NULL, category_source = NULL, category_confidence = NULL, amount_cents = -500, flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user', excluded = 0, excluded_source = NULL, flag_transfer = 0, flag_reimbursement = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = 0.5 WHERE id != ?",
+			)
+			.bind(id)
+			.run();
+		const pending = await pendingForJev(db, 40);
+		expect(pending).toContainEqual(
+			expect.objectContaining({ id, categoryOnly: true }),
+		);
+		const jev = fakeJev(
+			() =>
+				new Response(
+					JSON.stringify({
+						answers: {
+							category: {
+								type: "choice",
+								choice: "Eating Out",
+								confidence: 0.95,
+							},
+							transfer: { type: "noul", noul: 0.99 },
+							reimbursement: { type: "noul", noul: 0.99 },
+							income: { type: "noul", noul: 0.99 },
+						},
+					}),
+					{ status: 200 },
+				),
+		);
+		expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
+			asked: 1,
+			applied: 1,
+		});
+		expect(jev.calls()).toBe(1);
+		const category = await db
+			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
+			.first<{ id: number }>();
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source, category_confidence, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, flag_transfer, flag_reimbursement FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			category_id: category?.id,
+			category_source: "jev",
+			category_confidence: 0.95,
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+			excluded: 0,
+			flag_transfer: 0,
+			flag_reimbursement: 0,
+		});
+		const secondRun = fakeJev(() => reply(0.95));
+		expect(await categorizePending(withKey, secondRun.fetchImpl)).toEqual({
+			asked: 0,
+			applied: 0,
+		});
+		expect(secondRun.calls()).toBe(0);
+		expect(
+			await db
+				.prepare(
+					"SELECT amount_cents, income_source, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			amount_cents: -500,
+			income_source: "user",
+			credit_reviewed_by: "user",
+		});
 	});
 
 	it("applies confident answers and stores the confidence of unsure ones", async () => {
@@ -81,6 +225,77 @@ describe("categorizePending", () => {
 			),
 		).toBe(8);
 	});
+
+	it.each(["merchant_rule", "user"] as const)(
+		"remembers an uncertain answer for a $categorySource-categorized credit and retries after Plaid changes it",
+		async (categorySource) => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			await db
+				.prepare(
+					"UPDATE transactions SET category_confidence = 0.5 WHERE category_confidence IS NULL",
+				)
+				.run();
+			const heldBefore = (await monthCounts(db, MONTH)).heldForReview;
+			const inserted = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_income, income_source, credit_reviewed, credit_reviewed_by) VALUES (1, ?, -777, 'SYNTHETIC UNCERTAIN CREDIT', 1, ?, NULL, 0, NULL, 0, NULL) RETURNING id",
+				)
+				.bind(`${MONTH}-20`, categorySource)
+				.first<{ id: number }>();
+			const id = inserted?.id as number;
+			const jev = fakeJev(() => reply(0.5));
+			expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
+				asked: 1,
+				applied: 0,
+			});
+			expect(jev.calls()).toBe(1);
+			expect(
+				await db
+					.prepare(
+						"SELECT flag_income, income_source, credit_reviewed, category_confidence, category_id, category_source FROM transactions WHERE id = ?",
+					)
+					.bind(id)
+					.first(),
+			).toEqual({
+				flag_income: 0,
+				income_source: null,
+				credit_reviewed: 0,
+				category_confidence: 0.5,
+				category_id: 1,
+				category_source: categorySource,
+			});
+			expect((await monthCounts(db, MONTH)).heldForReview).toBe(heldBefore + 1);
+			expect(
+				(await loadMonth(db, MONTH)).transactions.some(
+					(transaction) => transaction.amountCents === -777,
+				),
+			).toBe(false);
+			const next = fakeJev(() => reply(0.95));
+			expect(await categorizePending(withKey, next.fetchImpl)).toEqual({
+				asked: 0,
+				applied: 0,
+			});
+			expect(next.calls()).toBe(0);
+
+			// Plaid amount corrections clear Jev's saved confidence and make the transaction eligible again.
+			await db
+				.prepare(
+					"UPDATE transactions SET amount_cents = -888, category_confidence = NULL WHERE id = ?",
+				)
+				.bind(id)
+				.run();
+			expect(
+				(await pendingForJev(db, 40)).map((transaction) => transaction.id),
+			).toContain(id);
+			const changed = fakeJev(() => reply(0.95));
+			expect(await categorizePending(withKey, changed.fetchImpl)).toEqual({
+				asked: 1,
+				applied: 1,
+			});
+			expect(changed.calls()).toBe(1);
+			expect((await monthCounts(db, MONTH)).heldForReview).toBe(heldBefore);
+		},
+	);
 
 	it("doesn't ask again about transactions it already looked at", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});

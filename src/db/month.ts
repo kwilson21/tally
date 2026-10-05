@@ -43,7 +43,7 @@ export async function loadMonth(
 					SELECT 1 FROM transactions t
 					${COUNTED_JOINS}
 					WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
-						AND t.flag_income = 0
+						AND t.flag_income = 0 AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR ${FOLLOWS_PURCHASE})
 				 )
 				 ORDER BY sort_order, name`,
 			)
@@ -57,7 +57,8 @@ export async function loadMonth(
 				   ${FOLLOWS_PURCHASE} AS linked
 				 FROM transactions t
 				 ${COUNTED_JOINS}
-				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0`,
+				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
+					AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE})`,
 			)
 			.bind(month),
 	])) as [D1Result, D1Result, D1Result];

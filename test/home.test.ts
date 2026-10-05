@@ -127,7 +127,7 @@ describe("GET / with the demo seed", () => {
 		expect((await home()).html).toContain("$0.30 more refunded than spent");
 	});
 
-	it("puts the number first: the month, Safe to spend, the Band, Budget, then Things to try (#92)", async () => {
+	it("puts the number first: the month, budget remaining, the Band, Budget, then Things to try (#92)", async () => {
 		const { html } = await home();
 		const at = (s: string) => html.indexOf(s);
 		expect(html).toMatch(/<h1 class="font-serif text-2xl[^"]*">/);

@@ -23,7 +23,23 @@ describe("parseEdit", () => {
 				displayName: "Local Bakery",
 				note: null,
 				excluded: false,
+				income: false,
+				creditReviewed: false,
+				creditReviewedProvided: false,
 			},
+		});
+	});
+
+	it("records whether the credit-review control was actually shown", () => {
+		expect(
+			parseEdit(form({ creditReviewedVisible: "1" }), CATEGORIES),
+		).toMatchObject({
+			ok: true,
+			value: { creditReviewed: false, creditReviewedProvided: true },
+		});
+		expect(parseEdit(form({ creditReviewed: "1" }), CATEGORIES)).toMatchObject({
+			ok: true,
+			value: { creditReviewed: true, creditReviewedProvided: true },
 		});
 	});
 

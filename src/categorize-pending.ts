@@ -24,6 +24,7 @@ type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
 export async function categorizePending(
 	env: CategorizeEnv,
 	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
+	switches: { income: boolean } = { income: true },
 ): Promise<{ asked: number; applied: number }> {
 	const done = { asked: 0, applied: 0 };
 	if (!env.JEV_API_KEY) return done;
@@ -58,7 +59,10 @@ export async function categorizePending(
 		}
 		failuresInARow = 0;
 		const decision = decide(result.answer, categories, JEV_THRESHOLD);
-		const written = await saveJevResult(env.DB, tx.id, decision);
+		const written = await saveJevResult(env.DB, tx.id, decision, {
+			categoryOnly: tx.categoryOnly,
+			switches,
+		});
 		if (written && decision.categoryId !== null) done.applied += 1;
 	}
 

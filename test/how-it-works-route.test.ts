@@ -82,7 +82,7 @@ describe("GET /how-it-works in the demo", () => {
 		const [counted, needs] = example(
 			/has (\d+) counted transactions, and (\d+) need a category\./,
 		);
-		expect(descOf("transactions-diagram")).toContain(`so ${counted} count.`);
+		expect(descOf("transactions-diagram")).toContain(`${counted} counted`);
 		expect(descOf("transactions-diagram")).toContain(
 			`${needs} of those need a category.`,
 		);
@@ -91,7 +91,7 @@ describe("GET /how-it-works in the demo", () => {
 			/This month, (\d+) transactions are excluded \(([^)]+)\)/,
 		);
 		expect(descOf("exclusions-diagram")).toContain(
-			`${counted} count toward the budget and ${excluded} are excluded: ${kinds}.`,
+			`${counted} counted, 0 held for review, and ${excluded} excluded (${kinds}).`,
 		);
 
 		const [jev] = example(/Jev categorized (\d+) transactions\./);

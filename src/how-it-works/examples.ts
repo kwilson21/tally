@@ -77,6 +77,7 @@ export function categorizationExample(
 		notYetAsked: number;
 		/** Income with no category: it needs none. */
 		income: number;
+		heldForReview?: number;
 	},
 	/** What to call the AI: "Tally" on screens, "Jev" only on the demo's page (decision 64). */
 	ai: "Jev" | "Tally" = "Tally",
@@ -109,6 +110,10 @@ export function categorizationExample(
 	if (c.income > 0)
 		parts.push(
 			`${c.income} ${c.income === 1 ? "is" : "are"} income, which needs no category.`,
+		);
+	if (c.heldForReview && c.heldForReview > 0)
+		parts.push(
+			`${c.heldForReview} ${c.heldForReview === 1 ? "credit is" : "credits are"} held for review and ${c.heldForReview === 1 ? "doesn't" : "don't"} count toward spending yet.`,
 		);
 	if (parts.length === 0) return "Nothing has been categorized yet this month.";
 	return `This month, ${parts.join(" ")}`;

@@ -1396,6 +1396,19 @@ export function SheetSpecimen() {
 						On phones it rises from the bottom; on desktop it's a panel on the
 						right. It isn't a modal: the page behind it stays in place.
 					</p>
+					<div class="mt-4 flex flex-col gap-3 border-t border-rule pt-3">
+						<p class="text-base text-ink">Income</p>
+						<div class="flex flex-wrap gap-2">
+							<Chip type="checkbox" name="ds-income" value="1">
+								Count as income
+							</Chip>
+						</div>
+					</div>
+					<div class="mt-3 flex flex-wrap gap-2 border-t border-rule pt-3">
+						<Chip type="checkbox" name="ds-credit-reviewed" value="1" checked>
+							Reviewed as a refund or other non-income credit
+						</Chip>
+					</div>
 					<Button
 						href="/design-system#bottom-sheet"
 						kind="secondary"

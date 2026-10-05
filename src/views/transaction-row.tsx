@@ -14,6 +14,13 @@ type Caption = {
 export function rowCaption(row: ListRow): Caption {
 	if (row.excluded)
 		return { kind: "excluded", caption: "Excluded", tag: false };
+	if (
+		!row.followsPurchase &&
+		!row.creditReviewed &&
+		row.amountCents < 0 &&
+		!row.income
+	)
+		return { kind: "needs", caption: "Review credit", tag: false };
 	if (row.parentId)
 		return {
 			kind: "category",
@@ -29,6 +36,18 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.isSplit)
 		return { kind: "category", caption: "Split transaction", tag: false };
 	// The note stays only until the purchase has a category again.
+	if (
+		row.splitRemovedFromCents !== null &&
+		row.splitRemovedFromCents !== undefined &&
+		row.categoryId === null
+	)
+		return {
+			kind: "needs",
+			caption: `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.`,
+			tag: true,
+		};
+	if (row.isSplit)
+		return { kind: "category", caption: "Split transaction", tag: false };
 	if (
 		row.splitRemovedFromCents !== null &&
 		row.splitRemovedFromCents !== undefined &&

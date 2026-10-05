@@ -274,6 +274,7 @@ howItWorks.get("/how-it-works", async (c) => {
 								<TransactionsDiagram
 									counted={counts.counted}
 									excluded={excludedTotal(excluded)}
+									heldForReview={counts.heldForReview}
 									needsCategory={counts.needsCategory}
 								/>
 							</Diagram>
@@ -312,6 +313,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							<Diagram>
 								<ExclusionsDiagram
 									counted={counts.counted}
+									heldForReview={counts.heldForReview}
 									breakdown={excluded}
 								/>
 							</Diagram>

@@ -1033,6 +1033,37 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
+				<div class="flex flex-col gap-2 border-t border-rule pt-3">
+					<p class="text-base text-ink">Income</p>
+					<div class="flex flex-wrap gap-2">
+						<Chip
+							type="checkbox"
+							name="income"
+							value="1"
+							checked={values.income}
+						>
+							Count as income
+						</Chip>
+					</div>
+				</div>
+				{tx.amountCents < 0 && (
+					<div class="flex flex-col gap-2 border-t border-rule pt-3">
+						<input type="hidden" name="creditReviewedVisible" value="1" />
+						{!tx.creditReviewed && !values.income && (
+							<p class="text-sm text-muted">
+								This bank credit is held out of spending until you identify it.
+							</p>
+						)}
+						<Chip
+							type="checkbox"
+							name="creditReviewed"
+							value="1"
+							checked={values.creditReviewed}
+						>
+							Reviewed as a refund or other non-income credit
+						</Chip>
+					</div>
+				)}
 				{/* Renaming and notes are rarer, so they wait behind one tap. It opens when there's something to
 				    see: a note, a typed name that isn't saved yet (after a failed save), or an error. */}
 				<details
@@ -1261,6 +1292,8 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		displayName: tx.merchantName,
 		note: tx.note,
 		excluded: tx.excluded,
+		income: tx.income,
+		creditReviewed: tx.income ? false : tx.creditReviewed,
 		refundOfId: tx.refundOfId ?? null,
 	};
 	const refunds = await refundPurchases(c.env.DB, tx);
@@ -1507,6 +1540,10 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
+			income: form.get("income") === "1",
+			creditReviewed: form.get("creditReviewed") === "1",
+			creditReviewedProvided:
+				form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
 			refundOfId,
 		};
 		const errors: EditErrors = {
@@ -1573,6 +1610,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	if (form.get("confirm") !== "1") {
 		const values: Edit = {
 			categoryId: tx.categoryId,
+			income: tx.income,
+			creditReviewed: tx.creditReviewed,
 			alwaysForMerchant: false,
 			displayName: tx.merchantName,
 			note: tx.note,

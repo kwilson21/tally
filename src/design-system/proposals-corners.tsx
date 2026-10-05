@@ -76,6 +76,7 @@ function tx(id: number, date: string, name: string, cents: number): ListRow {
 		note: null,
 		excluded: false,
 		income: false,
+		creditReviewed: true,
 		categoryId: 1,
 		categoryName: GROCERIES.name,
 		categoryIcon: GROCERIES.icon,

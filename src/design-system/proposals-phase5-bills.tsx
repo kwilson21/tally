@@ -605,6 +605,7 @@ function tx(
 		note: null,
 		excluded: false,
 		income: false,
+		creditReviewed: true,
 		categoryId: cat ? id : null,
 		categoryName: cat?.name ?? null,
 		categoryIcon: cat?.icon ?? null,

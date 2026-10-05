@@ -61,6 +61,26 @@ describe("summarizeMonth with a linked refund", () => {
 });
 
 describe("summarizeMonth", () => {
+	it("keeps payroll out of spending while purchases and refunds affect remaining budget", () => {
+		const summarize = (income: boolean) =>
+			summarizeMonth({
+				month: "2026-09",
+				categories: [{ id: 1, name: "Household" }],
+				amounts: [
+					{ categoryId: 1, effectiveMonth: "2026-09", amountCents: 100000 },
+				],
+				transactions: [tx(1, 20000), tx(1, -5000), tx(null, -300000, income)],
+				unpaidDueBillsCents: 0,
+			});
+		const flagged = summarize(true);
+		expect(flagged.totalSpentCents).toBe(15000);
+		expect(flagged.incomeCents).toBe(300000);
+		expect(flagged.safeToSpendCents).toBe(85000);
+		const unflagged = summarize(false);
+		expect(unflagged.totalSpentCents).toBe(-285000);
+		expect(unflagged.safeToSpendCents).toBe(385000);
+	});
+
 	const summary = summarizeMonth({
 		month: "2026-09",
 		categories: CATEGORIES,

@@ -301,15 +301,20 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category)
-						 SELECT ?, id, ?, ?, ?, ? FROM accounts
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category, credit_reviewed)
+						 SELECT ?, id, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
+								flag_income = CASE WHEN transactions.income_source = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.flag_income END,
+								income_source = CASE WHEN transactions.income_source = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.income_source END,
+								credit_reviewed = CASE WHEN transactions.credit_reviewed_by = 'user' THEN transactions.credit_reviewed WHEN transactions.amount_cents = excluded.amount_cents THEN transactions.credit_reviewed WHEN excluded.amount_cents < 0 THEN 0 ELSE 1 END,
+								credit_reviewed_by = CASE WHEN transactions.credit_reviewed_by = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.credit_reviewed_by END,
 							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
-							category_id = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_id END,
-							category_source = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_source END,
-							category_confidence = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_confidence END,
+							category_id = CASE WHEN (transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_id END,
+							category_source = CASE WHEN (transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_source END,
+							category_confidence = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_confidence END,
+							jev_category_id = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.jev_category_id END,
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
 							raw_name = excluded.raw_name,
@@ -321,6 +326,7 @@ export async function syncItem(
 						cents,
 						transaction.name,
 						transaction.personal_finance_category?.primary ?? null,
+						plaidAmountToCents(transaction.amount),
 						transaction.account_id,
 						itemRowId,
 						lockId,
@@ -360,12 +366,18 @@ export async function syncItem(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,
 							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
-							category_id = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_id END,
-							category_source = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_source END,
-							category_confidence = CASE WHEN is_split = 1 AND amount_cents != ? THEN NULL ELSE category_confidence END,
+							category_id = CASE WHEN (is_split = 1 OR category_source = 'jev') AND amount_cents != ? THEN NULL ELSE category_id END,
+							category_source = CASE WHEN (is_split = 1 OR category_source = 'jev') AND amount_cents != ? THEN NULL ELSE category_source END,
+							category_confidence = CASE WHEN amount_cents != ? THEN NULL ELSE category_confidence END,
+							jev_category_id = CASE WHEN amount_cents != ? THEN NULL ELSE jev_category_id END,
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?,
-							plaid_category = ?, updated_at = datetime('now')
+							plaid_category = ?,
+							flag_income = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN 0 ELSE flag_income END,
+							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
+							credit_reviewed = CASE WHEN credit_reviewed_by = 'user' THEN credit_reviewed WHEN amount_cents = ? THEN credit_reviewed WHEN ? < 0 THEN 0 ELSE 1 END,
+							credit_reviewed_by = CASE WHEN credit_reviewed_by = 'jev' AND amount_cents != ? THEN NULL ELSE credit_reviewed_by END,
+							updated_at = datetime('now')
 						 WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
 					).bind(
 						transaction.date,
@@ -375,8 +387,14 @@ export async function syncItem(
 						cents,
 						cents,
 						cents,
+						cents,
 						transaction.name,
 						transaction.personal_finance_category?.primary ?? null,
+						cents,
+						cents,
+						cents,
+						cents,
+						cents,
 						transaction.transaction_id,
 						itemRowId,
 						lockId,

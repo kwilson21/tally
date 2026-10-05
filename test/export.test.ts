@@ -10,6 +10,23 @@ beforeEach(async () => {
 });
 
 describe("data exports", () => {
+	it("includes income and credit review decisions in the JSON transaction export", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET income_source = 'jev', credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = 1",
+		).run();
+		const response = await exports.default.fetch(
+			`${BASE}/settings/export/tally.json`,
+		);
+		const data = (await response.json()) as {
+			transactions: Record<string, unknown>[];
+		};
+		expect(data.transactions[0]).toMatchObject({
+			income_source: "jev",
+			credit_reviewed: 0,
+			credit_reviewed_by: null,
+		});
+	});
+
 	it("neutralizes formulas in CSV text fields without changing numeric amounts", async () => {
 		await env.DB.prepare("UPDATE accounts SET name = ? WHERE id = 1")
 			.bind("@checking")
@@ -176,6 +193,8 @@ describe("data exports", () => {
 				"category_confidence",
 				"category_id",
 				"category_source",
+				"credit_reviewed",
+				"credit_reviewed_by",
 				"date",
 				"excluded",
 				"excluded_source",
@@ -183,6 +202,7 @@ describe("data exports", () => {
 				"flag_reimbursement",
 				"flag_transfer",
 				"id",
+				"income_source",
 				"is_split",
 				"jev_category_id",
 				"jev_failed_at",

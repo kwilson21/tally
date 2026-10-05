@@ -907,6 +907,7 @@ const EATING_OUT_ROWS: ListRow[] = (
 	note: null,
 	excluded: false,
 	income: false,
+	creditReviewed: true,
 	categoryId: 2,
 	categoryName: "Eating Out",
 	categoryIcon: "eating-out",

@@ -14,6 +14,7 @@ const base: ListRow = {
 	note: null,
 	excluded: false,
 	income: false,
+	creditReviewed: true,
 	categoryId: null,
 	categoryName: null,
 	categoryIcon: null,
@@ -21,6 +22,24 @@ const base: ListRow = {
 };
 
 describe("rowCaption", () => {
+	it("shows a newly imported credit as needing review", async () => {
+		expect(
+			rowCaption({ ...base, amountCents: -2500, creditReviewed: false }),
+		).toMatchObject({
+			caption: "Review credit",
+			tag: false,
+		});
+		const html = await TransactionRow({
+			row: {
+				...base,
+				amountCents: -2500,
+				creditReviewed: false,
+				categoryId: 1,
+			},
+		}).toString();
+		expect(html).toContain("Review credit");
+		expect(html).not.toContain("Needs category");
+	});
 	const kids = {
 		categoryId: 4,
 		categoryName: "Kids",

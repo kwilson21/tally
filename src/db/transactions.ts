@@ -1,4 +1,4 @@
-import type { JevInput } from "../ai/categorize";
+import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
@@ -24,6 +24,7 @@ export type ListRow = {
 	note: string | null;
 	excluded: boolean;
 	income: boolean;
+	creditReviewed: boolean;
 	categoryId: number | null;
 	categoryName: string | null;
 	categoryIcon: string | null;
@@ -42,11 +43,12 @@ export type ListRow = {
 
 export const PAGE_SIZE = 25;
 
-// "Needs category" is the same set Home counts as uncategorized (spec §6): counted, not income, no
-// counted category. A refund that follows its purchase is never on it: it has no category of its
-// own to set, so the purchase carries the need and categorizing that covers both. Queries add
-// COUNTED_JOINS.
-const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE}`;
+// "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
+// while held credits and income stay out of spending classification.
+const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+// Jev must be allowed to classify a new credit as income or another known kind of credit.
+const NEEDS_JEV_CLASSIFICATION =
+	"t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))";
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -100,8 +102,8 @@ export async function listTransactions(
 				t.is_split AS isSplit, pm.display_name AS parentMerchantName, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
-				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id) AS refundedCents,
-				t.excluded, t.flag_income AS income,
+				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
+				t.excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
@@ -112,13 +114,19 @@ export async function listTransactions(
 		.all<
 			Omit<
 				ListRow,
-				"excluded" | "income" | "displayName" | "isSplit" | "followsPurchase"
+				| "excluded"
+				| "income"
+				| "creditReviewed"
+				| "displayName"
+				| "isSplit"
+				| "followsPurchase"
 			> & {
 				merchantName: string | null;
 				parentMerchantName: string | null;
 				parentRawName: string | null;
 				excluded: number;
 				income: number;
+				creditReviewed: number;
 				isSplit: number;
 				followsPurchase: number;
 			}
@@ -133,6 +141,7 @@ export async function listTransactions(
 				: null,
 			excluded: r.excluded === 1,
 			income: r.income === 1,
+			creditReviewed: r.creditReviewed === 1,
 			isSplit: r.isSplit === 1,
 			followsPurchase: r.followsPurchase === 1,
 			displayName: merchantName ?? tidyName(r.rawName),
@@ -240,8 +249,9 @@ export async function getTransaction(
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
-				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id) AS refundedCents,
+				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType
@@ -257,10 +267,16 @@ export async function getTransaction(
 		.first<
 			Omit<
 				TransactionDetail,
-				"excluded" | "income" | "displayName" | "isSplit" | "followsPurchase"
+				| "excluded"
+				| "income"
+				| "creditReviewed"
+				| "displayName"
+				| "isSplit"
+				| "followsPurchase"
 			> & {
 				excluded: number;
 				income: number;
+				creditReviewed: number;
 				isSplit: number;
 				followsPurchase: number;
 			}
@@ -271,6 +287,7 @@ export async function getTransaction(
 				...r,
 				excluded: r.excluded === 1,
 				income: r.income === 1,
+				creditReviewed: r.creditReviewed === 1,
 				isSplit: r.isSplit === 1,
 				followsPurchase: r.followsPurchase === 1,
 				displayName: r.merchantName ?? tidyName(r.rawName),
@@ -295,14 +312,27 @@ export async function saveEdit(
 ): Promise<void> {
 	const current = await db
 		.prepare(
-			"SELECT raw_name AS rawName, category_id AS categoryId, excluded FROM transactions WHERE id = ?",
+			"SELECT raw_name AS rawName, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first<{ rawName: string; categoryId: number | null; excluded: number }>();
+		.first<{
+			rawName: string;
+			categoryId: number | null;
+			income: number;
+			creditReviewed: number | null;
+			excluded: number;
+		}>();
 	if (!current) throw new Error(`No transaction ${id}`);
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
+	const creditReviewProvided = edit.creditReviewedProvided !== false;
+	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
+	const creditReviewByUser =
+		creditReviewProvided &&
+		!edit.income &&
+		creditReviewChoice === 1 &&
+		(current.creditReviewed !== 1 || current.income === 1);
 	// Changing the exclusion makes it a person's choice, which Jev never overrides.
 	const excluded = edit.excluded ? 1 : 0;
 	const excludeArgs = [excluded, excluded];
@@ -312,14 +342,57 @@ export async function saveEdit(
 			? db
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
-							note = ?, ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+							note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
+							credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
+							credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
+							updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
-					.bind(edit.categoryId, edit.note, ...excludeArgs, actor, id)
+					.bind(
+						edit.categoryId,
+						edit.note,
+						...excludeArgs,
+						edit.income ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
+						creditReviewProvided ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						actor,
+						id,
+					)
 			: db
 					.prepare(
-						`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+						`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
+						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
+						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
+						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					)
-					.bind(edit.note, ...excludeArgs, actor, id),
+					.bind(
+						edit.note,
+						...excludeArgs,
+						edit.income ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
+						creditReviewProvided ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewChoice,
+						creditReviewProvided ? 1 : 0,
+						edit.income ? 1 : 0,
+						creditReviewByUser ? 1 : 0,
+						creditReviewProvided ? 1 : 0,
+						creditReviewChoice,
+						actor,
+						id,
+					),
 		db
 			.prepare(
 				`INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)
@@ -327,13 +400,36 @@ export async function saveEdit(
 			)
 			.bind(current.rawName, edit.displayName),
 	];
-	// Linking only sets the link: the refund's own category stays, so unlinking brings it back.
-	if (edit.refundOfId !== undefined)
+	// An explicit human link is also a review of this credit as a refund. Keep ownership on a
+	// split parent so split children can inherit the reviewed link as one bank transaction.
+	if (edit.refundOfId !== undefined) {
+		// Parts move with the parent only while they still follow its old link; a part a person
+		// linked to another purchase keeps its own choice. Runs before the parent's own update.
 		statements.push(
 			db
-				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+				.prepare(
+					"UPDATE transactions SET refund_of_id = ?1 WHERE parent_id = ?2 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?2)",
+				)
 				.bind(edit.refundOfId, id),
 		);
+		statements.push(
+			db
+				.prepare(
+					`UPDATE transactions SET refund_of_id = ?,
+						credit_reviewed = CASE WHEN ? IS NOT NULL AND amount_cents < 0 AND refund_of_id IS NOT ? THEN 1 ELSE credit_reviewed END,
+						credit_reviewed_by = CASE WHEN ? IS NOT NULL AND amount_cents < 0 AND refund_of_id IS NOT ? THEN 'user' ELSE credit_reviewed_by END
+					WHERE id = ?`,
+				)
+				.bind(
+					edit.refundOfId,
+					edit.refundOfId,
+					edit.refundOfId,
+					edit.refundOfId,
+					edit.refundOfId,
+					id,
+				),
+		);
+	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
 	if (excluded !== current.excluded)
@@ -369,7 +465,7 @@ export async function saveEdit(
 }
 
 /**
- * Dates of the refunds linked to a purchase or its parts, oldest first: the ones a split change unlinks.
+ * Dates of the refunds linked to a purchase or its parts, oldest first: the ones a split change affects.
  * `self` includes refunds of the purchase itself.
  */
 async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
@@ -383,8 +479,8 @@ async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
 }
 
 /**
- * Creates every child and marks its parent in one D1 batch. Refunds linked to the purchase or to
- * parts being replaced are unlinked in the same batch; their dates are returned for the toast.
+ * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows
+ * each new part; refunds linked to replaced parts are unlinked in the same batch.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -397,12 +493,21 @@ export async function saveSplit(
 		.bind(parentId)
 		.first();
 	if (!parent) throw new Error(`No transaction ${parentId}`);
-	// Every write checks, inside the same batch, that the parent still has the amount
-	// the parts were validated against, so a bank correction mid-save writes nothing.
+	// Every child reads its parent inside the atomic batch, so date, exclusion and review edits
+	// made after the route validation are reflected in the children.
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	const unchanged =
 		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	const reviewColumns = ", income_source, credit_reviewed, credit_reviewed_by";
+	const reviewValues =
+		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
 	const unlinked = await linkedRefundDates(db, parentId, true);
+	const linkedPurchase = await db
+		.prepare("SELECT refund_of_id AS refundOfId FROM transactions WHERE id = ?")
+		.bind(parentId)
+		.first<{ refundOfId: number | null }>();
+	const inheritedRefundLink =
+		"CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END";
 	const results = await db.batch([
 		db
 			.prepare(
@@ -413,14 +518,23 @@ export async function saveSplit(
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
 			.bind(parentId, parentId, total),
-		// Parts copy the parent's current date, name and exclusion in the same statement.
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, parent_id, plaid_transaction_id, updated_by)
-			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, id, NULL, ?
+			(account_id, date, amount_cents, raw_name, category_id, category_source, excluded, excluded_source${reviewColumns}, refund_of_id, parent_id, plaid_transaction_id, updated_by)
+			SELECT account_id, date, ?, raw_name, ?, 'user', excluded, excluded_source${reviewValues},
+				${inheritedRefundLink}, id, NULL, ?
 			FROM transactions WHERE id = ? AND amount_cents = ?`)
-				.bind(part.amountCents, part.categoryId, by, parentId, total),
+				.bind(
+					part.amountCents,
+					part.categoryId,
+					parentId,
+					parentId,
+					parentId,
+					by,
+					parentId,
+					total,
+				),
 		),
 		db
 			.prepare(
@@ -429,7 +543,10 @@ export async function saveSplit(
 			.bind(by, parentId, total),
 	]);
 	const saved = (results.at(-1)?.meta.changes ?? 0) > 0;
-	return { saved, unlinked: saved ? unlinked : [] };
+	return {
+		saved,
+		unlinked: saved && !linkedPurchase?.refundOfId ? unlinked : [],
+	};
 }
 
 /** Deletes a split and restores its parent atomically, unlinking refunds of its parts; returns their dates. */
@@ -475,31 +592,36 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 }
 
 /**
- * Transactions to ask Jev about, newest first: the ones that need a category (the same set
- * Home counts), with no category source and no stored confidence. A stored confidence means
- * Jev already looked and wasn't sure (decision 27).
+ * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
+ * unreviewed negative credits, even when a category was selected already. A user-reviewed
+ * uncategorized credit is eligible for category help only. A stored confidence means Jev already
+ * looked and wasn't sure (decision 27).
  */
 export async function pendingForJev(
 	db: D1Database,
 	limit: number,
-): Promise<(JevInput & { id: number })[]> {
+): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, m.display_name AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
-				t.plaid_category AS plaidCategory
+				t.plaid_category AS plaidCategory,
+				(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')) AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			${COUNTED_JOINS}
-			WHERE ${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.category_confidence IS NULL
+			WHERE ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND NOT ${FOLLOWS_PURCHASE}
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
 			LIMIT ?`,
 		)
 		.bind(limit)
-		.all<JevInput & { id: number }>();
-	return results;
+		.all<JevInput & { id: number; categoryOnly: number }>();
+	return results.map((transaction) => ({
+		...transaction,
+		categoryOnly: transaction.categoryOnly === 1,
+	}));
 }
 
 /** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */
@@ -516,33 +638,80 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
- * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion choice. Jev's income answer isn't stored: it changes the budget
- * math, and the edit panel has no income control (decision 28). Returns whether it wrote the row.
+ * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice. Returns whether it wrote the row.
  */
 export async function saveJevResult(
 	db: D1Database,
 	id: number,
 	d: Decision,
+	options: {
+		categoryOnly?: boolean;
+		switches?: { income: boolean };
+	} = {},
 ): Promise<boolean> {
+	if (options.categoryOnly) {
+		// A person already decided what this credit means. Jev may help with its category only.
+		const category = await db
+			.prepare(
+				`UPDATE transactions SET
+					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
+					updated_at = datetime('now')
+				 WHERE id = ? AND amount_cents < 0 AND credit_reviewed = 1 AND flag_income = 0
+					AND (income_source = 'user' OR credit_reviewed_by = 'user')
+					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+					AND excluded = 0 AND is_split = 0`,
+			)
+			.bind(
+				d.categoryId,
+				d.categoryId === null ? null : "jev",
+				d.confidence,
+				d.suggestedCategoryId,
+				id,
+			)
+			.run();
+		return category.meta.changes > 0;
+	}
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise.
 	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
+	const income = options.switches?.income === false ? false : d.flags.income;
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET
-				category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
-				flag_transfer = MAX(flag_transfer, ?), flag_reimbursement = MAX(flag_reimbursement, ?),
+				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_id END,
+				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_source END,
+			category_confidence = ?,
+			-- A credit counts only after a confident category (non-income classification) or an income decision.
+			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ?) OR ? = 1) THEN 1 ELSE credit_reviewed END,
+				jev_category_id = ?,
+				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
+				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
+				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
-			WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
+			WHERE id = ? AND category_confidence IS NULL
+				AND excluded = 0 AND is_split = 0
+				AND COALESCE(income_source, '') != 'user' AND COALESCE(credit_reviewed_by, '') != 'user'
+				AND (
+					(category_id IS NULL AND category_source IS NULL)
+					OR (amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0
+						AND credit_reviewed_by IS NULL AND COALESCE(income_source, '') != 'user')
+				)`,
 		)
 		.bind(
 			d.categoryId,
 			d.categoryId === null ? null : "jev",
 			d.confidence,
+			d.categoryId !== null ? 1 : 0,
+			d.confidence,
+			JEV_THRESHOLD,
+			income ? 1 : 0,
 			d.suggestedCategoryId,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
+			income ? 1 : 0,
+			income ? 1 : 0,
+
 			excludes,
 			excludes,
 			id,
@@ -615,20 +784,23 @@ export async function monthCounts(
 	notYetAsked: number;
 	/** Income with no category: it needs none, so it isn't waiting. */
 	income: number;
+	/** Negative credits that still need a person to review them. */
+	heldForReview: number;
 	/** Linked refunds waiting with a purchase that has no category; the purchase is the one to categorize. */
 	linkedWaiting: number;
 }> {
 	const row = await db
 		.prepare(
-			`SELECT COUNT(*) AS counted,
+			`SELECT COALESCE(SUM(t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}), 0) AS counted,
 				COALESCE(SUM(CASE WHEN ${NEEDS_CATEGORY} THEN 1 ELSE 0 END), 0) AS needsCategory,
-				COALESCE(SUM(${COUNTED_BY.source} = 'user'), 0) AS user,
-				COALESCE(SUM(${COUNTED_BY.source} = 'merchant_rule'), 0) AS merchantRule,
-				COALESCE(SUM(${COUNTED_BY.source} = 'jev'), 0) AS jev,
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}) AND ${COUNTED_BY.source} = 'user'), 0) AS user,
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}) AND ${COUNTED_BY.source} = 'merchant_rule'), 0) AS merchantRule,
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}) AND ${COUNTED_BY.source} = 'jev'), 0) AS jev,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NOT NULL), 0) AS unsure,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NULL), 0) AS noneFit,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NULL), 0) AS notYetAsked,
 				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income,
+				COALESCE(SUM(t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE}), 0) AS heldForReview,
 				COALESCE(SUM(${FOLLOWS_PURCHASE} AND ${COUNTED_CATEGORY} IS NULL AND t.flag_income = 0), 0) AS linkedWaiting
 			FROM transactions t
 			${COUNTED_JOINS}
@@ -645,6 +817,7 @@ export async function monthCounts(
 			noneFit: number;
 			notYetAsked: number;
 			income: number;
+			heldForReview: number;
 			linkedWaiting: number;
 		}>();
 	return (
@@ -658,6 +831,7 @@ export async function monthCounts(
 			noneFit: 0,
 			notYetAsked: 0,
 			income: 0,
+			heldForReview: 0,
 			linkedWaiting: 0,
 		}
 	);

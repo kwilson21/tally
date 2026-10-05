@@ -64,6 +64,7 @@ describe("GET /transactions/:id", () => {
 			(html.match(/<input type="radio" name="category"/g) ?? []).length,
 		).toBe(5);
 		expect(html).toContain("Always for this merchant");
+		expect(html).toContain("Count as income");
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value="Local Bakery"/);
 		expect(html).toMatch(/<label for="note"[^>]*>Note<\/label>/);
 		expect(html).toMatch(
@@ -100,7 +101,76 @@ describe("POST /transactions/:id", () => {
 		merchant: "Local Bakery",
 		note: "",
 		back: "/transactions?uncategorized=1",
+		income: "0",
+		creditReviewed: "0",
 	};
+
+	it("keeps a Jev income credit unchanged on a note-only save", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = 0.95, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const sheet = await get(`/transactions/${bakery}`);
+		expect(sheet.html).toContain('name="creditReviewedVisible"');
+		expect(sheet.html).toContain('name="creditReviewed"');
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Synthetic Payroll",
+			note: "Synthetic note",
+			back: "/transactions",
+			income: "1",
+			creditReviewedVisible: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT note, flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({
+			note: "Synthetic note",
+			flag_income: 1,
+			income_source: "jev",
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+		});
+	});
+
+	it("lets a person turn Jev income into a reviewed refund in one save", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = 0.95, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const sheet = await get(`/transactions/${bakery}`);
+		expect(sheet.html).toContain('name="creditReviewedVisible"');
+		expect(sheet.html).toContain(
+			"Reviewed as a refund or other non-income credit",
+		);
+
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewedVisible: "1",
+			creditReviewed: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+		});
+	});
 
 	it("saves, closes the sheet, and confirms with a toast and announcement (htmx)", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, save);
@@ -143,6 +213,21 @@ describe("POST /transactions/:id", () => {
 		);
 		const { html } = await post(`/transactions/${bakery}`, save);
 		expect(html).toMatch(/<span id="needs-count">11<\/span>/);
+	});
+
+	it("saves a person's income choice and preserves it when Jev runs again", async () => {
+		const { res } = await post(`/transactions/${bakery}`, {
+			...save,
+			income: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT flag_income, income_source FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({ flag_income: 1, income_source: "user" });
 	});
 
 	it("returns focus to the saved row when it's still in the list", async () => {
