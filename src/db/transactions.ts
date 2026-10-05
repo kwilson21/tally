@@ -11,6 +11,7 @@ import {
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
 } from "./counted-month";
+import { plaidSetIncomeSql } from "./income";
 import {
 	merchantColumnSql,
 	merchantKeySql,
@@ -736,7 +737,8 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
- * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice. Returns whether it wrote the row.
+ * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice, and it never
+ * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). Returns whether it wrote the row.
  */
 export async function saveJevResult(
 	db: D1Database,
@@ -783,7 +785,7 @@ export async function saveJevResult(
 				jev_category_id = ?,
 				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
-				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
+				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
