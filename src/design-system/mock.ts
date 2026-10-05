@@ -340,25 +340,33 @@ export const NET_WORTH_TODAY = "2026-10-05";
 const WOBBLE = [
 	0, 9000, -6000, 14000, 3000, -12000, 8000, 16000, -4000, 5000, -9000,
 ];
-const CLIMBING: NetWorthPoint[] = [
+/** The climbing weeks, ending on `endCents` today (a headline the picture sits under). */
+const climbing = (endCents: number): NetWorthPoint[] => [
 	...Array.from({ length: 22 }, (_, week) => ({
 		date: daysBefore("2026-05-01", -7 * week),
 		cents:
-			NET_WORTH_CENTS -
+			endCents -
 			360000 +
 			Math.floor((360000 * week) / 22) +
 			(week === 0 ? 0 : (WOBBLE[week % WOBBLE.length] ?? 0)),
 	})),
-	{ date: NET_WORTH_TODAY, cents: NET_WORTH_CENTS },
+	{ date: NET_WORTH_TODAY, cents: endCents },
 ];
+const CLIMBING = climbing(NET_WORTH_CENTS);
+
+/** The climbing line ending on `endCents`, for a mock whose headline isn't NET_WORTH_CENTS. */
+export const netWorthViewEnding = (endCents: number) =>
+	netWorthView(climbing(endCents), NET_WORTH_TODAY);
+
 /** The chart space in each state it can show (P25 A, P31), built by the same function the app uses. */
 export const NET_WORTH_VIEWS = {
 	rising: netWorthView(CLIMBING, NET_WORTH_TODAY),
-	// The same weeks with the values reversed: the line falls, ending on the same net worth.
+	// The same weeks mirrored about today's net worth: the line starts $3,600 higher and falls to
+	// NET_WORTH_CENTS, so it ends on the same headline as the others.
 	falling: netWorthView(
-		CLIMBING.map((p, i) => ({
+		CLIMBING.map((p) => ({
 			date: p.date,
-			cents: CLIMBING[CLIMBING.length - 1 - i]?.cents ?? 0,
+			cents: 2 * NET_WORTH_CENTS - p.cents,
 		})),
 		NET_WORTH_TODAY,
 	),
@@ -376,4 +384,6 @@ export const NET_WORTH_VIEWS = {
 		NET_WORTH_TODAY,
 	),
 	none: netWorthView([], NET_WORTH_TODAY),
+	// A connected account has no balance recorded yet, so there is no line until it has one.
+	waiting: netWorthView([], NET_WORTH_TODAY, 1),
 };

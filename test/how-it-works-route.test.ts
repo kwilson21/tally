@@ -304,6 +304,9 @@ describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
 			expect(text).toContain("time zone");
 			// Why the line starts when every account has a balance.
 			expect(text).toContain("first day every account has a balance");
+			expect(text).toContain(
+				"Until every account has a balance there is no line, only a note saying it is waiting.",
+			);
 			expect(text).toContain("another bank");
 			// The sentence under the number is written by code.
 			expect(text).toContain("Up $3,600 since May.");

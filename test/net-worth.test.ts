@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	accountsWaiting,
 	type BalanceRow,
 	chartStart,
 	type NetWorthPoint,
@@ -25,9 +26,12 @@ describe("chartStart", () => {
 	});
 });
 
+// netWorthSeries and accountsWaiting take the ids of every account the headline counts (connected
+// bank accounts, never Cash), so the line can never be a net worth that leaves one out.
 describe("netWorthSeries", () => {
 	it("is empty with no balances", () => {
-		expect(netWorthSeries([], "2026-05-01")).toEqual([]);
+		expect(netWorthSeries([], "2026-05-01", [])).toEqual([]);
+		expect(netWorthSeries([], "2026-05-01", [1])).toEqual([]);
 	});
 
 	it("adds what you have and subtracts what you owe, as netWorthCents does", () => {
@@ -39,8 +43,42 @@ describe("netWorthSeries", () => {
 					row(3, "2026-10-01", 25000, true),
 				],
 				"2026-05-01",
+				[1, 2, 3],
 			),
 		).toEqual([point("2026-10-01", 125000)]);
+	});
+
+	it("draws nothing while a counted account has no balance at all, however many days the others have", () => {
+		const others = [
+			row(1, "2026-10-01", 1000),
+			row(1, "2026-10-02", 1010),
+			row(2, "2026-10-01", 500),
+			row(2, "2026-10-02", 505),
+		];
+		expect(netWorthSeries(others, "2026-05-01", [1, 2, 3])).toEqual([]);
+		// The day it first has one, the line begins, and not before.
+		expect(
+			netWorthSeries(
+				[...others, row(3, "2026-10-03", 70, true), row(1, "2026-10-04", 1030)],
+				"2026-05-01",
+				[1, 2, 3],
+			),
+		).toEqual([point("2026-10-03", 1445), point("2026-10-04", 1465)]);
+	});
+
+	it("ignores balances of accounts the headline doesn't count, like Cash or a disconnected bank", () => {
+		expect(
+			netWorthSeries(
+				[
+					row(1, "2026-10-01", 1000),
+					row(9, "2026-10-01", 999999),
+					row(1, "2026-10-02", 1100),
+					row(9, "2026-10-02", 999999),
+				],
+				"2026-05-01",
+				[1],
+			),
+		).toEqual([point("2026-10-01", 1000), point("2026-10-02", 1100)]);
 	});
 
 	it("gives one point per day, oldest first, whatever order the rows come in", () => {
@@ -52,6 +90,7 @@ describe("netWorthSeries", () => {
 					row(1, "2026-10-02", 200),
 				],
 				"2026-05-01",
+				[1],
 			),
 		).toEqual([
 			point("2026-10-01", 100),
@@ -71,6 +110,7 @@ describe("netWorthSeries", () => {
 					row(2, "2026-10-03", 300, true),
 				],
 				"2026-05-01",
+				[1, 2],
 			),
 		).toEqual([
 			point("2026-10-01", 600),
@@ -91,6 +131,7 @@ describe("netWorthSeries", () => {
 					row(2, "2026-09-04", 5010),
 				],
 				"2026-05-01",
+				[1, 2],
 			),
 		).toEqual([point("2026-09-03", 6020), point("2026-09-04", 6040)]);
 	});
@@ -105,6 +146,7 @@ describe("netWorthSeries", () => {
 					row(1, "2026-05-02", 1200),
 				],
 				"2026-05-01",
+				[1, 2],
 			),
 		).toEqual([point("2026-05-01", 1600), point("2026-05-02", 1700)]);
 	});
@@ -114,8 +156,23 @@ describe("netWorthSeries", () => {
 			netWorthSeries(
 				[row(1, "2026-10-01", 20000), row(2, "2026-10-01", 90000, true)],
 				"2026-05-01",
+				[1, 2],
 			),
 		).toEqual([point("2026-10-01", -70000)]);
+	});
+});
+
+describe("accountsWaiting", () => {
+	it("counts the counted accounts with no balance, while another has one", () => {
+		const rows = [row(1, "2026-10-01", 100), row(2, "2026-10-01", 200)];
+		expect(accountsWaiting(rows, [1, 2, 3, 4])).toBe(2);
+		expect(accountsWaiting(rows, [1, 2])).toBe(0);
+	});
+
+	it("is zero before any balance is recorded, since then nothing waits on a particular account", () => {
+		expect(accountsWaiting([], [1, 2, 3])).toBe(0);
+		// A balance of an account the headline doesn't count doesn't make the rest wait.
+		expect(accountsWaiting([row(9, "2026-10-01", 5)], [1, 2])).toBe(0);
 	});
 });
 
@@ -126,6 +183,23 @@ describe("netWorthView, with fewer than two days of balances", () => {
 			sentence: null,
 			note: "The chart starts with the next sync.",
 		});
+	});
+
+	it("while a counted account has no balance yet, says the chart waits for every account, and draws no line", () => {
+		const waiting = {
+			kind: "early",
+			sentence: null,
+			note: "The chart starts once every account has a balance.",
+		};
+		expect(netWorthView([], "2026-10-05", 1)).toEqual(waiting);
+		// Even handed a line, it isn't drawn: it would add up fewer accounts than the headline does.
+		expect(
+			netWorthView(
+				[point("2026-10-01", 100), point("2026-10-05", 200)],
+				"2026-10-05",
+				2,
+			),
+		).toEqual(waiting);
 	});
 
 	it("on the first day, says when it started and that tomorrow brings the chart (P31)", () => {

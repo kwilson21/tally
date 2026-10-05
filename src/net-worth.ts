@@ -45,19 +45,22 @@ export function chartStart(today: string): string {
 }
 
 /**
- * Net worth on each day that has a balance, oldest first, from `from` on. An account with no row on
- * a day keeps its last balance; debt (`isLiability`) subtracts, as `netWorthCents` does. The series
- * starts on the first day every account has a balance, so linking another bank later doesn't look
- * like growth.
+ * Net worth on each day that has a balance, oldest first, from `from` on. `accountIds` are every
+ * account the headline counts (connected bank accounts, never Cash); balances of any other account
+ * are ignored. An account with no row on a day keeps its last balance; debt (`isLiability`)
+ * subtracts, as `netWorthCents` does. The series starts on the first day every one of those accounts
+ * has a balance, so linking another bank later doesn't look like growth, and while one has none at
+ * all there is no series: a line that left it out would disagree with the headline.
  */
 export function netWorthSeries(
 	rows: BalanceRow[],
 	from: string,
+	accountIds: number[],
 ): NetWorthPoint[] {
-	const accounts = new Set(rows.map((r) => r.accountId));
-	const sorted = [...rows].sort((a, b) =>
-		a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
-	);
+	const accounts = new Set(accountIds);
+	const sorted = rows
+		.filter((r) => accounts.has(r.accountId))
+		.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 	// Each account's latest balance so far, debt negative.
 	const latest = new Map<number, number>();
 	const points: NetWorthPoint[] = [];
@@ -73,7 +76,21 @@ export function netWorthSeries(
 	return points;
 }
 
+/**
+ * How many of `accountIds` have no balance recorded at all while another does: the chart is waiting
+ * for them. Zero before any balance exists, since then nothing waits on one account in particular.
+ */
+export function accountsWaiting(
+	rows: BalanceRow[],
+	accountIds: number[],
+): number {
+	const recorded = new Set(rows.map((r) => r.accountId));
+	const without = accountIds.filter((id) => !recorded.has(id)).length;
+	return without < accountIds.length ? without : 0;
+}
+
 const NEXT_SYNC = "The chart starts with the next sync.";
+const WAITING = "The chart starts once every account has a balance.";
 
 /** Where the chart's first day is named: its month, or its day when the history began this month. */
 const sinceLabel = (date: string, today: string) =>
@@ -112,12 +129,15 @@ function changeSentence(
 /**
  * The chart space from a series: the line, its sentence and its words for screen readers, or, with
  * fewer than two days, a note on when it starts (P31). Points are spaced by their dates, so a gap
- * in syncing is a straight stretch, not a squeeze.
+ * in syncing is a straight stretch, not a squeeze. `waiting` is `accountsWaiting`: while a counted
+ * account has no balance there is no line, whatever else was recorded, and the note says so.
  */
 export function netWorthView(
 	points: NetWorthPoint[],
 	today: string,
+	waiting = 0,
 ): NetWorthView {
+	if (waiting > 0) return { kind: "early", sentence: null, note: WAITING };
 	const first = points[0];
 	const last = points.at(-1);
 	if (!first || !last)

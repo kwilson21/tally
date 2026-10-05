@@ -463,6 +463,8 @@ howItWorks.get("/how-it-works", async (c) => {
 							The line has a point for each day with a balance, this month
 							included. It starts on the first day every account has a balance,
 							so linking another bank doesn't look like your net worth jumped.
+							Until every account has a balance there is no line, only a note
+							saying it is waiting.
 						</li>
 						<li>
 							Code writes the sentence under the number, like "Up $3,600 since

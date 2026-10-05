@@ -204,6 +204,28 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 		},
 	);
 
+	it.each(TODAYS)(
+		"moves each seeded transfer's money from Checking to Savings, so a transfer never changes net worth, on %s",
+		(today) => {
+			const seed = buildSeed(today);
+			const transfers = seed.transactions.filter((t) => t.flagTransfer);
+			expect(transfers.length).toBeGreaterThan(3);
+			const balance = (accountId: number, date: string) =>
+				seed.balanceHistory.find(
+					(r) => r.accountId === accountId && r.date === date,
+				)?.balanceCents ?? Number.NaN;
+			for (const t of transfers) {
+				const before = daysBefore(t.date, 1);
+				// Savings gains exactly the transfer.
+				expect(balance(2, t.date) - balance(2, before)).toBe(t.amountCents);
+				// Checking loses it, give or take its ordinary day-to-day drift (under $60): had it not,
+				// net worth would jump by the whole transfer.
+				const checking = balance(1, t.date) - balance(1, before);
+				expect(Math.abs(checking + t.amountCents)).toBeLessThan(6000);
+			}
+		},
+	);
+
 	it("is the same every time it is built", () => {
 		expect(buildSeed("2026-10-05").balanceHistory).toEqual(
 			buildSeed("2026-10-05").balanceHistory,
@@ -223,6 +245,7 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 					isLiability: liability.get(r.accountId) ?? false,
 				})),
 				chartStart(today),
+				bankAccounts(today).map((a) => a.id),
 			);
 			// $4,210.55 + $12,400.00 − $842.17
 			expect(points.at(-1)).toEqual({ date: today, cents: 1576838 });

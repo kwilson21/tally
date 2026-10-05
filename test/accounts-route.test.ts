@@ -146,6 +146,23 @@ describe("GET /accounts", () => {
 		expect(text).toContain("$15,768");
 	});
 
+	it("withholds the line while a connected account has no balance recorded, and says what it waits for", async () => {
+		// The headline counts this account's balance already; a line without it would disagree.
+		await env.DB.prepare(
+			"INSERT INTO accounts (plaid_item_id, name, mask, type, subtype, is_liability, balance_cents) VALUES (2, 'Store card', '3333', 'credit', 'credit card', 1, 25000)",
+		).run();
+		const { html } = await get("/accounts");
+		const text = textOf(html);
+		expect(html).not.toContain("<polyline");
+		expect(html).not.toContain('data-chart="line"');
+		expect(text).toContain(
+			"The chart starts once every account has a balance.",
+		);
+		// $4,210.55 + $12,400.00 − $842.17 − $250.00
+		expect(text).toContain("$15,518");
+		expect(text).toContain("Store card");
+	});
+
 	it("with no balance recorded yet, says the chart starts with the next sync", async () => {
 		await env.DB.prepare("DELETE FROM balance_history").run();
 		const { html } = await get("/accounts");
