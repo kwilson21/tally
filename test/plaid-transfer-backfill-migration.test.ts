@@ -33,11 +33,15 @@ const add = (
 ) =>
 	db
 		.prepare(
-			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, excluded, excluded_source, is_split, parent_id, income_source, credit_reviewed_by)
-			 SELECT ?, id, '2026-09-10', 5000, 'SYNTHETIC', ?, ?, ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, excluded, excluded_source, is_split, parent_id, income_source, credit_reviewed_by, flag_income)
+			 SELECT ?, id, '2026-09-10', ?, 'SYNTHETIC', ?, ?, ?, ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
 		)
 		.bind(
 			id,
+			// A person decides about credits (money in), and chosen income carries the income flag.
+			options.incomeSource === "user" || options.reviewedBy === "user"
+				? -5000
+				: 5000,
 			category,
 			options.excluded ?? 0,
 			options.source ?? null,
@@ -45,6 +49,7 @@ const add = (
 			options.parent ?? null,
 			options.incomeSource ?? null,
 			options.reviewedBy ?? null,
+			options.incomeSource === "user" ? 1 : 0,
 		);
 
 /** Links a bill's payment to a transaction. */
@@ -101,6 +106,10 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			// Income a person chose, or a credit a person reviewed, stays counted.
 			add(9032, "TRANSFER_IN", { incomeSource: "user" }),
 			add(9033, "TRANSFER_IN", { reviewedBy: "user" }),
+			// A reviewed credit the bank later turned into money out is no longer a credit, so the rule applies.
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, credit_reviewed_by) SELECT 9034, id, '2026-09-10', 5000, 'SYNTHETIC', 'TRANSFER_OUT', 'user' FROM accounts LIMIT 1",
+			),
 			// A split's parent and parts follow it, except a part a person set, a part with income a person chose, and a part that pays a bill.
 			add(9041, "TRANSFER_OUT", { split: true }),
 			add(9042, null, { parent: 9041 }),
@@ -138,6 +147,7 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			9031: COUNTED,
 			9032: COUNTED,
 			9033: COUNTED,
+			9034: PLAID,
 			9041: PLAID,
 			9042: PLAID,
 			9043: PLAID,

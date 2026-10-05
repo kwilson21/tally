@@ -13,14 +13,19 @@ export const isPlaidTransferSql = (category: string) =>
 const PAYS_A_BILL =
 	"EXISTS (SELECT 1 FROM bill_payments WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked')";
 
-/** True when a person decided what this credit is: income they chose, or a credit they reviewed (decision 70). */
-const PERSON_DECIDED_CREDIT =
-	"(COALESCE(transactions.income_source, '') = 'user' OR COALESCE(transactions.credit_reviewed_by, '') = 'user')";
+/**
+ * True when a person decided what this transaction is (decision 70): income they chose, which stays
+ * counted as income, or a credit they reviewed, but only while it is still a credit. `amount` is SQL
+ * for the row's amount after this write, so a reviewed credit the bank turns into money out loses
+ * the exception.
+ */
+const personDecided = (amount: string) =>
+	`((COALESCE(transactions.income_source, '') = 'user' AND transactions.flag_income = 1) OR (${amount} < 0 AND COALESCE(transactions.credit_reviewed_by, '') = 'user'))`;
 
 /**
  * The `excluded` and `excluded_source` assignments of an UPDATE of `transactions` (spec §8.5).
- * `category` is SQL for the row's Plaid category and repeats once per assignment, so a bound
- * value must be bound twice.
+ * `category` and `amount` are SQL for the row's Plaid category and its amount after this write; each
+ * repeats once per assignment, so bound values go in as category, amount, category, amount.
  * - A person's exclude or include is never touched.
  * - Plaid's transfer rule doesn't apply to a payment linked to a bill or to a credit a person decided
  *   about, so those keep counting.
@@ -29,8 +34,8 @@ const PERSON_DECIDED_CREDIT =
  * - A row Plaid excluded is counted again when the rule no longer applies to it; Jev's and a person's
  *   exclusions stay.
  */
-export const plaidTransferRuleSql = (category: string) => {
-	const excludes = `(${isPlaidTransferSql(category)} AND NOT ${PAYS_A_BILL} AND NOT ${PERSON_DECIDED_CREDIT})`;
+export const plaidTransferRuleSql = (category: string, amount: string) => {
+	const excludes = `(${isPlaidTransferSql(category)} AND NOT ${PAYS_A_BILL} AND NOT ${personDecided(amount)})`;
 	return `excluded = CASE
 	WHEN transactions.excluded_source = 'user' THEN transactions.excluded
 	WHEN ${excludes} THEN 1
@@ -59,6 +64,7 @@ export function plaidTransferRuleStatement(
 		.prepare(
 			`UPDATE transactions SET ${plaidTransferRuleSql(
 				`COALESCE(${ofParent("plaid_category")}, transactions.plaid_category)`,
+				"transactions.amount_cents",
 			)}
 			WHERE (id IN (${ids}) OR parent_id IN (${ids}))
 				AND COALESCE(${ofParent("excluded_source")}, '') != 'user'`,

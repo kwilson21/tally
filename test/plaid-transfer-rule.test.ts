@@ -21,11 +21,15 @@ type Options = {
 const add = (id: number, category: string | null, options: Options = {}) =>
 	db
 		.prepare(
-			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, excluded, excluded_source, is_split, parent_id, income_source, credit_reviewed_by)
-			 SELECT ?, id, '2026-09-10', 5000, 'SYNTHETIC', ?, ?, ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, excluded, excluded_source, is_split, parent_id, income_source, credit_reviewed_by, flag_income)
+			 SELECT ?, id, '2026-09-10', ?, 'SYNTHETIC', ?, ?, ?, ?, ?, ?, ?, ? FROM accounts LIMIT 1`,
 		)
 		.bind(
 			id,
+			// A person decides about credits (money in), and chosen income carries the income flag.
+			options.incomeSource === "user" || options.reviewedBy === "user"
+				? -5000
+				: 5000,
 			category,
 			options.excluded ?? 0,
 			options.source ?? null,
@@ -33,6 +37,7 @@ const add = (id: number, category: string | null, options: Options = {}) =>
 			options.parent ?? null,
 			options.incomeSource ?? null,
 			options.reviewedBy ?? null,
+			options.incomeSource === "user" ? 1 : 0,
 		);
 
 const stateOf = async (id: number) => {

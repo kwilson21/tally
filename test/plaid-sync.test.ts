@@ -2376,6 +2376,25 @@ describe("syncItem", () => {
 				},
 			);
 
+			it("excludes a reviewed credit once the bank turns it into money out", async () => {
+				const id = await addItem();
+				await syncAs(
+					id,
+					"added",
+					inCategory("FOOD_AND_DRINK", { amount: -50 }),
+				);
+				await decide("refund");
+				await syncAs(
+					id,
+					"modified",
+					inCategory("TRANSFER_OUT", { amount: 50 }),
+				);
+				expect(await exclusion()).toEqual({
+					excluded: 1,
+					excluded_source: "plaid",
+				});
+			});
+
 			it("lifts Plaid's own exclusion once a person marks the credit income", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));

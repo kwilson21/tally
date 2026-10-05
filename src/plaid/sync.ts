@@ -79,7 +79,7 @@ function partsExclusion(
 ): D1PreparedStatement {
 	const category = transaction.personal_finance_category?.primary ?? null;
 	return env.DB.prepare(
-		`UPDATE transactions SET ${plaidTransferRuleSql("?")}
+		`UPDATE transactions SET ${plaidTransferRuleSql("?", "transactions.amount_cents")}
 		 WHERE parent_id = (
 			SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND COALESCE(excluded_source, '') != 'user'
 		 ) AND ${OWNS_LOCK}`,
@@ -355,7 +355,7 @@ export async function syncItem(
 							raw_name = excluded.raw_name,
 							merchant_name = excluded.merchant_name,
 							plaid_category = excluded.plaid_category,
-							${plaidTransferRuleSql("excluded.plaid_category")},
+							${plaidTransferRuleSql("excluded.plaid_category", "excluded.amount_cents")},
 							updated_at = datetime('now')`,
 					).bind(
 						transaction.transaction_id,
@@ -417,7 +417,7 @@ export async function syncItem(
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?, merchant_name = ?,
 							plaid_category = ?,
-							${plaidTransferRuleSql("?")},
+							${plaidTransferRuleSql("?", "?")},
 							flag_income = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN 0 ELSE flag_income END,
 							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
 							credit_reviewed = CASE WHEN credit_reviewed_by = 'user' THEN credit_reviewed WHEN amount_cents = ? THEN credit_reviewed WHEN ? < 0 THEN 0 ELSE 1 END,
@@ -439,7 +439,9 @@ export async function syncItem(
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						cents,
 						cents,
 						cents,

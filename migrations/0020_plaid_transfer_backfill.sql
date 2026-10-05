@@ -6,7 +6,7 @@
 -- Only a transaction nobody has decided about is changed: it counts (`excluded = 0`) and has no
 -- source (`excluded_source IS NULL`), so a person's include or exclude and Jev's exclusion stay. A
 -- payment linked to a bill also stays, so the bill isn't paid by something nothing counts, and so
--- does a credit a person decided about (income they chose, or a credit they reviewed), since a
+-- does income a person chose and a credit a person reviewed while it is still a credit, since a
 -- person's choice about what it is wins (decision 70).
 -- No schema change; running it twice changes nothing the second time.
 
@@ -15,8 +15,8 @@ UPDATE transactions SET excluded = 1, excluded_source = 'plaid'
 WHERE plaid_category IN ('TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS')
   AND excluded = 0
   AND excluded_source IS NULL
-  AND COALESCE(income_source, '') != 'user'
-  AND COALESCE(credit_reviewed_by, '') != 'user'
+  AND NOT (COALESCE(income_source, '') = 'user' AND flag_income = 1)
+  AND NOT (amount_cents < 0 AND COALESCE(credit_reviewed_by, '') = 'user')
   AND NOT EXISTS (
     SELECT 1 FROM bill_payments
     WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked'
@@ -28,8 +28,8 @@ WHERE plaid_category IN ('TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS')
 UPDATE transactions SET excluded = 1, excluded_source = 'plaid'
 WHERE excluded = 0
   AND excluded_source IS NULL
-  AND COALESCE(income_source, '') != 'user'
-  AND COALESCE(credit_reviewed_by, '') != 'user'
+  AND NOT (COALESCE(income_source, '') = 'user' AND flag_income = 1)
+  AND NOT (amount_cents < 0 AND COALESCE(credit_reviewed_by, '') = 'user')
   AND parent_id IN (
     SELECT id FROM transactions WHERE is_split = 1 AND excluded = 1 AND excluded_source = 'plaid'
   )
