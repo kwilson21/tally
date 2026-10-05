@@ -399,7 +399,10 @@ export function CategoriesDiagram(c: {
 	income: number;
 	/** Jev's threshold as the page says it, like "80%". */
 	threshold: string;
+	/** The family-facing name for the categorization model. */
+	aiName?: string;
 }) {
+	const aiName = c.aiName ?? "Jev";
 	const income =
 		c.income > 0
 			? ` ${c.income} ${c.income === 1 ? "is" : "are"} income, which needs no category.`
@@ -407,14 +410,14 @@ export function CategoriesDiagram(c: {
 	const steps: [string, number][] = [
 		["A person's choice", c.user],
 		["A merchant rule", c.merchantRule],
-		[`Jev, if ${c.threshold} or more sure`, c.jev],
+		[`${aiName}, if ${c.threshold} or more sure`, c.jev],
 		["Waits for a person", c.waiting],
 	];
 	return (
 		<Figure
 			id="categories-diagram"
 			title="Where a transaction's category comes from"
-			desc={`Each transaction's category comes from the first step that applies. This month: a person chose ${c.user}, merchant rules ${c.merchantRule}, Jev ${c.jev}, and ${c.waiting} ${c.waiting === 1 ? "waits" : "wait"} for a person.${income}`}
+			desc={`Each transaction's category comes from the first step that applies. This month: a person chose ${c.user}, merchant rules ${c.merchantRule}, ${aiName} ${c.jev}, and ${c.waiting} ${c.waiting === 1 ? "waits" : "wait"} for a person.${income}`}
 			height={c.income > 0 ? 272 : 244}
 		>
 			{steps.map(([label, count], i) => (

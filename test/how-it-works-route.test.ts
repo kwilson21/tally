@@ -114,8 +114,13 @@ describe("outside the demo", () => {
 		const res = await howItWorks.request("/how-it-works", {}, notDemo);
 		const html = await res.text();
 		expect(res.status).toBe(200);
-		expect(html).toContain("With your numbers:");
+		const monthName = new Intl.DateTimeFormat("en-US", {
+			month: "long",
+			timeZone: "UTC",
+		}).format(new Date(`${todayUtc().slice(0, 7)}-01T00:00:00Z`));
+		expect(html).toContain(`With your numbers for ${monthName}:`);
 		expect(html).not.toContain("In the demo:");
+		expect(html).not.toContain("Jev");
 		expect(html).not.toContain('id="architecture"');
 		expect(html).not.toContain("system-diagram");
 		expect(html).not.toContain("Cloudflare Worker (Hono, TypeScript)");
@@ -147,7 +152,7 @@ describe("outside the demo", () => {
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
-		expect(html).toContain("With your numbers:");
+		expect(html).toMatch(/With your numbers for [A-Z][a-z]+:/);
 		expect(html).toContain("Electricity is");
 		expect(html).toContain('id="bills-diagram-title"');
 		expect(html).not.toContain("No bill has been paid yet this month.");

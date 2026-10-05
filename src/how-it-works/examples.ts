@@ -63,23 +63,26 @@ export function exclusionsExample(b: ExcludedBreakdown): string {
 		: `This month, ${total} transactions are excluded (${kinds}), so they don't count toward spending or safe to spend.`;
 }
 
-export function categorizationExample(c: {
-	user: number;
-	merchantRule: number;
-	jev: number;
-	/** Jev picked a category but wasn't sure enough to apply it. */
-	unsure: number;
-	/** Jev said none of the categories fit. */
-	noneFit: number;
-	/** Needs a category and Jev hasn't been asked yet. */
-	notYetAsked: number;
-	/** Income with no category: it needs none. */
-	income: number;
-}): string {
+export function categorizationExample(
+	c: {
+		user: number;
+		merchantRule: number;
+		jev: number;
+		/** Jev picked a category but wasn't sure enough to apply it. */
+		unsure: number;
+		/** Jev said none of the categories fit. */
+		noneFit: number;
+		/** Needs a category and Jev hasn't been asked yet. */
+		notYetAsked: number;
+		/** Income with no category: it needs none. */
+		income: number;
+	},
+	aiName = "Jev",
+): string {
 	const parts: string[] = [];
 	if (c.jev > 0) {
 		parts.push(
-			`Jev categorized ${plural(c.jev, "transaction", "transactions")}.`,
+			`${aiName} categorized ${plural(c.jev, "transaction", "transactions")}.`,
 		);
 	}
 	const left: string[] = [];
@@ -87,7 +90,7 @@ export function categorizationExample(c: {
 	if (c.noneFit > 0) left.push(`${c.noneFit} that fit none of the categories`);
 	if (left.length > 0) {
 		parts.push(
-			`${c.jev > 0 ? "It" : "Jev"} left ${left.join(" and ")} for a person.`,
+			`${c.jev > 0 ? "It" : aiName} left ${left.join(" and ")} for a person.`,
 		);
 	}
 	if (c.notYetAsked > 0) {
