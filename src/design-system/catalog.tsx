@@ -43,6 +43,7 @@ import { WhyLink } from "../views/why-link";
 import {
 	ADJUST_ROWS,
 	BAND,
+	BANK_LINES,
 	BANKS,
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
@@ -351,6 +352,25 @@ const ADJUST_SPEC: UseSpecText = {
 		"Adjust · Done · Lower {name} to {amount} · Raise {name} to {amount} · {name} is at $0 · {name} is at the largest budget · Toast: {name} is {amount} a month · Announced: {name} is {amount} a month from {month} on. · At a limit, toast and announced: {name} is already $0 · {name} is already the largest budget.",
 };
 
+// The stale-bank line's use spec (decision 72, P37 A): every line answered before the owner signs it off.
+const BANK_LINE_SPEC: UseSpecText = {
+	purpose:
+		"Tell a person, right under the number it affects, that a bank has stopped syncing, so Safe to spend may be too high, and take them to Accounts to fix it.",
+	affordance:
+		"An alert icon and a sentence in ink say it without color; “Check Accounts” is terracotta text like every link, on its own line with a 44px target. The line isn't tinted, so the Band stays Home's one highlighted row.",
+	states:
+		"Shown: a connected bank needs signing in, or hasn't synced for 3 days, counted from the household's today. Not shown: every bank healthy and synced within 2 days, a disconnected bank, a bank with no recorded sync that doesn't need attention, and the whole demo. The link has rest, the focus-visible ring and pressed; hover, disabled and loading don't apply to a plain link.",
+	feedback:
+		"“Check Accounts” opens Accounts, where the bank says “Needs attention: sign in again” with Fix connection, or shows its “Synced …” line next to Sync now. Once the bank is fixed or syncs again, the line is gone the next time Home loads. Nothing is announced: it is part of the page, not an answer to something a person did.",
+	input:
+		"Touch: the link is 44px tall. Keyboard: Tab reaches it after “How this works”; Enter follows it. Screen reader: the sentence, then “Check Accounts, link”; the icon is hidden from it because the words carry the meaning.",
+	motion: "None.",
+	edges:
+		"A bank that needs signing in and hasn't synced says the sign-in words. With two or more, the first in the order they were linked is named and the rest counted. A long bank name wraps with the sentence. With no Band (nothing needs a category) the line is the last thing in Home's top. A last sync from another year adds its year (“Dec 30, 2025”). No JavaScript: it's a plain link. The demo never shows it: it has no real banks to fix.",
+	words:
+		"“{bank} hasn't synced since {Oct 1}, so Safe to spend may be too high.” · “{bank} needs you to sign in again, so Safe to spend may be too high.” · “{bank} needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high.” (“2 other banks need a look” for more) · Link: Check Accounts.",
+};
+
 /**
  * A picture of part of a page: HomeTop draws the page's h1 and real links, so here it's one labelled
  * image with nothing inside to Tab to, and the catalog keeps its own h1.
@@ -369,12 +389,21 @@ const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
  * What a picture of Home shows, in words, built from the same data it draws, so a screen reader
  * hears the content being compared rather than only the picture's name.
  */
-function describeHome({ band = true, rows = true } = {}) {
+function describeHome({
+	band = true,
+	rows = true,
+	bankLine,
+}: {
+	band?: boolean;
+	rows?: boolean;
+	bankLine?: string;
+} = {}) {
 	const parts = [
 		HOME_TOP.month,
 		`Safe to spend ${whole(HOME_TOP.safeToSpendCents)}`,
 		HOME_TOP.status,
 		"How this works",
+		...(bankLine ? [bankLine, "Check Accounts"] : []),
 		...(band ? [HOME_TOP.band.text, HOME_TOP.band.detail] : []),
 	];
 	if (rows)
@@ -385,10 +414,20 @@ function describeHome({ band = true, rows = true } = {}) {
 }
 
 /** Home's top and the Budget list under it, as Home will draw them (#92). */
-function HomeSketch({ band = true }: { band?: boolean }) {
+function HomeSketch({
+	band = true,
+	bankLine,
+}: {
+	band?: boolean;
+	bankLine?: string;
+}) {
 	return (
 		<>
-			<HomeTop {...HOME_TOP} band={band ? HOME_TOP.band : undefined} />
+			<HomeTop
+				{...HOME_TOP}
+				bankLine={bankLine}
+				band={band ? HOME_TOP.band : undefined}
+			/>
 			<h2 class="mt-8 font-serif text-3xl font-semibold">Budget</h2>
 			<ul class="mt-2 divide-y divide-rule">
 				{HOME_ROWS.map((row) => (
@@ -407,7 +446,7 @@ function HomeTopGroup() {
 				title="HomeTop"
 				tier="visual"
 				components={["HomeTop"]}
-				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works, a BankLine when a bank has stopped syncing (its own entry, below) and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
 					<PhoneFrame
@@ -430,6 +469,37 @@ function HomeTopGroup() {
 						<HomeTop {...HOME_TOP} band={undefined} />
 					</Picture>
 				</State>
+			</Specimen>
+			<Specimen
+				id="bank-line"
+				title="BankLine"
+				tier="visual"
+				components={["BankLine"]}
+				sentence="When a connected bank needs you to sign in again, or hasn't synced for 3 days, Safe to spend may be too high, so a line under the status sentence says so and links to Accounts (decision 72, P37 A). Family app only: the demo has no banks to fix."
+			>
+				<State label="Hasn't synced for 3 days, on the family app's phone first screen: the number stays on top, and the Band keeps its job">
+					<PhoneFrame
+						demo={false}
+						label={`Home on a phone's first screen in the family app, top to bottom: ${describeHome({ bankLine: BANK_LINES.stale })}`}
+					>
+						<HomeSketch bankLine={BANK_LINES.stale} />
+					</PhoneFrame>
+				</State>
+				<State label="Needs signing in again (also the words for a bank that hasn't synced too)">
+					<Picture
+						label={`Home's top with a bank that needs signing in: ${describeHome({ bankLine: BANK_LINES.signIn, rows: false })}`}
+					>
+						<HomeTop {...HOME_TOP} bankLine={BANK_LINES.signIn} />
+					</Picture>
+				</State>
+				<State label="Two or more banks: it names the first and counts the rest">
+					<Picture
+						label={`Home's top with several banks to look at: ${describeHome({ bankLine: BANK_LINES.several, rows: false })}`}
+					>
+						<HomeTop {...HOME_TOP} bankLine={BANK_LINES.several} />
+					</Picture>
+				</State>
+				<UseSpec spec={BANK_LINE_SPEC} />
 			</Specimen>
 		</Group>
 	);

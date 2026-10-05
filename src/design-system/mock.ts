@@ -3,6 +3,7 @@
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import type { ListRow } from "../db/transactions";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
+import { type BankSync, flaggedBanks, staleBankWords } from "../stale-bank";
 import { tidyName } from "../transactions/tidy-name";
 
 // An unnamed merchant: nobody has chosen a display name for it yet, so the row shows tidyName's
@@ -192,6 +193,27 @@ export const HOME_ROWS = [
 export const BAND = {
 	href: "/transactions?uncategorized=1",
 	text: "12 transactions need a category",
+};
+
+const BANK_TODAY = "2026-09-28";
+const chase = (overrides: Partial<BankSync>): BankSync => ({
+	name: "Chase",
+	needsAttention: false,
+	lastSyncedAt: "2026-09-28 09:00:00",
+	...overrides,
+});
+/** The words for these banks as Home says them, from the real function so the catalog can't drift. */
+const bankWords = (banks: BankSync[]) =>
+	staleBankWords(flaggedBanks(banks, BANK_TODAY), BANK_TODAY) ?? "";
+
+/** BankLine's three wordings (decision 72, P37 A): not synced for 3 days, needs signing in, and several banks. */
+export const BANK_LINES = {
+	stale: bankWords([chase({ lastSyncedAt: "2026-09-25 09:00:00" })]),
+	signIn: bankWords([chase({ needsAttention: true })]),
+	several: bankWords([
+		chase({ needsAttention: true }),
+		chase({ name: "Citi", lastSyncedAt: "2026-09-20 09:00:00" }),
+	]),
 };
 
 /** The money input in each state it can show. */
