@@ -1,0 +1,196 @@
+import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+import { monthsBefore } from "../src/dates";
+import { loadMonth } from "../src/db/month";
+import { loadTrends } from "../src/db/trends";
+import { resetDemo } from "../src/demo/reset";
+import { TREND_MONTHS } from "../src/trends";
+
+const db = env.DB;
+const TODAY = "2026-10-05";
+const MONTHS = Array.from({ length: TREND_MONTHS }, (_, i) =>
+	monthsBefore("2026-10", TREND_MONTHS - 1 - i),
+);
+const GROCERIES = 1;
+const EATING_OUT = 2;
+const GAS = 3;
+const KIDS = 4;
+const HOUSEHOLD = 5;
+
+type Spend = { month: string; categoryId: number | null; cents: number };
+const key = (r: { month: string; categoryId: number | null }) =>
+	`${r.month}|${r.categoryId ?? "none"}`;
+const byKey = (rows: Spend[]) =>
+	Object.fromEntries(rows.map((r) => [key(r), r.cents]));
+
+/** Home's spending per category and month: loadMonth's rows, income left out (home.tsx's `spent`). */
+async function homeSpending(): Promise<Record<string, number>> {
+	const spent: Record<string, number> = {};
+	for (const month of MONTHS) {
+		const { transactions } = await loadMonth(db, month);
+		for (const t of transactions) {
+			if (t.income) continue;
+			const k = key({ month, categoryId: t.categoryId });
+			spent[k] = (spent[k] ?? 0) + t.amountCents;
+		}
+	}
+	return spent;
+}
+
+beforeEach(async () => {
+	await resetDemo(db, TODAY);
+});
+
+describe("loadTrends counts spending as Home does", () => {
+	it("agrees with Home for every month and category in the demo (split, refund, transfer, income, uncategorized)", async () => {
+		const { spend } = await loadTrends(db, TODAY);
+		expect(byKey(spend)).toEqual(await homeSpending());
+	});
+
+	// Every kind of row that makes a counted amount differ from its bank amount, in one household.
+	describe("with every awkward row", () => {
+		beforeEach(async () => {
+			await db.batch([
+				db.prepare("DELETE FROM bill_payments"),
+				db.prepare("DELETE FROM transactions"),
+				db.prepare(
+					"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (94, 'Late', 1234, 30, 'monthly', 'LATE BILL')",
+				),
+				db.prepare(`INSERT INTO transactions
+					(id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded, is_split, parent_id, flag_income, credit_reviewed, refund_of_id, pending) VALUES
+					(100, 1, '2026-04-10', 9999, 'BEFORE THE WINDOW', ${GROCERIES}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(101, 1, '2026-08-10', 10000, 'A', ${GROCERIES}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(102, 1, '2026-08-20', 5000, 'KIDS PURCHASE', ${KIDS}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(103, 1, '2026-09-03', 1000, 'B', ${GROCERIES}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(104, 1, '2026-09-05', 500, 'C', ${GROCERIES}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(105, 1, '2026-09-06', 700, 'D', ${GROCERIES}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(106, 1, '2026-09-20', 2000, 'E', ${GROCERIES}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(107, 1, '2026-09-04', 3000, 'EXCLUDED', ${EATING_OUT}, 'user', 1, 0, NULL, 0, NULL, NULL, 0),
+					(108, 1, '2026-09-04', 4000, 'SPLIT PARENT', NULL, NULL, 0, 1, NULL, 0, NULL, NULL, 0),
+					(109, 1, '2026-09-04', 1500, 'SPLIT PART', ${EATING_OUT}, 'user', 0, 0, 108, 0, NULL, NULL, 0),
+					(110, 1, '2026-09-04', 2500, 'SPLIT PART', ${HOUSEHOLD}, 'user', 0, 0, 108, 0, NULL, NULL, 0),
+					(111, 1, '2026-09-04', -2000, 'PAYCHECK', NULL, NULL, 0, 0, NULL, 1, NULL, NULL, 0),
+					(112, 1, '2026-09-04', -3000, 'UNREVIEWED CREDIT', ${EATING_OUT}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(113, 1, '2026-09-04', -800, 'REVIEWED CREDIT', ${EATING_OUT}, 'user', 0, 0, NULL, 0, 1, NULL, 0),
+					(114, 1, '2026-09-12', -2000, 'KIDS REFUND', ${GROCERIES}, 'user', 0, 0, NULL, 0, 1, 102, 0),
+					(115, 1, '2026-10-02', 1234, 'LATE BILL', ${GAS}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(116, 1, '2026-10-01', 4500, 'F', ${GROCERIES}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(117, 1, '2026-10-03', 800, 'PENDING', NULL, NULL, 0, 0, NULL, 0, NULL, NULL, 1),
+					(118, 1, '2026-10-04', 6000, 'G', ${EATING_OUT}, 'user', 0, 0, NULL, 0, NULL, NULL, 0),
+					(119, 1, '2026-10-04', 1200, 'H', ${HOUSEHOLD}, 'user', 0, 0, NULL, 0, NULL, NULL, 0)`),
+				// October's late payment pays September's bill, so it counts in September.
+				db.prepare(
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (94, '2026-09', 115, 'user', 'linked')",
+				),
+			]);
+		});
+
+		it("agrees with Home for every month and category", async () => {
+			const { spend } = await loadTrends(db, TODAY);
+			expect(byKey(spend)).toEqual(await homeSpending());
+		});
+
+		it("totals counted spending by the month it counts in and its category", async () => {
+			const { spend } = await loadTrends(db, TODAY);
+			expect(byKey(spend)).toEqual({
+				// A linked refund counts in its purchase's month and category: $50 less $20.
+				[`2026-08|${KIDS}`]: 3000,
+				[`2026-08|${GROCERIES}`]: 10000,
+				// Excluded, split parent, income and the unreviewed credit are out; the split's
+				// parts, the reviewed credit and the late bill's payment (counted here, not October) are in.
+				[`2026-09|${GROCERIES}`]: 4200,
+				[`2026-09|${EATING_OUT}`]: 700,
+				[`2026-09|${HOUSEHOLD}`]: 2500,
+				[`2026-09|${GAS}`]: 1234,
+				[`2026-10|${GROCERIES}`]: 4500,
+				[`2026-10|${EATING_OUT}`]: 6000,
+				[`2026-10|${HOUSEHOLD}`]: 1200,
+				// A pending transaction counts like any other, here with no category.
+				"2026-10|none": 800,
+			});
+		});
+
+		it("leaves out months before the six it draws", async () => {
+			const { spend } = await loadTrends(db, TODAY);
+			expect(spend.some((r) => r.month < "2026-05")).toBe(false);
+		});
+
+		it("counts last month's days 1 to today's, by the date a transaction is dated", async () => {
+			const { sameDays } = await loadTrends(db, TODAY);
+			const byCategory = Object.fromEntries(
+				sameDays.map((r) => [String(r.categoryId), r.cents]),
+			);
+			// Sep 3 ($10) and Sep 5 ($5) in Groceries, not Sep 6 or Sep 20; the split's parts and the
+			// reviewed credit (Sep 4); not the late bill, dated Oct 2 though counted in September; not
+			// the refund, which counts in August.
+			expect(byCategory).toEqual({
+				[String(GROCERIES)]: 1500,
+				[String(EATING_OUT)]: 700,
+				[String(HOUSEHOLD)]: 2500,
+			});
+		});
+
+		it("clamps to a shorter month: on Mar 31, all of February", async () => {
+			await db.batch([
+				db.prepare("DELETE FROM bill_payments"),
+				db.prepare("DELETE FROM transactions"),
+				db.prepare(`INSERT INTO transactions
+					(id, account_id, date, amount_cents, raw_name, category_id, category_source) VALUES
+					(200, 1, '2026-02-01', 100, 'X', ${GROCERIES}, 'user'),
+					(201, 1, '2026-02-28', 200, 'Y', ${GROCERIES}, 'user'),
+					(202, 1, '2026-03-05', 400, 'Z', ${GROCERIES}, 'user')`),
+			]);
+			const { sameDays, spend } = await loadTrends(db, "2026-03-31");
+			expect(sameDays).toEqual([{ categoryId: GROCERIES, cents: 300 }]);
+			expect(spend.find((r) => r.month === "2026-03")?.cents).toBe(400);
+		});
+
+		it("gives the earliest date of any transaction", async () => {
+			expect((await loadTrends(db, TODAY)).firstDate).toBe("2026-04-10");
+		});
+	});
+});
+
+describe("loadTrends's other rows", () => {
+	it("is TrendsInput: today, categories in Home's order, and every budget amount", async () => {
+		const data = await loadTrends(db, TODAY);
+		expect(data.today).toBe(TODAY);
+		expect(data.categories.map((c) => c.name)).toEqual([
+			"Groceries",
+			"Eating Out",
+			"Gas",
+			"Kids",
+			"Household",
+		]);
+		expect(data.categories[0]).toEqual({
+			id: GROCERIES,
+			name: "Groceries",
+			icon: "groceries",
+			color: "cat-blue",
+			archived: false,
+		});
+		// Eating Out's budget changed two months ago, so it has two amounts.
+		expect(
+			data.amounts.filter((a) => a.categoryId === EATING_OUT),
+		).toHaveLength(2);
+	});
+
+	it("marks an archived category archived", async () => {
+		await db.prepare("UPDATE categories SET archived = 1 WHERE id = 5").run();
+		const data = await loadTrends(db, TODAY);
+		expect(data.categories.find((c) => c.id === HOUSEHOLD)?.archived).toBe(
+			true,
+		);
+	});
+
+	it("has no first date when there are no transactions", async () => {
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM transactions"),
+		]);
+		const data = await loadTrends(db, TODAY);
+		expect(data.firstDate).toBeNull();
+		expect(data.spend).toEqual([]);
+		expect(data.sameDays).toEqual([]);
+	});
+});
