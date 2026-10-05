@@ -115,7 +115,7 @@ describe("GET /design-system in the demo", () => {
 			}),
 			...MONEY_STATES.map((s) => MoneyInput(s.props)),
 			ThingsToTry(),
-			HowLink({ section: "budget", demo: true }),
+			HowLink({ section: "budget" }),
 			SystemDiagram(),
 			BudgetDiagram(BUDGET_EXAMPLE),
 			BillsDiagram({

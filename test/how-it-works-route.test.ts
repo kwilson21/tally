@@ -110,28 +110,50 @@ describe("GET /how-it-works in the demo", () => {
 });
 
 describe("outside the demo", () => {
-	it("has no How Tally works page", async () => {
+	it("has How Tally works with household numbers and no architecture", async () => {
 		const res = await howItWorks.request("/how-it-works", {}, notDemo);
-		expect(res.status).toBe(404);
+		const html = await res.text();
+		expect(res.status).toBe(200);
+		expect(html).toContain("With your numbers:");
+		expect(html).not.toContain("In the demo:");
+		expect(html).not.toContain('id="architecture"');
+		expect(html).not.toContain("system-diagram");
+		expect(html).not.toContain("Cloudflare Worker (Hono, TypeScript)");
 	});
 
-	it("shows no Things to try and no How this works link on Home", async () => {
+	it("uses a plain sentence instead of transaction examples when the month is empty", async () => {
+		const month = todayUtc().slice(0, 7);
+		await env.DB.prepare(
+			"UPDATE transactions SET date = '2000-01-01' WHERE substr(date, 1, 7) = ?",
+		)
+			.bind(month)
+			.run();
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(
+			html.match(/There are no transactions this month yet\./g),
+		).toHaveLength(3);
+		expect(html).not.toContain("With your numbers: This month has");
+	});
+
+	it("shows no Things to try but does show How this works on Home", async () => {
 		const html = await (await home.request("/", {}, notDemo)).text();
 		expect(html).not.toContain("Things to try");
-		expect(html).not.toContain("/how-it-works");
+		expect(html).toContain('href="/how-it-works#budget"');
 	});
 
-	it("leaves How Tally works off the More page", async () => {
+	it("lists How Tally works on the More page", async () => {
 		const html = await (
 			await destinations.request("/more", {}, notDemo)
 		).text();
-		expect(html).not.toContain("/how-it-works");
+		expect(html).toContain('href="/how-it-works"');
 	});
 
-	it("shows no How this works link on Transactions or the edit sheet", async () => {
+	it("shows How this works on Transactions and the edit sheet", async () => {
 		for (const path of ["/transactions", "/transactions/110"]) {
 			const html = await (await transactions.request(path, {}, notDemo)).text();
-			expect(html).not.toContain("/how-it-works");
+			expect(html).toContain("/how-it-works");
 		}
 	});
 });

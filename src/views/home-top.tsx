@@ -12,19 +12,12 @@ type Props = {
 	safeToSpendCents: number;
 	/** The status sentence: "Eating Out is $36 over. Everything else is on track." */
 	status: string;
-	demo: boolean;
 	/** The one next action, when there is one: "12 transactions need a category", and its amount (decision 50). */
 	band?: { href: string; text: string; detail?: string };
 };
 
-/** The month, then Safe to spend, the status sentence, How this works (demo only) and the Band. */
-export function HomeTop({
-	month,
-	safeToSpendCents,
-	status,
-	demo,
-	band,
-}: Props) {
+/** The month, then Safe to spend, the status sentence, How this works and the Band. */
+export function HomeTop({ month, safeToSpendCents, status, band }: Props) {
 	return (
 		<>
 			<h1 class="font-serif text-2xl font-semibold tracking-tight">{month}</h1>
@@ -38,7 +31,7 @@ export function HomeTop({
 				<LedgerIllustration />
 			</div>
 			<p class="mt-3 font-serif text-lg italic">{status}</p>
-			<HowLink section="budget" demo={demo} />
+			<HowLink section="budget" />
 			{band && (
 				<div class="mt-4">
 					<Band href={band.href} detail={band.detail}>
