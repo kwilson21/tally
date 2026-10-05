@@ -3,6 +3,7 @@ import { plaidAmountToCents } from "../money";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
+import { mergePendingIntoPosted } from "./pending-merge";
 import { decryptToken } from "./token-crypto";
 
 type SyncEnv = PlaidEnv & {
@@ -293,8 +294,9 @@ export async function syncItem(
 				// (category, note, exclusion, income choice, bill payment, refund links both ways, split parts)
 				// is still attached, with nothing copied. The statements below then treat the row like any
 				// bank correction: the posted date and amount are written, a split is removed when the amount
-				// changed and kept, with its parts following the date, when it didn't. It's skipped when the
-				// posted id is already stored, so the two ids can never collide.
+				// changed and kept, with its parts following the date, when it didn't. When the posted id is
+				// already stored (its link arrives late), both rows exist, so the pending row's attachments
+				// are moved onto the posted one and the pending row deleted instead (pending-merge.ts).
 				if (!transaction.pending && transaction.pending_transaction_id) {
 					rekey = statements.length;
 					statements.push(
@@ -310,6 +312,23 @@ export async function syncItem(
 							lockId,
 						),
 					);
+					if (existingTransactionIds.has(transaction.transaction_id)) {
+						statements.push(
+							...mergePendingIntoPosted(
+								env.DB,
+								itemRowId,
+								lockId,
+								transaction.pending_transaction_id,
+								{
+									id: transaction.transaction_id,
+									cents,
+									date: transaction.date,
+									name: transaction.name,
+									merchantName: merchantNameOf(transaction),
+								},
+							),
+						);
+					}
 				}
 				// A corrected amount invalidates a person's parts; a date-only correction follows them.
 				statements.push(

@@ -227,4 +227,55 @@ describe("pages for a pending transaction", () => {
 		expect(other.html).not.toContain("Pending. The bank");
 		expect(other.html).not.toContain('data-icon="clock"');
 	});
+
+	describe("a split part", () => {
+		const PARENT = 9003;
+		const PARTS = [9004, 9005];
+		beforeEach(async () => {
+			// A pending purchase split in two, as saveSplit stores it: the parts are rows of their own with
+			// pending = 0, so what they show must come from the parent.
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, is_split, pending) SELECT ?, id, ?, 1100, 'PANTRY SPLIT', 1, 1 FROM accounts LIMIT 1",
+				).bind(PARENT, todayIn(DEFAULT_TIME_ZONE)),
+				...PARTS.map((id, index) =>
+					env.DB.prepare(
+						"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, parent_id, pending) SELECT ?, account_id, date, 550, raw_name, ?, 'user', id, 0 FROM transactions WHERE id = ?",
+					).bind(id, index + 1, PARENT),
+				),
+			]);
+		});
+
+		const li = (html: string, id: number) =>
+			html.match(
+				new RegExp(`<li data-transaction="${id}">(.*?)</li>`, "s"),
+			)?.[1] ?? "";
+
+		it("shows its parent's Pending in the list and the panel, and drops it once the parent posts", async () => {
+			const list = (await get("/transactions")).html;
+			for (const id of [PARENT, ...PARTS]) {
+				expect(li(list, id)).toContain("Pending");
+			}
+			for (const id of PARTS) {
+				const text = words((await get(`/transactions/${id}`)).html).replace(
+					/\s+/g,
+					" ",
+				);
+				expect(text).toContain(NOTE);
+			}
+
+			await env.DB.prepare("UPDATE transactions SET pending = 0 WHERE id = ?")
+				.bind(PARENT)
+				.run();
+			const posted = (await get("/transactions")).html;
+			for (const id of [PARENT, ...PARTS]) {
+				expect(li(posted, id)).not.toContain("Pending");
+			}
+			for (const id of PARTS) {
+				expect((await get(`/transactions/${id}`)).html).not.toContain(
+					"Pending. The bank",
+				);
+			}
+		});
+	});
 });

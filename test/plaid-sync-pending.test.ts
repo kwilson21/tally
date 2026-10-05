@@ -531,7 +531,7 @@ describe("when the bank posts a pending transaction", () => {
 		});
 	});
 
-	it("moves nothing onto a posted transaction that already exists", async () => {
+	it("leaves one row when both ids are already stored, never colliding on the unique id", async () => {
 		const item = await addItem();
 		await syncPending(item);
 		await syncItem(
@@ -539,7 +539,7 @@ describe("when the bank posts a pending transaction", () => {
 			item,
 			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
 		);
-		// Both rows exist, so the twin is not re-keyed (that would break the unique id); the drop removes the pending one.
+		// Both rows exist, so the pending one can't take the posted id; it is merged into it instead (below).
 		await post(item);
 		expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
 		expect(await row("posted-1")).toMatchObject({ pending: 0 });
@@ -733,5 +733,315 @@ describe("a pending transaction and its posted twin on different pages", () => {
 			(await env.DB.prepare("SELECT sync_cursor FROM plaid_items").first())
 				?.sync_cursor,
 		).toBe("page-1");
+	});
+});
+
+describe("when the posted transaction is already stored as the link arrives", () => {
+	/** The bank first sent the posted one with no link to the pending one, and sends the link now. */
+	async function bothStored(item: number, pending = {}) {
+		const id = await syncPending(item, pending);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				added: [postedTx({ pending_transaction_id: null, ...pending })],
+			}),
+		);
+		return { pending: id, posted: (await row("posted-1"))?.id as number };
+	}
+
+	const refundOf = async (id: number) =>
+		(
+			await env.DB.prepare("SELECT refund_of_id FROM transactions WHERE id = ?")
+				.bind(id)
+				.first()
+		)?.refund_of_id;
+
+	it("moves a person's category, note, exclusion and income choice onto it, over a machine's", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.batch([
+			env.DB.prepare(
+				`UPDATE transactions SET category_id = 3, category_source = 'user', note = 'Birthday money',
+					excluded = 1, excluded_source = 'user', flag_income = 1, income_source = 'user',
+					credit_reviewed = 1, credit_reviewed_by = 'user', updated_by = 'person@example.com'
+				 WHERE id = ?`,
+			).bind(ids.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = 2, category_source = 'jev', category_confidence = 0.9, jev_category_id = 2 WHERE id = ?",
+			).bind(ids.posted),
+		]);
+
+		expect(await post(item, { amount: -42 })).toEqual({
+			added: 0,
+			modified: 0,
+			removed: 1,
+		});
+
+		expect(await row("pending-1")).toBeNull();
+		expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			pending: 0,
+			category_id: 3,
+			category_source: "user",
+			category_confidence: null,
+			note: "Birthday money",
+			excluded: 1,
+			excluded_source: "user",
+			flag_income: 1,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+			updated_by: "person@example.com",
+		});
+	});
+
+	it("keeps what a person already chose on the posted transaction", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.batch([
+			env.DB.prepare(
+				`UPDATE transactions SET category_id = 3, category_source = 'user', note = 'From pending',
+					excluded = 1, excluded_source = 'user', flag_income = 1, income_source = 'user',
+					credit_reviewed = 1, credit_reviewed_by = 'user'
+				 WHERE id = ?`,
+			).bind(ids.pending),
+			env.DB.prepare(
+				`UPDATE transactions SET category_id = 4, category_source = 'user', note = 'From posted',
+					excluded = 0, excluded_source = 'user', flag_income = 0, income_source = 'user',
+					credit_reviewed = 0, credit_reviewed_by = 'user'
+				 WHERE id = ?`,
+			).bind(ids.posted),
+		]);
+		await post(item, { amount: -42 });
+		expect(await row("posted-1")).toMatchObject({
+			category_id: 4,
+			note: "From posted",
+			excluded: 0,
+			flag_income: 0,
+			credit_reviewed: 0,
+		});
+		expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
+	});
+
+	it("moves a bill payment onto it", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await addBillLinkedTo(ids.pending);
+		await post(item);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT bill_id, period, transaction_id, matched_by, status FROM bill_payments",
+				).all()
+			).results,
+		).toEqual([
+			{
+				bill_id: 700,
+				period: "2026-09",
+				transaction_id: ids.posted,
+				matched_by: "user",
+				status: "linked",
+			},
+		]);
+	});
+
+	it("leaves a bill payment the posted one already has, and drops the pending one's", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await addBillLinkedTo(ids.pending);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (701, 'Water', 1234, 28, 'monthly', 'Not a match either')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (701, '2026-09', ?, 'auto', 'linked')",
+			).bind(ids.posted),
+		]);
+		await post(item);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT bill_id, transaction_id FROM bill_payments ORDER BY bill_id",
+				).all()
+			).results,
+		).toEqual([{ bill_id: 701, transaction_id: ids.posted }]);
+	});
+
+	it("moves refund links both ways", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const refund = await addRefund(ids.pending);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				added: [
+					postedTx({
+						transaction_id: "purchase",
+						pending_transaction_id: null,
+						amount: 50,
+					}),
+				],
+			}),
+		);
+		const purchase = (await row("purchase"))?.id as number;
+		await env.DB.prepare(
+			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
+		)
+			.bind(purchase, ids.pending)
+			.run();
+
+		await post(item);
+
+		// The refund of the pending purchase now refunds the posted one.
+		expect(await refundOf(refund)).toBe(ids.posted);
+		// The pending credit's own link is now the posted credit's.
+		expect(await refundOf(ids.posted)).toBe(purchase);
+		expect(await row("pending-1")).toBeNull();
+	});
+
+	it("keeps a refund link the posted one already has", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				added: [
+					postedTx({
+						transaction_id: "purchase-a",
+						pending_transaction_id: null,
+						amount: 50,
+					}),
+					postedTx({
+						transaction_id: "purchase-b",
+						pending_transaction_id: null,
+						amount: 60,
+					}),
+				],
+			}),
+		);
+		const a = (await row("purchase-a"))?.id as number;
+		const b = (await row("purchase-b"))?.id as number;
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
+			).bind(a, ids.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
+			).bind(b, ids.posted),
+		]);
+		await post(item);
+		expect(await refundOf(ids.posted)).toBe(b);
+	});
+
+	it("moves a split when the amount is unchanged, with its parts following the posted date", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const parts = await splitInto(ids.pending, 600, 634);
+		await post(item);
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			is_split: 1,
+			split_removed_from_cents: null,
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT id, parent_id, amount_cents, date FROM transactions WHERE parent_id IS NOT NULL ORDER BY id",
+				).all()
+			).results,
+		).toEqual([
+			{
+				id: parts[0],
+				parent_id: ids.posted,
+				amount_cents: 600,
+				date: "2026-09-28",
+			},
+			{
+				id: parts[1],
+				parent_id: ids.posted,
+				amount_cents: 634,
+				date: "2026-09-28",
+			},
+		]);
+	});
+
+	it("removes the split when the amount changed, with a note, and unlinks a refund of a part (decision 62)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const parts = await splitInto(ids.pending, 600, 634);
+		const refundOfPart = await addRefund(parts[0] as number, -100);
+
+		await post(item, { amount: 15 });
+
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			amount_cents: 1500,
+			is_split: 0,
+			split_removed_from_cents: 1234,
+		});
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NOT NULL",
+			),
+		).toBe(0);
+		expect(await refundOf(refundOfPart)).toBeNull();
+	});
+
+	it("keeps a split the posted transaction already has, and drops the pending one's", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 700, 534);
+		await splitInto(ids.pending, 600, 634);
+		await post(item);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT id, parent_id FROM transactions WHERE parent_id IS NOT NULL ORDER BY id",
+				).all()
+			).results,
+		).toEqual(own.map((id) => ({ id, parent_id: ids.posted })));
+		expect(await row("posted-1")).toMatchObject({ is_split: 1 });
+	});
+
+	it("does the same when the drop came on an earlier page than the link", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 3, category_source = 'user', note = 'Kept' WHERE id = ?",
+		)
+			.bind(ids.pending)
+			.run();
+		await addBillLinkedTo(ids.pending);
+
+		await syncItem(
+			opts,
+			item,
+			plaidFetch((body) =>
+				body.cursor === "page-1"
+					? response(page({ added: [postedTx()], next_cursor: "page-2" }))
+					: response(
+							page({
+								removed: [{ transaction_id: "pending-1" }],
+								next_cursor: "page-1",
+								has_more: true,
+							}),
+						),
+			),
+		);
+
+		expect(await row("pending-1")).toBeNull();
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			category_id: 3,
+			note: "Kept",
+		});
+		expect(
+			(await env.DB.prepare("SELECT transaction_id FROM bill_payments").first())
+				?.transaction_id,
+		).toBe(ids.posted);
 	});
 });
