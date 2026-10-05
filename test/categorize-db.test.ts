@@ -101,6 +101,44 @@ describe("pendingForJev", () => {
 		);
 		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
 	});
+
+	describe("with categories and exclusions off (spec §8.6)", () => {
+		const reviewedCredit = async () => {
+			const id = await idOf("SQ *LOCAL BAKERY 4432");
+			await db
+				.prepare(
+					"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				)
+				.bind(id)
+				.run();
+			return id;
+		};
+
+		it("still asks about a credit a person reviewed when categories are on, for its category", async () => {
+			const id = await reviewedCredit();
+			expect(await pendingForJev(db, 40)).toContainEqual(
+				expect.objectContaining({ id, categoryOnly: true }),
+			);
+			expect(await pendingForJev(db, 40, { categories: true })).toContainEqual(
+				expect.objectContaining({ id, categoryOnly: true }),
+			);
+		});
+
+		it("leaves it out, since only its category could be asked and that answer is unused", async () => {
+			const id = await reviewedCredit();
+			const pending = await pendingForJev(db, 40, { categories: false });
+			expect(pending.map((p) => p.id)).not.toContain(id);
+			// Everything else is still asked about, for the income answer.
+			expect(pending).toHaveLength(11);
+		});
+
+		it("doesn't let those rows use up the limit", async () => {
+			await reviewedCredit();
+			expect(await pendingForJev(db, 11, { categories: false })).toHaveLength(
+				11,
+			);
+		});
+	});
 });
 
 describe("applyMerchantRules", () => {

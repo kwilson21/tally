@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending, jevCallLimit } from "../src/categorize-pending";
+import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
 import {
 	monthCounts,
@@ -95,7 +96,10 @@ describe("categorizePending", () => {
 					),
 			);
 
-			await categorizePending(withKey, jev.fetchImpl, { income: enabled });
+			await categorizePending(withKey, jev.fetchImpl, {
+				...AI_SWITCHES_ALL_ON,
+				income: enabled,
+			});
 			expect(
 				await db
 					.prepare(
@@ -581,5 +585,231 @@ describe("categorizePending", () => {
 			fakeJev(() => new Response("{}", { status: 503 })).fetchImpl,
 		);
 		expect(await countWhere("jev_failed_at IS NOT NULL")).toBe(0);
+	});
+});
+
+// Spec §8.6: every run honors the household's AI switches, nightly and at sync alike. Off means
+// Tally works from rules and people's choices alone, and nothing already decided changes.
+describe("the AI switches", () => {
+	const setSwitches = (over: Partial<typeof AI_SWITCHES_ALL_ON>) =>
+		saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...over });
+
+	/** A Jev reply with a flag's probability set, whatever the category. */
+	const flagged = (flags: {
+		transfer?: number;
+		reimbursement?: number;
+		income?: number;
+	}) =>
+		new Response(
+			JSON.stringify({
+				answers: {
+					category: { type: "choice", choice: "Eating Out", confidence: 0.95 },
+					transfer: { type: "noul", noul: flags.transfer ?? 0.01 },
+					reimbursement: { type: "noul", noul: flags.reimbursement ?? 0.01 },
+					income: { type: "noul", noul: flags.income ?? 0.01 },
+				},
+			}),
+			{ status: 200 },
+		);
+
+	/** Only transaction 1 is left for Jev, as a credit nobody has decided about. */
+	async function onlyOneCreditPending() {
+		await db.batch([
+			db.prepare(
+				"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = NULL, flag_income = 0, income_source = NULL, credit_reviewed = 0, credit_reviewed_by = NULL, excluded = 0, excluded_source = NULL WHERE id = 1",
+			),
+			db.prepare(
+				"UPDATE transactions SET category_confidence = 0.5 WHERE id != 1",
+			),
+		]);
+	}
+
+	const snapshot = async () =>
+		(
+			await db
+				.prepare(
+					`SELECT id, category_id, category_source, category_confidence, jev_category_id, flag_transfer,
+						flag_reimbursement, flag_income, income_source, credit_reviewed, excluded, excluded_source
+					FROM transactions ORDER BY id`,
+				)
+				.all()
+		).results;
+
+	beforeEach(() => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+	});
+
+	it("never calls Jev with categories and income both off, however many transactions wait", async () => {
+		await setSwitches({ categories: false, income: false });
+		const before = await snapshot();
+		const jev = fakeJev(() => reply(0.95));
+		expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
+			asked: 0,
+			applied: 0,
+		});
+		expect(jev.calls()).toBe(0);
+		expect(await snapshot()).toEqual(before);
+	});
+
+	it("still applies the household's merchant rules with every Jev switch off, since a rule is a person's choice", async () => {
+		await setSwitches({ categories: false, income: false });
+		await db
+			.prepare(
+				"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'SQ *FARMERS MKT'",
+			)
+			.run();
+		const jev = fakeJev(() => reply(0.95));
+		await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(0);
+		expect(await countWhere("category_source = 'merchant_rule'")).toBe(1);
+	});
+
+	it("asks Jev nightly with names and sorting-as-they-arrive off, since neither gates the nightly run", async () => {
+		await setSwitches({ names: false, sortOnArrival: false });
+		const jev = fakeJev(() => reply(0.95));
+		const result = await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(12);
+		expect(result.applied).toBe(12);
+	});
+
+	describe("with categories and exclusions off, and income on", () => {
+		beforeEach(() => setSwitches({ categories: false }));
+
+		it("asks Jev for the income answer, but applies and keeps no category", async () => {
+			const asked = (await pendingForJev(db, 40)).map((t) => t.id);
+			const jev = fakeJev(() => reply(0.97));
+			const result = await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(12);
+			expect(result.applied).toBe(0);
+			// Neither applied nor kept as a suggestion to show; only that it was asked is kept.
+			const rows = await db
+				.prepare(
+					`SELECT category_id, category_source, jev_category_id, category_confidence
+					FROM transactions WHERE id IN (${asked.join(",")})`,
+				)
+				.all();
+			expect(rows.results).toHaveLength(12);
+			for (const row of rows.results)
+				expect(row).toEqual({
+					category_id: null,
+					category_source: null,
+					jev_category_id: null,
+					category_confidence: 0.97,
+				});
+			expect(await needsCategoryCount(db, MONTH)).toBe(12);
+		});
+
+		it("lets Jev's transfer and reimbursement flags exclude nothing", async () => {
+			const excludedBefore = await countWhere("excluded = 1");
+			const flagsBefore = await countWhere(
+				"flag_transfer = 1 OR flag_reimbursement = 1",
+			);
+			const jev = fakeJev(() =>
+				flagged({ transfer: 0.99, reimbursement: 0.99 }),
+			);
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(12);
+			expect(await countWhere("excluded = 1")).toBe(excludedBefore);
+			expect(
+				await countWhere("flag_transfer = 1 OR flag_reimbursement = 1"),
+			).toBe(flagsBefore);
+			expect(await countWhere("excluded_source = 'jev'")).toBe(0);
+		});
+
+		it("still stores Jev's income answer on a credit", async () => {
+			await onlyOneCreditPending();
+			const jev = fakeJev(() => flagged({ income: 0.99 }));
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(1);
+			expect(
+				await db
+					.prepare(
+						"SELECT category_id, flag_income, income_source, credit_reviewed FROM transactions WHERE id = 1",
+					)
+					.first(),
+			).toEqual({
+				category_id: null,
+				flag_income: 1,
+				income_source: "jev",
+				credit_reviewed: 1,
+			});
+		});
+
+		it("marks what it asked about as looked at, so the same ones aren't asked every night", async () => {
+			const jev = fakeJev(() => reply(0.97));
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(12);
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(12);
+		});
+
+		it("doesn't ask about a credit a person already reviewed, since only its category could be asked", async () => {
+			await onlyOneCreditPending();
+			await db
+				.prepare(
+					"UPDATE transactions SET income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = 1",
+				)
+				.run();
+			const jev = fakeJev(() => reply(0.97));
+			expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
+				asked: 0,
+				applied: 0,
+			});
+			expect(jev.calls()).toBe(0);
+		});
+	});
+
+	describe("with income off, and categories on", () => {
+		beforeEach(() => setSwitches({ income: false }));
+
+		it("applies Jev's category but not its income answer", async () => {
+			await onlyOneCreditPending();
+			const jev = fakeJev(() => flagged({ income: 0.99 }));
+			const result = await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(1);
+			expect(result.applied).toBe(1);
+			expect(
+				await db
+					.prepare(
+						"SELECT category_id, category_source, flag_income, income_source FROM transactions WHERE id = 1",
+					)
+					.first(),
+			).toEqual({
+				category_id: 2,
+				category_source: "jev",
+				flag_income: 0,
+				income_source: null,
+			});
+		});
+
+		it("still lets its transfer flag exclude, which the categories switch owns", async () => {
+			const jev = fakeJev(() => flagged({ transfer: 0.99 }));
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(await countWhere("excluded_source = 'jev'")).toBeGreaterThan(0);
+		});
+	});
+
+	it("changes nothing already decided when switches are turned off after a run", async () => {
+		await categorizePending(withKey, fakeJev(() => reply(0.95)).fetchImpl);
+		const decided = await snapshot();
+		expect(await needsCategoryCount(db, MONTH)).toBe(0);
+		await setSwitches({
+			names: false,
+			categories: false,
+			income: false,
+			sortOnArrival: false,
+		});
+		const jev = fakeJev(() => reply(0.5));
+		await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(0);
+		expect(await snapshot()).toEqual(decided);
+	});
+
+	it("is back on after the demo's nightly reset", async () => {
+		await setSwitches({ categories: false, income: false });
+		await resetDemo(db, TODAY);
+		const jev = fakeJev(() => reply(0.95));
+		await categorizePending(withKey, jev.fetchImpl);
+		expect(jev.calls()).toBe(12);
 	});
 });

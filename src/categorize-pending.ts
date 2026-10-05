@@ -1,6 +1,7 @@
 // The nightly categorization step (spec §7): merchant rules first, then Jev for the rest.
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { decide } from "./ai/decide";
+import { type AiSwitches, asksJev, readAiSwitches } from "./db/ai-switches";
 import {
 	applyMerchantRules,
 	markJevFailed,
@@ -21,10 +22,17 @@ const MAX_FAILURES_IN_A_ROW = 3;
 
 type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
 
+/**
+ * Merchant rules, then Jev for what they left, honoring the household's AI switches (spec §8.6,
+ * decision 73). It reads them here unless a caller passes them, so the nightly run and a run
+ * after a sync agree: with categories and income both off Jev isn't asked at all, with categories
+ * off its category and its transfer and reimbursement flags are dropped, and with income off its
+ * income answer is.
+ */
 export async function categorizePending(
 	env: CategorizeEnv,
 	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
-	switches: { income: boolean } = { income: true },
+	switches?: AiSwitches,
 	// The nightly catch-up has just applied merchant rules after its syncs; without banks (the demo)
 	// or when that step failed, this run applies them itself.
 	{ rulesApplied = false }: { rulesApplied?: boolean } = {},
@@ -32,7 +40,11 @@ export async function categorizePending(
 	const done = { asked: 0, applied: 0 };
 	if (!env.JEV_API_KEY) return done;
 
+	// Merchant rules are the household's own, so they apply whatever the AI switches say.
 	if (!rulesApplied) await applyMerchantRules(env.DB);
+
+	const on = switches ?? (await readAiSwitches(env.DB));
+	if (!asksJev(on)) return done;
 
 	const { results: categories } = await env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
@@ -42,7 +54,9 @@ export async function categorizePending(
 	const names = categories.map((c) => c.name);
 
 	let failuresInARow = 0;
-	for (const tx of await pendingForJev(env.DB, jevCallLimit(env))) {
+	for (const tx of await pendingForJev(env.DB, jevCallLimit(env), {
+		categories: on.categories,
+	})) {
 		done.asked += 1;
 		const result = await askJev(tx, names, env.JEV_API_KEY, fetchImpl);
 		if (!result.ok) {
@@ -61,10 +75,12 @@ export async function categorizePending(
 			continue;
 		}
 		failuresInARow = 0;
-		const decision = decide(result.answer, categories, JEV_THRESHOLD);
+		const decision = decide(result.answer, categories, JEV_THRESHOLD, {
+			categories: on.categories,
+		});
 		const written = await saveJevResult(env.DB, tx.id, decision, {
 			categoryOnly: tx.categoryOnly,
-			switches,
+			switches: { income: on.income },
 		});
 		if (written && decision.categoryId !== null) done.applied += 1;
 	}
