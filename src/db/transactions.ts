@@ -398,7 +398,7 @@ export async function saveEdit(
 	];
 	// An explicit human link is also a review of this credit as a refund. Keep ownership on a
 	// split parent so split children can inherit the reviewed link as one bank transaction.
-	if (edit.refundOfId !== undefined)
+	if (edit.refundOfId !== undefined) {
 		statements.push(
 			db
 				.prepare(
@@ -416,6 +416,17 @@ export async function saveEdit(
 					id,
 				),
 		);
+		statements.push(
+			db
+				.prepare(
+					`UPDATE transactions SET refund_of_id = ?,
+						credit_reviewed = (SELECT credit_reviewed FROM transactions WHERE id = ?),
+						credit_reviewed_by = (SELECT credit_reviewed_by FROM transactions WHERE id = ?)
+					WHERE parent_id = ?`,
+				)
+				.bind(edit.refundOfId, id, id, id),
+		);
+	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
 	if (excluded !== current.excluded)

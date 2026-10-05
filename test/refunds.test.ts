@@ -806,6 +806,34 @@ describe("splits unlink their refunds", () => {
 		expect(await spent("2026-08", KIDS)).toBe(before);
 	});
 
+	it("unlinks every split part when a linked refund is marked not linked", async () => {
+		await link(REFUND, PURCHASE);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const beforeKids = await spent("2026-09", KIDS);
+		const beforeGas = await spent("2026-09", GAS);
+		const { res } = await link(REFUND, "");
+		expect(res.status).toBe(200);
+		expect(await refundOf(REFUND)).toBeNull();
+		const parts = await db
+			.prepare(
+				"SELECT refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all();
+		expect(parts.results).toEqual([
+			{ refund_of_id: null, credit_reviewed: 1, credit_reviewed_by: "user" },
+			{ refund_of_id: null, credit_reviewed: 1, credit_reviewed_by: "user" },
+		]);
+		expect(await spent("2026-09", KIDS)).toBe(beforeKids - 1000);
+		expect(await spent("2026-09", GAS)).toBe(beforeGas - 1000);
+	});
+
 	it("splitting a formerly linked refund does not link parts to its split parent", async () => {
 		await link(REFUND, PURCHASE);
 		await link(REFUND, "");
