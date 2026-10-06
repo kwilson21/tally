@@ -64,7 +64,7 @@ function problems(file: string, text: string): string[] {
 		// "rounded" alone must also be a class here, not part of a word like "roundedUp".
 		if (radius && !TOKEN_RADII.has(radius[4] ?? ""))
 			found.push(`${u}: radii are rounded-control, -sheet or -full`);
-		if (/^(drop-|inset-)?shadow(-|$)/.test(u))
+		if (/^(drop-|inset-|text-)?shadow(-|$)/.test(u))
 			found.push(`${u}: no shadows except toasts`);
 	}
 	return found;
@@ -191,9 +191,9 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(
 			problems(
 				"x.tsx",
-				'<p class="bg-white text-stone-700 border-[#ccc] text-[red] bg-[var(--x)] bg-[#ffffff]/30 text-[red]/50 rounded-lg shadow-md drop-shadow-sm hover:rounded-xl">',
+				'<p class="bg-white text-stone-700 border-[#ccc] text-[red] bg-[var(--x)] bg-[#ffffff]/30 text-[red]/50 rounded-lg shadow-md drop-shadow-sm text-shadow-sm hover:rounded-xl">',
 			),
-		).toHaveLength(11);
+		).toHaveLength(12);
 		expect(
 			problems(
 				"x.tsx",
