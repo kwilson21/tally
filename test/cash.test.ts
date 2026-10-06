@@ -520,8 +520,8 @@ describe("cash lifecycle", () => {
 			}),
 		});
 		expect(
-			JSON.parse(reused.res.headers.get("HX-Trigger") ?? "{}").toast.type,
-		).toBe("error");
+			JSON.parse(reused.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("That cash entry is already back.");
 		expect(
 			(
 				await env.DB.prepare("SELECT COUNT(*) n FROM transactions WHERE id=?")
@@ -566,6 +566,9 @@ describe("cash lifecycle", () => {
 			expect(
 				JSON.parse(refused.res.headers.get("HX-Trigger") ?? "{}").toast.type,
 			).toBe("error");
+			expect(
+				JSON.parse(refused.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe("Undo expired. The cash entry stays deleted.");
 			expect(
 				await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
 					.bind(id)

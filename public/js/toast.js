@@ -36,8 +36,14 @@
 	}
 
 	document.body.addEventListener("toast", (event) => {
-		const { message, type = "success", undo } = event.detail ?? {};
+		const {
+			message,
+			type = "success",
+			undo,
+			undoExpiresInMs,
+		} = event.detail ?? {};
 		if (!message) return;
+		if (undo && !(undoExpiresInMs > 0)) return;
 		const toast = document.createElement("div");
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
@@ -73,6 +79,9 @@
 			button.type = "submit";
 			button.className = "min-h-11 px-2 font-medium underline";
 			button.textContent = "Undo";
+			form.addEventListener("submit", () => {
+				button.disabled = true;
+			});
 			form.append(button);
 			toast.append(form);
 		} else {
@@ -80,12 +89,14 @@
 		}
 		document.getElementById("toasts")?.append(toast);
 		if (undo) window.htmx?.process(toast);
-		const undoDuration = getComputedStyle(toast).getPropertyValue(
-			"--duration-undo-toast",
-		);
+		if (undo)
+			toast.setAttribute(
+				"style",
+				`--duration-undo-toast: ${Math.min(10_000, undoExpiresInMs)}ms`,
+			);
 		setTimeout(
 			() => toast.remove(),
-			undo ? Number.parseFloat(undoDuration) * 1000 : DISPLAY_MS,
+			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
 		);
 	});
 

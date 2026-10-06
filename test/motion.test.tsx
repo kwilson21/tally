@@ -723,7 +723,9 @@ describe("the catalog and DESIGN.md", () => {
 		expect(toast).toMatch(/Motion\s+It fades in and rises 8 px in 150 ms/);
 		expect(toast).toContain("DISPLAY_MS");
 		expect(toast).toContain("invisible 150 ms before the script takes it out");
-		expect(toast).toContain("An Undo toast uses its 10-second token");
+		expect(toast).toContain(
+			"An Undo toast uses its remaining server token time",
+		);
 		expect(toast).toContain("Reduced motion shows it at once");
 		// Pages: Layout's specimen.
 		const layout = text(section(html, "layout"));

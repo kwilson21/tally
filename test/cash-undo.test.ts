@@ -38,6 +38,7 @@ function countingDb() {
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
+
 	return { db: db as D1Database, statements: () => statements };
 }
 
@@ -64,6 +65,251 @@ const deleteRequest = async (id: number, db: D1Database) =>
 	);
 
 describe("cash delete undo", () => {
+	it("sends the remaining server deadline computed from the stored hold time", async () => {
+		const id = await cashEntry();
+		const delayedDb = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						const result = await target.batch(statements);
+						const hold = await env.DB.prepare(
+							"SELECT token FROM cash_delete_holds ORDER BY rowid DESC LIMIT 1",
+						).first<{ token: string }>();
+						if (hold)
+							await env.DB.prepare(
+								"UPDATE cash_delete_holds SET created_at=? WHERE token=?",
+							)
+								.bind(Date.now() - 3000, hold.token)
+								.run();
+						return result;
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+		const deleted = await deleteRequest(id, delayedDb);
+		const feedback = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}");
+		expect(feedback.toast.undoExpiresInMs).toBeLessThanOrEqual(7000);
+		expect(feedback.toast.undoExpiresInMs).toBeGreaterThan(6800);
+	});
+
+	it("says the restored entry is already back when its Undo token is reused", async () => {
+		const id = await cashEntry();
+		const deleted = await deleteRequest(id, env.DB);
+		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
+			.undo as string;
+		const body = new URLSearchParams({ token, back: "/transactions" });
+		let response = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body,
+		});
+		response = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body,
+		});
+		const feedback = JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}");
+		expect(feedback.toast.message).toBe("That cash entry is already back.");
+	});
+
+	it("clears undo holds on demo reset and leaves the deleted entry expired", async () => {
+		const id = await cashEntry();
+		const deleted = await deleteRequest(id, env.DB);
+		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
+			.undo as string;
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back: "/transactions" }),
+		});
+		const feedback = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}");
+		expect(feedback.toast.message).toBe(
+			"Undo expired. The cash entry stays deleted.",
+		);
+		expect(
+			await env.DB.prepare("SELECT token FROM cash_delete_holds WHERE token=?")
+				.bind(token)
+				.first(),
+		).toBeNull();
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE id=?",
+				)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(1);
+	});
+
+	it("snapshots parts added immediately before the atomic delete batch", async () => {
+		const id = await cashEntry();
+		const cashAccount = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash'",
+		).first<{ id: number }>();
+		if (!cashAccount) throw new Error("cash account missing");
+		let added = false;
+		const interleavedDb = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						if (!added) {
+							added = true;
+							await env.DB.prepare(
+								"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,updated_by) VALUES (?, '2026-10-06', 100, 'Late split', ?, 'test')",
+							)
+								.bind(cashAccount.id, id)
+								.run();
+						}
+						return target.batch(statements);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+		const token = await holdCashDelete(interleavedDb, id, "Market");
+		if (!token) throw new Error("cash delete token missing");
+
+		await restoreCashDelete(env.DB, token);
+		expect(
+			await env.DB.prepare(
+				"SELECT raw_name FROM transactions WHERE parent_id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ raw_name: "Late split" });
+	});
+
+	it("restores only the first of two individually fitting refunds when their sum exceeds the purchase", async () => {
+		const id = await cashEntry();
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash'",
+		).first<{ id: number }>();
+		const bankAccount = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account || !bankAccount) throw new Error("account seed missing");
+		const purchase = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-01', 1000, 'Purchase', 'test')",
+		)
+			.bind(bankAccount.id)
+			.run();
+		const purchaseId = Number(purchase.meta.last_row_id);
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,updated_by) VALUES (?, '2026-10-01', -500, 'Existing refund', ?, 'test')",
+		)
+			.bind(bankAccount.id, purchaseId)
+			.run();
+		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
+			.bind(id)
+			.run();
+		const parts = await env.DB.batch(
+			["First deleted refund", "Second deleted refund"].map((raw_name) =>
+				env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-02', -400, ?, ?, ?, 'test')",
+				).bind(account.id, raw_name, id, purchaseId),
+			),
+		);
+		const deleted = await deleteRequest(id, env.DB);
+		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
+			.undo as string;
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back: "/transactions" }),
+		});
+		expect(
+			JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe(
+			"Restored Farmers market. Second deleted refund no longer fits and was left off.",
+		);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT id FROM transactions WHERE refund_of_id=? ORDER BY id",
+				)
+					.bind(purchaseId)
+					.all()
+			).results.map((row) => row.id),
+		).toEqual([expect.any(Number), Number(parts[0]?.meta.last_row_id)]);
+	});
+
+	it.each([
+		{ left: 0, amounts: [400, 400], expected: 0 },
+		{ left: 400, amounts: [400], expected: 1 },
+		{ left: 500, amounts: [400, 400], expected: 1 },
+		{ left: 800, amounts: [400, 400], expected: 2 },
+	])(
+		"restores $expected deleted refund links when $left cents remain",
+		async ({ left, amounts, expected }) => {
+			const id = await cashEntry();
+			const account = await env.DB.prepare(
+				"SELECT id FROM accounts WHERE type='cash'",
+			).first<{ id: number }>();
+			const bankAccount = await env.DB.prepare(
+				"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
+			).first<{ id: number }>();
+			if (!account || !bankAccount) throw new Error("account seed missing");
+			const purchase = await env.DB.prepare(
+				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-01', 1000, 'Purchase', 'test')",
+			)
+				.bind(bankAccount.id)
+				.run();
+			const purchaseId = Number(purchase.meta.last_row_id);
+			if (left < 1000)
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,updated_by) VALUES (?, '2026-10-01', ?, 'Existing refund', ?, 'test')",
+				)
+					.bind(bankAccount.id, -(1000 - left), purchaseId)
+					.run();
+			await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
+				.bind(id)
+				.run();
+			await env.DB.batch(
+				amounts.map((amount, index) =>
+					env.DB.prepare(
+						"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-02', ?, ?, ?, ?, 'test')",
+					).bind(
+						account.id,
+						-amount,
+						`Deleted refund ${index + 1}`,
+						id,
+						purchaseId,
+					),
+				),
+			);
+			const token = await holdCashDelete(env.DB, id, "Market");
+			if (!token) throw new Error("cash delete token missing");
+			await restoreCashDelete(env.DB, token);
+			expect(
+				(
+					await env.DB.prepare(
+						"SELECT COUNT(*) AS n FROM transactions WHERE refund_of_id=? AND raw_name LIKE 'Deleted refund %'",
+					)
+						.bind(purchaseId)
+						.first<{ n: number }>()
+				)?.n,
+			).toBe(expected);
+		},
+	);
 	it("restores every transaction and split field exactly as deleted", async () => {
 		const id = await cashEntry();
 		await env.DB.prepare(
@@ -142,8 +388,8 @@ describe("cash delete undo", () => {
 				if (property === "prepare")
 					return (sql: string) =>
 						target.prepare(
-							sql.includes("DELETE FROM cash_delete_holds")
-								? "DELETE FROM missing_cash_delete_holds"
+							sql.includes("UPDATE cash_delete_holds SET restore_marker")
+								? "UPDATE missing_cash_delete_holds SET restore_marker"
 								: sql,
 						);
 				return typeof value === "function" ? value.bind(target) : value;
@@ -157,10 +403,12 @@ describe("cash delete undo", () => {
 				.first(),
 		).toBeNull();
 		expect(
-			await env.DB.prepare("SELECT token FROM cash_delete_holds WHERE token=?")
+			await env.DB.prepare(
+				"SELECT token, restore_marker FROM cash_delete_holds WHERE token=?",
+			)
 				.bind(token)
 				.first(),
-		).toEqual({ token });
+		).toEqual({ token, restore_marker: null });
 	});
 
 	it("restores a token only once when two restores race", async () => {
@@ -181,11 +429,11 @@ describe("cash delete undo", () => {
 		).toEqual({ n: 1 });
 		expect(
 			await env.DB.prepare(
-				"SELECT COUNT(*) AS n FROM cash_delete_holds WHERE token=?",
+				"SELECT COUNT(*) AS n FROM cash_delete_holds WHERE token=? AND restore_marker IS NOT NULL",
 			)
 				.bind(token)
 				.first(),
-		).toEqual({ n: 0 });
+		).toEqual({ n: 1 });
 	});
 
 	it("names an omitted refund link when its purchase row is gone", async () => {
@@ -406,12 +654,14 @@ describe("cash delete undo", () => {
 		const deleted = await deleteRequest(id, counted.db);
 		expect(deleted.status).toBe(200);
 		expect(counted.statements()).toBeLessThanOrEqual(20);
+		expect(counted.statements()).toBe(15);
 
 		const small = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT id,'2026-10-06',100,'Small delete' FROM accounts WHERE type='cash' LIMIT 1",
 		).run();
 		const smallCount = countingDb();
 		await deleteRequest(Number(small.meta.last_row_id), smallCount.db);
+		expect(smallCount.statements()).toBe(15);
 		expect(
 			Math.abs(smallCount.statements() - counted.statements()),
 		).toBeLessThanOrEqual(3);

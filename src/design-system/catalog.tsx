@@ -525,13 +525,13 @@ const TOAST_SPEC: UseSpecText = {
 	affordance:
 		"A small paper pill with a hairline rule and the only lift Tally allows, near the bottom of the screen (above the tab bar on a phone). It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
 	states:
-		"Success: the words. A deleted cash entry adds a 44px Undo button and stays for 10 seconds. Error: the alert icon, then the words. Other messages stay for 4 seconds; several at once stack with a gap.",
+		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds; several at once stack with a gap.",
 	feedback:
 		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, and taps pass through the toast, so a Save under it can be tapped again.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
-		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its 10-second token and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
+		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its remaining server token time (up to 10 seconds) and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
 		"Long words wrap inside the pill. It sits above an open sheet (z-60); Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:

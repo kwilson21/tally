@@ -19,7 +19,7 @@ const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 const COULDNT_LOAD = "Couldn't load. Check your connection and try again.";
 const LONG_NAME = "x".repeat(48);
 
-class FakeNode {
+class FakeNode extends EventTarget {
 	children: FakeNode[] = [];
 	parent: FakeNode | null = null;
 	attrs = new Map<string, string>();
@@ -27,11 +27,14 @@ class FakeNode {
 	method = "";
 	action = "";
 	type = "";
+	disabled = false;
 	name = "";
 	value = "";
 	/** A node's own text. */
 	own = "";
-	constructor(readonly tag: string) {}
+	constructor(readonly tag: string) {
+		super();
+	}
 	/** As in a real page: this node's own text, then its children's, in order. */
 	get textContent(): string {
 		return this.own + this.children.map((child) => child.textContent).join("");
@@ -445,7 +448,11 @@ describe("the toasts the server sends", () => {
 	it("builds the cash-delete Undo form from the toast detail", async () => {
 		const { body, toasts, htmx } = await page();
 		const token = '"><img src=x onerror=alert(1)>';
-		fire(body, "toast", { message: "Deleted Coffee, $5.00.", undo: token });
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: token,
+			undoExpiresInMs: 10000,
+		});
 		const toast = toasts.children[0] as FakeNode;
 		const form = toast.all().find((node) => node.tag === "form");
 		expect(form).toBeDefined();
@@ -465,24 +472,44 @@ describe("the toasts the server sends", () => {
 		expect(button?.className).toContain("min-h-11");
 		// A native submit button is in the tab order unless explicitly removed from it.
 		expect(button?.attrs.get("tabindex")).not.toBe("-1");
+		form?.dispatchEvent(new Event("submit"));
+		expect(button?.disabled).toBe(true);
 		expect(toast.attrs.get("role")).toBe("status");
 		expect(htmx.process).toHaveBeenCalledWith(toast);
 		expect(appStyles).toContain("--duration-undo-toast: 10s");
-		expect(toastSource).toContain('"--duration-undo-toast"');
+		expect(toast.attrs.get("style")).toBe("--duration-undo-toast: 10000ms");
+		expect(toastSource).toContain("undoExpiresInMs");
 		expect(toastSource).not.toContain("undo ? 10_000");
 	});
 
-	it("keeps an Undo toast through 9,999 ms and removes it at 10,000 ms", async () => {
+	it("keeps an Undo toast for the server's remaining 4,000 ms", async () => {
 		const { body, toasts } = await page();
-		fire(body, "toast", { message: "Deleted Coffee, $5.00.", undo: "token" });
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 4000,
+		});
 		const toast = toasts.children[0] as FakeNode;
 		expect(toast.attrs.get("role")).toBe("status");
 		expect(toast.all().some((node) => node.tag === "form")).toBe(true);
-		vi.advanceTimersByTime(9999);
+		vi.advanceTimersByTime(3999);
 		expect(toasts.children).toContain(toast);
 		vi.advanceTimersByTime(1);
 		expect(toasts.children).not.toContain(toast);
 	});
+
+	it.each([0, -1])(
+		"does not show Undo with %i ms remaining",
+		async (undoExpiresInMs) => {
+			const { body, toasts } = await page();
+			fire(body, "toast", {
+				message: "Deleted Coffee, $5.00.",
+				undo: "token",
+				undoExpiresInMs,
+			});
+			expect(toasts.children).toHaveLength(0);
+		},
+	);
 
 	it("does not render an Undo form without undo detail", async () => {
 		const { body, toasts } = await page();

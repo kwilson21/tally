@@ -29,7 +29,11 @@ import {
 	parseCash,
 	saveCash,
 } from "../transactions/cash";
-import { holdCashDelete, restoreCashDelete } from "../transactions/cash-undo";
+import {
+	cashDeleteUndoExpiresInMs,
+	holdCashDelete,
+	restoreCashDelete,
+} from "../transactions/cash-undo";
 import {
 	type Edit,
 	type EditErrors,
@@ -2062,6 +2066,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	}
 	const undoToken = await holdCashDelete(c.env.DB, tx.id, tx.displayName);
 	if (!undoToken) return c.notFound();
+	const undoExpiresInMs = await cashDeleteUndoExpiresInMs(c.env.DB, undoToken);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
@@ -2070,6 +2075,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 				message: `Deleted ${tx.displayName}, ${formatCents(tx.amountCents)}.`,
 				type: "success",
 				undo: undoToken,
+				undoExpiresInMs,
 			},
 			announce: `Deleted ${tx.displayName}.`,
 		}),
@@ -2095,7 +2101,7 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	c.header(
 		"HX-Trigger",
 		JSON.stringify(
-			restored
+			restored && !restored.alreadyRestored
 				? {
 						toast: {
 							message:
@@ -2106,13 +2112,21 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 						},
 						announce: `${restored.name} is back.`,
 					}
-				: {
-						toast: {
-							message: "Undo expired. The cash entry stays deleted.",
-							type: "error",
+				: restored?.alreadyRestored
+					? {
+							toast: {
+								message: "That cash entry is already back.",
+								type: "success",
+							},
+							announce: `${restored.name} is already back.`,
+						}
+					: {
+							toast: {
+								message: "Undo expired. The cash entry stays deleted.",
+								type: "error",
+							},
+							announce: "Undo expired. The cash entry stays deleted.",
 						},
-						announce: "Undo expired. The cash entry stays deleted.",
-					},
 		),
 	);
 	c.header("HX-Push-Url", back);

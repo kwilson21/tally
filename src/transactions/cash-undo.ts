@@ -8,67 +8,70 @@ type Snapshot = {
 	refunds: Row[];
 };
 
-/** Keep the full SQLite rows so undo preserves fields added by future cash-entry edits. */
+const jsonColumn = (column: string) => `json_extract(value, '$."${column}"')`;
+
+/** Save and delete one cash entry from the same D1 snapshot. */
 export async function holdCashDelete(
 	db: D1Database,
 	id: number,
 	displayName: string,
 ) {
-	const transaction = await db
-		.prepare("SELECT * FROM transactions WHERE id=?")
-		.bind(id)
-		.first<Row>();
-	if (!transaction) return null;
-	const [parts, payments, refunds] = await Promise.all([
-		db
-			.prepare("SELECT * FROM transactions WHERE parent_id=? ORDER BY id")
-			.bind(id)
-			.all<Row>(),
-		db
-			.prepare(
-				"SELECT bp.*, b.name AS bill_name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY bp.id",
-			)
-			.bind(id, id)
-			.all<Row & { bill_name: string }>(),
-		db
-			.prepare(
-				"SELECT * FROM transactions WHERE refund_of_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY id",
-			)
-			.bind(id, id)
-			.all<Row>(),
+	const columns = async (table: string) =>
+		(
+			await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
+		).results.map(({ name }) => name);
+	const [transactionColumns, paymentColumns] = await Promise.all([
+		columns("transactions"),
+		columns("bill_payments"),
 	]);
+	const jsonObject = (names: string[], alias = "") =>
+		`json_object(${names.map((name) => `'${name}', ${alias}${name}`).join(",")})`;
+	const paymentJson = `json_object(${[
+		...paymentColumns.map((name) => `'${name}', bp.${name}`),
+		"'bill_name', b.name",
+	].join(",")})`;
+	const arrayOf = (query: string) =>
+		`COALESCE((SELECT json_group_array(json(row)) FROM (${query})), '[]')`;
 	const token = crypto.randomUUID();
-	await db.batch([
+	const result = await db.batch([
 		db
-			.prepare("INSERT INTO cash_delete_holds VALUES(?, ?, ?, ?, ?, ?, ?)")
-			.bind(
-				token,
-				Date.now(),
-				displayName,
-				JSON.stringify(transaction),
-				JSON.stringify(parts.results),
-				JSON.stringify(payments.results),
-				JSON.stringify(refunds.results),
-			),
+			.prepare(`INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows)
+				SELECT ?, ?, ?, ${jsonObject(transactionColumns)},
+				${arrayOf(`SELECT ${jsonObject(transactionColumns)} AS row FROM transactions WHERE parent_id=? ORDER BY id`)},
+				${arrayOf(`SELECT ${paymentJson} AS row FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY bp.id`)},
+				${arrayOf(`SELECT ${jsonObject(transactionColumns)} AS row FROM transactions WHERE refund_of_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY id`)}
+				FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')`)
+			.bind(token, Date.now(), displayName, id, id, id, id, id, id),
 		db
 			.prepare(
 				"DELETE FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
 			)
 			.bind(id),
 	]);
-	return token;
+	return result[0]?.meta.changes === 1 ? token : null;
 }
 
-const jsonColumn = (column: string) => `json_extract(value, '$."${column}"')`;
+/** The server clock determines how long the client may keep the Undo action visible. */
+export async function cashDeleteUndoExpiresInMs(db: D1Database, token: string) {
+	const hold = await db
+		.prepare(
+			"SELECT created_at FROM cash_delete_holds WHERE token=? AND restore_marker IS NULL",
+		)
+		.bind(token)
+		.first<{ created_at: number }>();
+	return hold
+		? Math.min(10_000, Math.max(0, hold.created_at + 10_000 - Date.now()))
+		: 0;
+}
 
 /** Restores once, only while the token is younger than ten seconds. */
 export async function restoreCashDelete(db: D1Database, token: string) {
 	const hold = await db
-		.prepare(
-			"SELECT * FROM cash_delete_holds WHERE token=? AND created_at>? AND created_at<=?",
-		)
-		.bind(token, Date.now() - 10_000, Date.now())
+		.prepare("SELECT * FROM cash_delete_holds WHERE token=?")
+		.bind(token)
 		.first<{
+			created_at: number;
+			restore_marker: string | null;
 			transaction_row: string;
 			display_name: string;
 			split_rows: string;
@@ -76,6 +79,10 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			refund_rows: string;
 		}>();
 	if (!hold) return null;
+	if (hold.restore_marker !== null)
+		return { alreadyRestored: true as const, name: hold.display_name };
+	const now = Date.now();
+	if (hold.created_at <= now - 10_000 || hold.created_at > now) return null;
 	const snapshot: Snapshot = {
 		transaction: JSON.parse(hold.transaction_row),
 		parts: JSON.parse(hold.split_rows),
@@ -88,44 +95,34 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		row_id: number;
 		partner_id: number;
 		name: string;
+		move_cents: number;
 		only_if_unlinked: boolean;
 	}[] = [];
-	if (transaction.refund_of_id !== null)
-		links.push({
-			row_id: Number(transaction.id),
-			partner_id: Number(transaction.refund_of_id),
-			name: String(transaction.raw_name),
-			only_if_unlinked: false,
-		});
-	for (const row of snapshot.parts)
-		if (row.refund_of_id !== null)
-			links.push({
-				row_id: Number(row.id),
-				partner_id: Number(row.refund_of_id),
-				name: String(row.raw_name),
-				only_if_unlinked: false,
-			});
-	for (const row of snapshot.refunds)
+	const addLink = (row: Row, onlyIfUnlinked = false) => {
+		if (row.refund_of_id === null) return;
 		links.push({
 			row_id: Number(row.id),
 			partner_id: Number(row.refund_of_id),
 			name: String(row.merchant_name ?? row.raw_name),
-			only_if_unlinked: true,
+			move_cents: row.is_split === 1 ? 0 : Math.abs(Number(row.amount_cents)),
+			only_if_unlinked: onlyIfUnlinked,
 		});
-	const lostLinks: string[] = [];
+	};
+	addLink(transaction);
+	for (const row of snapshot.parts) addLink(row);
+	for (const row of snapshot.refunds) addLink(row, true);
+	const marker = crypto.randomUUID();
 	try {
 		const paymentCheck = await db
 			.prepare(
 				`SELECT json_extract(value, '$.bill_name') AS name FROM json_each(?)
-			 WHERE json_extract(value, '$.status') = 'linked' AND (
-			 EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
-			 OR EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=json_extract(value, '$.transaction_id') AND status='linked'))`,
+				 WHERE json_extract(value, '$.status') = 'linked' AND (
+				 EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
+				 OR EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=json_extract(value, '$.transaction_id') AND status='linked'))`,
 			)
 			.bind(JSON.stringify(snapshot.payments))
 			.all<{ name: string }>();
-		lostLinks.push(
-			...paymentCheck.results.map(({ name }) => `${name} payment`),
-		);
+		const lostLinks = paymentCheck.results.map(({ name }) => `${name} payment`);
 		const insertTransaction = `INSERT INTO transactions (${columns.join(",")}) SELECT ${columns.map((column) => (column === "refund_of_id" ? "NULL" : jsonColumn(column))).join(",")} FROM json_each(?) WHERE json_extract(value, '$.id') = ?`;
 		const insertParts = `INSERT INTO transactions (${columns.join(",")}) SELECT ${columns
 			.map((column) =>
@@ -133,106 +130,88 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			)
 			.join(
 				",",
-			)} FROM json_each(?) WHERE EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=?)`;
-		const targets = [transaction, ...snapshot.parts].map((row) => ({
-			id: row.id,
-			amount_cents: row.amount_cents,
-		}));
-		const projectedLinks = links.map((link) => {
-			const row = [transaction, ...snapshot.parts, ...snapshot.refunds].find(
-				(candidate) => candidate.id === link.row_id,
-			);
-			return {
-				...link,
-				move_cents:
-					row?.is_split === 1 ? 0 : Math.abs(Number(row?.amount_cents ?? 0)),
-			};
-		});
-		const linkCheck = await db
-			.prepare(
-				`WITH links AS (SELECT value FROM json_each(?)), targets AS (SELECT value FROM json_each(?))
-				 SELECT json_extract(links.value, '$.row_id') AS row_id,
-				 json_extract(links.value, '$.partner_id') AS partner_id,
-				 json_extract(links.value, '$.name') AS name,
-				 EXISTS (SELECT 1 FROM transactions partner WHERE partner.id=json_extract(links.value, '$.partner_id'))
-				 OR EXISTS (SELECT 1 FROM targets WHERE json_extract(value, '$.id')=json_extract(links.value, '$.partner_id')) AS partner_exists,
-				 COALESCE((SELECT amount_cents FROM transactions WHERE id=json_extract(links.value, '$.partner_id')),
-				 (SELECT json_extract(value, '$.amount_cents') FROM targets WHERE json_extract(value, '$.id')=json_extract(links.value, '$.partner_id'))) AS purchase_cents,
-				 COALESCE((SELECT SUM(ABS(linked.amount_cents)) FROM transactions linked
-					WHERE linked.refund_of_id=json_extract(links.value, '$.partner_id') AND linked.is_split=0
-					AND linked.amount_cents<0 AND linked.flag_income=0 AND linked.id!=json_extract(links.value, '$.row_id')), 0) AS refunded_cents,
-				 json_extract(links.value, '$.move_cents') AS move_cents,
-				 json_extract(links.value, '$.only_if_unlinked') AS only_if_unlinked,
-				 (SELECT refund_of_id IS NULL FROM transactions WHERE id=json_extract(links.value, '$.row_id')) AS unlinked
-				 FROM links`,
-			)
-			.bind(JSON.stringify(projectedLinks), JSON.stringify(targets))
-			.all<{
-				row_id: number;
-				partner_id: number;
-				name: string;
-				partner_exists: number;
-				purchase_cents: number | null;
-				refunded_cents: number;
-				move_cents: number;
-				only_if_unlinked: number;
-				unlinked: number | null;
-			}>();
-		const fitLinks = linkCheck.results.filter(
-			(link) =>
-				link.partner_exists &&
-				(link.only_if_unlinked === 0 || link.unlinked === 1) &&
-				link.move_cents <=
-					Math.max(0, (link.purchase_cents ?? 0) - link.refunded_cents),
-		);
-		const found = new Set(
-			fitLinks.map((link) => `${link.row_id}:${link.partner_id}`),
-		);
-		for (const link of links)
-			if (!found.has(`${link.row_id}:${link.partner_id}`))
-				lostLinks.push(link.name);
+			)} FROM json_each(?) WHERE EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`;
 		const paymentColumns = Object.keys(snapshot.payments[0] ?? {}).filter(
 			(key) => key !== "bill_name",
 		);
+		const targets = [transaction, ...snapshot.parts];
 		const writes = [
+			db
+				.prepare(
+					"UPDATE cash_delete_holds SET restore_marker=? WHERE token=? AND restore_marker IS NULL AND created_at>? AND created_at<=?",
+				)
+				.bind(marker, token, now - 10_000, now),
 			db
 				.prepare(
 					insertTransaction.replace(
 						"WHERE json_extract(value, '$.id') = ?",
-						"WHERE json_extract(value, '$.id') = ? AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=?)",
+						"WHERE json_extract(value, '$.id') = ? AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)",
 					),
 				)
-				.bind(JSON.stringify([transaction]), transaction.id, token),
-			db.prepare(insertParts).bind(JSON.stringify(snapshot.parts), token),
+				.bind(JSON.stringify([transaction]), transaction.id, token, marker),
+			db
+				.prepare(insertParts)
+				.bind(JSON.stringify(snapshot.parts), token, marker),
 		];
 		if (snapshot.payments.length > 0)
 			writes.push(
 				db
 					.prepare(
 						`INSERT INTO bill_payments (${paymentColumns.join(",")})
-					 SELECT ${paymentColumns.map(jsonColumn).join(",")}
-					 FROM json_each(?) WHERE (json_extract(value, '$.status') != 'linked' OR (
-					 NOT EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
-					 AND NOT EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=json_extract(value, '$.transaction_id') AND status='linked')))
-					 AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=?)`,
+						 SELECT ${paymentColumns.map(jsonColumn).join(",")}
+						 FROM json_each(?) WHERE (json_extract(value, '$.status') != 'linked' OR (
+						 NOT EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
+						 AND NOT EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=json_extract(value, '$.transaction_id') AND status='linked')))
+						 AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`,
 					)
-					.bind(JSON.stringify(snapshot.payments), token),
+					.bind(JSON.stringify(snapshot.payments), token, marker),
 			);
 		writes.push(
 			db
-				.prepare(
-					`UPDATE transactions SET refund_of_id=json_extract(value, '$.partner_id') FROM json_each(?)
-					 WHERE transactions.id=json_extract(value, '$.row_id')
-					 AND (json_extract(value, '$.only_if_unlinked') = 0 OR transactions.refund_of_id IS NULL)
-					 AND ${refundFitsSql("transactions.id", "json_extract(value, '$.partner_id')")}
-					 AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=?)`,
-				)
-				.bind(JSON.stringify(links), token),
-			db.prepare("DELETE FROM cash_delete_holds WHERE token=?").bind(token),
+				.prepare(`WITH links AS (SELECT value FROM json_each(?)), targets AS (SELECT value FROM json_each(?)),
+					candidate AS (SELECT json_extract(links.value, '$.row_id') AS row_id,
+						json_extract(links.value, '$.partner_id') AS partner_id,
+						json_extract(links.value, '$.move_cents') AS move_cents,
+						json_extract(links.value, '$.only_if_unlinked') AS only_if_unlinked,
+						EXISTS (SELECT 1 FROM transactions p WHERE p.id=json_extract(links.value, '$.partner_id'))
+							OR EXISTS (SELECT 1 FROM targets WHERE json_extract(value, '$.id')=json_extract(links.value, '$.partner_id')) AS partner_exists,
+						COALESCE((SELECT amount_cents FROM transactions WHERE id=json_extract(links.value, '$.partner_id')),
+							(SELECT json_extract(value, '$.amount_cents') FROM targets WHERE json_extract(value, '$.id')=json_extract(links.value, '$.partner_id'))) AS purchase_cents,
+						COALESCE((SELECT SUM(ABS(r.amount_cents)) FROM transactions r WHERE r.refund_of_id=json_extract(links.value, '$.partner_id')
+							AND r.is_split=0 AND r.amount_cents<0 AND r.flag_income=0 AND r.id!=json_extract(links.value, '$.row_id')), 0) AS refunded_cents,
+						(SELECT refund_of_id IS NULL FROM transactions WHERE id=json_extract(links.value, '$.row_id')) AS unlinked
+						FROM links), eligible AS (SELECT * FROM candidate WHERE partner_exists
+						AND (only_if_unlinked=0 OR unlinked=1)), ordered AS (SELECT *,
+						SUM(move_cents) OVER (PARTITION BY partner_id ORDER BY row_id ROWS UNBOUNDED PRECEDING) AS running_cents
+						FROM eligible)
+					UPDATE transactions SET refund_of_id=ordered.partner_id FROM ordered
+					WHERE transactions.id=ordered.row_id AND ordered.running_cents<=MAX(0, ordered.purchase_cents-ordered.refunded_cents)
+					AND ${refundFitsSql("transactions.id", "ordered.partner_id")}
+					AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`)
+				.bind(JSON.stringify(links), JSON.stringify(targets), token, marker),
 		);
 		const results = await db.batch(writes);
-		if (results.at(-1)?.meta.changes !== 1) return null;
-		return { name: hold.display_name, lostLinks };
+		if (results[0]?.meta.changes !== 1) return null;
+		const restoredLinks = new Set(
+			(
+				await db
+					.prepare(
+						"SELECT id, refund_of_id FROM transactions WHERE id IN (SELECT CAST(json_extract(value, '$.row_id') AS INTEGER) FROM json_each(?))",
+					)
+					.bind(JSON.stringify(links))
+					.all<{ id: number; refund_of_id: number | null }>()
+			).results
+				.filter((row) => row.refund_of_id !== null)
+				.map((row) => `${row.id}:${row.refund_of_id}`),
+		);
+		for (const link of links)
+			if (!restoredLinks.has(`${link.row_id}:${link.partner_id}`))
+				lostLinks.push(link.name);
+		return {
+			name: hold.display_name,
+			lostLinks,
+			alreadyRestored: false as const,
+		};
 	} catch {
 		return null;
 	}

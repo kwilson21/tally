@@ -1122,7 +1122,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 					.bind(n, Date.now())
 					.run();
 			await env.DB.prepare(
-				"INSERT INTO cash_delete_holds VALUES (?, ?, ?, ?, ?, ?, ?)",
+				"INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			)
 				.bind("new", Date.now(), "new", "{}", "[]", "[]", "[]")
 				.run();
