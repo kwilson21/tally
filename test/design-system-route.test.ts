@@ -648,6 +648,15 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toMatch(/data-ds-toast="error"/);
 	});
 
+	it("shows the Transactions heading wrapping beside Select and the long name in the Toast specimen", async () => {
+		const { html } = await get("/design-system");
+		expect(design).toMatch(
+			/\| Page title \/ month \|[^\n]*Transactions page heading can wrap beside Select\./,
+		);
+		const toast = html.split('id="toast"')[1]?.split("</section>")[0] ?? "";
+		expect(toast).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV");
+	});
+
 	it("shows a disconnected bank, and DESIGN.md's BankGroup row mentions it", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain("A disconnected bank, its history kept");
