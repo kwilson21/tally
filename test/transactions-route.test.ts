@@ -252,6 +252,9 @@ describe("GET /transactions", () => {
 		expect(html).toMatch(
 			/<div class="flex items-center justify-between gap-3 lg:max-w-3xl"><h1 id="transactions-title"/,
 		);
+		const title =
+			html.match(/<h1[^>]*id="transactions-title"[^>]*>/)?.[0] ?? "";
+		expect(title).toMatch(/class="[^"]*\bmin-w-0\b[^"]*\bwrap-anywhere\b/);
 		const select = html.match(/<a[^>]*id="select-toggle"[^>]*>/)?.[0] ?? "";
 		// -mr-2 cancels the text button's 8px inset; px-2 and min-h-11 stay, so the target is still 44px.
 		expect(select).toMatch(/class="[^"]*\bmin-h-11\b[^"]*\bpx-2\b[^"]*-mr-2/);

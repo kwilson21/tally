@@ -16,6 +16,7 @@ it("only maps the trusted feedback confirmation and clears it", () => {
 
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 const COULDNT_LOAD = "Couldn't load. Check your connection and try again.";
+const LONG_NAME = "x".repeat(48);
 
 class FakeNode {
 	children: FakeNode[] = [];
@@ -93,6 +94,18 @@ const status = (code: number, method = "POST") => ({
 const dropped = (method = "POST") => ({
 	ctx: { request: { method } },
 	error: new TypeError("Failed to fetch"),
+});
+
+describe("cash entry confirmations", () => {
+	it("wraps an unbroken merchant name inside the toast", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", { message: `Added ${LONG_NAME}` });
+		const toast = toasts.children[0] as FakeNode;
+		expect(toast.words()).toBe(`Added ${LONG_NAME}`);
+		expect(toast.className).toMatch(/\bmin-w-0\b/);
+		expect(toast.className).toMatch(/\bmax-w-full\b/);
+		expect(toast.className).toMatch(/\bwrap-anywhere\b/);
+	});
 });
 
 beforeEach(() => {
