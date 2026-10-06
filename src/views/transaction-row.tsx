@@ -1,9 +1,10 @@
+import { JEV_THRESHOLD } from "../ai/categorize";
 import { shortDay } from "../dates";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
-import { MaybeCategory } from "./maybe-category";
+import { MaybeCategory, MaybeIncome } from "./maybe-category";
 import { BankMark, GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
 
 type Caption = {
@@ -17,6 +18,13 @@ export function rowCaption(row: ListRow): Caption {
 	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
 	if (row.excluded && !row.paysBill)
 		return { kind: "excluded", caption: "Excluded", tag: false };
+	if (
+		row.amountCents < 0 &&
+		!row.income &&
+		row.incomeConfidence != null &&
+		row.incomeConfidence < JEV_THRESHOLD
+	)
+		return { kind: "needs", caption: "Maybe income", tag: true };
 	if (
 		!row.followsPurchase &&
 		!row.creditReviewed &&
@@ -188,7 +196,12 @@ export function TransactionRow({
 								Pending{(caption || countsIn) && " ·"}
 							</span>
 						)}
-						{maybeCategory ? (
+						{row.incomeConfidence != null &&
+						row.incomeConfidence < JEV_THRESHOLD &&
+						row.amountCents < 0 &&
+						!row.income ? (
+							<MaybeIncome />
+						) : maybeCategory ? (
 							<MaybeCategory
 								name={maybeCategory.name}
 								kind={maybeCategory.kind}

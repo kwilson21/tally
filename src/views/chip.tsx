@@ -6,6 +6,7 @@ type Props = {
 	name: string;
 	value: string;
 	checked?: boolean;
+	dashed?: boolean;
 	/** On one radio of a group, makes choosing one of them required. */
 	required?: boolean;
 	/** The id of a hint that explains this choice (aria-describedby). */
@@ -24,13 +25,16 @@ export function Chip({
 	name,
 	value,
 	checked,
+	dashed = false,
 	describedBy,
 	icon,
 	children,
 	...inputAttrs
 }: Props) {
 	return (
-		<label class="group inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-rule px-4 text-base text-ink has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 has-[:checked]:border-ink has-[:checked]:bg-band has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
+		<label
+			class={`group inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border ${dashed ? "border-dashed border-ink" : "border-rule"} px-4 text-base text-ink has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 has-[:checked]:border-ink has-[:checked]:bg-band has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent`}
+		>
 			<input
 				type={type}
 				name={name}

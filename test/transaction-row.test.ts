@@ -40,6 +40,22 @@ describe("rowCaption", () => {
 		expect(html).toContain("Review credit");
 		expect(html).not.toContain("Needs category");
 	});
+
+	it("shows a low confidence income guess instead of Review credit", async () => {
+		const row = {
+			...base,
+			amountCents: -2500,
+			creditReviewed: false,
+			incomeConfidence: 0.71,
+		};
+		expect(rowCaption(row)).toMatchObject({
+			caption: "Maybe income",
+			tag: true,
+		});
+		const html = await TransactionRow({ row }).toString();
+		expect(html).toContain("Maybe income");
+		expect(html).not.toContain("Review credit");
+	});
 	const kids = {
 		categoryId: 4,
 		categoryName: "Kids",

@@ -50,6 +50,95 @@ describe("row links", () => {
 });
 
 describe("GET /transactions/:id", () => {
+	it("shows a below-threshold paycheck guess in the list and edit panel, held out of spending", async () => {
+		const id = Number(
+			(
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,credit_reviewed) VALUES (1,'2026-09-14',-71000,'PAYROLL CREDIT',0) RETURNING id",
+				).first<{ id: number }>()
+			)?.id,
+		);
+		await categorizePending({ DB: env.DB, JEV_API_KEY: "jev" }, async () =>
+			Response.json({
+				answers: {
+					category: {
+						type: "choice",
+						choice: "None of these fit",
+						confidence: 0.5,
+					},
+					transfer: { type: "noul", noul: 0.1 },
+					reimbursement: { type: "noul", noul: 0.1 },
+					income: { type: "noul", noul: 0.71 },
+				},
+			}),
+		);
+		const saved = await env.DB.prepare(
+			"SELECT flag_income, income_confidence, credit_reviewed FROM transactions WHERE id=?",
+		)
+			.bind(id)
+			.first();
+		expect(saved).toEqual({
+			flag_income: 0,
+			income_confidence: 0.71,
+			credit_reviewed: 0,
+		});
+		const { html: list } = await get(
+			"/transactions?show=all&month=all&q=PAYROLL",
+		);
+		const row = list.slice(list.indexOf(`data-transaction="${id}"`));
+		expect(row.slice(0, row.indexOf("</li>"))).toContain("Maybe income");
+		expect(row.slice(0, row.indexOf("</li>"))).not.toContain("Review credit");
+		const { html: spending } = await get(
+			"/transactions?show=spending&month=all&q=PAYROLL",
+		);
+		expect(spending).not.toContain(`data-transaction="${id}"`);
+		const { html: panel } = await get(`/transactions/${id}`);
+		const sheet = panel.slice(panel.indexOf('role="dialog"'));
+		expect(sheet).toContain("Count as income");
+		expect(sheet).toContain("border-dashed");
+		expect(sheet).toContain("Tally&#39;s guess · 71% sure");
+		expect(sheet).toContain('aria-label="Why? income"');
+	});
+
+	it("hides an income guess when Spot paychecks is off", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('ai_income', 'off') ON CONFLICT(key) DO UPDATE SET value = 'off'",
+		).run();
+		const id = Number(
+			(
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,credit_reviewed) VALUES (1,'2026-09-14',-95000,'OFF PAYCHECK',0) RETURNING id",
+				).first<{ id: number }>()
+			)?.id,
+		);
+		await categorizePending({ DB: env.DB, JEV_API_KEY: "jev" }, async () =>
+			Response.json({
+				answers: {
+					category: {
+						type: "choice",
+						choice: "None of these fit",
+						confidence: 0.5,
+					},
+					transfer: { type: "noul", noul: 0.1 },
+					reimbursement: { type: "noul", noul: 0.1 },
+					income: { type: "noul", noul: 0.95 },
+				},
+			}),
+		);
+		const saved = await env.DB.prepare(
+			"SELECT flag_income, income_confidence FROM transactions WHERE id=?",
+		)
+			.bind(id)
+			.first();
+		expect(saved).toEqual({ flag_income: 0, income_confidence: null });
+		const { html: list } = await get(
+			"/transactions?show=all&month=all&q=OFF%20PAYCHECK",
+		);
+		expect(list).not.toContain("Maybe income");
+		const { html: panel } = await get(`/transactions/${id}`);
+		expect(panel).not.toContain("Tally&#39;s guess · 95% sure");
+	});
+
 	it("shows a below-threshold Jev pick as the first suggested chip after the real save path", async () => {
 		const id = Number(
 			(

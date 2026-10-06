@@ -22,6 +22,7 @@ describe("decide", () => {
 			suggestedCategoryId: 2,
 			confidence: 0.93,
 			noneFit: false,
+			flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -38,6 +39,7 @@ describe("decide", () => {
 			suggestedCategoryId: 1,
 			confidence: 0.62,
 			noneFit: false,
+			flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -55,6 +57,7 @@ describe("decide", () => {
 			suggestedCategoryId: null,
 			confidence: 0.97,
 			noneFit: true,
+			flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -96,6 +99,7 @@ describe("decide", () => {
 				suggestedCategoryId: null,
 				confidence: 0.97,
 				noneFit: false,
+				flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 				flags: { transfer: false, reimbursement: false, income: false },
 			});
 		});

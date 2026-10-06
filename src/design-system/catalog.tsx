@@ -45,7 +45,11 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
-import { MaybeCategory, SuggestedCategoryChip } from "../views/maybe-category";
+import {
+	MaybeCategory,
+	MaybeIncome,
+	SuggestedCategoryChip,
+} from "../views/maybe-category";
 import { MoneyInput } from "../views/money-input";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
@@ -750,14 +754,21 @@ function Rows() {
 		<Group id="rows" title="Rows">
 			<Specimen
 				id="maybe-category"
-				title="MaybeCategory and SuggestedCategoryChip"
+				title="MaybeCategory, MaybeIncome and SuggestedCategoryChip"
 				tier="visual"
-				components={["MaybeCategory", "SuggestedCategoryChip"]}
-				sentence="The dashed Maybe row and first Suggested category chip carry Tally's guess where people already choose a category."
+				components={[
+					"MaybeCategory",
+					"MaybeIncome",
+					"SuggestedCategoryChip",
+					"Chip",
+					"WhyLink",
+				]}
+				sentence="The row uses dashed Maybe tags; the edit panel keeps its income guess dashed beside its confidence and Why?, like the suggested category chip."
 			>
 				<div class="flex flex-wrap gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
 					<MaybeCategory name="Pet Care" kind="new" />
+					<MaybeIncome />
 					<SuggestedCategoryChip
 						name="Eating Out"
 						value="2"
@@ -770,6 +781,13 @@ function Rows() {
 						sure={72}
 						transactionId={2}
 					/>
+					<div class="flex flex-col items-start gap-1">
+						<Chip type="checkbox" name="income" value="1" dashed>
+							Count as income
+						</Chip>
+						<p class="text-sm text-muted">Tally's guess · 71% sure</p>
+						<WhyLink section="categorization" topic="income" />
+					</div>
 				</div>
 			</Specimen>
 			<Specimen

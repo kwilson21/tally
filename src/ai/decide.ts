@@ -20,6 +20,8 @@ export type Decision = {
 	suggestedCategoryId: number | null;
 	/** Always stored, so a transaction Jev was unsure about isn't asked again (decision 27). */
 	confidence: number;
+	/** Jev's raw yes-probabilities for flags, retained for below-threshold suggestions. */
+	flagConfidence?: Record<Flag, number>;
 	flags: Record<Flag, boolean>;
 };
 
@@ -45,6 +47,7 @@ export function decide(
 		categoryId: match && confident ? match.id : null,
 		suggestedCategoryId: match ? match.id : null,
 		confidence: answer.category.confidence,
+		flagConfidence: answer.flags,
 		flags: {
 			transfer: categoriesOn && answer.flags.transfer >= threshold,
 			reimbursement: categoriesOn && answer.flags.reimbursement >= threshold,

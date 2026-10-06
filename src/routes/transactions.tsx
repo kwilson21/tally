@@ -71,6 +71,7 @@ import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
+import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
 export const transactions = new Hono<App>();
@@ -1330,10 +1331,25 @@ function EditSheet({
 							name="income"
 							value="1"
 							checked={values.income}
+							dashed={
+								tx.incomeConfidence != null &&
+								tx.incomeConfidence < JEV_THRESHOLD &&
+								!tx.income
+							}
 						>
 							Count as income
 						</Chip>
 					</div>
+					{tx.incomeConfidence != null &&
+						tx.incomeConfidence < JEV_THRESHOLD &&
+						!tx.income && (
+							<div class="flex flex-col items-start">
+								<p class="text-sm text-muted">
+									Tally's guess · {Math.round(tx.incomeConfidence * 100)}% sure
+								</p>
+								<WhyLink section="categorization" topic="income" />
+							</div>
+						)}
 				</div>
 				{tx.amountCents < 0 && (
 					<div class="flex flex-col gap-2 border-t border-rule pt-3">

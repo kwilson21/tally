@@ -438,7 +438,7 @@ describe("GET /design-system in the demo", () => {
 			specimens(html).find((t) => t.includes('id="maybe-category"')) ?? "";
 		expect(tag).toContain('data-ds-tier="visual"');
 		expect(tag).toContain(
-			'data-ds-components="MaybeCategory SuggestedCategoryChip"',
+			'data-ds-components="MaybeCategory MaybeIncome SuggestedCategoryChip Chip WhyLink"',
 		);
 		expect(html).toContain("Maybe new: Pet Care");
 		expect(html).toContain("Tally&#39;s guess");

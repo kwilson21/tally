@@ -18,6 +18,16 @@ export function MaybeCategory({
 	);
 }
 
+/** A below-threshold paycheck answer uses the same dashed row tag as other Maybe suggestions. */
+export function MaybeIncome() {
+	return (
+		<span class="inline-flex min-h-11 items-center gap-1 truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
+			<Icon name="circle-dashed" class="size-4" />
+			Maybe income
+		</span>
+	);
+}
+
 /** P32 A: first option in the category field, explicitly marked as a suggestion. */
 export function SuggestedCategoryChip({
 	name,
