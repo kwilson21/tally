@@ -205,6 +205,30 @@ describe("ExclusionsDiagram", () => {
 });
 
 describe("CategoriesDiagram", () => {
+	it("places the income note below the final step when the month has income", async () => {
+		const html = await render(
+			CategoriesDiagram({
+				user: 1,
+				merchantRule: 2,
+				bill: 3,
+				jev: 4,
+				waiting: 5,
+				income: 6,
+				threshold: "80%",
+			}),
+		);
+		const lastStep = [
+			...html.matchAll(/<rect[^>]*y="([\d.]+)"[^>]*height="([\d.]+)"[^>]*>/g),
+		].at(-1);
+		const note = html.match(/<text[^>]*y="([\d.]+)"[^>]*>\+ 6 income/);
+		const viewBoxHeight = Number(html.match(/viewBox="0 0 \d+ (\d+)"/)?.[1]);
+		expect(lastStep).toBeDefined();
+		expect(note).toBeDefined();
+		const bottom = Number(lastStep?.[1]) + Number(lastStep?.[2]);
+		expect(Number(note?.[1])).toBeGreaterThan(bottom);
+		expect(viewBoxHeight).toBeGreaterThan(Number(note?.[1]));
+	});
+
 	it("shows the five steps in order, with how many each handled", async () => {
 		const html = await render(
 			CategoriesDiagram({

@@ -36,7 +36,7 @@ describe("migration 0026: bill categories", () => {
 		).toEqual([]);
 	});
 
-	it("backfills linked uncategorized payments only, preserving Jev and user choices and ignoring unlinked rows", async () => {
+	it("backfills linked uncategorized and Jev payments, preserving other choices and links without a bill category", async () => {
 		const backfill = migration.match(
 			/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
 		)?.[0];
@@ -54,7 +54,7 @@ describe("migration 0026: bill categories", () => {
 			env.DB.prepare("DROP TRIGGER bill_payment_category"),
 			env.DB.prepare("DROP TRIGGER bill_payment_category_on_repoint"),
 			env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9920,'Backfill test',1000,10,'monthly',5,'BACKFILL TEST')",
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9920,'Backfill test',1000,10,'monthly',5,'BACKFILL TEST'),(9921,'No category test',1000,10,'monthly',NULL,'NO CATEGORY TEST')",
 			),
 			env.DB.prepare(
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9920,id,'2026-09-10',1000,'BACKFILL TEST',NULL,NULL FROM accounts LIMIT 1",
@@ -66,10 +66,16 @@ describe("migration 0026: bill categories", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9922,id,'2026-09-10',1000,'USER TEST',4,'user' FROM accounts LIMIT 1",
 			),
 			env.DB.prepare(
-				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9923,id,'2026-09-10',1000,'UNLINKED TEST' FROM accounts LIMIT 1",
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9923,id,'2026-09-10',1000,'MERCHANT RULE TEST',4,'merchant_rule' FROM accounts LIMIT 1",
 			),
 			env.DB.prepare(
-				"INSERT INTO bill_payments(id,bill_id,period,transaction_id,matched_by,status) VALUES(9920,9920,'2026-09',9920,'user','linked'),(9921,9920,'2026-10',9921,'user','linked'),(9922,9920,'2026-11',9922,'user','linked'),(9923,9920,'2026-12',9923,'user','dismissed')",
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9924,id,'2026-09-10',1000,'UNLINKED TEST' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9925,id,'2026-09-10',1000,'JEV NO BILL CATEGORY TEST',3,'jev' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(id,bill_id,period,transaction_id,matched_by,status) VALUES(9920,9920,'2026-09',9920,'user','linked'),(9921,9920,'2026-10',9921,'user','linked'),(9922,9920,'2026-11',9922,'user','linked'),(9923,9920,'2026-12',9923,'user','linked'),(9924,9920,'2027-01',9924,'user','dismissed'),(9925,9921,'2026-09',9925,'user','linked')",
 			),
 		]);
 		try {
@@ -77,24 +83,26 @@ describe("migration 0026: bill categories", () => {
 			expect(
 				(
 					await env.DB.prepare(
-						"SELECT id,category_id AS categoryId,category_source AS categorySource FROM transactions WHERE id BETWEEN 9920 AND 9923 ORDER BY id",
+						"SELECT id,category_id AS categoryId,category_source AS categorySource FROM transactions WHERE id BETWEEN 9920 AND 9925 ORDER BY id",
 					).all()
 				).results,
 			).toEqual([
 				{ id: 9920, categoryId: 5, categorySource: "bill" },
-				{ id: 9921, categoryId: 3, categorySource: "jev" },
+				{ id: 9921, categoryId: 5, categorySource: "bill" },
 				{ id: 9922, categoryId: 4, categorySource: "user" },
-				{ id: 9923, categoryId: null, categorySource: null },
+				{ id: 9923, categoryId: 4, categorySource: "merchant_rule" },
+				{ id: 9924, categoryId: null, categorySource: null },
+				{ id: 9925, categoryId: 3, categorySource: "jev" },
 			]);
 		} finally {
 			await env.DB.batch([
 				env.DB.prepare(
-					"DELETE FROM bill_payments WHERE id BETWEEN 9920 AND 9923",
+					"DELETE FROM bill_payments WHERE id BETWEEN 9920 AND 9925",
 				),
 				env.DB.prepare(
-					"DELETE FROM transactions WHERE id BETWEEN 9920 AND 9923",
+					"DELETE FROM transactions WHERE id BETWEEN 9920 AND 9925",
 				),
-				env.DB.prepare("DELETE FROM bills WHERE id=9920"),
+				env.DB.prepare("DELETE FROM bills WHERE id IN (9920,9921)"),
 				env.DB.prepare(triggers[0] as string),
 				env.DB.prepare(triggers[1] as string),
 			]);

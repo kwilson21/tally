@@ -67,6 +67,7 @@ export type ListRow = {
 	countsInMonth?: string | null;
 	parentId?: number | null;
 	parentName?: string | null;
+	parentBillName?: string | null;
 	isSplit?: boolean;
 	splitRemovedFromCents?: number | null;
 	refundOfId?: number | null;
@@ -213,6 +214,7 @@ export async function listTransactions(
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
+				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=p.id AND bp.status='linked' LIMIT 1) AS parentBillName,
 				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,

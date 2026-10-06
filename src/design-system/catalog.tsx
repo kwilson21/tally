@@ -1084,7 +1084,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill” on the caption line (P59 A, decision 74). A pending one adds “Pending” in muted words. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
 			>
 				<State label="Above the list, once only while a suggested name is shown">
 					<div class="max-w-xl">

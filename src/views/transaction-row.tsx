@@ -14,6 +14,9 @@ type Caption = {
 
 /** What a row says under its name, and which icon it gets. Status is always in words, never color alone. */
 export function rowCaption(row: ListRow): Caption {
+	const paidBillName = row.parentId ? row.parentBillName : row.billName;
+	const paidBill =
+		row.paysBill && paidBillName ? `paid ${paidBillName} bill` : null;
 	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
 	if (row.excluded && !row.paysBill)
 		return { kind: "excluded", caption: "Excluded", tag: false };
@@ -31,13 +34,18 @@ export function rowCaption(row: ListRow): Caption {
 				row.categoryName,
 				`Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
 				refunded(row),
+				paidBill,
 			]
 				.filter(Boolean)
 				.join(" · "),
 			tag: false,
 		};
 	if (row.isSplit)
-		return { kind: "category", caption: "Split transaction", tag: false };
+		return {
+			kind: "category",
+			caption: ["Split transaction", paidBill].filter(Boolean).join(" · "),
+			tag: false,
+		};
 	// The note stays only until the purchase has a category again.
 	if (
 		row.splitRemovedFromCents !== null &&
@@ -66,8 +74,6 @@ export function rowCaption(row: ListRow): Caption {
 	const pair = row.refundPurchaseDate
 		? `Refund for ${shortDay(row.refundPurchaseDate, row.date)}`
 		: refunded(row);
-	const paidBill =
-		row.paysBill && row.billName ? `paid ${row.billName} bill` : null;
 	if (row.categoryName)
 		return {
 			kind: "category",
@@ -79,7 +85,13 @@ export function rowCaption(row: ListRow): Caption {
 	return {
 		kind: "needs",
 		caption:
-			[pair, paidBill, row.rawName === row.displayName ? null : row.rawName]
+			[
+				pair,
+				paidBill,
+				!pair && !paidBill && row.rawName !== row.displayName
+					? row.rawName
+					: null,
+			]
 				.filter(Boolean)
 				.join(" · ") || null,
 		tag: true,

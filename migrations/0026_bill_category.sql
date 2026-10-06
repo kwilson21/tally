@@ -84,7 +84,7 @@ DROP TABLE bill_payments_keep;
 CREATE UNIQUE INDEX bill_payments_one_per_period ON bill_payments(bill_id, period) WHERE status = 'linked';
 CREATE UNIQUE INDEX bill_payments_one_bill_per_transaction ON bill_payments(transaction_id) WHERE status = 'linked';
 
--- Existing links get the same default as new ones; explicit categories remain untouched.
+-- Existing links get the same default as new ones, replacing only an empty or Jev-picked category.
 UPDATE transactions
 SET category_id = (SELECT b.category_id FROM bills b JOIN bill_payments bp ON bp.bill_id = b.id WHERE bp.transaction_id = transactions.id AND bp.status = 'linked'),
     category_source = 'bill',
@@ -92,7 +92,7 @@ SET category_id = (SELECT b.category_id FROM bills b JOIN bill_payments bp ON bp
     jev_category_id = NULL,
     jev_none_fit = 0,
     category_suggestion_id = NULL
-WHERE category_id IS NULL
+WHERE (category_id IS NULL OR category_source = 'jev')
   AND EXISTS (
     SELECT 1 FROM bills b JOIN bill_payments bp ON bp.bill_id = b.id
     WHERE bp.transaction_id = transactions.id AND bp.status = 'linked' AND b.category_id IS NOT NULL
