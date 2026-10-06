@@ -278,9 +278,10 @@ export function MixedStoreProposals() {
 				when the details name only one, the store's most-used other category
 				fills the second part (Q65 A), and when they name none, the store's two
 				most-used categories fill both (Q67 A), all counted over the same 3
-				months and skipping archived categories, which a split can't use. The
-				amounts are always the person's, Tally never fills one in, and the split
-				saves only when it adds up exactly (§6.1).
+				months and skipping archived categories, which a split can't use; a part
+				with nothing left to suggest starts blank. The amounts are always the
+				person's, Tally never fills one in, and the split saves only when it
+				adds up exactly (§6.1).
 			</NeedsLine>
 			<Options
 				options={[
