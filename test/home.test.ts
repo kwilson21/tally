@@ -1,10 +1,12 @@
 import { env, exports } from "cloudflare:workers";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { loadBillRows } from "../src/routes/bills";
+import { home as homeRoute } from "../src/routes/home";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
@@ -24,6 +26,43 @@ describe("GET / with the demo seed", () => {
 		expect(html).toContain('<html lang="en">');
 	});
 
+	it("uses a fixed number of D1 statements for a large Home request", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
+			 INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id)
+			 SELECT 1, ?, 100, 'Home count ' || i, 1 FROM n`,
+		)
+			.bind(`${month}-05`)
+			.run();
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30)
+			 INSERT INTO bills (name,amount_cents,due_day,frequency,merchant_raw_name)
+			 SELECT 'Home count ' || i, 100, 20, 'monthly', 'Home count ' || i FROM n`,
+		).run();
+
+		let statements = 0;
+		const db = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const app = new Hono<{ Bindings: Env }>().route("/", homeRoute);
+		const response = await app.request(
+			"http://tally.test/",
+			{},
+			{ ...env, DB: db },
+		);
+		expect(response.status).toBe(200);
+		expect(statements).toBeLessThanOrEqual(20);
+	});
+
 	it("leads with safe to spend and the status sentence", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
@@ -38,7 +77,9 @@ describe("GET / with the demo seed", () => {
 	it("links the uncategorized count to the filtered list", async () => {
 		const { html } = await home();
 		expect(html).toContain('href="/transactions?uncategorized=1"');
-		expect(html).toMatch(/12 transactions need\s+a\s+category/);
+		expect(html).toMatch(
+			/12<span class="sr-only"> transactions<\/span> need\s+a\s+category/,
+		);
 	});
 
 	it("lists due and overdue bills under an accurate heading", async () => {
@@ -112,7 +153,7 @@ describe("GET / with the demo seed", () => {
 	it("says needs a category once: the Band carries the amount, and there's no Uncategorized row (decision 50)", async () => {
 		const { html } = await home();
 		expect(html).toMatch(
-			/12 transactions need a category[\s\S]*?\$228 of this month&#39;s spending/,
+			/12<span class="sr-only"> transactions<\/span> need a category[\s\S]*?\$228 of this month&#39;s spending/,
 		);
 		expect(html).not.toContain("Uncategorized");
 	});
@@ -236,8 +277,12 @@ describe("GET / with the demo seed", () => {
 		const { html } = await home();
 		const at = (s: string) => html.indexOf(s);
 		expect(html).toMatch(/<h1 class="font-serif text-2xl[^"]*">/);
-		expect(at("Safe to spend")).toBeLessThan(at("12 transactions need"));
-		expect(at("12 transactions need")).toBeLessThan(at(">Budget<"));
+		expect(at("Safe to spend")).toBeLessThan(
+			at('12<span class="sr-only"> transactions</span> need'),
+		);
+		expect(
+			at('12<span class="sr-only"> transactions</span> need'),
+		).toBeLessThan(at(">Budget<"));
 		expect(at(">Budget<")).toBeLessThan(at("New here? Things to try"));
 	});
 

@@ -281,7 +281,19 @@ await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
 	.getByRole("link", { name: /10 transactions need a category/ })
 	.waitFor();
-step("Home now says 10 transactions need a category");
+const visibleBand = await page
+	.getByRole("link", { name: /10 transactions need a category/ })
+	.evaluate((link) => {
+		const visible = link.cloneNode(true);
+		visible.querySelectorAll(".sr-only").forEach((element) => {
+			element.remove();
+		});
+		return visible.textContent?.replace(/\s+/g, " ").trim();
+	});
+assert.match(visibleBand, /10 need a category/);
+step(
+	"Home now says 10 need a category, with transactions announced to screen readers",
+);
 
 // Change a budget amount (spec §11): Home → Groceries → 650, nudged up $1 and 1¢ → Home shows it.
 await goto(`${BASE}/`, { waitUntil: "networkidle" });

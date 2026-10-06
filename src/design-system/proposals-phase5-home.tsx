@@ -106,13 +106,18 @@ const STATUS = statusSentence(summaries(OCTOBER));
 
 const BAND = {
 	href: "/transactions/organize",
-	text: `${UNCATEGORIZED.count} transactions need a category`,
+	text: (
+		<>
+			{UNCATEGORIZED.count}
+			<span class="sr-only"> transactions</span> need a category
+		</>
+	),
 	detail: `${dollars(UNCATEGORIZED.cents)} of this month's spending`,
 };
 
 /** The real HomeTop with October's numbers, for options that change only its sentence or Band. */
 const homeTop = (
-	band: { href: string; text: string; detail?: string },
+	band: { href: string; text: Child; detail?: string },
 	status = STATUS,
 ) => (
 	<HomeTop

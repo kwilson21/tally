@@ -115,7 +115,16 @@ async function renderHome(
 	// Adjust is offered when there's a budget it can change: a budgeted category that isn't archived.
 	const canAdjust = summary.categories.some((cat) => linked.has(cat.id));
 	const { count, spentCents } = summary.uncategorized;
-	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
+	const needs = (
+		<>
+			{count}
+			<span class="sr-only">
+				{" "}
+				{count === 1 ? "transaction" : "transactions"}
+			</span>{" "}
+			{count === 1 ? "needs" : "need"} a category
+		</>
+	);
 	const allNeeds = await needsCategoryCount(c.env.DB, "all");
 	const currentNeeds = await needsCategoryCount(c.env.DB, month);
 	const olderNeeds = Math.max(0, allNeeds - currentNeeds);

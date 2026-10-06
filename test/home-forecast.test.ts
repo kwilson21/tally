@@ -43,6 +43,20 @@ describe("forecastMonth", () => {
 		});
 	});
 
+	it("excludes planned payments from the projected everyday pace", () => {
+		const input = {
+			day: 15,
+			daysInMonth: 31,
+			totalBudgetCents: 100000,
+			spentCents: 40000,
+			billPaymentsCents: 10000,
+			planPaymentsCents: 5000,
+			refundsCents: 2000,
+			billsStillDueCents: 5000,
+		};
+		expect(forecastMonth(input).endCents).toBe(73800);
+	});
+
 	it("starts on the third day and has no forecast before then", () => {
 		const input = {
 			day: 2,

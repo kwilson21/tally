@@ -570,7 +570,7 @@ describe("GET /design-system in the demo", () => {
 			expect(label).toContain("Safe to spend $283");
 			expect(label).toContain("Eating Out is $36 over");
 		}
-		expect(labels[0]).toContain("12 transactions need a category");
+		expect(labels[0]).toContain("12 need a category");
 		expect(labels[0]).toContain("Groceries $412 of $700");
 		expect(labels[2]).not.toContain("need a category");
 	});

@@ -4,6 +4,7 @@ export type ForecastInput = {
 	totalBudgetCents: number;
 	spentCents: number;
 	billPaymentsCents: number;
+	/** Planned-expense payments already counted in spending; remove them from the everyday pace. */
 	planPaymentsCents: number;
 	refundsCents: number;
 	billsStillDueCents: number;

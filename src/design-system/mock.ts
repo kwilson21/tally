@@ -273,7 +273,7 @@ export const HOME_TOP = {
 	status: "Eating Out is $36 over. Everything else is on track.",
 	band: {
 		href: "/transactions?uncategorized=1",
-		text: "12 transactions need a category",
+		text: "12 need a category",
 		detail: "$228 of this month's spending",
 	},
 };
@@ -318,7 +318,7 @@ export const HOME_ROWS = [
 /** The Band links to the demo's real "needs a category" list, which is what it says. */
 export const BAND = {
 	href: "/transactions?uncategorized=1",
-	text: "12 transactions need a category",
+	text: "12 need a category",
 };
 
 const BANK_TODAY = "2026-10-05";

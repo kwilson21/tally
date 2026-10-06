@@ -22,8 +22,8 @@ type Props = {
 	forecast?: Child;
 	/** Finished months are read-only and never show current-month alerts or projections. */
 	currentMonth?: boolean;
-	/** The one next action, when there is one: "12 transactions need a category", and its amount (decision 50). */
-	band?: { href: string; text: string; detail?: string; older?: number };
+	/** The one next action, when there is one, and its amount (decision 50). */
+	band?: { href: string; text: Child; detail?: string; older?: number };
 };
 
 /** The month, then Safe to spend, the status sentence, How this works, a stale-bank line when needed, and the Band. */
