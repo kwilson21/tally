@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COLOR_TOKENS } from "../src/design-system/tokens";
+import { COLOR_TOKENS, DURATION_TOKENS } from "../src/design-system/tokens";
 import css from "../src/styles/app.css?raw";
 
 // Every file that writes class names: the views and routes, and the scripts that build elements.
@@ -239,5 +239,13 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(COLOR_TOKENS.map((t) => [t.name, t.hex.toLowerCase()])).toEqual(
 			theme,
 		);
+	});
+
+	it("lists every duration token in the catalog, with app.css's value", () => {
+		const theme = [...css.matchAll(/--duration-([\w-]+):\s*([\d.]+m?s)/g)].map(
+			([, name, value]) => [name, value],
+		);
+		expect(theme.length).toBeGreaterThan(5);
+		expect(DURATION_TOKENS.map((t) => [t.name, t.value])).toEqual(theme);
 	});
 });

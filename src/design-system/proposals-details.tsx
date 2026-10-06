@@ -929,7 +929,9 @@ type Enter = "slide" | "fade";
 
 /**
  * The Transactions page on desktop with Costco's panel opening over it, looping at the real 200 ms
- * with a pause (the classes are in app.css, "P74 and P85"); at rest it shows the end state.
+ * with a pause: the panel and its backdrop carry the real classes from app.css (sheet-slide, which
+ * BottomSheet's own class becomes at desktop width, and fade-in), and the stage's loop replays them.
+ * At rest it shows the end state.
  */
 function DesktopPanel({ enter }: { enter: Enter }) {
 	return (
@@ -968,9 +970,9 @@ function DesktopPanel({ enter }: { enter: Enter }) {
 						</div>
 					</div>
 				</div>
-				<div class="proposal-fade absolute inset-0 bg-ink/30" />
+				<div class="fade-in absolute inset-0 bg-ink/30" />
 				<div
-					class={`absolute inset-y-0 right-0 flex w-[28rem] flex-col gap-3 rounded-l-sheet bg-paper p-5 ${enter === "slide" ? "proposal-slide-right" : "proposal-fade"}`}
+					class={`absolute inset-y-0 right-0 flex w-[28rem] flex-col gap-3 rounded-l-sheet bg-paper p-5 ${enter === "slide" ? "sheet-slide" : "fade-in"}`}
 				>
 					<PanelTop
 						row={COSTCO}

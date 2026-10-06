@@ -2,15 +2,19 @@
 // cuelume, somonoco) as inspiration. Tally can't add them (no client framework, and no new script or
 // dependency without a decision; the CSP is style-src 'self', so no inline style attributes), so
 // this draws the motion CSS alone could give it, with the browser's own View Transitions for page
-// changes. Each option is one inert picture of four moments, each looping at its real speed with a
-// pause, starting on its end state (the keyframes are in app.css, "P74"); under reduced motion each
-// rests on that end state. Nothing here is decided until the owner picks (decision 47).
+// changes. Each option is one picture of four moments, each looping at its real speed with a pause,
+// starting on its end state; under reduced motion each rests on that end state. Option A is
+// decided and built (decision 76, P74 A): its sheet, toast and desktop panel are drawn with the real
+// classes from app.css (sheet-rise, fade-in, toast-motion), replayed by the stage's loop, and its
+// switch is the real Switch, which slides when tapped (a transition needs a tap; a drawing has
+// none to give it). What the loop alone draws is what wasn't picked: B's morph and sliding pages.
 
 import type { Child } from "hono/jsx";
 import type { ListRow } from "../db/transactions";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
+import { Switch } from "../views/switch";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options } from "./proposal-parts";
 import { NeedsLine } from "./proposals-phase5-transactions";
@@ -49,8 +53,10 @@ const COSTCO: ListRow = {
 type Look = "quiet" | "more" | "none";
 
 /**
- * A stage loops --proposal-t from 0 to 1 and back. A move's real length decides the loop's:
- * 150 ms takes 4.5 s and 200 ms takes 6 s. "None" jumps instead of easing, so each change is a cut.
+ * A stage replays the real classes inside it, and loops --proposal-t from 0 to 1 and back for B's
+ * morph and sliding pages (app.css, "The proposals page's drawings"). A move's real length decides
+ * the loop's: 150 ms takes 4.5 s and 200 ms takes 6 s. "None" jumps instead of easing, so each
+ * change is a cut.
  */
 function loop(look: Look, ms: 150 | 200) {
 	return [
@@ -92,26 +98,23 @@ function Moment({ n, title, words, height, look, ms, children }: MomentProps) {
 }
 
 /**
- * 1 · The P41 switch (decision 73: On or Off in words, one Save under the group) turning off. The
- * knob slides, the track and knob swap tones, and the word changes halfway. It ends on Off. The
- * row is P41 B's own: its name and its muted line.
+ * 1 · The P41 switch (decision 73: On or Off in words, one Save under the group) turning off. It is
+ * the real Switch with its real classes: the knob slides and the track and knob swap tones as the
+ * checkbox changes, so it waits for a tap, as a transition does. It starts On. The row is P41 B's
+ * own: its name and its muted line.
  */
-function SwitchStage() {
+function SwitchStage({ look }: { look: Look }) {
 	return (
-		<div class="flex h-full items-center gap-3 px-4">
-			<span class="min-w-0 flex-1">
-				<span class="block text-lg">Income</span>
-				<span class="block text-pretty text-muted">
-					Spots paychecks and other money coming in.
-				</span>
-			</span>
-			<span class="relative h-6 w-8 shrink-0 font-medium">
-				<span class="proposal-on absolute inset-y-0 right-0">On</span>
-				<span class="proposal-off absolute inset-y-0 right-0">Off</span>
-			</span>
-			<span class="proposal-track flex h-7 w-12 shrink-0 items-center rounded-full border border-ink px-0.5">
-				<span class="proposal-knob size-5 rounded-full" />
-			</span>
+		<div class="flex h-full items-center px-4">
+			<div class="w-full">
+				<Switch
+					id={`p74-${look}-switch`}
+					name={`p74-${look}-switch`}
+					label="Income"
+					hint="Spots paychecks and other money coming in."
+					checked
+				/>
+			</div>
 		</div>
 	);
 }
@@ -132,8 +135,8 @@ function SheetStage({ look }: { look: Look }) {
 			<ul class="divide-y divide-rule px-4">
 				<TransactionRow row={COSTCO} />
 			</ul>
-			<div class="proposal-fade absolute inset-0 bg-ink/30" />
-			<div class="proposal-rise absolute inset-x-0 bottom-0 flex h-24 flex-col rounded-t-sheet bg-paper p-4">
+			<div class="fade-in absolute inset-0 bg-ink/30" />
+			<div class="sheet-rise absolute inset-x-0 bottom-0 flex h-24 flex-col rounded-t-sheet bg-paper p-4">
 				{look === "more" ? <div class="h-10" /> : title}
 				<p class="text-muted">$142.60 · Groceries</p>
 			</div>
@@ -155,7 +158,7 @@ function ToastStage() {
 		<div class="absolute inset-x-4 bottom-3 flex justify-center">
 			<p
 				role="status"
-				class="proposal-toast rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink"
+				class="toast-motion rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink"
 			>
 				Saved Costco
 			</p>
@@ -188,7 +191,7 @@ function PageStage({ look }: { look: Look }) {
 				</Button>
 			</div>
 			<div
-				class={`absolute inset-0 bg-paper px-4 pt-3 ${more ? "proposal-slide-in" : "proposal-fade"}`}
+				class={`absolute inset-0 bg-paper px-4 pt-3 ${more ? "proposal-slide-in" : "fade-in"}`}
 			>
 				<p class="font-serif text-2xl font-semibold tracking-tight">Organize</p>
 				<p class="text-muted">1 of 3 · 4 left, all months</p>
@@ -217,19 +220,19 @@ function PageStage({ look }: { look: Look }) {
 
 const WORDS: Record<Look, [string, string, string, string]> = {
 	quiet: [
-		"The knob slides in 150 ms; On becomes Off.",
+		"Tap it. The knob slides in 150 ms and the tones swap; On becomes Off.",
 		"The sheet rises in 200 ms; the backdrop fades in.",
 		"Fades in and rises 8 px in 150 ms, then fades out.",
 		"The old page cross-fades into the new in 150 ms.",
 	],
 	more: [
-		"The knob slides in 150 ms; On becomes Off.",
+		"Tap it. The knob slides in 150 ms and the tones swap; On becomes Off.",
 		"As A, and the row's name glides into the title.",
 		"Fades in and rises 8 px in 150 ms, then fades out.",
 		"The page slides left as the next comes in, 200 ms.",
 	],
 	none: [
-		"The knob and the word change at once.",
+		"Tap it. The knob and the word change at once.",
 		"The sheet and its backdrop appear at once.",
 		"It appears, then disappears.",
 		"The new page replaces the old at once.",
@@ -245,11 +248,11 @@ function Moments({ look }: { look: Look }) {
 				n={1}
 				title="The switch turns off"
 				words={sw}
-				height="h-20"
+				height="h-28"
 				look={look}
 				ms={150}
 			>
-				<SwitchStage />
+				<SwitchStage look={look} />
 			</Moment>
 			<Moment
 				n={2}

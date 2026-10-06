@@ -23,7 +23,9 @@ type Props = {
  * works without a script, and the whole 44px row is the target. A screen reader hears a switch
  * named by the label and described by the line; the words and the track are for the eye. Disabled,
  * the label and the word go muted, the track keeps only a rule-coloured edge and a muted knob, and
- * `note` says what the switch needs; the row is no longer a pointer target.
+ * `note` says what the switch needs; the row is no longer a pointer target. The knob slides and the
+ * tones swap in 150 ms (decision 76): `switch-track` and `switch-knob` are classes in app.css, which
+ * also shows the end state at once for reduced motion, so no length or reduce class is written here.
  */
 export function Switch({
 	id,
@@ -86,10 +88,10 @@ export function Switch({
 			</span>
 			<span
 				aria-hidden="true"
-				class={`flex h-7 w-12 shrink-0 items-center rounded-full border bg-rule px-0.5 transition-colors duration-150 motion-reduce:transition-none ${disabled ? "border-rule" : "border-ink group-has-[:checked]:bg-ink"}`}
+				class={`switch-track flex h-7 w-12 shrink-0 items-center rounded-full border bg-rule px-0.5 ${disabled ? "border-rule" : "border-ink group-has-[:checked]:bg-ink"}`}
 			>
 				<span
-					class={`size-5 rounded-full transition-transform duration-150 group-has-[:checked]:translate-x-[1.375rem] motion-reduce:transition-none ${disabled ? "bg-muted" : "bg-ink group-has-[:checked]:bg-paper"}`}
+					class={`switch-knob size-5 rounded-full group-has-[:checked]:translate-x-[1.375rem] ${disabled ? "bg-muted" : "bg-ink group-has-[:checked]:bg-paper"}`}
 				/>
 			</span>
 		</label>
