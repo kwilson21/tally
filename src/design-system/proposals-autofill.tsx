@@ -386,13 +386,13 @@ export function AutofillProposals() {
 				renames or removes one in Settings (§3); removing a name clears it from
 				the purchases marked for it. A kind is a word about the purchase and
 				never changes a number: Exclude and Bills work as before. Kind and who
-				it was for are two more questions in the one Jev call per transaction;
-				what it was is a short line Workers AI writes through
-				src/ai/suggest-name.ts; a purchase a rule or a person already sorted is
-				still asked once, for its empty details only. Each detail is Tally's
-				guess until a person keeps or changes it, tracked one by one, and Tally
-				only fills a detail that's empty, so a note someone wrote is never
-				replaced.
+				it was for are two more questions in the one Jev call per transaction,
+				each with a no-fit answer that leaves the detail empty; what it was is a
+				short line Workers AI writes through src/ai/suggest-name.ts; a purchase
+				a rule or a person already sorted is still asked once, for its empty
+				details only. Each detail is Tally's guess until a person keeps or
+				changes it, tracked one by one, and Tally only fills a detail that's
+				empty, so a note someone wrote is never replaced.
 			</NeedsLine>
 			<Options
 				options={[
