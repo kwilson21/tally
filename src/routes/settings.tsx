@@ -96,11 +96,10 @@ type View = {
  * each posts, its words and its muted line, in the order the group shows them, and how each is read
  * aloud after a save. Screens say "Tally", never the name of the AI behind it.
  *
- * Two more are stored (`names` and `sortOnArrival` in db/ai-switches.ts) but have no row yet, so no
- * switch promises something that isn't built. Each gets its row here, with its words from the P41
- * drawing (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant
- * names" with Workers AI names (#33, #194) and "Sort new transactions as they arrive" with the
- * Jev run after a sync (#193). Saving this group never changes a switch it doesn't list.
+ * One more is stored (`names` in db/ai-switches.ts) but has no row yet, so no switch promises
+ * something that isn't built. It gets its row here, with its words from the P41 drawing
+ * (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant names" with
+ * Workers AI names (#33, #194). Saving this group never changes a switch it doesn't list.
  */
 const AI_FEATURES: {
 	key: keyof AiSwitches;
@@ -122,6 +121,13 @@ const AI_FEATURES: {
 		label: "Income",
 		line: "Spots paychecks and other money coming in.",
 		spoken: "income",
+	},
+	{
+		key: "sortOnArrival",
+		id: "ai-sort-on-arrival",
+		label: "Sort new transactions as they arrive",
+		line: "Sorts them right after each sync, not only overnight.",
+		spoken: "sorting new transactions as they arrive",
 	},
 ];
 

@@ -91,6 +91,7 @@ describe("Plaid routes", () => {
 			TOKEN_ENCRYPTION_KEY: undefined,
 			ACCESS_TEAM_DOMAIN: undefined,
 			ACCESS_AUD: undefined,
+			JEV_API_KEY: undefined,
 		});
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
@@ -206,6 +207,100 @@ describe("Plaid routes", () => {
 			"never-return-this",
 		);
 		expect(await response.text()).not.toContain("never-return-this");
+	});
+
+	it("sorts what the repaired bank's sync brings in, in the same waitUntil (spec §8.6)", async () => {
+		Object.assign(env, { JEV_API_KEY: "jev-key" });
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+		]);
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",
+		)
+			.bind(await encryptToken("repaired-token", KEY))
+			.first<{ id: number }>();
+		const promises: Promise<unknown>[] = [];
+		const asked: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			async (input: string | URL | Request, init?: RequestInit) => {
+				const url = String(input);
+				if (url === "https://api.typesafe.ai/v1/systemone") {
+					asked.push(JSON.parse(String(init?.body)).state.bank_description);
+					return Response.json({
+						answers: {
+							category: {
+								type: "choice",
+								choice: "Eating Out",
+								confidence: 0.95,
+							},
+							transfer: { type: "noul", noul: 0.01 },
+							reimbursement: { type: "noul", noul: 0.01 },
+							income: { type: "noul", noul: 0.01 },
+						},
+					});
+				}
+				if (url.endsWith("/item/get"))
+					return Response.json({ item: { institution_id: "ins-1" } });
+				if (url.endsWith("/accounts/get"))
+					return Response.json({
+						accounts: [
+							{
+								account_id: "account-1",
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					});
+				return Response.json({
+					added: [
+						{
+							transaction_id: "tx-repaired",
+							account_id: "account-1",
+							date: "2026-09-27",
+							amount: 4.25,
+							name: "REPAIRED SHOP",
+							pending: false,
+						},
+					],
+					modified: [],
+					removed: [],
+					next_cursor: "next",
+					has_more: false,
+				});
+			},
+		);
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const response = await plaid.request(
+			`http://tally.test/plaid/items/${inserted?.id}/repaired`,
+			{ method: "POST", headers: { Origin: BASE } },
+			env,
+			{
+				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+				passThroughOnException() {},
+				props: {},
+			},
+		);
+		expect(response.status).toBe(204);
+		await Promise.all(promises);
+
+		try {
+			expect(asked).toEqual(["REPAIRED SHOP"]);
+			expect(
+				await env.DB.prepare(
+					"SELECT category_source FROM transactions WHERE plaid_transaction_id = 'tx-repaired'",
+				).first(),
+			).toEqual({ category_source: "jev" });
+		} finally {
+			// The sync's accounts point at the item, which the next test deletes.
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM transactions"),
+				env.DB.prepare("DELETE FROM accounts"),
+			]);
+		}
 	});
 
 	it("treats an item response without an error field as healthy", async () => {

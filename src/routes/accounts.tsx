@@ -4,6 +4,7 @@ import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
 import { netWorthView } from "../net-worth";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
+import { sortAfterSync } from "../plaid/sort-after-sync";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
 import { decryptToken } from "../plaid/token-crypto";
 import { AccountsTop } from "../views/accounts-top";
@@ -158,7 +159,8 @@ function syncOutcome(
 }
 
 // Sync now (P12 A): every healthy bank, at most once a minute each. Merchant rules run inside each
-// bank's sync, so the count and list are right when it answers; Jev is left to the nightly job (spec §8.1).
+// bank's sync, so the count and list are right when it answers; Jev then sorts what arrived in the
+// background, when the household's switch is on, so the answer never waits for it (spec §8.1, §8.6).
 // A failure is said once, in the summary's alert, like Fix connection; success is a toast plus announce.
 accounts.post("/accounts/sync", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
@@ -166,6 +168,14 @@ accounts.post("/accounts/sync", async (c) => {
 	let alert: string | undefined;
 	try {
 		const result = await syncAllItems(c.env, undefined, Date.now, true);
+		// Even when one bank failed, the others may have brought transactions in. When the rules step
+		// failed, the pass applies them itself, as the nightly run does.
+		if (result.added + result.modified > 0)
+			c.executionCtx.waitUntil(
+				sortAfterSync(c.env, result, undefined, {
+					rulesApplied: !result.afterSyncFailed,
+				}),
+			);
 		const outcome = syncOutcome(result, await accountsByBank(c.env.DB));
 		if ("alert" in outcome) alert = outcome.alert;
 		else if (!isHtmx) return c.redirect("/accounts", 303);

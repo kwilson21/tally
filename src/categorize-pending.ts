@@ -1,7 +1,9 @@
 // The nightly categorization step (spec §7): merchant rules first, then Jev for the rest.
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { decide } from "./ai/decide";
+import { householdToday } from "./dates";
 import { asksJev, readAiSwitches } from "./db/ai-switches";
+import { claimJevCall, jevCallsLeft } from "./db/jev-calls";
 import {
 	applyMerchantRules,
 	markJevFailed,
@@ -10,9 +12,10 @@ import {
 } from "./db/transactions";
 
 /**
- * How many transactions one night asks Jev about (decision 56). The demo's reset needs few.
+ * How many transactions Jev is asked about in a day (decisions 56 and 68). The demo's reset needs few.
  * Production sorts a new bank's backfill in a night; each answer is saved as it arrives,
- * so a run cut short keeps its work, and the rest wait for the next night.
+ * so a run cut short keeps its work, and the rest wait for the next run. The count is the household's
+ * whole day, shared by the runs right after a sync and the nightly run (db/jev-calls.ts).
  */
 export const jevCallLimit = (env: { DEMO?: string }) =>
 	env.DEMO === "false" ? 500 : 40;
@@ -29,6 +32,9 @@ type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
  * reimbursement flags are dropped, and with income off its income answer is. The switches can be
  * saved while a run is going, so each transaction reads them again before it's sent and before its
  * answer is saved; an answer that comes back after both went off is thrown away.
+ *
+ * Every call counts against the household's day (decisions 56 and 68): a run asks only about what is
+ * left of today's cap, and counts each call just before making it (db/jev-calls.ts).
  */
 export async function categorizePending(
 	env: CategorizeEnv,
@@ -46,6 +52,12 @@ export async function categorizePending(
 	const start = await readAiSwitches(env.DB);
 	if (!asksJev(start)) return done;
 
+	// Today's cap is shared with every other run, the ones right after a sync and the nightly one.
+	const today = await householdToday(env.DB);
+	const cap = jevCallLimit(env);
+	const left = await jevCallsLeft(env.DB, today, cap);
+	if (left <= 0) return done;
+
 	const { results: categories } = await env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
 	).all<{ id: number; name: string }>();
@@ -56,7 +68,7 @@ export async function categorizePending(
 	const names = categories.map((c) => c.name);
 
 	let failuresInARow = 0;
-	for (const tx of await pendingForJev(env.DB, jevCallLimit(env), {
+	for (const tx of await pendingForJev(env.DB, left, {
 		categories: start.categories,
 	})) {
 		// One small read per transaction: someone may have turned a switch off since the last one.
@@ -64,6 +76,8 @@ export async function categorizePending(
 		if (!asksJev(before)) return done;
 		// A credit a person reviewed is asked about only for its category.
 		if (tx.categoryOnly && !before.categories) continue;
+		// The call is counted before it's made, so runs going at once can't take more than the cap.
+		if (!(await claimJevCall(env.DB, today, cap))) return done;
 		done.asked += 1;
 		const result = await askJev(tx, names, env.JEV_API_KEY, fetchImpl);
 		if (!result.ok) {

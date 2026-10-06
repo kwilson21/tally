@@ -101,6 +101,7 @@ describe("syncAllItems", () => {
 		};
 		expect(await syncAllItems(withoutDb, fetchImpl)).toEqual({
 			added: 0,
+			modified: 0,
 			synced: 0,
 			skipped: 0,
 			busy: 0,
@@ -122,6 +123,7 @@ describe("syncAllItems", () => {
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
 			added: 2,
+			modified: 0,
 			synced: 2,
 			skipped: 0,
 			busy: 0,
@@ -133,6 +135,45 @@ describe("syncAllItems", () => {
 			"SELECT plaid_item_id FROM accounts ORDER BY plaid_item_id",
 		).all<{ plaid_item_id: number }>();
 		expect(results.map((row) => row.plaid_item_id)).toEqual([first, second]);
+	});
+
+	it("counts what the banks changed apart from what they added, so a sort can follow either", async () => {
+		await addItem();
+		await addItem();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const fetchImpl = fakePlaid();
+		fetchImpl.mockImplementation(async (url, init) => {
+			const body = JSON.parse(String(init?.body)) as { access_token: string };
+			if (String(url).endsWith("/accounts/get"))
+				return response({
+					accounts: [
+						{
+							account_id: `account-${body.access_token}`,
+							name: "Checking",
+							type: "depository",
+							balances: { current: 10 },
+						},
+					],
+				});
+			const transaction = (id: string) => ({
+				transaction_id: id,
+				account_id: `account-${body.access_token}`,
+				date: "2026-09-27",
+				amount: 1,
+				name: "SHOP",
+				pending: false,
+			});
+			return response({
+				added: [],
+				modified: [transaction("a"), transaction("b")],
+				removed: [],
+				next_cursor: "next",
+				has_more: false,
+			});
+		});
+
+		const result = await syncAllItems(enabledEnv, fetchImpl);
+		expect(result).toMatchObject({ added: 0, modified: 4, synced: 2 });
 	});
 
 	it("continues after one Item fails", async () => {
@@ -170,6 +211,7 @@ describe("syncAllItems", () => {
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
 			added: 0,
+			modified: 0,
 			synced: 1,
 			skipped: 0,
 			busy: 0,
@@ -241,6 +283,7 @@ describe("syncAllItems", () => {
 
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
 			added: 0,
+			modified: 0,
 			synced: 0,
 			skipped: 1,
 			busy: 1,
@@ -259,6 +302,7 @@ describe("syncAllItems", () => {
 			await syncAllItems(enabledEnv, fetchImpl, () => times.shift() ?? 0),
 		).toEqual({
 			added: 1,
+			modified: 0,
 			synced: 1,
 			skipped: 1,
 			busy: 0,
@@ -287,6 +331,7 @@ describe("syncAllItems", () => {
 
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
 			added: 1,
+			modified: 0,
 			synced: 1,
 			skipped: 1,
 			busy: 0,
@@ -307,6 +352,7 @@ describe("syncAllItems", () => {
 
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
 			added: 0,
+			modified: 0,
 			synced: 0,
 			skipped: 0,
 			busy: 0,
@@ -384,6 +430,7 @@ describe("syncAllItems", () => {
 
 		expect(await syncAllItems({ ...enabledEnv, DB: db }, fakePlaid())).toEqual({
 			added: 1,
+			modified: 0,
 			synced: 1,
 			skipped: 0,
 			busy: 0,
