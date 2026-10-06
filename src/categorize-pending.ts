@@ -11,6 +11,7 @@ import {
 	pendingForJev,
 	saveJevResult,
 } from "./db/transactions";
+import { type Deadline, pastDeadline } from "./run-budget";
 
 /**
  * How many transactions Jev is asked about in a day (decisions 56 and 68). The demo's reset needs few.
@@ -58,6 +59,12 @@ export type PassOptions = {
 	bySync?: boolean;
 	/** Ask about at most this many (newest first), fewer than the most a run may; the rest wait. */
 	maxCalls?: number;
+	/**
+	 * Start no new call once this deadline has passed (src/run-budget.ts), so a slow Jev can't use up the
+	 * rest of the run. What it didn't ask is given back to the day, and waits for the next run. The syncs'
+	 * runs and the re-ask have none.
+	 */
+	time?: Deadline;
 };
 
 /**
@@ -83,6 +90,7 @@ export async function categorizePending(
 		onlyIds,
 		bySync = false,
 		maxCalls = MAX_CALLS_PER_RUN,
+		time,
 	}: PassOptions = {},
 ): Promise<{ asked: number; applied: number }> {
 	const done = { asked: 0, applied: 0 };
@@ -112,7 +120,7 @@ export async function categorizePending(
 		categories: start.categories,
 		ids: onlyIds,
 	});
-	if (waiting.length === 0) return done;
+	if (waiting.length === 0 || pastDeadline(time)) return done;
 	// The day's cap is shared with every other run: take what's wanted and left in one step.
 	const granted = await reserveJevCalls(env.DB, day, cap, waiting.length);
 	if (granted === 0) return done;
@@ -122,6 +130,11 @@ export async function categorizePending(
 		for (const tx of waiting.slice(0, granted)) {
 			// Past the household's midnight the calls belong to the next day, which this run didn't reserve.
 			if (todayIn(timeZone) !== day) return done;
+			// Out of time: the calls not asked are given back below, and the next run asks about them.
+			if (pastDeadline(time)) {
+				console.log("jev: stopped at the time budget");
+				return done;
+			}
 			// One small read per transaction: someone may have turned a switch off since the last one.
 			const before = await readAiSwitches(env.DB);
 			if (!asksJev(before) || (bySync && !before.sortOnArrival)) return done;
