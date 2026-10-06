@@ -127,6 +127,8 @@ A pass over every page Phase 3.5 touched, at 1280×800 and 390×844, on the demo
 | Headings at their type roles, Transactions lined up | [#241](https://github.com/kwilson21/tally/pull/241) |
 | Copy, disclosure chevrons, How Tally works | [#242](https://github.com/kwilson21/tally/pull/242) |
 | The owner's picks Q56–Q59: Documents out of the menu, the cash delete question, the demo's feedback page, Bills' How link (decision 84, P110–P113) | [#246](https://github.com/kwilson21/tally/pull/246) |
+| The owner's picks Q60–Q62: the delete wording once Undo ships, the money box's corners, a 3-month average (decision 85, P114–P116) | this PR |
 | Undo after deleting a cash entry (decision 84, Q57 D); for the build session | [#244](https://github.com/kwilson21/tally/issues/244) |
+| A 3-month average chip in the budget sheet (decision 85, Q62 B); for the build session | [#250](https://github.com/kwilson21/tally/issues/250) |
 
 Later list (not scheduled): see spec §12.
