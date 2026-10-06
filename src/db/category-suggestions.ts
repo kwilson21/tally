@@ -12,16 +12,25 @@ export type NoneFitTransaction = {
 export async function noneFitTransactions(
 	db: D1Database,
 ): Promise<NoneFitTransaction[]> {
-	// Bound group building to the newest 500 candidates so one busy theme cannot monopolize the nightly run.
-	const { results } = await db
-		.prepare(`SELECT t.id, COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
-			${merchantKeySql("t")} merchantKey, COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant
-		FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
-		WHERE t.jev_none_fit = 1 AND t.category_confidence >= ? AND t.jev_category_id IS NULL
+	const theme = `COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")})`;
+	const eligible = `t.jev_none_fit = 1 AND t.category_confidence >= ? AND t.jev_category_id IS NULL
 		AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_suggestion_id IS NULL
 		AND t.amount_cents > 0 AND t.pending = 0 AND t.excluded = 0 AND t.flag_income = 0
-		AND t.is_split = 0 AND t.parent_id IS NULL ORDER BY t.date DESC, t.id DESC LIMIT 500`)
+		AND t.is_split = 0 AND t.parent_id IS NULL`;
+	const { results: groups } = await db
+		.prepare(`SELECT COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
+			COUNT(*) count FROM transactions t WHERE ${eligible} GROUP BY theme HAVING COUNT(*) >= 3
+			ORDER BY count DESC, theme LIMIT 10`)
 		.bind(JEV_THRESHOLD)
+		.all<{ theme: string; count: number }>();
+	if (!groups.length) return [];
+	const { results } = await db
+		.prepare(`SELECT t.id, ${theme} theme, ${merchantKeySql("t")} merchantKey,
+			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant
+		FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
+		JOIN json_each(?) selected ON selected.value = ${theme}
+		WHERE ${eligible} ORDER BY t.date DESC, t.id DESC LIMIT 500`)
+		.bind(JSON.stringify(groups.map((group) => group.theme)), JEV_THRESHOLD)
 		.all<NoneFitTransaction>();
 	return results.map((row) => ({ ...row, merchant: tidyName(row.merchant) }));
 }
@@ -64,23 +73,30 @@ export async function saveSuggestion(
 		const results = await db.batch([
 			db
 				.prepare(
+					`UPDATE transactions SET category_suggestion_id=NULL WHERE id IN (${placeholders()}) AND category_suggestion_id IN (SELECT id FROM category_suggestions WHERE status='none')`,
+				)
+				.bind(JSON.stringify(ids)),
+			db
+				.prepare(
 					`INSERT INTO category_suggestions (name,status) SELECT ?,? WHERE (SELECT COUNT(*) FROM transactions WHERE ${eligible}) >= 3 RETURNING id`,
 				)
 				.bind(safeName, status, JSON.stringify(ids), JEV_THRESHOLD),
 			db
 				.prepare(
-					`UPDATE transactions SET category_suggestion_id=(SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=? ORDER BY id DESC LIMIT 1) WHERE ${eligible} AND EXISTS (SELECT 1 FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=?)`,
+					`UPDATE transactions SET category_suggestion_id=(SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=? ORDER BY id DESC LIMIT 1) WHERE ${eligible} AND (SELECT COUNT(*) FROM transactions WHERE ${eligible}) >= 3 AND EXISTS (SELECT 1 FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=?)`,
 				)
 				.bind(
 					safeName,
 					status,
 					JSON.stringify(ids),
 					JEV_THRESHOLD,
+					JSON.stringify(ids),
+					JEV_THRESHOLD,
 					safeName,
 					status,
 				),
 		]);
-		const id = (results[0]?.results as { id: number }[] | undefined)?.[0]?.id;
+		const id = (results[1]?.results as { id: number }[] | undefined)?.[0]?.id;
 		if (id) return id;
 		return (
 			(

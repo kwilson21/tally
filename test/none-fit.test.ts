@@ -124,6 +124,14 @@ describe("categorizePending marks what Jev said", () => {
 			jev_category_id: null,
 			category_confidence: 0.92,
 		});
+		for (let copy = 0; copy < 2; copy++)
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,plaid_category,category_confidence,jev_none_fit)
+					 SELECT account_id,date,amount_cents,raw_name,merchant_name,plaid_category,0.92,1 FROM transactions WHERE id=?`,
+				)
+				.bind(id)
+				.run();
 		expect((await noneFitTransactions(db)).map((r) => r.id)).toContain(id);
 	});
 

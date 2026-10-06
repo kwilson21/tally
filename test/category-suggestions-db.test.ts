@@ -143,21 +143,28 @@ beforeEach(async () => {
 describe("noneFitTransactions: what counts as Jev being sure no category fits", () => {
 	it("counts a confident none-fit: a high confidence, no pick of Jev's, nothing chosen yet", async () => {
 		const id = await add();
-		expect(await noneFitTransactions(db)).toEqual([
-			{
-				id,
-				theme: "ENTERTAINMENT",
-				merchantKey: "NETFLIX.COM",
-				merchant: "Netflix.com",
-			},
-		]);
+		await add({ rawName: "HULU" });
+		await add({ rawName: "SPOTIFY" });
+		expect(await noneFitTransactions(db)).toContainEqual({
+			id,
+			theme: "ENTERTAINMENT",
+			merchantKey: "NETFLIX.COM",
+			merchant: "Netflix.com",
+		});
 	});
 
 	it("counts one at exactly the threshold, and leaves out a low-confidence none-fit, which behaves like unsure", async () => {
 		const sure = await add({ confidence: JEV_THRESHOLD });
+		const hulu = await add({ rawName: "HULU", confidence: JEV_THRESHOLD });
+		const spotify = await add({
+			rawName: "SPOTIFY",
+			confidence: JEV_THRESHOLD,
+		});
 		await add({ confidence: JEV_THRESHOLD - 0.01 });
 		await add({ confidence: 0.4 });
-		expect(ids(await noneFitTransactions(db))).toEqual([sure]);
+		expect(ids(await noneFitTransactions(db))).toEqual(
+			[sure, hulu, spotify].sort((a, b) => a - b),
+		);
 	});
 
 	it("leaves out an answer Jev gave while Guess categories was off, which stores no pick but isn't none-fit", async () => {
@@ -206,12 +213,15 @@ describe("noneFitTransactions: what counts as Jev being sure no category fits", 
 			plaidCategory: "TRANSPORTATION",
 			rawName: "UBER *TRIP",
 		});
+		await add({ plaidCategory: "TRANSPORTATION", rawName: "LYFT" });
+		await add({ plaidCategory: "TRANSPORTATION", rawName: "METRO" });
 		const without = await add({
 			plaidCategory: null,
 			rawName: "NEIGHBOR KID",
 			merchantName: null,
 		});
 		const blank = await add({ plaidCategory: "", rawName: "NEIGHBOR KID" });
+		await add({ plaidCategory: null, rawName: "NEIGHBOR KID" });
 		const found = await noneFitTransactions(db);
 		expect(found.find((r) => r.id === withHint)?.theme).toBe("TRANSPORTATION");
 		expect(found.find((r) => r.id === without)?.theme).toBe(

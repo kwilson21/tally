@@ -9,6 +9,7 @@ import {
 	dismissSuggestion,
 	noneFitTransactions,
 	pendingSuggestions,
+	saveSuggestion,
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -56,6 +57,7 @@ type Over = {
 	amountCents?: number;
 	note?: string | null;
 	pending?: 0 | 1;
+	date?: string;
 };
 let seq = 0;
 async function add(over: Over = {}) {
@@ -66,6 +68,7 @@ async function add(over: Over = {}) {
 		confidence: 0.93,
 		noneFit: 1,
 		amountCents: 1599,
+		date: "2026-09-20",
 		note: null,
 		pending: 0,
 		...over,
@@ -73,9 +76,10 @@ async function add(over: Over = {}) {
 	const result = await db
 		.prepare(
 			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_category, category_confidence, jev_none_fit, note, pending)
-			 VALUES (1, '2026-09-20', ?, ?, ?, ?, ?, ?, ?)`,
+			 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
+			o.date,
 			o.amountCents,
 			o.rawName,
 			o.plaidCategory,
@@ -144,11 +148,95 @@ describe("suggestNewCategories", () => {
 		).toBe(false);
 	});
 
-	it("limits none-fit loading to the newest 500 rows", async () => {
+	it("finds a qualifying older group behind 600 newer one-off merchants", async () => {
+		for (let i = 0; i < 600; i++)
+			await add({ rawName: `ONE OFF ${i}`, plaidCategory: `SINGLE ${i}` });
+		const older = [
+			await add({
+				rawName: "OLDER SHOP",
+				plaidCategory: null,
+				date: "2025-01-01",
+			}),
+			await add({
+				rawName: "OLDER SHOP",
+				plaidCategory: null,
+				date: "2025-01-02",
+			}),
+			await add({
+				rawName: "OLDER SHOP",
+				plaidCategory: null,
+				date: "2025-01-03",
+			}),
+		];
+		const ai = fakeAi(() => ({ response: "Older Shop" }));
+		await suggestNewCategories({ DB: db, AI: ai });
+		expect(ai.run).toHaveBeenCalledTimes(1);
+		expect(
+			(await suggestions()).some(
+				(s) => s.name === "Older Shop" && s.status === "pending",
+			),
+		).toBe(true);
+		expect(
+			(await pendingSuggestions(db))[0]?.rows.map((r) => r.id).sort(),
+		).toEqual([...older].sort());
+	});
+	it("caps loaded purchases at 500 even when a selected theme has more rows", async () => {
 		await addMany(501);
-		const rows = await noneFitTransactions(db);
-		expect(rows).toHaveLength(500);
-		expect(rows[0]?.id).toBeGreaterThan(rows.at(-1)?.id ?? 0);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements++;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+		const rows = await noneFitTransactions(counted);
+		expect(rows.length).toBeLessThanOrEqual(500);
+		expect(statements).toBe(2);
+	});
+	it("does not attach the remaining purchases to an older blank suggestion if one changes while AI answers", async () => {
+		const oldNone = await saveSuggestion(
+			db,
+			null,
+			await addMany(3, { rawName: "OLDER NONE", plaidCategory: "OLD" }),
+		);
+		const group = await addMany(3, {
+			rawName: "SHOP",
+			plaidCategory: "NEW GROUP",
+		});
+		const ai = fakeAi(async () => {
+			await db.batch([
+				db
+					.prepare(
+						"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
+					)
+					.bind(group[0]),
+				db
+					.prepare(
+						"UPDATE transactions SET category_suggestion_id=? WHERE id=?",
+					)
+					.bind(oldNone, group[1]),
+			]);
+			return { response: "1" };
+		});
+		await suggestNewCategories({ DB: db, AI: ai });
+		const links = await db
+			.prepare(
+				"SELECT category_suggestion_id FROM transactions WHERE id IN (SELECT value FROM json_each(?))",
+			)
+			.bind(JSON.stringify(group.slice(1)))
+			.all<{ category_suggestion_id: number | null }>();
+		expect(links.results.every((r) => r.category_suggestion_id === null)).toBe(
+			true,
+		);
+		await add({ rawName: "SHOP", plaidCategory: "NEW GROUP" });
+		const nextNight = fakeAi(() => ({ response: "Shopping" }));
+		await suggestNewCategories({ DB: db, AI: nextNight });
+		expect(nextNight.run).toHaveBeenCalledTimes(1);
 	});
 	it("asks Workers AI for a name once three confident none-fit transactions share a theme, and keeps it as a pending suggestion with those transactions behind it", async () => {
 		const made = await addMany(3);
