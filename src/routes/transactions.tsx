@@ -1,6 +1,7 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
+import { accountChoices } from "../db/accounts";
 import {
 	type FirstVisit,
 	firstVisitState,
@@ -34,6 +35,8 @@ import {
 	type Filters,
 	filtersToQuery,
 	parseFilters,
+	SHOW_LABELS,
+	SHOWS,
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
@@ -45,6 +48,7 @@ import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
+import { FilterSelect } from "../views/filter-select";
 import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
@@ -77,9 +81,6 @@ function byDay(rows: ListRow[]): [string, ListRow[]][] {
 	}
 	return groups;
 }
-
-const pill =
-	"min-h-11 rounded-full border border-rule bg-paper px-4 text-base text-ink";
 
 type ListOptions = {
 	/** The edit sheet to show over the list, given the active categories and the household's date. */
@@ -125,7 +126,7 @@ function FirstVisitList({ state }: { state: FirstVisit }) {
 		<EmptyState
 			kind="search"
 			sentence="Importing your transactions…"
-			hint="Your bank sends about 90 days. It usually takes a few minutes."
+			hint="Your bank sends about 90 days of them. It usually takes a few minutes."
 		/>
 	);
 }
@@ -160,7 +161,7 @@ async function renderList(
 		focusHeading = false,
 	}: ListOptions = {},
 ) {
-	const [{ rows, total, page, pages }, months, needs, categories] =
+	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
 		await Promise.all([
 			listTransactions(c.env.DB, filters),
 			monthsWithTransactions(c.env.DB),
@@ -168,6 +169,7 @@ async function renderList(
 			c.env.DB.prepare(
 				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 			).all<Category>(),
+			accountChoices(c.env.DB),
 		]);
 
 	// Only an empty list asks whether it is the first visit's (one cheap statement).
@@ -195,11 +197,18 @@ async function renderList(
 			)?.name ??
 			`category ${filters.category}`;
 	}
+	// Named like the category, so the count always says which account; one that's gone reads by its id.
+	const accountName =
+		filters.account === null
+			? null
+			: (accounts.find((a) => a.id === filters.account)?.label ??
+				`account ${filters.account}`);
 	const count = resultCount(
 		{ total, first, shown: rows.length, pages },
 		filters,
 		categoryName,
 		today,
+		accountName,
 	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	const focusCount =
@@ -210,7 +219,8 @@ async function renderList(
 		filters.uncategorized &&
 		filters.q === "" &&
 		filters.category === null &&
-		!filters.excluded;
+		filters.account === null &&
+		filters.show === "all";
 	const pageHref = (n: number) => {
 		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
 		const params = new URLSearchParams(query);
@@ -226,7 +236,7 @@ async function renderList(
 		<a
 			href={pageHref(n)}
 			rel={rel}
-			class="inline-flex min-h-11 items-center px-2"
+			class="inline-flex min-h-11 items-center px-2 -mx-2"
 			hx-get={pageHref(n)}
 			hx-sync="#filters:replace"
 			hx-target="#results"
@@ -242,13 +252,15 @@ async function renderList(
 	const pageNav = pages > 1 && (
 		<nav
 			aria-label="Pages"
-			class="mt-4 flex items-center justify-between border-t border-rule pt-2"
+			class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center border-t border-rule pt-2"
 		>
 			<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
 			<span class="text-sm text-muted">
 				Page {page} of {pages}
 			</span>
-			<span>{page < pages && pageLink(page + 1, "next", "Older")}</span>
+			<span class="justify-self-end">
+				{page < pages && pageLink(page + 1, "next", "Older")}
+			</span>
 		</nav>
 	);
 	const back = listHref(filters, today.slice(0, 7));
@@ -271,7 +283,7 @@ async function renderList(
 			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
-			<div class="flex items-center justify-between gap-3">
+			<div class="flex items-center justify-between gap-3 lg:max-w-3xl">
 				<h1
 					id="transactions-title"
 					tabindex={focusHeading ? -1 : undefined}
@@ -286,6 +298,7 @@ async function renderList(
 					<Button
 						id="select-toggle"
 						kind="text"
+						class="-mr-2"
 						href={selecting ? doneHref : selectHref}
 					>
 						{selecting ? "Done" : "Select"}
@@ -353,30 +366,52 @@ async function renderList(
 						)}
 					</FormField>
 					<div class="flex flex-wrap gap-2">
-						<label for="month" class="sr-only">
-							Month
-						</label>
-						<select id="month" name="month" class={pill}>
-							{months.map((m) => (
-								<option value={m} selected={filters.month === m}>
-									{monthLabel(m, today)}
-								</option>
-							))}
-							<option value="all" selected={filters.month === "all"}>
-								All months
-							</option>
-						</select>
-						<label for="category" class="sr-only">
-							Category
-						</label>
-						<select id="category" name="category" class={pill}>
-							<option value="">All categories</option>
-							{categories.results.map((cat) => (
-								<option value={cat.id} selected={filters.category === cat.id}>
-									{cat.name}
-								</option>
-							))}
-						</select>
+						<FilterSelect
+							id="month"
+							name="month"
+							label="Month"
+							options={[
+								...months.map((m) => ({
+									value: m,
+									label: monthLabel(m, today),
+								})),
+								{ value: "all", label: "All months" },
+							]}
+							selected={filters.month}
+						/>
+						<FilterSelect
+							id="category"
+							name="category"
+							label="Category"
+							options={[
+								{ value: "", label: "All categories" },
+								...categories.results.map((cat) => ({
+									value: cat.id,
+									label: cat.name,
+								})),
+							]}
+							selected={filters.category}
+						/>
+						<FilterSelect
+							id="account"
+							name="account"
+							label="Account"
+							options={[
+								{ value: "", label: "All accounts" },
+								...accounts.map((a) => ({
+									value: a.id,
+									label: a.disconnected ? `${a.label} · Disconnected` : a.label,
+								})),
+							]}
+							selected={filters.account}
+						/>
+						<FilterSelect
+							id="show"
+							name="show"
+							label="Show"
+							options={SHOWS.map((s) => ({ value: s, label: SHOW_LABELS[s] }))}
+							selected={filters.show}
+						/>
 					</div>
 					<div class="flex flex-wrap gap-2">
 						<Chip
@@ -389,14 +424,6 @@ async function renderList(
 							<span>
 								Needs category (<span id="needs-count">{needs}</span>)
 							</span>
-						</Chip>
-						<Chip
-							type="checkbox"
-							name="excluded"
-							value="1"
-							checked={filters.excluded}
-						>
-							Excluded
 						</Chip>
 					</div>
 					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}
@@ -421,10 +448,15 @@ async function renderList(
 						{count}
 					</p>
 				)}
-				{firstVisit === null && filters.uncategorized && (
-					<Button kind="text" href="/transactions/organize">
-						Organize by merchant
-					</Button>
+				{/* Always drawn on a list, so a filter change can add or remove the link inside it (LIST_OOB). */}
+				{firstVisit === null && (
+					<div id="organize-link">
+						{filters.uncategorized && (
+							<Button kind="text" href="/transactions/organize" class="-ml-2">
+								Organize by merchant
+							</Button>
+						)}
+					</div>
 				)}
 				{selecting ? (
 					<form
@@ -574,6 +606,7 @@ transactions.get("/transactions", async (c) => {
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
 const LIST_OOB = [
 	"#result-count:innerHTML",
+	"#organize-link:innerHTML",
 	"#add-cash:outerHTML",
 	"#select-toggle:outerHTML",
 	"#selection-back:outerHTML",

@@ -13,8 +13,9 @@ describe("parseFilters", () => {
 			q: "",
 			month: "2026-09",
 			category: null,
+			account: null,
+			show: "all",
 			uncategorized: false,
-			excluded: false,
 			page: 1,
 		});
 	});
@@ -31,7 +32,33 @@ describe("parseFilters", () => {
 		expect(parse("page=3").page).toBe(3);
 	});
 
+	it("reads the Account choice as an account id", () => {
+		expect(parse("account=4").account).toBe(4);
+		expect(parse("account=").account).toBeNull();
+	});
+
+	it.each(["all", "spending", "income", "refunds", "excluded"] as const)(
+		"reads Show %s",
+		(show) => {
+			expect(parse(`show=${show}`).show).toBe(show);
+		},
+	);
+
+	it("still reads the old Excluded chip's link as Show Excluded", () => {
+		expect(parse("excluded=1").show).toBe("excluded");
+		expect(parse("excluded=0").show).toBe("all");
+		// A Show choice in the same link wins over the old parameter.
+		expect(parse("show=income&excluded=1").show).toBe("income");
+		expect(parse("show=all&excluded=1").show).toBe("all");
+	});
+
 	it("ignores malformed values instead of failing", () => {
+		expect(parse("account=abc").account).toBeNull();
+		expect(parse("account=0").account).toBeNull();
+		expect(parse("account=-2").account).toBeNull();
+		expect(parse("account=1.5").account).toBeNull();
+		expect(parse("show=everything").show).toBe("all");
+		expect(parse("show=Income").show).toBe("all");
 		expect(parse("month=nope").month).toBe("2026-09");
 		expect(parse("month=2026-13").month).toBe("2026-09");
 		expect(parse("month=2026-00").month).toBe("2026-09");
@@ -51,6 +78,20 @@ describe("filtersToQuery", () => {
 		);
 		expect(filtersToQuery(parse(""), "2026-09")).toBe("");
 		expect(filtersToQuery(parse("page=2"), "2026-09")).toBe("page=2");
+	});
+
+	it("carries the Account and Show choices, and leaves out All accounts and Show All", () => {
+		const f = parse("account=4&show=refunds&category=2");
+		expect(filtersToQuery(f, "2026-09")).toBe(
+			"category=2&account=4&show=refunds",
+		);
+		expect(filtersToQuery(parse("show=all&account="), "2026-09")).toBe("");
+	});
+
+	it("writes the old Excluded chip's link as Show Excluded", () => {
+		expect(filtersToQuery(parse("excluded=1"), "2026-09")).toBe(
+			"show=excluded",
+		);
 	});
 });
 

@@ -97,6 +97,14 @@ describe("GET /how-it-works in the demo", () => {
 		);
 	});
 
+	it("points to the Show choice, not an Excluded filter, for finding excluded transactions (#210)", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"Choose Excluded in the Show choice on Transactions to see only the excluded ones.",
+		);
+		expect(html).not.toContain("The Excluded filter");
+	});
+
 	it("draws each section's diagram from the same numbers as its worked example", async () => {
 		const page = decodeHtml((await get("/how-it-works")).html);
 		const descOf = (id: string) =>
@@ -436,5 +444,42 @@ describe("the parts table", () => {
 			...html.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd[^>]*>([^<]+)<\/dd>/g),
 		].map(([, part = "", job = ""]) => [decodeHtml(part), decodeHtml(job)]);
 		expect(page).toEqual(rows);
+	});
+});
+
+describe("the held-for-review rule (spec §6, decision 70)", () => {
+	const sectionOf = (html: string, id: string) =>
+		decodeHtml(
+			html.match(
+				new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?</section>`),
+			)?.[0] ?? "",
+		).replace(/\s+/g, " ");
+	const family = async () =>
+		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+
+	it("is stated in the spec, and the Transactions section says it in the spec's words", async () => {
+		// Spec §6 says Spent, Uncategorized, and Safe to spend; the page says them as the person reads them.
+		expect(spec).toContain(
+			"is held out of Spent, Uncategorized, and Safe to spend until Jev confidently categorizes it as non-income or a person marks it reviewed as a refund or other non-income credit (decision 70)",
+		);
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = sectionOf(html, "transactions");
+			expect(text).toContain(
+				"An unreviewed bank credit that isn't income is held out of spending, uncategorized, and safe to spend until Tally confidently categorizes it as non-income or a person marks it reviewed as a refund or other non-income credit.",
+			);
+			// So the first rule no longer says every non-excluded transaction counts.
+			expect(text).toContain(
+				"not a split parent (its parts count instead) or a credit held for review (below)",
+			);
+		}
+	});
+
+	it("is pointed to from Excluding, where the held slice is drawn, and never names Jev", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			expect(sectionOf(html, "exclusions")).toContain(
+				"A credit held for review isn't excluded: it waits until Tally confidently sorts it as non-income or a person reviews it, and once a person marks it as income it counts toward Income instead, unless it's excluded too (see Transactions).",
+			);
+		}
+		expect(sectionOf(await family(), "transactions")).not.toMatch(/jev/i);
 	});
 });

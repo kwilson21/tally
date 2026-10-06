@@ -24,6 +24,33 @@ describe("Bills", () => {
 		expect(html).toContain("bills to pay soon");
 	});
 
+	// DESIGN.md Type roles: a page title is 5xl, so the title does not shrink on the Bills tab.
+	it.each([
+		["/bills", "Bills"],
+		["/bills/find", "Possible bills"],
+	])("draws %s's h1 as a 5xl page title", async (path, title) => {
+		const html = await (
+			await exports.default.fetch(`http://tally.test${path}`)
+		).text();
+		expect(html).toMatch(
+			new RegExp(
+				`<h1 class="font-serif text-5xl font-semibold tracking-tight">\\s*${title}\\s*</h1>`,
+			),
+		);
+	});
+
+	it("keeps the Add a bill sheet's title at the 4xl sheet role, a size below the page's", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/new")
+		).text();
+		expect(html).toContain(
+			'<h2 id="bill-sheet-title" class="font-serif text-4xl font-semibold tracking-tight"',
+		);
+		expect(html).toContain(
+			'<h1 class="font-serif text-5xl font-semibold tracking-tight">Bills</h1>',
+		);
+	});
+
 	it("adds a bill and returns htmx feedback", async () => {
 		const body = new URLSearchParams({
 			name: "Gym",
@@ -63,6 +90,19 @@ describe("Bills", () => {
 		expect(html).toContain('class="bill-month');
 	});
 
+	it("leads the Inactive disclosure with a chevron that turns when it opens", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		const details = html.match(
+			/<details[^>]*>\s*<summary[^>]*>[\s\S]*?<\/summary>/,
+		);
+		expect(details?.[0]).toMatch(/<details class="group /);
+		expect(details?.[0]).toContain("group-open:rotate-90");
+		expect(details?.[0]).toContain('data-icon="chevron-right"');
+		expect(details?.[0]).toMatch(/Inactive \(1\)\s*<\/summary>/);
+	});
+
 	it("does not call an inactive-only bill list empty", async () => {
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const html = await (
@@ -70,6 +110,20 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain("Inactive (7)");
 		expect(html).not.toContain("No bills yet.");
+		// With bills but none due, the count is accurate and stays.
+		expect(html).toContain("0 bills to pay soon, $0.00 in all");
+	});
+
+	it("says No bills yet. once on a first visit, without a count of zero above it", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+		]);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html).toContain("No bills yet.");
+		expect(html).not.toContain("to pay soon");
 	});
 
 	it("validates category and yearly month with alerts", async () => {

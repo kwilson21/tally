@@ -32,6 +32,7 @@ import { EmptyState } from "../views/empty-state";
 import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
+import { FilterSelect } from "../views/filter-select";
 import { HomeTop } from "../views/home-top";
 import {
 	BillsDiagram,
@@ -54,6 +55,7 @@ import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
+import { TimeZoneRow } from "../views/time-zone-row";
 import { TransactionRow } from "../views/transaction-row";
 import {
 	ChangeRow,
@@ -439,6 +441,45 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. With one transaction the muted line says “For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
 	words:
 		"Name · Tally's guess · Why? · Keep “{Blue bottle cof}” · Or your own · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+};
+
+// The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
+const FILTER_SELECT_SPEC: UseSpecText = {
+	purpose:
+		"Let a person narrow a list by one thing: Transactions' Month, Category, Account and Show. Several sit side by side, and the list and its count follow each choice.",
+	affordance:
+		"A pill with a thin rule, the chosen option in ink and the browser's own arrow at its end, 44px tall. It is a real select, so a phone opens its own picker. It reads as a pill like a Chip, because it narrows the list the way a Chip does.",
+	states:
+		"Rest: the chosen option, or the first (“All categories”, “All accounts”, “All”) when none is chosen. Open: the browser's own list. Focus: the focus-visible ring, for the keyboard. Hover, pressed, disabled, loading and error: not applicable. The list swaps as the choice changes, and a choice that can't be made isn't offered.",
+	feedback:
+		"With JavaScript the list and its count swap in place a moment after a choice and the page's address follows, so the view can be shared. The count above the list names the choice (“12 transactions in Chase Card ••9921, October”), which is what a screen reader announces. Without JavaScript the Apply filters button submits the same form.",
+	input:
+		"Touch: the whole 44px pill. Keyboard: Tab to it, arrow keys or typing the first letters change it. Screen reader: “Account, combo box, Chase Card ••9921”; its label is read but never shown, since the chosen option already says what it is.",
+	motion: "None. The browser draws its own list.",
+	edges:
+		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. An option that is gone (an account removed) leaves the pill on its first option. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
+	words:
+		"Month: {October} · All months. Category: All categories · {the household's categories}. Account: All accounts · {Chase Card ••9921} · {Cash} · {Old Savings ••3340 · Disconnected}. Show: All · Spending · Income · Refunds · Excluded.",
+};
+
+// The time zone row's use spec (decision 72, P35 A): every line answered before the owner signs it off.
+const TIME_ZONE_SPEC: UseSpecText = {
+	purpose:
+		"Let the household choose the time zone Tally uses for “today”, so a new month starts and a bill falls due at the household's own midnight. It's the one row in Settings' Household group.",
+	affordance:
+		"A row like a category row: “Time zone” at the left, the zone's everyday name at the right (“Eastern”), and a chevron at the far end. The whole row is the target, 44px tall, with the pointer hand. Opened, it holds a select of the six US zones and then “Other time zones”, a muted line saying what the zone decides, Save as the primary button and Cancel as the secondary one.",
+	states:
+		"Closed: the row with the saved zone's name. Open: the chevron turned down and the form below. Hover: no change (touch has none). Focus: the focus-visible ring on the row, the select and each button, for the keyboard. Save: rest, pressed, and “Saving…” with the spinner, disabled while it saves. Error: the row opens, the select takes the error look with its words under it in role=alert, and nothing was saved. Disabled and done: not applicable; a saved zone shows as the new name.",
+	feedback:
+		"Save: the group swaps in place and comes back closed with the new name at the right, a toast says “Saved time zone”, the announcer says “Saved time zone. Months and bills now follow Central time.”, and focus goes to the row, since the swap replaced Save. Cancel closes the row with focus on it. Without JavaScript Save posts the form and Settings comes back at the group. Nothing changes until Save.",
+	input:
+		"Touch: the row, the select and both buttons are 44px tall, and a phone opens its own picker for the select. Keyboard: Tab to the row, Enter or Space opens it; Tab to the select and choose with the arrow keys or by typing a name; Tab to Save and press Enter. Screen reader: “Time zone, Eastern, button, collapsed”; then the select, named “Time zone” and described by its muted line (and by its error).",
+	motion:
+		"The chevron turns a quarter turn as the row opens. Reduced motion shows the end state at once. Nothing else moves.",
+	edges:
+		"Only a zone the select offers is saved: a post that names another comes back with the error and changes nothing. Saving the zone that's already saved is fine. The zone changes only “today”; a transaction's own date is never converted. A saved zone the select doesn't offer still shows its city at the right, and the select starts on Eastern. At 320px the name and the zone sit side by side. No JavaScript: it's a plain details element and a form that posts.",
+	words:
+		"Time zone · {Eastern} (Eastern, Central, Mountain, Pacific, Alaska, Hawaii; the others by city) · Other time zones · Decides when a new month starts and when a bill is due. Transactions keep the bank's dates. · Save · Saving… · Cancel · Toast: Saved time zone · Announced: Saved time zone. Months and bills now follow {Central} time. · Error: Choose a time zone from the list.",
 };
 
 // The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
@@ -1215,6 +1256,133 @@ function Controls() {
 				</fieldset>
 			</Specimen>
 			<Specimen
+				id="filter-select"
+				title="FilterSelect"
+				tier="interactive"
+				components={["FilterSelect"]}
+				sentence="A pill-shaped choice that narrows a list: Transactions' Month, Category, Account and Show (P63 A, P64 B). A real select with a label only a screen reader hears."
+			>
+				<State label="Transactions' filter bar at rest: Month, Category, Account and Show (the selects open here; only Transactions filters a list)">
+					<div class="flex max-w-3xl flex-wrap gap-2">
+						<FilterSelect
+							id="ds-filter-month"
+							name="ds-month"
+							label="Month"
+							options={[
+								{ value: "2026-10", label: "October" },
+								{ value: "2026-09", label: "September" },
+								{ value: "all", label: "All months" },
+							]}
+							selected="2026-10"
+						/>
+						<FilterSelect
+							id="ds-filter-category"
+							name="ds-category"
+							label="Category"
+							options={[
+								{ value: "", label: "All categories" },
+								{ value: 1, label: "Groceries" },
+								{ value: 2, label: "Eating Out" },
+							]}
+							selected={null}
+						/>
+						<FilterSelect
+							id="ds-filter-account"
+							name="ds-account"
+							label="Account"
+							options={[
+								{ value: "", label: "All accounts" },
+								{ value: 3, label: "Chase Card ••9921" },
+								{ value: 5, label: "Old Savings ••3340 · Disconnected" },
+								{ value: 4, label: "Cash" },
+							]}
+							selected={null}
+						/>
+						<FilterSelect
+							id="ds-filter-show"
+							name="ds-show"
+							label="Show"
+							options={[
+								{ value: "all", label: "All" },
+								{ value: "spending", label: "Spending" },
+								{ value: "income", label: "Income" },
+								{ value: "refunds", label: "Refunds" },
+								{ value: "excluded", label: "Excluded" },
+							]}
+							selected="all"
+						/>
+					</div>
+				</State>
+				<State label="With choices made: a category, an account and Show Income">
+					<div class="flex max-w-3xl flex-wrap gap-2">
+						<FilterSelect
+							id="ds-filter-month-set"
+							name="ds-month-set"
+							label="Month"
+							options={[
+								{ value: "2026-10", label: "October" },
+								{ value: "all", label: "All months" },
+							]}
+							selected="all"
+						/>
+						<FilterSelect
+							id="ds-filter-category-set"
+							name="ds-category-set"
+							label="Category"
+							options={[
+								{ value: "", label: "All categories" },
+								{ value: 1, label: "Groceries" },
+							]}
+							selected={1}
+						/>
+						<FilterSelect
+							id="ds-filter-account-set"
+							name="ds-account-set"
+							label="Account"
+							options={[
+								{ value: "", label: "All accounts" },
+								{ value: 3, label: "Chase Card ••9921" },
+							]}
+							selected={3}
+						/>
+						<FilterSelect
+							id="ds-filter-show-set"
+							name="ds-show-set"
+							label="Show"
+							options={[
+								{ value: "all", label: "All" },
+								{ value: "income", label: "Income" },
+							]}
+							selected="income"
+						/>
+					</div>
+				</State>
+				<State label="On a narrow phone (320px): a long account name shortens inside its pill and the pills wrap">
+					<div class="flex w-[320px] max-w-full flex-wrap gap-2">
+						<FilterSelect
+							id="ds-filter-month-narrow"
+							name="ds-month-narrow"
+							label="Month"
+							options={[{ value: "2026-10", label: "October" }]}
+							selected="2026-10"
+						/>
+						<FilterSelect
+							id="ds-filter-account-narrow"
+							name="ds-account-narrow"
+							label="Account"
+							options={[
+								{
+									value: 3,
+									label: "Chase Sapphire Preferred Rewards Credit Card ••9921",
+								},
+							]}
+							selected={3}
+						/>
+					</div>
+				</State>
+				<UseSpec spec={FILTER_SELECT_SPEC} />
+			</Specimen>
+			<Specimen
 				id="switch"
 				title="Switch"
 				tier="interactive"
@@ -1304,6 +1472,61 @@ function Controls() {
 					</div>
 				</State>
 				<UseSpec spec={NAME_CHOICES_SPEC} />
+			</Specimen>
+			<Specimen
+				id="time-zone-row"
+				title="TimeZoneRow"
+				tier="visual"
+				components={["TimeZoneRow"]}
+				sentence="Settings' Household row (decision 72, P35 A): “Time zone” with the zone's everyday name at the right and a chevron, which opens to a select and Save. It works without JavaScript."
+			>
+				<State label="Closed, as Settings draws it">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-closed"
+							zone="America/New_York"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="Open: the select, what the zone decides, and Save and Cancel">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-open"
+							zone="America/Chicago"
+							open
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="With an error: the row opens, and the words sit under the select in role=“alert”">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-error"
+							zone="America/Chicago"
+							error="Choose a time zone from the list."
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="On a narrow phone (320px), with a longer name">
+					<div inert class="w-[320px] max-w-full border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-narrow"
+							zone="America/Puerto_Rico"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<UseSpec spec={TIME_ZONE_SPEC} />
 			</Specimen>
 			<Specimen
 				id="form-field"
