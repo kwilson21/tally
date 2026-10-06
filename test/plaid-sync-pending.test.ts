@@ -159,7 +159,7 @@ async function addRefund(purchase: number, cents = -300) {
 async function addBillLinkedTo(transactionId: number) {
 	await env.DB.batch([
 		env.DB.prepare(
-			"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (700, 'Phone', 1234, 28, 'monthly', 'Not a match')",
+			"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (700, 'Phone', 1234, 28, 'monthly', 1, 'Not a match')",
 		),
 		env.DB.prepare(
 			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (700, '2026-09', ?, 'user', 'linked')",
@@ -324,6 +324,10 @@ describe("when the bank posts a pending transaction", () => {
 					status: "linked",
 				},
 			],
+		});
+		expect(await row("posted-1")).toMatchObject({
+			category_id: 1,
+			category_source: "bill",
 		});
 	});
 

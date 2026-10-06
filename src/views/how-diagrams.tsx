@@ -418,6 +418,7 @@ export function ExclusionsDiagram({
 export function CategoriesDiagram(c: {
 	user: number;
 	merchantRule: number;
+	bill: number;
 	jev: number;
 	waiting: number;
 	income: number;
@@ -434,6 +435,7 @@ export function CategoriesDiagram(c: {
 	const steps: [string, number][] = [
 		["A person's choice", c.user],
 		["A merchant rule", c.merchantRule],
+		["A bill", c.bill],
 		[`${ai}, if ${c.threshold} or more sure`, c.jev],
 		["Waits for a person", c.waiting],
 	];
@@ -441,8 +443,8 @@ export function CategoriesDiagram(c: {
 		<Figure
 			id="categories-diagram"
 			title="Where a transaction's category comes from"
-			desc={`Each transaction's category comes from the first step that applies. This month: a person chose ${c.user}, merchant rules ${c.merchantRule}, ${ai} ${c.jev}, and ${c.waiting} ${c.waiting === 1 ? "waits" : "wait"} for a person.${income}`}
-			height={c.income > 0 ? 272 : 244}
+			desc={`Each transaction's category comes from the first step that applies. This month: a person chose ${c.user}, merchant rules ${c.merchantRule}, bills ${c.bill}, ${ai} ${c.jev}, and ${c.waiting} ${c.waiting === 1 ? "waits" : "wait"} for a person.${income}`}
+			height={c.income > 0 ? 336 : 308}
 		>
 			{steps.map(([label, count], i) => (
 				<>
@@ -454,9 +456,9 @@ export function CategoriesDiagram(c: {
 							</>
 						}
 						count={count}
-						dashed={i === 3}
+						dashed={i === 4}
 					/>
-					{i < 3 && (
+					{i < 4 && (
 						<path d={down(40, 48 + i * 64, 64 + i * 64)} class="stroke-ink" />
 					)}
 				</>

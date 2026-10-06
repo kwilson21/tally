@@ -64,6 +64,52 @@ describe("bill payment matching", () => {
 		]);
 	});
 
+	it("gives an uncategorized matched payment its bill category and preserves a person's choice", async () => {
+		await env.DB.batch([
+			env.DB.prepare("UPDATE bills SET category_id=1 WHERE id=1"),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id=NULL, category_source=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=3",
+			),
+		]);
+
+		await matchBillPayments(env.DB, "2026-04-03");
+
+		const rows = await env.DB.prepare(
+			"SELECT id,category_id AS categoryId,category_source AS categorySource FROM transactions WHERE id IN (1,3) ORDER BY id",
+		).all();
+		expect(rows.results).toEqual([
+			{ id: 1, categoryId: 1, categorySource: "bill" },
+			{ id: 3, categoryId: 2, categorySource: "user" },
+		]);
+	});
+
+	it("keeps a long bill scan under D1's 1,000 query limit", async () => {
+		await env.DB.batch(
+			Array.from({ length: 40 }, (_, i) =>
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?, ?, 10000, 10, 'monthly', ?)",
+				).bind(1000 + i, `Unmatched ${i}`, `NO MATCH ${i}`),
+			),
+		);
+		let statements = 0;
+		const counted = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		await matchBillPayments(counted as D1Database, "2026-04-03");
+		expect(statements).toBeLessThan(1000);
+	});
+
 	it("skips split parents, the wrong merchant, claimed rows, and dismissals", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),

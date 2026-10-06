@@ -367,6 +367,11 @@ howItWorks.get("/how-it-works", async (c) => {
 							with "Always for this merchant" in the edit panel.
 						</li>
 						<li>
+							A bill: a linked payment with no category takes its bill's. A
+							person's choice and a merchant rule replace it, and unlinking
+							leaves the category.
+						</li>
+						<li>
 							{demo
 								? `Jev, an AI model, which each night picks a category for what's left. Tally applies Jev's pick only when Jev is at least ${threshold} sure, and never when Jev says none of the categories fit; anything else waits for a person.`
 								: `An AI model, which each night picks a category for what's left. Tally applies its pick only when it is at least ${threshold} sure, and never when it says none of the categories fit; anything else waits for a person.`}
@@ -378,6 +383,7 @@ howItWorks.get("/how-it-works", async (c) => {
 								<CategoriesDiagram
 									user={counts.user}
 									merchantRule={counts.merchantRule}
+									bill={counts.bill}
 									jev={counts.jev}
 									waiting={counts.needsCategory + counts.linkedWaiting}
 									income={counts.income}

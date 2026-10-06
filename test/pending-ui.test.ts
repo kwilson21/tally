@@ -125,7 +125,7 @@ describe("Pending on a row's caption line", () => {
 		[
 			"a refund waiting on its purchase's category",
 			{ refundOfId: 3, refundPurchaseDate: "2026-10-01" },
-			["Pending ·", "Refund for Oct 1", "Needs category"],
+			["Pending ·", "Refund for Oct 1 · TST* LUPITAS TAQ", "Needs category"],
 		],
 	] as const)(
 		"goes first when the caption already says more: %s",

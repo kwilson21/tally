@@ -205,11 +205,12 @@ describe("ExclusionsDiagram", () => {
 });
 
 describe("CategoriesDiagram", () => {
-	it("shows the four steps in order, with how many each handled", async () => {
+	it("shows the five steps in order, with how many each handled", async () => {
 		const html = await render(
 			CategoriesDiagram({
 				user: 1,
 				merchantRule: 0,
+				bill: 3,
 				jev: 19,
 				waiting: 10,
 				income: 2,
@@ -219,10 +220,10 @@ describe("CategoriesDiagram", () => {
 		);
 		expectLabelled(html);
 		expect(words(html)).toContain(
-			"1 A person's choice 1 2 A merchant rule 0 3 Jev, if 80% or more sure 19 4 Waits for a person 10 + 2 income, which needs no category",
+			"1 A person's choice 1 2 A merchant rule 0 3 A bill 3 4 Jev, if 80% or more sure 19 5 Waits for a person 10 + 2 income, which needs no category",
 		);
 		expect(desc(html)).toBe(
-			"Each transaction's category comes from the first step that applies. This month: a person chose 1, merchant rules 0, Jev 19, and 10 wait for a person. 2 are income, which needs no category.",
+			"Each transaction's category comes from the first step that applies. This month: a person chose 1, merchant rules 0, bills 3, Jev 19, and 10 wait for a person. 2 are income, which needs no category.",
 		);
 		// The waiting step is dashed: nothing has decided yet.
 		expect(html.match(/stroke-dasharray/g)).toHaveLength(1);
@@ -233,6 +234,7 @@ describe("CategoriesDiagram", () => {
 			CategoriesDiagram({
 				user: 0,
 				merchantRule: 0,
+				bill: 0,
 				jev: 4,
 				waiting: 0,
 				income: 0,
@@ -241,7 +243,7 @@ describe("CategoriesDiagram", () => {
 			}),
 		);
 		expect(html).not.toMatch(/jev/i);
-		expect(words(html)).toContain("3 Tally, if 80% or more sure 4");
+		expect(words(html)).toContain("4 Tally, if 80% or more sure 4");
 		expect(desc(html)).toContain("Tally 4");
 	});
 
@@ -250,6 +252,7 @@ describe("CategoriesDiagram", () => {
 			CategoriesDiagram({
 				user: 0,
 				merchantRule: 0,
+				bill: 0,
 				jev: 0,
 				waiting: 0,
 				income: 0,

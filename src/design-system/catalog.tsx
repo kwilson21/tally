@@ -1055,7 +1055,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A pending one adds “Pending” to the same caption line in muted words, with no new tag or color (P34 A, decision 72). A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it (P29 A, P87 B, decisions 64 and 80). Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill” on the caption line (P59 A, decision 74). A pending one adds “Pending” in muted words. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
 			>
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
@@ -1989,6 +1989,12 @@ function Demo() {
 					Going well <span aria-hidden="true">·</span>{" "}
 					<WhyLink section="trends" topic="going well" />
 				</p>
+				<State label="Beside Category when a payment took the bill's category">
+					<p class="flex items-center gap-2">
+						Category <span aria-hidden="true">·</span>{" "}
+						<WhyLink section="categorization" topic="this category" />
+					</p>
+				</State>
 			</Specimen>
 		</Group>
 	);

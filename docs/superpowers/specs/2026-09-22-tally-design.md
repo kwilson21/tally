@@ -177,7 +177,8 @@ The amount tolerance (10%) and date window (±5 days) are single config values. 
 
 1. **A person.** A manual choice sets `category_source = user`, which is never overwritten. The edit panel offers "Always use this category for this merchant," which sets `merchants.default_category_id`.
 2. **Merchant rule.** If the merchant has a `default_category_id`, apply it (`category_source = merchant_rule`).
-3. **Jev.** Make **one** `POST /v1/systemone` call per transaction. Its `questions` map holds a `category` Choice question (options: the household's category list) and one yes/no (Noul) question per allowed flag (`transfer`, `reimbursement`, `income`), which is the bundling pattern Jev's docs recommend. If the category answer's confidence is at or above the threshold, apply it (`category_source = jev`); otherwise leave the category null for review. Each flag is applied on its own confidence check.
+3. **Bill.** A payment linked to a bill that has no category takes its bill's category (`category_source = bill`); a person's choice and a merchant rule replace it, and unlinking leaves it.
+4. **Jev.** Make **one** `POST /v1/systemone` call per transaction. Its `questions` map holds a `category` Choice question (options: the household's category list) and one yes/no (Noul) question per allowed flag (`transfer`, `reimbursement`, `income`), which is the bundling pattern Jev's docs recommend. If the category answer's confidence is at or above the threshold, apply it (`category_source = jev`); otherwise leave the category null for review. Each flag is applied on its own confidence check.
 
 The confidence threshold is a single config value, set during Phase 1 after checking Jev's output on the seed data.
 

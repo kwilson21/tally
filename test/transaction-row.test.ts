@@ -154,6 +154,29 @@ describe("rowCaption", () => {
 		).toBe("Groceries · Split from Costco");
 	});
 
+	it("names the bill a payment paid after its category", () => {
+		expect(
+			rowCaption({
+				...base,
+				categoryName: "Rent",
+				paysBill: true,
+				billName: "Rent",
+			}),
+		).toMatchObject({ kind: "category", caption: "Rent · paid Rent bill" });
+		expect(
+			rowCaption({
+				...base,
+				categoryName: "Utilities",
+				paysBill: true,
+				billName: "Internet",
+				categoryId: 3,
+			}),
+		).toMatchObject({
+			kind: "category",
+			caption: "Utilities · paid Internet bill",
+		});
+	});
+
 	it("drops the bank-change note once the purchase has a category again", () => {
 		expect(
 			rowCaption({ ...base, splitRemovedFromCents: 1234, categoryId: 1 })

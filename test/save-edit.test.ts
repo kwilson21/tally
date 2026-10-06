@@ -145,7 +145,7 @@ describe("saveEdit", () => {
 			category_confidence: null,
 			updated_by: "demo",
 		});
-		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(9);
 		const summary = summarizeMonth({
 			month: "2026-09",
 			...(await loadMonth(db, "2026-09")),
@@ -161,7 +161,7 @@ describe("saveEdit", () => {
 		const before = await loadMonth(db, "2026-09");
 		await saveEdit(db, id, edit({ excluded: true }), "demo");
 		expect(await row(id)).toMatchObject({ excluded: 1, updated_by: "demo" });
-		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(9);
 		const after = await loadMonth(db, "2026-09");
 		expect(after.transactions.length).toBe(before.transactions.length - 1);
 	});

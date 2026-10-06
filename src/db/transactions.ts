@@ -56,6 +56,8 @@ export type ListRow = {
 	excluded: boolean;
 	/** Linked to a bill's occurrence: it counts in Spent whatever its exclusion, and isn't shown as excluded. */
 	paysBill?: boolean;
+	/** The linked bill whose payment this transaction is. */
+	billName?: string | null;
 	income: boolean;
 	creditReviewed: boolean;
 	categoryId: number | null;
@@ -205,7 +207,9 @@ export async function listTransactions(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
+				t.excluded, ${paysBillSql("t")} AS paysBill,
+				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
+				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
@@ -366,7 +370,7 @@ export type TransactionDetail = ListRow & {
 	accountType: string;
 	/** The merchant's chosen display name, or null when it falls back to the raw name. */
 	merchantName: string | null;
-	categorySource: "user" | "merchant_rule" | "jev" | null;
+	categorySource: "user" | "merchant_rule" | "bill" | "jev" | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
 	/**
@@ -435,7 +439,9 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				t.excluded, ${paysBillSql("t")} AS paysBill,
+				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
+				${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
@@ -953,8 +959,8 @@ export async function removeSplit(
 }
 
 /**
- * Applies merchant rules to transactions nobody has categorized yet (spec §7: a merchant rule
- * comes before Jev). A person's choice, or a category from anywhere else, is never touched.
+ * Applies merchant rules to uncategorized transactions and bill categories (spec §7: a merchant
+ * rule replaces a bill category). A person's choice, or a Jev category, is never touched.
  * A rule whose category is archived is skipped, and works again once the category is restored.
  * A rule saved under the merchant key wins over one saved under the raw name (spec §6.1).
  */
@@ -966,7 +972,7 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 			`UPDATE transactions SET
 				category_id = (${rule}),
 				category_source = 'merchant_rule', category_confidence = NULL, updated_at = datetime('now')
-			WHERE category_id IS NULL AND category_source IS NULL AND EXISTS (${rule})`,
+			WHERE (category_id IS NULL AND category_source IS NULL OR category_source = 'bill') AND EXISTS (${rule})`,
 		)
 		.run();
 }
@@ -1304,6 +1310,7 @@ export async function monthCounts(
 	needsCategory: number;
 	user: number;
 	merchantRule: number;
+	bill: number;
 	jev: number;
 	unsure: number;
 	noneFit: number;
@@ -1321,6 +1328,7 @@ export async function monthCounts(
 				COALESCE(SUM(CASE WHEN ${NEEDS_CATEGORY} THEN 1 ELSE 0 END), 0) AS needsCategory,
 				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}) AND ${COUNTED_BY.source} = 'user'), 0) AS user,
 				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}) AND ${COUNTED_BY.source} = 'merchant_rule'), 0) AS merchantRule,
+				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}) AND ${COUNTED_BY.source} = 'bill'), 0) AS bill,
 				COALESCE(SUM((t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE}) AND ${COUNTED_BY.source} = 'jev'), 0) AS jev,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NOT NULL), 0) AS unsure,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NULL), 0) AS noneFit,
@@ -1338,6 +1346,7 @@ export async function monthCounts(
 			needsCategory: number;
 			user: number;
 			merchantRule: number;
+			bill: number;
 			jev: number;
 			unsure: number;
 			noneFit: number;
@@ -1352,6 +1361,7 @@ export async function monthCounts(
 			needsCategory: 0,
 			user: 0,
 			merchantRule: 0,
+			bill: 0,
 			jev: 0,
 			unsure: 0,
 			noneFit: 0,

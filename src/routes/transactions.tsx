@@ -69,6 +69,7 @@ import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
+import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
 export const transactions = new Hono<App>();
@@ -1184,7 +1185,15 @@ function EditSheet({
 					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
-					<legend class="text-base text-ink">Category</legend>
+					<legend class="flex items-center gap-1 text-base text-ink">
+						Category
+						{tx.categorySource === "bill" && (
+							<>
+								<span aria-hidden="true">·</span>
+								<WhyLink section="categorization" topic="this category" />
+							</>
+						)}
+					</legend>
 					<div class="flex flex-wrap gap-2">
 						{categories.map((cat) => (
 							<Chip

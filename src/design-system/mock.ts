@@ -44,6 +44,22 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 			categoryColor: "cat-blue",
 		},
 	},
+	{
+		label: "Payment linked to a bill",
+		row: {
+			...row,
+			id: 8,
+			displayName: "Harbor Property",
+			rawName: "HARBOR PROPERTY MGMT",
+			amountCents: 120000,
+			categoryId: 5,
+			categoryName: "Rent",
+			categoryIcon: "rent",
+			categoryColor: "cat-slate",
+			paysBill: true,
+			billName: "Rent",
+		},
+	},
 	{ label: "Needs a category (unnamed merchant, raw text tidied)", row },
 	{
 		label: "Income",
@@ -372,6 +388,7 @@ export const EXCLUSIONS_EXAMPLE: {
 export const CATEGORIES_EXAMPLE = {
 	user: 14,
 	merchantRule: 22,
+	bill: 5,
 	jev: 40,
 	waiting: 12,
 	income: 3,

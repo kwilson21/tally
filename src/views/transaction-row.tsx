@@ -65,17 +65,22 @@ export function rowCaption(row: ListRow): Caption {
 	const pair = row.refundPurchaseDate
 		? `Refund for ${shortDay(row.refundPurchaseDate, row.date)}`
 		: refunded(row);
+	const paidBill =
+		row.paysBill && row.billName ? `paid ${row.billName} bill` : null;
 	if (row.categoryName)
 		return {
 			kind: "category",
-			caption: pair ? `${row.categoryName} · ${pair}` : row.categoryName,
+			caption: [row.categoryName, pair, paidBill].filter(Boolean).join(" · "),
 			tag: false,
 		};
 	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
 	if (row.followsPurchase) return { kind: "needs", caption: pair, tag: false };
 	return {
 		kind: "needs",
-		caption: pair ?? (row.rawName === row.displayName ? null : row.rawName),
+		caption:
+			[pair, paidBill, row.rawName === row.displayName ? null : row.rawName]
+				.filter(Boolean)
+				.join(" · ") || null,
 		tag: true,
 	};
 }
