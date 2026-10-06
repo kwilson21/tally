@@ -60,8 +60,6 @@ export async function holdCashDelete(
 }
 
 const jsonColumn = (column: string) => `json_extract(value, '$."${column}"')`;
-const insertRows = (table: string, columns: string[]) =>
-	`INSERT INTO ${table} (${columns.join(",")}) SELECT ${columns.map(jsonColumn).join(",")} FROM json_each(?)`;
 
 /** Restores once, only while the token is younger than ten seconds. */
 export async function restoreCashDelete(db: D1Database, token: string) {
@@ -129,7 +127,11 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			...paymentCheck.results.map(({ name }) => `${name} payment`),
 		);
 		const insertTransaction = `INSERT INTO transactions (${columns.join(",")}) SELECT ${columns.map((column) => (column === "refund_of_id" ? "NULL" : jsonColumn(column))).join(",")} FROM json_each(?) WHERE json_extract(value, '$.id') = ?`;
-		const insertParts = insertRows("transactions", columns);
+		const insertParts = `INSERT INTO transactions (${columns.join(",")}) SELECT ${columns
+			.map((column) =>
+				column === "refund_of_id" ? "NULL" : jsonColumn(column),
+			)
+			.join(",")} FROM json_each(?)`;
 		const writes = [
 			db
 				.prepare(insertTransaction)

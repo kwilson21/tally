@@ -178,6 +178,77 @@ describe("cash delete undo", () => {
 		).toBeNull();
 	});
 
+	it("restores only split refund links that still fit", async () => {
+		const id = await cashEntry();
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash'",
+		).first<{ id: number }>();
+		const bankAccount = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account || !bankAccount) throw new Error("account seed missing");
+		const purchases = await env.DB.batch(
+			["Reduced purchase", "Still fits purchase", "Deleted purchase"].map(
+				(raw_name) =>
+					env.DB.prepare(
+						"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-01', 1000, ?, 'test')",
+					).bind(bankAccount.id, raw_name),
+			),
+		);
+		const purchaseIds = purchases.map((purchase) =>
+			Number(purchase.meta.last_row_id),
+		);
+		const purchaseId = (index: number) => {
+			const value = purchaseIds[index];
+			if (value === undefined) throw new Error("purchase insert missing");
+			return value;
+		};
+		const partIds: number[] = [];
+		for (let index = 0; index < purchaseIds.length; index++) {
+			const part = await env.DB.prepare(
+				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-02', -200, ?, ?, ?, 'test')",
+			)
+				.bind(account.id, `Split refund ${index + 1}`, id, purchaseId(index))
+				.run();
+			partIds.push(Number(part.meta.last_row_id));
+		}
+		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
+			.bind(id)
+			.run();
+		const deleted = await deleteRequest(id, env.DB);
+		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
+			.undo as string;
+		await env.DB.prepare("UPDATE transactions SET amount_cents=100 WHERE id=?")
+			.bind(purchaseId(0))
+			.run();
+		await env.DB.prepare("DELETE FROM transactions WHERE id=?")
+			.bind(purchaseId(2))
+			.run();
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back: "/transactions" }),
+		});
+		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.message as string;
+		const parts = await env.DB.prepare(
+			"SELECT id, refund_of_id FROM transactions WHERE id IN (?, ?, ?) ORDER BY id",
+		)
+			.bind(...partIds)
+			.all<{ id: number; refund_of_id: number | null }>();
+		expect(parts.results).toEqual([
+			{ id: partIds[0], refund_of_id: null },
+			{ id: partIds[1], refund_of_id: purchaseId(1) },
+			{ id: partIds[2], refund_of_id: null },
+		]);
+		expect(message).toContain("Split refund 1");
+		expect(message).toContain("Split refund 3");
+	});
+
 	it("uses a fixed number of statements for 30 split parts, 30 refund links and 3 payments", async () => {
 		const id = await cashEntry();
 		const account = await env.DB.prepare(
