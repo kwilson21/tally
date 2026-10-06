@@ -21,7 +21,11 @@ import { BankGroup } from "../views/bank-group";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
-import { BillRow, BillStatusHeading } from "../views/bill-row";
+import {
+	BillMonthlyTotal,
+	BillRow,
+	BillStatusHeading,
+} from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
@@ -892,9 +896,22 @@ function Rows() {
 				id="bill-row"
 				title="BillRow and bill status heading"
 				tier="visual"
-				components={["BillRow", "BillStatusHeading"]}
-				sentence="A bill group names its status with an icon and words; each bill shows its category, name, status sentence and amount, and asks “Price changed?” when a payment came at another price."
+				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each group ends with its total, and each bill shows its category, name, status sentence and amount."
 			>
+				<State label="Bills totals">
+					<div class="max-w-xl">
+						<BillMonthlyTotal
+							monthlyCents={153000}
+							stillToPayCents={61000}
+							month="2026-10"
+						/>
+						<div class="mt-4">
+							<BillStatusHeading status="overdue" totalCents={60000} />
+							<BillStatusHeading status="upcoming" totalCents={18800} />
+						</div>
+					</div>
+				</State>
 				<State label="Overdue">
 					<div class="max-w-xl">
 						<BillStatusHeading status="overdue" />
@@ -1971,6 +1988,7 @@ function Feedback() {
 				id="toast"
 				title="Toast"
 				tier="interactive"
+				components={["Toast"]}
 				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds, fading in and out, and the announcer reads it. An error toast speaks as an alert and leads with the alert icon in the over token, so it is never colour alone; the same toast appears, over an open sheet too, when a request fails (the connection drops or the server sends a 500). These buttons send the same events."
 			>
 				<div class="flex flex-wrap gap-3">
@@ -1981,6 +1999,14 @@ function Feedback() {
 						data-ds-message="Saved Groceries' budget."
 					>
 						Show a saved toast
+					</Button>
+					<Button
+						type="button"
+						kind="secondary"
+						data-ds-toast="success"
+						data-ds-message="ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+					>
+						Show a 48-character name
 					</Button>
 					<Button
 						type="button"
