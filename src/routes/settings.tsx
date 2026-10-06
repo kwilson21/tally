@@ -148,6 +148,8 @@ const AI_FEATURES: {
 
 /** What the greyed sorting switch says it needs, in the words of the rows above it. */
 const SORT_NEEDS = "Needs Categories and exclusions or Income on.";
+/** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
+const SORT_GREYED = "sortOnArrivalGreyed";
 
 /** The switches above and one Save. Without JavaScript the form posts and Settings reloads at this group. */
 function AiSuggestions({
@@ -199,6 +201,7 @@ function AiSuggestions({
 						</li>
 					))}
 				</ul>
+				{nothingToSort && <input type="hidden" name={SORT_GREYED} value="1" />}
 				<div class="mt-4">
 					<Button
 						id="ai-save"
@@ -626,14 +629,15 @@ settings.get("/settings/export/tally.json", async (c) => {
 // form always carries the whole group, so a save is always every switch it shows, and only those.
 // The sorting switch is greyed out while Jev isn't asked at all (categories and income both off), and
 // a greyed switch posts nothing, so it's left as it was saved (spec §8.6, decision 79). Whether it was
-// greyed is read from what is saved, which is what the page was drawn from.
+// greyed comes from the form the person saw (a hidden field), not from what's saved now, since another
+// tab may have changed the switches since the page was drawn.
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
-	const saved = await readAiSwitches(c.env.DB);
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
-	if (!asksJev(saved)) next.sortOnArrival = saved.sortOnArrival;
+	if (form.get(SORT_GREYED) === "1")
+		next.sortOnArrival = (await readAiSwitches(c.env.DB)).sortOnArrival;
 	await saveAiSwitches(c.env.DB, next);
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${next[f.key] ? "on" : "off"}`,
