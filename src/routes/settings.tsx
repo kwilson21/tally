@@ -628,19 +628,20 @@ settings.get("/settings/export/tally.json", async (c) => {
 // A switch that's on posts "on" and one that's off posts nothing, so a field left out is off; the
 // form always carries the whole group, so a save is always every switch it shows, and only those.
 // The sorting switch is greyed out while Jev isn't asked at all (categories and income both off), and
-// a greyed switch posts nothing, so it's left as it was saved (spec §8.6, decision 79). Whether it was
-// greyed comes from the form the person saw (a hidden field), not from what's saved now, since another
-// tab may have changed the switches since the page was drawn.
+// a greyed switch posts nothing, so Save doesn't write it at all and it stays as it was saved (spec
+// §8.6, decision 79). Whether it was greyed comes from the form the person saw (a hidden field), not
+// from what's saved now, since another tab may have changed the switches since the page was drawn; and
+// as nothing is read and written back, a save from another tab in between is never undone.
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
-	if (form.get(SORT_GREYED) === "1")
-		next.sortOnArrival = (await readAiSwitches(c.env.DB)).sortOnArrival;
+	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
 	await saveAiSwitches(c.env.DB, next);
+	const now = await readAiSwitches(c.env.DB);
 	const states = AI_FEATURES.map(
-		(f) => `${f.spoken} ${next[f.key] ? "on" : "off"}`,
+		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
 	).join(", ");
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
 	return done(c, "Saved AI suggestions", `Saved AI suggestions. ${spoken}.`, {

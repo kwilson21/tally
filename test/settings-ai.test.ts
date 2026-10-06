@@ -404,6 +404,18 @@ describe("the sorting switch with categories and income both off", () => {
 		);
 	});
 
+	it("doesn't write the sorting switch at all from a greyed page, so a save from another tab can't be undone", async () => {
+		await saveAiSwitches(env.DB, greyed);
+		await env.DB.prepare(
+			"DELETE FROM household_settings WHERE key = 'ai_sort_on_arrival'",
+		).run();
+		await post("/settings/ai", { income: "on", sortOnArrivalGreyed: "1" });
+		const row = await env.DB.prepare(
+			"SELECT value FROM household_settings WHERE key = 'ai_sort_on_arrival'",
+		).first();
+		expect(row).toBeNull();
+	});
+
 	it("keeps the saved sorting choice when another tab turned a Jev switch on after the page was drawn greyed", async () => {
 		await saveAiSwitches(env.DB, { ...greyed, sortOnArrival: true });
 		// Another tab turns categories on; this page still shows sorting greyed and posts nothing for it.
