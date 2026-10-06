@@ -11,6 +11,7 @@ import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
 import { accountsByBank } from "../db/accounts";
+import { namesToReview } from "../db/merchant-names";
 import { loadMonth } from "../db/month";
 import {
 	bankDatedCount,
@@ -114,17 +115,20 @@ function Example({
 	children,
 	demo,
 	monthName,
+	label,
 }: {
 	children?: Child;
 	demo: boolean;
 	monthName: string;
+	label?: string;
 }) {
 	return (
 		<p class="mt-3 bg-band px-4 py-3">
 			<span class="font-semibold">
-				{demo
-					? `In the demo for ${monthName}: `
-					: `With your numbers for ${monthName}: `}
+				{label ??
+					(demo
+						? `In the demo for ${monthName}: `
+						: `With your numbers for ${monthName}: `)}
 			</span>
 			{children}
 		</p>
@@ -140,15 +144,23 @@ howItWorks.get("/how-it-works", async (c) => {
 	const monthLabel = monthName(month);
 	// Screens call the AI "Tally"; only the demo's page names Jev (decision 64).
 	const ai: "Jev" | "Tally" = demo ? "Jev" : "Tally";
-	const [data, counts, excluded, billData, bankDated, trendsData] =
-		await Promise.all([
-			loadMonth(c.env.DB, month),
-			monthCounts(c.env.DB, month),
-			excludedBreakdown(c.env.DB, month),
-			loadBillRows(c.env.DB, today),
-			bankDatedCount(c.env.DB, month),
-			loadTrends(c.env.DB, today),
-		]);
+	const [
+		data,
+		counts,
+		excluded,
+		billData,
+		bankDated,
+		trendsData,
+		waitingNames,
+	] = await Promise.all([
+		loadMonth(c.env.DB, month),
+		monthCounts(c.env.DB, month),
+		excludedBreakdown(c.env.DB, month),
+		loadBillRows(c.env.DB, today),
+		bankDatedCount(c.env.DB, month),
+		loadTrends(c.env.DB, today),
+		namesToReview(c.env.DB),
+	]);
 	const trendsExampleText = trendsExample(buildTrends(trendsData));
 	const hasTransactions =
 		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
@@ -185,8 +197,8 @@ howItWorks.get("/how-it-works", async (c) => {
 					Tally is a small family budgeting app. One server builds every page
 					and a database keeps the numbers.{" "}
 					{demo
-						? "AI helps with names and categories: Jev picks categories today, and Workers AI will suggest merchant names later."
-						: "AI helps by suggesting categories, and a person can always change them."}{" "}
+						? "AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today."
+						: "AI helps with categories and store names, and a person can always change them."}{" "}
 					Code does all the math.
 				</p>
 				{demo && (
@@ -431,6 +443,15 @@ howItWorks.get("/how-it-works", async (c) => {
 							turn it back on, and the bank's own names still show.
 						</li>
 					</ul>
+					<Example
+						demo={demo}
+						monthName={monthLabel}
+						label={demo ? "In the demo, " : "With your numbers, "}
+					>
+						{waitingNames.length === 0
+							? "No merchant names are waiting for a choice."
+							: `${waitingNames.length} merchant name${waitingNames.length === 1 ? " is" : "s are"} waiting for a choice.`}
+					</Example>
 				</Section>
 
 				<Section id="bills" title="Bills">
