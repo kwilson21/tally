@@ -140,7 +140,7 @@ The owner answered these on Oct 6 by seeing a picture of each, so they have no r
 76. *The Band with two actions, and with two unpaid plans.* It asks about one plan at a time: "Car registration wasn't paid", with Move to Nov and Drop, and a dot for each plan waiting (P105).
 
 **The reconnect email (#203)**
-77. *Where "everyone in the family" comes from.* Everyone who has signed in to Tally: Tally notes each verified sign-in address the first time it sees it (a new `household_members` table with `email` and `first_seen_at`), and each address is also verified in Cloudflare Email Routing.
+77. *Where "everyone in the family" comes from.* Everyone who has signed in to Tally in the last 90 days: Tally notes each verified sign-in address the first time it sees it and updates it at each sign-in (a new `household_members` table with `email`, `first_seen_at` and `last_seen_at`), and each address is also verified in Cloudflare Email Routing. Settings lists each address with Remove for anyone in the family, so a person who has left stops getting it; a removed address comes back only if that person signs in again, which needs Cloudflare Access.
 78. *Whole household or per person, and On or Off to start.* One household switch, "Bank sign-in emails", on to start, with the people shown as initials (P107).
 79. *When the first email goes.* At the nightly run after a bank needs attention, then every 3 days until it's fixed (P108).
 80. *Where "when the last one went" is kept.* A nullable column on `plaid_items` (`reconnect_emailed_at`), listed in §5.

@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
+import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
 
 const get = async (path: string) => {
@@ -32,12 +33,12 @@ describe("GET /design-system/proposals", () => {
 		for (let n = 23; n <= 109; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
-		// every proposal from P91 on (decision 82): the owner picked each from pictures, so the page
+		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
 		// draws the pick and nothing to choose between. Every other proposal marks exactly one
 		// Recommended, with its reason.
 		for (const id of ids) {
 			const n = Number(id.match(/^p(\d+)/)?.[1]);
-			const asDrawn = id === "p31-empty" || n >= 91;
+			const asDrawn = id === "p31-empty" || (n >= 91 && n <= 109);
 			const start = html.indexOf(`<section id="${id}"`);
 			// Up to the next proposal (a picture can hold sections of its own).
 			const next = html.indexOf('<section id="p', start + 1);
@@ -69,6 +70,27 @@ describe("GET /design-system/proposals", () => {
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
 			if (d.issue) expect(html).toContain(`/issues/${d.issue}"`);
 		}
+	});
+
+	it("draws a $0 budget and a far-over category without breaking the bars", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(html).not.toMatch(/NaN|Infinity/);
+		// The $0-budget category is in the chart's text alternative, and its bar is drawn as over.
+		expect(html).toContain("Gifts $45 of $0");
+		expect(html).toContain("+$45");
+		expect(html).toContain("+$650");
+	});
+
+	it("keeps a finished month's bar height finite and capped", () => {
+		const cap = 1.25;
+		expect(endBarRatio(4500, 0)).toEqual({ ratio: cap, capped: true });
+		expect(endBarRatio(0, 0)).toEqual({ ratio: 0, capped: false });
+		expect(endBarRatio(-2000, 25000)).toEqual({ ratio: 0, capped: false });
+		expect(endBarRatio(90000, 25000)).toEqual({ ratio: cap, capped: true });
+		const over = endBarRatio(28600, 25000);
+		expect(over.capped).toBe(false);
+		expect(over.ratio).toBeCloseTo(1.144, 6);
+		expect(endBarRatio(19200, 20000).ratio).toBeCloseTo(0.96, 6);
 	});
 
 	it("is linked from the catalog", async () => {

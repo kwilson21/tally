@@ -124,6 +124,19 @@ export function Replaced({ by, children }: { by: string; children?: Child }) {
 	);
 }
 
+/**
+ * On a new pick (decision 82): what it replaces in an earlier drawing, in plain words. The earlier
+ * drawing carries the matching `Replaced` note, which points down to the new one.
+ */
+export function Replaces({ children }: { children?: Child }) {
+	return (
+		<p class="max-w-prose text-sm">
+			<span class="font-medium">Replaces: </span>
+			{children}
+		</p>
+	);
+}
+
 export function Title({ children }: { children?: Child }) {
 	return (
 		<h1 class="font-serif text-4xl font-semibold tracking-tight">{children}</h1>

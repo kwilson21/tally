@@ -338,7 +338,7 @@ export const DECIDED: readonly {
 	{
 		title: "P94–P97 · Home's top",
 		outcome:
-			"Safe to spend shows a negative number in brick (“−$40”) with Why? beside the label; the daily amount becomes a forecast chart (“$120 under by Oct 31, at this pace”); a bank that's behind gets an “as of Oct 2” tag and a soft line with a Fix button; the Band reads “12 need a category” with a “+6 older” chip (decision 82).",
+			"Safe to spend shows a negative number in brick (“−$40”) with Why? beside the label; the daily amount becomes a forecast chart (“$120 under by Oct 31, at this pace”); a bank that's behind gets an “as of Oct 2” tag and a soft line with a Fix button; the Band reads “12 need a category” with a “+1 older” chip (decision 82).",
 		issue: 199,
 	},
 	{
@@ -368,7 +368,7 @@ export const DECIDED: readonly {
 	{
 		title: "P107–P109 · The reconnect email",
 		outcome:
-			"One household switch, “Bank sign-in emails”, on to start, to everyone who has signed in; sent at the nightly run, then every 3 days until fixed; the email shows the bank, its account endings as chips, the last synced date and one Open Accounts button (decision 82).",
+			"One household switch, “Bank sign-in emails”, on to start, to everyone who has signed in within the last 90 days, with each address listed under a plain disclosure with Remove for anyone in the family; sent at the nightly run, then every 3 days until fixed; the email shows the bank, its account endings as chips, the last synced date and one Open Accounts button (decision 82).",
 		issue: 203,
 	},
 ];

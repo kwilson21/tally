@@ -1296,7 +1296,7 @@ export function Phase5HomeProposals() {
 				</NeedsLine>
 				<Replaced by="P97">
 					Option A's “and 6 more from earlier months” on the Band's second line:
-					a small “+6 older” chip.
+					a small “+1 older” chip.
 				</Replaced>
 				<Options
 					options={[

@@ -30,7 +30,7 @@ import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
 import { TimeZoneRow } from "../views/time-zone-row";
 import { WhyLink } from "../views/why-link";
-import { Fixed, Options, Replaced, Sheet, Title } from "./proposal-parts";
+import { Fixed, Options, Replaces, Sheet, Title } from "./proposal-parts";
 import { LedgerField } from "./proposals-forms";
 import {
 	bill,
@@ -343,17 +343,39 @@ function Stamp({ kind }: { kind: "under" | "over" }) {
 	);
 }
 
+/** The tallest a bar is drawn, as a multiple of its budget. A bar over it is capped, and its "+$X" says the rest. */
+const BAR_CAP = 1.25;
+
+/**
+ * How tall a bar is against its dashed budget line, as a multiple of the budget: never NaN or
+ * Infinity, and never past the cap. Spending against a $0 budget is over by all of it, so it draws at
+ * the cap; nothing spent (or only refunds) draws as an empty bar.
+ */
+export function endBarRatio(spentCents: number, budgetCents: number) {
+	if (spentCents <= 0) return { ratio: 0, capped: false };
+	if (budgetCents <= 0) return { ratio: BAR_CAP, capped: true };
+	const ratio = spentCents / budgetCents;
+	return ratio > BAR_CAP
+		? { ratio: BAR_CAP, capped: true }
+		: { ratio, capped: false };
+}
+
 /**
  * One bar per budgeted category, each against its own budget, which is the dashed line. A category
- * that went over pokes above the line in brick and says by how much.
+ * that went over pokes above the line in brick and says by how much; a bar is capped inside the
+ * chart, so its "+$X" is always in view above it. "budget" sits in the right margin, clear of every bar.
  */
 function EndBars({ rows }: { rows: Row[] }) {
 	const W = 350;
+	const left = 4;
+	const areaRight = 292;
 	const base = 112;
 	const unit = 72;
 	const width = 42;
-	const step = 66;
-	const x0 = (W - ((rows.length - 1) * step + width)) / 2;
+	const n = rows.length;
+	const step = n > 1 ? Math.min(66, (areaRight - left - width) / (n - 1)) : 66;
+	const x0 = left + (areaRight - left - ((n - 1) * step + width)) / 2;
+	const lineY = base - unit;
 	const words = rows
 		.map((r) => `${r.name} ${whole(r.spentCents)} of ${whole(r.budgetCents)}`)
 		.join(", ");
@@ -365,27 +387,22 @@ function EndBars({ rows }: { rows: Row[] }) {
 			aria-label={`Spent against each budget: ${words}`}
 		>
 			<line
-				x1="0"
-				x2={W}
-				y1={base - unit}
-				y2={base - unit}
+				x1={left}
+				x2={areaRight}
+				y1={lineY}
+				y2={lineY}
 				class="stroke-muted"
 				stroke-width="1"
 				stroke-dasharray="4 4"
 			/>
-			<text
-				x={W - 2}
-				y={base - unit - 6}
-				text-anchor="end"
-				class="fill-muted text-sm"
-			>
+			<text x={areaRight + 6} y={lineY + 5} class="fill-muted text-sm">
 				budget
 			</text>
 			{rows.map((r, i) => {
 				const over = r.spentCents > r.budgetCents;
 				const h = Math.max(
 					3,
-					Math.round((r.spentCents / r.budgetCents) * unit),
+					Math.round(endBarRatio(r.spentCents, r.budgetCents).ratio * unit),
 				);
 				const x = x0 + i * step;
 				return (
@@ -440,6 +457,16 @@ const JULY: Month = {
 /** May, the first month with transactions in the demo: it ended $340 under. */
 const MAY: Month = {
 	rows: budgeted([59800, 21400, 17600, 12000, 40200]),
+	noBudgetCents: 0,
+	uncategorizedCents: 0,
+	billsDueCents: 0,
+};
+/** A month with a $0 budget that still spent $45, and Eating Out far over: the bars cap, and each says by how much. */
+const STRETCH: Month = {
+	rows: [
+		...budgeted([61000, 90000, 15000, 18000, 40000]),
+		row(CATS.gifts, 4500, 0),
+	],
 	noBudgetCents: 0,
 	uncategorizedCents: 0,
 	billsDueCents: 0,
@@ -823,7 +850,7 @@ const FIVE_OCT: Month = {
 	billsDueCents: 14200,
 };
 
-/** The Band's first line carries a small "+6 older" chip; the second line is this month's amount. */
+/** The Band's first line carries a small "+1 older" chip; the second line is this month's amount. */
 function OlderBand({ older, count }: { older: number; count: number }) {
 	return (
 		<a
@@ -1525,7 +1552,7 @@ const emailSettings = (
 					label="Bank sign-in emails"
 					checked
 				/>
-				<div class="flex items-center gap-2 pb-3">
+				<div class="flex items-center gap-2 pb-1">
 					<p class="sr-only">Goes to {PEOPLE.map((p) => p.email).join(", ")}</p>
 					<ul aria-hidden="true" class="flex -space-x-2">
 						{PEOPLE.map((p) => (
@@ -1537,6 +1564,26 @@ const emailSettings = (
 						))}
 					</ul>
 				</div>
+				{/* A plain disclosure, drawn open: each address with its own Remove. */}
+				<details open class="group pb-3">
+					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
+						<Icon name="chevron" class="size-5 group-open:rotate-90" />
+						Who gets them
+					</summary>
+					<p class="text-muted">
+						Everyone who has signed in to Tally in the last 90 days.
+					</p>
+					<ul class="divide-y divide-rule border-y border-rule">
+						{PEOPLE.map((p) => (
+							<li class="flex min-h-11 items-center justify-between gap-3">
+								<span class="min-w-0 truncate">{p.email}</span>
+								<Button kind="text" type="button" class="shrink-0">
+									Remove<span class="sr-only"> {p.email}</span>
+								</Button>
+							</li>
+						))}
+					</ul>
+				</details>
 				<Button type="button">Save</Button>
 			</div>
 		</section>
@@ -1667,10 +1714,10 @@ export function Phase5PicksProposals() {
 					and a category that went over pokes above the dashed budget line in
 					brick with how far.
 				</NeedsLine>
-				<Replaced by="P91">
+				<Replaces>
 					P46 A's sentence (“Every category stayed under its budget.”) and its
 					check and “under budget” words.
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
@@ -1683,6 +1730,11 @@ export function Phase5PicksProposals() {
 							name: "July, over budget",
 							note: "The same, for a month that ended over: the number in brick with an Over stamp, and two categories over the line.",
 							screen: <PastTop viewing="Jul" month={JULY} />,
+						},
+						{
+							name: "A $0 budget and a far-over category",
+							note: "A bar never grows past a quarter above the line, so its “+$650” stays in view; spending against a $0 budget is over by all of it.",
+							screen: <PastTop viewing="Jun" month={STRETCH} />,
 						},
 					]}
 				/>
@@ -1796,10 +1848,10 @@ export function Phase5PicksProposals() {
 					the label. Cents show only when it's under $1 (“−$0.40”). The words
 					that say it is over budget are the sentence under it.
 				</NeedsLine>
-				<Replaced by="P94">
+				<Replaces>
 					P47 A's headline (“$120” with “over” in brick under it) and P47's $0
 					with a brick over-budget line.
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
@@ -1831,14 +1883,16 @@ export function Phase5PicksProposals() {
 				<NeedsLine settled={DECISION}>
 					The forecast is where the month ends if everyday spending keeps its
 					pace, counting the bills still due: the spending so far, plus the
-					bills still due, plus the everyday pace (spending that doesn't pay a
-					bill, per day so far) times the days left. The line is dashed from
-					today to the month's end against the dashed budget line, and the end
-					point is green when under and brick when over.
+					bills still due, plus the everyday pace times the days left. The pace
+					counts only money out that doesn't pay a bill, per day so far: refunds
+					already received count in the spending so far but are never projected
+					forward. The line is dashed from today to the month's end against the
+					dashed budget line, and the end point is green when under and brick
+					when over.
 				</NeedsLine>
-				<Replaced by="P95">
+				<Replaces>
 					P50 A's daily amount (“About $15.03 a day for the 27 days left.”).
-				</Replaced>
+				</Replaces>
 				<p class="max-w-prose text-sm text-muted">{workedPace(UNDER_PACE)}</p>
 				<Options
 					options={[
@@ -1875,9 +1929,9 @@ export function Phase5PicksProposals() {
 					2” or “Chase needs signing in”, with a Fix button that opens Accounts.
 					It has no playful words, and it comes before the forecast.
 				</NeedsLine>
-				<Replaced by="P96">
+				<Replaces>
 					P37 A's look: the plain alert-icon line and its Check Accounts link.
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
@@ -1907,19 +1961,19 @@ export function Phase5PicksProposals() {
 					to this month's amount.
 				</Fixed>
 				<NeedsLine settled={DECISION}>
-					The Band reads “12 need a category” with a small “+6 older” chip. Once
+					The Band reads “12 need a category” with a small “+1 older” chip. Once
 					this month's are done it stays for the older ones.
 				</NeedsLine>
-				<Replaced by="P97">
+				<Replaces>
 					P52 A's second-line words (“and 6 more from earlier months”).
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
 							name: "This month's and older ones",
 							picked: true,
-							note: "“12 need a category” and a “+6 older” chip, with “$228 of this month's spending” under them.",
-							screen: olderHome(<OlderBand count={12} older={6} />),
+							note: "“12 need a category” and a “+1 older” chip, with “$228 of this month's spending” under them.",
+							screen: olderHome(<OlderBand count={12} older={1} />),
 						},
 						{
 							name: "Only older ones left",
@@ -1953,9 +2007,9 @@ export function Phase5PicksProposals() {
 					of the budget the bar turns amber. A $0 budget with nothing spent
 					shows no warning.
 				</NeedsLine>
-				<Replaced by="P98">
+				<Replaces>
 					P49 A's “$14 left” under the bar (the bar now turns amber instead).
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
@@ -1983,9 +2037,7 @@ export function Phase5PicksProposals() {
 					some. Excluded transactions aren't counted, so the list it opens adds
 					up to the row's amount.
 				</NeedsLine>
-				<Replaced by="P99">
-					P53 A's link words (“See the 9 transactions”).
-				</Replaced>
+				<Replaces>P53 A's link words (“See the 9 transactions”).</Replaces>
 				<Options
 					options={[
 						{
@@ -2092,9 +2144,9 @@ export function Phase5PicksProposals() {
 					planned_expenses.category_id leaves §5. Deleting a plan deletes it;
 					unlinking a payment sets the plan aside again.
 				</NeedsLine>
-				<Replaced by="P102">
+				<Replaces>
 					P55 A's category column (§5): the sheet never had a Category field.
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
@@ -2181,9 +2233,9 @@ export function Phase5PicksProposals() {
 					Move to Nov (its month becomes this one) and Drop (it's deleted), and
 					a dot for each plan waiting.
 				</NeedsLine>
-				<Replaced by="P105">
+				<Replaces>
 					P55 A's Band words (“Move it to November?”, Move it, Drop it).
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
@@ -2228,7 +2280,7 @@ export function Phase5PicksProposals() {
 				id="p107-email-settings"
 				title="P107 · The reconnect email's switch"
 				tier="visual"
-				sentence="One household switch in Settings turns the bank sign-in emails off, and shows who they go to as initials. The drawing is the owner's pick (#203)."
+				sentence="One household switch in Settings turns the bank sign-in emails off, and shows who they go to as initials, with each address and a Remove under a plain disclosure. The drawing is the owner's pick (#203)."
 			>
 				<Fixed>
 					the switch is the Switch component built for P41 B, with a Save
@@ -2237,21 +2289,25 @@ export function Phase5PicksProposals() {
 				</Fixed>
 				<NeedsLine settled={DECISION}>
 					“Bank sign-in emails” is on to start. It goes to everyone who has
-					signed in to Tally: Tally notes each verified sign-in address the
-					first time it sees it (household_members, §5). Each address must also
-					be verified in Cloudflare Email Routing.
+					signed in to Tally in the last 90 days: Tally notes each verified
+					sign-in address the first time it sees it and updates its last_seen_at
+					at each sign-in (household_members, §5). Each address must also be
+					verified in Cloudflare Email Routing. Anyone in the family can remove
+					an address, like the people list (decision 81), so a person who has
+					left stops getting the email; a removed address comes back only if
+					that person signs in again, which needs Cloudflare Access.
 				</NeedsLine>
-				<Replaced by="P107">
+				<Replaces>
 					P56's “Both · Settings” picture (a Reminders section with “Email me”
 					and one address).
-				</Replaced>
+				</Replaces>
 				<Options
 					options={[
 						{
 							name: "In Settings",
 							picked: true,
 							family: true,
-							note: "Under Household, after the time zone: the switch, on, with a round initial for each person it goes to.",
+							note: "Under Household, after the time zone: the switch, on, a round initial for each person it goes to, and a plain disclosure (drawn open) listing each address with Remove.",
 							screen: emailSettings,
 						},
 					]}
@@ -2301,9 +2357,7 @@ export function Phase5PicksProposals() {
 					“Open Accounts” button, and “Turn off in Settings” in muted words with
 					no link.
 				</NeedsLine>
-				<Replaced by="P109">
-					P56 B's body and its “Turn these emails off” link.
-				</Replaced>
+				<Replaces>P56 B's body and its “Turn these emails off” link.</Replaces>
 				<Options
 					options={[
 						{
