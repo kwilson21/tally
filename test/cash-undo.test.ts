@@ -1,7 +1,9 @@
 import { env, exports } from "cloudflare:workers";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { transactions } from "../src/routes/transactions";
 import {
 	holdCashDelete,
 	restoreCashDelete,
@@ -38,6 +40,28 @@ function countingDb() {
 	});
 	return { db: db as D1Database, statements: () => statements };
 }
+
+type TestApp = { Bindings: Env; Variables: { actor: string } };
+const deleteRoute = new Hono<TestApp>();
+deleteRoute.use("*", async (c, next) => {
+	c.set("actor", "demo");
+	await next();
+});
+deleteRoute.route("/", transactions as unknown as Hono<TestApp>);
+const deleteRequest = async (id: number, db: D1Database) =>
+	deleteRoute.request(
+		`/transactions/${id}/delete`,
+		{
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "back=%2Ftransactions&confirm=1",
+		},
+		{ ...env, DB: db },
+	);
 
 describe("cash delete undo", () => {
 	it("restores every transaction and split field exactly as deleted", async () => {
@@ -215,5 +239,54 @@ describe("cash delete undo", () => {
 		expect(counted.statements() - smallCount.statements()).toBeLessThanOrEqual(
 			1,
 		);
+	});
+
+	it("deletes a cash entry with 30 parts, links, and 3 payments in a fixed number of statements", async () => {
+		const id = await cashEntry();
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash'",
+		).first<{ id: number }>();
+		const bankAccount = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account || !bankAccount) throw new Error("account seed missing");
+		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
+			.bind(id)
+			.run();
+		await env.DB.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30)
+			INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,category_id,updated_by)
+			SELECT ?, '2026-10-01', i*100, 'Part '||i, ?, 1, 'test' FROM n`)
+			.bind(account.id, id)
+			.run();
+		await env.DB.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30)
+			INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,updated_by)
+			SELECT ?, '2026-10-01', -100, 'Refund '||i, ?, 'test' FROM n`)
+			.bind(bankAccount.id, id)
+			.run();
+		const bill = await env.DB.prepare("SELECT id FROM bills LIMIT 1").first<{
+			id: number;
+		}>();
+		if (!bill) throw new Error("bill seed missing");
+		await env.DB.batch(
+			[0, 1, 2].map((i) =>
+				env.DB.prepare(
+					"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?,? ,?,'user','dismissed')",
+				).bind(bill.id, `2026-${String(i + 1).padStart(2, "0")}`, id),
+			),
+		);
+
+		const counted = countingDb();
+		const deleted = await deleteRequest(id, counted.db);
+		expect(deleted.status).toBe(200);
+		expect(counted.statements()).toBeLessThanOrEqual(20);
+
+		const small = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT id,'2026-10-06',100,'Small delete' FROM accounts WHERE type='cash' LIMIT 1",
+		).run();
+		const smallCount = countingDb();
+		await deleteRequest(Number(small.meta.last_row_id), smallCount.db);
+		expect(
+			Math.abs(smallCount.statements() - counted.statements()),
+		).toBeLessThanOrEqual(3);
 	});
 });

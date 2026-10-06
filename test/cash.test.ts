@@ -203,6 +203,96 @@ describe("adding cash", () => {
 });
 
 describe("cash lifecycle", () => {
+	it("uses the cash-delete toast wording for a split entry and Undo restores its parent and parts", async () => {
+		const name = "Split market";
+		const created = await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "20.00",
+				merchant: name,
+				category: "1",
+			}),
+		});
+		expect(created.res.status).toBe(200);
+		const entry = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
+		)
+			.bind(name)
+			.first<{ id: number }>();
+		if (!entry) throw new Error("created cash entry missing");
+
+		const split = await request(`/transactions/${entry.id}/split`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "part_category=1&part_category=2&part_amount=7.25&part_amount=12.75&back=%2Ftransactions",
+		});
+		expect(split.res.status).toBe(200);
+		const before = {
+			parent: await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
+				.bind(entry.id)
+				.first(),
+			parts: (
+				await env.DB.prepare(
+					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
+				)
+					.bind(entry.id)
+					.all()
+			).results,
+		};
+		expect(before.parts).toHaveLength(2);
+
+		const deleted = await request(`/transactions/${entry.id}/delete`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "back=%2Ftransactions&confirm=1",
+		});
+		const feedback = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}");
+		expect(deleted.res.status).toBe(200);
+		expect(feedback.toast.message).toBe("Deleted Split market, $20.00.");
+		expect(feedback.toast.undo).toEqual(expect.any(String));
+
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				token: feedback.toast.undo,
+				back: "/transactions",
+			}),
+		});
+		expect(restored.res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
+				.bind(entry.id)
+				.first(),
+		).toEqual(before.parent);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
+				)
+					.bind(entry.id)
+					.all()
+			).results,
+		).toEqual(before.parts);
+	});
+
 	it("is left out of Accounts and net worth", async () => {
 		await env.DB.prepare(
 			"UPDATE accounts SET balance_cents=99999999 WHERE type='cash'",
