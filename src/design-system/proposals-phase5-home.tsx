@@ -24,17 +24,8 @@ import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec doesn't settle yet; it's written into the spec before the pick is built. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 const dollars = (cents: number) => formatCents(cents, { wholeDollars: true });
 
@@ -1061,11 +1052,12 @@ export function Phase5HomeProposals() {
 					only with an icon and a word (DESIGN.md).
 				</Fixed>
 				<NeedsLine>
-					Home's words below $0, including the sentence under the number
-					(today's still names the categories over and says “Everything else is
-					on track”, which B and C keep here); at exactly $0 Home says “$0” as
-					today; and how a category reads when refunds outweigh its spending
-					(gap E9; today “-$20 of $250”).
+					how a category reads when refunds outweigh its spending (gap E9; today
+					“-$20 of $250”). At exactly $0 Home says “$0” under “Safe to spend”,
+					as today. Already settled (decision 74): when Safe to spend is below
+					$0, Home shows “$120 over” with the alert icon, and the sentence under
+					the number reads “Over budget this month. Spending more takes it
+					further over.”
 				</NeedsLine>
 				<Options
 					options={[
@@ -1158,9 +1150,9 @@ export function Phase5HomeProposals() {
 					status color, and category colors never carry status (DESIGN.md). Bars
 					have no limit marker (decision 46).
 				</Fixed>
-				<NeedsLine>
-					when a category is nearly spent (gap B3 says 80% or more of its budget
-					used, and not over; drawn that way).
+				<NeedsLine settled="decisions 74 and 79">
+					A category is nearly spent when 80% or more of its budget is used and
+					it is not over. Its row says “$X left”, with no new color.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1281,7 +1273,8 @@ export function Phase5HomeProposals() {
 				<NeedsLine>
 					the Band shows when this month or an earlier one has a transaction
 					needing a category; older ones are counted, not added to this month's
-					amount.
+					amount. Already settled (decision 74): older transactions needing a
+					category go on the Band's second line.
 				</NeedsLine>
 				<Options
 					options={[

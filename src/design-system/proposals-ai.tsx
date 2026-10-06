@@ -20,6 +20,7 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
 const TODAY = "2026-10-05";
@@ -36,7 +37,7 @@ const CATS = {
 type Cat = (typeof CATS)[keyof typeof CATS];
 
 /** A small terracotta "Why?" (P33 A), 44px tall, with its own name for screen readers. */
-function Why({ topic, href }: { topic: string; href: string }) {
+export function Why({ topic, href }: { topic: string; href: string }) {
 	return (
 		<a
 			href={href}
@@ -48,23 +49,13 @@ function Why({ topic, href }: { topic: string; href: string }) {
 	);
 }
 
-/** A rule the spec still needs before this is built: open, not fixed (as in the other proposal files). */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
-
 // ---------------------------------------------------------------------------------------------
 // P41: the AI suggestions switches in Settings.
 
-type Feature = { id: string; name: string; line: string };
+export type Feature = { id: string; name: string; line: string };
 
 /** The four switches (spec §8.6), each with the one muted line that says what it does. */
-const FEATURES: Feature[] = [
+export const FEATURES: Feature[] = [
 	{
 		id: "names",
 		name: "Merchant names",
@@ -90,7 +81,7 @@ const FEATURES: Feature[] = [
 /** The pictures show the last switch turned off, so each option's off look is drawn beside its on look. */
 const SOME_OFF = [true, true, true, false];
 
-const OFF_MEANS =
+export const OFF_MEANS =
 	"Off means your rules and choices only. Nothing already decided changes.";
 const ALL_OFF = "Tally sorts by your rules and choices only.";
 
@@ -115,7 +106,13 @@ function SettingsScrolled({ children }: { children?: Child }) {
 }
 
 /** The group's heading and its one line, then whatever the option puts under them. */
-function AiGroup({ intro, children }: { intro: string; children?: Child }) {
+export function AiGroup({
+	intro,
+	children,
+}: {
+	intro: string;
+	children?: Child;
+}) {
 	return (
 		<>
 			<h2 class="font-serif text-3xl font-semibold">AI suggestions</h2>
@@ -165,9 +162,21 @@ const switchButtons = (
 /**
  * Prototype switch: a real checkbox, hidden but reachable, with a track and knob drawn from it. Ink
  * and the knob on the right when on, a ruled track and the knob on the left when off, and the word
- * beside it says which. The whole 44px-tall row is its label.
+ * beside it says which. The whole 44px-tall row is its label. With `needs`, the switch is greyed
+ * out (P86): disabled, still showing its saved setting (On or Off) in muted text and a
+ * rule-coloured track, with the words it needs on under it, so the greying never rests on color
+ * alone. Save leaves a greyed switch's saved setting as it was.
  */
-function SwitchRow({ f, on }: { f: Feature; on: boolean }) {
+export function SwitchRow({
+	f,
+	on,
+	needs,
+}: {
+	f: Feature;
+	on: boolean;
+	needs?: string;
+}) {
+	const greyed = needs !== undefined;
 	return (
 		<li>
 			<label class="group flex min-h-11 cursor-pointer items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
@@ -175,18 +184,32 @@ function SwitchRow({ f, on }: { f: Feature; on: boolean }) {
 					type="checkbox"
 					name={`p41b-${f.id}`}
 					checked={on}
+					disabled={greyed}
 					class="sr-only"
 				/>
 				<span class="min-w-0 flex-1">
-					<span class="block text-lg">{f.name}</span>
+					<span class={`block text-lg ${greyed ? "text-muted" : ""}`}>
+						{f.name}
+					</span>
 					<span class="block text-pretty text-muted">{f.line}</span>
+					{greyed && (
+						<span class="mt-1 block text-pretty text-sm font-medium text-muted">
+							{needs}
+						</span>
+					)}
 				</span>
-				<span class="w-8 shrink-0 text-right font-medium">
+				<span
+					class={`w-8 shrink-0 text-right font-medium ${greyed ? "text-muted" : ""}`}
+				>
 					<span class="hidden group-has-[:checked]:inline">On</span>
 					<span class="group-has-[:checked]:hidden">Off</span>
 				</span>
-				<span class="flex h-7 w-12 shrink-0 items-center rounded-full border border-ink bg-rule px-0.5 group-has-[:checked]:justify-end group-has-[:checked]:bg-ink">
-					<span class="size-5 rounded-full bg-ink group-has-[:checked]:bg-paper" />
+				<span
+					class={`flex h-7 w-12 shrink-0 items-center rounded-full border bg-rule px-0.5 group-has-[:checked]:justify-end ${greyed ? "border-rule" : "border-ink group-has-[:checked]:bg-ink"}`}
+				>
+					<span
+						class={`size-5 rounded-full ${greyed ? "bg-muted" : "bg-ink group-has-[:checked]:bg-paper"}`}
+					/>
 				</span>
 			</label>
 		</li>
@@ -259,7 +282,7 @@ function Back() {
 }
 
 /** The top of one review item: where you are, then what's being asked about, like Organize's group. */
-function ReviewHead({
+export function ReviewHead({
 	place,
 	name,
 	bank,
@@ -288,16 +311,19 @@ function ReviewHead({
  * The suggestion as the one question: P32's dashed "Maybe …" tag at question size, in sans (the
  * screen's one serif headline is the name above it), with how sure Tally was when it can say.
  */
-function Question({
+export function Question({
 	icon,
 	children,
 	line,
 	sure,
+	source,
 }: {
 	icon: Child;
 	children?: Child;
 	line?: string;
 	sure?: number;
+	/** The line that says where the suggestion came from (P87), for one with no percentage. */
+	source?: Child;
 }) {
 	return (
 		<div class="mt-5 border-t border-rule pt-5">
@@ -314,6 +340,7 @@ function Question({
 					<Why topic="Tally's guess" href="#p42-review" />
 				</p>
 			)}
+			{source && <div class="mt-2">{source}</div>}
 		</div>
 	);
 }
@@ -340,7 +367,7 @@ function SomethingElse({
 }
 
 /** A's answers: the primary yes, a secondary no (or Something else), and Skip, each 44px. */
-function Answers({
+export function Answers({
 	yes,
 	no,
 	open,
@@ -495,6 +522,44 @@ const askChips = (
 	</>
 );
 
+/**
+ * What "Something else" opens on a name: the other suggested names, the bank's text tidied, a field
+ * for your own, then Save and next (P29's choices, one merchant at a time).
+ */
+export function ElseNames({
+	id,
+	names,
+	keep,
+}: {
+	id: string;
+	names: string[];
+	keep: string;
+}) {
+	return (
+		<div class="mt-3 flex flex-col gap-3">
+			<fieldset class="flex flex-col gap-2">
+				<legend class="sr-only">Other names</legend>
+				<div class="flex flex-wrap gap-2">
+					{names.map((n) => (
+						<Chip type="radio" name={id} value={n}>
+							{n}
+						</Chip>
+					))}
+					<Chip type="radio" name={id} value="tidied">
+						Keep “{keep}”
+					</Chip>
+				</div>
+			</fieldset>
+			<TextInput id={`${id}-own`} label="Or your own" surface="paper" />
+			<div>
+				<Button kind="secondary" type="button">
+					Save and next
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 /** Both: a merchant name, with P29's choices opened by Something else. */
 const askName = (
 	<>
@@ -508,34 +573,17 @@ const askName = (
 			Blue Bottle Coffee
 		</Question>
 		<Answers yes="Yes, Blue Bottle Coffee" open>
-			<div class="mt-3 flex flex-col gap-3">
-				<fieldset class="flex flex-col gap-2">
-					<legend class="sr-only">Other names</legend>
-					<div class="flex flex-wrap gap-2">
-						<Chip type="radio" name="p42-name" value="2">
-							Blue Bottle
-						</Chip>
-						<Chip type="radio" name="p42-name" value="3">
-							Blue Bottle Cafe
-						</Chip>
-						<Chip type="radio" name="p42-name" value="tidied">
-							Keep “Blue bottle cof”
-						</Chip>
-					</div>
-				</fieldset>
-				<TextInput id="p42-own" label="Or your own" surface="paper" />
-				<div>
-					<Button kind="secondary" type="button">
-						Save and next
-					</Button>
-				</div>
-			</div>
+			<ElseNames
+				id="p42-name"
+				names={["Blue Bottle", "Blue Bottle Cafe"]}
+				keep="Blue bottle cof"
+			/>
 		</Answers>
 	</>
 );
 
 /** Both: money in that looks like pay, answered Yes or No. */
-const askIncome = (
+export const askIncome = (
 	<>
 		<ReviewHead
 			place="5 of 14"
@@ -776,7 +824,7 @@ type Story = {
 	excluded?: boolean;
 };
 
-/** Six October transactions, each as Tally made it and as the bank sends it. */
+/** Six October transactions, each as Tally made it and as the bank sends it; the transfer is the demo seed's own. */
 const STORY: Story[] = [
 	{
 		id: 1,
@@ -805,9 +853,9 @@ const STORY: Story[] = [
 	{
 		id: 4,
 		date: "2026-10-02",
-		name: "Chase card payment",
-		bank: "CHASE CREDIT CRD AUTOPAY",
-		cents: 81240,
+		name: "Transfer to Savings",
+		bank: "ONLINE TRANSFER TO SAV ...5678",
+		cents: 50000,
 		excluded: true,
 	},
 	{
@@ -828,7 +876,7 @@ const STORY: Story[] = [
 	},
 ];
 
-/** A row as Tally made it: a clean name, a category, the paycheck as income, the card payment excluded. */
+/** A row as Tally made it: a clean name, a category, the paycheck as income, the transfer excluded. */
 const madeRow = (s: Story): ListRow => ({
 	id: s.id,
 	date: s.date,
@@ -869,7 +917,7 @@ const MADE = list(STORY.map(madeRow));
 const BANK = list(STORY.map(bankRow));
 
 const WITHOUT_LINE =
-	"No clean names or categories, and the card payment and the paycheck both count in Spent.";
+	"No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.";
 
 /** A's two links under the title: the current one in ink, the other a terracotta link, each 44px. */
 function ViewLinks({ current }: { current: "made" | "bank" }) {
@@ -882,7 +930,7 @@ function ViewLinks({ current }: { current: "made" | "bank" }) {
 				aria-current={current === "made" ? "page" : undefined}
 				class={current === "made" ? here : link}
 			>
-				What Tally made of it
+				Tidied by Tally
 			</a>
 			<span aria-hidden="true" class="text-muted">
 				·
@@ -892,7 +940,7 @@ function ViewLinks({ current }: { current: "made" | "bank" }) {
 				aria-current={current === "bank" ? "page" : undefined}
 				class={current === "bank" ? here : link}
 			>
-				As the bank sends it
+				Straight from the bank
 			</a>
 		</nav>
 	);
@@ -951,11 +999,11 @@ const viewSideBySide = (
 		</p>
 		<div class="mt-4 grid grid-cols-2 gap-6">
 			<section>
-				<h2 class="text-sm text-muted">As the bank sends it</h2>
+				<h2 class="text-sm text-muted">Straight from the bank</h2>
 				{BANK}
 			</section>
 			<section>
-				<h2 class="text-sm text-muted">What Tally made of it</h2>
+				<h2 class="text-sm text-muted">Tidied by Tally</h2>
 				{MADE}
 			</section>
 		</div>
@@ -980,11 +1028,11 @@ export function AiProposals() {
 					them (§8.6, decision 68). There is no new JavaScript (§8.1), so each
 					switch has to work without it.
 				</Fixed>
-				<NeedsLine>
-					what “Sort new transactions as they arrive” does, and says, when
-					categories and exclusions and income are both off (nothing is left to
-					sort); and whether turning a switch back on goes over what was skipped
-					while it was off.
+				<NeedsLine settled="decision 79">
+					“Sort right away” is greyed out, with “Needs Guess categories or Spot
+					paychecks on”, while both of those are off. A switch turned back on
+					catches up overnight: the next nightly run asks about what Tally
+					skipped while it was off, within the daily cap.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1033,10 +1081,12 @@ export function AiProposals() {
 					never applied without a tap (decision 64), and no screen names the AI
 					service (§7).
 				</Fixed>
-				<NeedsLine>
-					whether No is remembered so Tally doesn't ask again; whether Skip
-					keeps a suggestion in the Band's count; and the order the kinds come
-					in (mixed, or one kind at a time).
+				<NeedsLine settled="decision 79">
+					A No is remembered as a “Never suggest” rule, so Tally doesn't ask it
+					again until the family removes the rule. A Skip stays in the count and
+					comes back at the end. Suggestions come money first: income and
+					transfers, then categories and new categories, then names, newest
+					first within each.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1107,12 +1157,13 @@ export function AiProposals() {
 					found, and how many a person changed (§8.6). Code does the counting
 					(§2). The numbers drawn are an example October.
 				</Fixed>
-				<NeedsLine>
-					what counts as sorted (a category Tally picked, not a merchant
-					rule's), cleaned (a suggested name a person kept) and changed
-					(something Tally set that a person then changed: only categories, or
-					names and paychecks too); which month shows early in a new one; and
-					what a switched-off feature's line says.
+				<NeedsLine settled="decisions 79 and 80">
+					It counts all of Tally's work this month: transactions it sorted (gave
+					a category), names it cleaned (a suggested name a person kept) and
+					paychecks it found (income Tally set), and how many of those a person
+					later changed (a category, a name or income). Until this month has
+					any, it shows last month's, labelled with that month's name. A
+					switched-off feature's line says “Off” in muted words.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1147,25 +1198,25 @@ export function AiProposals() {
 				id="p44-without"
 				title="P44 · See it without AI"
 				tier="visual"
-				sentence="In the demo, a visitor can see the same Transactions list as the bank sends it, next to what Tally made of it. Without AI means the bank's own names, no categories (Needs category), and a card payment and a paycheck counted in Spent; the pictures show that state. Pick how they switch."
+				sentence="In the demo, a visitor can see the same Transactions list as the bank sends it, next to what Tally made of it. Without AI means the bank's own names, no categories (Needs category), and the transfer to Savings and a paycheck counted in Spent, as in the demo's own data; the pictures show that state. Pick how they switch."
 			>
 				<Fixed>
 					in the demo only, a toggle shows the same Transactions list as the
 					bank sends it, next to what Tally made of it (§8.6), with no new
 					JavaScript (§8.1).
 				</Fixed>
-				<NeedsLine>
-					exactly what the without view takes away: Tally's AI names, categories
-					and flags go, but a transfer or paycheck that Plaid itself marks
-					(§8.5) isn't the AI's, so whether it still shows is a choice; and
-					whether only this list changes, or Home's numbers too.
+				<NeedsLine settled="decision 79">
+					The without view takes away everything Tally decided, including what
+					it marked at sync from Plaid's categories, so the list shows the
+					bank's raw data only. Home stays as usual: its numbers don't change,
+					only the list switches.
 				</NeedsLine>
 				<Options
 					options={[
 						{
 							name: "Option A · Two links under the title",
 							picked: true,
-							note: "“What Tally made of it · As the bank sends it”: two 44px links, the current one in ink; the list swaps on a page with ?raw=1.",
+							note: "“Tidied by Tally · Straight from the bank”: two 44px links, the current one in ink; the list swaps on a page with ?raw=1.",
 							tradeoff: "two more links under the title.",
 							recommended:
 								"plain words, and it's a link, so it needs no script.",
@@ -1173,7 +1224,7 @@ export function AiProposals() {
 						},
 						{
 							name: "Option A · Without AI",
-							note: "The same page with “As the bank sends it” chosen, and one line saying what's missing.",
+							note: "The same page with “Straight from the bank” chosen, and one line saying what's missing.",
 							screen: viewLinksBank,
 						},
 						{

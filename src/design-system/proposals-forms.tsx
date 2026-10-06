@@ -40,9 +40,9 @@ const HOUSEHOLD: Cat = {
 	color: "cat-brown",
 };
 /** The demo's five categories in their order (src/demo/seed.ts), as the forms list them. */
-const CATEGORIES = [GROCERIES, EATING_OUT, GAS, KIDS, HOUSEHOLD];
+export const CATEGORIES = [GROCERIES, EATING_OUT, GAS, KIDS, HOUSEHOLD];
 
-type Bill = {
+export type Bill = {
 	name: string;
 	/** What the field holds ("1500.00"), as the server writes it. */
 	amount: string;
@@ -60,7 +60,7 @@ type Bill = {
 };
 
 /** A monthly bill: the one the sentences below read back. */
-const RENT: Bill = {
+export const RENT: Bill = {
 	name: "Rent",
 	amount: "1500.00",
 	day: 1,
@@ -141,7 +141,7 @@ const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const money = (amount: string) => formatCents(toCents(amount));
 
 /** The Bills screen's top, dimmed behind the sheet. */
-const billsBehind = (
+export const billsBehind = (
 	<>
 		<Title>Bills</Title>
 		<p class="mt-2 font-serif text-lg italic">
@@ -151,7 +151,7 @@ const billsBehind = (
 );
 
 /** The Transactions screen's top, dimmed behind the sheet. */
-const transactionsBehind = (
+export const transactionsBehind = (
 	<>
 		<Title>Transactions</Title>
 		<p class="mt-2 text-muted">18 transactions in October</p>
@@ -169,7 +169,7 @@ const transactionsBehind = (
  * its form, for a form that fits without scrolling. A picture can't scroll, so what doesn't fit is
  * cut off at the footer, which is what a person sees before they scroll.
  */
-function TallSheet({
+export function TallSheet({
 	behind,
 	footer,
 	fit,
@@ -208,7 +208,7 @@ function TallSheet({
  * The pinned footer (prototype): Cancel and the one primary side by side, 44px tall, under a rule,
  * outside the part of the sheet that scrolls, so they're on screen however long the form is.
  */
-function Footer({ save }: { save: string }) {
+export function Footer({ save }: { save: string }) {
 	return (
 		<div class="grid grid-cols-2 gap-3">
 			<Button kind="secondary" type="button" class="w-full">
@@ -248,7 +248,7 @@ type LedgerProps = {
  * for lines that only separate. Focus draws the accent ring around the line; an error turns the
  * line brick and says why under it in role="alert", with its words, as FormField does.
  */
-function LedgerField({
+export function LedgerField({
 	id,
 	name,
 	label,
@@ -312,9 +312,9 @@ function LedgerField({
 
 // A disclosure row's summary and chevron, as Settings draws them (DESIGN.md "Disclosure"): 48px at
 // least, the chevron turns when it opens, no script.
-const summaryRow =
+export const summaryRow =
 	"flex min-h-12 cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden";
-const Chevron = ({ push }: { push?: boolean }) => (
+export const Chevron = ({ push }: { push?: boolean }) => (
 	<span
 		class={`${push ? "ml-auto " : ""}shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none`}
 	>
@@ -331,7 +331,7 @@ const Chevron = ({ push }: { push?: boolean }) => (
  * so after a new pick it's the chips that show the choice until the page redraws (on an error, or
  * through the Chip's own `hx-get` where htmx is running). That is a build detail, not a look.
  */
-function Row({
+export function Row({
 	label,
 	value,
 	sub,
@@ -362,7 +362,7 @@ function Row({
 }
 
 /** A category as the row shows it: its icon and name, so the row says what's chosen. */
-const categoryValue = (c: Cat) => (
+export const categoryValue = (c: Cat) => (
 	<>
 		<CategoryIcon icon={c.icon} color={c.color} />
 		<span class="truncate text-lg">{c.name}</span>
@@ -370,7 +370,7 @@ const categoryValue = (c: Cat) => (
 );
 
 /** The categories as radio chips, the real Chip. Closed inside a Row, they still post. */
-function CategoryChips({ id, selected }: { id: string; selected: Cat }) {
+export function CategoryChips({ id, selected }: { id: string; selected: Cat }) {
 	return (
 		<fieldset class="pb-3">
 			<legend class="sr-only">Category</legend>
@@ -398,7 +398,7 @@ function CategoryChips({ id, selected }: { id: string; selected: Cat }) {
  * opens itself when it's empty or has an error. (Today it's required, so a bill added by hand with
  * nothing to fill in needs a rule: that's for the owner to settle if A or B is picked.)
  */
-function MatchRow({
+export function MatchRow({
 	id,
 	paidTo,
 	open,
@@ -430,7 +430,7 @@ function MatchRow({
  * today. `lead` is the words before the day. The legend is for screen readers: the visible words
  * already say it.
  */
-function DueRow({
+export function DueRow({
 	id,
 	bill,
 	lead,
