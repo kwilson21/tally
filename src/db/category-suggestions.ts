@@ -12,6 +12,7 @@ export type NoneFitTransaction = {
 export async function noneFitTransactions(
 	db: D1Database,
 ): Promise<NoneFitTransaction[]> {
+	// Bound group building to the newest 500 candidates so one busy theme cannot monopolize the nightly run.
 	const { results } = await db
 		.prepare(`SELECT t.id, COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
 			${merchantKeySql("t")} merchantKey, COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant
@@ -19,7 +20,7 @@ export async function noneFitTransactions(
 		WHERE t.jev_none_fit = 1 AND t.category_confidence >= ? AND t.jev_category_id IS NULL
 		AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_suggestion_id IS NULL
 		AND t.amount_cents > 0 AND t.pending = 0 AND t.excluded = 0 AND t.flag_income = 0
-		AND t.is_split = 0 AND t.parent_id IS NULL ORDER BY t.id`)
+		AND t.is_split = 0 AND t.parent_id IS NULL ORDER BY t.date DESC, t.id DESC LIMIT 500`)
 		.bind(JEV_THRESHOLD)
 		.all<NoneFitTransaction>();
 	return results.map((row) => ({ ...row, merchant: tidyName(row.merchant) }));
@@ -34,8 +35,10 @@ export async function saveSuggestion(
 ): Promise<number | null> {
 	if (!ids.length) return null;
 	const cleaned = name?.trim() ?? "";
+	const currentAvoid = [...new Set([...avoid, ...(await namesToAvoid(db))])];
 	const safeName =
-		cleaned && !avoid.some((n) => n.toLowerCase() === cleaned.toLowerCase())
+		cleaned &&
+		!currentAvoid.some((n) => n.toLowerCase() === cleaned.toLowerCase())
 			? cleaned
 			: "";
 	if (safeName) {
@@ -48,29 +51,65 @@ export async function saveSuggestion(
 		if (existing) {
 			await db
 				.prepare(
-					`UPDATE transactions SET category_suggestion_id = ? WHERE id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`,
+					`UPDATE transactions SET category_suggestion_id = ? WHERE id IN (${placeholders()}) AND category_confidence >= ? AND jev_none_fit=1 AND jev_category_id IS NULL AND amount_cents>0 AND pending=0 AND excluded=0 AND flag_income=0 AND is_split=0 AND parent_id IS NULL AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`,
 				)
-				.bind(existing.id, JSON.stringify(ids))
+				.bind(existing.id, JSON.stringify(ids), JEV_THRESHOLD)
 				.run();
 			return existing.id;
 		}
 	}
 	const status = safeName ? "pending" : "none";
-	const inserted = await db
-		.prepare(
-			"INSERT INTO category_suggestions (name, status) VALUES (?, ?) RETURNING id",
-		)
-		.bind(safeName, status)
-		.first<{ id: number }>();
-	const id = inserted?.id;
-	if (!id) return null;
-	await db
-		.prepare(
-			`UPDATE transactions SET category_suggestion_id = ? WHERE id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`,
-		)
-		.bind(id, JSON.stringify(ids))
-		.run();
-	return id;
+	const eligible = `id IN (${placeholders()}) AND category_confidence >= ? AND jev_none_fit=1 AND jev_category_id IS NULL AND amount_cents>0 AND pending=0 AND excluded=0 AND flag_income=0 AND is_split=0 AND parent_id IS NULL AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`;
+	try {
+		const results = await db.batch([
+			db
+				.prepare(
+					`INSERT INTO category_suggestions (name,status) SELECT ?,? WHERE (SELECT COUNT(*) FROM transactions WHERE ${eligible}) >= 3 RETURNING id`,
+				)
+				.bind(safeName, status, JSON.stringify(ids), JEV_THRESHOLD),
+			db
+				.prepare(
+					`UPDATE transactions SET category_suggestion_id=(SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=? ORDER BY id DESC LIMIT 1) WHERE ${eligible} AND EXISTS (SELECT 1 FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=?)`,
+				)
+				.bind(
+					safeName,
+					status,
+					JSON.stringify(ids),
+					JEV_THRESHOLD,
+					safeName,
+					status,
+				),
+		]);
+		const id = (results[0]?.results as { id: number }[] | undefined)?.[0]?.id;
+		if (id) return id;
+		return (
+			(
+				await db
+					.prepare(
+						"SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status='pending'",
+					)
+					.bind(safeName)
+					.first<{ id: number }>()
+			)?.id ?? null
+		);
+	} catch (error) {
+		// A concurrent nightly run may win the partial unique index; attach this group to that row.
+		if (!safeName || !/UNIQUE/i.test(String(error))) throw error;
+		const existing = await db
+			.prepare(
+				"SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status='pending'",
+			)
+			.bind(safeName)
+			.first<{ id: number }>();
+		if (!existing) throw error;
+		await db
+			.prepare(
+				`UPDATE transactions SET category_suggestion_id=? WHERE ${eligible}`,
+			)
+			.bind(existing.id, JSON.stringify(ids), JEV_THRESHOLD)
+			.run();
+		return existing.id;
+	}
 }
 
 export async function namesToAvoid(db: D1Database): Promise<string[]> {
@@ -87,11 +126,26 @@ export type PendingSuggestions = PendingSuggestion[] & { more: number };
 export async function pendingSuggestions(
 	db: D1Database,
 ): Promise<PendingSuggestions> {
+	await db.batch([
+		db.prepare(
+			`UPDATE transactions SET category_suggestion_id=NULL WHERE category_suggestion_id IN (SELECT cs.id FROM category_suggestions cs WHERE cs.status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL))`,
+		),
+		db.prepare(
+			`UPDATE category_suggestions SET status='none' WHERE status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=category_suggestions.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL)`,
+		),
+	]);
+	// Select the ten busiest eligible pending suggestions before loading ids or purchase rows.
 	const { results: suggestions } = await db
 		.prepare(
-			"SELECT id, name FROM category_suggestions WHERE status = 'pending' ORDER BY id",
+			`WITH candidates AS (
+				SELECT cs.id, cs.name, COUNT(t.id) n
+				FROM category_suggestions cs JOIN transactions t ON t.category_suggestion_id=cs.id
+				AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL
+				WHERE cs.status='pending' GROUP BY cs.id HAVING COUNT(t.id)>0
+			), ranked AS (SELECT *, COUNT(*) OVER() total, ROW_NUMBER() OVER(ORDER BY n DESC,id) rank FROM candidates)
+			SELECT id,name,n,total FROM ranked WHERE rank<=10 ORDER BY rank`,
 		)
-		.all<{ id: number; name: string }>();
+		.all<{ id: number; name: string; n: number; total: number }>();
 	if (!suggestions.length)
 		return Object.defineProperty([], "more", {
 			value: 0,
@@ -102,8 +156,8 @@ export async function pendingSuggestions(
 		), candidates AS (
 			SELECT cs.id, cs.name, COUNT(t.id) AS n
 			FROM pending p JOIN category_suggestions cs ON cs.id = p.id AND cs.status = 'pending'
-			JOIN transactions t ON t.category_suggestion_id = cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0
-			GROUP BY cs.id HAVING COUNT(t.id) >= 3
+			JOIN transactions t ON t.category_suggestion_id = cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
+			GROUP BY cs.id HAVING COUNT(t.id) > 0
 		), ranked AS (
 			SELECT *, COUNT(*) OVER() AS total, ROW_NUMBER() OVER(ORDER BY n DESC, id) AS rank FROM candidates
 		)
@@ -112,7 +166,7 @@ export async function pendingSuggestions(
 			t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending
 		FROM ranked r JOIN transactions t ON t.category_suggestion_id = r.id
 		LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
-		WHERE r.rank <= 10 AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0
+		WHERE r.rank <= 10 AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
 		ORDER BY r.rank, t.date DESC, t.id DESC`)
 		.bind(JSON.stringify(suggestions.map((s) => s.id)))
 		.all<
@@ -146,7 +200,7 @@ export async function pendingSuggestions(
 		});
 	}
 	return Object.defineProperty([...byId.values()], "more", {
-		value: Math.max(0, (results[0]?.total ?? 0) - byId.size),
+		value: Math.max(0, (suggestions[0]?.total ?? 0) - byId.size),
 	}) as PendingSuggestions;
 }
 
@@ -170,7 +224,7 @@ export async function createFromSuggestion(
 	const attached = (
 		await db
 			.prepare(
-				`SELECT id FROM transactions WHERE category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL AND id IN (${placeholders()})`,
+				`SELECT id FROM transactions WHERE category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND id IN (${placeholders()})`,
 			)
 			.bind(id, JSON.stringify(input.shown))
 			.all<{ id: number }>()
@@ -188,30 +242,24 @@ export async function createFromSuggestion(
 			reason: "invalid",
 			error: "Keep each note under 500 characters.",
 		};
-	const active = await db
-		.prepare("SELECT COUNT(*) n FROM categories WHERE archived = 0")
-		.first<{ n: number }>();
-	const conflict = await db
-		.prepare("SELECT 1 FROM categories WHERE name = ? COLLATE NOCASE")
+	const count = await db
+		.prepare(
+			"SELECT COUNT(*) n, COUNT(CASE WHEN archived=0 THEN 1 END) active, COALESCE(MAX(sort_order),0) last, MAX(name=? COLLATE NOCASE) conflict FROM categories",
+		)
 		.bind(name)
-		.first();
-	if (conflict)
+		.first<{ n: number; active: number; last: number; conflict: number }>();
+	if (count?.conflict)
 		return {
 			ok: false,
 			reason: "invalid",
 			error: "That name is reserved for Jev.",
 		};
-	if ((active?.n ?? 0) >= 50)
+	if ((count?.active ?? 0) >= 50)
 		return {
 			ok: false,
 			reason: "invalid",
 			error: "Tally has room for 50 categories. Archive one to add another.",
 		};
-	const count = await db
-		.prepare(
-			"SELECT COUNT(*) n, COALESCE(MAX(sort_order),0) last FROM categories",
-		)
-		.first<{ n: number; last: number }>();
 	const notes = Object.entries(input.notes)
 		.filter(
 			([tx, note]) =>
@@ -220,44 +268,109 @@ export async function createFromSuggestion(
 				note.trim(),
 		)
 		.map(([tx, note]) => ({ id: Number(tx), note: note.trim() }));
-	await db.batch([
-		db
-			.prepare(
-				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', ?, ?)",
-			)
-			.bind(
-				name,
-				["cat-blue", "cat-plum", "cat-slate", "cat-ochre", "cat-brown"][
-					(count?.n ?? 0) % 5
-				],
-				(count?.last ?? 0) + 1,
-			),
-		db
-			.prepare(
-				`UPDATE transactions SET category_id = (SELECT id FROM categories WHERE name = ? COLLATE NOCASE), category_source = 'user', category_confidence = NULL, category_suggestion_id = NULL, updated_by = ?, updated_at = datetime('now') WHERE category_suggestion_id = ? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL`,
-			)
-			.bind(name, actor, id, JSON.stringify(ticked)),
-		db
-			.prepare(
-				"UPDATE transactions SET note = json_extract(note.value, '$.note'), updated_by = ?, updated_at = datetime('now') FROM json_each(?) AS note WHERE transactions.id = json_extract(note.value, '$.id') AND transactions.category_suggestion_id = ? AND transactions.category_id IS NULL AND transactions.category_source IS NULL",
-			)
-			.bind(actor, JSON.stringify(notes), id),
-		db
-			.prepare(
-				"UPDATE category_suggestions SET status = 'created', decided_at = datetime('now') WHERE id = ?",
-			)
-			.bind(id),
-	]);
-	const { results: leftOut } = await db
-		.prepare(
-			`SELECT id FROM transactions WHERE category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL AND id IN (${placeholders()})`,
+	const token = `${Date.now()}-${Math.random()}`;
+	const gate =
+		"EXISTS (SELECT 1 FROM category_suggestions WHERE id=? AND status='pending' AND decided_at=?)";
+	const createdGate =
+		"EXISTS (SELECT 1 FROM category_suggestions WHERE id=? AND status='created' AND decided_at=?)";
+	let results: D1Result[];
+	try {
+		results = await db.batch([
+			db
+				.prepare(
+					"UPDATE category_suggestions SET decided_at=? WHERE id=? AND status='pending' AND decided_at IS NULL",
+				)
+				.bind(token, id),
+			db
+				.prepare(
+					`INSERT INTO categories (name,icon,color,sort_order) SELECT ?,'tag',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM categories) WHERE ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived=0)<50 AND NOT EXISTS(SELECT 1 FROM categories WHERE name=? COLLATE NOCASE) AND EXISTS(SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
+				)
+				.bind(
+					name,
+					["cat-blue", "cat-plum", "cat-slate", "cat-ochre", "cat-brown"][
+						(count?.n ?? 0) % 5
+					],
+					id,
+					token,
+					name,
+					id,
+					JSON.stringify(ticked),
+				),
+			db
+				.prepare(
+					"UPDATE category_suggestions SET status='created' WHERE id=? AND status='pending' AND decided_at=? AND changes()>0",
+				)
+				.bind(id, token),
+			db
+				.prepare(
+					`UPDATE transactions SET category_id=(SELECT id FROM categories WHERE name=? COLLATE NOCASE),category_source='user',category_confidence=NULL,jev_none_fit=0,category_suggestion_id=NULL,updated_by=?,updated_at=datetime('now') WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
+				)
+				.bind(name, actor, id, JSON.stringify(ticked), id, token),
+			db
+				.prepare(
+					`UPDATE transactions SET note=json_extract(note.value,'$.note'),updated_by=?,updated_at=datetime('now') FROM json_each(?) AS note WHERE transactions.id=json_extract(note.value,'$.id') AND transactions.category_suggestion_id=? AND transactions.category_id IS NULL AND transactions.category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
+				)
+				.bind(actor, JSON.stringify(notes), id, id, token),
+			db
+				.prepare(
+					`UPDATE transactions SET category_suggestion_id=NULL,category_confidence=NULL,jev_none_fit=0 WHERE category_suggestion_id=? AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate} RETURNING id`,
+				)
+				.bind(id, id, token),
+			db
+				.prepare(
+					`UPDATE transactions SET category_suggestion_id=NULL WHERE category_suggestion_id=? AND ${createdGate}`,
+				)
+				.bind(id, id, token),
+			db
+				.prepare(
+					"UPDATE category_suggestions SET decided_at=datetime('now') WHERE id=? AND status='created' AND decided_at=?",
+				)
+				.bind(id, token),
+			db
+				.prepare(
+					"UPDATE category_suggestions SET decided_at=NULL WHERE id=? AND status='pending' AND decided_at=?",
+				)
+				.bind(id, token),
+		]);
+	} catch (error) {
+		if (error instanceof Error && /UNIQUE/i.test(error.message))
+			return { ok: false, reason: "invalid", error: "That name is taken." };
+		throw error;
+	}
+	if ((results[2]?.meta.changes ?? 0) === 0) {
+		const stillPending = await db
+			.prepare("SELECT status FROM category_suggestions WHERE id=?")
+			.bind(id)
+			.first<{ status: string }>();
+		if (stillPending?.status !== "pending")
+			return { ok: false, reason: "gone" };
+		const currentCount = await db
+			.prepare("SELECT COUNT(*) n FROM categories WHERE archived=0")
+			.first<{ n: number }>();
+		if ((currentCount?.n ?? 0) >= 50)
+			return {
+				ok: false,
+				reason: "invalid",
+				error: "Tally has room for 50 categories. Archive one to add another.",
+			};
+		if (
+			await db
+				.prepare("SELECT 1 FROM categories WHERE name=? COLLATE NOCASE")
+				.bind(name)
+				.first()
 		)
-		.bind(id, JSON.stringify(attached))
-		.all<{ id: number }>();
+			return { ok: false, reason: "invalid", error: "That name is taken." };
+		return {
+			ok: false,
+			reason: "invalid",
+			error: "Tick at least one transaction, or dismiss this suggestion.",
+		};
+	}
+	const leftOut = (results[5]?.results as { id: number }[]) ?? [];
 	return {
 		ok: true,
 		name,
-		moved: ticked.length,
+		moved: results[3]?.meta.changes ?? 0,
 		leftOut: leftOut.map((row) => row.id),
 	};
 }

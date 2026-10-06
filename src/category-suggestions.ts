@@ -9,8 +9,11 @@ export const MAX_MERCHANTS_SENT = 10;
 
 export function groupNoneFit(rows: NoneFit[]) {
 	const groups = new Map<string, NoneFit[]>();
-	for (const row of rows)
-		groups.set(row.theme, [...(groups.get(row.theme) ?? []), row]);
+	for (const row of rows) {
+		const group = groups.get(row.theme);
+		if (group) group.push(row);
+		else groups.set(row.theme, [row]);
+	}
 	return [...groups.entries()]
 		.filter(([, group]) => group.length >= MIN_GROUP)
 		.sort(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b, "en"))

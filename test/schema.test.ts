@@ -123,6 +123,26 @@ describe("schema", () => {
 		).rejects.toThrow();
 	});
 
+	it("enforces one pending suggestion per name, ignoring case", async () => {
+		await db
+			.prepare(
+				"INSERT INTO category_suggestions (name,status) VALUES ('Pet Care','pending')",
+			)
+			.run();
+		await expect(
+			db
+				.prepare(
+					"INSERT INTO category_suggestions (name,status) VALUES ('pet care','pending')",
+				)
+				.run(),
+		).rejects.toThrow();
+		await db
+			.prepare(
+				"INSERT INTO category_suggestions (name,status) VALUES ('pet care','dismissed')",
+			)
+			.run();
+	});
+
 	it("lets a transaction pay only one bill occurrence, but allows dismissed rows", async () => {
 		await db
 			.prepare(

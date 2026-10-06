@@ -32,6 +32,7 @@ describe("groupNoneFit", () => {
 			category: null,
 			account: null,
 			uncategorized: false,
+			raw: false,
 			show: "all",
 			q: "Chewy",
 			page: 1,

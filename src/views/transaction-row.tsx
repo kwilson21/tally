@@ -127,11 +127,12 @@ export function TransactionRow({
 	bare?: boolean;
 }) {
 	const { kind, caption: said, tag } = rowCaption(row);
-	const maybeCategory = row.maybeCategoryName?.startsWith("new:")
-		? { name: row.maybeCategoryName.slice(4), kind: "new" as const }
-		: row.maybeCategoryName
-			? { name: row.maybeCategoryName, kind: "category" as const }
-			: null;
+	const maybeCategory =
+		kind === "needs" && tag && row.maybeCategoryName?.startsWith("new:")
+			? { name: row.maybeCategoryName.slice(4), kind: "new" as const }
+			: kind === "needs" && tag && row.maybeCategoryName
+				? { name: row.maybeCategoryName, kind: "category" as const }
+				: null;
 	// "Counts in …" shows when a bill moved the month, except where a refund's caption already names it.
 	const countsIn =
 		row.countsInMonth &&

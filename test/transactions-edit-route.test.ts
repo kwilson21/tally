@@ -129,6 +129,26 @@ describe("GET /transactions/:id", () => {
 		expect(html).toContain("PENDING NEW CATEGORY");
 	});
 
+	it("hides a below-threshold Jev chip when its category is archived", async () => {
+		const id = Number(
+			(
+				await env.DB.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,'2026-09-14',1200,'ARCHIVED GUESS') RETURNING id",
+				).first<{ id: number }>()
+			)?.id,
+		);
+		await env.DB.prepare(
+			"UPDATE transactions SET jev_category_id=1,category_confidence=? WHERE id=?",
+		)
+			.bind(JEV_THRESHOLD - 0.01, id)
+			.run();
+		await env.DB.prepare("UPDATE categories SET archived=1 WHERE id=1").run();
+		const { html } = await get(`/transactions/${id}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).not.toContain('type="radio" name="category" value="1"');
+		expect(sheet).not.toContain("Tally&#39;s guess");
+	});
+
 	it("shows the list and the edit sheet, labeled and focused", async () => {
 		const { res, html } = await get(`/transactions/${bakery}?uncategorized=1`);
 		expect(res.status).toBe(200);

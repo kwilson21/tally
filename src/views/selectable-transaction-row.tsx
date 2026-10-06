@@ -24,7 +24,7 @@ export function SelectableTransactionRow({
 	return (
 		<li data-transaction={row.id} class="group/tx">
 			{/* relative keeps the visually hidden checkbox inside its own row. */}
-			<label class="group relative flex min-h-16 cursor-pointer items-center gap-3 has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
+			<label class="group relative flex min-h-16 min-w-11 cursor-pointer items-center gap-3 has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
 				<input
 					class="peer sr-only"
 					type="checkbox"

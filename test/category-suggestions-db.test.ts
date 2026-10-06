@@ -10,6 +10,7 @@ import {
 	pendingSuggestions,
 	saveSuggestion,
 } from "../src/db/category-suggestions";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 // Which transactions count as "Jev was sure none of the categories fit" (spec §7, #51), where a
@@ -191,7 +192,11 @@ describe("noneFitTransactions: what counts as Jev being sure no category fits", 
 	});
 
 	it("leaves out one that is already behind a suggestion, so each is asked about once", async () => {
-		const made = await saveSuggestion(db, "Subscriptions", [await add()]);
+		const made = await saveSuggestion(db, "Subscriptions", [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+		]);
 		expect(made).not.toBeNull();
 		expect(await noneFitTransactions(db)).toEqual([]);
 	});
@@ -245,7 +250,8 @@ describe("saveSuggestion", () => {
 		const before = (await categories()).length;
 		const a = await add();
 		const b = await add({ rawName: "HULU" });
-		const id = await saveSuggestion(db, "Subscriptions", [a, b]);
+		const c = await add({ rawName: "SPOTIFY" });
+		const id = await saveSuggestion(db, "Subscriptions", [a, b, c]);
 		expect(await suggestion(id as number)).toMatchObject({
 			name: "Subscriptions",
 			status: "pending",
@@ -259,8 +265,12 @@ describe("saveSuggestion", () => {
 	});
 
 	it("keeps an empty one when no usable name came, so that group isn't asked about again", async () => {
-		const a = await add();
-		const id = await saveSuggestion(db, null, [a]);
+		const rows = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+		];
+		const id = await saveSuggestion(db, null, rows);
 		expect(await suggestion(id as number)).toMatchObject({
 			name: "",
 			status: "none",
@@ -269,9 +279,17 @@ describe("saveSuggestion", () => {
 	});
 
 	it("puts a second group with the same name, in any capitals, behind the pending suggestion that has it", async () => {
-		const first = await saveSuggestion(db, "Subscriptions", [await add()]);
-		const second = await saveSuggestion(db, "subscriptions", [
-			await add({ rawName: "HULU" }),
+		const [first, second] = await Promise.all([
+			saveSuggestion(db, "Subscriptions", [
+				await add(),
+				await add({ rawName: "HULU" }),
+				await add({ rawName: "SPOTIFY" }),
+			]),
+			saveSuggestion(db, "subscriptions", [
+				await add({ rawName: "HULU2" }),
+				await add({ rawName: "SPOTIFY2" }),
+				await add({ rawName: "MAX" }),
+			]),
 		]);
 		expect(second).toBe(first);
 		const { results } = await db
@@ -283,15 +301,232 @@ describe("saveSuggestion", () => {
 	it("doesn't take a transaction a person categorized while the name was being asked for", async () => {
 		const a = await add();
 		const b = await add({ rawName: "HULU" });
+		const c = await add({ rawName: "SPOTIFY" });
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ?",
 			)
 			.bind(b)
 			.run();
-		const id = await saveSuggestion(db, "Subscriptions", [a, b]);
+		const id = await saveSuggestion(db, "Subscriptions", [a, b, c]);
 		expect((await row(a))?.category_suggestion_id).toBe(id);
 		expect((await row(b))?.category_suggestion_id).toBeNull();
+	});
+
+	it("does not leave an empty suggestion when its candidate purchases changed while Jev answered", async () => {
+		const a = await add();
+		const b = await add({ rawName: "HULU" });
+		const c = await add({ rawName: "SPOTIFY" });
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id IN (?, ?, ?)",
+			)
+			.bind(a, b, c)
+			.run();
+		expect(await saveSuggestion(db, "Subscriptions", [a, b, c])).toBeNull();
+		expect(
+			await db.prepare("SELECT COUNT(*) n FROM category_suggestions").first(),
+		).toMatchObject({ n: 0 });
+	});
+
+	it("does not group split parents, and releases their old suggestion link", async () => {
+		const { id, made } = await (async () => {
+			const items = [
+				await add(),
+				await add({ rawName: "HULU" }),
+				await add({ rawName: "SPOTIFY" }),
+			];
+			return {
+				id: await saveSuggestion(db, "Subscriptions", items),
+				made: items,
+			};
+		})();
+		await saveSplit(
+			db,
+			made[0] as number,
+			[
+				{ categoryId: 1, amountCents: 750 },
+				{ categoryId: 2, amountCents: 750 },
+			],
+			"person",
+		);
+		expect(
+			(await pendingSuggestions(db)).flatMap((s) => s.rows.map((r) => r.id)),
+		).not.toContain(made[0]);
+		expect(
+			await createFromSuggestion(
+				db,
+				id as number,
+				{ ticked: made, shown: made, notes: {} },
+				"person",
+			),
+		).toMatchObject({ ok: true, moved: 2 });
+		expect((await row(made[0] as number))?.category_suggestion_id).toBeNull();
+	});
+
+	it("keeps a suggestion available while any eligible purchase remains", async () => {
+		const items = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+		];
+		const id = (await saveSuggestion(db, "Subscriptions", items)) as number;
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
+			)
+			.bind(items[0])
+			.run();
+		expect((await pendingSuggestions(db))[0]?.rows).toHaveLength(2);
+		expect(await suggestion(id)).toMatchObject({ status: "pending" });
+	});
+
+	it("clears the prior suggestion link from unticked and newly attached rows when Create succeeds", async () => {
+		const { id, made } = await (async () => {
+			const items = [
+				await add(),
+				await add({ rawName: "HULU" }),
+				await add({ rawName: "SPOTIFY" }),
+				await add({ rawName: "LATE" }),
+			];
+			return {
+				id: await saveSuggestion(db, "Subscriptions", items),
+				made: items,
+			};
+		})();
+		const result = await createFromSuggestion(
+			db,
+			id as number,
+			{ ticked: made.slice(0, 2), shown: made.slice(0, 3), notes: {} },
+			"person",
+		);
+		expect(result).toMatchObject({
+			ok: true,
+			leftOut: expect.arrayContaining([made[2], made[3]]),
+		});
+		for (const tx of [made[2] as number, made[3] as number])
+			expect((await row(tx))?.category_suggestion_id).toBeNull();
+	});
+
+	it("does not categorize a row excluded or made ineligible while the form is open", async () => {
+		const made = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+			await add({ rawName: "MAX" }),
+		];
+		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		await db
+			.prepare(
+				`CREATE TRIGGER exclude_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET excluded=1 WHERE category_suggestion_id=NEW.id; END`,
+			)
+			.run();
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		await db.prepare("DROP TRIGGER exclude_during_create").run();
+		expect(result).toMatchObject({ ok: false, reason: "invalid" });
+		for (const tx of made) expect((await row(tx))?.category_id).toBeNull();
+	});
+
+	it("does not create or move anything if another tab dismisses during Create", async () => {
+		const made = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+			await add({ rawName: "MAX" }),
+		];
+		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		await db
+			.prepare(
+				`CREATE TRIGGER dismiss_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE category_suggestions SET status='dismissed' WHERE id=NEW.id; END`,
+			)
+			.run();
+		const before = (await categories()).length;
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		await db.prepare("DROP TRIGGER dismiss_during_create").run();
+		expect(result).toEqual({ ok: false, reason: "gone" });
+		expect(await categories()).toHaveLength(before);
+		expect(await suggestion(id)).toMatchObject({ status: "dismissed" });
+		for (const tx of made) expect((await row(tx))?.category_id).toBeNull();
+	});
+
+	it("handles a category name taken after validation without making a duplicate", async () => {
+		const made = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+			await add({ rawName: "MAX" }),
+		];
+		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		await db
+			.prepare(
+				`CREATE TRIGGER take_name_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,icon,color,sort_order) VALUES(NEW.name,'tag','cat-blue',99); END`,
+			)
+			.run();
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		await db.prepare("DROP TRIGGER take_name_during_create").run();
+		expect(result).toMatchObject({
+			ok: false,
+			reason: "invalid",
+			error: "That name is taken.",
+		});
+		expect(
+			await db
+				.prepare(
+					"SELECT COUNT(*) n FROM categories WHERE name='Subscriptions' COLLATE NOCASE",
+				)
+				.first(),
+		).toMatchObject({ n: 1 });
+	});
+
+	it("enforces the 50 active category limit in the Create write", async () => {
+		const made = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+			await add({ rawName: "MAX" }),
+		];
+		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const active = (await categories()).filter((c) => !c.archived).length;
+		for (let i = active; i < 49; i++)
+			await db
+				.prepare(
+					"INSERT INTO categories(name,icon,color,sort_order) VALUES(?,'tag','cat-blue',?)",
+				)
+				.bind(`Limit ${i}`, 100 + i)
+				.run();
+		await db
+			.prepare(
+				`CREATE TRIGGER fill_limit_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,icon,color,sort_order) VALUES('Concurrent category','tag','cat-blue',999); END`,
+			)
+			.run();
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		await db.prepare("DROP TRIGGER fill_limit_during_create").run();
+		expect(result).toMatchObject({
+			ok: false,
+			reason: "invalid",
+			error: "Tally has room for 50 categories. Archive one to add another.",
+		});
+		expect((await categories()).filter((c) => !c.archived)).toHaveLength(50);
 	});
 });
 
@@ -300,9 +535,15 @@ describe("namesToAvoid", () => {
 		await db
 			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
 			.run();
-		const pending = await saveSuggestion(db, "Subscriptions", [await add()]);
+		const pending = await saveSuggestion(db, "Subscriptions", [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+		]);
 		const dismissed = await saveSuggestion(db, "Pet Care", [
 			await add({ rawName: "CHEWY" }),
+			await add({ rawName: "BANFIELD" }),
+			await add({ rawName: "PETSMART" }),
 		]);
 		await dismissSuggestion(db, dismissed as number);
 		const avoid = await namesToAvoid(db);
@@ -365,6 +606,19 @@ describe("pendingSuggestions: what Settings shows", () => {
 			)
 			.bind(txs[1])
 			.run();
+		expect((await pendingSuggestions(db))[0]?.rows).toHaveLength(2);
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
+			)
+			.bind(txs[2])
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
+			)
+			.bind(txs[3])
+			.run();
 		expect(await pendingSuggestions(db)).toEqual([]);
 	});
 
@@ -379,7 +633,11 @@ describe("pendingSuggestions: what Settings shows", () => {
 	it("leaves out suggestions that were created, dismissed or had no name", async () => {
 		const a = await made("Subscriptions", 3);
 		const b = await made("Pet Care", 3, "GENERAL_MERCHANDISE");
-		await saveSuggestion(db, null, [await add({ plaidCategory: "X" })]);
+		await saveSuggestion(db, null, [
+			await add({ plaidCategory: "X" }),
+			await add({ plaidCategory: "X", rawName: "Y" }),
+			await add({ plaidCategory: "X", rawName: "Z" }),
+		]);
 		await dismissSuggestion(db, a.id);
 		await db
 			.prepare(
@@ -397,6 +655,33 @@ describe("pendingSuggestions: what Settings shows", () => {
 			"Subscriptions",
 			"Pet Care",
 		]);
+	});
+
+	it("loads only the ten busiest of 50 pending suggestions before fetching purchases", async () => {
+		for (let i = 0; i < 50; i++) {
+			const items = [
+				await add({ rawName: `GROUP ${i} A` }),
+				await add({ rawName: `GROUP ${i} B` }),
+				await add({ rawName: `GROUP ${i} C` }),
+			];
+			await saveSuggestion(db, `Group ${i}`, items);
+		}
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements++;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+		const result = await pendingSuggestions(counted);
+		expect(result).toHaveLength(10);
+		expect(result.more).toBe(40);
+		expect(statements).toBe(4);
 	});
 });
 
@@ -548,14 +833,17 @@ describe("createFromSuggestion", () => {
 	it("doesn't count a transaction that arrived behind the suggestion after the page was drawn as one the person unticked", async () => {
 		const { id, made } = await pending(3);
 		const late = await add({ rawName: "LATE" });
-		await saveSuggestion(db, "Subscriptions", [late]);
+		await db
+			.prepare("UPDATE transactions SET category_suggestion_id=? WHERE id=?")
+			.bind(id, late)
+			.run();
 		const result = await createFromSuggestion(
 			db,
 			id,
 			{ ticked: made, shown: made, notes: {} },
 			"person",
 		);
-		expect(result).toMatchObject({ ok: true, leftOut: [] });
+		expect(result).toMatchObject({ ok: true, leftOut: [late] });
 	});
 
 	it("refuses a name a category already has, in any capitals, archived ones too, and creates nothing", async () => {
@@ -746,6 +1034,8 @@ describe("dismissSuggestion", () => {
 	it("says nothing was there when it was already decided", async () => {
 		const id = (await saveSuggestion(db, "Subscriptions", [
 			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
 		])) as number;
 		await dismissSuggestion(db, id);
 		expect(await dismissSuggestion(db, id)).toBeNull();

@@ -10,3 +10,4 @@ ALTER TABLE transactions ADD COLUMN jev_none_fit INTEGER NOT NULL DEFAULT 0 CHEC
 ALTER TABLE transactions ADD COLUMN category_suggestion_id INTEGER REFERENCES category_suggestions(id);
 
 CREATE INDEX transactions_category_suggestion_id ON transactions(category_suggestion_id);
+CREATE UNIQUE INDEX category_suggestions_pending_name ON category_suggestions(lower(name)) WHERE status = 'pending' AND name <> '';

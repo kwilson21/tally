@@ -7,6 +7,7 @@ import {
 import { saveAiSwitches } from "../src/db/ai-switches";
 import {
 	dismissSuggestion,
+	noneFitTransactions,
 	pendingSuggestions,
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
@@ -122,6 +123,33 @@ beforeEach(async () => {
 });
 
 describe("suggestNewCategories", () => {
+	it("rechecks names after Workers AI answers before saving a pending suggestion", async () => {
+		await addMany(3);
+		const ai = {
+			run: vi.fn(async () => {
+				await db
+					.prepare(
+						"INSERT INTO categories(name,icon,color,sort_order) VALUES('Home Supplies','tag','cat-blue',99)",
+					)
+					.run();
+				return { response: "Home Supplies" };
+			}),
+		} as unknown as Ai;
+		await suggestNewCategories({ DB: db, AI: ai });
+		expect(
+			(await suggestions()).some(
+				(s) =>
+					s.status === "pending" && s.name.toLowerCase() === "home supplies",
+			),
+		).toBe(false);
+	});
+
+	it("limits none-fit loading to the newest 500 rows", async () => {
+		await addMany(501);
+		const rows = await noneFitTransactions(db);
+		expect(rows).toHaveLength(500);
+		expect(rows[0]?.id).toBeGreaterThan(rows.at(-1)?.id ?? 0);
+	});
 	it("asks Workers AI for a name once three confident none-fit transactions share a theme, and keeps it as a pending suggestion with those transactions behind it", async () => {
 		const made = await addMany(3);
 		const had = await categoryCount();

@@ -94,7 +94,7 @@ function countingDb() {
 async function bulkSuggestion(name: string, count: number) {
 	const { results } = await db
 		.prepare(
-			"WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT 1,'2026-09-14',100,? || ' ' || i FROM n RETURNING id",
+			"WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_confidence,jev_none_fit) SELECT 1,'2026-09-14',100,? || ' ' || i,0.95,1 FROM n RETURNING id",
 		)
 		.bind(count, name)
 		.all<{ id: number }>();
@@ -152,13 +152,15 @@ const create = (
 const row = (id: number) =>
 	db
 		.prepare(
-			"SELECT category_id, category_source, category_confidence, note, updated_by FROM transactions WHERE id = ?",
+			"SELECT category_id, category_source, category_confidence, jev_none_fit, category_suggestion_id, note, updated_by FROM transactions WHERE id = ?",
 		)
 		.bind(id)
 		.first<{
 			category_id: number | null;
 			category_source: string | null;
 			category_confidence: number | null;
+			jev_none_fit: number;
+			category_suggestion_id: number | null;
 			note: string | null;
 			updated_by: string | null;
 		}>();
@@ -232,7 +234,9 @@ describe("GET /settings with a suggestion", () => {
 			expect(item).toMatch(
 				/<input class="peer sr-only" type="checkbox" name="ids"/,
 			);
-			expect(item).toMatch(/<label[^>]*class="group relative flex min-h-16/);
+			expect(item).toMatch(
+				/<label[^>]*class="group relative flex min-h-16 min-w-11/,
+			);
 			expect(item).toMatch(/selection-mark[^"]*size-7[^"]*rounded-full/);
 			expect(item).toMatch(/peer-checked:border-ink peer-checked:bg-band/);
 			expect(item).toMatch(/aria-labelledby="select-[^"]+-name"/);
@@ -243,15 +247,16 @@ describe("GET /settings with a suggestion", () => {
 		}
 		expect(text).toContain("Chewy.com");
 		expect(text).toContain("$189.00");
-		expect(text).toContain("Create Pet Care with 4");
+		expect(text).toContain("Create Pet Care");
+		expect(text).not.toContain("Create Pet Care with 4");
 		expect(text).toContain("Dismiss");
 		expect(html).toContain(`href="/how-it-works#categorization"`);
-		expect(card.indexOf("Create Pet Care with 4")).toBeLessThan(
+		expect(card.indexOf("Create Pet Care")).toBeLessThan(
 			card.indexOf("Dismiss"),
 		);
 		expect(card.indexOf("Dismiss")).toBeLessThan(card.indexOf("Why?</a>"));
 		expect(card).toMatch(
-			/<button type="submit" name="action" value="create" class="[^"]*border border-ink[^"]*">Create Pet Care with 4<\/button>/,
+			/<button type="submit" name="action" value="create" class="[^"]*border border-ink[^"]*">Create Pet Care<\/button>/,
 		);
 		expect(card).toMatch(
 			/<button type="submit" formaction="[^"]+\/dismiss"[^>]*class="[^"]*text-accent[^"]*">Dismiss<\/button>/,
@@ -259,7 +264,7 @@ describe("GET /settings with a suggestion", () => {
 	});
 
 	it("gives each transaction a note field that shows only while it is unticked, with no script", async () => {
-		const { ids } = await petCare();
+		const { id, ids } = await petCare();
 		const { html } = await get();
 		for (const n of ids) expect(html).toContain(`name="note_${n}"`);
 		expect(textOf(html)).toContain("A note for Amazon gift (optional)");
@@ -272,6 +277,16 @@ describe("GET /settings with a suggestion", () => {
 		);
 		expect(html).toContain(
 			"supports-[selector(:has(*))]:group-has-[input[type=checkbox]:not(:checked)]/tx:block",
+		);
+		expect(html).toMatch(/type="checkbox"[^>]*name="ids"[^>]*checked/);
+		expect(html).toContain('name="shown"');
+		const unchecked = await create(id, [], ids);
+		expect(unchecked.res.status).toBe(422);
+		expect(unchecked.html).toMatch(
+			/type="checkbox"[^>]*name="ids"[^>]*value="\d+"(?![^>]*checked)/,
+		);
+		expect(unchecked.html).toContain(
+			"group-has-[input[type=checkbox]:not(:checked)]/tx:block",
 		);
 	});
 
@@ -312,7 +327,7 @@ describe("GET /settings with a suggestion", () => {
 		expect(counted.statements()).toBeLessThan(20);
 	});
 
-	it("shows nothing for a suggestion with fewer than three transactions still needing a category", async () => {
+	it("keeps a partly reviewed suggestion visible while one eligible transaction remains, then retires it at zero", async () => {
 		const { ids } = await petCare();
 		await db
 			.prepare(
@@ -320,7 +335,14 @@ describe("GET /settings with a suggestion", () => {
 			)
 			.bind(ids[0], ids[1])
 			.run();
-		expect(textOf((await get()).html)).not.toContain("Suggested:");
+		expect(textOf((await get()).html)).toContain("Suggested: Pet Care");
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id=1,category_source='user' WHERE id IN (?,?)",
+			)
+			.bind(ids[2], ids[3])
+			.run();
+		expect(textOf((await get()).html)).not.toContain("Suggested: Pet Care");
 	});
 
 	it("keeps pending suggestions visible when Guess categories is off", async () => {
@@ -368,6 +390,11 @@ describe("creating the category", () => {
 				updated_by: "demo",
 			});
 		expect((await row(ids[3] as number))?.category_id).toBeNull();
+		expect(await row(ids[3] as number)).toMatchObject({
+			category_confidence: null,
+			jev_none_fit: 0,
+			category_suggestion_id: null,
+		});
 		expect(await status(id)).toBe("created");
 		expect(trigger(res)).toEqual({
 			toast: {
@@ -533,7 +560,7 @@ describe("creating the category", () => {
 		).toHaveLength(250);
 		const newest = await db
 			.prepare(
-				"SELECT raw_name FROM transactions WHERE raw_name LIKE 'Large Batch %' AND category_suggestion_id IS NOT NULL ORDER BY date DESC, id DESC LIMIT 50",
+				"SELECT raw_name FROM transactions WHERE raw_name LIKE 'Large Batch %' AND category_confidence=0.5 ORDER BY date DESC, id DESC LIMIT 50",
 			)
 			.all<{ raw_name: string }>();
 		expect(asked).toEqual(newest.results.map((row) => row.raw_name));

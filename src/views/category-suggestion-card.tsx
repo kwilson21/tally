@@ -77,7 +77,7 @@ export function CategorySuggestionCard({
 				</ul>
 				<div class="flex flex-wrap items-center gap-2 py-3">
 					<Button kind="secondary" type="submit" name="action" value="create">
-						Create {suggestion.name} with {suggestion.rows.length}
+						Create {suggestion.name}
 					</Button>
 					<Button
 						kind="text"

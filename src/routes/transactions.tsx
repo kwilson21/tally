@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
@@ -1194,7 +1195,7 @@ function EditSheet({
 							tx.suggestedCategoryId !== null &&
 							tx.suggestedCategoryName &&
 							tx.categoryConfidence !== null &&
-							tx.categoryConfidence < 0.8 && (
+							tx.categoryConfidence < JEV_THRESHOLD && (
 								<SuggestedCategoryChip
 									name={tx.suggestedCategoryName}
 									value={String(tx.suggestedCategoryId)}
@@ -1239,7 +1240,7 @@ function EditSheet({
 						!tx.maybeCategoryNew &&
 						tx.suggestedCategoryName &&
 						tx.categoryConfidence !== null &&
-						tx.categoryConfidence < 0.8 && (
+						tx.categoryConfidence < JEV_THRESHOLD && (
 							<p class="text-sm text-muted">
 								Tally's guess · {Math.round(tx.categoryConfidence * 100)}% sure
 							</p>
