@@ -33,7 +33,7 @@ The design system track runs alongside Phase 2 and comes before the audit detail
 
 Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's paid or the next one is due; a bank change to a split purchase's amount removes the split. Phase 3 is complete on `main` and the demo; it reaches production in the one owner-approved deploy after Oct 7 (decision 60). The other session's income work ([#149](https://github.com/kwilson21/tally/pull/149), [#153](https://github.com/kwilson21/tally/pull/153), [#160](https://github.com/kwilson21/tally/pull/160)) is separate; [#153](https://github.com/kwilson21/tally/pull/153) needs its migration renumbered after `0015`, which `main` now uses.
 
-Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Claude Sonnet subagents build Phases 3.5 to 5 from the main session's briefs (decision 78, replacing decision 71's Codex), and a separate ultracode session handles design and polish.
+Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Codex builds Phases 3.5 to 5 from the main session's briefs, in worktrees on the owner's machine, and Claude delivers the PRs (decision 88, replacing decision 78's Sonnet subagents), and a separate ultracode session handles design and polish.
 
 ## Where Phase 3.5 stands (Oct 6: all on `main`)
 
