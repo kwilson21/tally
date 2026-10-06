@@ -1,6 +1,6 @@
 # Open questions on the AI, Phase 5 and design-system issues (Oct 5)
 
-**Answered on Oct 6 (decisions 79–81):** the owner went through every question by seeing a picture of each answer. Where the answer differs from the recommendation below, the Answers section at the end wins.
+**Answered on Oct 6 (decisions 79–82):** the owner went through every question by seeing a picture of each answer. Where the answer differs from the recommendation below, the Answers section at the end wins.
 
 Writing the issues for decisions 73–76 turned up 53 questions the spec doesn't answer. Each has a recommended answer, in the spirit of the owner's earlier picks: the simplest rule a person can say in a sentence, nothing hidden from the family, and no new script. The owner accepts them all, changes some, or goes through them one by one. Accepted answers become a decision entry and replace the "Open:" lines in the issues.
 
@@ -103,3 +103,48 @@ Recommended answers were taken unless listed here.
 
 - **54:** a kind (subscription, one-off, bill or transfer) is a word about the purchase and never changes a number; Exclude and Bills work as before (A, as recommended).
 - **55:** removing a person from the people list clears them from the purchases marked for them, and the toast says how many (A, as recommended).
+
+## More, from #198–#203 and #207 (decision 82)
+
+The owner answered these on Oct 6 by seeing a picture of each, so they have no recommended answer above; the drawings are P91–P109 on the proposals page. Numbering continues from 55.
+
+**Browse past months (#198)**
+56. *Does a finished month's number take off its savings goal and plans?* No: it is the month's budgets minus its spending, and the goal and plans don't change it (P91).
+57. *The words for a month with no budgets, exactly $0, every category over, or three or more over.* There is no sentence to word: a tilted Under or Over stamp says how it ended (exactly $0 reads Under, as P46 A drew it), and the bars show every category that went over, however many (P91).
+58. *A month outside the range.* Any other month in the address, a future one or one before the first with transactions, opens this month; a strip of month dots runs from the first month to now (P92).
+59. *Does a finished month list its Not budgeted categories?* Yes, each with what it spent, read-only like its other rows (P93).
+
+**Home's top (#199)**
+60. *Where Why? goes below $0.* The label stays, because the number now shows as negative ("−$40"), so Why? sits beside "Safe to spend" as before (P94).
+61. *The daily line on the last day, and when it rounds to 0¢.* The daily line is gone: a forecast of where the month ends replaces it, from the 3rd day of the month, so neither case arises (P95).
+62. *The order of this line and the stale-bank line.* The bank line comes first, then the forecast; the bank line keeps its job and gets a dashed "as of Oct 2" tag and a soft brick-tinted line with a Fix button, and no playful words (P96).
+63. *A headline just below $0.* "−$0.40": cents show only when the amount is under $1 (P94).
+64. *The words for exactly one older transaction.* The Band reads "12 need a category" with a small "+1 older" chip (P97).
+
+**Budget rows (#200)**
+65. *A $0 budget with nothing spent.* No warning (P98).
+66. *"$X left" on a finished month's rows.* No: a finished row reads "spent / budget" with a bar, and nearly spent is now an amber bar at 80% or more, so there is no "left" (P93, P98).
+67. *A category where refunds outweigh spending (gap E9).* "+$20" in green with an empty bar, and the same on a Not budgeted row (P98).
+68. *Excluded transactions in the sheet's list, and its link.* Excluded transactions aren't counted; the link is a "12 transactions ›" button, shown only when there are some (P99).
+
+**A savings goal (#201)**
+69. *Can a goal be taken away?* Yes: setting it to $0 from a month on removes it, and it goes back under Not budgeted as "Set a goal" (P100).
+70. *Do Adjust's − and + apply to the Savings row?* No: only its sheet changes it (P100).
+71. *Does a finished month's number take off its goal?* No, as in 56.
+
+**Planned expenses (#202)**
+72. *A category on a plan.* No category: a linked payment keeps its own, and `category_id` leaves §5.
+73. *Which transactions the picker lists.* Money out from the plan's month and the next, not already paying a bill or a plan, closest amount first (P101).
+74. *Editing, deleting, unlinking, where a paid plan shows, totals.* The plan's own sheet edits it, deletes it and unlinks a payment (P102); once paid it shows with the paid bills, with a check (P103); the Planned group shows its own total, and plans aren't in the monthly bills total (P104).
+75. *An excluded payment.* It can be linked and counts once linked, the same rule as for bills.
+76. *The Band with two actions, and with two unpaid plans.* It asks about one plan at a time: "Car registration wasn't paid", with Move to Nov and Drop, and a dot for each plan waiting (P105).
+
+**The reconnect email (#203)**
+77. *Where "everyone in the family" comes from.* Everyone who has signed in to Tally: Tally notes each verified sign-in address the first time it sees it (a new `household_members` table with `email` and `first_seen_at`), and each address is also verified in Cloudflare Email Routing.
+78. *Whole household or per person, and On or Off to start.* One household switch, "Bank sign-in emails", on to start, with the people shown as initials (P107).
+79. *When the first email goes.* At the nightly run after a bank needs attention, then every 3 days until it's fixed (P108).
+80. *Where "when the last one went" is kept.* A nullable column on `plaid_items` (`reconnect_emailed_at`), listed in §5.
+81. *The footer's "Turn these emails off" link.* Dropped: the email says "Turn off in Settings" in muted words, with no link, and has one button, "Open Accounts" (P109).
+
+**The bills total (#207)**
+82. *Does a part-paid bill add its full amount or what's left to its group's total?* What's left. The monthly total still counts it in full (decision 79) (P106).

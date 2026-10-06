@@ -18,7 +18,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P90 with one recommended option each, marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P109 with one recommended option each (P91 on are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -27,24 +27,27 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P90 is drawn, and each id is used once.
+		// Every proposal from P23 to P109 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 90; n++) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 109; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
-		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. Every
-		// other proposal marks exactly one Recommended, with its reason.
+		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
+		// every proposal from P91 on (decision 82): the owner picked each from pictures, so the page
+		// draws the pick and nothing to choose between. Every other proposal marks exactly one
+		// Recommended, with its reason.
 		for (const id of ids) {
+			const n = Number(id.match(/^p(\d+)/)?.[1]);
+			const asDrawn = id === "p31-empty" || n >= 91;
 			const start = html.indexOf(`<section id="${id}"`);
 			// Up to the next proposal (a picture can hold sections of its own).
 			const next = html.indexOf('<section id="p', start + 1);
 			const section = html.slice(start, next === -1 ? undefined : next);
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
-			expect([id, recommended]).toEqual([id, id === "p31-empty" ? 0 : 1]);
+			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
 			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
 				recommended,
 			);
-			// P34–P90 mark the owner's pick (decisions 72–80); P60 took two options.
-			const n = Number(id.match(/^p(\d+)/)?.[1]);
+			// P34–P109 mark the owner's pick (decisions 72–82); P60 took two options.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const expected = n < 34 ? 0 : id === "p60-bills-total" ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
@@ -60,7 +63,7 @@ describe("GET /design-system/proposals", () => {
 			options,
 		);
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(57);
+		expect(DECIDED.length).toBe(64);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));

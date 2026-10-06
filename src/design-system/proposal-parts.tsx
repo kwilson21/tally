@@ -110,6 +110,20 @@ export function Fixed({ children }: { children?: Child }) {
 	);
 }
 
+/**
+ * What a later pick (decision 82) replaced in an earlier drawing, and the drawing that takes its
+ * place, named in plain words so the line adds no link to tap. The earlier drawing stays as it was,
+ * so the page still shows what was picked first.
+ */
+export function Replaced({ by, children }: { by: string; children?: Child }) {
+	return (
+		<p class="max-w-prose text-sm">
+			<span class="font-medium">Replaced by decision 82: </span>
+			{children} See {by}, further down.
+		</p>
+	);
+}
+
 export function Title({ children }: { children?: Child }) {
 	return (
 		<h1 class="font-serif text-4xl font-semibold tracking-tight">{children}</h1>
@@ -122,16 +136,21 @@ export function Title({ children }: { children?: Child }) {
  */
 export function Sheet({
 	behind,
+	top = "top-64",
 	children,
 }: {
 	behind?: Child;
+	/** Where the sheet's top edge sits, as a Tailwind class, for a sheet with more to hold. */
+	top?: string;
 	children?: Child;
 }) {
 	return (
 		<div class="relative -mx-5 h-[686px] overflow-hidden">
 			<div class="px-5">{behind}</div>
 			<div class="absolute inset-0 bg-ink/30" />
-			<div class="absolute inset-x-0 bottom-0 top-64 flex flex-col gap-3 overflow-y-auto rounded-t-sheet bg-paper p-5">
+			<div
+				class={`absolute inset-x-0 bottom-0 ${top} flex flex-col gap-3 overflow-y-auto rounded-t-sheet bg-paper p-5`}
+			>
 				{children}
 			</div>
 		</div>

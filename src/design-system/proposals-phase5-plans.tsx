@@ -15,7 +15,7 @@ import { Icon } from "../views/icons";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { TextInput } from "../views/text-input";
-import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { Fixed, Options, Replaced, Sheet, Title } from "./proposal-parts";
 import { LedgerField } from "./proposals-forms";
 import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
@@ -821,6 +821,10 @@ export function Phase5PlansProposals() {
 					to November?”, with Move it or Drop it, and until it's answered it
 					stays set aside. Its table is planned_expenses (§5).
 				</NeedsLine>
+				<Replaced by="P102 and P105">
+					The plan's category column in §5, and the Band's words (“Move it to
+					November?”, Move it, Drop it).
+				</Replaced>
 				<Options
 					options={[
 						{
@@ -872,6 +876,10 @@ export function Phase5PlansProposals() {
 					endings and when it last synced) and never carries amounts or
 					transaction details.
 				</NeedsLine>
+				<Replaced by="P107 to P109">
+					Option B's email body and its “Turn these emails off” link, and the
+					Settings picture's Reminders section.
+				</Replaced>
 				<Options
 					options={[
 						{
