@@ -9,7 +9,7 @@ export type PaymentPickerCandidate = {
 	date: string;
 	dateLabel: string;
 	amountCents: number;
-	/** An excluded payment can pay a bill, and linking it puts it back in the budget (spec §6.1 rule 4). */
+	/** An excluded payment can pay a bill, and counts in the budget once linked (spec §6.1 rule 4, §8.5). */
 	excluded?: boolean;
 };
 export type PaymentPickerPeriod = {

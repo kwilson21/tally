@@ -125,7 +125,7 @@ export async function categorizePending(
 			// One small read per transaction: someone may have turned a switch off since the last one.
 			const before = await readAiSwitches(env.DB);
 			if (!asksJev(before) || (bySync && !before.sortOnArrival)) return done;
-			// A credit a person reviewed is asked about only for its category.
+			// A credit a person reviewed, or an excluded payment that pays a bill, is asked about only for its category.
 			if (tx.categoryOnly && !before.categories) continue;
 			done.asked += 1;
 			const result = await askJev(tx, names, env.JEV_API_KEY, fetchImpl);

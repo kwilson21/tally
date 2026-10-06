@@ -2230,6 +2230,702 @@ describe("syncItem", () => {
 			spy.mockRestore();
 		}
 	});
+
+	describe("transfers and card payments (spec §8.5, decision 67)", () => {
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		const TRANSFERS = ["TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS"] as const;
+		const inCategory = (primary: string | null, overrides = {}) =>
+			transaction({
+				personal_finance_category: primary === null ? null : { primary },
+				...overrides,
+			});
+
+		/** Runs one sync that sends these transactions as added or as modified. */
+		const syncAs = (
+			id: number,
+			kind: "added" | "modified",
+			...sent: ReturnType<typeof transaction>[]
+		) =>
+			syncItem(
+				opts,
+				id,
+				plaidFetch(() => response(page({ [kind]: sent }))),
+			);
+
+		const exclusion = () =>
+			env.DB.prepare(
+				"SELECT excluded, excluded_source FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first();
+
+		const rowId = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first<{ id: number }>()
+			)?.id as number;
+
+		/** What the edit panel saves when a person only flips the exclude toggle. */
+		const person = async (excluded: boolean) =>
+			saveEdit(
+				env.DB,
+				await rowId(),
+				{
+					categoryId: null,
+					alwaysForMerchant: false,
+					displayName: null,
+					note: null,
+					excluded,
+					income: false,
+					creditReviewed: false,
+				},
+				"synthetic-person",
+			);
+
+		const jevFlags = async (flags: { transfer: boolean }) =>
+			saveJevResult(env.DB, await rowId(), {
+				categoryId: null,
+				suggestedCategoryId: null,
+				confidence: 0.5,
+				flags: { ...flags, reimbursement: false, income: false },
+			});
+
+		it.each(TRANSFERS)(
+			"excludes a new %s transaction at sync, with Plaid as the source",
+			async (category) => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory(category));
+				expect(await exclusion()).toEqual({
+					excluded: 1,
+					excluded_source: "plaid",
+				});
+			},
+		);
+
+		it.each(["FOOD_AND_DRINK", "INCOME", "TRANSFER", null])(
+			"leaves a new transaction in %s counted",
+			async (category) => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory(category));
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: null,
+				});
+			},
+		);
+
+		it("keeps a card payment out of what the month spent", async () => {
+			const id = await addItem();
+			await syncAs(
+				id,
+				"added",
+				inCategory("LOAN_PAYMENTS", { amount: 500, name: "CARD PAYMENT" }),
+				inCategory("FOOD_AND_DRINK", {
+					transaction_id: "lunch",
+					amount: 12,
+					name: "LUNCH",
+				}),
+			);
+			const month = await loadMonth(env.DB, "2026-09");
+			const summary = summarizeMonth({
+				month: "2026-09",
+				...month,
+				unpaidDueBillsCents: 0,
+			});
+			expect(summary.totalSpentCents).toBe(1200);
+		});
+
+		it("excludes a transaction Plaid later recategorizes as a transfer", async () => {
+			const id = await addItem();
+			await syncAs(id, "added", inCategory("FOOD_AND_DRINK"));
+			expect(await exclusion()).toEqual({
+				excluded: 0,
+				excluded_source: null,
+			});
+			await syncAs(id, "modified", inCategory("TRANSFER_OUT"));
+			expect(await exclusion()).toEqual({
+				excluded: 1,
+				excluded_source: "plaid",
+			});
+		});
+
+		it.each(["added", "modified"] as const)(
+			"keeps a person's include through the next sync that sends it again (%s)",
+			async (kind) => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_OUT"));
+				await person(false);
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: "user",
+				});
+				await syncAs(id, kind, inCategory("TRANSFER_OUT"));
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: "user",
+				});
+				// Even after Plaid changes its mind and changes it back.
+				await syncAs(id, kind, inCategory("FOOD_AND_DRINK"));
+				await syncAs(id, kind, inCategory("LOAN_PAYMENTS"));
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: "user",
+				});
+			},
+		);
+
+		it("keeps a person's include when Jev later flags the transfer", async () => {
+			const id = await addItem();
+			await syncAs(id, "added", inCategory("TRANSFER_OUT"));
+			await person(false);
+			await jevFlags({ transfer: true });
+			expect(await exclusion()).toEqual({
+				excluded: 0,
+				excluded_source: "user",
+			});
+		});
+
+		it.each(["added", "modified"] as const)(
+			"keeps a person's exclude when a %s transaction is or stops being a transfer",
+			async (kind) => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("FOOD_AND_DRINK"));
+				await person(true);
+				for (const category of ["TRANSFER_IN", "FOOD_AND_DRINK", null]) {
+					await syncAs(id, kind, inCategory(category));
+					expect(await exclusion()).toEqual({
+						excluded: 1,
+						excluded_source: "user",
+					});
+				}
+			},
+		);
+
+		describe("a transaction that stops being a transfer", () => {
+			const setups = {
+				plaid: async (id: number) =>
+					syncAs(id, "added", inCategory("TRANSFER_OUT")),
+				jev: async (id: number) => {
+					await syncAs(id, "added", inCategory("FOOD_AND_DRINK"));
+					await jevFlags({ transfer: true });
+				},
+				user: async (id: number) => {
+					await syncAs(id, "added", inCategory("TRANSFER_OUT"));
+					await person(false);
+					await person(true);
+				},
+				"no source": async (id: number) => {
+					await syncAs(id, "added", inCategory("FOOD_AND_DRINK"));
+					await env.DB.prepare(
+						"UPDATE transactions SET excluded = 1 WHERE plaid_transaction_id = 'transaction-1'",
+					).run();
+				},
+			} as const;
+
+			it.each(["added", "modified"] as const)(
+				"is counted again when Plaid was the source (%s)",
+				async (kind) => {
+					const id = await addItem();
+					await setups.plaid(id);
+					await syncAs(id, kind, inCategory("FOOD_AND_DRINK"));
+					expect(await exclusion()).toEqual({
+						excluded: 0,
+						excluded_source: null,
+					});
+				},
+			);
+
+			it.each(["jev", "user", "no source"] as const)(
+				"stays excluded when the source was %s",
+				async (source) => {
+					const id = await addItem();
+					await setups[source](id);
+					const before = await exclusion();
+					expect(before).toMatchObject({ excluded: 1 });
+					for (const kind of ["modified", "added"] as const) {
+						await syncAs(id, kind, inCategory("FOOD_AND_DRINK"));
+						expect(await exclusion()).toEqual(before);
+					}
+				},
+			);
+
+			it.each(["jev", "no source"] as const)(
+				"keeps its %s exclusion's source when Plaid calls it a transfer too",
+				async (source) => {
+					const id = await addItem();
+					await setups[source](id);
+					const before = await exclusion();
+					await syncAs(id, "modified", inCategory("TRANSFER_IN"));
+					expect(await exclusion()).toEqual(before);
+					// It was never Plaid's to clear.
+					await syncAs(id, "modified", inCategory("FOOD_AND_DRINK"));
+					expect(await exclusion()).toEqual(before);
+				},
+			);
+		});
+
+		/** Splits the synced purchase (12.34) the way a person does, and returns its parts' ids. */
+		const split = async () => {
+			await env.DB.prepare(
+				"INSERT OR IGNORE INTO categories (name, icon, color, sort_order) VALUES ('Split A', 'groceries', 'cat-blue', 91), ('Split B', 'groceries', 'cat-blue', 92)",
+			).run();
+			const { results: categories } = await env.DB.prepare(
+				"SELECT id FROM categories WHERE name IN ('Split A', 'Split B') ORDER BY name",
+			).all<{ id: number }>();
+			await saveSplit(
+				env.DB,
+				await rowId(),
+				[
+					{ amountCents: 600, categoryId: categories[0]?.id as number },
+					{ amountCents: 634, categoryId: categories[1]?.id as number },
+				],
+				"synthetic-person",
+			);
+			const { results } = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+				.bind(await rowId())
+				.all<{ id: number }>();
+			return results.map((part) => part.id);
+		};
+
+		describe("a split purchase", () => {
+			const spent = async () =>
+				summarizeMonth({
+					month: "2026-09",
+					...(await loadMonth(env.DB, "2026-09")),
+					unpaidDueBillsCents: 0,
+				}).totalSpentCents;
+
+			const parts = async () =>
+				(
+					await env.DB.prepare(
+						"SELECT excluded, excluded_source FROM transactions WHERE parent_id = ? ORDER BY id",
+					)
+						.bind(await rowId())
+						.all()
+				).results;
+
+			it.each(["added", "modified"] as const)(
+				"stops counting, parts and all, when Plaid calls it a transfer, and counts again when it stops (%s)",
+				async (kind) => {
+					const id = await addItem();
+					await syncAs(id, "added", inCategory("FOOD_AND_DRINK"));
+					await split();
+					expect(await spent()).toBe(1234);
+
+					await syncAs(id, kind, inCategory("TRANSFER_OUT"));
+					const plaid = { excluded: 1, excluded_source: "plaid" };
+					expect(await exclusion()).toEqual(plaid);
+					expect(await parts()).toEqual([plaid, plaid]);
+					expect(await spent()).toBe(0);
+
+					await syncAs(id, kind, inCategory("FOOD_AND_DRINK"));
+					const counted = { excluded: 0, excluded_source: null };
+					expect(await exclusion()).toEqual(counted);
+					expect(await parts()).toEqual([counted, counted]);
+					expect(await spent()).toBe(1234);
+				},
+			);
+
+			it.each(["added", "modified"] as const)(
+				"leaves a part a person set alone, whether it is included or excluded (%s)",
+				async (kind) => {
+					const id = await addItem();
+					await syncAs(id, "added", inCategory("TRANSFER_IN"));
+					const [first, second] = await split();
+					await env.DB.prepare(
+						"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = ?",
+					)
+						.bind(first)
+						.run();
+					await syncAs(id, kind, inCategory("LOAN_PAYMENTS"));
+					expect(await parts()).toEqual([
+						{ excluded: 0, excluded_source: "user" },
+						{ excluded: 1, excluded_source: "plaid" },
+					]);
+
+					await env.DB.prepare(
+						"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+					)
+						.bind(second)
+						.run();
+					await syncAs(id, kind, inCategory("FOOD_AND_DRINK"));
+					expect(await parts()).toEqual([
+						{ excluded: 0, excluded_source: "user" },
+						{ excluded: 1, excluded_source: "user" },
+					]);
+				},
+			);
+
+			it("keeps a person's include of the whole split through the next sync", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_OUT"));
+				const [first] = await split();
+				const included = { excluded: 0, excluded_source: "user" };
+				// The edit panel's toggle on one part includes the purchase and every part.
+				await saveEdit(
+					env.DB,
+					first as number,
+					{
+						categoryId: null,
+						alwaysForMerchant: false,
+						displayName: null,
+						note: null,
+						excluded: false,
+						income: false,
+						creditReviewed: false,
+					},
+					"synthetic-person",
+				);
+				for (const kind of ["added", "modified"] as const) {
+					await syncAs(id, kind, inCategory("TRANSFER_OUT"));
+					expect(await exclusion()).toEqual(included);
+					expect(await parts()).toEqual([included, included]);
+				}
+				expect(await spent()).toBe(1234);
+			});
+		});
+
+		// A payment linked to a bill counts in Spent whatever its exclusion (spec §6.1 rule 4, §8.5), decided
+		// where spending is read. So the transfer rule excludes it like any other row, and nothing about a link
+		// is ever written to or restored on the exclusion.
+		describe("a payment linked to a bill", () => {
+			const link = async (transactionId: number) => {
+				await env.DB.batch([
+					env.DB.prepare("DELETE FROM bills"),
+					env.DB.prepare(
+						"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9001, 'Rent', 150000, 27, 'monthly', 'LANDLORD LLC')",
+					),
+					env.DB.prepare(
+						"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9001, '2026-09', ?, 'user', 'linked')",
+					).bind(transactionId),
+				]);
+			};
+			const unlink = () =>
+				env.DB.prepare("DELETE FROM bill_payments WHERE bill_id = 9001").run();
+			const payment = () =>
+				env.DB.prepare(
+					"SELECT status FROM bill_payments WHERE bill_id = 9001",
+				).first();
+			const parts = async () =>
+				(
+					await env.DB.prepare(
+						"SELECT excluded, excluded_source FROM transactions WHERE parent_id = ? ORDER BY id",
+					)
+						.bind(await rowId())
+						.all()
+				).results;
+			const spent = async () =>
+				summarizeMonth({
+					month: "2026-09",
+					...(await loadMonth(env.DB, "2026-09")),
+					unpaidDueBillsCents: 0,
+				}).totalSpentCents;
+
+			it.each(["added", "modified"] as const)(
+				"counts, and the bill stays paid, when Plaid calls it a transfer, and stays excluded once the link is gone (%s)",
+				async (kind) => {
+					const id = await addItem();
+					await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
+					await link(await rowId());
+					await syncAs(id, kind, inCategory("TRANSFER_OUT"));
+					// Excluded by Plaid as any transfer is, and counted because it pays the bill.
+					expect(await exclusion()).toEqual({
+						excluded: 1,
+						excluded_source: "plaid",
+					});
+					expect(await payment()).toEqual({ status: "linked" });
+					expect(await spent()).toBe(1234);
+
+					await unlink();
+					expect(await exclusion()).toEqual({
+						excluded: 1,
+						excluded_source: "plaid",
+					});
+					expect(await spent()).toBe(0);
+				},
+			);
+
+			// A loan or card payment Plaid excludes at sync still pays its bill: bill matching takes excluded
+			// payments (spec §6.1 rule 4, #180), and it counts once it is linked, so the bill counts once.
+			it("matches a loan payment Plaid excluded to its bill, and counts it once", async () => {
+				const id = await addItem();
+				await env.DB.prepare(
+					"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9002, 'Car loan', 1234, 27, 'monthly', 'Shop')",
+				).run();
+				await syncAs(id, "added", inCategory("LOAN_PAYMENTS"));
+				expect(
+					await env.DB.prepare(
+						"SELECT period, status FROM bill_payments WHERE bill_id = 9002",
+					).first(),
+				).toEqual({ period: "2026-09", status: "linked" });
+				const excluded = { excluded: 1, excluded_source: "plaid" };
+				expect(await exclusion()).toEqual(excluded);
+				await syncAs(id, "modified", inCategory("LOAN_PAYMENTS"));
+				await syncAs(id, "added", inCategory("LOAN_PAYMENTS"));
+				expect(await exclusion()).toEqual(excluded);
+				expect(await spent()).toBe(1234);
+			});
+
+			// Jev's judgment survives every other writer: a link, Plaid calling it a transfer, the link going,
+			// and Plaid dropping the category, because none of them rewrites the exclusion Jev made.
+			it("keeps Jev's exclusion through a link, Plaid's transfer category, the link going and Plaid dropping the category", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
+				await jevFlags({ transfer: true });
+				const jev = { excluded: 1, excluded_source: "jev" };
+				expect(await exclusion()).toEqual(jev);
+
+				await link(await rowId());
+				expect(await spent()).toBe(1234);
+				await syncAs(id, "modified", inCategory("TRANSFER_OUT"));
+				expect(await exclusion()).toEqual(jev);
+				expect(await spent()).toBe(1234);
+
+				await unlink();
+				expect(await spent()).toBe(0);
+				await syncAs(id, "modified", inCategory("GENERAL_SERVICES"));
+				expect(await exclusion()).toEqual(jev);
+				expect(await spent()).toBe(0);
+			});
+
+			it("lets Jev flag a payment that pays a bill as a transfer, which still counts while it is linked", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
+				await link(await rowId());
+				await jevFlags({ transfer: true });
+				expect(
+					await env.DB.prepare(
+						"SELECT excluded, excluded_source, flag_transfer FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+					).first(),
+				).toEqual({ excluded: 1, excluded_source: "jev", flag_transfer: 1 });
+				expect(await spent()).toBe(1234);
+				await unlink();
+				expect(await spent()).toBe(0);
+			});
+
+			it("counts a part linked to a bill while its siblings and the split are excluded", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
+				const [linked] = await split();
+				await link(linked as number);
+				await syncAs(id, "modified", inCategory("LOAN_PAYMENTS"));
+				const plaid = { excluded: 1, excluded_source: "plaid" };
+				expect(await exclusion()).toEqual(plaid);
+				expect(await parts()).toEqual([plaid, plaid]);
+				expect(await payment()).toEqual({ status: "linked" });
+				// The part that pays the bill (6.00 of the 12.34) counts; the other part doesn't.
+				expect(await spent()).toBe(600);
+				await unlink();
+				expect(await spent()).toBe(0);
+			});
+		});
+
+		describe("a credit a person decided about", () => {
+			/**
+			 * A person marks the credit income, or reviews it as a refund, in the edit panel. The panel
+			 * sends the exclude toggle as it shows it, so `excluded` says whether it was left on.
+			 */
+			const decide = async (choice: "income" | "refund", excluded = false) =>
+				saveEdit(
+					env.DB,
+					await rowId(),
+					{
+						categoryId: null,
+						alwaysForMerchant: false,
+						displayName: null,
+						note: null,
+						excluded,
+						income: choice === "income",
+						creditReviewed: choice === "refund",
+					},
+					"synthetic-person",
+				);
+			const decisions = () =>
+				env.DB.prepare(
+					"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first();
+
+			it.each([
+				["income", { flag_income: 1, income_source: "user" }],
+				["refund", { credit_reviewed: 1, credit_reviewed_by: "user" }],
+			] as const)(
+				"stays counted when Plaid calls a credit a person marked as %s a transfer (added and modified)",
+				async (choice, expected) => {
+					const id = await addItem();
+					await syncAs(
+						id,
+						"added",
+						inCategory("FOOD_AND_DRINK", { amount: -50 }),
+					);
+					await decide(choice);
+					expect(await decisions()).toMatchObject(expected);
+					for (const kind of ["modified", "added"] as const) {
+						await syncAs(id, kind, inCategory("TRANSFER_IN", { amount: -50 }));
+						expect(await exclusion()).toEqual({
+							excluded: 0,
+							excluded_source: null,
+						});
+					}
+					expect(await decisions()).toMatchObject(expected);
+				},
+			);
+
+			it("excludes a reviewed credit once the bank turns it into money out", async () => {
+				const id = await addItem();
+				await syncAs(
+					id,
+					"added",
+					inCategory("FOOD_AND_DRINK", { amount: -50 }),
+				);
+				await decide("refund");
+				await syncAs(
+					id,
+					"modified",
+					inCategory("TRANSFER_OUT", { amount: 50 }),
+				);
+				expect(await exclusion()).toEqual({
+					excluded: 1,
+					excluded_source: "plaid",
+				});
+			});
+
+			it("counts a new transfer credit as soon as a person marks it income, with the exclude toggle left as shown", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				expect(await exclusion()).toEqual({
+					excluded: 1,
+					excluded_source: "plaid",
+				});
+				// The panel was drawn with Exclude on, and the save sends it on.
+				await decide("income", true);
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: null,
+				});
+				expect(await decisions()).toMatchObject({
+					flag_income: 1,
+					income_source: "user",
+				});
+				// Plaid sending it again doesn't take it back.
+				await syncAs(
+					id,
+					"modified",
+					inCategory("TRANSFER_IN", { amount: -50 }),
+				);
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: null,
+				});
+			});
+
+			it.each(["user", "jev"])(
+				"leaves a %s exclusion alone when a person marks the credit income",
+				async (source) => {
+					const id = await addItem();
+					await syncAs(
+						id,
+						"added",
+						inCategory("FOOD_AND_DRINK", { amount: -50 }),
+					);
+					await env.DB.prepare(
+						"UPDATE transactions SET excluded = 1, excluded_source = ? WHERE plaid_transaction_id = 'transaction-1'",
+					)
+						.bind(source)
+						.run();
+					await decide("income", true);
+					expect(await exclusion()).toEqual({
+						excluded: 1,
+						excluded_source: source,
+					});
+				},
+			);
+
+			it("leaves Plaid's exclusion when the credit was already income and the save doesn't change that", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				await env.DB.prepare(
+					"UPDATE transactions SET flag_income = 1, income_source = 'jev' WHERE plaid_transaction_id = 'transaction-1'",
+				).run();
+				await decide("income", true);
+				expect(await exclusion()).toEqual({
+					excluded: 1,
+					excluded_source: "plaid",
+				});
+			});
+
+			it("keeps a split part a person marked income counted", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("FOOD_AND_DRINK"));
+				const [first] = await split();
+				await env.DB.prepare(
+					"UPDATE transactions SET income_source = 'user', flag_income = 1 WHERE id = ?",
+				)
+					.bind(first)
+					.run();
+				await syncAs(id, "modified", inCategory("TRANSFER_OUT"));
+				expect(
+					(
+						await env.DB.prepare(
+							"SELECT excluded, excluded_source FROM transactions WHERE parent_id = ? ORDER BY id",
+						)
+							.bind(await rowId())
+							.all()
+					).results,
+				).toEqual([
+					{ excluded: 0, excluded_source: null },
+					{ excluded: 1, excluded_source: "plaid" },
+				]);
+			});
+		});
+
+		it("never lets Jev clear a Plaid exclusion or take it over", async () => {
+			const id = await addItem();
+			await syncAs(id, "added", inCategory("TRANSFER_OUT"));
+			const category = await env.DB.prepare(
+				"SELECT id FROM categories LIMIT 1",
+			).first<{ id: number }>();
+			const written = await saveJevResult(env.DB, await rowId(), {
+				categoryId: category?.id as number,
+				suggestedCategoryId: category?.id as number,
+				confidence: 0.95,
+				flags: { transfer: false, reimbursement: false, income: true },
+			});
+			expect(written).toBe(false);
+			expect(
+				await env.DB.prepare(
+					"SELECT excluded, excluded_source, category_id, flag_income, flag_transfer FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first(),
+			).toEqual({
+				excluded: 1,
+				excluded_source: "plaid",
+				category_id: null,
+				flag_income: 0,
+				flag_transfer: 0,
+			});
+			expect(await jevFlags({ transfer: true })).toBe(false);
+			expect(await exclusion()).toEqual({
+				excluded: 1,
+				excluded_source: "plaid",
+			});
+		});
+
+		it("doesn't ask Jev about a transaction Plaid excluded", async () => {
+			const id = await addItem();
+			await syncAs(id, "added", inCategory("LOAN_PAYMENTS"));
+			const fetchImpl = vi.fn(async () => response({}, 500));
+			const result = await categorizePending(
+				{ DB: env.DB, JEV_API_KEY: "synthetic-key" },
+				fetchImpl,
+			);
+			expect(result).toEqual({ asked: 0, applied: 0 });
+			expect(fetchImpl).not.toHaveBeenCalled();
+			expect(await exclusion()).toEqual({
+				excluded: 1,
+				excluded_source: "plaid",
+			});
+		});
+	});
 });
 
 describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", () => {

@@ -407,6 +407,45 @@ describe("select several transactions", () => {
 		]);
 	});
 
+	it("says a selected row that pays a bill still counts, as the edit panel does", async () => {
+		await splitParent();
+		// 111 pays a bill itself, and 990 is a part of 110, which pays another (spec §8.5).
+		await env.DB.batch([
+			...[9800, 9801].map((id) =>
+				env.DB.prepare(
+					"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (?, 'Club', 1200, 1, 'monthly', 1, 'CLUB')",
+				).bind(id),
+			),
+			...[
+				[9800, 111],
+				[9801, 110],
+			].map(([bill, transaction]) =>
+				env.DB.prepare(
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT ?1, substr(date, 1, 7), ?2, 'user', 'linked' FROM transactions WHERE id = ?2",
+				).bind(bill, transaction),
+			),
+		]);
+		const said = async (ids: number[]) => {
+			const res = await post(
+				"/transactions/select/exclude",
+				form(ids, { back: "/transactions" }),
+			);
+			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+			expect(trigger.toast.message).toBe(trigger.announce);
+			return trigger.announce;
+		};
+		expect(await said([111])).toBe(
+			"Excluded 1 transaction. It still counts while it pays a bill.",
+		);
+		expect(await said([990, 111, 112])).toBe(
+			"Excluded 3 transactions. 2 still count while they pay a bill.",
+		);
+		expect(await said([990, 112])).toBe(
+			"Excluded 2 transactions. 1 still counts while it pays a bill.",
+		);
+		expect(await said([112])).toBe("Excluded 1 transaction.");
+	});
+
 	it("keeps who excluded a row that was already excluded", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET excluded=1, excluded_source='jev' WHERE id=111",

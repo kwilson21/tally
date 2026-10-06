@@ -13,7 +13,8 @@ type Caption = {
 
 /** What a row says under its name, and which icon it gets. Status is always in words, never color alone. */
 export function rowCaption(row: ListRow): Caption {
-	if (row.excluded)
+	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
+	if (row.excluded && !row.paysBill)
 		return { kind: "excluded", caption: "Excluded", tag: false };
 	if (
 		!row.followsPurchase &&

@@ -1,5 +1,4 @@
 import { type Context, Hono } from "hono";
-import { actor } from "../actor";
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import {
 	BIG_BILL_CENTS,
@@ -24,7 +23,6 @@ import {
 	activateBill,
 	type BillFields,
 	insertBill,
-	putBackInBudget,
 	updateBill,
 } from "../bills/write";
 import { householdToday, ordinal, shortDay } from "../dates";
@@ -1155,14 +1153,14 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 	}
-	// An excluded payment can pay a bill; linking it puts it back in the budget (spec §6.1 rule 4).
-	const [, result] = await c.env.DB.batch([
-		putBackInBudget(c.env.DB, id, period, transaction, actor(c)),
-		c.env.DB.prepare(
-			`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30)`,
-		).bind(id, period, transaction, transaction, due),
-	]);
-	if (!result?.meta.changes)
+	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
+	// linking never writes (spec §6.1 rule 4, §8.5).
+	const result = await c.env.DB.prepare(
+		`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30)`,
+	)
+		.bind(id, period, transaction, transaction, due)
+		.run();
+	if (!result.meta.changes)
 		return billPage(
 			c,
 			id,
@@ -1294,7 +1292,7 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 		if (
 			seenBill !== bill.amount_cents ||
 			wholeCents(form.charge_cents) !== offer.amountCents ||
-			!(await acceptPriceOffer(c.env.DB, id, period, offer, seenBill, actor(c)))
+			!(await acceptPriceOffer(c.env.DB, id, period, offer, seenBill))
 		)
 			return gone();
 	} else {

@@ -18,6 +18,10 @@ import {
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
+	INCLUDED,
+	INCLUDED_ROW,
+	PAYS_A_BILL,
+	paysBillSql,
 } from "./counted-month";
 import { plaidSetIncomeSql } from "./income";
 import {
@@ -47,7 +51,10 @@ export type ListRow = {
 	rawName: string;
 	displayName: string;
 	note: string | null;
+	/** As stored: a person's or a machine's exclusion. A payment linked to a bill counts all the same (`paysBill`). */
 	excluded: boolean;
+	/** Linked to a bill's occurrence: it counts in Spent whatever its exclusion, and isn't shown as excluded. */
+	paysBill?: boolean;
 	income: boolean;
 	creditReviewed: boolean;
 	categoryId: number | null;
@@ -92,29 +99,33 @@ export const PAGE_SIZE = 25;
 
 // "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
 // while held credits and income stay out of spending classification.
-const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
-const NEEDS_JEV_CLASSIFICATION =
-	"t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))";
+const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
 
 /**
  * What each Show choice holds (spec §8.4, decision 74), once COUNTED_JOINS and the split parent `p`
  * are joined. The kinds can overlap: a refund that follows its purchase is both Spending and a Refund.
+ * "In the budget" is `INCLUDED` throughout: a payment linked to a bill counts whatever its exclusion
+ * (decision 83), so it is never Excluded, and Refunds and Excluded never share a row.
  * - Spending: what Home counts, so the list adds up to Home's Spent.
  * - Income: flagged income.
  * - Refunds: money in (a negative amount) that isn't income or a transfer and is in the budget or
- *   waiting to be, so a refund nobody linked and a credit nobody has identified are here. A split
- *   refund shows by its parts, as it counts; a part doesn't carry its parent's income or transfer
- *   flag, so it is a refund only when its parent isn't income or a transfer either.
- * - Excluded: left out of the budget, where transfers and card payments go (the old Excluded chip).
+ *   waiting to be, so a refund nobody linked and a credit nobody has identified are here. A credit
+ *   linked to a bill is here whatever its transfer flag or exclusion, since it is never Excluded
+ *   (spec §8.5). A split refund shows by its parts, as it counts; a part doesn't carry its parent's
+ *   income or transfer flag, so it is a refund only when its parent isn't income or a transfer either.
+ * - Excluded: left out of the budget, where transfers and card payments go (the old Excluded chip),
+ *   so not a payment linked to a bill (spec §8.5). A split shows by its parts, as the others do, so
+ *   it lists exactly what How Tally works' excluded count counts (`excludedBreakdown`).
  */
 const SHOW_SQL: Record<Show, string | null> = {
 	all: null,
 	spending: `(${COUNTED_SPENDING})`,
 	income: "t.flag_income = 1",
-	refunds:
-		"(t.amount_cents < 0 AND t.flag_income = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_income, 0) = 0 AND COALESCE(p.flag_transfer, 0) = 0 AND t.excluded = 0 AND t.is_split = 0)",
-	excluded: "t.excluded = 1",
+	refunds: `(t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(p.flag_income, 0) = 0 AND t.is_split = 0
+		AND (${paysBillSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
+	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
 };
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
@@ -177,7 +188,7 @@ export async function listTransactions(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
+				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
@@ -189,6 +200,7 @@ export async function listTransactions(
 			Omit<
 				ListRow,
 				| "excluded"
+				| "paysBill"
 				| "income"
 				| "creditReviewed"
 				| "displayName"
@@ -204,6 +216,7 @@ export async function listTransactions(
 					parentMerchantKey: string | null;
 					parentRawName: string | null;
 					excluded: number;
+					paysBill: number;
 					income: number;
 					creditReviewed: number;
 					isSplit: number;
@@ -249,6 +262,7 @@ export async function listTransactions(
 						}).name
 					: null,
 				excluded: r.excluded === 1,
+				paysBill: r.paysBill === 1,
 				income: r.income === 1,
 				creditReviewed: r.creditReviewed === 1,
 				isSplit: r.isSplit === 1,
@@ -392,7 +406,7 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
@@ -410,6 +424,7 @@ export async function getTransaction(
 			Omit<
 				TransactionDetail,
 				| "excluded"
+				| "paysBill"
 				| "income"
 				| "creditReviewed"
 				| "displayName"
@@ -419,6 +434,7 @@ export async function getTransaction(
 			> &
 				NameSuggestionColumns & {
 					excluded: number;
+					paysBill: number;
 					income: number;
 					creditReviewed: number;
 					isSplit: number;
@@ -446,6 +462,7 @@ export async function getTransaction(
 	return {
 		...row,
 		excluded: r.excluded === 1,
+		paysBill: r.paysBill === 1,
 		income: r.income === 1,
 		creditReviewed: r.creditReviewed === 1,
 		isSplit: r.isSplit === 1,
@@ -672,6 +689,18 @@ export async function saveEdit(
 			gated(
 				"UPDATE merchants SET suggestion_status = 'rejected' WHERE raw_name = ? AND suggestion_status = 'pending'",
 				[current.merchantKey],
+			),
+		);
+	// A credit a person newly marks as income counts as income, so an exclusion Plaid put on it (a
+	// transfer category) comes off, even though the panel sends its Exclude chip as it was drawn, on.
+	// This runs after the panel's own update: a chip the person turned off already made the exclusion
+	// theirs, and a person's or Jev's exclusion is never Plaid's to lift.
+	if (edit.income && current.income === 0)
+		statements.push(
+			gated(
+				`UPDATE transactions SET excluded = 0, excluded_source = NULL, updated_by = ?, updated_at = datetime('now')
+				WHERE id = ? AND amount_cents < 0 AND excluded_source = 'plaid'`,
+				[actor, id],
 			),
 		);
 	if (newLink === null) {
@@ -901,14 +930,18 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 // A credit a person already decided about: Jev can only help with its category. The review columns
 // are NULL on older rows, which SQL won't compare, so a missing review counts as no review: COALESCE
 // makes this 0 rather than NULL, and `NOT` of it can't drop the row.
-const CATEGORY_ONLY =
-	"COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)";
+// A payment that pays a bill though it is excluded counts (spec §8.5) but is a transfer, a card payment or
+// something a person left out: Jev may suggest its category, and its flags are never written, since they
+// could only change what it is excluded as or take it out of Spent (income).
+const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)
+	OR (t.excluded = 1 AND ${paysBillSql("t")}))`;
 
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
  * unreviewed negative credits, even when a category was selected already. A user-reviewed
  * uncategorized credit is eligible for category help only, so it's left out when the household's
- * categories switch is off (spec §8.6): that answer would go unused. A stored confidence means Jev
+ * categories switch is off (spec §8.6): that answer would go unused. An excluded payment that pays a
+ * bill counts, so it is asked about too, and likewise for its category only. A stored confidence means Jev
  * already looked and wasn't sure (decision 27).
  *
  * With `ids`, only those rows are considered: the ones a sync just brought in, or the one a person
@@ -977,10 +1010,11 @@ export async function saveJevResult(
 				`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
 					updated_at = datetime('now')
-				 WHERE id = ? AND amount_cents < 0 AND credit_reviewed = 1 AND flag_income = 0
-					AND (income_source = 'user' OR credit_reviewed_by = 'user')
+				 WHERE id = ? AND flag_income = 0
+					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
+						OR (excluded = 1 AND ${PAYS_A_BILL}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND excluded = 0 AND is_split = 0`,
+					AND ${INCLUDED_ROW} AND is_split = 0`,
 			)
 			.bind(
 				d.categoryId,
@@ -992,7 +1026,9 @@ export async function saveJevResult(
 			.run();
 		return category.meta.changes > 0;
 	}
-	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise.
+	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise. A payment
+	// that pays a bill counts all the same (it is read as counted, spec §8.5), so it needs no exception here.
+	// One that is excluded and pays a bill only gets a category (`categoryOnly` above), never these flags.
 	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
 	const income = options.switches?.income === false ? false : d.flags.income;
 	const result = await db
@@ -1005,8 +1041,9 @@ export async function saveJevResult(
 			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ?) OR ? = 1) THEN 1 ELSE credit_reviewed END,
 				jev_category_id = ?,
 				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
-				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
-				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
+				-- Income is money coming in: Jev's income answer never marks money out (a positive amount).
+				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income WHEN amount_cents > 0 THEN 0 ELSE ? END,
+				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 AND amount_cents <= 0 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
@@ -1041,11 +1078,27 @@ export async function saveJevResult(
 	return result.meta.changes > 0;
 }
 
-/** How many of a month's transactions are excluded (split parents aside), for How Tally works. */
+/** How many of these transactions pay a bill, on their own link or their split parent's (`paysBillSql`). */
+export async function payingBillsCount(
+	db: D1Database,
+	ids: number[],
+): Promise<number> {
+	if (ids.length === 0) return 0;
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (${ids.map(() => "?").join(",")}) AND ${paysBillSql("t")}`,
+		)
+		.bind(...ids)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
 /**
  * This month's excluded transactions by why (How Tally works, spec §9): a person's choice when a
  * person excluded it (even if it's also flagged) or it has no flag; otherwise its flag, transfer
- * first.
+ * first. One Plaid excluded as a transfer or card payment counts as a transfer. A payment linked to a
+ * bill counts, so it isn't listed here (spec §8.5). It counts the rows Show Excluded lists for the
+ * month (split parents aside, in the month the list puts them), so the two always agree.
  */
 export async function excludedBreakdown(
 	db: D1Database,
@@ -1053,10 +1106,15 @@ export async function excludedBreakdown(
 ): Promise<ExcludedBreakdown> {
 	const row = await db
 		.prepare(
-			`SELECT COALESCE(SUM(NOT person AND flag_transfer = 1), 0) AS transfer,
-				COALESCE(SUM(NOT person AND flag_transfer = 0 AND flag_reimbursement = 1), 0) AS reimbursement,
-				COALESCE(SUM(person OR (flag_transfer = 0 AND flag_reimbursement = 0)), 0) AS byPerson
-			FROM (SELECT *, COALESCE(excluded_source = 'user', 0) AS person FROM transactions) WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0`,
+			`SELECT COALESCE(SUM(NOT person AND moved), 0) AS transfer,
+				COALESCE(SUM(NOT person AND NOT moved AND reimbursement), 0) AS reimbursement,
+				COALESCE(SUM(person OR (NOT moved AND NOT reimbursement)), 0) AS byPerson
+			FROM (SELECT COALESCE(t.excluded_source = 'user', 0) AS person,
+					t.flag_transfer = 1 OR COALESCE(t.excluded_source = 'plaid', 0) AS moved,
+					t.flag_reimbursement = 1 AS reimbursement
+				FROM transactions t
+				${COUNTED_JOINS}
+				WHERE ${COUNTED_MONTH} = ? AND ${SHOW_SQL.excluded})`,
 		)
 		.bind(month)
 		.first<ExcludedBreakdown>();
@@ -1125,7 +1183,7 @@ export async function monthCounts(
 				COALESCE(SUM(${FOLLOWS_PURCHASE} AND ${COUNTED_CATEGORY} IS NULL AND t.flag_income = 0), 0) AS linkedWaiting
 			FROM transactions t
 			${COUNTED_JOINS}
-			WHERE ${COUNTED_MONTH} = ? AND t.excluded = 0 AND t.is_split = 0`,
+			WHERE ${COUNTED_MONTH} = ? AND ${INCLUDED} AND t.is_split = 0`,
 		)
 		.bind(month)
 		.first<{

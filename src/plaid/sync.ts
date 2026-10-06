@@ -1,6 +1,10 @@
 import { householdToday } from "../dates";
 import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
+import {
+	isPlaidTransferSql,
+	plaidTransferRuleSql,
+} from "../db/plaid-transfers";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
@@ -110,6 +114,26 @@ const withdrawOlderPlaidNameSql = (ownsLock: string) =>
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
 	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
+
+/**
+ * A split's parts follow the bank transaction's exclusion by the same rule (spec §8.5), because the
+ * budget counts the parts, not the parent. A split a person excluded or included stays as they set it.
+ * It runs before the parent's own write and reads the parent as it was.
+ */
+function partsExclusion(
+	env: SyncEnv,
+	itemRowId: number,
+	lockId: string,
+	transaction: PlaidTransaction,
+): D1PreparedStatement {
+	const category = transaction.personal_finance_category?.primary ?? null;
+	return env.DB.prepare(
+		`UPDATE transactions SET ${plaidTransferRuleSql("?", "transactions.amount_cents")}
+		 WHERE parent_id = (
+			SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND COALESCE(excluded_source, '') != 'user'
+		 ) AND ${OWNS_LOCK}`,
+	).bind(category, category, transaction.transaction_id, itemRowId, lockId);
+}
 
 function accountUpsert(
 	env: SyncEnv,
@@ -471,11 +495,14 @@ export async function syncItem(
 						lockId,
 					),
 				);
+				statements.push(partsExclusion(env, itemRowId, lockId, transaction));
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, flag_income, pending)
-						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' AND ? < 0 THEN 1 ELSE 0 END, ? FROM accounts
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, flag_income, excluded, excluded_source, pending)
+						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' AND ? < 0 THEN 1 ELSE 0 END,
+							CASE WHEN ${isPlaidTransferSql("?")} THEN 1 ELSE 0 END,
+							CASE WHEN ${isPlaidTransferSql("?")} THEN 'plaid' ELSE NULL END, ? FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
 						 ON CONFLICT(plaid_transaction_id) DO UPDATE SET
 							date = excluded.date,
@@ -493,6 +520,7 @@ export async function syncItem(
 							raw_name = excluded.raw_name,
 							merchant_name = excluded.merchant_name,
 							plaid_category = excluded.plaid_category,
+							${plaidTransferRuleSql("excluded.plaid_category", "excluded.amount_cents")},
 							pending = excluded.pending,
 							updated_at = datetime('now')`,
 					).bind(
@@ -505,6 +533,8 @@ export async function syncItem(
 						plaidAmountToCents(transaction.amount),
 						transaction.personal_finance_category?.primary ?? null,
 						cents,
+						transaction.personal_finance_category?.primary ?? null,
+						transaction.personal_finance_category?.primary ?? null,
 						transaction.pending ? 1 : 0,
 						transaction.account_id,
 						itemRowId,
@@ -545,6 +575,7 @@ export async function syncItem(
 						lockId,
 					),
 				);
+				statements.push(partsExclusion(env, itemRowId, lockId, transaction));
 				statements.push(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,
@@ -556,6 +587,7 @@ export async function syncItem(
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?, merchant_name = ?,
 							plaid_category = ?, pending = ?,
+							${plaidTransferRuleSql("?", "?")},
 							flag_income = ${syncedIncomeFlagSql("transactions", "?", "?")},
 							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
 							credit_reviewed = CASE WHEN credit_reviewed_by = 'user' THEN credit_reviewed WHEN amount_cents = ? THEN credit_reviewed WHEN ? < 0 THEN 0 ELSE 1 END,
@@ -577,6 +609,10 @@ export async function syncItem(
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
 						transaction.pending ? 1 : 0,
+						transaction.personal_finance_category?.primary ?? null,
+						cents,
+						transaction.personal_finance_category?.primary ?? null,
+						cents,
 						transaction.personal_finance_category?.primary ?? null,
 						cents,
 						cents,
