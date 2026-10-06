@@ -11,7 +11,10 @@ assert.equal(reset.status, 200, "resetting the demo data failed");
 const browser = await chromium.launch({
 	executablePath: process.env.CHROMIUM_PATH || undefined,
 });
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+const page = await browser.newPage({
+	viewport: { width: 390, height: 844 },
+	reducedMotion: "reduce",
+});
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(e.message));
