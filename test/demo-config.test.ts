@@ -92,8 +92,8 @@ describe("production environment config (#23)", () => {
 		expect(JSON.stringify(production)).not.toContain("finance.");
 	});
 
-	it("syncs every bank daily at 09:00 UTC", () => {
-		expect(production.triggers).toEqual({ crons: ["0 9 * * *"] });
+	it("syncs every bank daily at 09:00 UTC, and sorts what's left at 09:30 (decision 56)", () => {
+		expect(production.triggers).toEqual({ crons: ["0 9 * * *", "30 9 * * *"] });
 	});
 
 	it("binds Workers AI for merchant names (#33) in production and the demo, not in local development", () => {

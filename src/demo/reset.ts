@@ -27,7 +27,6 @@ const TABLES_CHILD_FIRST = [
 	"categories",
 	"accounts",
 	"plaid_items",
-	"household_settings",
 ];
 
 /**
@@ -79,6 +78,12 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 
 	await db.batch([
 		...TABLES_CHILD_FIRST.map((t) => db.prepare(`DELETE FROM ${t}`)),
+		// The household's choices go back to the start (the AI switches are all on, and a missing
+		// row means on), except how many calls Jev has had today: that is the day's, not a choice, so a
+		// second run on the same household day can't spend the demo's cap over again (spec §8.6).
+		db.prepare(
+			"DELETE FROM household_settings WHERE key NOT GLOB 'jev_calls_*'",
+		),
 		// The demo's time zone goes back to the default, like everything else a visitor can change.
 		db
 			.prepare(

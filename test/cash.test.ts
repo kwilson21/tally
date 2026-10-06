@@ -321,8 +321,8 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=/transactions",
 		});
-		expect(confirm.html).toContain("Delete this cash entry?");
-		expect(confirm.html).toContain(">Cancel</a>");
+		expect(confirm.html).toContain("This can&#39;t be undone.");
+		expect(confirm.html).toContain(">Keep it</a>");
 		const deleted = await request(`/transactions/${cash?.id}/delete`, {
 			method: "POST",
 			headers: {
@@ -356,6 +356,135 @@ describe("cash lifecycle", () => {
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(0);
+	});
+
+	describe("asking before a cash entry is deleted (decision 84, Q57 B)", () => {
+		const form = { "content-type": "application/x-www-form-urlencoded" };
+		const ask = (id: number, back = "/transactions") =>
+			request(`/transactions/${id}/delete`, {
+				method: "POST",
+				headers: { Origin: BASE, "HX-Request": "true", ...form },
+				body: new URLSearchParams({ back }),
+			});
+		const farmersMarket = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Farmers market'",
+				).first<{ id: number }>()
+			)?.id as number;
+		const dialog = (html: string) =>
+			html.slice(html.indexOf('role="dialog"'), html.lastIndexOf("</section>"));
+		const deleteForm = (html: string, id: number) => {
+			const from = html.indexOf(`action="/transactions/${id}/delete"`);
+			return html.slice(from, html.indexOf("</form>", from));
+		};
+
+		it("asks one sentence with the name and amount, where Cancel and Save were", async () => {
+			const id = await farmersMarket();
+			const { html } = await ask(id);
+			expect(html).toContain(
+				"Delete Farmers market, $20.00? This can&#39;t be undone.",
+			);
+			// The edit form's own Cancel and Save are not there while it asks.
+			expect(html).not.toContain('id="edit-save"');
+			expect(html).not.toContain(">Save</span>");
+			expect(html).not.toContain(">Cancel</a>");
+			expect(html).not.toContain("Delete this cash entry?");
+			expect(html).not.toContain("Delete cash transaction");
+			// The question comes after the edit form's fields and is the end of the sheet.
+			expect(html.indexOf("Rename or add a note")).toBeLessThan(
+				html.indexOf("Delete Farmers market, $20.00?"),
+			);
+		});
+
+		it("has Delete as the one primary button, in the delete form, and Keep it beside it", async () => {
+			const id = await farmersMarket();
+			const { html } = await ask(id);
+			const deleting = deleteForm(html, id);
+			expect(deleting).toContain('name="confirm" value="1"');
+			expect(deleting).toContain("grid-cols-2");
+			expect(deleting).toMatch(
+				/<button[^>]*type="submit"[^>]*class="[^"]*bg-ink[^"]*"[^>]*>Delete<\/button>/,
+			);
+			expect(deleting).toMatch(
+				new RegExp(
+					`<a[^>]*href="/transactions/${id}"[^>]*class="[^"]*border-ink[^"]*"[^>]*>Keep it</a>`,
+				),
+			);
+			// One submit button in the whole sheet that can be pressed: Delete.
+			expect(
+				dialog(html)
+					.match(/<button[^>]*type="submit"[^>]*>/g)
+					?.filter((b) => !/\sdisabled[\s>=]/.test(b)),
+			).toHaveLength(1);
+			expect(dialog(html).match(/<button[^>]*bg-ink/g)).toHaveLength(1);
+			// Both are 44px targets.
+			expect(deleting.match(/min-h-11/g)).toHaveLength(2);
+		});
+
+		it("can't save the edit form with Enter while it asks: the form's default button is disabled", async () => {
+			const id = await farmersMarket();
+			const { html } = await ask(id);
+			const from = html.indexOf(`action="/transactions/${id}"`);
+			const editing = html.slice(from, html.indexOf("</form>", from));
+			// Enter in a text field presses the form's first submit button; a disabled one sends nothing.
+			const first = editing.match(/<button[^>]*type="submit"[^>]*>/)?.[0];
+			expect(first).toMatch(/\sdisabled[\s>=]/);
+			expect(first).toMatch(/\shidden[\s>=]/);
+		});
+
+		it("Keep it goes back to this entry's edit sheet with the same filters, as Cancel did", async () => {
+			const id = await farmersMarket();
+			const { html } = await ask(id, "/transactions?q=farmers");
+			const keep = html.match(/<a[^>]*>Keep it<\/a>/)?.[0] ?? "";
+			expect(keep).toContain(`href="/transactions/${id}?q=farmers"`);
+			expect(keep).toContain(`hx-get="/transactions/${id}?q=farmers"`);
+			expect(keep).toContain('hx-target="#page"');
+			expect(keep).toContain('hx-select="#page"');
+			expect(keep).toContain('hx-swap="outerHTML"');
+		});
+
+		it("announces the swap by moving focus to the question, not the title", async () => {
+			const id = await farmersMarket();
+			const { html } = await ask(id);
+			const question =
+				html.match(/<p[^>]*>Delete Farmers market, \$20\.00\?/)?.[0] ?? "";
+			expect(question).toContain("autofocus");
+			expect(question).toContain('tabindex="-1"');
+			// Focusing it scrolls Delete and Keep it into view with it on a phone.
+			expect(question).toContain("scroll-mb-24");
+			expect(html.match(/<h2 id="edit-title"[^>]*>/)?.[0]).not.toContain(
+				"autofocus",
+			);
+			// Only one thing takes focus, or htmx would pick the first.
+			expect(html.match(/autofocus/g)).toHaveLength(1);
+		});
+
+		it("Keep it brings the normal sheet back, with Cancel and Save and the title focused", async () => {
+			const id = await farmersMarket();
+			const { html } = await request(`/transactions/${id}`, {
+				headers: { "HX-Request": "true" },
+			});
+			expect(html).toContain('id="edit-save"');
+			expect(html).toContain(">Save</span>");
+			expect(html).toContain(">Cancel</a>");
+			expect(html).toContain("Delete cash transaction");
+			expect(html).not.toContain("This can&#39;t be undone.");
+			expect(html).not.toContain(">Keep it</a>");
+			expect(html.match(/<h2 id="edit-title"[^>]*>/)?.[0]).toContain(
+				"autofocus",
+			);
+		});
+
+		it("keeps the entry until Delete is pressed", async () => {
+			const id = await farmersMarket();
+			await ask(id);
+			expect(
+				await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
+					.bind(id)
+					.first(),
+			).not.toBeNull();
+		});
 	});
 
 	it("is counted by Home and budgets", async () => {

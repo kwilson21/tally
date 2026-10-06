@@ -9,7 +9,10 @@ export const JEV_THRESHOLD = 0.8;
 
 const TIMEOUT_MS = 10_000;
 
-/** What Jev is told about a transaction; nothing else (no dates, notes or account names). */
+/**
+ * What Jev is told about a transaction; nothing else (no dates or account names). A note a person wrote
+ * is told too (spec §7, decision 64), so it can help the transaction sort.
+ */
 export type JevInput = {
 	rawName: string;
 	displayName: string | null;
@@ -17,6 +20,7 @@ export type JevInput = {
 	amountCents: number;
 	accountType: string;
 	plaidCategory?: string | null;
+	note?: string | null;
 };
 
 export type JevResult =
@@ -47,6 +51,7 @@ export async function askJev(
 			direction: input.amountCents >= 0 ? "money out" : "money in",
 			account_type: input.accountType,
 			...(input.plaidCategory ? { plaid_category: input.plaidCategory } : {}),
+			...(input.note ? { note: input.note } : {}),
 		},
 		questions: {
 			category: {

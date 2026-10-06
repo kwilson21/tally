@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { app } from "../src/index";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -548,5 +549,166 @@ describe("Plaid webhook route", () => {
 			},
 			{ id: "unruled", category_id: null, category_source: null },
 		]);
+	});
+});
+
+// Spec §8.6, decision 68: after a webhook's sync, in the same waitUntil, Jev sorts what arrived.
+describe("Plaid webhook sorting what arrived", () => {
+	const JEV_URL = "https://api.typesafe.ai/v1/systemone";
+	const jevSays = () =>
+		Response.json({
+			answers: {
+				category: { type: "choice", choice: "Eating Out", confidence: 0.95 },
+				transfer: { type: "noul", noul: 0.01 },
+				reimbursement: { type: "noul", noul: 0.01 },
+				income: { type: "noul", noul: 0.01 },
+			},
+		});
+
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare("DELETE FROM household_settings WHERE key != 'time_zone'"),
+		]);
+		Object.assign(env, {
+			DEMO: "false",
+			PLAID_CLIENT_ID: "client",
+			PLAID_SECRET: "secret",
+			PLAID_ENV: "sandbox",
+			TOKEN_ENCRYPTION_KEY: KEY,
+			JEV_API_KEY: "jev-key",
+		});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+		Object.assign(env, { JEV_API_KEY: undefined });
+	});
+
+	/** Delivers a signed webhook for a bank whose sync brings in one transaction, "NEW SHOP". */
+	async function deliver(jev: () => Response = jevSays) {
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-sort', ?, 'Bank', 'person')",
+		)
+			.bind(await encryptToken("token-sort", KEY))
+			.run();
+		const sign = await signer();
+		const body = JSON.stringify({
+			item_id: "item-sort",
+			webhook_type: "TRANSACTIONS",
+			webhook_code: "SYNC_UPDATES_AVAILABLE",
+		});
+		const { token, jwk } = await sign(body);
+		const asked: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (url === JEV_URL) {
+					asked.push(JSON.parse(String(init?.body)).state.bank_description);
+					return jev();
+				}
+				if (url.endsWith("/webhook_verification_key/get"))
+					return Response.json({ key: { ...jwk, expired_at: null } });
+				if (url.endsWith("/accounts/get"))
+					return Response.json({
+						accounts: [
+							{
+								account_id: "account-1",
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					});
+				return Response.json({
+					added: [
+						{
+							transaction_id: "tx-new",
+							account_id: "account-1",
+							date: "2026-09-27",
+							amount: 4.25,
+							name: "NEW SHOP",
+							pending: false,
+						},
+					],
+					modified: [],
+					removed: [],
+					next_cursor: "next",
+					has_more: false,
+				});
+			}),
+		);
+		const promises: Promise<unknown>[] = [];
+		const ctx = {
+			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+			passThroughOnException() {},
+			props: {},
+		} as unknown as ExecutionContext;
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		const response = await app.request(
+			"http://tally.test/webhooks/plaid",
+			{
+				method: "POST",
+				body,
+				headers: {
+					"content-type": "application/json",
+					"Plaid-Verification": token,
+				},
+			},
+			env,
+			ctx,
+		);
+		return {
+			response,
+			asked,
+			finished: () => Promise.all(promises),
+			logged: () => JSON.stringify([...log.mock.calls, ...error.mock.calls]),
+		};
+	}
+
+	const stored = () =>
+		env.DB.prepare(
+			"SELECT plaid_transaction_id AS id, category_source, category_confidence FROM transactions",
+		).all();
+
+	it("asks Jev about the transactions the sync brought in, in the same waitUntil", async () => {
+		const sent = await deliver();
+		expect(sent.response.status).toBe(200);
+		await sent.finished();
+		expect(sent.asked).toEqual(["NEW SHOP"]);
+		expect((await stored()).results).toEqual([
+			{ id: "tx-new", category_source: "jev", category_confidence: 0.95 },
+		]);
+	});
+
+	it("leaves them for the nightly run when the sorting switch is off", async () => {
+		await saveAiSwitches(env.DB, { sortOnArrival: false });
+		const sent = await deliver();
+		await sent.finished();
+		expect(sent.asked).toEqual([]);
+		expect((await stored()).results).toEqual([
+			{ id: "tx-new", category_source: null, category_confidence: null },
+		]);
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+	});
+
+	it("still answers 200 and keeps the sync when Jev is down, logging no names or keys", async () => {
+		const sent = await deliver(() => new Response("{}", { status: 503 }));
+		expect(sent.response.status).toBe(200);
+		await sent.finished();
+		expect(sent.asked).toEqual(["NEW SHOP"]);
+		expect((await stored()).results).toEqual([
+			{ id: "tx-new", category_source: null, category_confidence: null },
+		]);
+		const output = sent.logged();
+		expect(output).toContain("jev: 503");
+		for (const secret of ["NEW SHOP", "jev-key", "token-sort", "item-sort"])
+			expect(output).not.toContain(secret);
 	});
 });

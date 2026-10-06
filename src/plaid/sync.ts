@@ -58,7 +58,17 @@ export const TRANSIENT_ITEM_ERROR_CODES = [
 
 const transient = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 
-export type SyncSummary = { added: number; modified: number; removed: number };
+export type SyncSummary = {
+	added: number;
+	modified: number;
+	removed: number;
+	/**
+	 * The ids of the transaction rows this sync added or modified, for the run that sorts them right
+	 * after it (spec §8.6): one the bank posted under a new id is its pending row, which is the same row.
+	 * Some may already be sorted or asked about; the run asks about the ones that aren't.
+	 */
+	changedIds: number[];
+};
 export type SyncResult = SyncSummary | { skipped: true };
 
 /** Plaid's cleaned merchant name, or null when it sent none or a blank one (spec §5, decision 67). */
@@ -199,6 +209,31 @@ async function handlePlaidError(
 	throw error;
 }
 
+/**
+ * Adds the row ids of these Plaid transactions to `into`. The ids go in as one JSON array read by
+ * `json_each`, since D1 allows 100 bound values in a statement. The page is already saved, and the
+ * ids only tell the run after the sync what to ask about, so a failure here never fails the sync: the
+ * rows wait for the nightly run.
+ */
+async function collectChangedIds(
+	db: D1Database,
+	plaidIds: string[],
+	into: Set<number>,
+): Promise<void> {
+	if (plaidIds.length === 0) return;
+	try {
+		const { results } = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE plaid_transaction_id IN (SELECT value FROM json_each(?))",
+			)
+			.bind(JSON.stringify(plaidIds))
+			.all<{ id: number }>();
+		for (const row of results) into.add(row.id);
+	} catch {
+		console.error("plaid sync: couldn't list the changed rows");
+	}
+}
+
 /** Pulls every available page for one Item, committing each page and its cursor atomically. */
 export async function syncItem(
 	env: SyncEnv,
@@ -270,7 +305,9 @@ export async function syncItem(
 		let cursor = startCursor;
 		let mutationRestarts = 0;
 		let firstPage = true;
-		let summary: SyncSummary = { added: 0, modified: 0, removed: 0 };
+		let summary = { added: 0, modified: 0, removed: 0 };
+		// Kept across a restart: the rows an abandoned pass wrote are still written.
+		const changedIds = new Set<number>();
 		const addedDuringRun = new Set<string>();
 		// Pending transactions the bank dropped on an earlier page of this run, and where the run's saved
 		// position is held while any waits (see below).
@@ -702,6 +739,14 @@ export async function syncItem(
 				}
 			}
 
+			await collectChangedIds(
+				env.DB,
+				[...added, ...page.modified].map(
+					(transaction) => transaction.transaction_id,
+				),
+				changedIds,
+			);
+
 			cursor = page.next_cursor;
 			firstPage = false;
 			summary.added += inserted;
@@ -714,7 +759,7 @@ export async function syncItem(
 			}
 			if (!page.has_more) {
 				if (runAfterSync) await afterSync(env.DB);
-				return summary;
+				return { ...summary, changedIds: [...changedIds] };
 			}
 		}
 	} finally {

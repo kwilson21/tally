@@ -268,10 +268,15 @@ describe("GET /design-system in the demo", () => {
 		const inputs = [...section.matchAll(/<input[^>]*role="switch"[^>]*>/g)].map(
 			(m) => m[0],
 		);
-		expect(inputs).toHaveLength(4);
+		// Three live ones, and two greyed out (P86 A): one saved On and one saved Off.
+		expect(inputs).toHaveLength(6);
 		const on = (input: string) => /\schecked(\s|>|=)/.test(input);
-		expect(inputs.filter(on)).toHaveLength(3);
-		expect(inputs.filter((i) => !on(i))).toHaveLength(1);
+		const greyed = (input: string) => /\sdisabled(\s|>|=)/.test(input);
+		expect(inputs.filter((i) => !greyed(i))).toHaveLength(4);
+		expect(inputs.filter(greyed)).toHaveLength(2);
+		expect(inputs.filter((i) => greyed(i) && on(i))).toHaveLength(1);
+		expect(inputs.filter(on)).toHaveLength(4);
+		expect(inputs.filter((i) => !on(i))).toHaveLength(2);
 		// The real checkboxes are the only controls here: nothing posts from the catalog.
 		expect(section).not.toContain("<form");
 		expect(section).not.toContain("<button");
@@ -286,9 +291,14 @@ describe("GET /design-system in the demo", () => {
 		expect(section).not.toMatch(/jev/i);
 		// It lists only the AI switches that have a feature behind them, as Settings does.
 		expect(design).toMatch(
-			/Suggest store names; Categories and exclusions; Income/,
+			/Suggest store names; Categories and exclusions; Income; Sort new transactions as they arrive/,
 		);
-		expect(section).not.toContain("Sort new transactions as they arrive");
+		expect(section).not.toContain("Merchant names");
+		// The greyed ones say what they need, so the greying never rests on color alone.
+		expect(
+			section.match(/Needs Categories and exclusions or Income on\./g),
+		).toHaveLength(2);
+		expect(design).toMatch(/\| Switch \|[^\n]*Greyed out[^\n]*saved On or Off/);
 	});
 
 	it("shows NameChoices with a guess chosen and not, an error, and its whole use spec (P29 A, P87 B)", async () => {

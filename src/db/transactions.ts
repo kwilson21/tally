@@ -910,28 +910,33 @@ const CATEGORY_ONLY =
  * uncategorized credit is eligible for category help only, so it's left out when the household's
  * categories switch is off (spec §8.6): that answer would go unused. A stored confidence means Jev
  * already looked and wasn't sure (decision 27).
+ *
+ * With `ids`, only those rows are considered: the ones a sync just brought in, or the one a person
+ * just added a note to. They go in as one JSON array read by `json_each`, since D1 allows 100 bound
+ * values in a statement and a bank's first sync brings in thousands.
  */
 export async function pendingForJev(
 	db: D1Database,
 	limit: number,
-	{ categories = true }: { categories?: boolean } = {},
+	{ categories = true, ids }: { categories?: boolean; ids?: number[] } = {},
 ): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
-				t.plaid_category AS plaidCategory,
+				t.plaid_category AS plaidCategory, t.note,
 				${CATEGORY_ONLY} AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND NOT ${FOLLOWS_PURCHASE}
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
+				${ids ? "AND t.id IN (SELECT value FROM json_each(?))" : ""}
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
 			LIMIT ?`,
 		)
-		.bind(categories ? 1 : 0, limit)
+		.bind(categories ? 1 : 0, ...(ids ? [JSON.stringify(ids)] : []), limit)
 		.all<JevInput & { id: number; categoryOnly: number }>();
 	return results.map((transaction) => ({
 		...transaction,

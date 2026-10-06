@@ -1,6 +1,7 @@
 const NAMES = {
 	budget: "the budget",
 	transactions: "transactions",
+	bills: "bills",
 	categorization: "categories",
 	exclusions: "excluding",
 	trends: "trends",
