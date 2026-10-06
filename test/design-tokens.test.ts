@@ -94,29 +94,52 @@ describe("design tokens (DESIGN.md)", () => {
 		 * ("stroke-linecap", "border-color") but are never classes.
 		 */
 		const NOT_COLORS = new Set(
-			"transparent current inherit none auto xs sm base lg xl left center right justify start end top bottom left-top left-bottom right-top right-bottom top-left top-right bottom-left bottom-right wrap nowrap balance pretty ellipsis clip t r b l x y s e solid dashed dotted double wavy hidden collapse separate offset inset cover contain fixed local scroll no-repeat clone slice from-font align color style width radius input linecap linejoin".split(
+			"transparent current inherit none auto xs sm md base lg xl left center right justify start end top bottom left-top left-bottom right-top right-bottom top-left top-right bottom-left bottom-right wrap nowrap balance pretty ellipsis clip t r b l x y s e solid dashed dotted double wavy hidden collapse separate offset inset cover contain fixed local scroll no-repeat clone slice from-font align color style width radius input linecap linejoin".split(
 				" ",
 			),
 		);
-		/** Families of utilities after a color prefix that aren't colors: "bg-blend-multiply", "divide-x-reverse". */
-		const NOT_COLOR_STEMS =
-			/^(blend|clip|origin|linear|radial|conic|gradient|repeat|shadow|spacing|offset|x|y)(-|$)/;
+		/**
+		 * Families of utilities that aren't colors, each only after its own prefix:
+		 * "bg-blend-multiply", "bg-repeat-x", "border-spacing-2", "divide-x-reverse".
+		 */
+		const NOT_COLOR_FAMILIES: Record<string, RegExp> = {
+			bg: /^(blend|clip|origin|linear|radial|conic|gradient|repeat)(-|$)/,
+			border: /^spacing(-|$)/,
+			divide: /^(x|y)(-|$)/,
+		};
+		/** Prefixes whose next word is a color of its own: "ring-offset-paper", "text-shadow-sm". */
+		const COLOR_AFTER: Record<string, string> = {
+			ring: "offset-",
+			outline: "offset-",
+			text: "shadow-",
+		};
 		const NAMED =
 			/^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-([a-z][a-z-]*?)(\/\d+)?$/;
 		const offToken = (u: string) => {
-			const name = u.match(NAMED)?.[3];
-			return (
-				name !== undefined &&
-				!tokens.has(name) &&
-				!NOT_COLORS.has(name) &&
-				!NOT_COLOR_STEMS.test(name)
-			);
+			const match = u.match(NAMED);
+			if (!match?.[1] || !match[3]) return false;
+			const prefix = match[1].startsWith("border") ? "border" : match[1];
+			const inner = COLOR_AFTER[prefix];
+			const name =
+				inner && match[3].startsWith(inner)
+					? match[3].slice(inner.length)
+					: match[3];
+			if (NOT_COLOR_FAMILIES[prefix]?.test(name)) return false;
+			return !tokens.has(name) && !NOT_COLORS.has(name);
 		};
 		expect(
-			["text-error", "border-negative", "text-alert", "from-danger"].every(
-				offToken,
-			),
-		).toBe(true);
+			[
+				"text-error",
+				"border-negative",
+				"text-alert",
+				"from-danger",
+				// A family's word is only skipped after its own prefix, and what follows it is still a color.
+				"from-shadow-error",
+				"border-repeat-x",
+				"text-shadow-error",
+				"ring-offset-error",
+			].filter((u) => !offToken(u)),
+		).toEqual([]);
 		expect(
 			[
 				"text-over",
@@ -146,6 +169,8 @@ describe("design tokens (DESIGN.md)", () => {
 				"decoration-wavy",
 				"decoration-from-font",
 				"accent-auto",
+				"ring-offset-paper",
+				"text-shadow-md",
 			].filter(offToken),
 		).toEqual([]);
 		const found = Object.entries(SOURCES).flatMap(([file, text]) =>
