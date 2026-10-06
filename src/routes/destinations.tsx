@@ -1,21 +1,27 @@
 import { Hono } from "hono";
 import { Layout } from "../views/layout";
-import { SIDEBAR_ITEMS } from "../views/nav";
+import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
 
 // Every nav destination resolves inside the shell. A feature's own route replaces its placeholder when it ships.
 export const destinations = new Hono<{ Bindings: Env }>();
 
 const MORE_ITEMS = SIDEBAR_ITEMS.filter((item) =>
-	["accounts", "documents", "settings"].includes(item.key),
+	["accounts", "settings"].includes(item.key),
 );
 
-// Home, Transactions, Trends, Accounts and Settings have their own routes.
-for (const item of SIDEBAR_ITEMS.filter(
-	(item) =>
-		!["home", "transactions", "trends", "accounts", "settings"].includes(
-			item.key,
-		),
-)) {
+// Documents is no menu item (decisions 66 and 82), but its address keeps answering inside the shell.
+const PLACEHOLDERS: { key?: NavKey; label: string; href: string }[] = [
+	...SIDEBAR_ITEMS.filter(
+		// Home, Transactions, Trends, Accounts and Settings have their own routes.
+		(item) =>
+			!["home", "transactions", "trends", "accounts", "settings"].includes(
+				item.key,
+			),
+	),
+	{ label: "Documents", href: "/documents" },
+];
+
+for (const item of PLACEHOLDERS) {
 	destinations.get(item.href, (c) =>
 		c.html(
 			<Layout
