@@ -127,6 +127,18 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 		},
 	},
 	{
+		label: "A name the bank sent: dashed too, but no icon",
+		row: {
+			...row,
+			id: 12,
+			displayName: "CVS Pharmacy",
+			rawName: "CHECKCARD 0921 CVS",
+			amountCents: 1643,
+			nameSuggested: true,
+			nameFromBank: true,
+		},
+	},
+	{
 		label:
 			"A guessed name on a row with a category, and one long enough to be cut off",
 		row: {

@@ -62,6 +62,8 @@ describe("GET /how-it-works in the demo", () => {
 			"nothing is renamed until you choose it",
 		);
 		expect(decodeHtml(names)).toContain("Suggest store names");
+		expect(decodeHtml(names)).toContain('says "From your bank"');
+		expect(decodeHtml(names)).toContain("the bank's own names still show");
 		expect(names).not.toMatch(/jev|workers ai/i);
 	});
 
