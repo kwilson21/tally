@@ -86,6 +86,120 @@ afterEach(() => {
 });
 
 describe("categorizePending", () => {
+	it("sends the five newest person-chosen merchant categories in one Jev request", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.batch(
+			Array.from({ length: 5 }, (_, index) =>
+				db
+					.prepare(
+						`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source)
+						 VALUES (1, ?, 500, ?, 'Costco', 1, ?)`,
+					)
+					.bind(
+						`${MONTH}-${String(index + 1).padStart(2, "0")}`,
+						`COSTCO ${index}`,
+						index === 0 ? "merchant_rule" : "user",
+					),
+			),
+		);
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('Costco', 'Costco')",
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source)
+				 VALUES (1, '2026-08-31', 500, 'COSTCO OLD', 'Costco', 2, 'user')`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source)
+				 VALUES (1, '2026-09-30', 500, 'COSTCO TALLY', 'Costco', 2, 'jev')`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded)
+				 VALUES (1, '2026-09-29', 500, 'COSTCO EXCLUDED', 'Costco', 2, 'user', 1)`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, pending)
+				 VALUES (1, '2026-09-28', 500, 'COSTCO PENDING', 'Costco', 2, 'user', 1)`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split)
+				 VALUES (1, '2026-09-27', 500, 'COSTCO SPLIT PARENT', 'Costco', 2, 'user', 1)`,
+			),
+		]);
+		const target = await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name)
+				 VALUES (1, ?, 1200, 'COSTCO CURRENT', 'Costco') RETURNING id`,
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		let calls = 0;
+		let sent: Record<string, unknown> | undefined;
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				calls += 1;
+				sent = JSON.parse(String(init?.body));
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: [target?.id as number] },
+		);
+		expect(calls).toBe(1);
+		expect(sent?.state).toMatchObject({
+			merchant: "Costco",
+			merchant_category_history: [
+				"Groceries",
+				"Groceries",
+				"Groceries",
+				"Groceries",
+				"Groceries",
+			],
+		});
+		expect(sent?.state).not.toHaveProperty("date");
+		expect(sent?.state).not.toHaveProperty("account");
+		expect(sent?.state).not.toHaveProperty("note");
+		expect(sent?.state).not.toHaveProperty("history");
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, jev_category_id, category_confidence FROM transactions WHERE id = ?",
+				)
+				.bind(target?.id)
+				.first(),
+		).toEqual({
+			category_id: null,
+			jev_category_id: 2,
+			category_confidence: 0.5,
+		});
+	});
+
+	it("sends a transaction with no merchant history exactly as it did before", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const target = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1200, 'ONE-OFF SHOP') RETURNING id",
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		let sent: Record<string, unknown> | undefined;
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				sent = JSON.parse(String(init?.body));
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: [target?.id as number] },
+		);
+		expect(sent?.state).toEqual({
+			bank_description: "ONE-OFF SHOP",
+			merchant: null,
+			amount_cents: 1200,
+			direction: "money out",
+			account_type: "depository",
+		});
+	});
+
 	it.each([
 		{ enabled: true, income: 1, source: "jev", reviewed: 1 },
 		{ enabled: false, income: 0, source: null, reviewed: 0 },
@@ -515,8 +629,8 @@ describe("categorizePending", () => {
 			{ ...withKey, DB: counted as D1Database, DEMO: "false" },
 			fakeJev(() => reply(0.95)).fetchImpl,
 		);
-		// Three queries a call and a few for its setup, with room left for what the invocation did before.
-		expect(statements).toBeLessThanOrEqual(MAX_CALLS_PER_RUN * 3 + 15);
+		// Three queries per call, one history read per run, and a few for setup.
+		expect(statements).toBeLessThanOrEqual(MAX_CALLS_PER_RUN * 3 + 16);
 		expect(statements).toBeLessThan(1000 - 50);
 	}, 60_000);
 
@@ -667,9 +781,10 @@ describe("categorizePending", () => {
 				fakeJev(() => reply(0.95)).fetchImpl,
 				{ rulesApplied: true, onlyIds: ids },
 			);
-			// Six more calls cost the switches read before and after each (two) and its save (one).
+			// Six more calls cost the switches read before and after each (two) and its save (one); history is one query per run.
 			const perCall = (many.statements() - few.statements()) / 6;
 			expect(perCall).toBeLessThanOrEqual(3);
+			expect(many.statements() - few.statements()).toBeLessThanOrEqual(19);
 		});
 
 		it("gives back what it reserved and didn't ask when the run stops early", async () => {

@@ -8,6 +8,7 @@ import { giveBackJevCalls, reserveJevCalls } from "./db/jev-calls";
 import {
 	applyMerchantRules,
 	markJevFailed,
+	merchantCategoryHistoryForJev,
 	pendingForJev,
 	saveJevResult,
 } from "./db/transactions";
@@ -26,8 +27,8 @@ export const jevCallLimit = (env: { DEMO?: string }) =>
 /**
  * The most calls one run makes, whatever the day's cap still allows; what's left waits for the next
  * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read
- * before it and after it, and saving its answer), plus a few for the run's setup: 300 calls is about 900
- * queries. So production's 09:40 run does nothing else, and the sync (09:00) and the names with the first
+ * before it and after it, and saving its answer), plus a few for setup and one merchant-history read:
+ * 300 calls is about 901 queries. So production's 09:40 run does nothing else, and the sync (09:00) and the names with the first
  * pass (09:20, where 100 names and 200 calls are about the same) are runs of their own.
  */
 export const MAX_CALLS_PER_RUN = 300;
@@ -35,7 +36,7 @@ export const MAX_CALLS_PER_RUN = 300;
 /**
  * The most transactions the run right after a sync asks about, newest first among that sync's own.
  * A sync that imports a lot of rows has already spent most of its invocation's 1,000 queries saving
- * them, so this run stays small (50 calls is about 150 queries); the rest wait for the nightly runs.
+ * them, so this run stays small (50 calls is about 151 queries including merchant history); the rest wait for the nightly runs.
  */
 export const AFTER_SYNC_BATCH = 50;
 
@@ -127,6 +128,7 @@ export async function categorizePending(
 
 	let failuresInARow = 0;
 	try {
+		const histories = await merchantCategoryHistoryForJev(env.DB, waiting);
 		for (const tx of waiting.slice(0, granted)) {
 			// Past the household's midnight the calls belong to the next day, which this run didn't reserve.
 			if (todayIn(timeZone) !== day) return done;
@@ -141,7 +143,15 @@ export async function categorizePending(
 			// A credit a person reviewed, or an excluded payment that pays a bill, is asked about only for its category.
 			if (tx.categoryOnly && !before.categories) continue;
 			done.asked += 1;
-			const result = await askJev(tx, names, env.JEV_API_KEY, fetchImpl);
+			const result = await askJev(
+				{
+					...tx,
+					merchantCategoryHistory: histories.get(tx.merchantKey),
+				},
+				names,
+				env.JEV_API_KEY,
+				fetchImpl,
+			);
 			if (!result.ok) {
 				// Status and request id only: never the key or anything about the transaction.
 				console.error(

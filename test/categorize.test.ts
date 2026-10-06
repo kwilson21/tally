@@ -101,6 +101,28 @@ describe("askJev", () => {
 		expect(second.state.direction).toBe("money in");
 	});
 
+	it("sends merchant history as category names in state, without the earlier transaction details", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(
+			{ ...input, merchantCategoryHistory: ["Groceries", "Groceries"] },
+			categories,
+			"k",
+			fetchImpl,
+		);
+		const body = JSON.parse(String(calls[0]?.init.body));
+		expect(body.state).toEqual({
+			bank_description: "SQ *LOCAL BAKERY 4432",
+			merchant: "Local Bakery",
+			amount_cents: 1200,
+			direction: "money out",
+			account_type: "credit",
+			merchant_category_history: ["Groceries", "Groceries"],
+		});
+		expect(body.questions.category.instructions).toContain(
+			"use them as context for this category guess",
+		);
+	});
+
 	it("adds the note a person wrote, so it can help the transaction sort (decision 64), and nothing when there is none", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(

@@ -940,10 +940,12 @@ export async function pendingForJev(
 	db: D1Database,
 	limit: number,
 	{ categories = true, ids }: { categories?: boolean; ids?: number[] } = {},
-): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
+): Promise<
+	(JevInput & { id: number; categoryOnly: boolean; merchantKey: string })[]
+> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
+			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note,
 				${CATEGORY_ONLY} AS categoryOnly
@@ -958,11 +960,55 @@ export async function pendingForJev(
 			LIMIT ?`,
 		)
 		.bind(categories ? 1 : 0, ...(ids ? [JSON.stringify(ids)] : []), limit)
-		.all<JevInput & { id: number; categoryOnly: number }>();
+		.all<
+			JevInput & { id: number; categoryOnly: number; merchantKey: string }
+		>();
 	return results.map((transaction) => ({
 		...transaction,
 		categoryOnly: transaction.categoryOnly === 1,
 	}));
+}
+
+/** The recent categories chosen by a person or merchant rule, fetched once for a Jev page. */
+export async function merchantCategoryHistoryForJev(
+	db: D1Database,
+	transactions: { id: number; merchantKey: string }[],
+): Promise<Map<string, string[]>> {
+	const keys = [
+		...new Set(transactions.map((transaction) => transaction.merchantKey)),
+	];
+	if (keys.length === 0) return new Map();
+	const { results } = await db
+		.prepare(
+			`WITH requested AS (SELECT value AS merchant_key FROM json_each(?)),
+			 asked AS (SELECT value AS transaction_id FROM json_each(?)),
+			 ranked AS (
+				SELECT ${merchantKeySql("t")} AS merchant_key, c.name AS category_name,
+					ROW_NUMBER() OVER (PARTITION BY ${merchantKeySql("t")} ORDER BY t.date DESC, t.id DESC) AS position
+				FROM transactions t
+				JOIN requested r ON r.merchant_key = ${merchantKeySql("t")}
+				JOIN categories c ON c.id = t.category_id
+				LEFT JOIN transactions p ON p.id = t.parent_id
+				WHERE t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND t.category_source IN ('user', 'merchant_rule')
+					AND t.is_split = 0 AND t.excluded = 0
+					AND COALESCE(p.excluded, 0) = 0 AND COALESCE(p.pending, t.pending) = 0
+			)
+			SELECT merchant_key, category_name FROM ranked WHERE position <= 5
+			ORDER BY merchant_key, position`,
+		)
+		.bind(
+			JSON.stringify(keys),
+			JSON.stringify(transactions.map((transaction) => transaction.id)),
+		)
+		.all<{ merchant_key: string; category_name: string }>();
+	const history = new Map<string, string[]>();
+	for (const row of results) {
+		const categories = history.get(row.merchant_key) ?? [];
+		categories.push(row.category_name);
+		history.set(row.merchant_key, categories);
+	}
+	return history;
 }
 
 /** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */

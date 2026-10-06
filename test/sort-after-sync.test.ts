@@ -132,6 +132,42 @@ describe("sortAfterSync", () => {
 		expect(await callsUsed()).toBe(50);
 	});
 
+	it("keeps a full 50-call sync sort under D1's 1,000-statement limit", async () => {
+		quiet();
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 70)
+				 INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+				 SELECT 1, date('2026-07-01', '+' || i || ' days'), 100, 'SYNC BUDGET ' || i FROM n`,
+			)
+			.run();
+		const { results } = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name LIKE 'SYNC BUDGET %'",
+			)
+			.all<{ id: number }>();
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const jev = fakeJev();
+		await sortAfterSync(
+			{ ...withKey, DB: counted as D1Database, DEMO: "false" },
+			{ changedIds: results.map((row) => row.id) },
+			jev.fetchImpl,
+		);
+		expect(jev.fetchImpl).toHaveBeenCalledTimes(AFTER_SYNC_BATCH);
+		expect(statements).toBeLessThan(1000);
+	});
+
 	it("doesn't run when the sorting switch is off, and leaves everything waiting for the nightly run", async () => {
 		quiet();
 		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, sortOnArrival: false });
