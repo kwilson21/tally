@@ -269,6 +269,125 @@ describe("a split whose bank transaction pays a bill", () => {
 	});
 });
 
+// Transactions' Show choice (#210, spec §8.4) reads what counts the same way (decision 83): Spending is
+// what Home counts, so a linked payment is there whatever its exclusion, and Excluded, Refunds and How
+// Tally works' excluded count leave it out of "excluded" alike.
+describe("the Show choice and a payment linked to a bill", () => {
+	/** Every row a Show choice lists in the month, across every page. */
+	const shown = async (show: string) => {
+		const query = (page: number) =>
+			listTransactions(
+				db,
+				parseFilters(
+					new URLSearchParams(`month=${MONTH}&show=${show}&page=${page}`),
+					MONTH,
+				),
+			);
+		const first = await query(1);
+		const rows = [...first.rows];
+		for (let page = 2; page <= first.pages; page++)
+			rows.push(...(await query(page)).rows);
+		return rows;
+	};
+	const ids = async (show: string) => (await shown(show)).map((r) => r.id);
+	const spendingListed = async () =>
+		(await shown("spending")).reduce((sum, r) => sum + r.amountCents, 0);
+	const breakdownTotal = async () =>
+		excludedBreakdown(db, MONTH).then(
+			(b) => b.transfer + b.reimbursement + b.byPerson,
+		);
+	const excludedCount = async () =>
+		(
+			await listTransactions(
+				db,
+				parseFilters(
+					new URLSearchParams(`month=${MONTH}&show=excluded`),
+					MONTH,
+				),
+			)
+		).total;
+
+	it("lists a linked, Plaid-excluded payment under Spending and not under Excluded, until the link goes", async () => {
+		await addPayment("plaid").run();
+		expect(await ids("spending")).not.toContain(9501);
+		expect(await ids("excluded")).toContain(9501);
+
+		await link(9501).run();
+		expect(await ids("spending")).toContain(9501);
+		expect(await ids("excluded")).not.toContain(9501);
+		// The old Excluded chip's link reads the same.
+		expect(
+			(await listTransactions(db, excludedFilter())).rows.map((r) => r.id),
+		).not.toContain(9501);
+
+		await unlink().run();
+		expect(await ids("spending")).not.toContain(9501);
+		expect(await ids("excluded")).toContain(9501);
+	});
+
+	it("adds Spending up to Home's Spent with a linked, excluded payment and a linked split", async () => {
+		await addPayment("plaid").run();
+		await link(9501).run();
+		expect(await spendingListed()).toBe(await spendFor());
+
+		await db.batch([
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, is_split, plaid_category)
+				 SELECT 9540, id, '2026-09-06', 80000, 'LANDLORD LLC', 1, 'plaid', 1, 'LOAN_PAYMENTS' FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id)
+				 SELECT 9541, id, '2026-09-06', 50000, 'LANDLORD LLC', 1, 'plaid', 9540 FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id)
+				 SELECT 9542, id, '2026-09-06', 30000, 'LANDLORD LLC', 1, 'plaid', 9540 FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9502, 'Storage', 80000, 6, 'monthly', 5, 'LANDLORD LLC')",
+			),
+			db
+				.prepare(
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9502, ?, 9540, 'auto', 'linked')",
+				)
+				.bind(MONTH),
+		]);
+		// The parts count on their parent's link; the parent never does.
+		const spending = await ids("spending");
+		expect(spending).toEqual(expect.arrayContaining([9541, 9542]));
+		expect(spending).not.toContain(9540);
+		expect(await spendingListed()).toBe(await spendFor());
+	});
+
+	it("counts the same excluded transactions in How Tally works as Show Excluded lists", async () => {
+		await addPayment("plaid").run();
+		expect(await excludedCount()).toBe(await breakdownTotal());
+		await link(9501).run();
+		expect(await excludedCount()).toBe(await breakdownTotal());
+		await unlink().run();
+		expect(await excludedCount()).toBe(await breakdownTotal());
+	});
+
+	it("reads a linked, excluded credit as a refund, never as excluded, so the two never share a row", async () => {
+		// A credit the bill's payment came back as, excluded by Plaid and linked by hand.
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, plaid_category, credit_reviewed)
+				 SELECT 9550, id, '2026-09-08', -2000, 'LANDLORD LLC CREDIT', 1, 'plaid', 'TRANSFER_IN', 1 FROM accounts LIMIT 1`,
+			)
+			.run();
+		expect(await ids("refunds")).not.toContain(9550);
+		expect(await ids("excluded")).toContain(9550);
+
+		await link(9550, "user").run();
+		const refunds = await ids("refunds");
+		const excluded = await ids("excluded");
+		expect(refunds).toContain(9550);
+		expect(excluded).not.toContain(9550);
+		expect(refunds.filter((id) => excluded.includes(id))).toEqual([]);
+	});
+});
+
 describe("Jev and a payment that pays a bill", () => {
 	const answer = (flags: {
 		transfer?: boolean;
