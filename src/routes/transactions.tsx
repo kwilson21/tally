@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
+import { accountChoices } from "../db/accounts";
 import {
 	type FirstVisit,
 	firstVisitState,
@@ -35,6 +36,8 @@ import {
 	type Filters,
 	filtersToQuery,
 	parseFilters,
+	SHOW_LABELS,
+	SHOWS,
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
@@ -46,6 +49,7 @@ import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
+import { FilterSelect } from "../views/filter-select";
 import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
@@ -72,9 +76,6 @@ function byDay(rows: ListRow[]): [string, ListRow[]][] {
 	}
 	return groups;
 }
-
-const pill =
-	"min-h-11 rounded-full border border-rule bg-paper px-4 text-base text-ink";
 
 type ListOptions = {
 	/** The edit sheet to show over the list, given the active categories and the household's date. */
@@ -155,7 +156,7 @@ async function renderList(
 		focusHeading = false,
 	}: ListOptions = {},
 ) {
-	const [{ rows, total, page, pages }, months, needs, categories] =
+	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
 		await Promise.all([
 			listTransactions(c.env.DB, filters),
 			monthsWithTransactions(c.env.DB),
@@ -163,6 +164,7 @@ async function renderList(
 			c.env.DB.prepare(
 				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 			).all<Category>(),
+			accountChoices(c.env.DB),
 		]);
 
 	// Only an empty list asks whether it is the first visit's (one cheap statement).
@@ -190,11 +192,18 @@ async function renderList(
 			)?.name ??
 			`category ${filters.category}`;
 	}
+	// Named like the category, so the count always says which account; one that's gone reads by its id.
+	const accountName =
+		filters.account === null
+			? null
+			: (accounts.find((a) => a.id === filters.account)?.label ??
+				`account ${filters.account}`);
 	const count = resultCount(
 		{ total, first, shown: rows.length, pages },
 		filters,
 		categoryName,
 		today,
+		accountName,
 	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	const focusCount =
@@ -205,7 +214,8 @@ async function renderList(
 		filters.uncategorized &&
 		filters.q === "" &&
 		filters.category === null &&
-		!filters.excluded;
+		filters.account === null &&
+		filters.show === "all";
 	const pageHref = (n: number) => {
 		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
 		const params = new URLSearchParams(query);
@@ -351,30 +361,52 @@ async function renderList(
 						)}
 					</FormField>
 					<div class="flex flex-wrap gap-2">
-						<label for="month" class="sr-only">
-							Month
-						</label>
-						<select id="month" name="month" class={pill}>
-							{months.map((m) => (
-								<option value={m} selected={filters.month === m}>
-									{monthLabel(m, today)}
-								</option>
-							))}
-							<option value="all" selected={filters.month === "all"}>
-								All months
-							</option>
-						</select>
-						<label for="category" class="sr-only">
-							Category
-						</label>
-						<select id="category" name="category" class={pill}>
-							<option value="">All categories</option>
-							{categories.results.map((cat) => (
-								<option value={cat.id} selected={filters.category === cat.id}>
-									{cat.name}
-								</option>
-							))}
-						</select>
+						<FilterSelect
+							id="month"
+							name="month"
+							label="Month"
+							options={[
+								...months.map((m) => ({
+									value: m,
+									label: monthLabel(m, today),
+								})),
+								{ value: "all", label: "All months" },
+							]}
+							selected={filters.month}
+						/>
+						<FilterSelect
+							id="category"
+							name="category"
+							label="Category"
+							options={[
+								{ value: "", label: "All categories" },
+								...categories.results.map((cat) => ({
+									value: cat.id,
+									label: cat.name,
+								})),
+							]}
+							selected={filters.category}
+						/>
+						<FilterSelect
+							id="account"
+							name="account"
+							label="Account"
+							options={[
+								{ value: "", label: "All accounts" },
+								...accounts.map((a) => ({
+									value: a.id,
+									label: a.disconnected ? `${a.label} · Disconnected` : a.label,
+								})),
+							]}
+							selected={filters.account}
+						/>
+						<FilterSelect
+							id="show"
+							name="show"
+							label="Show"
+							options={SHOWS.map((s) => ({ value: s, label: SHOW_LABELS[s] }))}
+							selected={filters.show}
+						/>
 					</div>
 					<div class="flex flex-wrap gap-2">
 						<Chip
@@ -387,14 +419,6 @@ async function renderList(
 							<span>
 								Needs category (<span id="needs-count">{needs}</span>)
 							</span>
-						</Chip>
-						<Chip
-							type="checkbox"
-							name="excluded"
-							value="1"
-							checked={filters.excluded}
-						>
-							Excluded
 						</Chip>
 					</div>
 					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}

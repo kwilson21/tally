@@ -2,11 +2,12 @@ import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
-import { type Filters, likePattern } from "../transactions/filters";
+import { type Filters, likePattern, type Show } from "../transactions/filters";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import {
 	COUNTED_JOINS,
+	COUNTED_SPENDING,
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
@@ -68,6 +69,26 @@ const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND t.excluded = 0 AND t.is_
 const NEEDS_JEV_CLASSIFICATION =
 	"t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))";
 
+/**
+ * What each Show choice holds (spec §8.4, decision 74), once COUNTED_JOINS and the split parent `p`
+ * are joined. The kinds can overlap: a refund that follows its purchase is both Spending and a Refund.
+ * - Spending: what Home counts, so the list adds up to Home's Spent.
+ * - Income: flagged income.
+ * - Refunds: money in (a negative amount) that isn't income or a transfer and is in the budget or
+ *   waiting to be, so a refund nobody linked and a credit nobody has identified are here. A split
+ *   refund shows by its parts, as it counts; a part doesn't carry its parent's income or transfer
+ *   flag, so it is a refund only when its parent isn't income or a transfer either.
+ * - Excluded: left out of the budget, where transfers and card payments go (the old Excluded chip).
+ */
+const SHOW_SQL: Record<Show, string | null> = {
+	all: null,
+	spending: `(${COUNTED_SPENDING})`,
+	income: "t.flag_income = 1",
+	refunds:
+		"(t.amount_cents < 0 AND t.flag_income = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_income, 0) = 0 AND COALESCE(p.flag_transfer, 0) = 0 AND t.excluded = 0 AND t.is_split = 0)",
+	excluded: "t.excluded = 1",
+};
+
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
 	db: D1Database,
@@ -84,8 +105,13 @@ export async function listTransactions(
 		where.push("t.is_split = 0");
 		args.push(f.category);
 	}
+	if (f.account !== null) {
+		where.push("t.account_id = ?");
+		args.push(f.account);
+	}
 	if (f.uncategorized) where.push(NEEDS_CATEGORY);
-	if (f.excluded) where.push("t.excluded = 1");
+	const shown = SHOW_SQL[f.show];
+	if (shown) where.push(shown);
 	if (f.q) {
 		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
 		// "google youtube" finds "GOOGLE *YOUTUBE".

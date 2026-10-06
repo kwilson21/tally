@@ -278,12 +278,15 @@ describe("the empty-list check", () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const full = recorded();
 		await get("/transactions", full.bindings);
-		expect(full.sql.some((s) => s.includes("plaid_items"))).toBe(false);
+		// The Account choice reads plaid_items too (to mark a disconnected bank), so this finds the
+		// first-visit statement by its answer.
+		const firstVisitCheck = (s: string) => s.includes("'importing'");
+		expect(full.sql.some(firstVisitCheck)).toBe(false);
 
 		await emptyHousehold();
 		const empty = recorded();
 		await get("/transactions", empty.bindings);
-		expect(empty.sql.filter((s) => s.includes("plaid_items"))).toHaveLength(1);
+		expect(empty.sql.filter(firstVisitCheck)).toHaveLength(1);
 	});
 });
 
