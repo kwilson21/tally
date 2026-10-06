@@ -64,9 +64,10 @@
 			],
 			"workers_dev": false,
 			"preview_urls": false,
-			// The daily catch-up sync (spec §4), at the demo's hour.
+			// The daily catch-up sync (spec §4), at the demo's hour, and 30 minutes later a second run that
+			// asks Jev about what the first left, so a new bank's backfill is sorted in a night (decision 56).
 			"triggers": {
-				"crons": ["0 9 * * *"]
+				"crons": ["0 9 * * *", "30 9 * * *"]
 			},
 			// Not the demo: no banner, and the nightly reset can never run (decision 25).
 			"vars": {

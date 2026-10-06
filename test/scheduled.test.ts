@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
-import { runScheduled } from "../src/index";
+import { runScheduled, runSecondSort } from "../src/index";
 import { encryptToken } from "../src/plaid/token-crypto";
 
 const KEY = btoa("01234567890123456789012345678901");
@@ -184,6 +184,44 @@ describe("scheduled handler", () => {
 				"SELECT category_id, category_source FROM transactions WHERE plaid_transaction_id = 'new-transaction'",
 			).first(),
 		).toEqual({ category_id: category?.id, category_source: "merchant_rule" });
+	});
+
+	// Decision 56: the 09:30 run only sorts what the first left; it never resets the demo or syncs.
+	it("runs only the second sort at 09:30, with no reset and no sync", async () => {
+		await env.DB.prepare("DELETE FROM transactions").run();
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+		await worker.scheduled({ cron: "30 9 * * *" });
+
+		expect(await count()).toBe(0);
+		expect(fetchSpy).not.toHaveBeenCalled();
+		fetchSpy.mockRestore();
+	});
+
+	it("asks Jev about what the first run left, so the night still reaches the day's cap", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		const answer = () =>
+			new Response(
+				JSON.stringify({
+					answers: {
+						category: { type: "choice", choice: "Eating Out", confidence: 0.5 },
+						transfer: { type: "noul", noul: 0.01 },
+						reimbursement: { type: "noul", noul: 0.01 },
+						income: { type: "noul", noul: 0.01 },
+					},
+				}),
+			);
+		const fetchImpl = vi.fn(async () => answer());
+
+		await runSecondSort(
+			{ ...env, DEMO: "false", JEV_API_KEY: "jev" },
+			fetchImpl as unknown as typeof fetch,
+		);
+
+		expect(fetchImpl).toHaveBeenCalledTimes(12);
+		vi.restoreAllMocks();
 	});
 
 	// Spec §8.6: the nightly run reads the household's AI switches too.

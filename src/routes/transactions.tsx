@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import {
@@ -966,8 +967,9 @@ function EditSheet({
 			<h2
 				id="edit-title"
 				tabindex={-1}
-				autofocus
-				// Focused only so screen readers start here; it isn't a control, so no ring.
+				// Focused only so screen readers start here; it isn't a control, so no ring. While the sheet
+				// asks about a delete, the question takes the focus instead (one autofocus, or htmx picks the first).
+				autofocus={!deleteConfirm}
 				class={`font-serif text-4xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
 			>
 				{tx.displayName}
@@ -1047,6 +1049,9 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				{/* While the delete question is open there's no Save, so Enter in the name field would save the
+				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
+				{deleteConfirm && <button type="submit" disabled hidden />}
 				{/* What the name field held when this panel was drawn, so a save can tell a rename from a panel that
 				    is only out of date: another tab may have named the merchant since (src/transactions/edit.ts). */}
 				<input
@@ -1260,19 +1265,23 @@ function EditSheet({
 						</FormField>
 					</div>
 				</details>
-				<div class="mt-2 grid grid-cols-2 gap-3">
-					<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
-						Cancel
-					</Button>
-					<Button
-						id="edit-save"
-						type="submit"
-						class="w-full"
-						busyLabel="Saving…"
-					>
-						Save
-					</Button>
-				</div>
+				{/* Asking about a delete takes this row's place (below, in the delete form), so the sheet never
+				    has two ways to leave it side by side (decision 84). */}
+				{!deleteConfirm && (
+					<div class="mt-2 grid grid-cols-2 gap-3">
+						<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
+							Cancel
+						</Button>
+						<Button
+							id="edit-save"
+							type="submit"
+							class="w-full"
+							busyLabel="Saving…"
+						>
+							Save
+						</Button>
+					</div>
+				)}
 			</form>
 			{tx.accountType === "cash" && tx.parentId === null && (
 				<form
@@ -1286,21 +1295,36 @@ function EditSheet({
 				>
 					<input type="hidden" name="back" value={back} />
 					{deleteConfirm ? (
-						<div class="flex items-center gap-3">
+						<>
 							<input type="hidden" name="confirm" value="1" />
-							<Button type="submit">Delete this cash entry?</Button>
-							{/* Cancel goes back to this entry's edit sheet, not the list. */}
-							<Button
-								href={editHref}
-								kind="text"
-								hx-get={editHref}
-								hx-target="#page"
-								hx-select="#page"
-								hx-swap="outerHTML"
+							<p
+								id="delete-question"
+								tabindex={-1}
+								autofocus
+								// Focused so the swap is announced with the question; it isn't a control, so no ring.
+								// The bottom scroll margin brings Delete and Keep it into view with it on a phone.
+								class="scroll-mb-24 text-lg outline-none"
 							>
-								Cancel
-							</Button>
-						</div>
+								{`Delete ${tx.displayName}, ${formatCents(tx.amountCents)}? This can't be undone.`}
+							</p>
+							<div class="mt-3 grid grid-cols-2 gap-3">
+								<Button type="submit" class="w-full">
+									Delete
+								</Button>
+								{/* Keep it goes back to this entry's edit sheet, not the list. */}
+								<Button
+									href={editHref}
+									kind="secondary"
+									class="w-full"
+									hx-get={editHref}
+									hx-target="#page"
+									hx-select="#page"
+									hx-swap="outerHTML"
+								>
+									Keep it
+								</Button>
+							</div>
+						</>
 					) : (
 						<Button kind="text" type="submit">
 							Delete cash transaction
@@ -1761,6 +1785,19 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 	if (!result.saved)
 		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
+	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
+	// a transaction that already has a category, or gets one in this save, asks nothing.
+	const addedName =
+		parsed.value.displayName !== null &&
+		parsed.value.displayName !== tx.merchantName;
+	const addedNote = parsed.value.note !== null && parsed.value.note !== tx.note;
+	if (
+		(addedName || addedNote) &&
+		tx.categoryId === null &&
+		parsed.value.categoryId === null
+	)
+		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
