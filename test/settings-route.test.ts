@@ -224,7 +224,7 @@ describe("adding a category", () => {
 		});
 		expect(res.status).toBe(422);
 		expect(html).toMatch(/<details[^>]*data-row="new"[^>]*\bopen/);
-		expect(html).toContain("That name is reserved for Jev. Pick another.");
+		expect(html).toContain("That name is reserved for Tally. Pick another.");
 	});
 });
 

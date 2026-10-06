@@ -376,6 +376,15 @@ describe("the edit panel's name choices", () => {
 		for (const radio of radios) expect(radio).not.toMatch(/\schecked/);
 		expect(html).toContain("Keep “Blue bottle cof”");
 		expect(html).toMatch(/<label[^>]*>Or your own<\/label>/);
+		expect(
+			html.match(/A name typed here is used instead of any name above\./g),
+		).toHaveLength(1);
+		const ownField = html.match(/<input[^>]*id="name-own"[^>]*>/)?.[0] ?? "";
+		const hintId = ownField.match(/aria-describedby="([^"]+)"/)?.[1];
+		expect(hintId).toBe("name-own-hint");
+		expect(html).toMatch(
+			/<label[^>]*>Or your own<\/label>[\s\S]*?A name typed here is used instead of any name above\. For all 2 transactions from this merchant\./,
+		);
 		expect(html).toContain("For all 2 transactions from this merchant.");
 		// The title is the first suggestion, dashed like the list, and the bank's text is above it.
 		expect(html).toMatch(

@@ -21,6 +21,7 @@ import {
 	type TransactionDetail,
 } from "../db/transactions";
 import { formatCents } from "../money";
+import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
 import {
 	type CashValues,
 	entryKeyOf,
@@ -67,12 +68,16 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
+import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
 export const transactions = new Hono<App>();
 
 type Category = { id: number; name: string; icon: string; color: string };
+
+/** The demo, where "Straight from the bank" (`?raw=1`) lives; the family app has no such view (spec §8.6). */
+const isDemo = (c: Context<App>) => c.env.DEMO === "true";
 
 /** Consecutive rows that share a date, in list order. */
 function byDay(rows: ListRow[]): [string, ListRow[]][] {
@@ -104,13 +109,12 @@ function listHref(filters: Filters, thisMonth: string) {
 	const query = filtersToQuery(filters, thisMonth);
 	return `/transactions${query ? `?${query}` : ""}`;
 }
-
 /**
  * Whether the household has nothing at all yet, and what it is waiting for (spec §8.5). The demo
  * always has its seeded household and no Plaid, so it never shows the first visit's lists.
  */
 async function firstVisitFor(c: Context<App>): Promise<FirstVisit | null> {
-	return c.env.DEMO === "true" ? null : firstVisitState(c.env.DB);
+	return isDemo(c) ? null : firstVisitState(c.env.DB);
 }
 
 /**
@@ -168,7 +172,7 @@ async function renderList(
 		await Promise.all([
 			listTransactions(c.env.DB, filters),
 			monthsWithTransactions(c.env.DB),
-			needsCategoryCount(c.env.DB, filters.month),
+			needsCategoryCount(c.env.DB, filters.month, filters.raw),
 			c.env.DB.prepare(
 				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 			).all<Category>(),
@@ -178,7 +182,7 @@ async function renderList(
 	// Only an empty list asks whether it is the first visit's (one cheap statement).
 	const firstVisit = rows.length === 0 ? await firstVisitFor(c) : null;
 	// With nothing at all to select, the page is the first visit's whatever the address says.
-	const selecting = selectRequested && firstVisit === null;
+	const selecting = selectRequested && firstVisit === null && !filters.raw;
 
 	// Keep the active month in the picker even when it has no transactions.
 	if (filters.month !== "all" && !months.includes(filters.month)) {
@@ -278,6 +282,19 @@ async function renderList(
 		</nav>
 	);
 	const back = listHref(filters, today.slice(0, 7));
+	const clearFiltersHref = listHref(
+		{
+			...filters,
+			q: "",
+			month: today.slice(0, 7),
+			category: null,
+			account: null,
+			show: "all",
+			uncategorized: false,
+			page: 1,
+		},
+		today.slice(0, 7),
+	);
 	// Select and Done keep every filter and the page; Done drops only select mode.
 	const doneHref = `/transactions${listQuery ? `?${listQuery}` : ""}`;
 	const selectHref = `/transactions?${listQuery ? `${listQuery}&` : ""}select=1`;
@@ -291,6 +308,8 @@ async function renderList(
 	// shows the no-JS hint, and htmx re-counts on load.
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
 	const htmx = c.req.header("HX-Request") === "true";
+	// The demo's raw view draws each row as the bank sends it; which rows are listed, and what a tap does, don't change.
+	const shown = (row: ListRow) => (filters.raw ? bankRow(row) : row);
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
 	return c.html(
@@ -301,7 +320,7 @@ async function renderList(
 			}
 			active="transactions"
 			currentPath={c.req.path + new URL(c.req.url).search}
-			demo={c.env.DEMO === "true"}
+			demo={isDemo(c)}
 		>
 			<div class="flex items-center justify-between gap-3 lg:max-w-3xl">
 				<h1
@@ -314,7 +333,7 @@ async function renderList(
 				</h1>
 				{/* Swapped out-of-band on filter and page changes, so it keeps the current filters. Select
 				    waits for the first transaction (P40 A). */}
-				{firstVisit === null && (
+				{firstVisit === null && !filters.raw && (
 					<Button
 						id="select-toggle"
 						kind="text"
@@ -325,6 +344,22 @@ async function renderList(
 					</Button>
 				)}
 			</div>
+			{/* The demo's "See it without AI" (spec §8.6): plain links to the other view of this list, keeping the
+			    filters but starting at the first page. Swapped out of band on filter and page changes, so they never
+			    name a stale filter. */}
+			{isDemo(c) && (
+				<ViewLinks
+					current={filters.raw ? "bank" : "made"}
+					madeHref={listHref(
+						{ ...filters, page: 1, raw: false },
+						today.slice(0, 7),
+					)}
+					bankHref={listHref(
+						{ ...filters, page: 1, raw: true },
+						today.slice(0, 7),
+					)}
+				/>
+			)}
 			{selecting && (
 				<p class="mt-2 text-sm text-muted">Tap rows to select them.</p>
 			)}
@@ -366,6 +401,8 @@ async function renderList(
 					{...includeTicked}
 				>
 					{selecting && <input type="hidden" name="select" value="1" />}
+					{/* The demo's raw view stays on while filtering, with or without htmx. */}
+					{filters.raw && <input type="hidden" name="raw" value="1" />}
 					<FormField id="q" label="Search transactions" hideLabel>
 						{(a11y) => (
 							<div class="relative">
@@ -468,6 +505,8 @@ async function renderList(
 						{count}
 					</p>
 				)}
+				{/* Under the count, not in it: what the raw view leaves out stays put as filters change. */}
+				{filters.raw && <p class="mt-1 text-muted">{BANK_VIEW_NOTE}</p>}
 				{/* Always drawn on a list, so a filter change can add or remove the link inside it (LIST_OOB). */}
 				{firstVisit === null && (
 					<div id="organize-link">
@@ -502,7 +541,7 @@ async function renderList(
 									kind="search"
 									sentence="No transactions match these filters."
 									hint="Try a wider month, or clear the search."
-									action={{ href: "/transactions", label: "Clear filters" }}
+									action={{ href: clearFiltersHref, label: "Clear filters" }}
 								/>
 							) : (
 								byDay(rows).map(([date, dayRows]) => (
@@ -513,10 +552,10 @@ async function renderList(
 										<ul class="divide-y divide-rule">
 											{dayRows.map((row) =>
 												row.isSplit ? (
-													<TransactionRow row={row} />
+													<TransactionRow row={shown(row)} />
 												) : (
 													<SelectableTransactionRow
-														row={row}
+														row={shown(row)}
 														checked={checkedIds.has(row.id)}
 														today={today}
 													/>
@@ -567,7 +606,7 @@ async function renderList(
 									kind="search"
 									sentence="No transactions match these filters."
 									hint="Try a wider month, or clear the search."
-									action={{ href: "/transactions", label: "Clear filters" }}
+									action={{ href: clearFiltersHref, label: "Clear filters" }}
 								/>
 							)
 						) : (
@@ -581,7 +620,7 @@ async function renderList(
 											const href = `/transactions/${row.id}${listQuery ? `?${listQuery}` : ""}`;
 											return (
 												<TransactionRow
-													row={row}
+													row={shown(row)}
 													href={href}
 													autofocus={row.id === focusId}
 													// Opening swaps in only the sheet, so the list keeps its place.
@@ -616,13 +655,18 @@ transactions.get("/transactions", async (c) => {
 	const focus = Number(params.get("focus"));
 	const selecting = params.get("select") === "1";
 	const today = await householdToday(c.env.DB);
-	return renderList(c, today, parseFilters(params, today.slice(0, 7)), {
-		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
-		selecting,
-		checkedIds: selecting
-			? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
-			: undefined,
-	});
+	return renderList(
+		c,
+		today,
+		parseFilters(params, today.slice(0, 7), isDemo(c)),
+		{
+			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+			selecting,
+			checkedIds: selecting
+				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
+				: undefined,
+		},
+	);
 });
 
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
@@ -635,6 +679,7 @@ const LIST_OOB = [
 	"#selected-count:innerHTML",
 	"#set-category-selection:outerHTML",
 	"#exclude-selection:outerHTML",
+	"#view-links:outerHTML",
 ].join(", ");
 
 /** Most ids one bulk action takes (D1 binds at most 100 parameters per statement). */
@@ -839,7 +884,7 @@ async function categorySheet(
 	/** Its Save was refused: the sheet is already open, so it isn't drawn arriving again. */
 	still = false,
 ) {
-	return renderList(c, today, filtersFrom(today, back), {
+	return renderList(c, today, filtersFrom(c, today, back), {
 		selecting: true,
 		checkedIds: new Set(ids),
 		status: error ? 422 : 200,
@@ -876,7 +921,9 @@ async function finishSelection(
 	);
 	// The list is out of select mode, so the address bar is too.
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filtersFrom(today, back), { focusHeading: true });
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusHeading: true,
+	});
 }
 
 transactions.post("/transactions/select/category/save", async (c) => {
@@ -920,7 +967,7 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	const { ids, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
 	if (error)
-		return renderList(c, today, filtersFrom(today, back), {
+		return renderList(c, today, filtersFrom(c, today, back), {
 			selecting: true,
 			checkedIds: new Set(ids),
 			status: 422,
@@ -1177,7 +1224,8 @@ function EditSheet({
 						tx.categorySource === "jev" &&
 						tx.categoryConfidence !== null && (
 							<p class="text-sm text-muted">
-								Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
+								Picked by Tally · {Math.round(tx.categoryConfidence * 100)}%
+								sure
 							</p>
 						)}
 					{errors.category && (
@@ -1407,8 +1455,12 @@ function EditSheet({
 	);
 }
 
-const filtersFrom = (today: string, url: string) =>
-	parseFilters(new URL(url, "http://tally").searchParams, today.slice(0, 7));
+const filtersFrom = (c: Context<App>, today: string, url: string) =>
+	parseFilters(
+		new URL(url, "http://tally").searchParams,
+		today.slice(0, 7),
+		isDemo(c),
+	);
 
 const cashValues = (today: string, form?: FormData): CashValues => ({
 	date: form?.get("date")?.toString() ?? today,
@@ -1464,7 +1516,7 @@ transactions.get("/transactions/cash/new", async (c) => {
 		new URL(c.req.url).searchParams.get("back") ?? undefined,
 	);
 	const today = await householdToday(c.env.DB);
-	return renderList(c, today, filtersFrom(today, back), {
+	return renderList(c, today, filtersFrom(c, today, back), {
 		pageTitle: "Add cash · Tally",
 		sheet: (categories, today) => (
 			<CashSheet
@@ -1491,7 +1543,7 @@ transactions.post("/transactions/cash", async (c) => {
 		categories.map((x) => x.id),
 	);
 	if (!parsed.ok)
-		return renderList(c, today, filtersFrom(today, back), {
+		return renderList(c, today, filtersFrom(c, today, back), {
 			pageTitle: "Add cash · Tally",
 			status: 422,
 			sheet: () => (
@@ -1524,7 +1576,7 @@ transactions.post("/transactions/cash", async (c) => {
 	c.header("HX-Push-Url", back);
 	// The pressed button leaves with the swap, so focus goes to the title instead.
 	if (wasFirstVisit) swapWholePage(c);
-	return renderList(c, today, filtersFrom(today, back), {
+	return renderList(c, today, filtersFrom(c, today, back), {
 		focusHeading: wasFirstVisit,
 	});
 });
@@ -1551,7 +1603,11 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	if (!tx) return c.notFound();
 	const today = await householdToday(c.env.DB);
 	const thisMonth = today.slice(0, 7);
-	const filters = parseFilters(new URL(c.req.url).searchParams, thisMonth);
+	const filters = parseFilters(
+		new URL(c.req.url).searchParams,
+		thisMonth,
+		isDemo(c),
+	);
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
@@ -1641,7 +1697,7 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	if (!tx || tx.parentId !== null || tx.income) return c.notFound();
 	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
 	const today = await householdToday(c.env.DB);
-	const filters = filtersFrom(today, back);
+	const filters = filtersFrom(c, today, back);
 	return renderList(c, today, filters, {
 		sheet: (_categories, today) => (
 			<SplitSheet
@@ -1699,7 +1755,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		if (result && !result.saved) {
 			// Show the bank's new amount, so the next save checks against it.
 			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
-			return renderList(c, today, filtersFrom(today, back), {
+			return renderList(c, today, filtersFrom(c, today, back), {
 				status: 422,
 				sheet: (_categories, today) => (
 					<SplitSheet
@@ -1728,9 +1784,11 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				}),
 			);
 			c.header("HX-Push-Url", back);
-			return renderList(c, today, filtersFrom(today, back), { focusId: tx.id });
+			return renderList(c, today, filtersFrom(c, today, back), {
+				focusId: tx.id,
+			});
 		}
-		return renderList(c, today, filtersFrom(today, back), {
+		return renderList(c, today, filtersFrom(c, today, back), {
 			status: 422,
 			sheet: (_categories, today) => (
 				<SplitSheet
@@ -1746,7 +1804,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		});
 	}
 	// Add a part: the open sheet again, with one more part.
-	return renderList(c, today, filtersFrom(today, back), {
+	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
 				tx={tx}
@@ -1791,7 +1849,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filtersFrom(today, back), { focusId: tx.id });
+	return renderList(c, today, filtersFrom(c, today, back), { focusId: tx.id });
 });
 
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
@@ -1801,7 +1859,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
-	const filters = filtersFrom(today, back);
+	const filters = filtersFrom(c, today, back);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
 	).all<{ id: number; name: string }>();
@@ -1959,7 +2017,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			refundOfId: tx.refundOfId ?? null,
 		};
 		const refunds = await refundPurchases(c.env.DB, tx);
-		return renderList(c, today, filtersFrom(today, back), {
+		return renderList(c, today, filtersFrom(c, today, back), {
 			sheet: (categories, today) => (
 				<EditSheet
 					tx={tx}
@@ -1989,7 +2047,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	c.header("HX-Push-Url", back);
 	const nowFirstVisit = (await firstVisitFor(c)) !== null;
 	if (nowFirstVisit) swapWholePage(c);
-	return renderList(c, today, filtersFrom(today, back), {
+	return renderList(c, today, filtersFrom(c, today, back), {
 		focusHeading: nowFirstVisit,
 	});
 });

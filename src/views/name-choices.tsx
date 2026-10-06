@@ -142,16 +142,12 @@ export function NameChoices({
 				label="Or your own"
 				name="merchant"
 				value={own}
+				hint={`A name typed here is used instead of any name above. ${count === 1 ? "For the 1 transaction from this merchant." : `For all ${count} transactions from this merchant.`}`}
 				maxlength={MAX_OWN_NAME}
 				autocomplete="off"
 				surface="paper"
 				error={error}
 			/>
-			<p class="text-sm text-muted">
-				{count === 1
-					? "For the 1 transaction from this merchant."
-					: `For all ${count} transactions from this merchant.`}
-			</p>
 		</fieldset>
 	);
 }

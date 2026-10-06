@@ -398,6 +398,15 @@ describe("GET /settings/names", () => {
 		);
 		expect(html).toContain('href="/how-it-works#names"');
 		expect(text).toContain("Or your own");
+		expect(
+			html.match(/A name typed here is used instead of any name above\./g),
+		).toHaveLength(1);
+		const ownField = html.match(/<input[^>]*id="review-own"[^>]*>/)?.[0] ?? "";
+		const hintId = ownField.match(/aria-describedby="([^"]+)"/)?.[1];
+		expect(hintId).toBe("review-own-hint");
+		expect(html).toMatch(
+			/<label[^>]*>Or your own<\/label>[\s\S]*?A name typed here is used instead of any name above\. For all 3 transactions from this merchant\./,
+		);
 		expect(text).toContain("For all 3 transactions from this merchant.");
 		expect(text).toContain("Save and next");
 		expect(text).toContain("Skip");
