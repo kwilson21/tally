@@ -324,7 +324,7 @@ describe("scheduled handler", () => {
 });
 
 // Which run each cron starts (decision 56): production has three, 20 minutes apart, so each has D1's 1,000
-// queries to itself (09:00 syncs, 09:20 names and then asks Jev, 09:40 asks Jev); the demo has one. The entry point routes by the cron that fired.
+// queries to itself (09:00 syncs, 09:20 asks Jev and then names, 09:40 asks Jev); the demo has one. The entry point routes by the cron that fired.
 describe("scheduled handler: which run a cron starts", () => {
 	async function seedWaiting() {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
@@ -350,7 +350,7 @@ describe("scheduled handler: which run a cron starts", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("asks names, then Jev, at 09:20", async () => {
+	it("asks Jev, then names, at 09:20", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await seedWaiting();
 		const { jev, names } = await fire("20 9 * * *");
@@ -368,10 +368,10 @@ describe("scheduled handler: which run a cron starts", () => {
 });
 
 // The nightly names step (spec §7, §9, #33): Workers AI suggests names where there is a binding. In
-// production it runs first in the 09:20 run, before that run's Jev pass, so no sync or sort can starve it, and
-// it stops starting requests after 5 minutes, so it can't hold up the sort for long (the 09:40 run, only Jev,
-// picks up what the 09:20 run didn't finish); the demo has one run, which names after Jev, within the same
-// budget, counted from the start of the run.
+// production it runs last in the 09:20 run, after that run's Jev pass, in a run of its own that no sync
+// shares. Both steps have a time budget counted from the start of the run, so neither can starve the other:
+// Jev starts no call after 9 minutes and names start no request after 13. The demo has one run, which
+// names after Jev, within the same two budgets.
 describe("scheduled handler: merchant names", () => {
 	async function oneUnnamedCharge() {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
@@ -561,7 +561,7 @@ describe("scheduled handler: merchant names", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("asks names first in the 09:20 run, then Jev, so a sync or a sort can't starve the names", async () => {
+	it("asks Jev first in the 09:20 run, then names, so the sort is never delayed by them", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await oneUnnamedCharge();
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
@@ -580,22 +580,33 @@ describe("scheduled handler: merchant names", () => {
 			{ ...env, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
 			fetchImpl as unknown as typeof fetch,
 		);
-		expect(order).toEqual(["names", "jev"]);
+		expect(order).toEqual(["jev", "names"]);
 		vi.restoreAllMocks();
 	});
 
-	it("stops starting names after 5 minutes, counted from the start of the 09:20 run, and Jev then makes its calls, up to 200", async () => {
+	/** How many of the household day's Jev calls are spoken for. */
+	const callsCounted = async () =>
+		Number(
+			(
+				await env.DB.prepare(
+					"SELECT value FROM household_settings WHERE key GLOB 'jev_calls_*'",
+				).first<{ value: string }>()
+			)?.value ?? 0,
+		);
+
+	it("stops Jev at 9 minutes in the 09:20 run, gives back the calls it didn't ask, and lets names run until 13 minutes", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
 		await addUnsorted(250);
 		const clock = fakeClock();
 		const order: string[] = [];
+		// A slow Jev, a minute a call, and a name takes a minute too.
 		const fetchImpl = vi.fn(async () => {
 			order.push("jev");
+			clock.tick(60_000);
 			return jevAnswer();
 		});
-		// Each name takes a minute.
 		const ai = {
 			run: vi.fn(async () => {
 				order.push("names");
@@ -610,22 +621,47 @@ describe("scheduled handler: merchant names", () => {
 			{ now: clock.now },
 		);
 
-		// Names started at 0:00 to 4:00, and the sixth would have started at 5:00, the end of the budget.
-		expect(ai.run).toHaveBeenCalledTimes(5);
-		expect(fetchImpl).toHaveBeenCalledTimes(200);
-		expect(order).toEqual([
-			...Array(5).fill("names"),
-			...Array(200).fill("jev"),
-		]);
+		// Jev started calls at 0:00 to 8:00 and none at 9:00. The names started at 9:00 to 12:00, none at 13:00.
+		expect(fetchImpl).toHaveBeenCalledTimes(9);
+		expect(ai.run).toHaveBeenCalledTimes(4);
+		expect(order).toEqual([...Array(9).fill("jev"), ...Array(4).fill("names")]);
+		// The 200 it reserved, less the 191 it gave back: the day shows only what was asked.
+		expect(await callsCounted()).toBe(9);
 		vi.restoreAllMocks();
 	});
 
-	it("gives the demo's one 09:00 run the same 5-minute names budget, after its sort", async () => {
+	it("stops Jev at 13 minutes in the 09:40 run, which asks no names", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await addUnsorted(400);
+		const clock = fakeClock();
+		const fetchImpl = vi.fn(async () => {
+			clock.tick(60_000);
+			return jevAnswer();
+		});
+		const ai = aiThatSays("Some Place Name");
+
+		await runSecondSort(
+			{ ...env, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
+			fetchImpl as unknown as typeof fetch,
+			{ now: clock.now },
+		);
+
+		// Calls started at 0:00 to 12:00, and none at 13:00.
+		expect(fetchImpl).toHaveBeenCalledTimes(13);
+		expect(ai.run).not.toHaveBeenCalled();
+		expect(await callsCounted()).toBe(13);
+		vi.restoreAllMocks();
+	});
+
+	it("gives the demo's one 09:00 run the same two deadlines: Jev's 9 minutes, then names' 13", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const clock = fakeClock();
 		const order: string[] = [];
 		const fetchImpl = vi.fn(async () => {
 			order.push("jev");
+			clock.tick(60_000);
 			return jevAnswer();
 		});
 		const ai = {
@@ -643,10 +679,11 @@ describe("scheduled handler: merchant names", () => {
 			{ now: clock.now },
 		);
 
-		// The names started at 0:00, 2:00 and 4:00; the next would have been at 6:00. The seed has more to ask.
-		expect(ai.run).toHaveBeenCalledTimes(3);
-		expect(fetchImpl.mock.calls.length).toBeGreaterThan(0);
-		expect(order.indexOf("names")).toBeGreaterThan(order.lastIndexOf("jev"));
+		// The seed's 12 waiting: Jev started calls at 0:00 to 8:00 and none at 9:00. The names started at 9:00
+		// and 11:00, none at 13:00.
+		expect(fetchImpl).toHaveBeenCalledTimes(9);
+		expect(ai.run).toHaveBeenCalledTimes(2);
+		expect(order).toEqual([...Array(9).fill("jev"), "names", "names"]);
 		vi.restoreAllMocks();
 	});
 
@@ -681,7 +718,7 @@ describe("scheduled handler: merchant names", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("caps the 09:20 run's Jev pass at 200 calls, so its names and sort stay under D1's query limit", async () => {
+	it("caps the 09:20 run's Jev pass at 200 calls, so its sort and names stay under D1's query limit", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
@@ -721,7 +758,7 @@ describe("scheduled handler: merchant names", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("keeps going when Workers AI fails, so the sort that follows still runs", async () => {
+	it("keeps going when Workers AI fails, so the run still ends well after its sort", async () => {
 		await oneUnnamedCharge();
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -893,7 +930,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		vi.restoreAllMocks();
 	}, 60_000);
 
-	it("production's 09:20 run, which asks 100 names and then Jev about up to 200", async () => {
+	it("production's 09:20 run, which asks Jev about up to 200 and then 100 names", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);

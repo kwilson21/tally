@@ -1,33 +1,22 @@
 // The nightly names step (spec §7, §9): Workers AI suggests names for the bank texts Plaid didn't name. In
-// production it runs first in the 09:20 run, before that run's Jev pass, and the demo's one run names after
-// Jev (src/index.tsx); in both it stops starting requests once its time budget has passed. It only ever
-// makes pending suggestions; a person chooses (decision 64).
+// production it runs last in the 09:20 run, after that run's Jev pass, and the demo's one run names after
+// Jev too (src/index.tsx); in both it stops starting requests once its deadline has passed
+// (src/run-budget.ts). It only ever makes pending suggestions; a person chooses (decision 64).
 import { suggestNames } from "./ai/suggest-name";
 import { readAiSwitches } from "./db/ai-switches";
 import { merchantsToAsk, saveAskedNames } from "./db/merchant-names";
+import { type Deadline, pastDeadline } from "./run-budget";
 
 /**
- * How many bank texts one night asks about: 100, about three D1 queries each. In production they come first
- * in the 09:20 run, so 100 names and that run's 200 Jev calls are about 900 of the 1,000 queries one
+ * How many bank texts one night asks about: 100, about three D1 queries each. In production they follow
+ * the 09:20 run's Jev pass, so that run's 200 Jev calls and 100 names are about 900 of the 1,000 queries one
  * invocation may make (test/scheduled.test.ts). Each answer is saved as it arrives, so a run cut short keeps
  * its work and the rest wait for the next night.
  */
 export const nameCallLimit = 100;
 
-/**
- * How long the names step may keep starting requests, counted from the start of its run: 5 minutes. In
- * production the names come before the 09:20 run's Jev pass, which must not wait long on them, and a request
- * can still be waiting when the budget ends (it is abandoned after 15 seconds, src/ai/suggest-name.ts). A
- * cron run is cut off at 15 minutes of wall-clock time, so this leaves the rest of the run about 10. The
- * names not asked wait for the next night.
- */
-export const namesTimeBudgetMs = 5 * 60_000;
-
 /** Failures in a row that point at every call (the service is down) rather than one bank text. */
 const MAX_FAILURES_IN_A_ROW = 3;
-
-/** When the names step stops starting requests, on the clock `now` reads (milliseconds, `Date.now` by default). */
-export type NamesDeadline = { deadline: number; now?: () => number };
 
 type NamesEnv = {
 	DB: D1Database;
@@ -46,19 +35,17 @@ type NamesEnv = {
 export async function suggestMerchantNames(
 	env: NamesEnv,
 	limit = nameCallLimit,
-	time?: NamesDeadline,
+	time?: Deadline,
 ): Promise<{ asked: number; suggested: number }> {
 	const done = { asked: 0, suggested: 0 };
 	const ai = env.AI;
 	if (!ai) return done;
-	const now = time?.now ?? Date.now;
-	const pastDeadline = () => time !== undefined && now() >= time.deadline;
-	if (pastDeadline()) return done;
+	if (pastDeadline(time)) return done;
 	if (!(await readAiSwitches(env.DB)).names) return done;
 
 	let failuresInARow = 0;
 	for (const rawName of await merchantsToAsk(env.DB, limit)) {
-		if (pastDeadline()) {
+		if (pastDeadline(time)) {
 			console.log("workers-ai: names stopped at the time budget");
 			break;
 		}
