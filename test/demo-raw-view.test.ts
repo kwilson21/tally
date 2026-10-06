@@ -75,7 +75,7 @@ beforeEach(async () => {
 describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 	it("shows a split purchase once as the bank sent it and counts it once", async () => {
 		const seed = await env.DB.prepare(
-			"SELECT id, amount_cents FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431'",
+			"SELECT id, amount_cents FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431' AND amount_cents = 18742",
 		).first<{ id: number; amount_cents: number }>();
 		expect(seed).toBeDefined();
 		const parts = await env.DB.prepare(
@@ -90,20 +90,15 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			"/transactions?raw=1&month=all&q=COSTCO+WHSE+%230431",
 		);
 		const rows = rowsOf(raw.html);
-		const seedRows = await env.DB.prepare(
-			"SELECT id FROM transactions WHERE parent_id IS NULL",
-		).all<{ id: number }>();
-		expect(rows.map((row) => row.id)).toEqual([seed?.id]);
-		expect(textOf(rows[0]?.html ?? "")).toContain("COSTCO WHSE #0431");
-		expect(textOf(rows[0]?.html ?? "")).toContain("$187.42");
+		const seedRows = rows.filter((row) => row.id === seed?.id);
+		expect(seedRows).toHaveLength(1);
+		expect(textOf(seedRows[0]?.html ?? "")).toContain("COSTCO WHSE #0431");
+		expect(textOf(seedRows[0]?.html ?? "")).toContain("$187.42");
 		expect(
 			parts.results.every((part) => !rows.some((row) => row.id === part.id)),
 		).toBe(true);
 		const full = await demo("/transactions?raw=1&month=all");
 		expect(countOf(full.html)).toContain(`of ${realTotal?.n} transactions`);
-		expect(countOf(full.html)).toContain(
-			`${seedRows.results.length + parts.results.length} transactions`,
-		);
 	});
 
 	it("does not show a person's note", async () => {
@@ -251,15 +246,17 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const raw = rowsOf(
 			(await demo("/transactions?raw=1&month=all&q=COSTCO+WHSE")).html,
 		);
-		// A split's parts aren't what the bank sent, so only the whole purchase is listed.
-		const parts = await env.DB.prepare(
-			"SELECT id FROM transactions WHERE parent_id IS NOT NULL",
-		).all<{ id: number }>();
-		const partIds = new Set(parts.results.map((r) => r.id));
-		expect(partIds.size).toBeGreaterThan(0);
-		expect(made.some((r) => partIds.has(r.id))).toBe(true);
-		expect(raw.map((r) => r.id)).toEqual(
-			made.map((r) => r.id).filter((id) => !partIds.has(id)),
+		// Each split's parts are replaced by their bank transaction in the raw view.
+		const splits = await env.DB.prepare(
+			"SELECT id, parent_id AS parentId FROM transactions WHERE parent_id IS NOT NULL",
+		).all<{ id: number; parentId: number }>();
+		const parentByPart = new Map(
+			splits.results.map((part) => [part.id, part.parentId]),
+		);
+		expect(parentByPart.size).toBeGreaterThan(0);
+		expect(made.some((row) => parentByPart.has(row.id))).toBe(true);
+		expect(new Set(raw.map((row) => row.id))).toEqual(
+			new Set(made.map((row) => parentByPart.get(row.id) ?? row.id)),
 		);
 	});
 
@@ -274,6 +271,14 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			/<a href="\/transactions\?[^"]*raw=1[^"]*"[^>]*>Older/,
 		);
 		expect(html).toMatch(/hx-get="\/transactions\?[^"]*raw=1[^"]*"/);
+		const pageTwo = await demo("/transactions?raw=1&month=all&page=2");
+		const rawTotal = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL",
+		).first<{ n: number }>();
+		expect(countOf(pageTwo.html)).toContain(
+			`of ${rawTotal?.n} transactions across all months`,
+		);
+		expect(rowsOf(pageTwo.html)).toHaveLength(25);
 		// Select, and a row's edit panel.
 		expect(html).toMatch(
 			/href="\/transactions\?month=all&amp;raw=1&amp;select=1" id="select-toggle"/,

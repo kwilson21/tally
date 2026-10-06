@@ -18,6 +18,14 @@ page.on("pageerror", (e) => errors.push(e.message));
 
 const step = (text) => console.log(`✓ ${text}`);
 const rows = () => page.locator("#results li[data-transaction]").count();
+// A link opens its page with a 150 ms cross-fade (decision 76). A page.goto while it runs makes the
+// browser cancel it and log an error, so wait for it to end first, as a person would.
+const goto = async (url, options) => {
+	await page.waitForFunction(
+		() => !document.documentElement.matches(":active-view-transition"),
+	);
+	return page.goto(url, options);
+};
 
 // Inject simulated insets into the app's same-origin stylesheet to respect its CSP.
 await page.route("**/assets/app.css", async (route) => {
@@ -29,7 +37,7 @@ await page.route("**/assets/app.css", async (route) => {
 	});
 });
 
-await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.keyboard.press("Tab");
 const skipLink = await page.locator('a[href="#main"]').boundingBox();
 assert(skipLink);
@@ -74,13 +82,13 @@ await page.waitForURL(/\/transactions\/organize$/);
 await page.getByRole("heading", { name: "Organize", level: 1 }).waitFor();
 step("Home's band opens Organize");
 
-await page.goto(`${BASE}/transactions?uncategorized=1`, {
+await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
 assert.equal(await rows(), 12);
 step("the Needs category filter lists the 12 transactions");
 
-await page.goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
 await page.locator("#month").selectOption("all");
 await page.waitForFunction(() =>
 	document
@@ -89,7 +97,7 @@ await page.waitForFunction(() =>
 		?.includes("month%3Dall"),
 );
 step("changing a filter in place updates Add cash's way back");
-await page.goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
 await page.getByRole("link", { name: "Add cash" }).click();
 await page.getByRole("textbox", { name: "Amount" }).fill("12.00");
 await page.getByLabel("Where").fill("Corner stand");
@@ -98,7 +106,7 @@ await page.getByRole("button", { name: "Add", exact: true }).click();
 await page.locator("#toasts").getByText("Added Corner stand").waitFor();
 await page.getByRole("link", { name: /Corner stand/ }).waitFor();
 step("adding $12 cash shows its toast and row");
-await page.goto(`${BASE}/transactions?uncategorized=1`, {
+await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
 
@@ -126,14 +134,14 @@ await page.locator('[role="dialog"]').waitFor({ state: "detached" });
 assert.equal(await rows(), 10);
 step("excluding a transaction takes it out of the list, leaving 10");
 
-await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
 	.getByRole("link", { name: /10 transactions need a category/ })
 	.waitFor();
 step("Home now says 10 transactions need a category");
 
 // Change a budget amount (spec §11): Home → Groceries → 650, nudged up $1 and 1¢ → Home shows it.
-await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.locator('a[href="/budget/1"]').first().click();
 const sheetInsets = await page.locator('[role="dialog"]').evaluate((sheet) => {
 	const style = getComputedStyle(sheet);
@@ -219,7 +227,7 @@ step("Done right after a tap keeps the tap ($690) and puts the buttons away");
 // Split a transaction, see the server-computed confirmation, then restore it. The first answer
 // about the line is held back until after the second part is typed, so a late answer about older
 // amounts must not be the line's last word.
-await page.goto(`${BASE}/transactions?q=Local+Bakery`, {
+await goto(`${BASE}/transactions?q=Local+Bakery`, {
 	waitUntil: "networkidle",
 });
 await page.getByRole("link", { name: /Local Bakery/ }).click();
@@ -261,7 +269,7 @@ assert.equal(await rows(), 1);
 step("removing the split restores the transaction");
 
 // The demo's Target refund is linked to its purchase (P19): its row says so, and its panel shows the link.
-await page.goto(`${BASE}/transactions?q=Target&month=all`, {
+await goto(`${BASE}/transactions?q=Target&month=all`, {
 	waitUntil: "networkidle",
 });
 const refundRow = page
@@ -300,7 +308,7 @@ step(
 );
 
 // Reorder through htmx: the button inside the edit form must send its own direction.
-await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+await goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.locator('summary[data-category="3"]').click();
 await page
 	.locator('details[data-row="3"]')
@@ -319,7 +327,7 @@ step("Move up in Settings moves Gas up one place");
 
 // Select several uncategorized rows, then set their category in one action (P20 A).
 assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);
-await page.goto(`${BASE}/transactions?uncategorized=1`, {
+await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
 await page.getByRole("link", { name: "Select" }).click();

@@ -94,20 +94,46 @@ export const USE_SPEC_PARTS = [
 
 export type UseSpecText = Record<(typeof USE_SPEC_PARTS)[number][0], Child>;
 
-/** A component's use spec (DESIGN.md, "Use"): all eight answers, shown next to it for sign-off. */
-export function UseSpec({ spec }: { spec: UseSpecText }) {
+/** The box a use spec's rows sit in. */
+function SpecList({ children }: { children?: Child }) {
 	return (
 		<div class="max-w-prose">
 			<p class="text-sm font-medium text-muted">How it's used</p>
-			<dl class="mt-2 divide-y divide-rule border-y border-rule">
-				{USE_SPEC_PARTS.map(([key, label]) => (
-					<div class="py-3 sm:grid sm:grid-cols-[8rem_1fr] sm:gap-4">
-						<dt class="font-medium">{label}</dt>
-						<dd class="mt-1 sm:mt-0">{spec[key]}</dd>
-					</div>
-				))}
-			</dl>
+			<dl class="mt-2 divide-y divide-rule border-y border-rule">{children}</dl>
 		</div>
+	);
+}
+
+function SpecRow({ label, children }: { label: string; children?: Child }) {
+	return (
+		<div class="py-3 sm:grid sm:grid-cols-[8rem_1fr] sm:gap-4">
+			<dt class="font-medium">{label}</dt>
+			<dd class="mt-1 sm:mt-0">{children}</dd>
+		</div>
+	);
+}
+
+/** A component's use spec (DESIGN.md, "Use"): all eight answers, shown next to it for sign-off. */
+export function UseSpec({ spec }: { spec: UseSpecText }) {
+	return (
+		<SpecList>
+			{USE_SPEC_PARTS.map(([key, label]) => (
+				<SpecRow label={label}>{spec[key]}</SpecRow>
+			))}
+		</SpecList>
+	);
+}
+
+/**
+ * Part 6 of the use spec alone (DESIGN.md, "Use": what moves, how long, and the reduced-motion
+ * version), for a part of the page that isn't an interactive component with a spec of its own: the
+ * page shell, whose pages cross-fade.
+ */
+export function MotionSpec({ children }: { children?: Child }) {
+	return (
+		<SpecList>
+			<SpecRow label="Motion">{children}</SpecRow>
+		</SpecList>
 	);
 }
 

@@ -94,6 +94,41 @@ export const COLOR_TOKENS = [
 	},
 ] as const;
 
+// The duration tokens as the catalog shows them (DESIGN.md "Motion tokens"). The values must match
+// app.css's @theme (test/design-tokens.test.ts); a rule in app.css names one, never a length.
+export const DURATION_TOKENS = [
+	{
+		name: "confirm",
+		value: "150ms",
+		use: "a confirmation: the switch's knob, a toast arriving, a page cross-fading",
+	},
+	{
+		name: "rising",
+		value: "200ms",
+		use: "something rising or sliding in: the sheet, the desktop panel, the backdrop",
+	},
+	{
+		name: "shake",
+		value: "300ms",
+		use: "a field with an error, once",
+	},
+	{
+		name: "slow",
+		value: "600ms",
+		use: "a budget bar filling on load",
+	},
+	{
+		name: "spin",
+		value: "700ms",
+		use: "one turn of the busy ring",
+	},
+	{
+		name: "toast",
+		value: "4s",
+		use: "a toast's whole stay: it fades in, holds and fades out; toast.js removes it after the same 4 seconds",
+	},
+] as const;
+
 export const CATEGORY_COLORS = COLOR_TOKENS.filter((t) =>
 	t.name.startsWith("cat-"),
 ).map((t) => t.name);
