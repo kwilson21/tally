@@ -17,7 +17,19 @@ describe("parseFilters", () => {
 			show: "all",
 			uncategorized: false,
 			page: 1,
+			raw: false,
 		});
+	});
+
+	it("reads ?raw=1 only where the demo asks for it (the family app ignores it)", () => {
+		const raw = new URLSearchParams("raw=1");
+		expect(parseFilters(raw, "2026-09", true).raw).toBe(true);
+		expect(parseFilters(raw, "2026-09", false).raw).toBe(false);
+		expect(parseFilters(raw, "2026-09").raw).toBe(false);
+		for (const other of ["raw=0", "raw=", "raw=true", "raw=2"])
+			expect(
+				parseFilters(new URLSearchParams(other), "2026-09", true).raw,
+			).toBe(false);
 	});
 
 	it("reads Home's band link", () => {
@@ -86,6 +98,27 @@ describe("filtersToQuery", () => {
 			"category=2&account=4&show=refunds",
 		);
 		expect(filtersToQuery(parse("show=all&account="), "2026-09")).toBe("");
+	});
+
+	it("carries raw=1 after the other filters, and leaves it out otherwise", () => {
+		const f = parseFilters(
+			new URLSearchParams("q=bakery&page=2&raw=1"),
+			"2026-09",
+			true,
+		);
+		expect(filtersToQuery(f, "2026-09")).toBe("q=bakery&page=2&raw=1");
+		expect(
+			filtersToQuery(
+				parseFilters(new URLSearchParams("raw=1"), "2026-09", true),
+				"2026-09",
+			),
+		).toBe("raw=1");
+		expect(
+			filtersToQuery(
+				parseFilters(new URLSearchParams("raw=1"), "2026-09"),
+				"2026-09",
+			),
+		).toBe("");
 	});
 
 	it("writes the old Excluded chip's link as Show Excluded", () => {

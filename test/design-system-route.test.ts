@@ -48,6 +48,7 @@ import { ThingsToTry } from "../src/views/things-to-try";
 import { TimeZoneRow } from "../src/views/time-zone-row";
 import { TransactionRow } from "../src/views/transaction-row";
 import { TrendsScreen } from "../src/views/trends";
+import { ViewLinks } from "../src/views/view-links";
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -333,6 +334,42 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows ViewLinks with each view current, as the demo's Transactions draws it, with its whole use spec (P44 A)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="view-links"'));
+		// Plain links that work in the demo and in development, so there is nothing to fake.
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain('data-ds-components="ViewLinks"');
+		const section =
+			html.split('id="view-links"')[1]?.split("</section>")[0] ?? "";
+		// The real component, once for each view, so the two looks sit side by side.
+		for (const current of ["made", "bank"] as const)
+			expect(section).toContain(
+				String(
+					ViewLinks({
+						id: `ds-view-${current}`,
+						current,
+						madeHref: "/transactions",
+						bankHref: "/transactions?raw=1",
+					}),
+				),
+			);
+		expect(section.match(/<nav [^>]*aria-label="View"/g)).toHaveLength(3);
+		expect(section.match(/aria-current="page"/g)).toHaveLength(3);
+		// And the narrowest phone, where the links wrap.
+		expect(section).toContain("w-[320px]");
+		expect(section).not.toContain("<form");
+		expect(section).not.toContain("<button");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		expect(section).not.toMatch(/jev/i);
+		// DESIGN.md says what it is, where it shows and that it needs no script.
+		expect(design).toMatch(
+			/\| ViewLinks \|[^\n]*Tidied by Tally · Straight from the bank[^\n]*aria-current[^\n]*demo only[^\n]*no JavaScript/,
+		);
+	});
+
 	it("shows a guessed name in TransactionRow with the sparkles icon, dashed, and says so in DESIGN.md", async () => {
 		const { html } = await get("/design-system");
 		const section =
@@ -535,7 +572,7 @@ describe("GET /design-system in the demo", () => {
 		);
 		expect(
 			html.match(
-				/fixed bottom-\[calc\(6\.5rem\+var\(--safe-area-bottom\)\)\] right-\[calc\(1rem\+var\(--safe-area-right\)\)\]/g,
+				/fixed bottom-\[calc\(var\(--feedback-bottom\)\+var\(--safe-area-bottom\)\)\] right-\[calc\(1rem\+var\(--safe-area-right\)\)\]/g,
 			),
 		).toHaveLength(1);
 		const formSpecimen = specimens(html).find((tag) =>

@@ -11,6 +11,7 @@ const base: Filters = {
 	show: "all",
 	uncategorized: false,
 	page: 1,
+	raw: false,
 };
 const CARD = "Chase Card ••9921";
 const one = { total: 12, first: 1, shown: 12, pages: 1 };
@@ -56,6 +57,34 @@ describe("resultCount", () => {
 		expect(
 			resultCount(one, { ...base, uncategorized: true }, null, TODAY),
 		).toBe("12 transactions needing a category in September");
+	});
+
+	it("says the list is as the bank sends them, after every other filter (the demo's raw view)", () => {
+		const raw = { ...base, raw: true };
+		expect(resultCount(one, raw, null, TODAY)).toBe(
+			"12 transactions in September, as the bank sends them",
+		);
+		expect(
+			resultCount({ total: 1, first: 1, shown: 1, pages: 1 }, raw, null, TODAY),
+		).toBe("1 transaction in September, as the bank sends them");
+		expect(resultCount(one, { ...raw, month: "all" }, null, TODAY)).toBe(
+			"12 transactions across all months, as the bank sends them",
+		);
+		expect(
+			resultCount(
+				{ total: 40, first: 26, shown: 14, pages: 2 },
+				{ ...raw, q: "shell", category: 4, uncategorized: true },
+				"Gas",
+				TODAY,
+				CARD,
+			),
+		).toBe(
+			'Showing 26–39 of 40 transactions needing a category matching "shell" in Gas, Chase Card ••9921, September, as the bank sends them',
+		);
+		// Both views read differently, so the switch is announced.
+		expect(resultCount(one, raw, null, TODAY)).not.toBe(
+			resultCount(one, base, null, TODAY),
+		);
 	});
 
 	it("names the Excluded filter", () => {

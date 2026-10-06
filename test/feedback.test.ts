@@ -697,7 +697,7 @@ it("uses the Referer for the return page and omits the button on feedback", asyn
 	const html = await response.text();
 	expect(html).toContain('name="from" value="/transactions"');
 	expect(html).not.toContain(
-		"fixed bottom-[calc(6.5rem+var(--safe-area-bottom))]",
+		"fixed bottom-[calc(var(--feedback-bottom)+var(--safe-area-bottom))]",
 	);
 });
 
