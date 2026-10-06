@@ -382,7 +382,7 @@ describe("today follows the saved zone", () => {
 		await post("/settings/time-zone", { time_zone: "Europe/London" });
 		const london = await get("/");
 		expect(london.html).toContain("November");
-		expect(london.html).not.toContain("October");
+		expect(london.html).toMatch(/<h1[^>]*>November<\/h1>/);
 
 		await post("/settings/time-zone", { time_zone: "America/New_York" });
 		const back = await get("/");

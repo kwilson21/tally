@@ -2,7 +2,7 @@ import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
-import { householdToday, monthName } from "../dates";
+import { householdToday, monthLabel, monthName } from "../dates";
 import { bankSyncs } from "../db/accounts";
 import {
 	type BudgetCategory,
@@ -11,7 +11,7 @@ import {
 	nudgeBudget,
 	setBudget,
 } from "../db/budgets";
-import { loadMonth } from "../db/month";
+import { firstCountedMonth, loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
 import { flaggedBanks, staleBankWords } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
@@ -23,6 +23,8 @@ import { EmptyState } from "../views/empty-state";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
+import { MonthEnd, PastNotBudgeted } from "../views/month-end";
+import { MonthNavigation } from "../views/month-navigation";
 import { ProgressRow } from "../views/progress-row";
 import { ThingsToTry } from "../views/things-to-try";
 import { loadBillRows } from "./bills";
@@ -66,6 +68,10 @@ const adjustAttrs = (href: string) => ({
 const nudgeAttrs = inPlace;
 
 type HomeOptions = {
+	/** A finished month selected from Home's month strip. */
+	viewMonth?: string;
+	/** First month with a counted transaction, already read by the root route. */
+	firstMonth?: string;
 	/** The budget sheet over Home, drawn with this month's numbers. */
 	sheet?: (spentCents: (id: number) => number) => Child;
 	/** Move focus to this category's row: after a save, or when the sheet closes. */
@@ -83,24 +89,48 @@ type HomeOptions = {
 async function renderHome(
 	c: Context<App>,
 	today: string,
-	{ sheet, focusId, adjusting, nudgeFocus, status = 200 }: HomeOptions = {},
+	{
+		viewMonth,
+		firstMonth: firstMonthOption,
+		sheet,
+		focusId,
+		adjusting,
+		nudgeFocus,
+		status = 200,
+	}: HomeOptions = {},
 ) {
-	const month = today.slice(0, 7);
+	const currentMonth = today.slice(0, 7);
+	const month = viewMonth ?? currentMonth;
 	const data = await loadMonth(c.env.DB, month);
-	const billData = await loadBillRows(c.env.DB, today);
-	const dueBills = billData.rows.filter(
-		(b) => b.active && (b.status === "due" || b.status === "overdue"),
-	);
+	const billData =
+		month === currentMonth ? await loadBillRows(c.env.DB, today) : null;
+	const dueBills =
+		billData?.rows.filter(
+			(b) => b.active && (b.status === "due" || b.status === "overdue"),
+		) ?? [];
 	const summary = summarizeMonth({
 		month,
 		...data,
 		unpaidDueBillsCents: dueBills.reduce((sum, b) => sum + b.amountCents, 0),
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
+	const current = month === currentMonth;
+	const storedFirstMonth =
+		firstMonthOption ?? (await firstCountedMonth(c.env.DB));
+	const firstMonth =
+		storedFirstMonth && storedFirstMonth < currentMonth
+			? storedFirstMonth
+			: currentMonth;
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));
-	const notBudgeted = data.categories.filter(
-		(cat) => !cat.archived && !budgeted.has(cat.id),
-	);
+	const notBudgeted = data.categories.filter((cat) => {
+		if (
+			budgeted.has(cat.id) ||
+			(!current &&
+				!data.transactions.some((t) => t.categoryId === cat.id && !t.income))
+		)
+			return false;
+		return current ? !cat.archived : true;
+	});
 	// Focus goes to the row asked for; if it isn't a link any more (archived on another screen while
 	// its sheet was open), to the Budget heading, so focus is never lost.
 	const linked = new Set(
@@ -114,14 +144,19 @@ async function renderHome(
 	const demo = c.env.DEMO === "true";
 	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
 	// no real banks, so it never asks.
-	const bankLine = demo
-		? null
-		: staleBankWords(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+	const bankLine =
+		demo || !current
+			? null
+			: staleBankWords(flaggedBanks(await bankSyncs(c.env.DB), today), today);
 	// Counted spending by category, income left out, as Home counts it (spec §6).
 	const spent = (id: number) =>
 		data.transactions
 			.filter((t) => t.categoryId === id && !t.income)
 			.reduce((sum, t) => sum + t.amountCents, 0);
+	const pastNotBudgeted = notBudgeted.map((cat) => ({
+		...cat,
+		spentCents: spent(cat.id),
+	}));
 
 	return c.html(
 		<Layout
@@ -133,26 +168,56 @@ async function renderHome(
 				<div id="page">
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}
 					<div class="lg:max-w-2xl">
-						<HomeTop
-							month={monthName(month)}
-							safeToSpendCents={summary.safeToSpendCents}
-							status={statusSentence(summary.categories)}
-							bankLine={bankLine ?? undefined}
-							band={
-								count > 0
-									? {
-											href: "/transactions/organize",
-											text: needs,
-											// Home says "needs a category" once: the Band carries the amount (decision 50).
-											// Refunds can outweigh the spending; it says so, as the budget sheet does.
-											detail:
-												spentCents < 0
-													? `${bandAmount(-spentCents)} more refunded than spent`
-													: `${bandAmount(spentCents)} of this month's spending`,
-										}
-									: undefined
-							}
-						/>
+						{current ? (
+							<HomeTop
+								month={monthName(month)}
+								monthHeading={
+									<MonthNavigation
+										month={month}
+										firstMonth={firstMonth}
+										currentMonth={currentMonth}
+									/>
+								}
+								safeToSpendCents={summary.safeToSpendCents}
+								status={statusSentence(summary.categories)}
+								bankLine={bankLine ?? undefined}
+								band={
+									count > 0
+										? {
+												href: "/transactions/organize",
+												text: needs,
+												// Home says "needs a category" once: the Band carries the amount (decision 50).
+												// Refunds can outweigh the spending; it says so, as the budget sheet does.
+												detail:
+													spentCents < 0
+														? `${bandAmount(-spentCents)} more refunded than spent`
+														: `${bandAmount(spentCents)} of this month's spending`,
+											}
+										: undefined
+								}
+							/>
+						) : (
+							<>
+								<MonthNavigation
+									month={month}
+									firstMonth={firstMonth}
+									currentMonth={currentMonth}
+								/>
+								<MonthEnd
+									monthName={monthLabel(month, currentMonth)}
+									amountCents={
+										summary.totalBudgetCents - summary.totalSpentCents
+									}
+									rows={summary.categories}
+								/>
+								<a
+									href="/"
+									class="mt-3 inline-flex min-h-11 items-center text-accent"
+								>
+									Back to {monthName(currentMonth)}
+								</a>
+							</>
+						)}
 
 						<section class="mt-8" aria-labelledby="budget-title">
 							<div class="flex items-baseline justify-between gap-4">
@@ -164,7 +229,7 @@ async function renderHome(
 								>
 									Budget
 								</h2>
-								{canAdjust && (
+								{current && canAdjust && (
 									<AdjustLink
 										adjusting={adjusting === true}
 										attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
@@ -176,9 +241,10 @@ async function renderHome(
 									{summary.categories.map((cat) => {
 										// An archived category shows for a month it has spending in (spec §7), but it
 										// can't be budgeted, so its row isn't a link.
-										const href = looks.get(cat.id)?.archived
-											? undefined
-											: `/budget/${cat.id}`;
+										const href =
+											current && !looks.get(cat.id)?.archived
+												? `/budget/${cat.id}`
+												: undefined;
 										return (
 											<ProgressRow
 												name={cat.name}
@@ -190,7 +256,7 @@ async function renderHome(
 												attrs={href ? openAttrs(href) : undefined}
 												autofocus={cat.id === focusId}
 												nudge={
-													adjusting && href
+													current && adjusting && href
 														? {
 																href: `${href}/nudge`,
 																id: `nudge-${cat.id}`,
@@ -207,42 +273,48 @@ async function renderHome(
 									})}
 								</ul>
 							)}
-							{notBudgeted.length > 0 && (
-								<>
-									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
-									<ul class="divide-y divide-rule">
-										{notBudgeted.map((cat) => {
-											const href = `/budget/${cat.id}`;
-											return (
-												<li>
-													<a
-														href={href}
-														autofocus={cat.id === focusId}
-														class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
-														{...openAttrs(href)}
-													>
-														<CategoryIcon icon={cat.icon} color={cat.color} />
-														<span class="min-w-0 flex-1 truncate text-lg">
-															{cat.name}
-														</span>
-														<span class="text-accent">Add a budget</span>
-													</a>
-												</li>
-											);
-										})}
-									</ul>
-								</>
+							{!current ? (
+								<PastNotBudgeted items={pastNotBudgeted} />
+							) : (
+								notBudgeted.length > 0 && (
+									<>
+										<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
+										<ul class="divide-y divide-rule">
+											{notBudgeted.map((cat) => {
+												const href = `/budget/${cat.id}`;
+												return (
+													<li>
+														<a
+															href={href}
+															autofocus={cat.id === focusId}
+															class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
+															{...openAttrs(href)}
+														>
+															<CategoryIcon icon={cat.icon} color={cat.color} />
+															<span class="min-w-0 flex-1 truncate text-lg">
+																{cat.name}
+															</span>
+															<span class="text-accent">Add a budget</span>
+														</a>
+													</li>
+												);
+											})}
+										</ul>
+									</>
+								)
 							)}
-							{summary.categories.length === 0 && notBudgeted.length === 0 && (
-								<EmptyState
-									kind="done"
-									sentence="No categories to budget yet."
-									hint="Add a category in Settings to get started."
-									action={{ href: "/settings", label: "Open Settings" }}
-								/>
-							)}
+							{current &&
+								summary.categories.length === 0 &&
+								notBudgeted.length === 0 && (
+									<EmptyState
+										kind="done"
+										sentence="No categories to budget yet."
+										hint="Add a category in Settings to get started."
+										action={{ href: "/settings", label: "Open Settings" }}
+									/>
+								)}
 						</section>
-						{dueBills.length > 0 && (
+						{current && dueBills.length > 0 && (
 							<section class="mt-8" aria-labelledby="home-bills-title">
 								<div class="flex items-baseline justify-between">
 									<h2
@@ -257,13 +329,13 @@ async function renderHome(
 								</div>
 								<ul class="divide-y divide-rule">
 									{dueBills.slice(0, 3).map((bill) => (
-										<BillRow bill={bill} today={billData.today} />
+										<BillRow bill={bill} today={billData?.today ?? today} />
 									))}
 								</ul>
 							</section>
 						)}
 						{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
-						{demo && (
+						{current && demo && (
 							<div class="mt-8">
 								<ThingsToTry />
 							</div>
@@ -380,10 +452,27 @@ async function activeCategory(c: Context<App>) {
 // ?focus=<id> puts focus on that row when the sheet closes.
 // ?adjust=1 is Adjust mode (#94).
 home.get("/", async (c) => {
+	const today = await householdToday(c.env.DB);
+	const currentMonth = today.slice(0, 7);
+	const storedFirstMonth = await firstCountedMonth(c.env.DB);
+	const firstMonth =
+		storedFirstMonth && storedFirstMonth < currentMonth
+			? storedFirstMonth
+			: currentMonth;
+	const requested = c.req.query("month");
+	const viewMonth =
+		requested &&
+		/^\d{4}-(0[1-9]|1[0-2])$/.test(requested) &&
+		requested >= firstMonth &&
+		requested <= currentMonth
+			? requested
+			: currentMonth;
 	const focus = Number(c.req.query("focus"));
-	return renderHome(c, await householdToday(c.env.DB), {
+	return renderHome(c, today, {
+		viewMonth,
+		firstMonth,
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
-		adjusting: c.req.query("adjust") === "1",
+		adjusting: viewMonth === currentMonth && c.req.query("adjust") === "1",
 	});
 });
 

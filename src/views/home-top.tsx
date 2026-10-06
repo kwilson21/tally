@@ -1,6 +1,7 @@
 // Home's top (#92, decision 46 P1): what's safe to spend is the one thing, so on a phone it's on the
 // first screen. The month is a small heading above it, the status sentence says what it means, and the
 // Band is the one next action. Things to try and the Budget list come after, in the route.
+import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 import { Band } from "./band";
 import { BankLine } from "./bank-line";
@@ -10,6 +11,7 @@ import { LedgerIllustration } from "./illustration";
 type Props = {
 	/** "September" */
 	month: string;
+	monthHeading?: Child;
 	safeToSpendCents: number;
 	/** The status sentence: "Eating Out is $36 over. Everything else is on track." */
 	status: string;
@@ -22,6 +24,7 @@ type Props = {
 /** The month, then Safe to spend, the status sentence, How this works, a stale-bank line when needed, and the Band. */
 export function HomeTop({
 	month,
+	monthHeading,
 	safeToSpendCents,
 	status,
 	bankLine,
@@ -29,7 +32,11 @@ export function HomeTop({
 }: Props) {
 	return (
 		<>
-			<h1 class="font-serif text-2xl font-semibold tracking-tight">{month}</h1>
+			{monthHeading ?? (
+				<h1 class="font-serif text-2xl font-semibold tracking-tight">
+					{month}
+				</h1>
+			)}
 			<div class="mt-2 flex items-center justify-between gap-6">
 				<div>
 					<p class="text-lg text-muted">Safe to spend</p>

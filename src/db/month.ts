@@ -82,3 +82,17 @@ export async function loadMonth(
 		).map((t) => ({ ...t, income: t.income === 1, linked: t.linked === 1 })),
 	};
 }
+
+/** First month with an included, whole transaction, using the same counted-month rule as Home. */
+export async function firstCountedMonth(
+	db: D1Database,
+): Promise<string | null> {
+	const row = await db
+		.prepare(
+			`SELECT MIN(${COUNTED_MONTH}) AS month FROM transactions t
+			 ${COUNTED_JOINS}
+			 WHERE ${INCLUDED} AND t.is_split = 0`,
+		)
+		.first<{ month: string | null }>();
+	return row?.month ?? null;
+}

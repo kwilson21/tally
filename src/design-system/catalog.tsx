@@ -45,6 +45,8 @@ import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
+import { MonthEnd, PastNotBudgeted } from "../views/month-end";
+import { MonthNavigation } from "../views/month-navigation";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
 import { PendingNote } from "../views/pending-note";
@@ -619,6 +621,13 @@ function Picture({ label, children }: { label: string; children?: Child }) {
 }
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
+const HOME_MONTH_HEADING = (
+	<MonthNavigation
+		month="2026-10"
+		firstMonth="2026-05"
+		currentMonth="2026-10"
+	/>
+);
 
 /**
  * What a picture of Home shows, in words, built from the same data it draws, so a screen reader
@@ -660,6 +669,7 @@ function HomeSketch({
 		<>
 			<HomeTop
 				{...HOME_TOP}
+				monthHeading={HOME_MONTH_HEADING}
 				bankLine={bankLine}
 				band={band ? HOME_TOP.band : undefined}
 			/>
@@ -672,6 +682,25 @@ function HomeSketch({
 		</>
 	);
 }
+
+const MONTH_HISTORY_SPEC: UseSpecText = {
+	purpose:
+		"Open a month to review how its budgets ended and return to this month.",
+	affordance:
+		"Previous and next are round 44px arrows beside the month. Each month dot is a 44px link; the selected month is filled and this month is ringed.",
+	states:
+		"Available arrows and dots are links. At the first month and this month, the corresponding arrow is faded and hidden from assistive technology because it has no action. The current dot is ringed even while another month is selected.",
+	feedback:
+		"A link loads that month's own Home URL. The browser announces the new page title and the selected month; no in-place swap or JavaScript is needed.",
+	input:
+		"Touch targets are 44px. Keyboard Tab reaches each available arrow and month link in order; Enter follows it. Screen readers hear Previous month, August; Next month, October; and a month name with this month where applicable. Unavailable arrows are hidden because they are not controls.",
+	motion:
+		"No custom motion. The page uses the shell's browser page transition; reduced-motion preferences are honored by the shell.",
+	edges:
+		"The strip starts at the first month with a counted transaction and ends at the household's current month. At either end the unavailable arrow has no link. The strip scrolls horizontally when the household has more months than fit. A future or pre-history month address opens this month's Home.",
+	words:
+		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget}.",
+};
 
 function HomeTopGroup() {
 	return (
@@ -701,9 +730,101 @@ function HomeTopGroup() {
 					<Picture
 						label={`Home's top when nothing needs a category, with no Band: ${describeHome({ band: false, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} band={undefined} />
+						<HomeTop
+							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
+							band={undefined}
+						/>
 					</Picture>
 				</State>
+			</Specimen>
+			<Specimen
+				id="home-month-history"
+				title="Month navigation and finished Home"
+				tier="visual"
+				components={[
+					"MonthNavigation",
+					"MonthEnd",
+					"PastNotBudgeted",
+					"ProgressRow",
+				]}
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, read-only category bars and any Not budgeted spending (P46 A, P91–P93, decision 82)."
+			>
+				<State label="September ended under overall, with Eating Out over its own budget">
+					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+							/>
+							<MonthEnd
+								monthName="September"
+								amountCents={8600}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 63600,
+										leftCents: 6400,
+										over: false,
+									},
+									{
+										id: 2,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 28600,
+										leftCents: -3600,
+										over: true,
+									},
+									{
+										id: 3,
+										name: "Gas",
+										budgetCents: 20000,
+										spentCents: 19200,
+										leftCents: 800,
+										over: false,
+									},
+								]}
+							/>
+							<a
+								href="/"
+								class="mt-3 inline-flex min-h-11 items-center text-accent"
+							>
+								Back to October
+							</a>
+							<h2 class="mt-8 font-serif text-3xl font-semibold">Budget</h2>
+							<ul class="mt-2 divide-y divide-rule">
+								<ProgressRow
+									name="Groceries"
+									icon="groceries"
+									color="cat-blue"
+									spentCents={63600}
+									budgetCents={70000}
+								/>
+								<ProgressRow
+									name="Eating Out"
+									icon="eating-out"
+									color="cat-plum"
+									spentCents={28600}
+									budgetCents={25000}
+								/>
+							</ul>
+							<PastNotBudgeted
+								items={[
+									{
+										name: "Kids",
+										icon: "kids",
+										color: "cat-ochre",
+										spentCents: 3000,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<UseSpec spec={MONTH_HISTORY_SPEC} />
 			</Specimen>
 			<Specimen
 				id="bank-line"
@@ -724,14 +845,22 @@ function HomeTopGroup() {
 					<Picture
 						label={`Home's top with a bank that needs signing in: ${describeHome({ bankLine: BANK_LINES.signIn, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} bankLine={BANK_LINES.signIn} />
+						<HomeTop
+							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
+							bankLine={BANK_LINES.signIn}
+						/>
 					</Picture>
 				</State>
 				<State label="Two or more banks: it names the first and counts the rest">
 					<Picture
 						label={`Home's top with several banks to look at: ${describeHome({ bankLine: BANK_LINES.several, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} bankLine={BANK_LINES.several} />
+						<HomeTop
+							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
+							bankLine={BANK_LINES.several}
+						/>
 					</Picture>
 				</State>
 				<UseSpec spec={BANK_LINE_SPEC} />

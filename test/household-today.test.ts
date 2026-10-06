@@ -51,7 +51,7 @@ describe("the month at the household's midnight", () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const { html } = await get("/");
 		expect(html).toContain("November");
-		expect(html).not.toContain("October");
+		expect(html).toMatch(/<h1[^>]*>November<\/h1>/);
 	});
 
 	it("Home follows the stored time zone", async () => {

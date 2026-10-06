@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
-import { loadMonth } from "../src/db/month";
+import { firstCountedMonth, loadMonth } from "../src/db/month";
 
 const db = env.DB;
 
@@ -100,5 +100,24 @@ describe("loadMonth", () => {
 				(t) => t.amountCents === 4000,
 			),
 		).toBe(false);
+	});
+});
+
+describe("firstCountedMonth query count", () => {
+	it("stays under D1's 1,000 statement limit", async () => {
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		expect(await firstCountedMonth(counted as D1Database)).toBe("2026-08");
+		expect(statements).toBeLessThan(950);
 	});
 });

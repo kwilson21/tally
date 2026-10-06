@@ -1,7 +1,9 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { budgetForMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
-import { loadMonth } from "../src/db/month";
+import { setBudget } from "../src/db/budgets";
+import { firstCountedMonth, loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 
 async function home() {
@@ -9,9 +11,94 @@ async function home() {
 	return { res, html: await res.text() };
 }
 
+async function homeAt(month: string) {
+	const res = await exports.default.fetch(`http://tally.test/?month=${month}`);
+	return { res, html: await res.text() };
+}
+
 describe("GET / with the demo seed", () => {
 	beforeEach(async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	});
+
+	it("shows a finished month read-only, using that month's budget history", async () => {
+		const { html } = await homeAt("2026-09");
+		expect(html).toContain("September ended");
+		expect(html).not.toContain("Safe to spend");
+		expect(html).not.toContain("Adjust");
+		expect(html).not.toMatch(/href="\/budget\//);
+		expect(html).toContain("Back to October");
+		expect(html).toContain('href="/?month=2026-08"');
+		expect(html).toContain('href="/?month=2026-10"');
+	});
+
+	it("keeps a finished month's budget when the category amount changes later", async () => {
+		const data = await loadMonth(env.DB, "2026-09");
+		const previous = budgetForMonth(data.amounts, 1, "2026-09");
+		if (previous === null) throw new Error("Groceries has no September budget");
+		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		await setBudget(env.DB, 1, previous + 12300, current);
+		const { html } = await homeAt("2026-09");
+		expect(html).toContain(
+			`${(previous / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+		);
+		expect(html).not.toContain(
+			`of $${((previous + 12300) / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+		);
+	});
+
+	it("stamps $86 under, then $42 over when unbudgeted spending grows", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare(
+				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-09', 100000), (2, '2026-09', 85000)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (90001, 1, '2026-09-02', 100000, 'GROCERIES', 1), (90002, 1, '2026-09-03', 73400, 'EATING OUT', 2), (90003, 1, '2026-09-04', 3000, 'UNBUDGETED', NULL)",
+			),
+		]);
+		const under = (await homeAt("2026-09")).html;
+		expect(under).toContain("September ended");
+		expect(under).toContain(">$86</p>");
+		expect(under).toContain("border-ok text-ok");
+
+		await env.DB.prepare(
+			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (90004, 1, '2026-09-05', 12800, 'MORE UNBUDGETED')",
+		).run();
+		const over = (await homeAt("2026-09")).html;
+		expect(over).toContain(">$42</p>");
+		expect(over).toContain("border-over text-over");
+
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 8600 WHERE id = 90004",
+		).run();
+		const zero = (await homeAt("2026-09")).html;
+		expect(zero).toContain(">$0</p>");
+		expect(zero).toContain("border-ok text-ok");
+	});
+
+	it("returns to this month's Home for a future month and a month before history", async () => {
+		const future = await homeAt("2099-01");
+		expect(future.html).toContain("Safe to spend");
+		expect(future.html).not.toContain("January ended");
+		const before = await homeAt("1900-01");
+		expect(before.html).toContain("Safe to spend");
+		expect(before.html).not.toContain("January 1900 ended");
+	});
+
+	it("fades the unavailable arrows on this month and the first month with transactions", async () => {
+		const currentMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const { html } = await homeAt(currentMonth);
+		expect(html).not.toMatch(/aria-label="Next month,[^"]+"[^>]*href=/);
+		const first = await firstCountedMonth(env.DB);
+		if (first) {
+			const earliest = await homeAt(first);
+			expect(earliest.html).not.toMatch(
+				/aria-label="Previous month,[^"]+"[^>]*href=/,
+			);
+		}
 	});
 
 	it("renders an HTML page titled Tally", async () => {
