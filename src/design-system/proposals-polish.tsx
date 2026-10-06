@@ -1,15 +1,19 @@
-// P110–P113 (spec §8, §8.1, §8.2 and §9, decision 84): the owner's picks on four choices the polish
-// pass turned up (questions 56 to 59), drawn the way the earlier picks were, so the page keeps what
-// each pick looked like next to what it was chosen over. Each option is drawn on a phone from the
-// real components with demo-style data (today is Mon Oct 5); a piece that no longer exists, like
-// Documents in More, or never did, like a toast's Undo, is a prototype in tokens.
+// P110–P116 (spec §8, §8.1, §8.2, §7 and §9, decisions 84 and 85): the owner's picks on the choices
+// the polish pass turned up (questions 56 to 62), drawn the way the earlier picks were, so the page
+// keeps what each pick looked like next to what it was chosen over. Each option is drawn on a phone
+// from the real components with demo-style data (today is Mon Oct 5); a piece that no longer
+// exists, like Documents in More, or never did, like a toast's Undo or the budget sheet's
+// 3-month average chip, is a prototype in tokens.
 
 import type { Child } from "hono/jsx";
-import { formatCents } from "../money";
+import { centsToAmount, formatCents } from "../money";
 import { BillRow } from "../views/bill-row";
 import { Button } from "../views/button";
+import { CashForm } from "../views/cash-form";
+import { CategoryIcon } from "../views/category";
 import { FEEDBACK_PRIVACY, FeedbackForm } from "../views/feedback-form";
 import { HowLink } from "../views/how-link";
+import { MoneyInput, moneyChip } from "../views/money-input";
 import { Fixed, Options } from "./proposal-parts";
 import {
 	BillsScreen,
@@ -20,6 +24,7 @@ import {
 	SWIM,
 	toPay,
 } from "./proposals-phase5-bills";
+import { budgetBehind, OCTOBER, SEPTEMBER } from "./proposals-phase5-home";
 import {
 	actions,
 	BLUE_BOTTLE,
@@ -173,14 +178,21 @@ const saveOutlinedSheet = (
 	</EntrySheet>
 );
 
+/** The question replaces Cancel and Save: one plain sentence, then Delete and Keep it. */
+function Asks({ p, text }: { p: string; text: string }) {
+	return (
+		<EntrySheet p={p}>
+			<div class="flex flex-col gap-3">
+				<p class="text-lg">{text}</p>
+				{deleteOrKeep}
+			</div>
+		</EntrySheet>
+	);
+}
+
 /** B: the question replaces Cancel and Save, in the words the app uses. */
 const questionSheet = (
-	<EntrySheet p="p111-b">
-		<div class="flex flex-col gap-3">
-			<p class="text-lg">{`Delete ${NAME_AND_AMOUNT}? This can't be undone.`}</p>
-			{deleteOrKeep}
-		</div>
-	</EntrySheet>
+	<Asks p="p111-b" text={`Delete ${NAME_AND_AMOUNT}? This can't be undone.`} />
 );
 
 /** C: the sheet as it is, with a small sheet over it asking, and a second dimming between. */
@@ -292,7 +304,121 @@ function Bills({ link }: { link?: boolean }) {
 	);
 }
 
-/** P110–P113 on the proposals page, picked (decision 84). */
+// ---------------------------------------------------------------------------------------------
+// P114: the delete question's words once Undo ships (question 60). The same sheet as P111.
+
+const QUESTION = `Delete ${NAME_AND_AMOUNT}?`;
+
+/** A: just the question. */
+const justQuestion = <Asks p="p114-a" text={QUESTION} />;
+
+/** B: as built in #246, with the second sentence. */
+const withCant = <Asks p="p114-b" text={`${QUESTION} This can't be undone.`} />;
+
+/** C: the second sentence says how to undo. */
+const withUndo = (
+	<Asks p="p114-c" text={`${QUESTION} You can undo it for 10 seconds.`} />
+);
+
+// ---------------------------------------------------------------------------------------------
+// P115: the money box's corners (question 61). The real Add cash form, where the money box sits
+// over the Date and Where fields, so its corners can be compared with theirs.
+
+const CASH_VALUES = {
+	date: TODAY,
+	amount: "20.00",
+	merchant: "Farmers market",
+	category: "1",
+	note: "",
+};
+
+/**
+ * B's drawing only: the money box and its cent arrows with the 8px corners they had, found inside
+ * the money input by their token classes, so the other fields keep theirs. The pick is A.
+ */
+const EIGHT_PX =
+	"[&_[data-money]_.rounded-control]:rounded-lg [&_[data-money]_.rounded-tr-control]:rounded-tr-lg [&_[data-money]_.rounded-br-control]:rounded-br-lg";
+
+/** The Add cash sheet as the route draws it, with its list behind. */
+function AddCash({ p, corners }: { p: string; corners?: string }) {
+	return (
+		<PanelSheet behind={behind} tall>
+			<h2 class="font-serif text-4xl font-semibold tracking-tight">
+				Add cash spending
+			</h2>
+			<div class={corners}>
+				<CashForm
+					today={TODAY}
+					values={CASH_VALUES}
+					categories={THREE.map((c, i) => ({ id: i + 1, ...c }))}
+					action="#"
+					idPrefix={p}
+				/>
+			</div>
+		</PanelSheet>
+	);
+}
+
+// ---------------------------------------------------------------------------------------------
+// P116: a suggested amount in the budget sheet (question 62). Groceries, as the sheet is drawn in
+// October: $700 budgeted, $312 spent so far, September $636.
+
+const GROCERIES_ROW = OCTOBER[0] as (typeof OCTOBER)[number];
+const LAST_MONTH_CENTS = SEPTEMBER[0]?.spentCents ?? 0;
+/**
+ * The 3-month average as drawn: July $662.00, August $652.00, September $636.00 make $650.00. It is
+ * a picture, not a sum: #250 builds the average.
+ */
+const AVERAGE_CENTS = 65000;
+
+/**
+ * The budget sheet as the route draws it, over Home's budget list. The 3-month average chip isn't
+ * built yet (#250), so it is drawn here in a second row of the chips, in the money input's own chip
+ * classes; on a phone the two chips don't fit side by side, and they wrap just that way.
+ */
+function BudgetSheet({ average }: { average?: boolean }) {
+	return (
+		<PanelSheet behind={budgetBehind}>
+			<div class="flex items-center gap-3">
+				<CategoryIcon icon={GROCERIES.icon} color={GROCERIES.color} />
+				<h2 class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight">
+					{GROCERIES.name}
+				</h2>
+			</div>
+			<p class="text-muted">
+				{formatCents(GROCERIES_ROW.spentCents)} spent so far in October
+			</p>
+			<div class="flex flex-col gap-4 border-t border-rule pt-4">
+				<div>
+					<MoneyInput
+						id={average ? "p116-b-budget" : "p116-a-budget"}
+						name="budget"
+						label="Budget from October on"
+						value={centsToAmount(GROCERIES_ROW.budgetCents)}
+						lastMonthCents={LAST_MONTH_CENTS}
+					/>
+					{average && (
+						<div data-money-js class="mt-2 flex flex-wrap justify-center gap-2">
+							<button type="button" class={moneyChip}>
+								3-month average: {formatCents(AVERAGE_CENTS)}
+							</button>
+						</div>
+					)}
+				</div>
+				<div class="mt-2 grid grid-cols-2 gap-3">
+					<Button kind="secondary" type="button" class="w-full">
+						Cancel
+					</Button>
+					<Button type="button" class="w-full">
+						Save
+					</Button>
+				</div>
+			</div>
+		</PanelSheet>
+	);
+}
+
+/** P110–P116 on the proposals page, picked (decisions 84 and 85). */
 export function PolishProposals() {
 	return (
 		<>
@@ -471,6 +597,119 @@ export function PolishProposals() {
 							tradeoff:
 								"a person who wonders why a bill is Due, not Upcoming, has nowhere to look.",
 							screen: <Bills />,
+						},
+					]}
+				/>
+			</Specimen>
+
+			<Specimen
+				id="p114-delete-wording"
+				title="P114 · Deleting a cash entry, once Undo ships"
+				tier="visual"
+				sentence="Once the toast's Undo ships, the delete question's second sentence stops being true. Pick what the question says. Each is Farmers market, $20.00, with the sheet scrolled to its end."
+			>
+				<Fixed>
+					Decision 84 put the question in place of Cancel and Save, with Delete
+					the one primary button and Keep it, and an Undo toast for 10 seconds
+					(#244). The owner's pick (decision 85) keeps the words true once Undo
+					ships; until then the app keeps its second sentence.
+				</Fixed>
+				<Options
+					options={[
+						{
+							name: "Option A · Just the question",
+							picked: true,
+							note: "The sheet asks “Delete Farmers market, $20.00?” with Delete and Keep it, and no second sentence.",
+							tradeoff:
+								"the sheet no longer says what is lost; the toast's Undo is the way back, for 10 seconds.",
+							recommended:
+								"the second sentence would no longer be true, and the words on screen must be.",
+							screen: justQuestion,
+						},
+						{
+							name: "Option B · Keep “This can't be undone.”",
+							note: "As built in #246: the question, then “This can't be undone.”, then Delete and Keep it.",
+							tradeoff:
+								"once Undo ships it says something untrue, since the entry can be put back.",
+							screen: withCant,
+						},
+						{
+							name: "Option C · Say how to undo",
+							note: "The question and how to undo: “Delete Farmers market, $20.00? You can undo it for 10 seconds.”",
+							tradeoff:
+								"it explains the undo before anything is deleted, and the question grows to two sentences.",
+							screen: withUndo,
+						},
+					]}
+				/>
+			</Specimen>
+
+			<Specimen
+				id="p115-money-corners"
+				title="P115 · The money box's corners"
+				tier="visual"
+				sentence="The money box is the one field with 8px corners; every other input has 12px. Pick whether it matches them. Each is the Add cash sheet on a phone, with the money box over Date and Where."
+			>
+				<Fixed>
+					DESIGN.md's Radii rule: rounded-control (12px) for inputs, chips and
+					buttons, and P75 A's squircles (decision 76) on every one of them. The
+					owner's pick is decision 85.
+				</Fixed>
+				<Options
+					options={[
+						{
+							name: "Option A · 12px, like every input",
+							picked: true,
+							note: "The money box and its cent arrows use the same 12px corner as Date and Where, and become squircles with them.",
+							tradeoff:
+								"the hero amount from the original app loses the 8px it came with.",
+							recommended:
+								"one corner size for every control, and nothing left off the tokens.",
+							tall: true,
+							screen: <AddCash p="p115-a-cash" />,
+						},
+						{
+							name: "Option B · Keep 8px",
+							note: "As it was: the box and its arrows keep the original app's 8px, a little squarer than the fields under it.",
+							tradeoff:
+								"the one field off the tokens, with no squircle, and an exception in the design-token test.",
+							tall: true,
+							screen: <AddCash p="p115-b-cash" corners={EIGHT_PX} />,
+						},
+					]}
+				/>
+			</Specimen>
+
+			<Specimen
+				id="p116-budget-average"
+				title="P116 · A suggested amount in the budget sheet"
+				tier="visual"
+				sentence="Last month fills the budget box with what the category spent last month. Pick whether a second chip offers a steadier number. Each is Groceries' budget sheet on a phone, in October."
+			>
+				<Fixed>
+					Last month's chip fills the box and Save still decides (§7). AI
+					suggests, code calculates, people decide: the average is arithmetic on
+					the last three finished months, so no AI is involved. The owner's pick
+					is decision 85.
+				</Fixed>
+				<Options
+					options={[
+						{
+							name: "Option A · Last month only",
+							note: "Today's sheet: one chip, “Last month: $636.00”, fills the box.",
+							tradeoff:
+								"one odd month, like a holiday or a repair, sets the suggestion.",
+							screen: <BudgetSheet />,
+						},
+						{
+							name: "Option B · Add a 3-month average",
+							picked: true,
+							note: "A second chip beside it, “3-month average: $650.00”, fills the box with the last three finished months' average. It shows once there are three finished months, a part first month not counting (Q63 A), and the average is above $0.",
+							tradeoff:
+								"one more chip, and on a phone it wraps to a second line.",
+							recommended:
+								"a steadier starting point that code works out, and the person still decides.",
+							screen: <BudgetSheet average />,
 						},
 					]}
 				/>
