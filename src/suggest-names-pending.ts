@@ -1,15 +1,17 @@
 // The nightly names step (spec §7, §9): Workers AI suggests names for the bank texts Plaid didn't name. In
-// production it runs last in the 09:40 run, after that run's Jev pass, and the demo's one run names after Jev
-// too (src/index.tsx); in both it stops starting requests once its time budget has passed. It only ever makes
-// pending suggestions; a person chooses (decision 64).
+// production it runs last in the 09:00 run, after the sync and the feedback retry, which ask Jev nothing, and
+// the demo's one run names after Jev (src/index.tsx); in both it stops starting requests once its time budget
+// has passed. It only ever makes pending suggestions; a person chooses (decision 64).
 import { suggestNames } from "./ai/suggest-name";
 import { readAiSwitches } from "./db/ai-switches";
 import { merchantsToAsk, saveAskedNames } from "./db/merchant-names";
 
 /**
- * How many bank texts one night asks about: 100, about three D1 queries each, which leaves the 09:40
- * run room for its Jev pass inside the 1,000 queries one invocation may make. Each answer is saved as it
- * arrives, so a run cut short keeps its work and the rest wait for the next night.
+ * How many bank texts one night asks about: 100, about three D1 queries each. In production they follow
+ * the 09:00 run's sync and feedback retry: a busy night's 100 new transactions, 20 retried reports and
+ * 100 names come to about 970 of the 1,000 queries one invocation may make (test/scheduled.test.ts), so on
+ * a bigger night it is the names, last in the run, that run out. Each answer is saved as it arrives, so a run cut
+ * short keeps its work and the rest wait for the next night.
  */
 export const nameCallLimit = 100;
 

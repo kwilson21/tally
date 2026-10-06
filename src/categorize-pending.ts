@@ -26,7 +26,7 @@ export const jevCallLimit = (env: { DEMO?: string }) =>
  * The most calls one run makes, whatever the day's cap still allows; what's left waits for the next
  * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read
  * before it and after it, and saving its answer), plus a few for the run's setup: 300 calls is about 900
- * queries. So production's 09:20 run does nothing else, and the sync (09:00) and the names with the
+ * queries. So production's 09:20 run does nothing else, and the sync with the names (09:00) and the
  * second pass (09:40) are runs of their own.
  */
 export const MAX_CALLS_PER_RUN = 300;
