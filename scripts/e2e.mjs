@@ -18,7 +18,12 @@ const page = await browser.newPage({
 const consoleErrors = [];
 const pageErrors = [];
 const expected422 = [];
-page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+page.on(
+	"console",
+	(m) =>
+		m.type() === "error" &&
+		consoleErrors.push({ text: m.text(), url: m.location().url }),
+);
 page.on("pageerror", (e) => pageErrors.push(e.message));
 
 const step = (text) => console.log(`✓ ${text}`);
@@ -147,7 +152,11 @@ for (const width of [390, 1280]) {
 	);
 	await page.getByRole("button", { name: "Save and next" }).click();
 	const response = await failedSave;
-	expected422.push({ status: response.status(), url: response.url() });
+	expected422.push({
+		status: response.status(),
+		method: response.request().method(),
+		url: response.url(),
+	});
 	await page.locator("#names-page [role=alert]").waitFor();
 	assert.equal(
 		await page.evaluate(() => document.activeElement?.name),
@@ -465,17 +474,20 @@ step(
 );
 
 await browser.close();
-// Match intentional failed form submissions by count; every other console error still fails.
+// Tie the two intentional failed saves to their resource URLs; unrelated 422s cannot substitute.
 const expected422Errors = consoleErrors.filter((error) =>
-	error.includes("status of 422"),
+	error.text.includes("status of 422"),
 );
 const otherErrors = consoleErrors.filter(
-	(error) => !error.includes("status of 422"),
+	(error) => !error.text.includes("status of 422"),
 );
-assert.equal(
-	expected422Errors.length,
-	expected422.length,
-	`expected 422 responses: ${JSON.stringify(expected422)}\n422 console errors: ${JSON.stringify(expected422Errors)}\nother console errors: ${JSON.stringify(otherErrors)}\npage errors: ${JSON.stringify(pageErrors)}`,
+const expected422Urls = expected422.map(({ url }) => url).sort();
+const logged422Urls = expected422Errors.map(({ url }) => url).sort();
+const diagnostics = `expected 422 responses (method + URL): ${JSON.stringify(expected422)}\n422 console errors (text + URL): ${JSON.stringify(expected422Errors)}\nother console errors: ${JSON.stringify(otherErrors)}\npage errors: ${JSON.stringify(pageErrors)}`;
+assert.deepEqual(
+	logged422Urls,
+	expected422Urls,
+	`each deliberate 422 response must have exactly one matching console error by URL; missing messages may indicate Chromium folded duplicates\n${diagnostics}`,
 );
 assert.deepEqual(
 	{ console: otherErrors, page: pageErrors },
