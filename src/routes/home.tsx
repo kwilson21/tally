@@ -308,6 +308,8 @@ function BudgetSheet({
 			labelledBy="budget-sheet-title"
 			closeHref="/"
 			closeAttrs={closeAttrs}
+			// A refused amount draws the open sheet again.
+			still={error !== undefined}
 		>
 			<div class="flex items-center gap-3">
 				<CategoryIcon icon={category.icon} color={category.color} />

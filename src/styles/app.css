@@ -46,6 +46,14 @@
 
 	--radius-control: 0.75rem;
 	--radius-sheet: 1.25rem;
+
+	/* How long each move takes (DESIGN.md, Motion). A rule names one of these, never a length. */
+	--duration-confirm: 150ms; /* a confirmation: the switch, a toast arriving, a page cross-fading */
+	--duration-rising: 200ms; /* something rising or sliding in: the sheet, the desktop panel */
+	--duration-shake: 300ms; /* a field with an error, once */
+	--duration-slow: 600ms; /* a budget bar filling on load */
+	--duration-spin: 700ms; /* one turn of the busy ring */
+	--duration-toast: 4s; /* a toast's whole stay; toast.js's DISPLAY_MS is the same 4 seconds */
 }
 
 @layer base {
@@ -174,7 +182,7 @@ html:not(.js) [data-money-js] {
 .bar-fill {
 	transform-box: fill-box;
 	transform-origin: left;
-	animation: bar-fill 600ms ease-out both;
+	animation: bar-fill var(--duration-slow) ease-out both;
 }
 @media (prefers-reduced-motion: reduce) {
 	.bar-fill {
@@ -199,7 +207,7 @@ html:not(.js) [data-money-js] {
 	}
 }
 .field-shake {
-	animation: field-shake 300ms ease-out;
+	animation: field-shake var(--duration-shake) ease-out;
 }
 
 /* The request label remains visible; reduced motion only stops its ring. */
@@ -209,7 +217,7 @@ html:not(.js) [data-money-js] {
 	}
 }
 .button-spinner {
-	animation: button-spin 700ms linear infinite;
+	animation: button-spin var(--duration-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -227,11 +235,144 @@ html:not(.js) [data-money-js] {
 }
 
 /*
- * P74 and P85, the proposals page only (delete this block when P74 A ships, decision 76). Each motion
- * picture loops --proposal-t from 0 (before) to 1 (after) at the move's real speed, pauses, then
- * plays back to repeat: 150 ms is 1/30 of 4.5 s, and 200 ms is 1/30 of 6 s. The parts are drawn
- * from it. The end state is held longest and the negative delay starts each loop on it, so a still
- * capture mostly shows it. Reduced motion drops the loop, so --proposal-t rests at 1, still.
+ * Quiet confirmations (decision 76, P74 A; decision 80, P85 A). Four moves, each over in 150 to 200 ms,
+ * each a class here because the CSP forbids style attributes, and each stilled by the reduced-motion
+ * block below, which shows the end state with nothing moving. A rule names a duration token above,
+ * never a length. The switch is a transition (the checkbox's state is the change); the others play
+ * once when the element arrives. A sheet plays only when it opens: BottomSheet leaves the classes off
+ * (`still`) when a swap draws the open sheet again, so an error never looks like it closing and opening.
+ */
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+}
+@keyframes sheet-rise {
+	from {
+		transform: translateY(100%);
+	}
+}
+@keyframes sheet-slide {
+	from {
+		transform: translateX(100%);
+	}
+}
+/* The sheet's backdrop. */
+.fade-in {
+	animation: fade-in var(--duration-rising) ease-out;
+}
+/* The sheet rises from the bottom edge on a phone and slides in from the right edge as a desktop panel
+   (the width of Tailwind's lg); the other two names are for a move that doesn't follow the width. */
+.sheet-rise,
+.sheet-panel {
+	animation: sheet-rise var(--duration-rising) ease-out;
+}
+.sheet-slide {
+	animation: sheet-slide var(--duration-rising) ease-out;
+}
+@media (min-width: 64rem) {
+	.sheet-panel {
+		animation-name: sheet-slide;
+	}
+}
+
+/*
+ * A toast fades in and rises 8 px in 150 ms, holds, then fades out, all in one animation as long as
+ * its stay: toast.js removes it after DISPLAY_MS, the same 4 seconds as --duration-toast. toast.js
+ * starts that timer when it adds the toast, and the animation starts a frame or more later, so a
+ * fade-out that ended exactly at 4 seconds would be cut off, the toast popping out part-way through
+ * it. It is over 150 ms early instead, and (both) it stays at opacity 0 until the script takes it
+ * out. toast.js builds the toast with no class of ours, so this styles whatever #toasts holds. The
+ * stops are 150 ms as a share of the 4 seconds: 3.75% in; fade-out from 92.5% (3.7 s) to 96.25%
+ * (3.85 s). test/motion.test.tsx keeps them true.
+ */
+@keyframes toast {
+	0% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	3.75% {
+		opacity: 1;
+		transform: none;
+	}
+	92.5% {
+		opacity: 1;
+		transform: none;
+	}
+	96.25% {
+		opacity: 0;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+#toasts > *,
+.toast-motion {
+	animation: toast var(--duration-toast) ease-out both;
+}
+
+/*
+ * The switch's knob slides and the track and knob swap tones in 150 ms, as the checkbox changes
+ * (Tailwind's translate utilities move the knob with the translate property).
+ */
+.switch-track,
+.switch-knob {
+	transition-duration: var(--duration-confirm);
+	transition-timing-function: ease-out;
+}
+.switch-track {
+	transition-property: background-color;
+}
+.switch-knob {
+	transition-property: translate, transform, background-color;
+}
+
+/*
+ * Pages cross-fade through the browser's View Transitions: both pages opt in, and Layout loads this
+ * file on every page. The browser's own length is 250 ms, set on the group, which the old and new
+ * pictures inherit. A browser without it (Firefox, so far) just switches pages. Only where motion is
+ * welcome: with a reduce preference neither page opts in.
+ */
+@media (prefers-reduced-motion: no-preference) {
+	@view-transition {
+		navigation: auto;
+	}
+	::view-transition-group(root) {
+		animation-duration: var(--duration-confirm);
+	}
+}
+
+/*
+ * Reduced motion shows each move's end state. This block comes after the moves it stills: the rules
+ * have the same weight, so the later one wins. Pages need no rule here: the cross-fade is only
+ * opted into where motion is welcome (above), and htmx's transitions setting is off.
+ */
+@media (prefers-reduced-motion: reduce) {
+	.fade-in,
+	.sheet-rise,
+	.sheet-slide,
+	.sheet-panel,
+	#toasts > *,
+	.toast-motion {
+		animation: none;
+	}
+	.switch-track,
+	.switch-knob {
+		transition: none;
+	}
+}
+
+/*
+ * The proposals page's drawings of motion (P74, P85). The moves that shipped are drawn with their
+ * real classes above; a drawing can't be tapped or load a new page, so the loop replays them: a
+ * stage is 30 times a move's length (4.5 s for 150 ms, 6 s for 200 ms): a rest on the start, the move
+ * itself (1/30 of the loop), the end state held longest, then played back. The negative delay starts
+ * each loop on the end state, so a still capture mostly shows it. --replay-ease is the move's
+ * ease-out squeezed into that 1/30 (C, none, cuts instead of easing). What is left below draws what
+ * wasn't picked: B's row-to-sheet morph and sliding pages, which --proposal-t drives. A switch moves
+ * by a transition, which a tap starts and a loop can't, so its picture is the real Switch, drawn Off,
+ * and the loop slides its real knob and track from the On look as an animation. Under reduced motion
+ * the loops drop, and each drawing rests on its end state.
  */
 @property --proposal-t {
 	syntax: "<number>";
@@ -252,24 +393,63 @@ html:not(.js) [data-money-js] {
 	}
 }
 .proposal-loop {
-	animation: proposal-loop 4.5s ease-out -1.5s infinite;
+	--loop: calc(var(--duration-confirm) * 30);
+	--replay-ease: linear(
+		0 0%,
+		0 26.67%,
+		0.199 27.08%,
+		0.378 27.5%,
+		0.541 27.92%,
+		0.685 28.33%,
+		0.808 28.75%,
+		0.907 29.17%,
+		0.974 29.58%,
+		1 30%,
+		1 96.67%,
+		0 100%
+	);
+	animation: proposal-loop var(--loop) ease-out calc(var(--loop) / -3) infinite;
 }
 .proposal-200 {
-	animation-duration: 6s;
-	animation-delay: -2s;
+	--loop: calc(var(--duration-rising) * 30);
 }
 .proposal-cut {
+	--replay-ease: linear(0 0%, 0 26.67%, 1 26.67%, 1 96.67%, 0 96.67%, 0 100%);
 	animation-timing-function: step-start;
 }
-.proposal-fade {
-	opacity: var(--proposal-t);
+@keyframes replay-knob {
+	from {
+		translate: 1.375rem;
+		background-color: var(--color-paper);
+	}
 }
-.proposal-rise {
-	transform: translateY(calc((1 - var(--proposal-t)) * 100%));
+@keyframes replay-track {
+	from {
+		background-color: var(--color-ink);
+	}
 }
-.proposal-toast {
-	opacity: var(--proposal-t);
-	transform: translateY(calc((1 - var(--proposal-t)) * 8px));
+.proposal-loop .switch-knob {
+	animation-name: replay-knob;
+}
+.proposal-loop .switch-track {
+	animation-name: replay-track;
+}
+.proposal-loop
+	:is(.fade-in, .sheet-rise, .sheet-slide, .switch-knob, .switch-track) {
+	animation-duration: var(--loop);
+	animation-delay: calc(var(--loop) / -3);
+	animation-iteration-count: infinite;
+	animation-timing-function: var(--replay-ease);
+}
+.proposal-loop .toast-motion {
+	animation-iteration-count: infinite;
+	animation-delay: calc(var(--duration-toast) / -4);
+}
+.proposal-cut .toast-motion {
+	animation-timing-function: step-start;
+}
+.proposal-cut :is(.switch-track, .switch-knob) {
+	transition: none;
 }
 .proposal-slide-out {
 	opacity: calc(1 - var(--proposal-t));
@@ -279,38 +459,18 @@ html:not(.js) [data-money-js] {
 	opacity: var(--proposal-t);
 	transform: translateX(calc((1 - var(--proposal-t)) * 25%));
 }
-.proposal-slide-right {
-	transform: translateX(calc((1 - var(--proposal-t)) * 100%));
-}
 .proposal-morph {
 	opacity: min(1, calc(var(--proposal-t) * 3));
 	translate: calc((1 - var(--proposal-t)) * 2.75rem)
 		calc((1 - var(--proposal-t)) * -5rem);
 	scale: calc(0.5 + var(--proposal-t) * 0.5);
 }
-.proposal-knob {
-	transform: translateX(calc((1 - var(--proposal-t)) * 1.375rem));
-	background-color: color-mix(
-		in srgb,
-		var(--color-paper) calc((1 - var(--proposal-t)) * 100%),
-		var(--color-ink)
-	);
-}
-.proposal-track {
-	background-color: color-mix(
-		in srgb,
-		var(--color-ink) calc((1 - var(--proposal-t)) * 100%),
-		var(--color-rule)
-	);
-}
-.proposal-on {
-	opacity: clamp(0, calc((0.5 - var(--proposal-t)) * 1000), 1);
-}
-.proposal-off {
-	opacity: clamp(0, calc((var(--proposal-t) - 0.5) * 1000), 1);
-}
 @media (prefers-reduced-motion: reduce) {
 	.proposal-loop {
+		animation: none;
+	}
+	.proposal-loop .switch-knob,
+	.proposal-loop .switch-track {
 		animation: none;
 	}
 }
