@@ -1796,7 +1796,10 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
+	// A name counts only when this form gave one (nameChanged, from the name the panel showed): a panel that
+	// is out of date, saved after another tab renamed the merchant, isn't a new name and asks nothing.
 	const addedName =
+		parsed.value.nameChanged !== false &&
 		parsed.value.displayName !== null &&
 		parsed.value.displayName !== tx.merchantName;
 	const addedNote = parsed.value.note !== null && parsed.value.note !== tx.note;
