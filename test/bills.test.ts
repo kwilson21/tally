@@ -340,6 +340,34 @@ describe("Bills", () => {
 			expect(await state()).toEqual({ excluded: 1, excluded_source: "plaid" });
 		});
 
+		it("is left out when a person excluded it, until a person links it by hand, and then it stays theirs", async () => {
+			await setUp("2026-07");
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded_source='user' WHERE id=9301",
+			).run();
+			await matchBillPayments(env.DB, "2026-07-12");
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=9300 AND status='linked'",
+				).first("n"),
+			).toBe(0);
+			expect(await state()).toEqual({ excluded: 1, excluded_source: "user" });
+
+			await post("/bills/9300/link", {
+				transaction_id: "9301",
+				period: "2026-07",
+				opened_period: "2026-07",
+			});
+			expect(
+				await env.DB.prepare(
+					"SELECT matched_by FROM bill_payments WHERE bill_id=9300 AND status='linked'",
+				).first(),
+			).toEqual({ matched_by: "user" });
+			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
+			await post("/bills/9300/occurrences/2026-07/unlink");
+			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
+		});
+
 		it("stays included after Not this one when a person linked it by hand", async () => {
 			await setUp("2026-07");
 			await post("/bills/9300/link", {

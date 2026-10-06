@@ -135,6 +135,7 @@ export async function matchBillPayments(
 					.prepare(
 						`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
 				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
+					 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user')
 					 AND t.date BETWEEN ? AND ?
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments occurrence WHERE occurrence.bill_id=? AND occurrence.period=? AND occurrence.status='linked')
 					 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
@@ -175,7 +176,8 @@ export async function matchBillPayments(
 			a.bill.id - b.bill.id ||
 			a.candidate.id - b.candidate.id,
 	);
-	// An excluded payment qualifies (§6.1 rule 4, decision 67), and linking it puts it back in the budget:
+	// A payment Plaid or Jev excluded qualifies (§6.1 rule 4, decision 67; one a person excluded is theirs, and
+	// only their hand link takes it), and linking it puts it back in the budget:
 	// each link is a put-back statement, then the insert it depends on, and only the inserts are counted.
 	// Income is never a bill payment, excluded or not (the candidate query leaves `flag_income` ones out,
 	// as the hand-link picker does), so putting a payment back can't turn a paycheck into spending.
