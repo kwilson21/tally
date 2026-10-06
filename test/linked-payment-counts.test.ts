@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
+import { categorizePending } from "../src/categorize-pending";
 import { loadMonth } from "../src/db/month";
 import {
 	excludedBreakdown,
@@ -195,52 +196,186 @@ describe("a payment linked to a bill", () => {
 });
 
 describe("Jev and a payment that pays a bill", () => {
-	const answer = (flags: { transfer: boolean }) => ({
+	const answer = (flags: {
+		transfer?: boolean;
+		reimbursement?: boolean;
+		income?: boolean;
+	}) => ({
 		categoryId: 5,
 		suggestedCategoryId: 5,
 		confidence: 0.95,
-		flags: { ...flags, reimbursement: false, income: false },
+		flags: {
+			transfer: false,
+			reimbursement: false,
+			income: false,
+			...flags,
+		},
 	});
-	const askedIds = async () => (await pendingForJev(db, 500)).map((t) => t.id);
+	const asked = async () =>
+		(await pendingForJev(db, 500)).find((t) => t.id === 9501);
+	const row = () =>
+		db
+			.prepare(
+				"SELECT excluded, excluded_source, flag_transfer, flag_reimbursement, flag_income, income_source, category_id, category_source FROM transactions WHERE id = 9501",
+			)
+			.first();
+	const stillLinked = async () =>
+		await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9500 AND status = 'linked'",
+			)
+			.first("n");
 
-	it("is asked about it while it pays a bill, like any counted payment, and not once the link is gone", async () => {
+	it("asks about it for its category only while it pays a bill, and not once the link is gone", async () => {
 		await addPayment("plaid").run();
-		expect(await askedIds()).not.toContain(9501);
+		expect(await asked()).toBeUndefined();
 		await link(9501).run();
-		expect(await askedIds()).toContain(9501);
+		expect(await asked()).toMatchObject({ id: 9501, categoryOnly: true });
 		await unlink().run();
-		expect(await askedIds()).not.toContain(9501);
+		expect(await asked()).toBeUndefined();
 	});
 
-	it("files its category without taking over Plaid's exclusion, and a transfer answer changes nothing it counts", async () => {
+	it("files only the category: a transfer, reimbursement or income answer changes nothing about its exclusion or Spent", async () => {
 		await addPayment("plaid").run();
+		await link(9501).run();
+		const before = await readings();
+		expect(
+			await saveJevResult(
+				db,
+				9501,
+				answer({ transfer: true, reimbursement: true, income: true }),
+				{ categoryOnly: true, switches: { income: true } },
+			),
+		).toBe(true);
+		expect(await row()).toEqual({
+			excluded: 1,
+			excluded_source: "plaid",
+			flag_transfer: 0,
+			flag_reimbursement: 0,
+			flag_income: 0,
+			income_source: null,
+			category_id: 5,
+			category_source: "jev",
+		});
+		expect(await stillLinked()).toBe(1);
+		// Categorized now, so it no longer needs one; everything else reads as before.
+		expect(await readings()).toEqual({
+			...before,
+			needsCategory: before.needsCategory - 1,
+		});
+	});
+
+	it("keeps Jev's own exclusion on a linked payment through Jev's answers", async () => {
+		await addPayment("jev").run();
 		await link(9501).run();
 		const before = await spendFor();
-		expect(await saveJevResult(db, 9501, answer({ transfer: true }))).toBe(
-			true,
-		);
-		expect(await stored(9501)).toEqual([
-			{ id: 9501, excluded: 1, excluded_source: "plaid" },
-		]);
-		expect(
-			await db
-				.prepare(
-					"SELECT category_id, category_source FROM transactions WHERE id = 9501",
-				)
-				.first(),
-		).toEqual({ category_id: 5, category_source: "jev" });
+		await saveJevResult(db, 9501, answer({ income: true }), {
+			categoryOnly: true,
+			switches: { income: true },
+		});
+		expect(await row()).toMatchObject({
+			excluded: 1,
+			excluded_source: "jev",
+			flag_transfer: 1,
+			flag_income: 0,
+		});
 		expect(await spendFor()).toBe(before);
+		await unlink().run();
+		expect(await row()).toMatchObject({ excluded: 1, excluded_source: "jev" });
 	});
 
 	it("never writes to a payment that isn't linked and is excluded", async () => {
 		await addPayment("plaid").run();
-		expect(await saveJevResult(db, 9501, answer({ transfer: false }))).toBe(
-			false,
-		);
+		for (const categoryOnly of [true, false])
+			expect(await saveJevResult(db, 9501, answer({}), { categoryOnly })).toBe(
+				false,
+			);
 		await link(9501).run();
 		await unlink().run();
-		expect(await saveJevResult(db, 9501, answer({ transfer: false }))).toBe(
-			false,
+		expect(
+			await saveJevResult(db, 9501, answer({}), { categoryOnly: true }),
+		).toBe(false);
+		expect(await row()).toMatchObject({ category_id: null });
+	});
+
+	it("keeps the bill paid and in Spent when Jev answers transfer and income on it (a whole run)", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await addPayment("plaid").run();
+		await link(9501).run();
+		// Everything else has been looked at already, so the run asks only about this payment.
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = 0.5 WHERE id != 9501",
+			)
+			.run();
+		const before = await spendFor();
+		const jev = async () =>
+			new Response(
+				JSON.stringify({
+					answers: {
+						category: {
+							type: "choice",
+							choice: "Eating Out",
+							confidence: 0.95,
+						},
+						transfer: { type: "noul", noul: 0.99 },
+						reimbursement: { type: "noul", noul: 0.99 },
+						income: { type: "noul", noul: 0.99 },
+					},
+				}),
+				{ status: 200 },
+			);
+		const result = await categorizePending(
+			{ DB: db, JEV_API_KEY: "test-key" },
+			jev,
 		);
+		expect(result.asked).toBe(1);
+		expect(await row()).toMatchObject({
+			excluded: 1,
+			excluded_source: "plaid",
+			flag_transfer: 0,
+			flag_income: 0,
+			category_source: "jev",
+		});
+		expect(await stillLinked()).toBe(1);
+		expect(await spendFor()).toBe(before);
+	});
+
+	it("never marks money out as income, for a transaction that counts on its own", async () => {
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name)
+				 SELECT 9520, id, '2026-09-04', 4200, 'SOME SHOP' FROM accounts LIMIT 1`,
+			)
+			.run();
+		expect(
+			await saveJevResult(db, 9520, answer({ income: true }), {
+				switches: { income: true },
+			}),
+		).toBe(true);
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income, income_source, category_id FROM transactions WHERE id = 9520",
+				)
+				.first(),
+		).toEqual({ flag_income: 0, income_source: null, category_id: 5 });
+		// Money in is still Jev's to call income.
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name)
+				 SELECT 9521, id, '2026-09-04', -4200, 'SOME PAYROLL' FROM accounts LIMIT 1`,
+			)
+			.run();
+		await saveJevResult(db, 9521, answer({ income: true }), {
+			switches: { income: true },
+		});
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income, income_source FROM transactions WHERE id = 9521",
+				)
+				.first(),
+		).toEqual({ flag_income: 1, income_source: "jev" });
 	});
 });

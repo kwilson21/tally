@@ -22,9 +22,12 @@ export const FOLLOWS_PURCHASE =
  */
 export const INCLUDED = "(t.excluded = 0 OR bp.id IS NOT NULL)";
 
-/** The same test for an UPDATE or a subquery on `transactions` itself, where no joins or alias exist. */
-export const INCLUDED_ROW =
-	"(excluded = 0 OR EXISTS (SELECT 1 FROM bill_payments WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked'))";
+/** True when a bill's payment is linked to the row, for an UPDATE or subquery on `transactions` itself (no joins, no alias). */
+export const PAYS_A_BILL =
+	"EXISTS (SELECT 1 FROM bill_payments WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked')";
+
+/** `INCLUDED` for an UPDATE or subquery on `transactions` itself. */
+export const INCLUDED_ROW = `(excluded = 0 OR ${PAYS_A_BILL})`;
 
 /**
  * What counts as spending, once the joins are added (spec §6): not excluded (or paying a bill), not a

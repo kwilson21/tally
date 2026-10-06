@@ -12,6 +12,7 @@ import {
 	FOLLOWS_PURCHASE,
 	INCLUDED,
 	INCLUDED_ROW,
+	PAYS_A_BILL,
 } from "./counted-month";
 import { plaidSetIncomeSql } from "./income";
 import {
@@ -759,14 +760,18 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 // A credit a person already decided about: Jev can only help with its category. The review columns
 // are NULL on older rows, which SQL won't compare, so a missing review counts as no review: COALESCE
 // makes this 0 rather than NULL, and `NOT` of it can't drop the row.
-const CATEGORY_ONLY =
-	"COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)";
+// A payment that pays a bill though it is excluded counts (spec §8.5) but is a transfer, a card payment or
+// something a person left out: Jev may suggest its category, and its flags are never written, since they
+// could only change what it is excluded as or take it out of Spent (income).
+const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)
+	OR (t.excluded = 1 AND bp.id IS NOT NULL))`;
 
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
  * unreviewed negative credits, even when a category was selected already. A user-reviewed
  * uncategorized credit is eligible for category help only, so it's left out when the household's
- * categories switch is off (spec §8.6): that answer would go unused. A stored confidence means Jev
+ * categories switch is off (spec §8.6): that answer would go unused. An excluded payment that pays a
+ * bill counts, so it is asked about too, and likewise for its category only. A stored confidence means Jev
  * already looked and wasn't sure (decision 27).
  */
 export async function pendingForJev(
@@ -830,8 +835,9 @@ export async function saveJevResult(
 				`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
 					updated_at = datetime('now')
-				 WHERE id = ? AND amount_cents < 0 AND credit_reviewed = 1 AND flag_income = 0
-					AND (income_source = 'user' OR credit_reviewed_by = 'user')
+				 WHERE id = ? AND flag_income = 0
+					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
+						OR (excluded = 1 AND ${PAYS_A_BILL}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 					AND ${INCLUDED_ROW} AND is_split = 0`,
 			)
@@ -847,8 +853,7 @@ export async function saveJevResult(
 	}
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise. A payment
 	// that pays a bill counts all the same (it is read as counted, spec §8.5), so it needs no exception here.
-	// One already excluded (a linked payment Plaid excluded) keeps the source it has: Jev's flag never
-	// takes over Plaid's exclusion.
+	// One that is excluded and pays a bill only gets a category (`categoryOnly` above), never these flags.
 	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
 	const income = options.switches?.income === false ? false : d.flags.income;
 	const result = await db
@@ -861,13 +866,14 @@ export async function saveJevResult(
 			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ?) OR ? = 1) THEN 1 ELSE credit_reviewed END,
 				jev_category_id = ?,
 				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
-				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income ELSE ? END,
-				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 THEN 'jev' ELSE NULL END,
+				-- Income is money coming in: Jev's income answer never marks money out (a positive amount).
+				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income WHEN amount_cents > 0 THEN 0 ELSE ? END,
+				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 AND amount_cents <= 0 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
-				excluded_source = CASE WHEN excluded_source = 'user' OR excluded = 1 OR ? = 0 THEN excluded_source ELSE 'jev' END,
+				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
 			WHERE id = ? AND category_confidence IS NULL
-				AND ${INCLUDED_ROW} AND is_split = 0
+				AND excluded = 0 AND is_split = 0
 				AND COALESCE(income_source, '') != 'user' AND COALESCE(credit_reviewed_by, '') != 'user'
 				AND (
 					(category_id IS NULL AND category_source IS NULL)

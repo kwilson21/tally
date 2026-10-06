@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import migration from "../migrations/0020_plaid_transfer_backfill.sql?raw";
+import { summarizeMonth } from "../src/budget";
+import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 
 const db = env.DB;
@@ -101,7 +103,7 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			add(9021, "FOOD_AND_DRINK"),
 			add(9022, "INCOME"),
 			add(9023, null),
-			// A payment linked to a bill stays counted.
+			// A payment linked to a bill is excluded like any other (it counts while linked, below).
 			add(9031, "LOAN_PAYMENTS"),
 			// Income a person chose, or a credit a person reviewed, stays counted.
 			add(9032, "TRANSFER_IN", { incomeSource: "user" }),
@@ -110,7 +112,7 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			db.prepare(
 				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_category, credit_reviewed_by) SELECT 9034, id, '2026-09-10', 5000, 'SYNTHETIC', 'TRANSFER_OUT', 'user' FROM accounts LIMIT 1",
 			),
-			// A split's parent and parts follow it, except a part a person set, a part with income a person chose, and a part that pays a bill.
+			// A split's parent and parts follow it, except a part a person set, a part with income a person chose.
 			add(9041, "TRANSFER_OUT", { split: true }),
 			add(9042, null, { parent: 9041 }),
 			add(9043, null, { parent: 9041 }),
@@ -120,7 +122,7 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			// A split a person included keeps its parts as they are.
 			add(9051, "TRANSFER_OUT", { split: true, source: "user" }),
 			add(9052, null, { parent: 9051 }),
-			// A split that pays a bill isn't excluded, so its parts aren't either.
+			// A split whose bank transaction is linked to a bill is excluded with its parts, like any other.
 			add(9061, "TRANSFER_OUT", { split: true }),
 			add(9062, null, { parent: 9061 }),
 			// A split that isn't a transfer keeps counting.
@@ -144,7 +146,7 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			9021: COUNTED,
 			9022: COUNTED,
 			9023: COUNTED,
-			9031: COUNTED,
+			9031: PLAID,
 			9032: COUNTED,
 			9033: COUNTED,
 			9034: PLAID,
@@ -152,15 +154,42 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			9042: PLAID,
 			9043: PLAID,
 			9044: [0, "user"],
-			9045: COUNTED,
+			9045: PLAID,
 			9046: COUNTED,
 			9051: [0, "user"],
 			9052: COUNTED,
-			9061: COUNTED,
-			9062: COUNTED,
+			9061: PLAID,
+			9062: PLAID,
 			9071: COUNTED,
 			9072: COUNTED,
 		});
+	});
+
+	// Decision 77's aim: nothing a bill's payment paid changes. The payment is excluded by the backfill, and
+	// counts in Spent while it is linked (spec §6.1 rule 4, §8.5); an unlink leaves it excluded.
+	it("excludes an older transfer that pays a bill, which counts while linked and stops once unlinked", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9100, 'Mortgage', 5000, 10, 'monthly', 'SYNTHETIC')",
+			),
+			add(9031, "LOAN_PAYMENTS"),
+			pay(9100, "2026-09", 9031),
+		]);
+		const spent = async () =>
+			summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(db, "2026-09")),
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		const before = await spent();
+
+		await run();
+		expect((await stateOf())[9031]).toEqual(PLAID);
+		expect(await spent()).toBe(before);
+
+		await db.prepare("DELETE FROM bill_payments WHERE bill_id = 9100").run();
+		expect((await stateOf())[9031]).toEqual(PLAID);
+		expect(await spent()).toBe(before - 5000);
 	});
 
 	it("changes nothing the second time", async () => {
