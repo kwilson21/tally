@@ -688,7 +688,7 @@ export function Phase35StatesProposals() {
 					share a name (§8.5); the form is in a bottom sheet (§8.2), and invalid
 					input comes back as a field error in role="alert" (§10).
 				</Fixed>
-				<NeedsLine settled="decisions 72 and 78">
+				<NeedsLine settled="decisions 72 and 80">
 					“Over” means more than $100,000.00, so exactly that saves without
 					asking. Adding or editing an amount over it comes back unsaved until a
 					“Yes, $X is right” chip under the amount's alert is ticked, and the

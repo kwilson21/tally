@@ -359,7 +359,7 @@ const askFor = (
 	</>
 );
 
-/** P89 on the proposals page, picked (decision 78). */
+/** P89 on the proposals page, picked (decision 80). */
 export function AutofillProposals() {
 	return (
 		<Specimen
@@ -381,7 +381,7 @@ export function AutofillProposals() {
 				switches with On or Off in words and one Save (decision 73). There is no
 				new JavaScript (§8.1).
 			</Fixed>
-			<NeedsLine settled="decision 79">
+			<NeedsLine settled="decision 81">
 				the people list holds names, not logins, and anyone in the family adds,
 				renames or removes one in Settings (§3); removing a name clears it from
 				the purchases marked for it. A kind is a word about the purchase and
@@ -418,7 +418,7 @@ export function AutofillProposals() {
 					},
 					{
 						name: "Option A, next · Where it's switched off",
-						note: "A fifth switch, “Fill in details”, after the store names, because each AI feature has its own switch (decision 68); the words are P86 A's, picked in decision 78. Off, Tally guesses none of the three and the panel's rows stay empty for a person to fill in by hand; the Name guesses follow “Suggest store names”, and nothing already kept changes. Folding it under “Guess categories” would make one switch do two jobs.",
+						note: "A fifth switch, “Fill in details”, after the store names, because each AI feature has its own switch (decision 68); the words are P86 A's, picked in decision 80. Off, Tally guesses none of the three and the panel's rows stay empty for a person to fill in by hand; the Name guesses follow “Suggest store names”, and nothing already kept changes. Folding it under “Guess categories” would make one switch do two jobs.",
 						tall: true,
 						screen: switchOff,
 					},

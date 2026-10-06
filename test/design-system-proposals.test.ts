@@ -35,7 +35,7 @@ describe("GET /design-system/proposals", () => {
 			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
 				recommended,
 			);
-			// P34–P90 mark the owner's pick (decisions 72–78); P60 took two options.
+			// P34–P90 mark the owner's pick (decisions 72–80); P60 took two options.
 			const n = Number(id.match(/^p(\d+)/)?.[1]);
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const expected = n < 34 ? 0 : id === "p60-bills-total" ? 2 : 1;

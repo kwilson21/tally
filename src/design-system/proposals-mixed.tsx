@@ -88,7 +88,7 @@ type Part = { category: number; amount: string };
 /**
  * P17 A's split as it opens from the nudge (prototype, laid out as SplitForm is): the same live
  * line and Cancel and Save split, with each part's amount in P72 A's plain amount field, since
- * split parts take it rather than MoneyInput (decision 77, question 44). What's new is the label
+ * split parts take it rather than MoneyInput (decision 79, question 44). What's new is the label
  * saying where the parts came from, and each part's category drawn dashed, as every guess is
  * (decision 64), until a person types its amount or changes it (`kept`). The amounts start empty:
  * the bank sent only the total.
@@ -243,7 +243,7 @@ const askOnce = (
 	/>
 );
 
-/** P90 on the proposals page, picked (decision 78). */
+/** P90 on the proposals page, picked (decision 80). */
 export function MixedStoreProposals() {
 	return (
 		<Specimen

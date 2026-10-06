@@ -3,7 +3,7 @@
 // earlier picked drawing made, with only the detail in question changing: the real components in
 // src/views/, and the picked drawings' own prototypes (imported from the proposals-*.tsx files that
 // drew them) where a component doesn't exist yet. Today is Mon Oct 5, as in every proposal.
-// The owner's picks are marked Picked (decision 78).
+// The owner's picks are marked Picked (decision 80).
 
 import type { Child } from "hono/jsx";
 import { dayLabel } from "../dates";
@@ -1301,7 +1301,7 @@ function NameQuestion({
 	);
 }
 
-/** P76–P87 on the proposals page, picked (decision 78). */
+/** P76–P87 on the proposals page, picked (decision 80). */
 export function DetailsProposals() {
 	return (
 		<>

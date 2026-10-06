@@ -245,7 +245,7 @@ export function P75() {
 				radii are the two tokens (rounded-control, rounded-sheet) and no shadows
 				(DESIGN.md); the CSP allows no inline styles.
 			</Fixed>
-			<NeedsLine settled="decisions 76 and 77">
+			<NeedsLine settled="decisions 76 and 79">
 				It's Chrome and Edge only today: Safari (iPhones) and Firefox keep
 				today's round corners until they support it, so nothing breaks. One rule
 				in app.css sets corner-shape: squircle on the two radius tokens, so

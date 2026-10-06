@@ -964,7 +964,7 @@ export function Phase5BillsProposals() {
 					one is due (§6, decision 62). A bill's page lists each month's
 					occurrence with its payment (§8.2).
 				</Fixed>
-				<NeedsLine settled="decisions 74 and 77">
+				<NeedsLine settled="decisions 74 and 79">
 					A weekly or every-two-weeks occurrence is keyed by its own due date,
 					YYYY-MM-DD, and a quarterly one by YYYY-Qn, the calendar quarter that
 					holds its due date (Q1 is January to March), so each key names exactly
@@ -1035,7 +1035,7 @@ export function Phase5BillsProposals() {
 					one unlinks it (§6.1, §8.2); a month with a linked payment is Paid,
 					and a missed one stays overdue (§6).
 				</Fixed>
-				<NeedsLine settled="decisions 74 and 77">
+				<NeedsLine settled="decisions 74 and 79">
 					One occurrence can have several linked payments, a bill paid in parts,
 					while each transaction still pays at most one bill or planned expense.
 					The matcher still links one; a person links more by hand. An
@@ -1083,7 +1083,7 @@ export function Phase5BillsProposals() {
 					category choice is never overwritten (§7), and a payment linked to a
 					bill's month counts in that month (§6, decision 58).
 				</Fixed>
-				<NeedsLine settled="decisions 74 and 78">
+				<NeedsLine settled="decisions 74 and 80">
 					A linked payment with no category takes its bill's (its
 					category_source is “bill”). A person's choice or a merchant rule
 					replaces it, and unlinking the payment leaves the category on it. The
@@ -1131,7 +1131,7 @@ export function Phase5BillsProposals() {
 					(proposed: weekly × 52 ÷ 12, every two weeks × 26 ÷ 12 and quarterly ÷
 					3), and that “still to pay” counts every occurrence due this month
 					that isn't paid yet, overdue ones included. Already settled (decisions
-					74 and 77): a yearly bill counts as a twelfth; both totals count
+					74 and 79): a yearly bill counts as a twelfth; both totals count
 					active bills only; and a part-paid bill counts in full in the monthly
 					total and by what's left in “still to pay”.
 				</NeedsLine>
@@ -1175,7 +1175,7 @@ export function Phase5BillsProposals() {
 					(§8.4, A9). A budget's amount in a month is the latest budget_amounts
 					row with effective_month on or before it (§6).
 				</Fixed>
-				<NeedsLine settled="decisions 74 and 77">
+				<NeedsLine settled="decisions 74 and 79">
 					A bill_amounts table like budget_amounts (bill_id, effective_month,
 					amount_cents) holds a bill's amount from a month on: an occurrence's
 					amount is the row with the latest effective_month on or before its

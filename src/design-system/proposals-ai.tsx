@@ -1027,7 +1027,7 @@ export function AiProposals() {
 					them (§8.6, decision 68). There is no new JavaScript (§8.1), so each
 					switch has to work without it.
 				</Fixed>
-				<NeedsLine settled="decision 77">
+				<NeedsLine settled="decision 79">
 					“Sort right away” is greyed out, with “Needs Guess categories or Spot
 					paychecks on”, while both of those are off. A switch turned back on
 					catches up overnight: the next nightly run asks about what Tally
@@ -1080,7 +1080,7 @@ export function AiProposals() {
 					never applied without a tap (decision 64), and no screen names the AI
 					service (§7).
 				</Fixed>
-				<NeedsLine settled="decision 77">
+				<NeedsLine settled="decision 79">
 					A No is remembered as a “Never suggest” rule, so Tally doesn't ask it
 					again until the family removes the rule. A Skip stays in the count and
 					comes back at the end. Suggestions come money first: income and
@@ -1156,7 +1156,7 @@ export function AiProposals() {
 					found, and how many a person changed (§8.6). Code does the counting
 					(§2). The numbers drawn are an example October.
 				</Fixed>
-				<NeedsLine settled="decisions 77 and 78">
+				<NeedsLine settled="decisions 79 and 80">
 					It counts all of Tally's work this month: transactions it sorted (gave
 					a category), names it cleaned (a suggested name a person kept) and
 					paychecks it found (income Tally set), and how many of those a person
@@ -1204,7 +1204,7 @@ export function AiProposals() {
 					bank sends it, next to what Tally made of it (§8.6), with no new
 					JavaScript (§8.1).
 				</Fixed>
-				<NeedsLine settled="decision 77">
+				<NeedsLine settled="decision 79">
 					The without view takes away everything Tally decided, including what
 					it marked at sync from Plaid's categories, so the list shows the
 					bank's raw data only. Home stays as usual: its numbers don't change,

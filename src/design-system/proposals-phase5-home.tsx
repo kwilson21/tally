@@ -1151,7 +1151,7 @@ export function Phase5HomeProposals() {
 					status color, and category colors never carry status (DESIGN.md). Bars
 					have no limit marker (decision 46).
 				</Fixed>
-				<NeedsLine settled="decisions 74 and 77">
+				<NeedsLine settled="decisions 74 and 79">
 					A category is nearly spent when 80% or more of its budget is used and
 					it is not over. Its row says “$X left”, with no new color.
 				</NeedsLine>

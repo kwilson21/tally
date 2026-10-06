@@ -316,7 +316,7 @@ function P73() {
 				(§2 rule 6, §7); screens say “Tally's guess”, never the AI's name
 				(decision 64).
 			</Fixed>
-			<NeedsLine settled="decisions 76 and 77">
+			<NeedsLine settled="decisions 76 and 79">
 				Each row gives one of two reasons: “Same merchant”, which names the
 				transaction it matches and starts ticked, or “Tally's guess”, which
 				starts unticked with a Why? and only when the new name is one Tally had

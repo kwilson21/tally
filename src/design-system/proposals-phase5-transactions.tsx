@@ -1197,7 +1197,7 @@ export function Phase5TransactionsProposals() {
 					(§8.6); a rule offer isn't on that list, so whether it joins is part
 					of this pick.
 				</Fixed>
-				<NeedsLine settled="decisions 74, 77 and 78">
+				<NeedsLine settled="decisions 74, 79 and 80">
 					The offer comes on the third save of one category for one merchant,
 					and on every matching save after, until the merchant has a rule; Not
 					now only skips that one. Only transactions a person put in that
@@ -1284,7 +1284,7 @@ export function Phase5TransactionsProposals() {
 					its purchase counts in the purchase's month and category (§6). The
 					Excluded filter shows only excluded transactions (§8).
 				</Fixed>
-				<NeedsLine settled="decisions 74 and 77">
+				<NeedsLine settled="decisions 74 and 79">
 					The Show choice for type has all, spending, income, refunds and
 					excluded, and replaces the Excluded filter. Refunds holds money in
 					that isn't income or a transfer, so money in that nothing explains
@@ -1325,7 +1325,7 @@ export function Phase5TransactionsProposals() {
 				<NeedsLine>
 					what a number matches as an amount (proposed: with or without $, “$42”
 					anything from $42.00 to $42.99). Already settled (decisions 74 and
-					77): a word also matches a category's name, and a number matches an
+					79): a word also matches a category's name, and a number matches an
 					amount, money out and money in alike (“42.17” finds a $42.17 purchase
 					and a $42.17 refund).
 				</NeedsLine>
@@ -1443,7 +1443,7 @@ export function Phase5TransactionsProposals() {
 				<NeedsLine>
 					which choice starts ticked (proposed: This one only; today's behavior
 					is All) and whether search matches both names. Already settled
-					(decisions 74 and 77): a name kept on one transaction is its own_name,
+					(decisions 74 and 79): a name kept on one transaction is its own_name,
 					shown in place of its merchant's name and on its split's parts; the
 					merchant's name and the bank's text stay as they are.
 				</NeedsLine>
@@ -1485,7 +1485,7 @@ export function Phase5TransactionsProposals() {
 					that removing a rule never changes a transaction already sorted, what
 					the list says with no rules (proposed: an EmptyState) and how it marks
 					a rule on an archived category (proposed: paused). Already settled
-					(decisions 77 and 78): in the edit panel the toggle is ticked when the
+					(decisions 79 and 80): in the edit panel the toggle is ticked when the
 					chosen category is the rule's and unticked when it isn't, and ticking
 					it makes the new category the rule; the list is A to Z, with a search
 					box once there are more than 20.
@@ -1570,7 +1570,7 @@ export function Phase5TransactionsProposals() {
 				<NeedsLine>
 					whether a date can be in the future and which month a changed entry
 					counts in (proposed: it can't be in the future; it counts in its new
-					date's month). Already settled (decision 77): a split cash entry's new
+					date's month). Already settled (decision 79): a split cash entry's new
 					date moves to its parts, and a new amount that no longer matches its
 					parts can't be saved until the parts are corrected, so the split is
 					never reset. Its links (a bill payment, a refund) are kept: a new date

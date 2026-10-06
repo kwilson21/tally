@@ -1,6 +1,6 @@
 # Open questions on the AI, Phase 5 and design-system issues (Oct 5)
 
-**Answered on Oct 6 (decisions 77–79):** the owner went through every question by seeing a picture of each answer. Where the answer differs from the recommendation below, the Answers section at the end wins.
+**Answered on Oct 6 (decisions 79–81):** the owner went through every question by seeing a picture of each answer. Where the answer differs from the recommendation below, the Answers section at the end wins.
 
 Writing the issues for decisions 73–76 turned up 53 questions the spec doesn't answer. Each has a recommended answer, in the spirit of the owner's earlier picks: the simplest rule a person can say in a sentence, nothing hidden from the family, and no new script. The owner accepts them all, changes some, or goes through them one by one. Accepted answers become a decision entry and replace the "Open:" lines in the issues.
 
@@ -79,7 +79,7 @@ Writing the issues for decisions 73–76 turned up 53 questions the spec doesn't
 52. *MoneyInput's corners (#219).* They join the squircle rule when #80 settles its corners; until then they stay as they are.
 53. *The P75 drawing after squircles ship (#219).* It stays, with "Today" forced round so the comparison still shows.
 
-## Answers (decisions 77 and 78)
+## Answers (decisions 79 and 80)
 
 Recommended answers were taken unless listed here.
 
@@ -99,7 +99,7 @@ Recommended answers were taken unless listed here.
 - **42:** a new date moves a split cash entry's parts; a new amount that no longer matches its parts can't be saved until the parts are corrected ("The parts add up to $90.00. Change them to match $100.00."). The split is never reset.
 - **48:** decided as recommended (it's how the work is split into pull requests).
 
-## Two more, from P89 (decision 79)
+## Two more, from P89 (decision 81)
 
 - **54:** a kind (subscription, one-off, bill or transfer) is a word about the purchase and never changes a number; Exclude and Bills work as before (A, as recommended).
 - **55:** removing a person from the people list clears them from the purchases marked for them, and the toast says how many (A, as recommended).
