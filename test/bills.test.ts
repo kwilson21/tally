@@ -25,6 +25,11 @@ describe("Bills", () => {
 		])
 			expect(html).toContain(heading);
 		expect(html).toContain("bills to pay soon");
+		expect(html).toMatch(
+			/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
+		);
+		expect(html).toMatch(/Overdue[\s\S]*?\$[\d,]+\.\d{2}/);
+		expect(html).toContain("this month");
 	});
 
 	it("has a How this works link to the Bills section, under the status sentence (decision 84)", async () => {
