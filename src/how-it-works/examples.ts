@@ -27,7 +27,15 @@ export function budgetExample(
 		uncategorizedCents + s.unbudgetedCents + s.billsDueCents;
 	const amount = (cents: number) =>
 		formatCents(cents, { wholeDollars: cents % 100 === 0 });
-	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${amount(differenceCents)} less: ${amount(uncategorizedCents)} has no category yet, ${amount(s.unbudgetedCents)} went to categories with no budget, and ${amount(s.billsDueCents)} is set aside for bills due.`;
+	const difference =
+		differenceCents === 0
+			? "the same as your budgets"
+			: `${amount(Math.abs(differenceCents))} ${differenceCents > 0 ? "less" : "more"}`;
+	const spendingPart = (cents: number, normal: string, where: string) =>
+		cents < 0
+			? `${amount(-cents)} more came back as refunds than was spent ${where}`
+			: `${amount(cents)} ${normal}`;
+	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${difference}: ${spendingPart(uncategorizedCents, "has no category yet", "there")}, ${spendingPart(s.unbudgetedCents, "went to categories with no budget", "in categories with no budget")}, and ${amount(s.billsDueCents)} is set aside for bills due.`;
 }
 
 /**

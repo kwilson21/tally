@@ -29,7 +29,13 @@ export function HomeForecast({
 	const right = 340;
 	const top = 34;
 	const base = 142;
-	const ymax = Math.max(budgetCents, endCents, 1);
+	let cumulativeCents = 0;
+	let peakCents = 0;
+	for (const cents of spentByDay.slice(0, day)) {
+		cumulativeCents += cents;
+		peakCents = Math.max(peakCents, cumulativeCents);
+	}
+	const ymax = Math.max(budgetCents, endCents, peakCents, 1);
 	const x = (d: number) =>
 		left + ((d - 1) / (daysInMonth - 1)) * (right - left);
 	const y = (cents: number) => base - (cents / ymax) * (base - top);

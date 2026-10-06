@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { homeForecastDays } from "../src/db/home-forecast";
 import { forecastMonth } from "../src/home-forecast";
+import { HomeForecast } from "../src/views/home-forecast";
 
 describe("forecastMonth", () => {
 	it("projects everyday spending and bills still due in integer cents", () => {
@@ -70,6 +71,27 @@ describe("forecastMonth", () => {
 		};
 		expect(forecastMonth(input).visible).toBe(false);
 		expect(forecastMonth({ ...input, day: 3 }).visible).toBe(true);
+	});
+});
+
+describe("HomeForecast chart scale", () => {
+	it("keeps an earlier cumulative spending peak inside the viewBox", () => {
+		const html = String(
+			HomeForecast({
+				month: "2026-10",
+				day: 2,
+				daysInMonth: 31,
+				spentByDay: [20000, -19000],
+				budgetCents: 10000,
+				endCents: 5000,
+				differenceCents: 5000,
+			}),
+		);
+		const points = [
+			...html.matchAll(/(?:\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g),
+		].map((match) => Number(match[1]));
+		expect(points.length).toBeGreaterThan(0);
+		expect(points.every((y) => y >= 34 && y <= 142)).toBe(true);
 	});
 });
 

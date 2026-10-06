@@ -147,6 +147,54 @@ describe("netWorthExample", () => {
 });
 
 describe("budgetExample", () => {
+	const example = (uncategorizedCents: number, unbudgetedCents: number) =>
+		budgetExample({
+			totalBudgetCents: 100000,
+			totalSpentCents: 20000,
+			safeToSpendCents: 0,
+			uncategorized: { spentCents: uncategorizedCents, count: 1 },
+			unbudgetedCents,
+			billsDueCents: 0,
+		});
+
+	it.each([
+		[1000, "$10 has no category yet"],
+		[0, "$0 has no category yet"],
+		[-1000, "$10 more came back as refunds than was spent there"],
+	])(
+		"describes uncategorized spending of %i cents without a negative amount",
+		(cents, words) => {
+			expect(example(cents, 0)).toContain(words);
+			expect(example(cents, 0)).not.toContain("-$");
+		},
+	);
+
+	it.each([
+		[1000, "$10 went to categories with no budget"],
+		[0, "$0 went to categories with no budget"],
+		[
+			-1000,
+			"$10 more came back as refunds than was spent in categories with no budget",
+		],
+	])(
+		"describes unbudgeted spending of %i cents without a negative amount",
+		(cents, words) => {
+			expect(example(0, cents)).toContain(words);
+			expect(example(0, cents)).not.toContain("-$");
+		},
+	);
+
+	it.each([
+		[1000, "Safe to spend is $10 less:"],
+		[0, "Safe to spend is the same as your budgets:"],
+		[-1000, "Safe to spend is $10 more:"],
+	])(
+		"chooses the safe-to-spend comparison for a difference of %i cents",
+		(cents, words) => {
+			expect(example(cents, 0)).toContain(words);
+		},
+	);
+
 	it("explains why safe to spend is below the budgets, with parts that add up", () => {
 		expect(
 			budgetExample({

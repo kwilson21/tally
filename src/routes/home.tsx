@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { calculateBillTotals } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { daysInMonth, householdToday, monthName } from "../dates";
@@ -93,9 +94,31 @@ async function renderHome(
 	const month = today.slice(0, 7);
 	const data = await loadMonth(c.env.DB, month);
 	const billData = await loadBillRows(c.env.DB, today);
+	const activeBills = billData.rows.filter((bill) => bill.active);
 	const dueBills = billData.rows.filter(
 		(b) => b.active && (b.status === "due" || b.status === "overdue"),
 	);
+	const billTotals = calculateBillTotals({
+		month,
+		bills: activeBills.map((bill) => ({
+			id: bill.id,
+			amountCents: bill.amountCents,
+			frequency: bill.frequency,
+			active: true,
+		})),
+		displayedOccurrences: activeBills.map((bill) => ({
+			billId: bill.id,
+			dueDate: bill.dueDate,
+			status: bill.status,
+			amountCents: bill.amountCents,
+			paidCents: bill.paidCents,
+		})),
+		thisMonthOccurrences: activeBills.flatMap((bill) =>
+			bill.totalOccurrences
+				.filter((occurrence) => occurrence.dueDate.startsWith(month))
+				.map((occurrence) => ({ billId: bill.id, ...occurrence })),
+		),
+	});
 	const summary = summarizeMonth({
 		month,
 		...data,
@@ -156,10 +179,7 @@ async function renderHome(
 		billPaymentsCents,
 		planPaymentsCents: 0,
 		refundsCents,
-		billsStillDueCents: dueBills.reduce(
-			(sum, bill) => sum + bill.amountCents,
-			0,
-		),
+		billsStillDueCents: billTotals.stillToPayCents,
 	});
 	const dailySpending = Array.from({ length: day }, (_, index) => {
 		const entry = forecastDays.find((item) => item.day === index + 1);
