@@ -356,7 +356,10 @@ export function buildSeed(today: string): Seed {
 	const clamp = (target: number) => day(thisMonth, Math.min(target, todayDay));
 	const transactions: SeedTransaction[] = [];
 
-	// Previous 5 months: three transactions per category (days 5, 14, 23), plus paychecks and the savings transfer.
+	// Previous 5 months: three transactions per category (days 5, 14, 23), plus paychecks and the savings
+	// transfer. Their days are clamped to today's day-of-month, as this month's are, so on any day last
+	// month has spent about as much "by this time" as this month has: Trends' same-days comparison is
+	// fair (spec §8.3). From the 23rd on they fall on 5, 14 and 23 as written.
 	for (let monthsAgo = 5; monthsAgo >= 1; monthsAgo--) {
 		const month = monthOffset(today, monthsAgo);
 		for (const category of CATEGORIES) {
@@ -368,7 +371,7 @@ export function buildSeed(today: string): Seed {
 				transactions.push(
 					spend(
 						i === 2 ? CARD : CHECKING,
-						day(month, [5, 14, 23][i] as number),
+						day(month, Math.min([5, 14, 23][i] as number, todayDay)),
 						rawName,
 						category.id,
 						cents,

@@ -14,6 +14,14 @@
 export const FOLLOWS_PURCHASE =
 	"(rp.id IS NOT NULL AND rp.excluded = 0 AND t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(t.credit_reviewed, 0) = 1)";
 
+/**
+ * What counts as spending, once the joins are added (spec §6): not excluded, not a split parent
+ * (its parts count), not income, and not an unreviewed bank credit; a refund that follows its
+ * purchase counts. Home's budget rows, last month's amount and Trends all use this one definition.
+ */
+export const COUNTED_SPENDING = `t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0
+	AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR ${FOLLOWS_PURCHASE})`;
+
 /** The month a transaction's own date and bill payment put it in. */
 function billMonthSql(transaction: string, payment: string, bill: string) {
 	const bankMonth = `substr(${transaction}.date,1,7)`;

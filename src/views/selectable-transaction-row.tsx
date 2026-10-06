@@ -38,6 +38,8 @@ export function SelectableTransactionRow({
 					Select {row.displayName},{" "}
 					{formatCents(row.amountCents, { signed: true })},{" "}
 					{dayLabel(row.date, today)}
+					{/* The checkbox is named by this label alone, so a pending row says so here too. */}
+					{row.pending && ", pending"}
 				</span>
 				<span class="min-w-0 flex-1">
 					<TransactionRow row={row} bare />

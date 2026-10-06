@@ -62,7 +62,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec Â
 | Part | Issue | State |
 |---|---|---|
 | How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Merged ([#173](https://github.com/kwilson21/tally/pull/173)) |
-| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Being built ([#229](https://github.com/kwilson21/tally/pull/229), decision 78) |
+| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Merged ([#229](https://github.com/kwilson21/tally/pull/229)) |
 | Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Merged ([#230](https://github.com/kwilson21/tally/pull/230)) |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
 | Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | To build (decision 78) |
