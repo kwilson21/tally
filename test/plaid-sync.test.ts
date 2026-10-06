@@ -2816,6 +2816,67 @@ describe("syncItem", () => {
 				});
 			});
 
+			it("counts a new transfer credit as soon as a person reviews it as a refund, with the exclude toggle left as shown", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				// The panel was drawn with Exclude on, and the save sends it on.
+				await decide("refund", true);
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: null,
+				});
+				expect(await decisions()).toMatchObject({
+					credit_reviewed: 1,
+					credit_reviewed_by: "user",
+				});
+				// Plaid sending it again doesn't take it back (decision 70: a person decided this credit).
+				await syncAs(
+					id,
+					"modified",
+					inCategory("TRANSFER_IN", { amount: -50 }),
+				);
+				expect(await exclusion()).toEqual({
+					excluded: 0,
+					excluded_source: null,
+				});
+			});
+
+			it.each(["user", "jev"])(
+				"leaves a %s exclusion alone when a person reviews the credit as a refund",
+				async (source) => {
+					const id = await addItem();
+					await syncAs(
+						id,
+						"added",
+						inCategory("FOOD_AND_DRINK", { amount: -50 }),
+					);
+					await env.DB.prepare(
+						"UPDATE transactions SET excluded = 1, excluded_source = ? WHERE plaid_transaction_id = 'transaction-1'",
+					)
+						.bind(source)
+						.run();
+					await decide("refund", true);
+					expect(await exclusion()).toEqual({
+						excluded: 1,
+						excluded_source: source,
+					});
+				},
+			);
+
+			it("leaves Plaid's exclusion when the credit was already reviewed and the save doesn't change that", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				await env.DB.prepare(
+					// Tally reviewed it (no person), so a save that keeps it reviewed changes nothing.
+					"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = NULL WHERE plaid_transaction_id = 'transaction-1'",
+				).run();
+				await decide("refund", true);
+				expect(await exclusion()).toEqual({
+					excluded: 1,
+					excluded_source: "plaid",
+				});
+			});
+
 			it.each(["user", "jev"])(
 				"leaves a %s exclusion alone when a person marks the credit income",
 				async (source) => {

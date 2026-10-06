@@ -552,11 +552,12 @@ export async function saveEdit(
 			" ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
 		),
 	);
-	// A credit a person newly marks as income counts as income, so an exclusion Plaid put on it (a
-	// transfer category) comes off, even though the panel sends its Exclude chip as it was drawn, on.
-	// This runs after the panel's own update: a chip the person turned off already made the exclusion
-	// theirs, and a person's or Jev's exclusion is never Plaid's to lift.
-	if (edit.income && current.income === 0)
+	// A credit a person newly marks as income, or newly reviews as a refund or other non-income credit,
+	// is theirs to count (decision 70), so an exclusion Plaid put on it (a transfer category) comes off,
+	// even though the panel sends its Exclude chip as it was drawn, on. This runs after the panel's own
+	// update: a chip the person turned off already made the exclusion theirs, and a person's or Jev's
+	// exclusion is never Plaid's to lift.
+	if ((edit.income && current.income === 0) || creditReviewByUser)
 		statements.push(
 			gated(
 				`UPDATE transactions SET excluded = 0, excluded_source = NULL, updated_by = ?, updated_at = datetime('now')
