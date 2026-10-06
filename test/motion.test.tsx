@@ -1,8 +1,10 @@
 /** @jsxImportSource hono/jsx */
-import { exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { env, exports } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
 import design from "../DESIGN.md?raw";
 import toastSource from "../public/js/toast.js?raw";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { resetDemo } from "../src/demo/reset";
 import { DURATION_TOKENS } from "../src/design-system/tokens";
 import css from "../src/styles/app.css?raw";
 import { BottomSheet } from "../src/views/bottom-sheet";
@@ -336,6 +338,18 @@ describe("the sheet and the switch", () => {
 		expect(out).not.toMatch(/\sstyle=|<script/);
 	});
 
+	it("draws a sheet that is already open with neither class, and nothing else changes", () => {
+		const props = { labelledBy: "t", closeHref: "/", children: "x" };
+		const playing = String(BottomSheet(props));
+		const still = String(BottomSheet({ ...props, still: true }));
+		expect(still).not.toMatch(/\bfade-in\b|\bsheet-panel\b/);
+		expect(still).toContain('role="dialog"');
+		// The same sheet in the same place: only the two motion classes are gone.
+		expect(still).toBe(
+			playing.replace("fade-in ", "").replace("sheet-panel ", ""),
+		);
+	});
+
 	it("slides the knob and swaps the tones in 150 ms ease-out, from classes in app.css", () => {
 		for (const part of [".switch-track", ".switch-knob"]) {
 			expect(decl(part, "transition-duration"), part).toBe(
@@ -358,6 +372,170 @@ describe("the sheet and the switch", () => {
 		expect(out).toMatch(/class="[^"]*\bswitch-track\b/);
 		expect(out).toMatch(/class="[^"]*\bswitch-knob\b/);
 		expect(out).not.toMatch(/duration-|motion-reduce:transition/);
+	});
+});
+
+describe("a sheet that is already open stays still", () => {
+	// The sheet's arrival (fade-in on the backdrop, sheet-panel on the sheet) is a class on the element,
+	// so any swap that draws the open sheet again would play it again: a field's error, the delete
+	// question and Add a part would each look like the sheet closing and opening, and the rise would
+	// drown the field's own shake. Opening it plays; drawing it again does not.
+	const BASE = "http://tally.test";
+	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
+
+	async function send(
+		path: string,
+		fields?: Record<string, string>,
+		headers: Record<string, string> = {},
+	) {
+		const res = await exports.default.fetch(BASE + path, {
+			method: fields ? "POST" : "GET",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				...(fields
+					? { "content-type": "application/x-www-form-urlencoded" }
+					: {}),
+				...headers,
+			},
+			body: fields ? new URLSearchParams(fields) : undefined,
+		});
+		return { res, html: await res.text() };
+	}
+	/** Whether the page has a sheet, and which of its two arrival classes it carries. */
+	function sheetIn(html: string) {
+		const sheet = html.match(/<section [^>]*role="dialog"[^>]*>/)?.[0];
+		const backdrop = html.match(
+			/<a [^>]*aria-label="Close"[^>]*bg-ink\/30[^>]*>/,
+		)?.[0];
+		return {
+			open: sheet !== undefined && backdrop !== undefined,
+			panel: /\bsheet-panel\b/.test(sheet ?? ""),
+			fade: /\bfade-in\b/.test(backdrop ?? ""),
+		};
+	}
+	const PLAYS = { open: true, panel: true, fade: true };
+	const STILL = { open: true, panel: false, fade: false };
+
+	const firstTransaction = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id IS NULL AND is_split = 0 AND flag_income = 0 AND amount_cents > 0 LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+	const addCash = async () => {
+		await send("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "20.45",
+			merchant: "Quiet market",
+			category: "1",
+			back: "/transactions",
+		});
+		return (
+			await env.DB.prepare(
+				"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Quiet market'",
+			).first<{ id: number }>()
+		)?.id as number;
+	};
+
+	it("opens Home's budget sheet with the motion, and draws it still after a refused amount", async () => {
+		expect(sheetIn((await send("/budget/1")).html)).toEqual(PLAYS);
+		const refused = await send("/budget/1", { budget: "abc" });
+		expect(refused.res.status).toBe(422);
+		expect(sheetIn(refused.html)).toEqual(STILL);
+	});
+
+	it("opens Add cash with the motion, and draws it still after a field's error", async () => {
+		expect(sheetIn((await send("/transactions/cash/new")).html)).toEqual(PLAYS);
+		const refused = await send("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "",
+			merchant: "",
+			category: "1",
+		});
+		expect(refused.res.status).toBe(422);
+		expect(sheetIn(refused.html)).toEqual(STILL);
+	});
+
+	it("opens the edit panel with the motion, and draws it still after a field's error", async () => {
+		const id = await firstTransaction();
+		expect(sheetIn((await send(`/transactions/${id}`)).html)).toEqual(PLAYS);
+		const refused = await send(`/transactions/${id}`, {
+			merchant: "x".repeat(200),
+			back: "/transactions",
+		});
+		expect(refused.res.status).toBe(422);
+		expect(sheetIn(refused.html)).toEqual(STILL);
+	});
+
+	it("draws the edit panel still for the delete question, and again when Keep it brings the panel back", async () => {
+		const id = await addCash();
+		const question = await send(`/transactions/${id}/delete`, {
+			back: "/transactions",
+		});
+		expect(question.html).toContain("Delete Quiet market, $20.45?");
+		expect(sheetIn(question.html)).toEqual(STILL);
+		// Keep it is a GET of the panel's own address, from the page that already shows it.
+		const keep = await send(`/transactions/${id}`, undefined, {
+			"HX-Current-URL": `${BASE}/transactions/${id}?month=all`,
+		});
+		expect(sheetIn(keep.html)).toEqual(STILL);
+		// A tap on the row, from the list, is the panel opening.
+		const open = await send(`/transactions/${id}`, undefined, {
+			"HX-Current-URL": `${BASE}/transactions`,
+		});
+		expect(sheetIn(open.html)).toEqual(PLAYS);
+		// Without the header (a link, a reload) the panel arrives like any page.
+		const reload = await exports.default.fetch(`${BASE}/transactions/${id}`);
+		expect(sheetIn(await reload.text())).toEqual(PLAYS);
+	});
+
+	it("opens the split sheet with the motion, and draws it still for Add a part and for an error", async () => {
+		const id = await firstTransaction();
+		expect(sheetIn((await send(`/transactions/${id}/split`)).html)).toEqual(
+			PLAYS,
+		);
+		const parts = {
+			back: "/transactions",
+			part_category: "1",
+			part_amount: "1.00",
+		};
+		const added = await send(`/transactions/${id}/split`, {
+			...parts,
+			add: "1",
+		});
+		expect(added.res.status).toBe(200);
+		expect(sheetIn(added.html)).toEqual(STILL);
+		const refused = await send(`/transactions/${id}/split`, parts);
+		expect(refused.res.status).toBe(422);
+		expect(sheetIn(refused.html)).toEqual(STILL);
+	});
+
+	it("opens a bill's sheet with the motion, and draws it still after a field's error", async () => {
+		expect(sheetIn((await send("/bills/new")).html)).toEqual(PLAYS);
+		const refused = await send("/bills", {
+			name: "",
+			amount: "",
+			due_day: "",
+			frequency: "monthly",
+		});
+		expect(refused.html).toContain("Enter a name.");
+		expect(sheetIn(refused.html)).toEqual(STILL);
+	});
+
+	it("opens Set category with the motion, and draws it still when its Save is refused", async () => {
+		const id = await firstTransaction();
+		const open = await send("/transactions/select/category", {
+			ids: String(id),
+			back: "/transactions",
+		});
+		expect(sheetIn(open.html)).toEqual(PLAYS);
+		const refused = await send("/transactions/select/category/save", {
+			ids: String(id),
+			back: "/transactions",
+		});
+		expect(refused.res.status).toBe(422);
+		expect(sheetIn(refused.html)).toEqual(STILL);
 	});
 });
 
@@ -471,6 +649,8 @@ describe("the catalog and DESIGN.md", () => {
 		expect(sheet).toContain(
 			"Reduced motion shows the sheet and backdrop at once",
 		);
+		// It plays when it opens, not when a swap draws the open sheet again.
+		expect(sheet).toContain("It plays only when it opens");
 		const toast = text(section(html, "toast"));
 		expect(toast).toMatch(/Motion\s+It fades in and rises 8 px in 150 ms/);
 		expect(toast).toContain("DISPLAY_MS");
@@ -491,6 +671,7 @@ describe("the catalog and DESIGN.md", () => {
 		);
 		expect(design).toMatch(/\| Layout \|[^\n]*@view-transition/);
 		expect(design).toMatch(/\| Switch \|[^\n]*knob slides in 150 ms/);
+		expect(design).toMatch(/\| BottomSheet \|[^\n]*only when it opens/);
 		expect(design).toMatch(/- Motion:[^\n]*decision 76[^\n]*[Dd]ecision 80/);
 		expect(design).toMatch(/- Motion:[^\n]*toast[^\n]*DISPLAY_MS/);
 	});

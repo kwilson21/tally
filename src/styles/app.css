@@ -150,7 +150,8 @@ html:not(.js) [data-money-js] {
  * each a class here because the CSP forbids style attributes, and each stilled by the reduced-motion
  * block below, which shows the end state with nothing moving. A rule names a duration token above,
  * never a length. The switch is a transition (the checkbox's state is the change); the others play
- * once when the element arrives. A swap that brings a new sheet in plays the rise again.
+ * once when the element arrives. A sheet plays only when it opens: BottomSheet leaves the classes off
+ * (`still`) when a swap draws the open sheet again, so an error never looks like it closing and opening.
  */
 @keyframes fade-in {
 	from {
