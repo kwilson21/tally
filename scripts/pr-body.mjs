@@ -8,6 +8,8 @@ export const PAGES = [
 	// Home in Adjust mode (#94): − and + on every budgeted row.
 	{ name: "home-adjust", path: "/?adjust=1" },
 	{ name: "transactions", path: "/transactions" },
+	// The demo's list as the bank sends it (#197, P44 A): bank text, no categories, no marks.
+	{ name: "transactions-raw", path: "/transactions?raw=1" },
 	{ name: "transactions-add-cash", path: "/transactions/cash/new" },
 	{ name: "transactions-organize", path: "/transactions/organize" },
 	{

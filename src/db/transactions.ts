@@ -137,6 +137,8 @@ export async function listTransactions(
 		args.push(f.account);
 	}
 	if (f.uncategorized) where.push(NEEDS_CATEGORY);
+	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
+	if (f.raw) where.push("t.parent_id IS NULL");
 	const shown = SHOW_SQL[f.show];
 	if (shown) where.push(shown);
 	if (f.q) {

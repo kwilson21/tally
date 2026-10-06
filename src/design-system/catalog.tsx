@@ -65,6 +65,7 @@ import {
 	TrendsScreen,
 	TrendsTop,
 } from "../views/trends";
+import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 import {
 	ADJUST_ROWS,
@@ -460,6 +461,25 @@ const FILTER_SELECT_SPEC: UseSpecText = {
 		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. A saved link to an account that's since been removed keeps it as the choice, named by its id (“account 999”), so the pill shows the filter the list is using. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
 	words:
 		"Month: {October} · All months. Category: All categories · {the household's categories}. Account: All accounts · {Chase Card ••9921} · {Cash} · {Old Savings ••3340 · Disconnected}. Show: All · Spending · Income · Refunds · Excluded.",
+};
+
+// The demo's two view links' use spec (decisions 73 and 79, P44 A): every line answered before the owner signs it off.
+const VIEW_LINKS_SPEC: UseSpecText = {
+	purpose:
+		"Let a visitor to the demo see the same Transactions list as the bank sends it, next to what Tally made of it, so they can see what Tally did for them. It exists only in the demo.",
+	affordance:
+		"Two links in words under the page title with a dot between them: “Tidied by Tally · Straight from the bank”. The one you're on is ink and semibold with no underline; the other is a terracotta link, as every link is. Each is 44px tall.",
+	states:
+		"Current: ink, semibold, not underlined, and aria-current=“page”, so the state is also in words for a screen reader, not weight and color alone. The other: terracotta. Hover: no change (touch has none). Focus: the focus-visible ring. Pressed: the page loads. Disabled, loading, done and error: not applicable, since a link either goes or it doesn't.",
+	feedback:
+		"A link loads the same page in the other view. The rows change, and the result count, which is the page's live line, ends “, as the bank sends them” (or stops saying it), so it always says which view is shown. The raw view adds one muted line under the count. Nothing else changes: Home's numbers never do. Search and filters stay as they were, and paging starts again at the first page. A filter change updates both links, so they never name a stale filter.",
+	input:
+		"Touch: each link is 44px tall, and the dot and the gap keep the two apart. Keyboard: Tab to each, Enter follows it. Screen reader: “View, navigation”, then “Tidied by Tally, current page, link” and “Straight from the bank, link”; the dot is hidden from it.",
+	motion: "None added. Reduced motion changes nothing.",
+	edges:
+		"Demo only: the family app has neither the links nor the view, and ignores ?raw=1. No JavaScript: they are plain links. On a 320px phone both still fit on one line, and larger text wraps them onto a second line rather than cutting them off. A search or filter in the address stays when you switch. The note under the count names the demo's own transfer to Savings and paycheck, because that is what its data has.",
+	words:
+		"View (the nav's name) · Tidied by Tally · Straight from the bank · the count ends “, as the bank sends them” · “No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.” Never the name of the AI behind it.",
 };
 
 // The time zone row's use spec (decision 72, P35 A): every line answered before the owner signs it off.
@@ -1406,6 +1426,41 @@ function Controls() {
 					</div>
 				</State>
 				<UseSpec spec={FILTER_SELECT_SPEC} />
+			</Specimen>
+			<Specimen
+				id="view-links"
+				title="ViewLinks"
+				tier="visual"
+				components={["ViewLinks"]}
+				sentence="The demo's “See it without AI” (decisions 73 and 79, P44 A): two plain links under the Transactions title, “Tidied by Tally · Straight from the bank”, that switch the list between what Tally made of it and the bank's own data. The current one is ink and semibold; the other is a terracotta link. They are real links to the demo's Transactions."
+			>
+				<State label="Tally's list: “Tidied by Tally” is current">
+					<ViewLinks
+						id="ds-view-made"
+						current="made"
+						madeHref="/transactions"
+						bankHref="/transactions?raw=1"
+					/>
+				</State>
+				<State label="The bank's list (?raw=1): “Straight from the bank” is current">
+					<ViewLinks
+						id="ds-view-bank"
+						current="bank"
+						madeHref="/transactions"
+						bankHref="/transactions?raw=1"
+					/>
+				</State>
+				<State label="On a narrow phone (320px): both links still fit on one line">
+					<div class="w-[320px] max-w-full">
+						<ViewLinks
+							id="ds-view-narrow"
+							current="bank"
+							madeHref="/transactions"
+							bankHref="/transactions?raw=1"
+						/>
+					</div>
+				</State>
+				<UseSpec spec={VIEW_LINKS_SPEC} />
 			</Specimen>
 			<Specimen
 				id="switch"

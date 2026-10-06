@@ -34,13 +34,17 @@ export type Filters = {
 	uncategorized: boolean;
 	/** 1-based page of results. Changing any filter starts again at page 1. */
 	page: number;
+	/** The demo's "Straight from the bank" view (`?raw=1`, spec §8.6): the list as the bank sends it. Never set outside the demo. */
+	raw: boolean;
 };
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+/** `allowRaw` is true only in the demo: the family app ignores `?raw=1`. */
 export function parseFilters(
 	params: URLSearchParams,
 	thisMonth: string,
+	allowRaw = false,
 ): Filters {
 	const month = params.get("month") ?? "";
 	const category = Number(params.get("category"));
@@ -60,6 +64,7 @@ export function parseFilters(
 				: "all",
 		uncategorized: params.get("uncategorized") === "1",
 		page: Number.isInteger(page) && page > 1 ? page : 1,
+		raw: allowRaw && params.get("raw") === "1",
 	};
 }
 
@@ -73,6 +78,7 @@ export function filtersToQuery(f: Filters, thisMonth: string): string {
 	if (f.uncategorized) p.set("uncategorized", "1");
 	if (f.show !== "all") p.set("show", f.show);
 	if (f.page > 1) p.set("page", String(f.page));
+	if (f.raw) p.set("raw", "1");
 	return p.toString();
 }
 
