@@ -2,6 +2,8 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { SHOW_LABELS, SHOWS } from "../src/transactions/filters";
+import { FilterSelect } from "../src/views/filter-select";
 
 async function get(path: string, headers: Record<string, string> = {}) {
 	const res = await exports.default.fetch(`http://tally.test${path}`, {
@@ -358,6 +360,51 @@ describe("GET /transactions: Account and Show", () => {
 		expect(countOf(first)).toMatch(
 			/in Checking ••1234 \(First Harbor Bank\), across all months$/,
 		);
+	});
+
+	it("draws all four choices with the FilterSelect the catalog shows", async () => {
+		const { html } = await get("/transactions?month=all&account=4&show=income");
+		const drawn = (
+			id: string,
+			name: string,
+			label: string,
+			options: unknown[],
+			selected: string | number | null,
+		) =>
+			String(
+				FilterSelect({
+					id,
+					name,
+					label,
+					options: options as { value: string | number; label: string }[],
+					selected,
+				}),
+			);
+		// The Show choice is the one whose options the page fully decides.
+		expect(html).toContain(
+			drawn(
+				"show",
+				"show",
+				"Show",
+				SHOWS.map((s) => ({ value: s, label: SHOW_LABELS[s] })),
+				"income",
+			),
+		);
+		for (const [id, label] of [
+			["month", "Month"],
+			["category", "Category"],
+			["account", "Account"],
+			["show", "Show"],
+		]) {
+			expect(html).toContain(
+				`<label for="${id}" class="sr-only">${label}</label>`,
+			);
+			expect(html).toMatch(
+				new RegExp(
+					`<select id="${id}" name="${id}" class="min-h-11 max-w-full rounded-full border border-rule bg-paper px-4 text-base text-ink">`,
+				),
+			);
+		}
 	});
 
 	it("lists only that account's rows and the count names it", async () => {

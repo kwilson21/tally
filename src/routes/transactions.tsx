@@ -48,6 +48,7 @@ import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
+import { FilterSelect } from "../views/filter-select";
 import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
@@ -74,10 +75,6 @@ function byDay(rows: ListRow[]): [string, ListRow[]][] {
 	}
 	return groups;
 }
-
-// max-w-full: a long account name shortens inside its pill rather than pushing the page sideways.
-const pill =
-	"min-h-11 max-w-full rounded-full border border-rule bg-paper px-4 text-base text-ink";
 
 type ListOptions = {
 	/** The edit sheet to show over the list, given the active categories and the household's date. */
@@ -363,51 +360,52 @@ async function renderList(
 						)}
 					</FormField>
 					<div class="flex flex-wrap gap-2">
-						<label for="month" class="sr-only">
-							Month
-						</label>
-						<select id="month" name="month" class={pill}>
-							{months.map((m) => (
-								<option value={m} selected={filters.month === m}>
-									{monthLabel(m, today)}
-								</option>
-							))}
-							<option value="all" selected={filters.month === "all"}>
-								All months
-							</option>
-						</select>
-						<label for="category" class="sr-only">
-							Category
-						</label>
-						<select id="category" name="category" class={pill}>
-							<option value="">All categories</option>
-							{categories.results.map((cat) => (
-								<option value={cat.id} selected={filters.category === cat.id}>
-									{cat.name}
-								</option>
-							))}
-						</select>
-						<label for="account" class="sr-only">
-							Account
-						</label>
-						<select id="account" name="account" class={pill}>
-							<option value="">All accounts</option>
-							{accounts.map((a) => (
-								<option value={a.id} selected={filters.account === a.id}>
-									{a.disconnected ? `${a.label} · Disconnected` : a.label}
-								</option>
-							))}
-						</select>
-						<label for="show" class="sr-only">
-							Show
-						</label>
-						<select id="show" name="show" class={pill}>
-							{SHOWS.map((s) => (
-								<option value={s} selected={filters.show === s}>
-									{SHOW_LABELS[s]}
-								</option>
-							))}
-						</select>
+						<FilterSelect
+							id="month"
+							name="month"
+							label="Month"
+							options={[
+								...months.map((m) => ({
+									value: m,
+									label: monthLabel(m, today),
+								})),
+								{ value: "all", label: "All months" },
+							]}
+							selected={filters.month}
+						/>
+						<FilterSelect
+							id="category"
+							name="category"
+							label="Category"
+							options={[
+								{ value: "", label: "All categories" },
+								...categories.results.map((cat) => ({
+									value: cat.id,
+									label: cat.name,
+								})),
+							]}
+							selected={filters.category}
+						/>
+						<FilterSelect
+							id="account"
+							name="account"
+							label="Account"
+							options={[
+								{ value: "", label: "All accounts" },
+								...accounts.map((a) => ({
+									value: a.id,
+									label: a.disconnected ? `${a.label} · Disconnected` : a.label,
+								})),
+							]}
+							selected={filters.account}
+						/>
+						<FilterSelect
+							id="show"
+							name="show"
+							label="Show"
+							options={SHOWS.map((s) => ({ value: s, label: SHOW_LABELS[s] }))}
+							selected={filters.show}
+						/>
 					</div>
 					<div class="flex flex-wrap gap-2">
 						<Chip

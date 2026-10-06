@@ -32,6 +32,7 @@ import { EmptyState } from "../views/empty-state";
 import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
+import { FilterSelect } from "../views/filter-select";
 import { HomeTop } from "../views/home-top";
 import {
 	BillsDiagram,
@@ -420,6 +421,25 @@ const SWITCH_SPEC: UseSpecText = {
 		"A long name or line wraps beside the switch and never under it; the word and the track keep their width. With no muted line it is the name alone. No JavaScript: it's a plain checkbox that posts “on” when on and nothing when off, so the server reads a field left out as off, and the form always carries the whole group. At 320px the row still fits the name, word and track side by side.",
 	words:
 		"The label is the person's word for the feature (“Categories and exclusions”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Categories and exclusions on, income off.",
+};
+
+// The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
+const FILTER_SELECT_SPEC: UseSpecText = {
+	purpose:
+		"Let a person narrow a list by one thing: Transactions' Month, Category, Account and Show. Several sit side by side, and the list and its count follow each choice.",
+	affordance:
+		"A pill with a thin rule, the chosen option in ink and the browser's own arrow at its end, 44px tall. It is a real select, so a phone opens its own picker. It reads as a pill like a Chip, because it narrows the list the way a Chip does.",
+	states:
+		"Rest: the chosen option, or the first (“All categories”, “All accounts”, “All”) when none is chosen. Open: the browser's own list. Focus: the focus-visible ring, for the keyboard. Hover, pressed, disabled, loading and error: not applicable. The list swaps as the choice changes, and a choice that can't be made isn't offered.",
+	feedback:
+		"With JavaScript the list and its count swap in place a moment after a choice and the page's address follows, so the view can be shared. The count above the list names the choice (“12 transactions in Chase Card ••9921, October”), which is what a screen reader announces. Without JavaScript the Apply filters button submits the same form.",
+	input:
+		"Touch: the whole 44px pill. Keyboard: Tab to it, arrow keys or typing the first letters change it. Screen reader: “Account, combo box, Chase Card ••9921”; its label is read but never shown, since the chosen option already says what it is.",
+	motion: "None. The browser draws its own list.",
+	edges:
+		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. An option that is gone (an account removed) leaves the pill on its first option. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
+	words:
+		"Month: {October} · All months. Category: All categories · {the household's categories}. Account: All accounts · {Chase Card ••9921} · {Cash} · {Old Savings ••3340 · Disconnected}. Show: All · Spending · Income · Refunds · Excluded.",
 };
 
 // The time zone row's use spec (decision 72, P35 A): every line answered before the owner signs it off.
@@ -1214,6 +1234,133 @@ function Controls() {
 						</div>
 					</div>
 				</fieldset>
+			</Specimen>
+			<Specimen
+				id="filter-select"
+				title="FilterSelect"
+				tier="interactive"
+				components={["FilterSelect"]}
+				sentence="A pill-shaped choice that narrows a list: Transactions' Month, Category, Account and Show (P63 A, P64 B). A real select with a label only a screen reader hears."
+			>
+				<State label="Transactions' filter bar at rest: Month, Category, Account and Show (change one: it works here as on the page)">
+					<div class="flex max-w-3xl flex-wrap gap-2">
+						<FilterSelect
+							id="ds-filter-month"
+							name="ds-month"
+							label="Month"
+							options={[
+								{ value: "2026-10", label: "October" },
+								{ value: "2026-09", label: "September" },
+								{ value: "all", label: "All months" },
+							]}
+							selected="2026-10"
+						/>
+						<FilterSelect
+							id="ds-filter-category"
+							name="ds-category"
+							label="Category"
+							options={[
+								{ value: "", label: "All categories" },
+								{ value: 1, label: "Groceries" },
+								{ value: 2, label: "Eating Out" },
+							]}
+							selected={null}
+						/>
+						<FilterSelect
+							id="ds-filter-account"
+							name="ds-account"
+							label="Account"
+							options={[
+								{ value: "", label: "All accounts" },
+								{ value: 3, label: "Chase Card ••9921" },
+								{ value: 5, label: "Old Savings ••3340 · Disconnected" },
+								{ value: 4, label: "Cash" },
+							]}
+							selected={null}
+						/>
+						<FilterSelect
+							id="ds-filter-show"
+							name="ds-show"
+							label="Show"
+							options={[
+								{ value: "all", label: "All" },
+								{ value: "spending", label: "Spending" },
+								{ value: "income", label: "Income" },
+								{ value: "refunds", label: "Refunds" },
+								{ value: "excluded", label: "Excluded" },
+							]}
+							selected="all"
+						/>
+					</div>
+				</State>
+				<State label="With choices made: a category, an account and Show Income">
+					<div class="flex max-w-3xl flex-wrap gap-2">
+						<FilterSelect
+							id="ds-filter-month-set"
+							name="ds-month-set"
+							label="Month"
+							options={[
+								{ value: "2026-10", label: "October" },
+								{ value: "all", label: "All months" },
+							]}
+							selected="all"
+						/>
+						<FilterSelect
+							id="ds-filter-category-set"
+							name="ds-category-set"
+							label="Category"
+							options={[
+								{ value: "", label: "All categories" },
+								{ value: 1, label: "Groceries" },
+							]}
+							selected={1}
+						/>
+						<FilterSelect
+							id="ds-filter-account-set"
+							name="ds-account-set"
+							label="Account"
+							options={[
+								{ value: "", label: "All accounts" },
+								{ value: 3, label: "Chase Card ••9921" },
+							]}
+							selected={3}
+						/>
+						<FilterSelect
+							id="ds-filter-show-set"
+							name="ds-show-set"
+							label="Show"
+							options={[
+								{ value: "all", label: "All" },
+								{ value: "income", label: "Income" },
+							]}
+							selected="income"
+						/>
+					</div>
+				</State>
+				<State label="On a narrow phone (320px): a long account name shortens inside its pill and the pills wrap">
+					<div class="flex w-[320px] max-w-full flex-wrap gap-2">
+						<FilterSelect
+							id="ds-filter-month-narrow"
+							name="ds-month-narrow"
+							label="Month"
+							options={[{ value: "2026-10", label: "October" }]}
+							selected="2026-10"
+						/>
+						<FilterSelect
+							id="ds-filter-account-narrow"
+							name="ds-account-narrow"
+							label="Account"
+							options={[
+								{
+									value: 3,
+									label: "Chase Sapphire Preferred Rewards Credit Card ••9921",
+								},
+							]}
+							selected={3}
+						/>
+					</div>
+				</State>
+				<UseSpec spec={FILTER_SELECT_SPEC} />
 			</Specimen>
 			<Specimen
 				id="switch"
