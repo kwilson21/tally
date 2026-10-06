@@ -310,8 +310,12 @@ describe("GET /design-system in the demo", () => {
 		const section =
 			html.split('id="name-choices"')[1]?.split("</section>")[0] ?? "";
 		// Three states, each its own radio group, and nothing posts from the catalog.
-		const radios = [...section.matchAll(/<input[^>]*name="name_pick"[^>]*>/g)];
+		const radios = [...section.matchAll(/<input[^>]*type="radio"[^>]*>/g)];
 		expect(radios.length).toBeGreaterThanOrEqual(8);
+		const groups = [
+			...section.matchAll(/<input[^>]*type="radio"[^>]*name="([^"]+)"/g),
+		].map((m) => m[1]);
+		expect(new Set(groups).size).toBe(6);
 		const chosen = radios.filter((m) => /\schecked(\s|>|=)/.test(m[0]));
 		expect(chosen).toHaveLength(1);
 		expect(section).not.toContain("<form");
@@ -324,6 +328,28 @@ describe("GET /design-system in the demo", () => {
 			/<p id="ds-names-bank-source" class="text-sm text-muted">From your bank<\/p>/,
 		);
 		expect(section).toContain('role="alert"');
+		expect(section).toContain(
+			"Pick a name, keep the bank&#39;s, or type your own.",
+		);
+		expect(section).toMatch(/id="ds-names-error-own"[^>]*value=""/);
+		expect(section).not.toMatch(/name="ds-names-error"[^>]*checked/);
+		expect(html).toContain('name="ds-names-narrow"');
+		expect(html).toContain("320px");
+		expect(html).toContain(
+			"A very long guessed store name for the neighborhood market",
+		);
+		expect(html).toContain(
+			"A very long tidied name the bank sent for a neighborhood market",
+		);
+		expect(html).toContain(
+			"https://example.com/this-is-a-long-unbroken-name-for-the-bank",
+		);
+		expect(section).toContain('value="keep"');
+		expect(section).toContain("wrap-anywhere");
+		expect(section).toContain(
+			"A name typed here is used instead of any name above.",
+		);
+		expect(section).toContain('aria-describedby="ds-names-one-own-hint"');
 		for (const [, label] of USE_SPEC_PARTS) {
 			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
 		}
@@ -331,6 +357,9 @@ describe("GET /design-system in the demo", () => {
 		expect(section).not.toMatch(/jev|workers ai/i);
 		expect(design).toMatch(
 			/\| NameChoices \|[^\n]*Tally's guess[^\n]*Or your own[^\n]*without JavaScript/,
+		);
+		expect(design).toContain(
+			"A name typed here is used instead of any name above. For all 9 transactions from this merchant.",
 		);
 	});
 
@@ -394,8 +423,9 @@ describe("GET /design-system in the demo", () => {
 			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
 		expect(section).toContain("Tally&#39;s guess: ");
 		// Two guessed names and one the bank sent: all dashed, only the guesses with the icon.
-		expect(section.match(/decoration-dashed/g)).toHaveLength(3);
-		expect(section.match(/Tally&#39;s guess: /g)).toHaveLength(2);
+		expect(section.match(/decoration-dashed/g)).toHaveLength(4);
+		expect(section.match(/Tally&#39;s guess: /g)).toHaveLength(3);
+		expect(section).toContain("Dashed names are suggestions.");
 		expect(section.match(/From your bank: /g)).toHaveLength(1);
 		expect(design).toMatch(
 			/\| TransactionRow \|[^\n]*sparkles icon[^\n]*dashed underline/,
@@ -621,6 +651,15 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('src="/js/ds.js"');
 		expect(html).toMatch(/data-ds-toast="success"/);
 		expect(html).toMatch(/data-ds-toast="error"/);
+	});
+
+	it("shows the Transactions heading wrapping beside Select and the long name in the Toast specimen", async () => {
+		const { html } = await get("/design-system");
+		expect(design).toMatch(
+			/\| Page title \/ month \|[^\n]*Transactions page heading can wrap beside Select\./,
+		);
+		const toast = html.split('id="toast"')[1]?.split("</section>")[0] ?? "";
+		expect(toast).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV");
 	});
 
 	it("shows a disconnected bank, and DESIGN.md's BankGroup row mentions it", async () => {

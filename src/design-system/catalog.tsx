@@ -21,7 +21,11 @@ import { BankGroup } from "../views/bank-group";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
-import { BillRow, BillStatusHeading } from "../views/bill-row";
+import {
+	BillMonthlyTotal,
+	BillRow,
+	BillStatusHeading,
+} from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
@@ -488,12 +492,12 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 	feedback:
 		"Choosing changes the pill at once. Saving swaps the panel back to the list with a toast that says what was done (“Renamed 9 transactions to Blue Bottle Coffee”, “Kept the bank's name for 9 transactions”), the announcer repeats it, and focus returns to the row. In Settings the next merchant comes up with the toast and the count left, and focus moves to the bank's text above it. Without JavaScript Save posts and redirects.",
 	input:
-		"Touch: every pill and the field are 44px tall. Keyboard: Tab to the group, the arrow keys move between the pills, Tab on to the field. Screen reader: “Name, group”; each suggestion reads “Blue Bottle Coffee, radio button, not checked, Tally's guess” (or “From your bank”); the Keep pill reads without it; then “Or your own, edit”, then the count.",
+		"Touch: every pill and the field are 44px tall. Keyboard: Tab to the group, the arrow keys move between the pills, Tab on to the field. Screen reader: “Name, group”; each suggestion reads “Blue Bottle Coffee, radio button, not checked, Tally's guess” (or “From your bank”); the Keep pill reads without it; then “Or your own, edit”, described by the muted line that says a typed name replaces any name above and how many transactions it is for.",
 	motion: "None added. Reduced motion changes nothing.",
 	edges:
-		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. With one transaction the muted line says “For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
+		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. The muted line under the field says “A name typed here is used instead of any name above.” followed by how many transactions the name is for. With one transaction it says “A name typed here is used instead of any name above. For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
 	words:
-		"Name · Tally's guess · From your bank · Why? · Keep “{Blue bottle cof}” · Or your own · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+		"Name · Tally's guess · From your bank · Why? · Keep “{Blue bottle cof}” · Or your own · A name typed here is used instead of any name above. · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
 };
 
 const DETAIL_ROW_SPEC: UseSpecText = {
@@ -930,9 +934,22 @@ function Rows() {
 				id="bill-row"
 				title="BillRow and bill status heading"
 				tier="visual"
-				components={["BillRow", "BillStatusHeading"]}
-				sentence="A bill group names its status with an icon and words; each bill shows its category, name, status sentence and amount, and asks “Price changed?” when a payment came at another price."
+				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each group ends with its total, and each bill shows its category, name, status sentence and amount."
 			>
+				<State label="Bills totals">
+					<div class="max-w-xl">
+						<BillMonthlyTotal
+							monthlyCents={153000}
+							stillToPayCents={61000}
+							month="2026-10"
+						/>
+						<div class="mt-4">
+							<BillStatusHeading status="overdue" totalCents={60000} />
+							<BillStatusHeading status="upcoming" totalCents={18800} />
+						</div>
+					</div>
+				</State>
 				<State label="Overdue">
 					<div class="max-w-xl">
 						<BillStatusHeading status="overdue" />
@@ -1126,6 +1143,21 @@ function Rows() {
 				components={["TransactionRow"]}
 				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A pending one adds “Pending” to the same caption line in muted words, with no new tag or color (P34 A, decision 72). A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it (P29 A, P87 B, decisions 64 and 80). Here the rows don't link anywhere."
 			>
+				<State label="Above the list, once only while a suggested name is shown">
+					<div class="max-w-xl">
+						<p class="flex flex-wrap items-center gap-x-1 text-sm text-muted">
+							Dashed names are suggestions.
+							<WhyLink section="names" topic="suggested name" />
+						</p>
+						<ul class="max-w-xl">
+							{TRANSACTION_ROWS.filter((state) => state.row.nameSuggested)
+								.slice(0, 1)
+								.map((state) => (
+									<TransactionRow row={state.row} />
+								))}
+						</ul>
+					</div>
+				</State>
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
@@ -1723,6 +1755,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-three"
+							radioName="ds-names-three"
 							names={["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"]}
 							source="tally"
 							tidied="Blue bottle cof"
@@ -1734,6 +1767,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-one"
+							radioName="ds-names-one"
 							names={["DoorDash"]}
 							source="tally"
 							tidied="Doordash taco"
@@ -1746,6 +1780,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-bank"
+							radioName="ds-names-bank"
 							names={["Blue Bottle Coffee"]}
 							source="bank"
 							tidied="Blue bottle cof"
@@ -1753,16 +1788,38 @@ function Controls() {
 						/>
 					</div>
 				</State>
-				<State label="With an error in the field">
+				<State label="Nothing chosen, field empty, and the choice error under it">
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-error"
+							radioName="ds-names-error"
 							names={["Craft Supply Co", "Craft Supply"]}
 							source="tally"
 							tidied="Craftsupply"
 							count={2}
-							own="A very long name"
-							error="Keep the name under 80 characters."
+							error="Pick a name, keep the bank's, or type your own."
+						/>
+					</div>
+				</State>
+				<State label="On a narrow phone (320px): long names wrap inside their chips">
+					<div class="w-[320px] max-w-full">
+						<NameChoices
+							id="ds-names-narrow"
+							radioName="ds-names-narrow"
+							names={[
+								"A very long guessed store name for the neighborhood market",
+							]}
+							source="tally"
+							tidied="A very long tidied name the bank sent for a neighborhood market"
+							count={9}
+						/>
+						<NameChoices
+							id="ds-names-unbroken"
+							radioName="ds-names-unbroken"
+							names={["The Store"]}
+							source="bank"
+							tidied="https://example.com/this-is-a-long-unbroken-name-for-the-bank"
+							count={1}
 						/>
 					</div>
 				</State>
@@ -2005,7 +2062,7 @@ function Controls() {
 				title="MoneyInput"
 				tier="interactive"
 				components={["MoneyInput"]}
-				sentence="The owner's hero amount from the original app: ±$1 round buttons, ▲▼ cent arrows inside the field, Round-to and Last-month chips. Try the buttons, the chips and the ↑ ↓ keys."
+				sentence="The owner's hero amount from the original app: ±$1 round buttons, ▲▼ cent arrows inside the field, Round-to, Last-month and 3-month-average chips. The average appears with three finished months and positive spending. Try the buttons, the chips and the ↑ ↓ keys."
 			>
 				{MONEY_STATES.map((s) => (
 					<State label={s.label}>
@@ -2055,6 +2112,7 @@ function Feedback() {
 				id="toast"
 				title="Toast"
 				tier="interactive"
+				components={["Toast"]}
 				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds, fading in and out, and the announcer reads it. An error toast speaks as an alert and leads with the alert icon in the over token, so it is never colour alone; the same toast appears, over an open sheet too, when a request fails (the connection drops or the server sends a 500). These buttons send the same events."
 			>
 				<div class="flex flex-wrap gap-3">
@@ -2065,6 +2123,14 @@ function Feedback() {
 						data-ds-message="Saved Groceries' budget."
 					>
 						Show a saved toast
+					</Button>
+					<Button
+						type="button"
+						kind="secondary"
+						data-ds-toast="success"
+						data-ds-message="ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+					>
+						Show a 48-character name
 					</Button>
 					<Button
 						type="button"

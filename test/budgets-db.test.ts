@@ -7,6 +7,8 @@ import {
 	lastMonthSpentCents,
 	nudgeBudget,
 	setBudget,
+	THREE_MONTH_AVERAGE_SQL,
+	threeMonthAverageSpentCents,
 } from "../src/db/budgets";
 import { settingsCategories } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
@@ -16,6 +18,80 @@ const MONTH = "2026-09";
 
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
+});
+
+describe("threeMonthAverageSpentCents", () => {
+	async function history(firstDate: string) {
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM transactions"),
+			db
+				.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, credit_reviewed, refund_of_id) VALUES
+				(800, 1, ?, 60000, 'FIRST', 1, 'user', NULL, NULL),
+				(801, 1, ?, 65000, 'SECOND', 1, 'user', NULL, NULL),
+				(802, 1, ?, 70000, 'THIRD', 1, 'user', NULL, NULL),
+				(803, 1, '2026-10-01', 75000, 'FOURTH', 1, 'user', NULL, NULL)`)
+				.bind(firstDate, "2026-08-01", "2026-09-01"),
+		]);
+	}
+
+	it("requires three whole months and then includes a part first month only after it leaves the window", async () => {
+		await history("2026-07-12");
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-10")).toBeNull();
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(70000);
+	});
+
+	it("counts a refund in its purchase month", async () => {
+		await history("2026-07-01");
+		await db
+			.prepare(`INSERT INTO transactions
+			(id, account_id, date, amount_cents, raw_name, category_id, category_source, credit_reviewed, refund_of_id)
+			VALUES (804, 1, '2026-10-04', -10000, 'REFUND', 1, 'user', 1, 802)`)
+			.run();
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(66667);
+	});
+
+	it("counts a linked bill payment in its occurrence month when dated later", async () => {
+		await history("2026-07-01");
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(95,'Moved',1234,30,'monthly','MOVED')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 805,id,'2026-09-02',1234,'MOVED',1,'user' FROM accounts LIMIT 1",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(95,'2026-08',805,'user','linked')",
+			),
+		]);
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(70411);
+	});
+
+	it("does not let years of older spending change the three-month result", async () => {
+		await history("2020-01-01");
+		const before = await threeMonthAverageSpentCents(db, 1, "2026-11");
+		await db
+			.prepare(
+				"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,category_source) SELECT id,'2010-01-01',999999,'OLD HISTORY',1,'user' FROM accounts LIMIT 1",
+			)
+			.run();
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(before);
+	});
+
+	it("uses the transaction date and refund indexes", async () => {
+		const { results } = await db
+			.prepare(`EXPLAIN QUERY PLAN ${THREE_MONTH_AVERAGE_SQL}`)
+			.bind("2026-08", "2026-09", "2026-10", "2026-07-01", "2026-12-01", 1)
+			.all<{ detail: string }>();
+		const plan = results.map((row) => row.detail).join("\n");
+		expect(plan).toMatch(
+			/SEARCH transactions USING (COVERING )?INDEX transactions_date/,
+		);
+		expect(plan).toMatch(
+			/SEARCH transactions USING (COVERING )?INDEX transactions_refund_of_id_idx/,
+		);
+	});
 });
 
 describe("setBudget", () => {

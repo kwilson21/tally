@@ -10,6 +10,7 @@ import {
 	lastMonthSpentCents,
 	nudgeBudget,
 	setBudget,
+	threeMonthAverageSpentCents,
 } from "../db/budgets";
 import { loadMonth } from "../db/month";
 import { centsToAmount, formatCents } from "../money";
@@ -284,6 +285,7 @@ function BudgetSheet({
 	error,
 	spentCents,
 	lastMonthCents,
+	averageCents,
 	month: monthPeriod,
 }: {
 	category: BudgetCategory;
@@ -291,6 +293,7 @@ function BudgetSheet({
 	error?: string;
 	spentCents: number;
 	lastMonthCents: number;
+	averageCents: number | null;
 	/** The household's current month, YYYY-MM. */
 	month: string;
 }) {
@@ -345,6 +348,7 @@ function BudgetSheet({
 					value={value}
 					error={error}
 					lastMonthCents={lastMonthCents}
+					averageCents={averageCents}
 					autofocus
 				/>
 				<div class="mt-2 grid grid-cols-2 gap-3">
@@ -393,6 +397,11 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 	if (!active) return c.notFound();
 	const { category, today, month } = active;
 	const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
+	const average = await threeMonthAverageSpentCents(
+		c.env.DB,
+		category.id,
+		month,
+	);
 	return renderHome(c, today, {
 		sheet: (spent) => (
 			<BudgetSheet
@@ -404,6 +413,7 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 				}
 				spentCents={spent(category.id)}
 				lastMonthCents={lastMonth}
+				averageCents={average}
 				month={month}
 			/>
 		),
@@ -419,6 +429,11 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 	const parsed = parseBudgetAmount(typed);
 	if (!parsed.ok) {
 		const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
+		const average = await threeMonthAverageSpentCents(
+			c.env.DB,
+			category.id,
+			month,
+		);
 		return renderHome(c, today, {
 			status: 422,
 			sheet: (spent) => (
@@ -428,6 +443,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 					error={parsed.error}
 					spentCents={spent(category.id)}
 					lastMonthCents={lastMonth}
+					averageCents={average}
 					month={month}
 				/>
 			),

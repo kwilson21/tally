@@ -74,6 +74,7 @@ function SourceLine({ id, source }: { id: string; source: NameSource }) {
  */
 export function NameChoices({
 	id,
+	radioName = "name_pick",
 	names,
 	source,
 	tidied,
@@ -81,9 +82,12 @@ export function NameChoices({
 	picked,
 	own = "",
 	error,
+	focusFirst = false,
 }: {
 	/** Unique on the page: the radio group's and the field's ids start with it. */
 	id: string;
+	/** Override only for isolated, non-form catalog specimens. */
+	radioName?: string;
 	/** The suggested names, at most three. */
 	names: string[];
 	/** Where they came from: Tally guessed them, or the bank sent Plaid's name. */
@@ -97,20 +101,25 @@ export function NameChoices({
 	/** What was typed in the field. */
 	own?: string;
 	error?: string;
+	focusFirst?: boolean;
 }) {
 	const sourceId = `${id}-source`;
 	return (
-		<fieldset class="flex flex-col gap-2">
+		<fieldset
+			class="flex flex-col gap-2"
+			aria-describedby={error ? `${id}-own-error` : undefined}
+		>
 			<legend class="text-base text-ink">Name</legend>
 			<div class="flex flex-col gap-1">
 				<div class="flex flex-wrap gap-2">
-					{names.map((name) => (
+					{names.map((name, index) => (
 						<Chip
 							type="radio"
-							name="name_pick"
+							name={radioName}
 							value={pickValue(name)}
 							checked={picked === pickValue(name)}
 							describedBy={sourceId}
+							autofocus={focusFirst && index === 0}
 						>
 							{name}
 						</Chip>
@@ -121,7 +130,7 @@ export function NameChoices({
 			<div class="flex flex-wrap gap-2 pt-1">
 				<Chip
 					type="radio"
-					name="name_pick"
+					name={radioName}
 					value={KEEP_VALUE}
 					checked={picked === KEEP_VALUE}
 				>
@@ -133,16 +142,12 @@ export function NameChoices({
 				label="Or your own"
 				name="merchant"
 				value={own}
+				hint={`A name typed here is used instead of any name above. ${count === 1 ? "For the 1 transaction from this merchant." : `For all ${count} transactions from this merchant.`}`}
 				maxlength={MAX_OWN_NAME}
 				autocomplete="off"
 				surface="paper"
 				error={error}
 			/>
-			<p class="text-sm text-muted">
-				{count === 1
-					? "For the 1 transaction from this merchant."
-					: `For all ${count} transactions from this merchant.`}
-			</p>
 		</fieldset>
 	);
 }
