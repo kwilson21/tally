@@ -132,6 +132,17 @@ describe("savings goal routes", () => {
 		expect(sheetHtml).toMatch(
 			/<a href="\/" hx-get="\/\?focus=savings-goal" hx-target="#page" hx-select="#page" hx-swap="outerHTML" hx-push-url="\/"[^>]*>Cancel<\/a>/,
 		);
+		const cancelled = await homeRoutes.fetch(
+			new Request("http://tally.test/?focus=savings-goal", {
+				headers: { "HX-Request": "true" },
+			}),
+			env,
+		);
+		const cancelTrigger = JSON.parse(
+			cancelled.headers.get("HX-Trigger") ?? "{}",
+		);
+		expect(cancelTrigger).toHaveProperty("toast");
+		expect(cancelTrigger).toHaveProperty("announce");
 		const saved = await homeRoutes.fetch(
 			new Request("http://tally.test/savings-goal", {
 				method: "POST",
@@ -143,9 +154,10 @@ describe("savings goal routes", () => {
 			}),
 			env,
 		);
-		expect(
-			JSON.parse(saved.headers.get("HX-Trigger") ?? "{}").toast.message,
-		).toBe("Saved the savings goal");
+		const saveTrigger = JSON.parse(saved.headers.get("HX-Trigger") ?? "{}");
+		expect(saveTrigger).toHaveProperty("toast");
+		expect(saveTrigger).toHaveProperty("announce");
+		expect(saveTrigger.toast.message).toBe("Saved the savings goal");
 		const row = await env.DB.prepare(
 			"SELECT effective_month AS month, amount_cents AS cents FROM savings_goal_amounts ORDER BY effective_month DESC LIMIT 1",
 		).first();
@@ -225,9 +237,19 @@ describe("savings goal routes", () => {
 			expect(html).not.toContain(`from ${month} on`);
 			expect(html).toMatch(/<input[^>]*name="goal"[^>]*autofocus/);
 			expect(html).toMatch(/<input[^>]*name="goal"[^>]*aria-invalid="true"/);
-			expect(
-				JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
-			).toBe(
+			const rejectionTrigger = JSON.parse(
+				response.headers.get("HX-Trigger") ?? "{}",
+			);
+			expect(rejectionTrigger).toHaveProperty("toast");
+			expect(rejectionTrigger).toHaveProperty("announce");
+			expect(rejectionTrigger.toast).toEqual({
+				message:
+					typed === "1000000.01"
+						? "Keep the budget to $1,000,000 a month or less."
+						: "Enter a dollar amount, like 250 or 250.50.",
+				type: "error",
+			});
+			expect(rejectionTrigger.announce).toBe(
 				typed === "1000000.01"
 					? "Keep the budget to $1,000,000 a month or less."
 					: "Enter a dollar amount, like 250 or 250.50.",

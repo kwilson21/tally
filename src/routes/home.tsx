@@ -426,7 +426,18 @@ async function activeCategory(c: Context<App>) {
 // ?focus=<id> puts focus on that row when the sheet closes.
 // ?adjust=1 is Adjust mode (#94).
 home.get("/", async (c) => {
-	const focus = Number(c.req.query("focus"));
+	const focusValue = c.req.query("focus");
+	const focus = Number(focusValue);
+	if (focusValue === "savings-goal" && c.req.header("HX-Request")) {
+		const message = "Savings goal editing cancelled.";
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "info" },
+				announce: message,
+			}),
+		);
+	}
 	return renderHome(c, await householdToday(c.env.DB), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		focusSavingsGoal: c.req.query("focus") === "savings-goal",
@@ -493,7 +504,13 @@ home.post("/savings-goal", async (c) => {
 	const parsed = parseBudgetAmount(typed);
 	if (!parsed.ok) {
 		if (c.req.header("HX-Request")) {
-			c.header("HX-Trigger", JSON.stringify({ announce: parsed.error }));
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({
+					toast: { message: parsed.error, type: "error" },
+					announce: parsed.error,
+				}),
+			);
 		}
 		return renderHome(c, today, {
 			status: 422,
