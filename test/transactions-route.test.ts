@@ -291,6 +291,33 @@ describe("GET /transactions: Account and Show", () => {
 		expect(countOf(html)).toMatch(/in Credit card ••9012, across all months$/);
 	});
 
+	it("tells two accounts with the same name and ending apart, in the choice and in the count", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO plaid_items(id, access_token_encrypted, institution_name, linked_by) VALUES (8, X'', 'Second Bank', 'demo')",
+			),
+			env.DB.prepare(
+				"INSERT INTO accounts(id, plaid_item_id, name, mask, type, subtype) VALUES (80, 8, 'Checking', '1234', 'depository', 'checking')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES (906,80,'2026-09-02',1200,'SECOND BANK COFFEE',1)",
+			),
+		]);
+		const { html } = await get("/transactions?month=all&account=80");
+		const labels = optionsOf(html, "account").map((o) => o.text);
+		expect(labels).toContain("Checking ••1234 (First Harbor Bank)");
+		expect(labels).toContain("Checking ••1234 (Second Bank)");
+		expect(new Set(labels).size).toBe(labels.length);
+		expect(countOf(html)).toBe(
+			"1 transaction in Checking ••1234 (Second Bank), across all months",
+		);
+		expect(html).toMatch(/second bank coffee/i);
+		const first = (await get("/transactions?month=all&account=1")).html;
+		expect(countOf(first)).toMatch(
+			/in Checking ••1234 \(First Harbor Bank\), across all months$/,
+		);
+	});
+
 	it("lists only that account's rows and the count names it", async () => {
 		const { html } = await get("/transactions?month=all&account=4");
 		expect(rowCount(html)).toBe(1);

@@ -2,9 +2,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
-import { accountChoices } from "../src/db/accounts";
+import { accountChoices, uniqueAccountLabels } from "../src/db/accounts";
 import { loadMonth } from "../src/db/month";
-import { listTransactions } from "../src/db/transactions";
+import { listTransactions, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
 
@@ -163,6 +163,53 @@ describe("listTransactions by type", () => {
 		).toBe(true);
 	});
 
+	it("Show Refunds leaves out the parts of a split transfer or paycheck, which don't carry their parent's flags", async () => {
+		const insert = env.DB.prepare(
+			`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,flag_income,flag_transfer,excluded,credit_reviewed) VALUES (?,?,'2026-09-13',-6000,?,?,?,0,1)`,
+		);
+		await env.DB.batch([
+			// A transfer credit a person put back in the budget, and a paycheck, each split in two.
+			insert.bind(880, CHECKING, "TRANSFER KEPT AND SPLIT", 0, 1),
+			insert.bind(881, CHECKING, "PAYCHECK SPLIT", 1, 0),
+			// An ordinary refund, split the same way.
+			insert.bind(882, CARD, "REFUND SPLIT", 0, 0),
+		]);
+		for (const id of [880, 881, 882]) {
+			await saveSplit(
+				env.DB,
+				id,
+				[
+					{ categoryId: 1, amountCents: -4000 },
+					{ categoryId: 4, amountCents: -2000 },
+				],
+				"person@example.com",
+			);
+		}
+		const partsOf = async (parent: number) =>
+			(
+				await env.DB.prepare("SELECT id FROM transactions WHERE parent_id = ?")
+					.bind(parent)
+					.all<{ id: number }>()
+			).results.map((r) => r.id);
+		const refunds = await ids("month=2026-09&show=refunds");
+		expect((await partsOf(880)).length).toBe(2);
+		for (const id of [
+			880,
+			881,
+			...(await partsOf(880)),
+			...(await partsOf(881)),
+		]) {
+			expect(refunds, `row ${id}`).not.toContain(id);
+		}
+		// The ordinary split refund still shows by its parts.
+		expect(refunds).toEqual(expect.arrayContaining(await partsOf(882)));
+		// The same rule holds for the count the page shows.
+		const first = await list("month=2026-09&show=refunds");
+		expect(first.total).toBe(
+			(await listAll("month=2026-09&show=refunds")).length,
+		);
+	});
+
 	it("Show Refunds leaves out the demo's excluded reimbursement, which Excluded shows", async () => {
 		const refunds = (await listAll("month=2026-09&show=refunds")).map(
 			(r) => r.displayName,
@@ -263,5 +310,120 @@ describe("accountChoices", () => {
 		const choices = await accountChoices(env.DB);
 		expect(choices.find((c) => c.id === CASH)?.label).toBe("Cash");
 		expect(choices.find((c) => c.id === CHECKING)?.label).toBe("Checking");
+	});
+});
+
+describe("unique account labels", () => {
+	const account = (
+		id: number,
+		name: string,
+		mask: string | null,
+		bank: string | null,
+		type = "depository",
+		subtype: string | null = null,
+	) => ({ id, name, mask, bank, type, subtype });
+
+	it("leaves labels that already differ as they are, and Cash reading Cash", () => {
+		expect(
+			uniqueAccountLabels([
+				account(1, "Chase Card", "9921", "Chase"),
+				account(2, "Checking", null, "Chase"),
+				account(3, "Wallet", null, null, "cash"),
+			]),
+		).toEqual(["Chase Card ••9921", "Checking", "Cash"]);
+	});
+
+	it("adds the bank's name to accounts that share a name and ending, only to those", () => {
+		expect(
+			uniqueAccountLabels([
+				account(1, "Checking", "1234", "Chase"),
+				account(2, "Checking", "1234", "Wells Fargo"),
+				account(3, "Savings", "5678", "Chase"),
+			]),
+		).toEqual([
+			"Checking ••1234 (Chase)",
+			"Checking ••1234 (Wells Fargo)",
+			"Savings ••5678",
+		]);
+	});
+
+	it("covers accounts with no ending the same way", () => {
+		expect(
+			uniqueAccountLabels([
+				account(1, "Savings", null, "Chase"),
+				account(2, "Savings", null, "Ally"),
+			]),
+		).toEqual(["Savings (Chase)", "Savings (Ally)"]);
+	});
+
+	it("adds what kind of account it is when the bank doesn't tell them apart", () => {
+		expect(
+			uniqueAccountLabels([
+				account(1, "Rewards", "4410", "Chase", "depository", "checking"),
+				account(2, "Rewards", "4410", "Chase", "credit", "credit card"),
+				account(3, "Rewards", "4410", "Chase", "credit", null),
+			]),
+		).toEqual([
+			"Rewards ••4410 (Chase, checking)",
+			"Rewards ••4410 (Chase, credit card)",
+			"Rewards ••4410 (Chase, credit)",
+		]);
+	});
+
+	it("numbers accounts that are still the same, the first keeping its label", () => {
+		expect(
+			uniqueAccountLabels([
+				account(1, "Checking", "1234", "Chase", "depository", "checking"),
+				account(2, "Checking", "1234", "Chase", "depository", "checking"),
+				account(3, "Checking", "1234", "Chase", "depository", "checking"),
+			]),
+		).toEqual([
+			"Checking ••1234 (Chase, checking)",
+			"Checking ••1234 (Chase, checking) (2)",
+			"Checking ••1234 (Chase, checking) (3)",
+		]);
+	});
+
+	it("keeps an account with no bank apart from one named like it", () => {
+		const labels = uniqueAccountLabels([
+			account(1, "Cash", null, "Chase"),
+			account(2, "Wallet", null, null, "cash"),
+		]);
+		expect(labels).toEqual(["Cash (Chase)", "Cash"]);
+	});
+
+	it("never numbers an account into a label another account already has", () => {
+		const labels = uniqueAccountLabels([
+			account(1, "Checking", "1234", "Chase"),
+			account(2, "Checking", "1234", "Chase"),
+			account(3, "Checking ••1234 (Chase, depository) (2)", null, null),
+		]);
+		expect(labels).toEqual([
+			"Checking ••1234 (Chase, depository)",
+			"Checking ••1234 (Chase, depository) (3)",
+			"Checking ••1234 (Chase, depository) (2)",
+		]);
+	});
+
+	it("is what the choice offers, in the order accountChoices lists them", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO plaid_items(id, access_token_encrypted, institution_name, linked_by) VALUES (7, X'', 'Wells Fargo', 'demo')",
+			),
+			env.DB.prepare(
+				"INSERT INTO accounts(id, plaid_item_id, name, mask, type, subtype) VALUES (70, 7, 'Checking', '1234', 'depository', 'checking'), (71, 7, 'Savings', NULL, 'depository', 'savings'), (72, 7, 'Savings', NULL, 'depository', 'savings')",
+			),
+		]);
+		const choices = await accountChoices(env.DB);
+		expect(choices.map((c) => c.label)).toEqual([
+			"Checking ••1234 (First Harbor Bank)",
+			"Savings ••5678",
+			"Credit card ••9012",
+			"Checking ••1234 (Wells Fargo)",
+			"Savings (Wells Fargo, savings)",
+			"Savings (Wells Fargo, savings) (2)",
+			"Cash",
+		]);
+		expect(new Set(choices.map((c) => c.label)).size).toBe(choices.length);
 	});
 });

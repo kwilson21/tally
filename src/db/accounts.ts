@@ -39,14 +39,60 @@ export type BankRow = {
 	is_liability: number | null;
 };
 
-/** An account's name as the lists name it: "Chase Card ••9921", or just the name when the bank gives no digits. The Cash account reads "Cash". */
-export function accountLabel(account: {
+/** What names an account in Transactions' Account choice and its count. */
+type LabelInput = {
 	name: string;
 	mask: string | null;
 	type: string;
-}): string {
+	subtype: string | null;
+	/** The bank it was linked from; null for the Cash account. */
+	bank: string | null;
+};
+
+/** An account's name as the lists name it: "Chase Card ••9921", or just the name when the bank gives no digits. The Cash account reads "Cash". */
+function baseLabel(account: LabelInput): string {
 	if (account.type === "cash") return "Cash";
 	return account.mask ? `${account.name} ••${account.mask}` : account.name;
+}
+
+/**
+ * One label per account, no two alike, so the choice and the count always say which account. Accounts
+ * that share a label get the bank's name ("Checking ••1234 (Chase)"); those still alike get what kind
+ * of account it is ("(Chase, credit card)"); any still alike are numbered, the first keeping its label
+ * ("... (2)"). Only accounts that share a label are changed, one step at a time.
+ */
+export function uniqueAccountLabels(accounts: LabelInput[]): string[] {
+	const bases = accounts.map(baseLabel);
+	// What each account's label becomes at each step; an account with no bank has nothing to add.
+	const steps: ((a: LabelInput, base: string) => string)[] = [
+		(a, base) => (a.bank ? `${base} (${a.bank})` : base),
+		(a, base) =>
+			a.bank ? `${base} (${a.bank}, ${a.subtype ?? a.type})` : base,
+	];
+	let labels = bases;
+	for (const step of steps) {
+		const current = labels;
+		labels = current.map((label, i) =>
+			current.some((other, j) => j !== i && other === label)
+				? step(accounts[i] as LabelInput, bases[i] as string)
+				: label,
+		);
+	}
+	// Still alike: number every one after the first, skipping a number another account already wears.
+	const used = new Set(labels);
+	const seen = new Set<string>();
+	return labels.map((label) => {
+		if (!seen.has(label)) {
+			seen.add(label);
+			return label;
+		}
+		let n = 2;
+		while (used.has(`${label} (${n})`)) n++;
+		const numbered = `${label} (${n})`;
+		used.add(numbered);
+		seen.add(numbered);
+		return numbered;
+	});
 }
 
 /** One entry of Transactions' Account choice. */
@@ -64,7 +110,7 @@ export type AccountChoice = {
 export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT a.id, a.name, a.mask, a.type, p.disconnected_at
+			`SELECT a.id, a.name, a.mask, a.type, a.subtype, p.institution_name AS bank, p.disconnected_at
 			FROM accounts a LEFT JOIN plaid_items p ON p.id = a.plaid_item_id
 			ORDER BY a.type = 'cash', a.plaid_item_id, a.id`,
 		)
@@ -73,11 +119,14 @@ export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
 			name: string;
 			mask: string | null;
 			type: string;
+			subtype: string | null;
+			bank: string | null;
 			disconnected_at: string | null;
 		}>();
-	return results.map((a) => ({
+	const labels = uniqueAccountLabels(results);
+	return results.map((a, i) => ({
 		id: a.id,
-		label: accountLabel(a),
+		label: labels[i] as string,
 		disconnected: a.disconnected_at !== null,
 	}));
 }
