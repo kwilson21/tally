@@ -2841,6 +2841,96 @@ describe("syncItem", () => {
 				});
 			});
 
+			it("counts a split transfer credit's parts when a person reviews the split as a refund", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				const { results: categories } = await env.DB.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+				).all<{ id: number }>();
+				await saveSplit(
+					env.DB,
+					await rowId(),
+					[
+						{ amountCents: -2000, categoryId: categories[0]?.id as number },
+						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+					],
+					"synthetic-person",
+				);
+				const parts = async () =>
+					(
+						await env.DB.prepare(
+							"SELECT excluded, excluded_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+						)
+							.bind(await rowId())
+							.all()
+					).results;
+				// The parts follow their parent: excluded by Plaid and not yet reviewed.
+				expect(await parts()).toEqual([
+					{
+						excluded: 1,
+						excluded_source: "plaid",
+						credit_reviewed: 0,
+						credit_reviewed_by: null,
+					},
+					{
+						excluded: 1,
+						excluded_source: "plaid",
+						credit_reviewed: 0,
+						credit_reviewed_by: null,
+					},
+				]);
+				// A person reviews the split as a refund from its own panel, with Exclude left on.
+				await decide("refund", true);
+				expect(await parts()).toEqual([
+					{
+						excluded: 0,
+						excluded_source: null,
+						credit_reviewed: 1,
+						credit_reviewed_by: "user",
+					},
+					{
+						excluded: 0,
+						excluded_source: null,
+						credit_reviewed: 1,
+						credit_reviewed_by: "user",
+					},
+				]);
+			});
+
+			it("leaves a split part's own exclusion alone when a person reviews the split", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				const { results: categories } = await env.DB.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+				).all<{ id: number }>();
+				await saveSplit(
+					env.DB,
+					await rowId(),
+					[
+						{ amountCents: -2000, categoryId: categories[0]?.id as number },
+						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+					],
+					"synthetic-person",
+				);
+				const { results } = await env.DB.prepare(
+					"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(await rowId())
+					.all<{ id: number }>();
+				await env.DB.prepare(
+					"UPDATE transactions SET excluded_source = 'user' WHERE id = ?",
+				)
+					.bind(results[0]?.id)
+					.run();
+				await decide("refund", true);
+				const first = await env.DB.prepare(
+					"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
+				)
+					.bind(results[0]?.id)
+					.first();
+				expect(first).toEqual({ excluded: 1, excluded_source: "user" });
+			});
+
 			it.each(["user", "jev"])(
 				"leaves a %s exclusion alone when a person reviews the credit as a refund",
 				async (source) => {
