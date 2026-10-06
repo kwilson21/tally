@@ -1,5 +1,5 @@
 import { type Context, Hono } from "hono";
-import { householdToday } from "../dates";
+import { householdTimeZone, householdToday, todayIn } from "../dates";
 import {
 	type AiSwitches,
 	readAiSwitches,
@@ -14,6 +14,7 @@ import {
 	setArchived,
 	settingsCategories,
 } from "../db/categories";
+import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
 import {
 	type CategoryErrors,
@@ -22,6 +23,7 @@ import {
 	restoreProblem,
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";
+import { parseTimeZone, zoneLabel } from "../settings/time-zones";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
@@ -29,6 +31,7 @@ import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
+import { TimeZoneRow } from "../views/time-zone-row";
 
 type App = { Bindings: Env };
 export const settings = new Hono<App>();
@@ -73,8 +76,8 @@ const chevron = (
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
-	/** Move focus here after a swap: a row's summary, or the Archived summary. */
-	focus?: number | "archived";
+	/** Move focus here after a swap: a row's summary, the Archived summary, or the Time zone row. */
+	focus?: number | "archived" | "zone";
 	/** What was typed, shown again with the errors. */
 	values?: { name: string };
 	errors?: CategoryErrors;
@@ -83,8 +86,11 @@ type View = {
 	/** Why the change didn't happen, shown above the list. */
 	listError?: string;
 	status?: 200 | 404 | 422;
-	/** The household's date, when the handler already read it, so the request reads it once. */
+	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
+	timeZone?: string;
+	/** Why the posted time zone wasn't saved, shown under its select. */
+	zoneError?: string;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
 	aiSaved?: boolean;
 	/** Where a plain browser lands after a save: a section's id, so it isn't sent back to the top. */
@@ -332,7 +338,8 @@ function CategoryRow({
 
 /** The whole Settings page. Every swap selects #categories from this same page. */
 async function renderSettings(c: Context<App>, view: View = {}) {
-	const today = view.today ?? (await householdToday(c.env.DB));
+	const timeZone = view.timeZone ?? (await householdTimeZone(c.env.DB));
+	const today = view.today ?? todayIn(timeZone);
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
@@ -454,6 +461,22 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					)}
 				</div>
 			</section>
+			<section
+				id="household"
+				aria-labelledby="household-title"
+				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
+			>
+				<h2 id="household-title" class="font-serif text-3xl font-semibold">
+					Household
+				</h2>
+				<div class="mt-3 border-t border-rule">
+					<TimeZoneRow
+						zone={timeZone}
+						error={view.zoneError}
+						focus={view.focus === "zone"}
+					/>
+				</div>
+			</section>
 			<AiSuggestions switches={aiSwitches} saved={Boolean(view.aiSaved)} />
 			<section
 				aria-labelledby="your-data-title"
@@ -534,13 +557,16 @@ async function find(c: Context<App>) {
 
 // More → Settings (spec §8): the household's categories. Budgets are set on Home (decision 38).
 // ?open=<id> opens that category's row, so a row can be linked to (and screenshotted).
-// ?focus=<id> puts focus on that row after Cancel.
+// ?focus=<id> puts focus on that row after Cancel; ?focus=zone does the same for the Time zone row.
 settings.get("/settings", (c) => {
 	const id = (key: string) => {
 		const n = Number(c.req.query(key));
 		return Number.isInteger(n) && n > 0 ? n : undefined;
 	};
-	return renderSettings(c, { open: id("open"), focus: id("focus") });
+	return renderSettings(c, {
+		open: id("open"),
+		focus: c.req.query("focus") === "zone" ? "zone" : id("focus"),
+	});
 });
 
 settings.get("/settings/export/transactions.csv", async (c) => {
@@ -578,6 +604,21 @@ settings.post("/settings/ai", async (c) => {
 		aiSaved: true,
 		hash: "ai-suggestions",
 	});
+});
+
+// Only a zone the select offers is saved, and nothing else changes: "today" reads it from there
+// (src/dates.ts), and a transaction's own date is never converted (decision 67).
+settings.post("/settings/time-zone", async (c) => {
+	const parsed = parseTimeZone(await c.req.formData());
+	if (!parsed.ok)
+		return renderSettings(c, { zoneError: parsed.error, status: 422 });
+	await saveTimeZone(c.env.DB, parsed.zone);
+	return done(
+		c,
+		"Saved time zone",
+		`Saved time zone. Months and bills now follow ${zoneLabel(parsed.zone)} time.`,
+		{ focus: "zone", hash: "household" },
+	);
 });
 
 settings.post("/settings/categories", async (c) => {
@@ -660,7 +701,8 @@ settings.post(
 		if (!category || category.archived) return gone(c);
 		const direction = c.req.param("direction") === "up" ? "up" : "down";
 		await moveCategory(c.env.DB, category.id, direction);
-		const today = await householdToday(c.env.DB);
+		const timeZone = await householdTimeZone(c.env.DB);
+		const today = todayIn(timeZone);
 		const { active } = await settingsCategories(c.env.DB, today.slice(0, 7));
 		const position = active.findIndex((x) => x.id === category.id) + 1;
 		return done(
@@ -668,7 +710,7 @@ settings.post(
 			`Moved ${category.name}`,
 			`Moved ${category.name} ${direction}. It's now ${position} of ${active.length}.`,
 			// Stay open, so the same button can be pressed again.
-			{ open: category.id, focus: category.id, today },
+			{ open: category.id, focus: category.id, today, timeZone },
 		);
 	},
 );
