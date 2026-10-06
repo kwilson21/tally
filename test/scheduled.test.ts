@@ -780,6 +780,74 @@ describe("scheduled handler: merchant names", () => {
 		logged.mockRestore();
 		vi.restoreAllMocks();
 	});
+
+	/** A DB whose sort step fails, as D1 can: the query for the categories Jev is offered throws. */
+	const dbThatFailsTheSort = () =>
+		new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						if (/FROM categories WHERE archived = 0/.test(sql))
+							throw new Error("D1 is down for the secret text");
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+
+	it("still makes the names in the 09:20 run when the sort throws, and logs only the error's name", async () => {
+		await oneUnnamedCharge();
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const ai = aiThatSays("Blue Bottle Coffee");
+		const fetchImpl = vi.fn(async () => jevAnswer());
+
+		await expect(
+			runFirstSort(
+				{
+					...env,
+					DB: dbThatFailsTheSort(),
+					DEMO: "false",
+					AI: ai,
+					JEV_API_KEY: "jev",
+				},
+				fetchImpl as unknown as typeof fetch,
+			),
+		).resolves.toBeUndefined();
+
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(ai.run).toHaveBeenCalledTimes(1);
+		const lines = logged.mock.calls.map((call) => String(call.join(" ")));
+		expect(lines).toContain("jev: sort step failed Error");
+		expect(lines.join(" ")).not.toContain("secret text");
+		logged.mockRestore();
+		vi.restoreAllMocks();
+	});
+
+	it("still makes the names in the demo's one run when its sort throws", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const ai = aiThatSays("Some Place Name");
+
+		// DEMO is "true" here, with no Plaid secrets: the demo's run, which resets the seed first.
+		await expect(
+			runScheduled({
+				...env,
+				DB: dbThatFailsTheSort(),
+				AI: ai,
+				JEV_API_KEY: "jev",
+			}),
+		).resolves.toBeUndefined();
+
+		expect(ai.run.mock.calls.length).toBeGreaterThan(0);
+		expect(logged.mock.calls.map((call) => String(call.join(" ")))).toContain(
+			"jev: sort step failed Error",
+		);
+		logged.mockRestore();
+		vi.restoreAllMocks();
+	});
 });
 
 // D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one (a call to

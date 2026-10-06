@@ -437,7 +437,7 @@ describe("categorizePending", () => {
 		expect(jev.calls()).toBe(40);
 	});
 
-	it("goes past the demo's cap in production, so a new bank's backfill is sorted in a night", async () => {
+	it("goes past the demo's cap in production, so a new bank's backfill isn't held to 40 a day", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		for (let i = 0; i < 50; i++) {
 			await db

@@ -70,7 +70,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec ย
 
 ## AI that earns its place (decisions 68, 73; spec ยง8.6)
 
-#191 is merged ([#231](https://github.com/kwilson21/tally/pull/231)), and so is #193 ([#238](https://github.com/kwilson21/tally/pull/238)). The nightly Jev pass runs twice, so a new bank's backfill of up to 500 is sorted in one night (decision 56); a queue replaces the per-run caps next ([#248](https://github.com/kwilson21/tally/issues/248)).
+#191 is merged ([#231](https://github.com/kwilson21/tally/pull/231)), and so is #193 ([#238](https://github.com/kwilson21/tally/pull/238)). The nightly Jev pass runs twice, so a new bank's backfill of up to 500 can be sorted in one night, and when Jev answers slowly its time budgets stop the passes sooner and the rest waits for the next night (decision 56); a queue replaces the per-run caps next ([#248](https://github.com/kwilson21/tally/issues/248)).
 
 | Part | Issue | Depends on |
 |---|---|---|

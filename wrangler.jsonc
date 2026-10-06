@@ -68,8 +68,8 @@
 			// (decision 56): 09:00 the daily catch-up sync (spec §4), at the demo's hour, then the feedback retry,
 			// and no Jev or names; 09:20 the first sort, Jev asked about up to 200 (no new call after 9 minutes),
 			// then the names (no new request after 13); 09:40 the second sort, Jev asked about up to 300 more
-			// (no new call after 13), and no names. A new bank's backfill is still sorted in a night.
-			// src/index.tsx routes by these exact strings.
+			// (no new call after 13), and no names. A new bank's backfill can be sorted in a night, and a slow
+			// Jev leaves the rest for the next one. src/index.tsx routes by these exact strings.
 			"triggers": {
 				"crons": ["0 9 * * *", "20 9 * * *", "40 9 * * *"]
 			},
