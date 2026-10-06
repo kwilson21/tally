@@ -35,7 +35,7 @@ type ScheduledEnv = PlaidEnv & {
 	DB: D1Database;
 	DEMO?: string;
 	JEV_API_KEY?: string;
-	/** Workers AI, bound in production only (wrangler.jsonc); the demo and local development have none. */
+	/** Workers AI, bound in production and the demo (wrangler.jsonc); local development has none. */
 	AI?: Ai;
 	FEEDBACK_GITHUB_TOKEN?: string;
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;

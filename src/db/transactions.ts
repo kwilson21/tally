@@ -71,6 +71,9 @@ type NameSuggestionColumns = {
 	suggestionStatus: string | null;
 };
 
+/** True when a merchant's pending, unchosen suggested names (one per line) hold the search text; one `?`. */
+const SUGGESTED_NAME_MATCH = `EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL AND m.suggested_name LIKE ? ESCAPE '\\')`;
+
 export const PAGE_SIZE = 25;
 
 // "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
@@ -87,6 +90,7 @@ export async function listTransactions(
 ): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
+	const { names: namesOn } = await readAiSwitches(db);
 	if (f.month !== "all") {
 		where.push(`${COUNTED_MONTH} = ?`);
 		args.push(f.month);
@@ -100,12 +104,15 @@ export async function listTransactions(
 	if (f.excluded) where.push("t.excluded = 1");
 	if (f.q) {
 		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
-		// "google youtube" finds "GOOGLE *YOUTUBE".
+		// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
+		// while it is offered (the names switch is on), so what a row says can be searched for.
+		const suggested = namesOn ? SUGGESTED_NAME_MATCH : "0";
 		where.push(
-			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')`,
+			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggested})`,
 		);
 		const pattern = likePattern(f.q);
 		args.push(pattern, pattern, pattern, pattern);
+		if (namesOn) args.push(pattern);
 	}
 
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
@@ -127,7 +134,7 @@ export async function listTransactions(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
-				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, p.raw_name AS parentRawName,
+				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
@@ -153,6 +160,8 @@ export async function listTransactions(
 				NameSuggestionColumns & {
 					merchantName: string | null;
 					parentMerchantName: string | null;
+					parentSuggestedNames: string | null;
+					parentSuggestionStatus: string | null;
 					parentRawName: string | null;
 					excluded: number;
 					income: number;
@@ -164,12 +173,14 @@ export async function listTransactions(
 		>();
 
 	// A person's chosen name wins; until then the first pending suggestion, shown dashed; otherwise the
-	// bank's raw text, tidied for display (spec §7).
-	const { names: namesOn } = await readAiSwitches(db);
+	// bank's raw text, tidied for display (spec §7). A split part's "Split from" caption names its
+	// parent the same way, so it reads as the parent's own row does.
 	const rows = results.map(
 		({
 			merchantName,
 			parentMerchantName,
+			parentSuggestedNames,
+			parentSuggestionStatus,
 			parentRawName,
 			suggestedNames,
 			suggestionStatus,
@@ -185,7 +196,13 @@ export async function listTransactions(
 			return {
 				...r,
 				parentName: parentRawName
-					? (parentMerchantName ?? tidyName(parentRawName))
+					? shownName({
+							chosen: parentMerchantName,
+							stored: parentSuggestedNames,
+							status: parentSuggestionStatus,
+							rawName: parentRawName,
+							namesOn,
+						}).name
 					: null,
 				excluded: r.excluded === 1,
 				income: r.income === 1,

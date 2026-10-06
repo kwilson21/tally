@@ -40,6 +40,8 @@ async function addTransactions(
 		merchantName?: string | null;
 		plaid?: boolean;
 		parent?: number;
+		/** On the Cash account, as a cash entry a person typed is. */
+		cash?: boolean;
 	}[],
 ) {
 	let n = 0;
@@ -48,10 +50,11 @@ async function addTransactions(
 		await db
 			.prepare(
 				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, parent_id)
-				 VALUES (?, 1, '2026-09-20', 650, ?, ?, ?)`,
+				 VALUES (?, CASE WHEN ? THEN (SELECT id FROM accounts WHERE type = 'cash') ELSE 1 END, '2026-09-20', 650, ?, ?, ?)`,
 			)
 			.bind(
 				row.plaid === false ? null : `plaid-${crypto.randomUUID()}-${n}`,
+				row.cash ? 1 : 0,
 				row.rawName,
 				row.merchantName ?? null,
 				row.parent ?? null,
@@ -142,7 +145,7 @@ describe("suggestMerchantNames", () => {
 		]);
 		await addTransactions([
 			{ rawName: "SQ *LOCAL BAKERY 4432", merchantName: "Local Bakery" },
-			{ rawName: "Cash at the fair", plaid: false },
+			{ rawName: "Cash at the fair", plaid: false, cash: true },
 			{ rawName: "NAMED BY PERSON" },
 			{ rawName: "ALREADY PENDING" },
 			{ rawName: "TURNED DOWN" },
@@ -150,6 +153,36 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi();
 		await suggestMerchantNames({ DB: db, AI: ai });
 		expect(ai.run).not.toHaveBeenCalled();
+	});
+
+	it("asks for a seeded-style row with no Plaid id and no merchant name, but not for a cash entry, so the demo's bank texts are asked after a reset", async () => {
+		await addTransactions([
+			{ rawName: "TST* CORNER DELI", plaid: false },
+			{ rawName: "Farmers market stall", plaid: false, cash: true },
+		]);
+		const ai = fakeAi(() => ({ response: "Corner Deli Cafe" }));
+		expect(await suggestMerchantNames({ DB: db, AI: ai })).toEqual({
+			asked: 1,
+			suggested: 1,
+		});
+		expect(callsFor(ai)).toEqual(["TST* CORNER DELI"]);
+		expect(await merchants()).toMatchObject([
+			{ raw_name: "TST* CORNER DELI", suggestion_status: "pending" },
+		]);
+	});
+
+	it("asks about the seeded demo's unnamed bank texts, within its limit, and never about its cash entries or named merchants", async () => {
+		await resetDemo(db, "2026-09-22");
+		const ai = fakeAi(() => ({ response: "Some Place" }));
+		await suggestMerchantNames({ DB: db, AI: ai });
+		const asked = callsFor(ai);
+		expect(asked.length).toBeGreaterThan(0);
+		expect(asked.length).toBeLessThanOrEqual(nameCallLimit);
+		// Seeded merchants that already have a chosen name or a suggestion, and the cash entry, are left alone.
+		expect(asked).not.toContain("Farmers market");
+		expect(asked).not.toContain("TRADER JOE'S #552");
+		expect(asked).not.toContain("TST* CORNER DELI");
+		expect(asked).toContain("VENMO *J RIVERA");
 	});
 
 	it("asks for a bank text Plaid named on some charges but not others", async () => {

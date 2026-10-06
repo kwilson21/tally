@@ -68,23 +68,18 @@ export async function suggestNames(
 const LIST_MARK = /^\s*(?:[-•·]|\*(?=\s)|\d+[.)])\s*/;
 const QUOTES = /^["'“”‘’`]+|["'“”‘’`]+$/g;
 
-const hasLetters = (text: string, pattern: RegExp) => pattern.test(text);
-
-/** True when `name` says nothing the bank's tidied text doesn't: the same, or the same in all capitals or none. */
-function sameAsTidied(name: string, tidied: string): boolean {
-	if (name === tidied) return true;
-	if (name.toLowerCase() !== tidied.toLowerCase()) return false;
-	const mixed =
-		hasLetters(name, /\p{Lu}/u) &&
-		hasLetters(name, /\p{Ll}/u) &&
-		name !== tidied;
-	return !mixed;
-}
+/**
+ * True when `name` says nothing the bank's tidied text doesn't: the same words, whatever the capitals. A
+ * guess like "Blue Bottle Cof" beside the tidied "Blue bottle cof" would only be a second, odd-looking
+ * copy of what the list already shows.
+ */
+const sameAsTidied = (name: string, tidied: string) =>
+	name.toLowerCase() === tidied.toLowerCase();
 
 /**
  * The names worth offering from a model's answer (spec §7): one per line, trimmed, with list marks and
  * quotes taken off, 2 to 40 characters and at most five words, with no amount, store number, code,
- * link or markup in them, and none that only repeats the bank's text or its tidied form. Repeats
+ * link or markup in them, and none that only repeats the bank's text or its tidied form, in any capitals. Repeats
  * (ignoring capitals) are dropped and at most three are kept, in the order given. Anything that
  * isn't text gives none.
  */

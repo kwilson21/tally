@@ -276,10 +276,13 @@ describe("scheduled handler: merchant names", () => {
 		expect((await pending()).results).toEqual([]);
 	});
 
-	it("never asks about the demo's seeded data, so the demo can't call Workers AI even with a binding", async () => {
-		const ai = aiThatSays("Anything");
+	it("asks about the demo's seeded bank texts too, since the demo has the binding (spec §4.1), within the nightly limit", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const ai = aiThatSays("Some Place Name");
 		await runScheduled({ ...env, AI: ai });
-		expect(ai.run).not.toHaveBeenCalled();
+		expect(ai.run.mock.calls.length).toBeGreaterThan(0);
+		expect(ai.run.mock.calls.length).toBeLessThanOrEqual(100);
+		vi.restoreAllMocks();
 	});
 
 	it("keeps going when Workers AI fails, so the rest of the night still runs", async () => {

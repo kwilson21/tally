@@ -80,6 +80,15 @@ beforeEach(async () => {
 	]);
 });
 
+/** The number Skip uses for a merchant, never its bank text. */
+const rowId = async (key: string) =>
+	(
+		await db
+			.prepare("SELECT rowid AS id FROM merchants WHERE raw_name = ?")
+			.bind(key)
+			.first<{ id: number }>()
+	)?.id as number;
+
 async function twoMerchants() {
 	await charges(BLUE, 3);
 	await suggest(BLUE, "Blue Bottle Coffee\nBlue Bottle\nBlue Bottle Cafe");
@@ -93,6 +102,7 @@ describe("namesToReview", () => {
 		expect(await namesToReview(db)).toEqual([
 			{
 				key: BLUE,
+				id: await rowId(BLUE),
 				bankText: BLUE,
 				tidied: "Blue bottle cof",
 				names: ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
@@ -100,6 +110,7 @@ describe("namesToReview", () => {
 			},
 			{
 				key: LUPITA,
+				id: await rowId(LUPITA),
 				bankText: LUPITA,
 				tidied: "Lupitas taq",
 				names: ["Lupita's Taqueria"],
@@ -131,6 +142,121 @@ describe("namesToReview", () => {
 		expect(await namesToReview(db)).toEqual([]);
 		await saveAiSwitches(db, { names: true });
 		expect((await namesToReview(db)).length).toBe(2);
+	});
+});
+
+describe("namesToReview with several bank texts for one merchant", () => {
+	it("keeps a merchant whose most frequent text repeats the suggestion, since its other rows still show it", async () => {
+		// "TARGET 1234" tidies to "Target", which the suggestion repeats, so its rows show no suggestion;
+		// "TGT*0099 SF" doesn't, so those rows show it dashed and the review must still offer it.
+		await charges("TARGET 1234", 3, "Target");
+		await charges("TGT*0099 SF", 1, "Target");
+		await suggest("Target", "Target");
+		expect(await namesToReview(db)).toEqual([
+			{
+				key: "Target",
+				id: await rowId("Target"),
+				bankText: "TGT*0099 SF",
+				tidied: "Tgt 0099 sf",
+				names: ["Target"],
+				count: 4,
+			},
+		]);
+	});
+
+	it("shows the text with the most charges among those that have a name to offer", async () => {
+		await charges("TGT*0099 SF", 1, "Target");
+		await charges("TGT*5 OAKLAND", 2, "Target");
+		await charges("TARGET 1234", 5, "Target");
+		await suggest("Target", "Target\nTarget Stores");
+		const [review] = await namesToReview(db);
+		// The first text's tidied form repeats "Target", so only "Target Stores" is offered there; the
+		// text shown is the busiest one where something is offered.
+		expect(review).toMatchObject({ key: "Target", count: 8 });
+		expect(review?.bankText).toBe("TARGET 1234");
+		expect(review?.names).toEqual(["Target Stores"]);
+	});
+
+	it("drops a merchant only when no text of it has a name to offer", async () => {
+		await charges("TARGET 1234", 2, "Target");
+		await suggest("Target", "Target");
+		expect(await namesToReview(db)).toEqual([]);
+	});
+
+	it("keeps the Settings count and the review in step", async () => {
+		await charges("TARGET 1234", 3, "Target");
+		await charges("TGT*0099 SF", 1, "Target");
+		await suggest("Target", "Target");
+		expect(textOf((await get("/settings")).html)).toContain(
+			"1 merchant name to check",
+		);
+		const { html } = await get("/settings/names");
+		expect(textOf(html)).toContain("The bank says TGT*0099 SF");
+		expect(textOf(html)).toContain("For all 4 transactions");
+	});
+});
+
+describe("saving the names switch redraws the Band above Categories", () => {
+	const bandOf = (html: string) =>
+		html.match(/<div id="names-band">[\s\S]*?<\/div>(?=\s*<section)/)?.[0] ??
+		"";
+
+	it("always has a place for it, and the group asks for it to be drawn again with the switch", async () => {
+		const { html } = await get("/settings");
+		expect(html).toContain('<div id="names-band">');
+		expect(html).toMatch(
+			/<form[^>]*action="\/settings\/ai"[^>]*hx-select-oob="#names-band"/,
+		);
+	});
+
+	it("takes the Band away when the switch is saved off, and says so", async () => {
+		await twoMerchants();
+		expect(bandOf((await get("/settings")).html)).toContain(
+			"2 merchant names to check",
+		);
+		const { res, html } = await post(
+			"/settings/ai",
+			{ categories: "on", income: "on" },
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(html).toContain('<div id="names-band">');
+		expect(html).not.toContain('href="/settings/names"');
+		expect(trigger(res).announce).toContain("No merchant names to check.");
+	});
+
+	it("brings the Band back when the switch is saved on, with its count in the announcement", async () => {
+		await twoMerchants();
+		await saveAiSwitches(db, { names: false });
+		const { res, html } = await post(
+			"/settings/ai",
+			{ names: "on", categories: "on", income: "on" },
+			true,
+		);
+		expect(textOf(html)).toContain("2 merchant names to check");
+		expect(html).toMatch(
+			/<div id="names-band"><div[^>]*><a href="\/settings\/names"/,
+		);
+		expect(trigger(res).announce).toContain("2 merchant names to check.");
+	});
+
+	it("says nothing about the Band when a save doesn't change it", async () => {
+		await twoMerchants();
+		const { res } = await post(
+			"/settings/ai",
+			{ names: "on", categories: "on" },
+			true,
+		);
+		expect(trigger(res).announce).not.toMatch(/merchant name/);
+	});
+
+	it("without JavaScript the save redirects, and the Settings page it lands on has the right Band", async () => {
+		await twoMerchants();
+		const { res } = await post("/settings/ai", { income: "on" }, false);
+		expect(res.status).toBe(303);
+		expect((await get("/settings")).html).not.toContain(
+			'href="/settings/names"',
+		);
 	});
 });
 
@@ -233,9 +359,7 @@ describe("GET /settings/names", () => {
 
 	it("moves to the next merchant when one is skipped, and skipping changes nothing", async () => {
 		await twoMerchants();
-		const { html } = await get(
-			`/settings/names?skip=${encodeURIComponent(BLUE)}`,
-		);
+		const { html } = await get(`/settings/names?skip=${await rowId(BLUE)}`);
 		const text = textOf(html);
 		expect(text).toContain("2 of 2 · 1 transaction");
 		expect(text).toContain(LUPITA);
@@ -244,10 +368,30 @@ describe("GET /settings/names", () => {
 		});
 	});
 
+	it("puts no bank text in the address when skipping: Skip and the form carry the merchant's row number only", async () => {
+		await twoMerchants();
+		const first = await get("/settings/names");
+		const skip =
+			first.html.match(
+				/<a[^>]*href="(\/settings\/names\?[^"]*)"[^>]*>\s*Skip\s*<\/a>/,
+			)?.[1] ?? "";
+		expect(skip).toBe(`/settings/names?skip=${await rowId(BLUE)}`);
+		for (const text of ["BLUE", "SQ", "LUPITA", "Blue", "COF"])
+			expect(decodeURIComponent(skip)).not.toContain(text);
+		// The next page's form, which the address is pushed from, names the skipped row the same way.
+		const next = await get(skip);
+		const action = next.html.match(/<form[^>]*action="([^"]*)"/)?.[1] ?? "";
+		expect(action).toBe(skip);
+		expect(next.html.match(/hx-push-url="([^"]*)"/)?.[1]).toBe(skip);
+		// A bank text in the address is not a skip: it moves nothing.
+		const stale = await get(`/settings/names?skip=${encodeURIComponent(BLUE)}`);
+		expect(textOf(stale.html)).toContain("1 of 2 · 3 transactions");
+	});
+
 	it("says so when every merchant was skipped, and offers to start over", async () => {
 		await twoMerchants();
 		const { html } = await get(
-			`/settings/names?skip=${encodeURIComponent(BLUE)}&skip=${encodeURIComponent(LUPITA)}`,
+			`/settings/names?skip=${await rowId(BLUE)}&skip=${await rowId(LUPITA)}`,
 		);
 		expect(textOf(html)).toContain("You skipped the rest.");
 		expect(html).toContain('href="/settings/names"');
@@ -360,11 +504,11 @@ describe("POST /settings/names", () => {
 		const { res } = await save(
 			{ key: LUPITA, name_pick: "s:Lupita's Taqueria" },
 			false,
-			`?skip=${encodeURIComponent(BLUE)}`,
+			`?skip=${await rowId(BLUE)}`,
 		);
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe(
-			`/settings/names?skip=${encodeURIComponent(BLUE)}`,
+			`/settings/names?skip=${await rowId(BLUE)}`,
 		);
 	});
 

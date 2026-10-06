@@ -15,7 +15,7 @@ const MAX_FAILURES_IN_A_ROW = 3;
 
 type NamesEnv = {
 	DB: D1Database;
-	/** Workers AI. Production has it; the demo and local development don't, so no name is ever asked for there. */
+	/** Workers AI. Production and the demo have it (wrangler.jsonc); local development and tests don't, so no name is asked for there. */
 	AI?: Ai;
 };
 

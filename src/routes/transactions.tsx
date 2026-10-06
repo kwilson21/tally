@@ -49,7 +49,12 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
-import { NameChoices, SUGGESTED_NAME_CLASS } from "../views/name-choices";
+import {
+	KEEP_VALUE,
+	NameChoices,
+	pickValue,
+	SUGGESTED_NAME_CLASS,
+} from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -1651,6 +1656,16 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		form.delete("category");
 		form.delete("always");
 	}
+	// A name chip counts only while it is still offered: the panel may have been opened before "Suggest store
+	// names" went off or before the suggestion was settled elsewhere, and a person's save must not accept or
+	// turn down a guess they can no longer see. A name typed in the field is always their own.
+	const pick = form.get("name_pick")?.toString() ?? "";
+	const offered = tx.nameChoices?.names ?? [];
+	const stillOffered =
+		pick === KEEP_VALUE
+			? tx.nameChoices !== null && tx.nameChoices !== undefined
+			: offered.some((name) => pickValue(name) === pick);
+	if (pick && !stillOffered) form.delete("name_pick");
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),

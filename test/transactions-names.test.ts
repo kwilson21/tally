@@ -84,6 +84,32 @@ const merchant = (key: string) =>
 const filters = parseFilters(new URLSearchParams("month=all"), "2026-09");
 const rowOf = async (id: number) =>
 	(await listTransactions(db, filters)).rows.find((r) => r.id === id);
+/** The ids of the rows a search finds. */
+const found = async (q: string) =>
+	(
+		await listTransactions(
+			db,
+			parseFilters(new URLSearchParams({ month: "all", q }), "2026-09"),
+		)
+	).rows.map((r) => r.id);
+/** A split part of a purchase from `rawName`, as the split form saves it. */
+async function splitPart(rawName = RAW): Promise<number> {
+	const parent = await db
+		.prepare(
+			`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, is_split)
+			 VALUES (?, 1, '2026-09-20', 1300, ?, 1) RETURNING id`,
+		)
+		.bind(`plaid-${crypto.randomUUID()}`, rawName)
+		.first<{ id: number }>();
+	const part = await db
+		.prepare(
+			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id)
+			 VALUES (1, '2026-09-20', 650, ?, ?) RETURNING id`,
+		)
+		.bind(rawName, parent?.id)
+		.first<{ id: number }>();
+	return part?.id as number;
+}
 
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
@@ -163,6 +189,80 @@ describe("the Transactions list", () => {
 		expect(html.match(/decoration-dashed/g)).toHaveLength(1);
 		expect(html.match(/Tally&#39;s guess: /g)).toHaveLength(1);
 		expect(html).toContain(">Mine<");
+	});
+});
+
+describe("searching the Transactions list", () => {
+	it("finds a row by the name it shows as a suggestion, and still by its bank text", async () => {
+		const id = await charge();
+		await charge("OTHER SHOP 5");
+		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+		expect(await found("Blue Bottle Coffee")).toEqual([id]);
+		expect(await found("bottle cof")).toEqual([id]);
+		expect(await found("0412")).toEqual([id]);
+		// Any of the suggested names, not only the first.
+		expect(await found("blue bottle")).toEqual([id]);
+	});
+
+	it("finds it from the page too", async () => {
+		await charge();
+		await suggest(RAW, "Blue Bottle Coffee");
+		const { html } = await get("/transactions?month=all&q=Blue+Bottle+Coffee");
+		expect(html).toContain("Blue Bottle Coffee");
+		expect(html).toContain(RAW);
+	});
+
+	it("finds nothing by a suggestion that is hidden or decided: with the names switch off, rejected, or accepted as another name", async () => {
+		await charge();
+		await suggest(RAW, "Blue Bottle Coffee");
+		await saveAiSwitches(db, { names: false });
+		expect(await found("Blue Bottle Coffee")).toEqual([]);
+		await saveAiSwitches(db, { names: true });
+		expect(await found("Blue Bottle Coffee")).toHaveLength(1);
+		await db
+			.prepare("UPDATE merchants SET suggestion_status = 'rejected'")
+			.run();
+		expect(await found("Blue Bottle Coffee")).toEqual([]);
+		await db
+			.prepare(
+				"UPDATE merchants SET suggestion_status = 'accepted', display_name = 'The Bottle'",
+			)
+			.run();
+		expect(await found("Blue Bottle Coffee")).toEqual([]);
+		expect(await found("The Bottle")).toHaveLength(1);
+	});
+
+	it("matches a % or _ in the search literally, as before", async () => {
+		const id = await charge();
+		await suggest(RAW, "Blue Bottle Coffee");
+		expect(await found("%")).toEqual([]);
+		expect(await found("Blue_Bottle")).toEqual([]);
+		expect(await found("Blue Bottle")).toEqual([id]);
+	});
+});
+
+describe("a split part's caption", () => {
+	it("names its parent the way the parent's own row does: the suggestion, shown while it is offered", async () => {
+		const part = await splitPart();
+		await suggest(RAW, "Blue Bottle Coffee");
+		expect(await rowOf(part)).toMatchObject({
+			displayName: "Blue Bottle Coffee",
+			parentName: "Blue Bottle Coffee",
+		});
+	});
+
+	it("says the tidied bank text when the suggestion is hidden (names off) or decided, and the chosen name once chosen", async () => {
+		const part = await splitPart();
+		await suggest(RAW, "Blue Bottle Coffee");
+		await saveAiSwitches(db, { names: false });
+		expect((await rowOf(part))?.parentName).toBe("Blue bottle cof");
+		await saveAiSwitches(db, { names: true });
+		await db
+			.prepare("UPDATE merchants SET suggestion_status = 'rejected'")
+			.run();
+		expect((await rowOf(part))?.parentName).toBe("Blue bottle cof");
+		await db.prepare("UPDATE merchants SET display_name = 'The Bottle'").run();
+		expect((await rowOf(part))?.parentName).toBe("The Bottle");
 	});
 });
 
@@ -257,6 +357,83 @@ describe("the edit panel's name choices", () => {
 					displayName: "Blue Bottle",
 					nameSuggested: false,
 				});
+		});
+
+		describe("a chip that is no longer offered is ignored (the panel was open while things changed)", () => {
+			const stillPending = {
+				display_name: null,
+				suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+				suggestion_status: "pending",
+			};
+
+			it("once the names switch is off, neither a guess nor Keep accepts or turns anything down", async () => {
+				const id = await charge();
+				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+				await saveAiSwitches(db, { names: false });
+				for (const pick of ["s:Blue Bottle Coffee", "keep"]) {
+					const { res } = await save(id, { name_pick: pick });
+					expect(res.status).toBe(303);
+					expect(await merchant(RAW)).toEqual(stillPending);
+				}
+				// Switched back on, the guesses are still waiting for a choice.
+				await saveAiSwitches(db, { names: true });
+				expect(await rowOf(id)).toMatchObject({
+					displayName: "Blue Bottle Coffee",
+					nameSuggested: true,
+				});
+			});
+
+			it("the rest of the form still saves: the category goes in even though the name pick is ignored", async () => {
+				const id = await charge();
+				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+				await saveAiSwitches(db, { names: false });
+				const category = await db
+					.prepare("SELECT id FROM categories WHERE archived = 0 LIMIT 1")
+					.first<{ id: number }>();
+				await save(id, {
+					name_pick: "s:Blue Bottle",
+					category: String(category?.id),
+				});
+				expect(await merchant(RAW)).toEqual(stillPending);
+				const saved = await db
+					.prepare("SELECT category_id FROM transactions WHERE id = ?")
+					.bind(id)
+					.first<{ category_id: number }>();
+				expect(saved?.category_id).toBe(category?.id);
+			});
+
+			it("once the suggestion was settled elsewhere, or its names changed, a stale chip changes nothing", async () => {
+				const id = await charge();
+				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+				await db
+					.prepare("UPDATE merchants SET suggested_name = 'Other Name'")
+					.run();
+				await save(id, { name_pick: "s:Blue Bottle" });
+				expect(await merchant(RAW)).toMatchObject({
+					display_name: null,
+					suggestion_status: "pending",
+				});
+				await db
+					.prepare("UPDATE merchants SET suggestion_status = 'rejected'")
+					.run();
+				await save(id, { name_pick: "s:Other Name" });
+				await save(id, { name_pick: "keep" });
+				expect(await merchant(RAW)).toMatchObject({
+					display_name: null,
+					suggestion_status: "rejected",
+				});
+			});
+
+			it("a name typed in the field is still the person's own, offered or not", async () => {
+				const id = await charge();
+				await suggest(RAW, "Blue Bottle Coffee");
+				await saveAiSwitches(db, { names: false });
+				await save(id, { name_pick: "s:Blue Bottle Coffee", merchant: "Mine" });
+				expect(await merchant(RAW)).toMatchObject({
+					display_name: "Mine",
+					suggestion_status: "rejected",
+				});
+			});
 		});
 
 		it("a name typed instead is the person's own: it wins over a chip and rejects the suggestions", async () => {

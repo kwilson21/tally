@@ -41,19 +41,22 @@ async function renderReview(
 	} = {},
 ) {
 	const all = await namesToReview(c.env.DB);
+	// Skip names a merchant by its row's number, never by its bank text, which would end up in the history.
 	const requestedSkips = new URL(c.req.url).searchParams.getAll("skip");
-	const keys = new Set(all.map((review) => review.key));
-	const skipped = [...new Set(requestedSkips)].filter((key) => keys.has(key));
-	const available = all.filter((review) => !skipped.includes(review.key));
+	const ids = new Set(all.map((review) => String(review.id)));
+	const skipped = [...new Set(requestedSkips)].filter((id) => ids.has(id));
+	const available = all.filter(
+		(review) => !skipped.includes(String(review.id)),
+	);
 	// After an error the same merchant comes back, with what was typed; otherwise the first one not skipped.
 	const review: NameReview | undefined =
 		(values && all.find((item) => item.key === values.key)) || available[0];
 
 	const query = new URLSearchParams();
-	for (const key of skipped) query.append("skip", key);
+	for (const id of skipped) query.append("skip", id);
 	const action = `/settings/names${query.size ? `?${query}` : ""}`;
 	const skipQuery = new URLSearchParams(query);
-	if (review) skipQuery.append("skip", review.key);
+	if (review) skipQuery.append("skip", String(review.id));
 
 	if (toast) {
 		c.header(
@@ -150,7 +153,7 @@ async function renderReview(
 }
 
 // More → Settings → Merchant names (P29 A, decision 64): one merchant with suggested names at a time.
-// ?skip=<key> (repeated) moves past the merchants a person skipped, without changing them.
+// ?skip=<row number> (repeated) moves past the merchants a person skipped, without changing them.
 merchantNames.get("/settings/names", (c) => renderReview(c));
 
 merchantNames.post("/settings/names", async (c) => {

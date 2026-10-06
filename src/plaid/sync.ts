@@ -535,7 +535,11 @@ export async function syncItem(
 			}
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
 			// starts as a copy of the row saved under the bank text, if there is one: its name, rule and Not a
-			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one.
+			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one. The one
+			// thing it doesn't leave behind is a waiting suggestion (spec §7): when several bank texts get one Plaid
+			// name, the row that was copied first may hold none, while another text's row holds names Workers AI
+			// already made and a person could still choose. A merchant with nothing waiting, and nothing decided,
+			// takes the waiting names of the text it came from.
 			for (const transaction of [...added, ...page.modified]) {
 				const key = merchantNameOf(transaction);
 				if (!key || key === transaction.name) continue;
@@ -545,6 +549,15 @@ export async function syncItem(
 						 SELECT ?, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill FROM merchants
 						 WHERE raw_name = ? AND NOT EXISTS (SELECT 1 FROM merchants WHERE raw_name = ?) AND ${OWNS_LOCK}`,
 					).bind(key, transaction.name, key, itemRowId, lockId),
+				);
+				statements.push(
+					env.DB.prepare(
+						`UPDATE merchants SET suggested_name = (SELECT s.suggested_name FROM merchants s WHERE s.raw_name = ?),
+							suggestion_status = 'pending'
+						 WHERE raw_name = ? AND display_name IS NULL AND suggestion_status = 'none'
+						   AND EXISTS (SELECT 1 FROM merchants s WHERE s.raw_name = ? AND s.suggestion_status = 'pending' AND COALESCE(s.suggested_name, '') != '')
+						   AND ${OWNS_LOCK}`,
+					).bind(transaction.name, key, transaction.name, itemRowId, lockId),
 				);
 			}
 			// A pending transaction the bank drops waits for the update's last page before it is deleted, because
