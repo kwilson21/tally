@@ -85,6 +85,14 @@ describe("GET /how-it-works in the demo", () => {
 		);
 	});
 
+	it("points to the Show choice, not an Excluded filter, for finding excluded transactions (#210)", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"Choose Excluded in the Show choice on Transactions to see only the excluded ones.",
+		);
+		expect(html).not.toContain("The Excluded filter");
+	});
+
 	it("draws each section's diagram from the same numbers as its worked example", async () => {
 		const page = decodeHtml((await get("/how-it-works")).html);
 		const descOf = (id: string) =>
