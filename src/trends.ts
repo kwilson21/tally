@@ -294,8 +294,13 @@ export type ChangeData = {
 export type TrendsPage =
 	| { kind: "empty" }
 	| {
-			/** Before there's a full month to compare: all spending by month, and when Tally started. */
+			/**
+			 * While last month is the part month Tally started in, or there's no last month: this month
+			 * so far with no comparison, all spending by month, and when Tally started.
+			 */
 			kind: "early";
+			monthName: string;
+			soFarCents: number;
 			startMonthName: string;
 			months: MonthPoint[];
 			label: string;
@@ -371,6 +376,8 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	if (judged.length === 0) {
 		return {
 			kind: "early",
+			monthName: monthName(thisMonth),
+			soFarCents: total(thisMonth),
 			startMonthName: monthName(startMonth),
 			months: allPoints,
 			label: monthsLabel(allPoints, "All spending"),

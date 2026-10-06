@@ -765,8 +765,14 @@ describe("buildTrends: months before there's history", () => {
 				],
 			}),
 		);
+		// Last month is the part month, so there's no comparison: no sentence, no same-days sides, but
+		// this month so far is still the headline.
+		expect(page).not.toHaveProperty("sentence");
+		expect(page).not.toHaveProperty("sameDaysCents");
 		expect(page).toEqual({
 			kind: "early",
+			monthName: "October",
+			soFarCents: 3000,
 			startMonthName: "September",
 			// September is where history starts, so it may be only part of a month.
 			months: [
@@ -811,8 +817,12 @@ describe("buildTrends: months before there's history", () => {
 				spend: [{ month: "2026-10", categoryId: GROCERIES, cents: 3000 }],
 			}),
 		);
+		// No last month at all: this month so far, with nothing to compare it with.
+		expect(page).not.toHaveProperty("sentence");
 		expect(page).toMatchObject({
 			kind: "early",
+			monthName: "October",
+			soFarCents: 3000,
 			startMonthName: "October",
 			months: [
 				{

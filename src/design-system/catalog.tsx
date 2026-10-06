@@ -1666,7 +1666,7 @@ function describeTrends(page: TrendsPage): string {
 	if (page.kind === "empty")
 		return "Trends with nothing to show yet: No spending to show yet. Trends fill in as your transactions arrive. Open Accounts";
 	if (page.kind === "early")
-		return `Trends before there's a month to compare: All spending. ${page.label} Trends fill in as months pass. Tally started in ${page.startMonthName}.`;
+		return `Trends with nothing to compare yet: Spent so far in ${page.monthName} ${trendsAmount(page.soFarCents)}. All spending. ${page.label} Trends fill in as months pass. Tally started in ${page.startMonthName}.`;
 	const rows = (list: { name: string; line: string }[]) =>
 		list.map((r) => `${r.name} ${r.line}`).join(", ");
 	const parts = [

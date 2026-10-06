@@ -317,6 +317,11 @@ export function TrendsScreen({
 			)}
 			{page.kind === "early" && (
 				<>
+					{/* This month so far, with no sentence: last month is only part of a month, or there is none. */}
+					<TrendsTop
+						month={page.monthName}
+						spent={trendsAmount(page.soFarCents)}
+					/>
 					<h2 class="mt-4 text-lg">All spending</h2>
 					<MonthBars
 						id={`${id}-bars`}

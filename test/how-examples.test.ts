@@ -89,6 +89,8 @@ describe("trendsExample", () => {
 		expect(
 			trendsExample({
 				kind: "early",
+				monthName: "October",
+				soFarCents: 0,
 				startMonthName: "September",
 				months: [],
 				label: "",

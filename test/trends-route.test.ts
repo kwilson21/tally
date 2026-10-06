@@ -245,7 +245,39 @@ describe("early and empty states (P31)", () => {
 		expect(html).toContain("<pattern");
 		expect(html).toMatch(/fill="url\(#[a-z-]+-part\)"/);
 		expect(html).not.toContain("Going well");
-		expect(html).not.toContain("Spent so far in");
+	});
+
+	it("shows this month so far with no comparison while last month is the part month", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		const last = monthsBefore(month, 1);
+		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
+			.bind(`${last}-01`)
+			.run();
+		const { html } = await get("/trends");
+		// The headline is there, as the serif number...
+		expect(html).toContain(`Spent so far in ${monthName(month)}`);
+		expect(html).toMatch(/<p class="font-serif text-6xl[^"]*">\$[\d,]+<\/p>/);
+		// ...but nothing is compared with a month Tally only partly has: no sentence, no Why? for
+		// it, no changes list.
+		expect(text(html)).not.toMatch(/by this time in/);
+		expect(html).not.toContain('aria-label="Why? this month against last"');
+		expect(html).not.toContain('aria-labelledby="changes-title"');
+		expect(text(html)).toContain(`Tally started in ${monthName(last)}.`);
+	});
+
+	it("shows this month so far with no comparison in Tally's very first month", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		// No bill payment either, so nothing counts in an earlier month than the first transaction.
+		await env.DB.prepare("DELETE FROM bill_payments").run();
+		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
+			.bind(`${month}-01`)
+			.run();
+		const { html } = await get("/trends");
+		expect(html).toContain(`Spent so far in ${monthName(month)}`);
+		expect(text(html)).not.toMatch(/by this time in/);
+		expect(text(html)).toContain(`Tally started in ${monthName(month)}.`);
 	});
 
 	it("says there's nothing to show, with a way to Accounts, with no transactions", async () => {
