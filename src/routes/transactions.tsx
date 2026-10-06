@@ -204,6 +204,17 @@ async function renderList(
 			? null
 			: (accounts.find((a) => a.id === filters.account)?.label ??
 				`account ${filters.account}`);
+	// A saved link can name an account that's since been deleted: keep it in the choice, as the month
+	// picker keeps its month, so the choice shows the filter the list is using rather than "All accounts".
+	if (
+		filters.account !== null &&
+		!accounts.some((a) => a.id === filters.account)
+	)
+		accounts.push({
+			id: filters.account,
+			label: `account ${filters.account}`,
+			disconnected: false,
+		});
 	const count = resultCount(
 		{ total, first, shown: rows.length, pages },
 		filters,

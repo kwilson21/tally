@@ -30,7 +30,7 @@ export function Chip({
 	...inputAttrs
 }: Props) {
 	return (
-		<label class="group inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-rule px-4 text-base text-ink has-[:checked]:border-ink has-[:checked]:bg-band has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
+		<label class="group inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-rule px-4 text-base text-ink has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 has-[:checked]:border-ink has-[:checked]:bg-band has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
 			<input
 				type={type}
 				name={name}

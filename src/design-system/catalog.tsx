@@ -457,7 +457,7 @@ const FILTER_SELECT_SPEC: UseSpecText = {
 		"Touch: the whole 44px pill. Keyboard: Tab to it, arrow keys or typing the first letters change it. Screen reader: “Account, combo box, Chase Card ••9921”; its label is read but never shown, since the chosen option already says what it is.",
 	motion: "None. The browser draws its own list.",
 	edges:
-		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. An option that is gone (an account removed) leaves the pill on its first option. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
+		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. A saved link to an account that's since been removed keeps it as the choice, named by its id (“account 999”), so the pill shows the filter the list is using. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
 	words:
 		"Month: {October} · All months. Category: All categories · {the household's categories}. Account: All accounts · {Chase Card ••9921} · {Cash} · {Old Savings ••3340 · Disconnected}. Show: All · Spending · Income · Refunds · Excluded.",
 };
@@ -1252,6 +1252,31 @@ function Controls() {
 								Yes, $150,000.00 is right
 							</Chip>
 						</div>
+					</div>
+				</fieldset>
+				<fieldset disabled>
+					<legend class="text-sm font-medium text-muted">
+						Disabled: a refund linked to a purchase counts in its purchase's
+						category
+					</legend>
+					<div class="mt-2 flex flex-wrap gap-2">
+						<Chip
+							type="radio"
+							name="ds-category-disabled"
+							value="groceries"
+							checked
+							icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+						>
+							Groceries
+						</Chip>
+						<Chip
+							type="radio"
+							name="ds-category-disabled"
+							value="gas"
+							icon={<CategoryIcon icon="gas" color="cat-slate" />}
+						>
+							Gas
+						</Chip>
 					</div>
 				</fieldset>
 			</Specimen>
