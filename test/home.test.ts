@@ -45,6 +45,17 @@ describe("GET / with the demo seed", () => {
 		expect(html).not.toContain("Bills due in the next 7 days");
 	});
 
+	it("draws Bills due soon as a section title, the same size as Budget", async () => {
+		const { html } = await home();
+		// DESIGN.md Type roles: a section title is 3xl, and Home's two section titles match.
+		expect(html).toMatch(
+			/<h2 id="budget-title"[^>]*class="font-serif text-3xl font-semibold"/,
+		);
+		expect(html).toMatch(
+			/<h2\s+id="home-bills-title"\s+class="font-serif text-3xl font-semibold"\s*>/,
+		);
+	});
+
 	it("subtracts exactly active, unpaid due and overdue bills", async () => {
 		const dollars = (html: string) =>
 			Number(
