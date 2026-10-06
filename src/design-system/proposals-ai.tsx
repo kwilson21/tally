@@ -163,8 +163,9 @@ const switchButtons = (
  * Prototype switch: a real checkbox, hidden but reachable, with a track and knob drawn from it. Ink
  * and the knob on the right when on, a ruled track and the knob on the left when off, and the word
  * beside it says which. The whole 44px-tall row is its label. With `needs`, the switch is greyed
- * out (P86): disabled, off, in muted text and a rule-coloured track, with the words it needs on
- * under it, so the greying never rests on color alone.
+ * out (P86): disabled, still showing its saved setting (On or Off) in muted text and a
+ * rule-coloured track, with the words it needs on under it, so the greying never rests on color
+ * alone. Save leaves a greyed switch's saved setting as it was.
  */
 export function SwitchRow({
 	f,
@@ -182,7 +183,7 @@ export function SwitchRow({
 				<input
 					type="checkbox"
 					name={`p41b-${f.id}`}
-					checked={on && !greyed}
+					checked={on}
 					disabled={greyed}
 					class="sr-only"
 				/>

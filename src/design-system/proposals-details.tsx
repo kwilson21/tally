@@ -1082,7 +1082,8 @@ const TODAYS_NAMES: SwitchWords = {
 
 /**
  * Settings' AI suggestions group as P41 B draws it, in one option's words: all on to start, or
- * (greyed) with Categories and Income off, so the last switch has nothing to sort and is greyed out.
+ * (greyed) with Categories and Income off, so the last switch has nothing to sort and is greyed out,
+ * still showing its saved On.
  */
 function AiWords({ words, greyed }: { words: SwitchWords; greyed?: boolean }) {
 	return (
@@ -1091,7 +1092,7 @@ function AiWords({ words, greyed }: { words: SwitchWords; greyed?: boolean }) {
 				{words.features.map((f) => (
 					<SwitchRow
 						f={f}
-						on={!greyed || f.id === "names"}
+						on={!greyed || f.id === "names" || f.id === "arrival"}
 						needs={greyed && f.id === "arrival" ? words.needs : undefined}
 					/>
 				))}
@@ -1814,7 +1815,7 @@ export function DetailsProposals() {
 						},
 						{
 							name: "Option A, next · Categories and Income off",
-							note: "Nothing is left to sort, so “Sort right away” is greyed out and says what it needs.",
+							note: "Nothing is left to sort, so “Sort right away” is greyed out and says what it needs. It still shows its saved On, dimmed, and Save leaves it as it was.",
 							tall: true,
 							screen: <AiWords words={SAY_WHAT_IT_DOES} greyed />,
 						},
