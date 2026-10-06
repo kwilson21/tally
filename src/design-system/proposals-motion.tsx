@@ -102,11 +102,12 @@ function Moment({ n, title, words, height, look, ms, children }: MomentProps) {
  * 1 · The P41 switch (decision 73: On or Off in words, one Save under the group) turning off. It is
  * the real Switch, drawn Off: its real knob and track, which the loop slides from the On look, so a
  * still capture shows the end of the move. The row is P41 B's own: its name and its muted line.
+ * It's inert, as the catalog's other pictures are, so a tap can't turn it On mid-loop.
  */
 function SwitchStage({ look }: { look: Look }) {
 	return (
 		<div class="flex h-full items-center px-4">
-			<div class="w-full">
+			<div class="w-full" inert>
 				<Switch
 					id={`p74-${look}-switch`}
 					name={`p74-${look}-switch`}

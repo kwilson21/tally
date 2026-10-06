@@ -677,6 +677,12 @@ describe("the proposals page's drawings", () => {
 			)?.[0];
 			expect(input, look).toBeDefined();
 			expect(input, look).not.toMatch(/\schecked\b/);
+			// A tap can't turn the pictured switch On while the loop keeps showing it turning off.
+			expect(html, look).toMatch(
+				new RegExp(
+					`<div [^>]*inert[^>]*>(?:(?!</div>)[\\s\\S])*?id="p74-${look}-switch"`,
+				),
+			);
 		}
 	});
 });
