@@ -731,6 +731,25 @@ describe("the AI switches", () => {
 			});
 		});
 
+		it("still asks about an older credit whose review was never recorded (NULL), and stores its income answer", async () => {
+			await onlyOneCreditPending();
+			await db
+				.prepare(
+					"UPDATE transactions SET credit_reviewed = NULL, credit_reviewed_by = NULL, income_source = NULL WHERE id = 1",
+				)
+				.run();
+			const jev = fakeJev(() => flagged({ income: 0.99 }));
+			await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(1);
+			expect(
+				await db
+					.prepare(
+						"SELECT flag_income, income_source FROM transactions WHERE id = 1",
+					)
+					.first(),
+			).toEqual({ flag_income: 1, income_source: "jev" });
+		});
+
 		it("marks what it asked about as looked at, so the same ones aren't asked every night", async () => {
 			const jev = fakeJev(() => reply(0.97));
 			await categorizePending(withKey, jev.fetchImpl);

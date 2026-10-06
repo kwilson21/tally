@@ -720,9 +720,11 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 		.run();
 }
 
-// A credit a person already decided about: Jev can only help with its category.
+// A credit a person already decided about: Jev can only help with its category. The review columns
+// are NULL on older rows, which SQL won't compare, so a missing review counts as no review: COALESCE
+// makes this 0 rather than NULL, and `NOT` of it can't drop the row.
 const CATEGORY_ONLY =
-	"(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'))";
+	"COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)";
 
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
