@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { namesToReview } from "../src/db/merchant-names";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { suggestMerchantNames } from "../src/suggest-names-pending";
@@ -428,6 +429,42 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				],
 			});
 			expect(await pendingNames()).toEqual([]);
+		});
+
+		it("withdraws a name that only repeats its own bank text when another text has an older name", async () => {
+			const id = await addItem();
+			await sync(id, {
+				added: [
+					transaction({
+						transaction_id: "target-corp",
+						name: "TGT*0099",
+						date: "2026-08-02",
+						merchant_name: "Target Corp",
+					}),
+					transaction({
+						transaction_id: "target",
+						name: "TARGET 1234",
+						date: "2026-09-27",
+						merchant_name: "Target",
+					}),
+				],
+			});
+
+			expect(await merchants()).toEqual([
+				{
+					raw_name: "Target Corp",
+					suggested_name: "Target Corp",
+					display_name: null,
+					suggestion_status: "pending",
+				},
+			]);
+			expect(await namesToReview(env.DB)).toEqual([
+				expect.objectContaining({
+					key: "Target Corp",
+					bankText: "TGT*0099",
+					names: ["Target Corp"],
+				}),
+			]);
 		});
 
 		it("leaves a name that is the newest for another bank text", async () => {

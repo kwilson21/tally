@@ -131,12 +131,15 @@ const suggestPlaidNamesSql = (ownsLock: string) =>
  * the newest Plaid name (latest date, then latest id) for none of its charges' bank texts.
  */
 const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
-	`UPDATE merchants SET suggested_name = NULL, suggestion_status = 'none'
+	`WITH pair(text, tidied) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
+	 UPDATE merchants SET suggested_name = NULL, suggestion_status = 'none'
 	 WHERE suggestion_status = 'pending' AND display_name IS NULL AND suggested_name = raw_name
-	   AND EXISTS (SELECT 1 FROM transactions t WHERE t.raw_name IN (SELECT json_extract(value, '$[0]') FROM json_each(?))
+	   AND EXISTS (SELECT 1 FROM transactions t WHERE t.raw_name IN (SELECT text FROM pair)
 	     AND t.parent_id IS NULL AND t.merchant_name = merchants.raw_name)
 	   AND NOT EXISTS (
-	     SELECT 1 FROM transactions c WHERE c.parent_id IS NULL AND c.merchant_name = merchants.raw_name
+	     SELECT 1 FROM transactions c JOIN pair p ON p.text = c.raw_name
+	     WHERE c.parent_id IS NULL AND c.merchant_name = merchants.raw_name
+	       AND c.merchant_name != p.tidied
 	       AND c.merchant_name = (SELECT n.merchant_name FROM transactions n
 	         WHERE n.raw_name = c.raw_name AND n.parent_id IS NULL AND NULLIF(n.merchant_name, '') IS NOT NULL
 	         ORDER BY n.date DESC, n.id DESC LIMIT 1))
