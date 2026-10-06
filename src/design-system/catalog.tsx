@@ -53,6 +53,7 @@ import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
+import { TimeZoneRow } from "../views/time-zone-row";
 import { TransactionRow } from "../views/transaction-row";
 import {
 	ChangeRow,
@@ -419,6 +420,26 @@ const SWITCH_SPEC: UseSpecText = {
 		"A long name or line wraps beside the switch and never under it; the word and the track keep their width. With no muted line it is the name alone. No JavaScript: it's a plain checkbox that posts “on” when on and nothing when off, so the server reads a field left out as off, and the form always carries the whole group. At 320px the row still fits the name, word and track side by side.",
 	words:
 		"The label is the person's word for the feature (“Categories and exclusions”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Categories and exclusions on, income off.",
+};
+
+// The time zone row's use spec (decision 72, P35 A): every line answered before the owner signs it off.
+const TIME_ZONE_SPEC: UseSpecText = {
+	purpose:
+		"Let the household choose the time zone Tally uses for “today”, so a new month starts and a bill falls due at the household's own midnight. It's the one row in Settings' Household group.",
+	affordance:
+		"A row like a category row: “Time zone” at the left, the zone's everyday name at the right (“Eastern”), and a chevron at the far end. The whole row is the target, 44px tall, with the pointer hand. Opened, it holds a select of the six US zones and then “Other time zones”, a muted line saying what the zone decides, Save as the primary button and Cancel as the secondary one.",
+	states:
+		"Closed: the row with the saved zone's name. Open: the chevron turned down and the form below. Hover: no change (touch has none). Focus: the focus-visible ring on the row, the select and each button, for the keyboard. Save: rest, pressed, and “Saving…” with the spinner, disabled while it saves. Error: the row opens, the select takes the error look with its words under it in role=alert, and nothing was saved. Disabled and done: not applicable; a saved zone shows as the new name.",
+	feedback:
+		"Save: the group swaps in place and comes back closed with the new name at the right, a toast says “Saved time zone”, the announcer says “Saved time zone. Months and bills now follow Central time.”, and focus goes to the row, since the swap replaced Save. Cancel closes the row with focus on it. Without JavaScript Save posts the form and Settings comes back at the group. Nothing changes until Save.",
+	input:
+		"Touch: the row, the select and both buttons are 44px tall, and a phone opens its own picker for the select. Keyboard: Tab to the row, Enter or Space opens it; Tab to the select and choose with the arrow keys or by typing a name; Tab to Save and press Enter. Screen reader: “Time zone, Eastern, button, collapsed”; then the select, named “Time zone” and described by its muted line (and by its error).",
+	motion:
+		"The chevron turns a quarter turn as the row opens. Reduced motion shows the end state at once. Nothing else moves.",
+	edges:
+		"Only a zone the select offers is saved: a post that names another comes back with the error and changes nothing. Saving the zone that's already saved is fine. The zone changes only “today”; a transaction's own date is never converted. A saved zone the select doesn't offer still shows its city at the right, and the select starts on Eastern. At 320px the name and the zone sit side by side. No JavaScript: it's a plain details element and a form that posts.",
+	words:
+		"Time zone · {Eastern} (Eastern, Central, Mountain, Pacific, Alaska, Hawaii; the others by city) · Other time zones · Decides when a new month starts and when a bill is due. Transactions keep the bank's dates. · Save · Saving… · Cancel · Toast: Saved time zone · Announced: Saved time zone. Months and bills now follow {Central} time. · Error: Choose a time zone from the list.",
 };
 
 // The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
@@ -1267,6 +1288,61 @@ function Controls() {
 					</div>
 				</State>
 				<UseSpec spec={SWITCH_SPEC} />
+			</Specimen>
+			<Specimen
+				id="time-zone-row"
+				title="TimeZoneRow"
+				tier="visual"
+				components={["TimeZoneRow"]}
+				sentence="Settings' Household row (decision 72, P35 A): “Time zone” with the zone's everyday name at the right and a chevron, which opens to a select and Save. It works without JavaScript."
+			>
+				<State label="Closed, as Settings draws it">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-closed"
+							zone="America/New_York"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="Open: the select, what the zone decides, and Save and Cancel">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-open"
+							zone="America/Chicago"
+							open
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="With an error: the row opens, and the words sit under the select in role=“alert”">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-error"
+							zone="America/Chicago"
+							error="Choose a time zone from the list."
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="On a narrow phone (320px), with a longer name">
+					<div inert class="w-[320px] max-w-full border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-narrow"
+							zone="America/Puerto_Rico"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<UseSpec spec={TIME_ZONE_SPEC} />
 			</Specimen>
 			<Specimen
 				id="form-field"

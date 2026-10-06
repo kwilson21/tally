@@ -44,6 +44,7 @@ import { ProgressRow } from "../src/views/progress-row";
 import { Switch } from "../src/views/switch";
 import { SystemDiagram } from "../src/views/system-diagram";
 import { ThingsToTry } from "../src/views/things-to-try";
+import { TimeZoneRow } from "../src/views/time-zone-row";
 import { TransactionRow } from "../src/views/transaction-row";
 import { TrendsScreen } from "../src/views/trends";
 
@@ -131,6 +132,21 @@ describe("GET /design-system in the demo", () => {
 				label: "Categories and exclusions",
 				hint: "Picks categories, and leaves out transfers and reimbursements.",
 				checked: true,
+			}),
+			TimeZoneRow({
+				id: "ds-zone-closed",
+				zone: "America/New_York",
+				action: "#",
+				back: "#",
+				backSwap: "#",
+			}),
+			TimeZoneRow({
+				id: "ds-zone-error",
+				zone: "America/Chicago",
+				error: "Choose a time zone from the list.",
+				action: "#",
+				back: "#",
+				backSwap: "#",
 			}),
 			...MONEY_STATES.map((s) => MoneyInput(s.props)),
 			ThingsToTry(),
@@ -271,6 +287,40 @@ describe("GET /design-system in the demo", () => {
 		expect(disabled).toContain("has-[:disabled]:cursor-not-allowed");
 		expect(design).toMatch(
 			/\| Chip \|[^\n]*disabled fieldset[^\n]*40%[^\n]*not-allowed cursor/,
+		);
+	});
+
+	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="time-zone-row"'));
+		// Visual: a form here posts nowhere, and the specimen is inert to htmx.
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain('data-ds-components="TimeZoneRow"');
+		expect(tag).toContain("hx-ignore");
+		const section =
+			html.split('id="time-zone-row"')[1]?.split("</section>")[0] ?? "";
+		// Four rows, each in an inert box so nothing in them can be tapped or can take focus.
+		expect(section.match(/<details/g)).toHaveLength(4);
+		expect(section.match(/<div inert/g)).toHaveLength(4);
+		// Closed, open (the chevron's turned state is the open attribute), and the error one open too.
+		expect(
+			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
+				/\sopen(\s|>|=)/.test(m[0]),
+			),
+		).toEqual([false, true, true, false]);
+		expect(section).toContain("Eastern");
+		expect(section).toContain("Puerto Rico");
+		expect(section).toMatch(
+			/role="alert"[^>]*>Choose a time zone from the list\./,
+		);
+		expect(section).toContain("Decides when a new month starts");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		expect(section).not.toMatch(/jev/i);
+		// DESIGN.md says what it is, and that it works without a script.
+		expect(design).toMatch(
+			/\| TimeZoneRow \|[^\n]*"Time zone"[^\n]*works without JavaScript/,
 		);
 	});
 
