@@ -21,6 +21,7 @@ describe("parseEdit", () => {
 				categoryId: 2,
 				alwaysForMerchant: false,
 				displayName: "Local Bakery",
+				keepBankName: false,
 				note: null,
 				excluded: false,
 				income: false,

@@ -230,3 +230,70 @@ describe("scheduled handler", () => {
 		},
 	);
 });
+
+// The nightly names step (spec §9, #33): Workers AI suggests names after Jev, where there is a binding.
+describe("scheduled handler: merchant names", () => {
+	const aiThatSays = (response: string) =>
+		({ run: vi.fn(async () => ({ response })) }) as unknown as Ai & {
+			run: ReturnType<typeof vi.fn>;
+		};
+	async function oneUnnamedCharge() {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('plaid-1', 1, '2026-09-20', 650, 'SQ *BLUE BOTTLE COF 0412')",
+			),
+		]);
+	}
+	const pending = () =>
+		env.DB.prepare(
+			"SELECT raw_name, suggested_name, display_name, suggestion_status FROM merchants",
+		).all();
+
+	it("suggests names for a bank text Plaid didn't name, as pending suggestions", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await oneUnnamedCharge();
+		const ai = aiThatSays("Blue Bottle Coffee\nBlue Bottle");
+		await runScheduled({ ...env, DEMO: "false", AI: ai });
+		expect(ai.run).toHaveBeenCalledTimes(1);
+		expect((await pending()).results).toEqual([
+			{
+				raw_name: "SQ *BLUE BOTTLE COF 0412",
+				suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+				display_name: null,
+				suggestion_status: "pending",
+			},
+		]);
+		vi.restoreAllMocks();
+	});
+
+	it("does nothing where there is no Workers AI binding, as in the demo and local development", async () => {
+		await oneUnnamedCharge();
+		await runScheduled({ ...env, DEMO: "false" });
+		expect((await pending()).results).toEqual([]);
+	});
+
+	it("never asks about the demo's seeded data, so the demo can't call Workers AI even with a binding", async () => {
+		const ai = aiThatSays("Anything");
+		await runScheduled({ ...env, AI: ai });
+		expect(ai.run).not.toHaveBeenCalled();
+	});
+
+	it("keeps going when Workers AI fails, so the rest of the night still runs", async () => {
+		await oneUnnamedCharge();
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const ai = {
+			run: vi.fn(async () => {
+				throw new Error("capacity");
+			}),
+		} as unknown as Ai;
+		await expect(
+			runScheduled({ ...env, DEMO: "false", AI: ai }),
+		).resolves.toBeUndefined();
+		expect((await pending()).results).toEqual([]);
+		logged.mockRestore();
+	});
+});

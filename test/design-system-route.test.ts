@@ -256,9 +256,49 @@ describe("GET /design-system in the demo", () => {
 		// Its name for the AI never says Jev, since this is the family's screen too.
 		expect(section).not.toMatch(/jev/i);
 		// It lists only the AI switches that have a feature behind them, as Settings does.
-		expect(design).toMatch(/Categories and exclusions; Income/);
-		expect(section).not.toContain("Merchant names");
+		expect(design).toMatch(
+			/Suggest store names; Categories and exclusions; Income/,
+		);
 		expect(section).not.toContain("Sort new transactions as they arrive");
+	});
+
+	it("shows NameChoices with a guess chosen and not, an error, and its whole use spec (P29 A, P87 B)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="name-choices"'));
+		expect(tag).toContain('data-ds-tier="interactive"');
+		expect(tag).toContain('data-ds-components="NameChoices"');
+		const section =
+			html.split('id="name-choices"')[1]?.split("</section>")[0] ?? "";
+		// Three states, each its own radio group, and nothing posts from the catalog.
+		const radios = [...section.matchAll(/<input[^>]*name="name_pick"[^>]*>/g)];
+		expect(radios.length).toBeGreaterThanOrEqual(8);
+		const chosen = radios.filter((m) => /\schecked(\s|>|=)/.test(m[0]));
+		expect(chosen).toHaveLength(1);
+		expect(section).not.toContain("<form");
+		expect(section).not.toContain("<button");
+		// Where the guesses came from, under them: the icon, "Tally's guess" and a Why?.
+		expect(section).toContain("Tally&#39;s guess");
+		expect(section).toContain('href="/how-it-works#names"');
+		expect(section).toContain('role="alert"');
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		// Never the name of the AI behind it.
+		expect(section).not.toMatch(/jev|workers ai/i);
+		expect(design).toMatch(
+			/\| NameChoices \|[^\n]*Tally's guess[^\n]*Or your own[^\n]*without JavaScript/,
+		);
+	});
+
+	it("shows a guessed name in TransactionRow with the sparkles icon, dashed, and says so in DESIGN.md", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain("Tally&#39;s guess: ");
+		expect(section.match(/decoration-dashed/g)).toHaveLength(2);
+		expect(design).toMatch(
+			/\| TransactionRow \|[^\n]*sparkles icon[^\n]*dashed underline/,
+		);
 	});
 
 	it("shows the price-changed offer on the bill's row and page, with its whole use spec (P36 B)", async () => {

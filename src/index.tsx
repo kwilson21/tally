@@ -15,6 +15,7 @@ import { feedback, retryFeedback } from "./routes/feedback";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
 import { howItWorks } from "./routes/how-it-works";
+import { merchantNames } from "./routes/merchant-names";
 import { organize } from "./routes/organize";
 import { plaid, enabled as plaidEnabled } from "./routes/plaid";
 import { settings } from "./routes/settings";
@@ -22,6 +23,7 @@ import { transactions } from "./routes/transactions";
 import { trends } from "./routes/trends";
 import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
+import { suggestMerchantNames } from "./suggest-names-pending";
 
 type AppEnv = Env & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
@@ -33,6 +35,8 @@ type ScheduledEnv = PlaidEnv & {
 	DB: D1Database;
 	DEMO?: string;
 	JEV_API_KEY?: string;
+	/** Workers AI, bound in production only (wrangler.jsonc); the demo and local development have none. */
+	AI?: Ai;
 	FEEDBACK_GITHUB_TOKEN?: string;
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
@@ -58,6 +62,15 @@ export async function runScheduled(
 	await categorizePending(env, fetchImpl, {
 		rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
 	});
+	// Workers AI then suggests names for the bank texts Plaid didn't name (spec §9), while the names switch
+	// is on. Nothing here changes a name, and a failure never stops the retry below.
+	try {
+		await suggestMerchantNames(env);
+	} catch (error) {
+		console.error(
+			`workers-ai: names step failed ${error instanceof Error ? error.name : "unknown"}`,
+		);
+	}
 	await retryFeedback(env, fetchImpl);
 }
 
@@ -125,6 +138,7 @@ app.route("/", plaid);
 app.route("/", organize);
 app.route("/", transactions);
 app.route("/", trends);
+app.route("/", merchantNames);
 app.route("/", settings);
 app.route("/", accounts);
 app.route("/", bills);

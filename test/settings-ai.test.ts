@@ -10,9 +10,9 @@ import { resetDemo } from "../src/demo/reset";
 
 // The AI suggestions group in Settings (spec §8.6, decision 73, P41 B): switches with On or Off in
 // words, one Save under the group, working with or without JavaScript. It shows only the switches
-// whose feature exists: categories and exclusions, and income. Merchant names (Workers AI) and
-// sorting new transactions as they arrive (the Jev run after a sync) are stored but get their rows
-// when the features that read them ship, so no switch promises something that isn't built.
+// whose feature exists: suggest store names (Workers AI, #33), categories and exclusions, and income.
+// Sorting new transactions as they arrive (the Jev run after a sync) is stored but gets its row when
+// the feature that reads it ships, so no switch promises something that isn't built.
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -80,14 +80,18 @@ describe("GET /settings: the AI suggestions group", () => {
 		expect(at('id="ai-suggestions"')).toBeLessThan(at('id="your-data-title"'));
 	});
 
-	it("has two switches, on to start, each with its words and its muted line", async () => {
+	it("has three switches, on to start, each with its words and its muted line", async () => {
 		const { html } = await get("/settings");
 		expect(inputs(html)).toEqual([
+			{ name: "names", on: true },
 			{ name: "categories", on: true },
 			{ name: "income", on: true },
 		]);
 		const words = textOf(group(html));
 		for (const sentence of [
+			// P86 A's words and example (decision 80).
+			"Suggest store names",
+			"Turns bank text like SQ *BLUE BOTTLE COF into Blue Bottle Coffee. You pick the name.",
 			"Categories and exclusions",
 			"Picks categories, and leaves out transfers and reimbursements.",
 			"Income",
@@ -95,21 +99,17 @@ describe("GET /settings: the AI suggestions group", () => {
 		])
 			expect(words).toContain(sentence);
 		// On and Off are both in the markup; the checkbox's state decides which one shows.
-		expect(group(html).match(/>On</g)).toHaveLength(2);
-		expect(group(html).match(/>Off</g)).toHaveLength(2);
+		expect(group(html).match(/>On</g)).toHaveLength(3);
+		expect(group(html).match(/>Off</g)).toHaveLength(3);
 	});
 
 	it("doesn't show a switch for a feature that isn't built yet", async () => {
 		const { html } = await get("/settings");
 		const words = textOf(group(html));
-		expect(words).not.toContain("Merchant names");
 		expect(words).not.toContain("Sort new transactions as they arrive");
-		expect(group(html)).not.toContain('name="names"');
 		expect(group(html)).not.toContain('name="sortOnArrival"');
-		// Their rows are still stored, on, for the features that will read them.
-		const stored = await readAiSwitches(env.DB);
-		expect(stored.names).toBe(true);
-		expect(stored.sortOnArrival).toBe(true);
+		// Its row is still stored, on, for the feature that will read it.
+		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);
 	});
 
 	it("never names Jev", async () => {
@@ -118,9 +118,10 @@ describe("GET /settings: the AI suggestions group", () => {
 	});
 
 	it("shows each switch as it's saved", async () => {
-		await saveAiSwitches(env.DB, { categories: false });
+		await saveAiSwitches(env.DB, { names: false, categories: false });
 		const { html } = await get("/settings");
 		expect(inputs(html)).toEqual([
+			{ name: "names", on: false },
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 		]);
@@ -168,50 +169,58 @@ describe("POST /settings/ai", () => {
 		const { res, html } = await post("/settings/ai", { income: "on" });
 		expect(res.status).toBe(200);
 		expect(await readAiSwitches(env.DB)).toMatchObject({
+			names: false,
 			categories: false,
 			income: true,
 		});
 		// The section comes back as saved, for htmx to swap in.
 		expect(inputs(html)).toEqual([
+			{ name: "names", on: false },
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 		]);
 		expect(trigger(res)).toEqual({
 			toast: { message: "Saved AI suggestions", type: "success" },
 			announce:
-				"Saved AI suggestions. Categories and exclusions off, income on.",
+				"Saved AI suggestions. Suggest store names off, categories and exclusions off, income on.",
 		});
 	});
 
-	it("turns both back on", async () => {
+	it("turns them back on", async () => {
 		await saveAiSwitches(env.DB, allOff);
 		const { res } = await post("/settings/ai", {
+			names: "on",
 			categories: "on",
 			income: "on",
 		});
 		expect(await readAiSwitches(env.DB)).toMatchObject({
+			names: true,
 			categories: true,
 			income: true,
 		});
 		expect(trigger(res).announce).toBe(
-			"Saved AI suggestions. Categories and exclusions on, income on.",
+			"Saved AI suggestions. Suggest store names on, categories and exclusions on, income on.",
 		);
 	});
 
 	it("leaves the switches that have no row on the page as they were, whatever is posted", async () => {
-		await saveAiSwitches(env.DB, { names: false });
-		await post("/settings/ai", { categories: "on", income: "on" });
+		await saveAiSwitches(env.DB, { sortOnArrival: false });
+		await post("/settings/ai", {
+			names: "on",
+			categories: "on",
+			income: "on",
+		});
 		expect(await readAiSwitches(env.DB)).toEqual({
 			...AI_SWITCHES_ALL_ON,
-			names: false,
+			sortOnArrival: false,
 		});
-		// A post that names them can't change them either.
-		await post("/settings/ai", { names: "on", sortOnArrival: "" });
+		// A post that names it can't change it either.
+		await post("/settings/ai", { sortOnArrival: "on" });
 		expect(await readAiSwitches(env.DB)).toEqual({
 			names: false,
 			categories: false,
 			income: false,
-			sortOnArrival: true,
+			sortOnArrival: false,
 		});
 	});
 

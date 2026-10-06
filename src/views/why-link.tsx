@@ -4,6 +4,7 @@ export type WhySection =
 	| "transactions"
 	| "exclusions"
 	| "categorization"
+	| "names"
 	| "bills"
 	| "trends"
 	| "net-worth";

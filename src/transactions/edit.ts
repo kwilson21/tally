@@ -6,6 +6,11 @@ export type Edit = {
 	alwaysForMerchant: boolean;
 	/** null falls back to the bank's raw name. */
 	displayName: string | null;
+	/**
+	 * "Keep the bank's name" was chosen from the suggested names (P29 A): the merchant keeps its tidied
+	 * bank text, and its suggestions are turned down. Only with no name typed.
+	 */
+	keepBankName?: boolean;
 	note: string | null;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
 	excluded: boolean;
@@ -42,7 +47,13 @@ export function parseEdit(
 	const rawCategory = text(form, "category");
 	const categoryId = rawCategory === "" ? null : Number(rawCategory);
 	const alwaysForMerchant = form.get("always") === "1";
-	const displayName = text(form, "merchant");
+	// A name typed in the field is a person's own and wins over a chip. The chips (P29 A) post `name_pick`:
+	// "s:" and a suggested name, or "keep" for the bank's. No chip is chosen to start with.
+	const typedName = text(form, "merchant");
+	const pick = text(form, "name_pick");
+	const pickedName = pick.startsWith("s:") ? pick.slice(2).trim() : "";
+	const displayName = typedName || pickedName;
+	const keepBankName = !typedName && pick === "keep";
 	const note = text(form, "note");
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
@@ -67,6 +78,7 @@ export function parseEdit(
 			categoryId,
 			alwaysForMerchant,
 			displayName: displayName || null,
+			keepBankName,
 			note: note || null,
 			excluded,
 			income,

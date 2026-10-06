@@ -16,6 +16,9 @@ export const PAGES = [
 	},
 	// 110 is Local Bakery after a reset; test/seed.test.ts keeps that true.
 	{ name: "transaction-edit", path: "/transactions/110?uncategorized=1" },
+	// 116 is a Craft Supply charge whose merchant has two names Tally guessed, so the sheet offers them (P29 A, P87 B);
+	// test/seed.test.ts keeps that true.
+	{ name: "transaction-edit-names", path: "/transactions/116?uncategorized=1" },
 	// 94 is a Trader Joe's that Jev categorized, so the sheet shows "Picked by Jev"; test/seed.test.ts keeps that true.
 	{ name: "transaction-edit-jev", path: "/transactions/94" },
 	{ name: "bills", path: "/bills" },
@@ -25,6 +28,8 @@ export const PAGES = [
 	{ name: "settings", path: "/settings" },
 	// Gas's row open for editing, as in the round 5 study.
 	{ name: "settings-edit", path: "/settings?open=3" },
+	// The one-at-a-time review of the names Tally guessed that a Band on Settings leads to (P29 A).
+	{ name: "settings-names", path: "/settings/names" },
 	{ name: "more", path: "/more" },
 	{ name: "how-it-works", path: "/how-it-works" },
 	{ name: "feedback", path: "/feedback" },

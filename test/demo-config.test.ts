@@ -96,6 +96,12 @@ describe("production environment config (#23)", () => {
 		expect(production.triggers).toEqual({ crons: ["0 9 * * *"] });
 	});
 
+	it("binds Workers AI for merchant names (#33), and only here: the demo and local development have none", () => {
+		expect(production.ai).toEqual({ binding: "AI" });
+		expect(demo.ai).toBeUndefined();
+		expect(config.ai).toBeUndefined();
+	});
+
 	it("holds no secrets or Plaid settings; those go in with wrangler secret put", () => {
 		expect(JSON.stringify(production)).not.toMatch(
 			/plaid|secret|token|jev|access_aud|team_domain/i,

@@ -49,6 +49,7 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { NameChoices, SUGGESTED_NAME_CLASS } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -881,6 +882,8 @@ type SheetProps = {
 	refunds?: RefundPurchase[];
 	/** The household's date, for the transaction's "Today" label. */
 	today: string;
+	/** The name chip that was chosen when the form was posted, shown again after an error. */
+	namePick?: string | null;
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -893,6 +896,7 @@ function EditSheet({
 	deleteConfirm = false,
 	refunds = [],
 	today,
+	namePick = null,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -926,9 +930,10 @@ function EditSheet({
 				tabindex={-1}
 				autofocus
 				// Focused only so screen readers start here; it isn't a control, so no ring.
-				class="font-serif text-4xl font-semibold tracking-tight outline-none"
+				class={`font-serif text-4xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
 			>
 				{tx.displayName}
+				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}
 			</h2>
 			<p class="font-serif text-4xl font-semibold">
 				{formatCents(tx.amountCents, { signed: true })}
@@ -1004,6 +1009,19 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				{/* A merchant with suggested names waiting (P29 A): choose one, keep the bank's, or type your own.
+				    Nothing is chosen to start with, so saving for another reason never renames the merchant. */}
+				{tx.nameChoices && (
+					<NameChoices
+						id="name"
+						names={tx.nameChoices.names}
+						tidied={tx.nameChoices.tidied}
+						count={tx.nameChoices.count}
+						picked={namePick}
+						own={values.displayName ?? ""}
+						error={errors.merchant}
+					/>
+				)}
 				<fieldset
 					class="flex flex-col gap-2"
 					disabled={purchase !== undefined}
@@ -1155,8 +1173,9 @@ function EditSheet({
 					class="group border-t border-rule"
 					open={Boolean(
 						values.note ||
-							(values.displayName || null) !== tx.merchantName ||
-							errors.merchant ||
+							(!tx.nameChoices &&
+								((values.displayName || null) !== tx.merchantName ||
+									errors.merchant)) ||
 							errors.note,
 					)}
 				>
@@ -1164,20 +1183,23 @@ function EditSheet({
 						<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
 							<Icon name="chevron-right" class="size-5" />
 						</span>
-						Rename or add a note
+						{tx.nameChoices ? "Add a note" : "Rename or add a note"}
 					</summary>
 					<div class="flex flex-col gap-4 pt-2">
-						<TextInput
-							id="merchant"
-							label="Merchant name"
-							name="merchant"
-							value={values.displayName ?? ""}
-							placeholder={tx.rawName}
-							autocomplete="off"
-							surface="paper"
-							hint="Renames every transaction from this merchant."
-							error={errors.merchant}
-						/>
+						{/* With names to choose from, the field is "Or your own" up with them. */}
+						{!tx.nameChoices && (
+							<TextInput
+								id="merchant"
+								label="Merchant name"
+								name="merchant"
+								value={values.displayName ?? ""}
+								placeholder={tx.rawName}
+								autocomplete="off"
+								surface="paper"
+								hint="Renames every transaction from this merchant."
+								error={errors.merchant}
+							/>
+						)}
 						<FormField id="note" label="Note" error={errors.note}>
 							{({ class: errorClass, ...a11y }) => (
 								<textarea
@@ -1659,6 +1681,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					refunds={refunds}
 					errors={errors}
 					today={today}
+					namePick={form.get("name_pick")?.toString() ?? null}
 				/>
 			),
 		});
@@ -1685,8 +1708,13 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
-	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).
-	const name = parsed.value.displayName ?? tidyName(tx.rawName);
+	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
+	// suggestion its rows were showing when nothing was chosen (P29 A).
+	const name =
+		parsed.value.displayName ??
+		(tx.nameSuggested && !parsed.value.keepBankName
+			? tx.displayName
+			: tidyName(tx.rawName));
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;

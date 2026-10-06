@@ -14,6 +14,7 @@ import {
 	setArchived,
 	settingsCategories,
 } from "../db/categories";
+import { namesToReview } from "../db/merchant-names";
 import { formatCents } from "../money";
 import {
 	type CategoryErrors,
@@ -22,6 +23,7 @@ import {
 	restoreProblem,
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";
+import { Band } from "../views/band";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
@@ -96,11 +98,11 @@ type View = {
  * each posts, its words and its muted line, in the order the group shows them, and how each is read
  * aloud after a save. Screens say "Tally", never the name of the AI behind it.
  *
- * Two more are stored (`names` and `sortOnArrival` in db/ai-switches.ts) but have no row yet, so no
- * switch promises something that isn't built. Each gets its row here, with its words from the P41
- * drawing (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant
- * names" with Workers AI names (#33, #194) and "Sort new transactions as they arrive" with the
- * Jev run after a sync (#193). Saving this group never changes a switch it doesn't list.
+ * One more is stored (`sortOnArrival` in db/ai-switches.ts) but has no row yet, so no switch
+ * promises something that isn't built. It gets its row here, with its words from the P41 drawing
+ * (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Sort new
+ * transactions as they arrive" with the Jev run after a sync (#193). Saving this group never
+ * changes a switch it doesn't list.
  */
 const AI_FEATURES: {
 	key: keyof AiSwitches;
@@ -109,6 +111,14 @@ const AI_FEATURES: {
 	line: string;
 	spoken: string;
 }[] = [
+	{
+		key: "names",
+		id: "ai-names",
+		// P86 A's words and example (decision 80); the other rows take theirs when that change ships.
+		label: "Suggest store names",
+		line: "Turns bank text like SQ *BLUE BOTTLE COF into Blue Bottle Coffee. You pick the name.",
+		spoken: "suggest store names",
+	},
 	{
 		key: "categories",
 		id: "ai-categories",
@@ -336,6 +346,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
+	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const adding = view.open === "new";
 
 	return c.html(
@@ -346,6 +357,15 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>
+			{/* Suggested merchant names waiting for a person (P29 A): a Band to the one-at-a-time review. */}
+			{namesWaiting > 0 && (
+				<div class="mt-4 lg:max-w-3xl">
+					<Band href="/settings/names" detail="Suggested names; you choose">
+						{namesWaiting} merchant {namesWaiting === 1 ? "name" : "names"} to
+						check
+					</Band>
+				</div>
+			)}
 			<section
 				id="categories"
 				aria-labelledby="categories-title"

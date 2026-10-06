@@ -77,7 +77,13 @@
 					"database_id": "97a4d15e-58a4-4067-b74e-6101195c6493",
 					"migrations_dir": "migrations"
 				}
-			]
+			],
+			// Workers AI suggests merchant names (spec §7, #33), only through src/ai/suggest-name.ts. It needs no
+			// secret. Bindings aren't inherited, so the demo has none (it shows seeded suggestions) and the nightly
+			// job skips the step where there is no binding. Local development has none either: an AI binding always
+			// runs on Cloudflare's side, so at the top level it would make every `npm test` and `npm run dev` open a
+			// remote connection and may incur usage charges. Tests hand the code a fake `AI` instead.
+			"ai": { "binding": "AI" }
 		}
 	}
 }
