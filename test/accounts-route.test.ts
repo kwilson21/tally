@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { chartStart } from "../src/net-worth";
 import { encryptToken } from "../src/plaid/token-crypto";
@@ -308,10 +309,16 @@ describe("POST /accounts/sync feedback", () => {
 	}
 
 	/** A fake Plaid: each bank's token gets these transaction names, or fails. */
-	function stubPlaid(added: Record<string, string[]>, failing: string[] = []) {
+	function stubPlaid(
+		added: Record<string, string[]>,
+		failing: string[] = [],
+		// Jev is down unless a test says how it answers.
+		jev: () => Response | Promise<Response> = () =>
+			new Response("{}", { status: 503 }),
+	) {
 		const fetchImpl = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
-				if (String(url) === JEV_URL) return new Response("{}", { status: 503 });
+				if (String(url) === JEV_URL) return jev();
 				const { access_token } = JSON.parse(String(init?.body)) as {
 					access_token: string;
 				};
@@ -511,7 +518,28 @@ describe("POST /accounts/sync feedback", () => {
 		expect(trigger).toEqual(said("Fix the connection first.", "info"));
 	});
 
-	it("applies merchant rules before answering and leaves Jev to the nightly job (spec §8.1)", async () => {
+	const jevCalls = (fetchImpl: ReturnType<typeof stubPlaid>) =>
+		fetchImpl.mock.calls.filter(([url]) => String(url) === JEV_URL);
+	/** The background work Sync now handed to waitUntil, finished. */
+	const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
+	/** Jev answers Eating Out, no flags. */
+	const jevSays = (confidence: number) => () =>
+		Response.json({
+			answers: {
+				category: { type: "choice", choice: "Eating Out", confidence },
+				transfer: { type: "noul", noul: 0.01 },
+				reimbursement: { type: "noul", noul: 0.01 },
+				income: { type: "noul", noul: 0.01 },
+			},
+		});
+	const categoryOf = (name: string) =>
+		env.DB.prepare(
+			"SELECT category_source, category_confidence FROM transactions WHERE raw_name = ?",
+		)
+			.bind(name)
+			.first();
+
+	it("applies merchant rules before answering, then Jev sorts the rest in the background (spec §8.1, §8.6)", async () => {
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
 		).first<{ id: number }>();
@@ -521,7 +549,11 @@ describe("POST /accounts/sync feedback", () => {
 			.bind(category?.id)
 			.run();
 		await addBank("Chase");
-		const fetchImpl = stubPlaid({ Chase: ["RULED SHOP", "UNKNOWN SHOP"] });
+		const fetchImpl = stubPlaid(
+			{ Chase: ["RULED SHOP", "UNKNOWN SHOP"] },
+			[],
+			jevSays(0.95),
+		);
 
 		const { trigger } = await sync({ JEV_API_KEY: "jev-key" });
 		expect(trigger).toEqual(said("2 new transactions"));
@@ -533,11 +565,143 @@ describe("POST /accounts/sync feedback", () => {
 			category_source: "merchant_rule",
 		});
 
+		// Handed to waitUntil, so the answer above didn't wait for it.
+		expect(waitUntil).toHaveBeenCalledTimes(1);
+		await background();
+		// Rules ran once, in the sync; Jev was asked only about what they left.
+		expect(jevCalls(fetchImpl)).toHaveLength(1);
+		expect(await categoryOf("UNKNOWN SHOP")).toEqual({
+			category_source: "jev",
+			category_confidence: 0.95,
+		});
+		expect(await categoryOf("RULED SHOP")).toEqual({
+			category_source: "merchant_rule",
+			category_confidence: null,
+		});
+	});
+
+	it("asks Jev about what this sync brought in, and leaves an older unsorted transaction for the night", async () => {
+		await addBank("Chase");
+		// An older transaction nobody sorted, saved while sorting right away was off.
+		await saveAiSwitches(env.DB, { sortOnArrival: false });
+		stubPlaid({ Chase: ["OLD SHOP"] }, [], jevSays(0.95));
+		await sync({ JEV_API_KEY: "jev-key" });
+		await background();
+		await saveAiSwitches(env.DB, { sortOnArrival: true });
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_sync_attempt_at = NULL",
+		).run();
+		waitUntil.mockClear();
+
+		await addBank("Ally");
+		const fetchImpl = stubPlaid({ Ally: ["NEW SHOP"] }, [], jevSays(0.95));
+		await sync({ JEV_API_KEY: "jev-key" });
+		await background();
+		expect(jevCalls(fetchImpl)).toHaveLength(1);
+		expect(await categoryOf("NEW SHOP")).toMatchObject({
+			category_source: "jev",
+		});
+		expect(await categoryOf("OLD SHOP")).toEqual({
+			category_source: null,
+			category_confidence: null,
+		});
+	});
+
+	it("answers without waiting for Jev", async () => {
+		await addBank("Chase");
+		let release: (r: Response) => void = () => {};
+		const slow = new Promise<Response>((resolve) => {
+			release = resolve;
+		});
+		const fetchImpl = stubPlaid({ Chase: ["SHOP"] }, [], () => slow);
+		const { trigger } = await sync({ JEV_API_KEY: "jev-key" });
+		// The answer is out while Jev's call is still going.
+		expect(trigger).toEqual(said("1 new transaction"));
+		await vi.waitFor(() => expect(jevCalls(fetchImpl)).toHaveLength(1));
+		expect(await categoryOf("SHOP")).toEqual({
+			category_source: null,
+			category_confidence: null,
+		});
+		release(jevSays(0.95)());
+		await background();
+		expect(await categoryOf("SHOP")).toMatchObject({ category_source: "jev" });
+	});
+
+	it("doesn't ask Jev when the sorting switch is off", async () => {
+		await saveAiSwitches(env.DB, { sortOnArrival: false });
+		await addBank("Chase");
+		const fetchImpl = stubPlaid({ Chase: ["SHOP"] }, [], jevSays(0.95));
+		const { trigger } = await sync({ JEV_API_KEY: "jev-key" });
+		await background();
+		expect(trigger).toEqual(said("1 new transaction"));
+		expect(jevCalls(fetchImpl)).toHaveLength(0);
+	});
+
+	it("doesn't ask Jev without a key", async () => {
+		await addBank("Chase");
+		const fetchImpl = stubPlaid({ Chase: ["SHOP"] }, [], jevSays(0.95));
+		await sync();
+		await background();
+		expect(jevCalls(fetchImpl)).toHaveLength(0);
+	});
+
+	it("doesn't ask Jev when nothing came in", async () => {
+		await addBank("Chase");
+		const fetchImpl = stubPlaid({ Chase: [] }, [], jevSays(0.95));
+		await sync({ JEV_API_KEY: "jev-key" });
 		expect(waitUntil).not.toHaveBeenCalled();
-		const jevCalls = fetchImpl.mock.calls.filter(
-			([url]) => String(url) === JEV_URL,
-		);
-		expect(jevCalls).toHaveLength(0);
+		expect(jevCalls(fetchImpl)).toHaveLength(0);
+	});
+
+	it("still sorts what the other banks brought when one bank failed, and says only that one failed", async () => {
+		await addBank("Chase");
+		await addBank("Ally");
+		const fetchImpl = stubPlaid({ Ally: ["SHOP"] }, ["Chase"], jevSays(0.95));
+		const { trigger, html } = await sync({ JEV_API_KEY: "jev-key" });
+		await background();
+		expect(trigger).toBeNull();
+		expect(html).toContain("Couldn&#39;t sync Chase. Try again later.");
+		expect(jevCalls(fetchImpl)).toHaveLength(1);
+		expect(await categoryOf("SHOP")).toMatchObject({ category_source: "jev" });
+	});
+
+	it("says the same when Jev is down, and the transaction stays for the nightly run", async () => {
+		await addBank("Chase");
+		const fetchImpl = stubPlaid({ Chase: ["SHOP"] });
+		const { trigger, html } = await sync({ JEV_API_KEY: "jev-key" });
+		await expect(background()).resolves.toBeDefined();
+		expect(trigger).toEqual(said("1 new transaction"));
+		expect(html).not.toContain('role="alert"');
+		expect(jevCalls(fetchImpl)).toHaveLength(1);
+		expect(await categoryOf("SHOP")).toEqual({
+			category_source: null,
+			category_confidence: null,
+		});
+	});
+
+	it("tries the merchant rules again itself when that step of the sync failed, and its failure stays out of the answer", async () => {
+		await addBank("Chase");
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('SHOP', (SELECT id FROM categories ORDER BY id LIMIT 1))",
+			),
+			env.DB.prepare(
+				"CREATE TRIGGER fail_rules BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'nope'); END",
+			),
+		]);
+		const fetchImpl = stubPlaid({ Chase: ["SHOP"] }, [], jevSays(0.95));
+		try {
+			const { html } = await sync({ JEV_API_KEY: "jev-key" });
+			await expect(background()).resolves.toBeDefined();
+			expect(html).toContain("Couldn&#39;t sync accounts. Try again later.");
+			// The pass applied the rules itself, which failed again, so Jev wasn't asked.
+			expect(jevCalls(fetchImpl)).toHaveLength(0);
+			expect(JSON.stringify(vi.spyOn(console, "error").mock.calls)).toContain(
+				"sort after sync failed",
+			);
+		} finally {
+			await env.DB.prepare("DROP TRIGGER fail_rules").run();
+		}
 	});
 });
 

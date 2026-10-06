@@ -410,7 +410,7 @@ const SWITCH_SPEC: UseSpecText = {
 	affordance:
 		"A track with a knob, and “On” or “Off” written beside it, so the state never rests on color or position alone. The whole row is the target, 44px tall, with the pointer hand. Off is a pale track with the knob on the left; on is an ink track with the knob on the right.",
 	states:
-		"Off: pale track, ink knob left, the word Off. On: ink track, paper knob right, the word On. Hover: no change (touch has none). Focus: the focus-visible ring around the row, for the keyboard. Pressed: it turns at once, with no separate pressed look. Disabled, loading, done and error: not applicable. A switch that can't be changed isn't shown, and a switch changes nothing until its form's Save, which has its own busy and error states.",
+		"Off: pale track, ink knob left, the word Off. On: ink track, paper knob right, the word On. Hover: no change (touch has none). Focus: the focus-visible ring around the row, for the keyboard. Pressed: it turns at once, with no separate pressed look. Disabled (greyed out, P86 A): the label and the word go muted, the track keeps a rule-coloured edge with a muted knob, the checkbox is disabled so it posts nothing, the row isn't a pointer target, and a muted line under it says what it needs, so the greying never rests on color alone; it still shows its saved On or Off, and the form's Save leaves that setting as it was. Loading, done and error: not applicable. A switch changes nothing until its form's Save, which has its own busy and error states.",
 	feedback:
 		"The track, knob and word change the moment it is tapped. Nothing is saved until Save is pressed. Then the toast says what was saved, the announcer reads every switch's state, and focus returns to Save. Without JavaScript Save posts the form and the page comes back at the group.",
 	input:
@@ -437,7 +437,7 @@ const FILTER_SELECT_SPEC: UseSpecText = {
 		"Touch: the whole 44px pill. Keyboard: Tab to it, arrow keys or typing the first letters change it. Screen reader: “Account, combo box, Chase Card ••9921”; its label is read but never shown, since the chosen option already says what it is.",
 	motion: "None. The browser draws its own list.",
 	edges:
-		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. An option that is gone (an account removed) leaves the pill on its first option. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
+		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. A saved link to an account that's since been removed keeps it as the choice, named by its id (“account 999”), so the pill shows the filter the list is using. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
 	words:
 		"Month: {October} · All months. Category: All categories · {the household's categories}. Account: All accounts · {Chase Card ••9921} · {Cash} · {Old Savings ••3340 · Disconnected}. Show: All · Spending · Income · Refunds · Excluded.",
 };
@@ -1398,6 +1398,31 @@ function Controls() {
 						</li>
 					</ul>
 				</State>
+				<State label="Greyed out (it needs another switch on): still shows its saved On or Off, says what it needs, and can't be turned">
+					<ul class="max-w-xl divide-y divide-rule border-y border-rule">
+						<li>
+							<Switch
+								id="ds-switch-greyed-on"
+								name="ds-switch-greyed-on"
+								label="Sort new transactions as they arrive"
+								hint="Sorts them right after each sync, not only overnight."
+								checked
+								disabled
+								note="Needs Categories and exclusions or Income on."
+							/>
+						</li>
+						<li>
+							<Switch
+								id="ds-switch-greyed-off"
+								name="ds-switch-greyed-off"
+								label="Sort new transactions as they arrive"
+								hint="Sorts them right after each sync, not only overnight."
+								disabled
+								note="Needs Categories and exclusions or Income on."
+							/>
+						</li>
+					</ul>
+				</State>
 				<State label="On a narrow phone (320px): the name wraps, and the word and the track keep their place">
 					<div class="w-[320px] max-w-full border-y border-rule">
 						<Switch
@@ -1705,7 +1730,7 @@ function Demo() {
 				title="HowLink"
 				tier="visual"
 				components={["HowLink"]}
-				sentence="A small “How this works” link under a screen's title to its section of How Tally works in both environments."
+				sentence="A small “How this works” link under a screen's title, or under its status sentence on Home and Bills, to its section of How Tally works in both environments."
 			>
 				<HowLink section="budget" />
 			</Specimen>
