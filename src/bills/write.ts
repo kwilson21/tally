@@ -12,7 +12,7 @@
 // Only a name that is new is checked: adding, reactivating and renaming. Editing a bill under the
 // name it already has isn't, so two bills that already share a name stay editable.
 
-import { plaidTransferRuleStatement } from "../db/plaid-transfers";
+import { restoreExclusionStatements } from "../db/plaid-transfers";
 
 export type BillFields = {
 	name: string;
@@ -95,7 +95,7 @@ export async function updateBill(
 		);
 	if (!dropDismissals) return (await update.run()).meta.changes > 0;
 	// The schedule form allows this only without linked payments; if one is dropped here anyway, what
-	// it paid goes back under Plaid's transfer rule (spec §8.5), in the same batch.
+	// it paid gets back the exclusion a machine set aside (spec §8.5), in the same batch.
 	const { results: links } = await db
 		.prepare(
 			"SELECT transaction_id FROM bill_payments WHERE bill_id=? AND status='linked'",
@@ -111,7 +111,7 @@ export async function updateBill(
 				"DELETE FROM bill_payments WHERE bill_id=? AND EXISTS (SELECT 1 FROM bills WHERE id=? AND name=?)",
 			)
 			.bind(id, id, f.name),
-		plaidTransferRuleStatement(
+		...restoreExclusionStatements(
 			db,
 			links.map((link) => link.transaction_id),
 		),
@@ -124,15 +124,16 @@ export async function updateBill(
  * decision 67): an excluded payment can pay a bill, and linking it puts it back in the budget
  * (`excluded = 0`), so the bill stops being set aside only because its payment now counts as spending.
  * A person linking it, by hand or by accepting a price change, makes that their choice
- * (`excluded_source = 'user'`). The matcher is not a person, so it leaves no source: that way Plaid's
- * transfer rule can exclude the payment again if its link comes off. While it pays the bill, neither
- * Plaid's rule nor Jev takes it out again (both skip a linked payment).
+ * (`excluded_source = 'user'`). The matcher is not a person, so it keeps the source ('plaid' or 'jev'):
+ * the machine's exclusion is set aside while the link stands, not erased, and the write that removes
+ * the link gives it back (`restoreExclusionStatements`). While it pays the bill, neither Plaid's rule
+ * nor Jev takes it out again (both skip a linked payment).
  *
  * It runs first, in the same batch as the link's insert, and only when that insert will be new: no
  * linked row for the transaction, and none for the occurrence. So a refused link (already linked, or the
  * occurrence taken) changes nothing, and an excluded payment can't be put back without the link that
  * explains why. A split is one bank transaction (the edit panel excludes it whole), so its parent and
- * parts come back together. `actor` is who is linking by hand; the matcher passes null, leaves no
+ * parts come back together. `actor` is who is linking by hand; the matcher passes null, keeps the
  * source and leaves `updated_by` as it was.
  *
  * `also` is a further condition for a caller whose link is conditional too (accepting a price change,
@@ -149,7 +150,7 @@ export function putBackInBudget(
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`UPDATE transactions SET excluded = 0, excluded_source = CASE WHEN ?4 IS NULL THEN NULL ELSE 'user' END, updated_by = COALESCE(?4, updated_by), updated_at = datetime('now')
+			`UPDATE transactions SET excluded = 0, excluded_source = CASE WHEN ?4 IS NULL THEN excluded_source ELSE 'user' END, updated_by = COALESCE(?4, updated_by), updated_at = datetime('now')
 			 WHERE excluded = 1 AND (
 				id = ?1
 				OR parent_id = ?1

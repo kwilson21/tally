@@ -2672,9 +2672,14 @@ describe("syncItem", () => {
 						"SELECT period, status FROM bill_payments WHERE bill_id = 9002",
 					).first(),
 				).toEqual({ period: "2026-09", status: "linked" });
-				expect(await exclusion()).toMatchObject({ excluded: 0 });
+				// Counted while it pays the bill, with Plaid's exclusion set aside, not erased, through the
+				// next syncs (the transfer rule skips a payment that pays a bill).
+				const suspended = { excluded: 0, excluded_source: "plaid" };
+				expect(await exclusion()).toEqual(suspended);
 				await syncAs(id, "modified", inCategory("LOAN_PAYMENTS"));
-				expect(await exclusion()).toMatchObject({ excluded: 0 });
+				expect(await exclusion()).toEqual(suspended);
+				await syncAs(id, "added", inCategory("LOAN_PAYMENTS"));
+				expect(await exclusion()).toEqual(suspended);
 				const month = await loadMonth(env.DB, "2026-09");
 				expect(
 					summarizeMonth({

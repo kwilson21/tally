@@ -110,8 +110,8 @@ describe("bill payment matching", () => {
 			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
 		).all();
 		expect(rows.results).toEqual([
-			{ id: 30, excluded: 0, excluded_source: null },
-			{ id: 31, excluded: 0, excluded_source: null },
+			{ id: 30, excluded: 0, excluded_source: "jev" },
+			{ id: 31, excluded: 0, excluded_source: "plaid" },
 			{ id: 32, excluded: 0, excluded_source: null },
 		]);
 	});
@@ -140,7 +140,7 @@ describe("bill payment matching", () => {
 				).all()
 			).results,
 		).toEqual([
-			{ id: 70, excluded: 0, excluded_source: null },
+			{ id: 70, excluded: 0, excluded_source: "plaid" },
 			{ id: 71, excluded: 1, excluded_source: "user" },
 		]);
 		// Nothing changes on a later run either.
@@ -168,7 +168,7 @@ describe("bill payment matching", () => {
 		expect(rows.results).toEqual([
 			{ id: 60, excluded: 1, excluded_source: "user" },
 			{ id: 61, excluded: 0, excluded_source: null },
-			{ id: 62, excluded: 0, excluded_source: null },
+			{ id: 62, excluded: 0, excluded_source: "jev" },
 		]);
 	});
 

@@ -2,7 +2,9 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { matchBillPayments } from "../src/bills/match";
+import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
 import { loadBillRows } from "../src/routes/bills";
@@ -295,23 +297,58 @@ describe("Bills", () => {
 		expect(await state()).toEqual({ excluded: 1, excluded_source: "plaid" });
 	});
 
-	describe("a card payment Plaid excluded that pays a bill", () => {
-		/** A Plaid-excluded LOAN_PAYMENTS payment for a bill due on the 5th, dated the 4th. */
-		const setUp = async (period: string) => {
+	// A payment Plaid or Jev excluded can still pay a bill. While the link stands the exclusion is set
+	// aside (`excluded = 0`, its source kept), and it comes back when the link is removed (spec §6.1
+	// rule 4, §8.5). A person's choice is never set aside.
+	describe("a payment Plaid or Jev excluded that pays a bill", () => {
+		const MONTH = "2026-07";
+		type Machine = "plaid" | "jev";
+		const BILL =
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9300,'Mortgage',150000,5,'monthly',5,'LANDLORD LLC')";
+		/** A 1500.00 payment: a loan payment for Plaid, a transfer Jev flagged for Jev. */
+		const setUp = async (source: Machine) => {
 			await env.DB.batch([
 				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare(BILL),
 				env.DB.prepare(
-					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9300,'Mortgage',150000,5,'monthly',5,'LANDLORD LLC')",
-				),
-				env.DB.prepare(
-					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,plaid_category,excluded,excluded_source) SELECT 9301,id,?,150000,'LANDLORD LLC','LOAN_PAYMENTS',1,'plaid' FROM accounts LIMIT 1",
-				).bind(`${period}-04`),
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,plaid_category,flag_transfer)
+					 SELECT 9301,id,'${MONTH}-04',150000,'LANDLORD LLC',1,?1,
+						CASE WHEN ?1 = 'plaid' THEN 'LOAN_PAYMENTS' END, CASE WHEN ?1 = 'jev' THEN 1 ELSE 0 END FROM accounts LIMIT 1`,
+				).bind(source),
 			]);
 		};
-		const state = () =>
-			env.DB.prepare(
-				"SELECT excluded, excluded_source FROM transactions WHERE id=9301",
-			).first();
+		/** A split bank transaction of 2000.00 whose 1500.00 part is the bill's payment, excluded whole. */
+		const setUpSplit = async (source: Machine) => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare(BILL),
+				env.DB.prepare(
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,is_split,plaid_category,flag_transfer)
+					 SELECT 9310,id,'${MONTH}-04',200000,'LANDLORD LLC',1,?1,1,
+						CASE WHEN ?1 = 'plaid' THEN 'TRANSFER_OUT' END, CASE WHEN ?1 = 'jev' THEN 1 ELSE 0 END FROM accounts LIMIT 1`,
+				).bind(source),
+				env.DB.prepare(
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,parent_id)
+					 SELECT 9311,id,'${MONTH}-04',150000,'LANDLORD LLC',1,?,9310 FROM accounts LIMIT 1`,
+				).bind(source),
+				env.DB.prepare(
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,parent_id)
+					 SELECT 9312,id,'${MONTH}-04',50000,'ELSEWHERE',1,?,9310 FROM accounts LIMIT 1`,
+				).bind(source),
+			]);
+		};
+		const state = async (...ids: number[]) =>
+			(
+				await env.DB.prepare(
+					`SELECT id, excluded, excluded_source FROM transactions WHERE id IN (${ids.join(",")}) ORDER BY id`,
+				).all()
+			).results;
+		const spent = async () =>
+			summarizeMonth({
+				month: MONTH,
+				...(await loadMonth(env.DB, MONTH)),
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
 		const post = (path: string, body?: Record<string, string>) =>
 			exports.default.fetch(`http://tally.test${path}`, {
 				method: "POST",
@@ -325,60 +362,114 @@ describe("Bills", () => {
 				},
 				...(body ? { body: new URLSearchParams(body) } : {}),
 			});
-
-		it("is put back by the matcher with no source, and Not this one excludes it again", async () => {
-			await setUp("2026-07");
-			expect(await matchBillPayments(env.DB, "2026-07-12")).toBeGreaterThan(0);
-			expect(
+		const link = (transaction: number) =>
+			post("/bills/9300/link", {
+				transaction_id: String(transaction),
+				period: MONTH,
+				opened_period: MONTH,
+			});
+		const unlink = () => post(`/bills/9300/occurrences/${MONTH}/unlink`);
+		const linkedBy = async () =>
+			(
 				await env.DB.prepare(
-					"SELECT matched_by FROM bill_payments WHERE transaction_id=9301 AND status='linked'",
-				).first(),
-			).toEqual({ matched_by: "auto" });
-			expect(await state()).toEqual({ excluded: 0, excluded_source: null });
+					"SELECT matched_by FROM bill_payments WHERE bill_id=9300 AND status='linked'",
+				).first<{ matched_by: string }>()
+			)?.matched_by;
 
-			await post("/bills/9300/occurrences/2026-07/unlink");
-			expect(await state()).toEqual({ excluded: 1, excluded_source: "plaid" });
-		});
+		it.each(["plaid", "jev"] as const)(
+			"sets a %s exclusion aside while the matcher's link stands, and brings it back when the link is removed",
+			async (source) => {
+				await setUp(source);
+				const base = await spent();
+				expect(await state(9301)).toEqual([
+					{ id: 9301, excluded: 1, excluded_source: source },
+				]);
 
-		it("is left out when a person excluded it, until a person links it by hand, and then it stays theirs", async () => {
-			await setUp("2026-07");
+				await matchBillPayments(env.DB, "2026-07-12");
+				expect(await linkedBy()).toBe("auto");
+				// Counted now, and still the machine's: its exclusion is set aside, not erased.
+				expect(await state(9301)).toEqual([
+					{ id: 9301, excluded: 0, excluded_source: source },
+				]);
+				expect(await spent()).toBe(base + 150000);
+
+				await unlink();
+				expect(await state(9301)).toEqual([
+					{ id: 9301, excluded: 1, excluded_source: source },
+				]);
+				expect(await spent()).toBe(base);
+			},
+		);
+
+		it.each(["plaid", "jev"] as const)(
+			"brings a %s exclusion back for the whole split when the matcher's link on one part is removed",
+			async (source) => {
+				await setUpSplit(source);
+				const base = await spent();
+
+				await matchBillPayments(env.DB, "2026-07-12");
+				expect(await linkedBy()).toBe("auto");
+				const whole = (excluded: number) => [
+					{ id: 9310, excluded, excluded_source: source },
+					{ id: 9311, excluded, excluded_source: source },
+					{ id: 9312, excluded, excluded_source: source },
+				];
+				expect(await state(9310, 9311, 9312)).toEqual(whole(0));
+				expect(await spent()).toBe(base + 200000);
+
+				await unlink();
+				expect(await state(9310, 9311, 9312)).toEqual(whole(1));
+				expect(await spent()).toBe(base);
+			},
+		);
+
+		it.each(["plaid", "jev"] as const)(
+			"keeps a person's hand link of a %s-excluded payment included after Not this one",
+			async (source) => {
+				await setUp(source);
+				const base = await spent();
+
+				await link(9301);
+				expect(await linkedBy()).toBe("user");
+				expect(await state(9301)).toEqual([
+					{ id: 9301, excluded: 0, excluded_source: "user" },
+				]);
+				expect(await spent()).toBe(base + 150000);
+
+				await unlink();
+				expect(await state(9301)).toEqual([
+					{ id: 9301, excluded: 0, excluded_source: "user" },
+				]);
+				expect(await spent()).toBe(base + 150000);
+			},
+		);
+
+		it("leaves a payment a person excluded alone, until a person links it by hand, and then it stays theirs", async () => {
+			await setUp("plaid");
 			await env.DB.prepare(
 				"UPDATE transactions SET excluded_source='user' WHERE id=9301",
 			).run();
+			const base = await spent();
 			await matchBillPayments(env.DB, "2026-07-12");
 			expect(
 				await env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=9300 AND status='linked'",
 				).first("n"),
 			).toBe(0);
-			expect(await state()).toEqual({ excluded: 1, excluded_source: "user" });
+			expect(await state(9301)).toEqual([
+				{ id: 9301, excluded: 1, excluded_source: "user" },
+			]);
 
-			await post("/bills/9300/link", {
-				transaction_id: "9301",
-				period: "2026-07",
-				opened_period: "2026-07",
-			});
-			expect(
-				await env.DB.prepare(
-					"SELECT matched_by FROM bill_payments WHERE bill_id=9300 AND status='linked'",
-				).first(),
-			).toEqual({ matched_by: "user" });
-			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
-			await post("/bills/9300/occurrences/2026-07/unlink");
-			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
-		});
-
-		it("stays included after Not this one when a person linked it by hand", async () => {
-			await setUp("2026-07");
-			await post("/bills/9300/link", {
-				transaction_id: "9301",
-				period: "2026-07",
-				opened_period: "2026-07",
-			});
-			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
-
-			await post("/bills/9300/occurrences/2026-07/unlink");
-			expect(await state()).toEqual({ excluded: 0, excluded_source: "user" });
+			await link(9301);
+			expect(await linkedBy()).toBe("user");
+			expect(await state(9301)).toEqual([
+				{ id: 9301, excluded: 0, excluded_source: "user" },
+			]);
+			await unlink();
+			expect(await state(9301)).toEqual([
+				{ id: 9301, excluded: 0, excluded_source: "user" },
+			]);
+			expect(await spent()).toBe(base + 150000);
 		});
 	});
 
