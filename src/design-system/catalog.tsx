@@ -1234,6 +1234,31 @@ function Controls() {
 						</div>
 					</div>
 				</fieldset>
+				<fieldset disabled>
+					<legend class="text-sm font-medium text-muted">
+						Disabled: a refund linked to a purchase counts in its purchase's
+						category
+					</legend>
+					<div class="mt-2 flex flex-wrap gap-2">
+						<Chip
+							type="radio"
+							name="ds-category-disabled"
+							value="groceries"
+							checked
+							icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+						>
+							Groceries
+						</Chip>
+						<Chip
+							type="radio"
+							name="ds-category-disabled"
+							value="gas"
+							icon={<CategoryIcon icon="gas" color="cat-slate" />}
+						>
+							Gas
+						</Chip>
+					</div>
+				</fieldset>
 			</Specimen>
 			<Specimen
 				id="filter-select"
