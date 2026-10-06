@@ -19,13 +19,14 @@ import {
 	billOccurrence,
 	billOccurrenceForMonth,
 } from "../bills/status";
+import { type BillTotalFrequency, calculateBillTotals } from "../bills/totals";
 import {
 	activateBill,
 	type BillFields,
 	insertBill,
 	updateBill,
 } from "../bills/write";
-import { householdToday, ordinal, shortDay } from "../dates";
+import { daysBefore, householdToday, ordinal, shortDay } from "../dates";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -40,6 +41,7 @@ import {
 	BillPaymentPicker,
 } from "../views/bill-payment-picker";
 import {
+	BillMonthlyTotal,
 	BillRow,
 	type BillRowData,
 	BillStatusHeading,
@@ -73,6 +75,7 @@ type DbBill = {
 	color: string | null;
 	payment_period?: string | null;
 	payment_date?: string | null;
+	payment_amount_cents?: number | null;
 };
 type Category = { id: number; name: string; icon: string; color: string };
 /** An amount over $100,000.00 that the form asks about with a "Yes, $X is right" chip (P45 A). */
@@ -99,7 +102,7 @@ function previousMonth(today: string) {
 export async function loadBillRows(db: D1Database, today: string) {
 	const rows = await db
 		.prepare(
-			`SELECT b.*, c.icon, c.color, bp.period AS payment_period, t.date AS payment_date
+			`SELECT b.*, c.icon, c.color, bp.period AS payment_period, t.date AS payment_date, t.amount_cents AS payment_amount_cents
 			 FROM bills b
 			 LEFT JOIN categories c ON c.id=b.category_id
 			 LEFT JOIN bill_payments bp ON bp.bill_id=b.id AND bp.status='linked'
@@ -112,6 +115,14 @@ export async function loadBillRows(db: D1Database, today: string) {
 		.all<DbBill>();
 	const result: (BillRowData & {
 		active: boolean;
+		frequency: BillTotalFrequency;
+		paidCents: number;
+		totalOccurrences: {
+			dueDate: string;
+			status: BillStatus;
+			amountCents: number;
+			paidCents: number;
+		}[];
 		/** The occurrence the row shows, as bill_payments keys it, and the merchant it's matched on. */
 		period: string;
 		merchantRawName: string;
@@ -133,6 +144,15 @@ export async function loadBillRows(db: D1Database, today: string) {
 					row.payment_date as string,
 				]),
 		);
+		const paymentsByPeriod = new Map<string, number>();
+		for (const row of billRows) {
+			if (!row.payment_period) continue;
+			paymentsByPeriod.set(
+				row.payment_period,
+				(paymentsByPeriod.get(row.payment_period) ?? 0) +
+					Math.max(0, row.payment_amount_cents ?? 0),
+			);
+		}
 		const occurrence = billOccurrence(
 			{
 				frequency: b.frequency,
@@ -142,6 +162,43 @@ export async function loadBillRows(db: D1Database, today: string) {
 			today,
 			new Set(payments.keys()),
 		);
+		const totalOccurrences = [
+			{
+				dueDate: occurrence.dueDate,
+				status: occurrence.status,
+				amountCents: b.amount_cents,
+				paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
+			},
+		];
+		if (
+			b.frequency === "monthly" ||
+			b.anchor_month === Number(today.slice(5, 7))
+		) {
+			const current = billOccurrenceForMonth(
+				{
+					frequency: b.frequency,
+					dueDay: b.due_day,
+					anchorMonth: b.anchor_month,
+				},
+				Number(today.slice(0, 4)),
+				Number(today.slice(5, 7)),
+			);
+			if (!totalOccurrences.some((item) => item.dueDate === current.dueDate)) {
+				const linked = payments.has(current.period);
+				totalOccurrences.push({
+					dueDate: current.dueDate,
+					status: linked
+						? "paid"
+						: current.dueDate < today
+							? "overdue"
+							: current.dueDate <= daysBefore(today, -7)
+								? "due"
+								: "upcoming",
+					amountCents: b.amount_cents,
+					paidCents: paymentsByPeriod.get(current.period) ?? 0,
+				});
+			}
+		}
 		result.push({
 			id: b.id,
 			name: b.name,
@@ -155,6 +212,9 @@ export async function loadBillRows(db: D1Database, today: string) {
 			period: occurrence.period,
 			merchantRawName: b.merchant_raw_name,
 			merchantRawText: b.merchant_raw_text,
+			frequency: b.frequency,
+			paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
+			totalOccurrences,
 		});
 	}
 	return { today, rows: result };
@@ -199,6 +259,32 @@ async function page(
 	const soon = active.filter(
 		(b) => b.status === "due" || b.status === "overdue",
 	);
+	const totals = calculateBillTotals({
+		month: today.slice(0, 7),
+		bills: active.map((bill) => ({
+			id: bill.id,
+			amountCents: bill.amountCents,
+			frequency: bill.frequency,
+			active: true,
+		})),
+		displayedOccurrences: active.map((bill) => ({
+			billId: bill.id,
+			dueDate: bill.dueDate,
+			status: bill.status,
+			amountCents: bill.amountCents,
+			paidCents: bill.paidCents,
+		})),
+		thisMonthOccurrences: active.flatMap((bill) =>
+			bill.totalOccurrences
+				.filter((occurrence) =>
+					occurrence.dueDate.startsWith(today.slice(0, 7)),
+				)
+				.map((occurrence) => ({
+					billId: bill.id,
+					...occurrence,
+				})),
+		),
+	});
 	return c.html(
 		<Layout
 			title="Bills · Tally"
@@ -213,6 +299,13 @@ async function page(
 						{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
 						{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
 					</p>
+				)}
+				{rows.length > 0 && (
+					<BillMonthlyTotal
+						monthlyCents={totals.monthlyCents}
+						stillToPayCents={totals.stillToPayCents}
+						month={today.slice(0, 7)}
+					/>
 				)}
 				<HowLink section="bills" />
 				<div class="mt-3">
@@ -238,7 +331,14 @@ async function page(
 							if (!group.length) return null;
 							return (
 								<section class="mt-4">
-									<BillStatusHeading status={status} />
+									<BillStatusHeading
+										status={status}
+										totalCents={
+											totals.groups[
+												`${status === "paid" ? "paid" : status}Cents`
+											]
+										}
+									/>
 									<ul class="divide-y divide-rule">
 										{group.map((bill) => (
 											<BillRow
