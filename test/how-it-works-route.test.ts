@@ -67,6 +67,16 @@ describe("GET /how-it-works in the demo", () => {
 		expect(names).not.toMatch(/jev|workers ai/i);
 	});
 
+	it("explains suggested categories in the Categories section", async () => {
+		const { html } = await get("/how-it-works");
+		const categories =
+			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
+			"";
+		expect(categories).toContain("suggested category");
+		expect(categories).toContain("nothing is created until a person says so");
+		expect(html).not.toContain('href="/how-it-works#categorization"');
+	});
+
 	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
 		const { html } = await get("/how-it-works");
 		const trends =
@@ -483,5 +493,27 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 			);
 		}
 		expect(sectionOf(await family(), "transactions")).not.toMatch(/jev/i);
+	});
+});
+
+describe("new category suggestions in the Categories section (spec §7, #51)", () => {
+	const sectionOf = (html: string) =>
+		(
+			html.split('id="categorization"')[1]?.split("</section>")[0] ?? ""
+		).replace(/\s+/g, " ");
+	const family = async () =>
+		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+	const NOTHING =
+		"A suggested category is only an idea; nothing is created until a person says so.";
+
+	it("explains the suggestion and says nothing is created until a person decides", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = decodeHtml(sectionOf(html));
+			expect(text).toContain(NOTHING);
+		}
+	});
+
+	it("never names Jev in the family app", async () => {
+		expect(sectionOf(await family())).not.toMatch(/jev/i);
 	});
 });
