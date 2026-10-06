@@ -54,7 +54,7 @@ export async function runScheduled(
 	const synced = await syncAllItems(env, fetchImpl);
 	// The catch-up has already applied merchant rules unless Plaid is off (the demo) or that step
 	// failed; Jev then asks about what they left, so newly fetched transactions are sorted tonight.
-	await categorizePending(env, fetchImpl, undefined, {
+	await categorizePending(env, fetchImpl, {
 		rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
 	});
 	await retryFeedback(env, fetchImpl);

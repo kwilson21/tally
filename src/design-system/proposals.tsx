@@ -199,6 +199,7 @@ export const DECIDED: readonly {
 		title: "P41 · The AI suggestions switches in Settings",
 		outcome:
 			"Option B: switches with On or Off beside each, and one Save under the group (decision 73).",
+		issue: 191,
 	},
 	{
 		title: "P42 · One review screen for every “Maybe …”",

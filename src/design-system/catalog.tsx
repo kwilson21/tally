@@ -2,6 +2,7 @@
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
+import type { NetWorthView } from "../net-worth";
 import { AccountRow } from "../views/account-row";
 import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
@@ -33,9 +34,11 @@ import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
+import { NetWorthChart } from "../views/net-worth-chart";
 import { ProgressRow } from "../views/progress-row";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
+import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
@@ -55,6 +58,7 @@ import {
 	HOME_TOP,
 	MONEY_STATES,
 	NET_WORTH_CENTS,
+	NET_WORTH_VIEWS,
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
@@ -370,6 +374,26 @@ const BANK_LINE_SPEC: UseSpecText = {
 		"A bank that needs signing in and hasn't synced says the sign-in words. With two or more, the first in the order they were linked is named and the rest counted. A long bank name wraps with the sentence. With no Band (nothing needs a category) the line is the last thing in Home's top. A last sync from another year adds its year (“Dec 30, 2025”). No JavaScript: it's a plain link. The demo never shows it: it has no real banks to fix.",
 	words:
 		"“{bank} hasn't synced since {Oct 1}, so Safe to spend may be too high.” · “{bank} needs you to sign in again, so Safe to spend may be too high.” · “{bank} needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high.” (“2 other banks need a look” for more) · Link: Check Accounts.",
+};
+
+// The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
+const SWITCH_SPEC: UseSpecText = {
+	purpose:
+		"Let a person turn one thing on or off and see which, in words. It's the control for the AI suggestions in Settings, where the household chooses what Tally may suggest.",
+	affordance:
+		"A track with a knob, and “On” or “Off” written beside it, so the state never rests on color or position alone. The whole row is the target, 44px tall, with the pointer hand. Off is a pale track with the knob on the left; on is an ink track with the knob on the right.",
+	states:
+		"Off: pale track, ink knob left, the word Off. On: ink track, paper knob right, the word On. Hover: no change (touch has none). Focus: the focus-visible ring around the row, for the keyboard. Pressed: it turns at once, with no separate pressed look. Disabled, loading, done and error: not applicable. A switch that can't be changed isn't shown, and a switch changes nothing until its form's Save, which has its own busy and error states.",
+	feedback:
+		"The track, knob and word change the moment it is tapped. Nothing is saved until Save is pressed. Then the toast says what was saved, the announcer reads every switch's state, and focus returns to Save. Without JavaScript Save posts the form and the page comes back at the group.",
+	input:
+		"Touch: the whole 44px row. Keyboard: Tab to it, Space turns it. Screen reader: “Income, switch, on”, then its muted line. The On and Off words and the track are hidden from it, because it already says its state.",
+	motion:
+		"The knob slides and the track changes tone in 150 ms. Reduced motion shows the end state at once.",
+	edges:
+		"A long name or line wraps beside the switch and never under it; the word and the track keep their width. With no muted line it is the name alone. No JavaScript: it's a plain checkbox that posts “on” when on and nothing when off, so the server reads a field left out as off, and the form always carries the whole group. At 320px the row still fits the name, word and track side by side.",
+	words:
+		"The label is the person's word for the feature (“Categories and exclusions”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Categories and exclusions on, income off.",
 };
 
 // The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
@@ -1132,6 +1156,55 @@ function Controls() {
 				</fieldset>
 			</Specimen>
 			<Specimen
+				id="switch"
+				title="Switch"
+				tier="interactive"
+				components={["Switch"]}
+				sentence="A real checkbox drawn as a switch, with On or Off in words beside it (decision 73, P41 B). It works without JavaScript, and its whole 44px row is the target."
+			>
+				<State label="Off, on, and with no muted line (tap one: it turns here as it does in Settings)">
+					<ul class="max-w-xl divide-y divide-rule border-y border-rule">
+						<li>
+							<Switch
+								id="ds-switch-off"
+								name="ds-switch-off"
+								label="Income"
+								hint="Spots paychecks and other money coming in."
+							/>
+						</li>
+						<li>
+							<Switch
+								id="ds-switch-on"
+								name="ds-switch-on"
+								label="Categories and exclusions"
+								hint="Picks categories, and leaves out transfers and reimbursements."
+								checked
+							/>
+						</li>
+						<li>
+							<Switch
+								id="ds-switch-plain"
+								name="ds-switch-plain"
+								label="Income"
+								checked
+							/>
+						</li>
+					</ul>
+				</State>
+				<State label="On a narrow phone (320px): the name wraps, and the word and the track keep their place">
+					<div class="w-[320px] max-w-full border-y border-rule">
+						<Switch
+							id="ds-switch-narrow"
+							name="ds-switch-narrow"
+							label="Categories and exclusions"
+							hint="Picks categories, and leaves out transfers and reimbursements."
+							checked
+						/>
+					</div>
+				</State>
+				<UseSpec spec={SWITCH_SPEC} />
+			</Specimen>
+			<Specimen
 				id="form-field"
 				title="FormField"
 				tier="visual"
@@ -1441,12 +1514,18 @@ function Diagrams() {
 	);
 }
 
+/** What the chart space says, in words: a line's text alternative, or the early note and its sentence. */
+const chartWords = (view: NetWorthView) =>
+	view.kind === "line"
+		? view.description
+		: [view.sentence, view.note].filter(Boolean).join(" ");
+
 /** What a picture of Accounts shows, in words, from the same data it draws. */
 function describeAccounts() {
 	return [
 		"Accounts",
 		`Net worth ${whole(NET_WORTH_CENTS)}`,
-		"Net worth over time arrives later",
+		chartWords(NET_WORTH_VIEWS.rising),
 		"Sync now",
 		...BANKS.map(
 			(b) =>
@@ -1472,6 +1551,7 @@ function AccountsSketch({ syncId }: { syncId?: string }) {
 		<>
 			<AccountsTop
 				netWorthCents={NET_WORTH_CENTS}
+				history={NET_WORTH_VIEWS.rising}
 				action={
 					<div class="mt-4">
 						<Button
@@ -1510,7 +1590,7 @@ function AccountsGroup() {
 				title="AccountsTop, SyncNow, BankGroup and AccountRow"
 				tier="visual"
 				components={["AccountsTop", "SyncNow", "BankGroup", "AccountRow"]}
-				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over a ruled space for the Phase 4 chart, then accounts grouped by bank, each with a muted Synced … line, and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action; a disconnected bank keeps its accounts and says Disconnected in muted words, with no Synced line, Manage or Fix connection. Link a bank is the primary button. Sync now, a secondary button under the title, syncs every healthy bank at most once a minute; while pending it says Syncing…, success shows a toast of what arrived (N new transactions, Nothing new, or Already synced a moment ago) and refreshes the banks, and failure puts one alert naming the bank above the summary. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
+				sentence="The Accounts screen from the round 5 study: Net worth as the serif headline over the net-worth chart (P25 A, below), then accounts grouped by bank, each with a muted Synced … line, and debt shown negative. A bank whose login needs fixing says so in words with an alert icon and offers Fix connection; Manage is a no-JavaScript disclosure containing the secondary Disconnect this bank action; a disconnected bank keeps its accounts and says Disconnected in muted words, with no Synced line, Manage or Fix connection. Link a bank is the primary button. Sync now, a secondary button under the title, syncs every healthy bank at most once a minute; while pending it says Syncing…, success shows a toast of what arrived (N new transactions, Nothing new, or Already synced a moment ago) and refreshes the banks, and failure puts one alert naming the bank above the summary. Fix connection requests a fresh update-mode Plaid Link session when clicked; while pending it is disabled and says Fixing…, success shows a Fixed bank toast and refreshes the banks, and failure puts an alert beside that bank's button. Link a bank requests a secure Plaid Link session and opens it; while a request is pending the button is disabled and says Linking…, success shows a Linked bank toast and refreshes the banks, and failure puts an alert beside the button."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar)">
 					<PhoneFrame
@@ -1541,6 +1621,65 @@ function AccountsGroup() {
 						<AccountRow {...CHECKING} />
 						<AccountRow {...CREDIT_CARD} />
 					</ul>
+				</State>
+			</Specimen>
+			<Specimen
+				id="net-worth-chart"
+				title="NetWorthChart"
+				tier="visual"
+				components={["NetWorthChart"]}
+				sentence="The line under Accounts' headline (P25 A, P26 A, P31). Code writes the change in a sentence in the status sentence's voice (Up $3,600 since May., Down $1,200 since May., or No change since May.; a history that began this month names the day, Up $120 since Oct 1.) followed by a terracotta Why? that goes to the Net worth section of How Tally works, then one server-drawn line through the last 6 months of net worth on the ledger rules, with its first and last day under it in muted words (May, Today). It has no amounts, axis or hover: the headline and the sentence carry the numbers, and the picture is an SVG with a text alternative that says the same in dollars. Net worth is every account's balance with debt subtracted, leaving out the Cash account and disconnected banks, read from one balance a day recorded when a sync refreshes balances; it starts on the first day every counted account has one, so linking another bank never looks like growth, and while a connected account has none at all there is no line (a line that left it out would disagree with the headline), only a note saying the chart waits for every account. Under two days of balances it is the five empty rules with a sentence and a note on when the chart starts (as P31 drew it). There is nothing to tap: a sync redraws it with the rest of Accounts, and the sync's toast is what is announced. Account rows keep today's balance only."
+			>
+				<State label="Six months, up (P25 A), at a phone's width">
+					<div class="w-[358px] max-w-full">
+						<Picture
+							label={`Net worth chart on a phone: ${chartWords(NET_WORTH_VIEWS.rising)}`}
+						>
+							<NetWorthChart view={NET_WORTH_VIEWS.rising} />
+						</Picture>
+					</div>
+				</State>
+				<State label="The same on desktop: the line stretches to the page's width, and its strokes and dot stay the same size">
+					<Picture
+						label={`Net worth chart on desktop: ${chartWords(NET_WORTH_VIEWS.rising)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.rising} />
+					</Picture>
+				</State>
+				<State label="Six months, down">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.falling)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.falling} />
+					</Picture>
+				</State>
+				<State label="A history that began this month: the line starts on a day">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.startedThisMonth)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.startedThisMonth} />
+					</Picture>
+				</State>
+				<State label="The first day (P31): when the chart starts">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.firstDay)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.firstDay} />
+					</Picture>
+				</State>
+				<State label="While a connected account has no balance recorded yet: no line, so it never disagrees with the headline">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.waiting)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.waiting} />
+					</Picture>
+				</State>
+				<State label="Before any balance is recorded">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.none)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.none} />
+					</Picture>
 				</State>
 			</Specimen>
 		</Group>

@@ -53,10 +53,17 @@ export type SeedTransaction = {
 	isSplit: boolean;
 	refundOfId?: number | null;
 };
+/** One bank account's balance on one day, as `balance_history` stores it (cents; for debt, the amount owed). */
+export type SeedBalance = {
+	accountId: number;
+	date: string;
+	balanceCents: number;
+};
 export type Seed = {
 	categories: SeedCategory[];
 	banks: SeedBank[];
 	accounts: SeedAccount[];
+	balanceHistory: SeedBalance[];
 	merchants: SeedMerchant[];
 	budgetAmounts: BudgetAmount[];
 	transactions: SeedTransaction[];
@@ -282,6 +289,64 @@ function spend(
 		excluded: false,
 		isSplit: false,
 	};
+}
+
+/**
+ * The demo's balance history (spec §9, feature 7): a balance for each bank account on every day from
+ * the net-worth chart's first day to today, so the chart shows. Each is today's balance plus a plain
+ * pattern in whole cents, so the line ends where the headline does and the same today always makes
+ * the same rows. Checking creeps up $20 a day with a $450 swell each month; each monthly transfer
+ * moves its $500 out of Checking into Savings on its date, so it never changes net worth; the Credit
+ * card builds $15 a day and is paid down every 30.
+ */
+function balanceHistory(
+	today: string,
+	transactions: SeedTransaction[],
+): SeedBalance[] {
+	const balanceToday = (id: number) =>
+		ACCOUNTS.find((a) => a.id === id)?.balanceCents ?? 0;
+	const transfers = transactions.filter((t) => t.flagTransfer);
+	// What the transfers after `date` moved, still in Checking on `date` and not yet in Savings.
+	const movedAfter = (date: string) =>
+		transfers
+			.filter((t) => t.date > date)
+			.reduce((sum, t) => sum + t.amountCents, 0);
+	// `k` is how many days before today.
+	const checkingSwell = (k: number) => 3000 * Math.abs((k % 30) - 15);
+	const cardBuildUp = (k: number) => 1500 * (k % 30);
+
+	const start = `${monthOffset(today, 5)}-01`;
+	let oldest = 0;
+	while (daysBefore(today, oldest + 1) >= start) oldest++;
+
+	const rows: SeedBalance[] = [];
+	for (let k = oldest; k >= 0; k--) {
+		const date = daysBefore(today, k);
+		rows.push(
+			{
+				accountId: CHECKING,
+				date,
+				balanceCents:
+					balanceToday(CHECKING) -
+					2000 * k +
+					checkingSwell(k) -
+					checkingSwell(0) +
+					movedAfter(date),
+			},
+			{
+				accountId: SAVINGS,
+				date,
+				balanceCents: balanceToday(SAVINGS) - movedAfter(date),
+			},
+			{
+				accountId: CARD,
+				date,
+				balanceCents:
+					balanceToday(CARD) + 120 * k + cardBuildUp(k) - cardBuildUp(0),
+			},
+		);
+	}
+	return rows;
 }
 
 /** Builds the Rivera household relative to today ('YYYY-MM-DD'). */
@@ -521,6 +586,7 @@ export function buildSeed(today: string): Seed {
 		categories: CATEGORIES,
 		banks: BANKS,
 		accounts: ACCOUNTS,
+		balanceHistory: balanceHistory(today, transactions),
 		merchants,
 		budgetAmounts,
 		transactions,

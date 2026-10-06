@@ -33,7 +33,7 @@ The design system track runs alongside Phase 2 and comes before the audit detail
 
 Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's paid or the next one is due; a bank change to a split purchase's amount removes the split. Phase 3 is complete on `main` and the demo; it reaches production in the one owner-approved deploy after Oct 7 (decision 60). The other session's income work ([#149](https://github.com/kwilson21/tally/pull/149), [#153](https://github.com/kwilson21/tally/pull/153), [#160](https://github.com/kwilson21/tally/pull/160)) is separate; [#153](https://github.com/kwilson21/tally/pull/153) needs its migration renumbered after `0015`, which `main` now uses.
 
-Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Codex builds Phases 3.5 to 5 from briefs, and a separate ultracode session handles design and polish (decision 71, superseding 69).
+Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Claude Sonnet subagents build Phases 3.5 to 5 from the main session's briefs (decision 78, replacing decision 71's Codex), and a separate ultracode session handles design and polish.
 
 ## Where Phase 3.5 stands (Oct 6)
 
@@ -55,18 +55,18 @@ Every visual piece is picked (P34–P40, P45, decision 72).
 | A stale or broken bank flagged on Home (P37 A) | [#184](https://github.com/kwilson21/tally/issues/184) | Merged ([#221](https://github.com/kwilson21/tally/pull/221)) |
 | The first visit's empty list (P40 A) | [#185](https://github.com/kwilson21/tally/issues/185) | Merged ([#220](https://github.com/kwilson21/tally/pull/220)) |
 
-## Where Phase 4 stands (Oct 5: picked; built after Phase 3.5, decision 71)
+## Where Phase 4 stands (Oct 5: picked; built after Phase 3.5, decision 78)
 
 The owner picked every Phase 4 design on the proposals page (decision 64, spec §8.3), and asked for "Why?" links and How Tally works in the family app (decision 65).
 
 | Part | Issue | State |
 |---|---|---|
 | How Tally works in the family app, and the "Why?" link (decision 65) | [#170](https://github.com/kwilson21/tally/issues/170) | Merged ([#173](https://github.com/kwilson21/tally/pull/173)) |
-| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | To build (decision 71) |
-| Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | To build (decision 71) |
+| Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Being built ([#229](https://github.com/kwilson21/tally/pull/229), decision 78) |
+| Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Merged ([#230](https://github.com/kwilson21/tally/pull/230)) |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
-| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | To build (decision 71) |
-| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 71) |
+| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | To build (decision 78) |
+| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 78) |
 
 ## AI that earns its place (decisions 68, 73; spec §8.6)
 
