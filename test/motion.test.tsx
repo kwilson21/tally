@@ -46,7 +46,8 @@ function parse(text: string, path: string[] = []): Rule[] {
 				else if (text[j] === "}") depth--;
 				j++;
 			}
-			const prelude = text.slice(start, i).trim();
+			// A selector the formatter broke over two lines is the same selector.
+			const prelude = text.slice(start, i).trim().replace(/\s+/g, " ");
 			const inner = text.slice(i + 1, j - 1);
 			if (inner.includes("{")) rules.push(...parse(inner, [...path, prelude]));
 			else {
@@ -641,6 +642,53 @@ describe("the proposals page's drawings", () => {
 					r.decls.get("animation") === "none",
 			),
 		).toBe(true);
+	});
+
+	it("keeps the switch moving too: it is drawn Off, and the loop slides the real knob and track from the On look", async () => {
+		// The switch's own move is a transition, which a tap starts and a loop cannot, so the loop
+		// replays the same two classes as an animation that runs from On to the Off they rest on.
+		const replay = rules.find((r) =>
+			r.selector.startsWith(".proposal-loop :is("),
+		);
+		for (const part of [".switch-knob", ".switch-track"]) {
+			expect(replay?.selector, part).toContain(part);
+			const named = rules.find(
+				(r) =>
+					!inReduce(r) &&
+					r.selector === `.proposal-loop ${part}` &&
+					r.decls.has("animation-name"),
+			);
+			const from = keyframes(named?.decls.get("animation-name") ?? "")[0];
+			expect(from?.selector, part).toBe("from");
+			expect(
+				rules.some(
+					(r) =>
+						inReduce(r) &&
+						selectorsOf(r).includes(`.proposal-loop ${part}`) &&
+						r.decls.get("animation") === "none",
+				),
+				`${part} under reduced motion`,
+			).toBe(true);
+		}
+		expect(
+			keyframes(
+				rules
+					.find((r) => r.selector === ".proposal-loop .switch-knob")
+					?.decls.get("animation-name") ?? "",
+			)[0]?.decls.get("translate"),
+		).toBe("1.375rem");
+		// Off at rest, so what the loop settles on (and a still capture shows) is the move's end.
+		const res = await exports.default.fetch(
+			"http://tally.test/design-system/proposals",
+		);
+		const html = await res.text();
+		for (const look of ["quiet", "more", "none"]) {
+			const input = html.match(
+				new RegExp(`<input [^>]*id="p74-${look}-switch"[^>]*>`),
+			)?.[0];
+			expect(input, look).toBeDefined();
+			expect(input, look).not.toMatch(/\schecked\b/);
+		}
 	});
 });
 

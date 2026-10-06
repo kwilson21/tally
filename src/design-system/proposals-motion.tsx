@@ -4,10 +4,11 @@
 // this draws the motion CSS alone could give it, with the browser's own View Transitions for page
 // changes. Each option is one picture of four moments, each looping at its real speed with a pause,
 // starting on its end state; under reduced motion each rests on that end state. Option A is
-// decided and built (decision 76, P74 A): its sheet, toast and desktop panel are drawn with the real
-// classes from app.css (sheet-rise, fade-in, toast-motion), replayed by the stage's loop, and its
-// switch is the real Switch, which slides when tapped (a transition needs a tap; a drawing has
-// none to give it). What the loop alone draws is what wasn't picked: B's morph and sliding pages.
+// decided and built (decision 76, P74 A): its sheet, toast, desktop panel and switch are drawn with
+// the real classes from app.css (sheet-rise, fade-in, toast-motion, switch-knob, switch-track),
+// replayed by the stage's loop. A switch's own move is a transition, which only a tap starts, so the
+// loop runs the real knob and track as an animation, from On to the Off they rest on. What the loop
+// alone draws is what wasn't picked: B's morph and sliding pages.
 
 import type { Child } from "hono/jsx";
 import type { ListRow } from "../db/transactions";
@@ -53,10 +54,10 @@ const COSTCO: ListRow = {
 type Look = "quiet" | "more" | "none";
 
 /**
- * A stage replays the real classes inside it, and loops --proposal-t from 0 to 1 and back for B's
- * morph and sliding pages (app.css, "The proposals page's drawings"). A move's real length decides
- * the loop's: 150 ms takes 4.5 s and 200 ms takes 6 s. "None" jumps instead of easing, so each
- * change is a cut.
+ * A stage replays the real classes inside it (the sheet, the backdrop, the toast, the switch's knob
+ * and track), and loops --proposal-t from 0 to 1 and back for B's morph and sliding pages (app.css,
+ * "The proposals page's drawings"). A move's real length decides the loop's: 150 ms takes 4.5 s and
+ * 200 ms takes 6 s. "None" jumps instead of easing, so each change is a cut.
  */
 function loop(look: Look, ms: 150 | 200) {
 	return [
@@ -99,9 +100,8 @@ function Moment({ n, title, words, height, look, ms, children }: MomentProps) {
 
 /**
  * 1 · The P41 switch (decision 73: On or Off in words, one Save under the group) turning off. It is
- * the real Switch with its real classes: the knob slides and the track and knob swap tones as the
- * checkbox changes, so it waits for a tap, as a transition does. It starts On. The row is P41 B's
- * own: its name and its muted line.
+ * the real Switch, drawn Off: its real knob and track, which the loop slides from the On look, so a
+ * still capture shows the end of the move. The row is P41 B's own: its name and its muted line.
  */
 function SwitchStage({ look }: { look: Look }) {
 	return (
@@ -112,7 +112,6 @@ function SwitchStage({ look }: { look: Look }) {
 					name={`p74-${look}-switch`}
 					label="Income"
 					hint="Spots paychecks and other money coming in."
-					checked
 				/>
 			</div>
 		</div>
@@ -220,19 +219,19 @@ function PageStage({ look }: { look: Look }) {
 
 const WORDS: Record<Look, [string, string, string, string]> = {
 	quiet: [
-		"Tap it. The knob slides in 150 ms and the tones swap; On becomes Off.",
+		"The knob slides from On to Off in 150 ms and the tones swap; on the real switch the word changes with it.",
 		"The sheet rises in 200 ms; the backdrop fades in.",
 		"Fades in and rises 8 px in 150 ms, then fades out.",
 		"The old page cross-fades into the new in 150 ms.",
 	],
 	more: [
-		"Tap it. The knob slides in 150 ms and the tones swap; On becomes Off.",
+		"The knob slides from On to Off in 150 ms and the tones swap; on the real switch the word changes with it.",
 		"As A, and the row's name glides into the title.",
 		"Fades in and rises 8 px in 150 ms, then fades out.",
 		"The page slides left as the next comes in, 200 ms.",
 	],
 	none: [
-		"Tap it. The knob and the word change at once.",
+		"The knob and the tones change at once.",
 		"The sheet and its backdrop appear at once.",
 		"It appears, then disappears.",
 		"The new page replaces the old at once.",

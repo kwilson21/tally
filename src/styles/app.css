@@ -291,9 +291,10 @@ html:not(.js) [data-money-js] {
  * itself (1/30 of the loop), the end state held longest, then played back. The negative delay starts
  * each loop on the end state, so a still capture mostly shows it. --replay-ease is the move's
  * ease-out squeezed into that 1/30 (C, none, cuts instead of easing). What is left below draws what
- * wasn't picked: B's row-to-sheet morph and sliding pages, which --proposal-t drives. A switch is a
- * transition, which needs a tap, so its picture is the real Switch: tap it. Under reduced motion the
- * loops drop, and each drawing rests on its end state.
+ * wasn't picked: B's row-to-sheet morph and sliding pages, which --proposal-t drives. A switch moves
+ * by a transition, which a tap starts and a loop can't, so its picture is the real Switch, drawn Off,
+ * and the loop slides its real knob and track from the On look as an animation. Under reduced motion
+ * the loops drop, and each drawing rests on its end state.
  */
 @property --proposal-t {
 	syntax: "<number>";
@@ -338,7 +339,25 @@ html:not(.js) [data-money-js] {
 	--replay-ease: linear(0 0%, 0 26.67%, 1 26.67%, 1 96.67%, 0 96.67%, 0 100%);
 	animation-timing-function: step-start;
 }
-.proposal-loop :is(.fade-in, .sheet-rise, .sheet-slide) {
+@keyframes replay-knob {
+	from {
+		translate: 1.375rem;
+		background-color: var(--color-paper);
+	}
+}
+@keyframes replay-track {
+	from {
+		background-color: var(--color-ink);
+	}
+}
+.proposal-loop .switch-knob {
+	animation-name: replay-knob;
+}
+.proposal-loop .switch-track {
+	animation-name: replay-track;
+}
+.proposal-loop
+	:is(.fade-in, .sheet-rise, .sheet-slide, .switch-knob, .switch-track) {
 	animation-duration: var(--loop);
 	animation-delay: calc(var(--loop) / -3);
 	animation-iteration-count: infinite;
@@ -370,6 +389,10 @@ html:not(.js) [data-money-js] {
 }
 @media (prefers-reduced-motion: reduce) {
 	.proposal-loop {
+		animation: none;
+	}
+	.proposal-loop .switch-knob,
+	.proposal-loop .switch-track {
 		animation: none;
 	}
 }
