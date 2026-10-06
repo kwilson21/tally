@@ -640,19 +640,22 @@ type Pace = {
 	/** Today's day of the month, and how many days the month has. */
 	day: number;
 	daysInMonth: number;
-	/** Counted spending so far, and the part of it that paid a bill. */
+	/** Counted spending so far (refunds already taken off), and the part of it that paid a bill. */
 	soFarCents: number;
 	paysBillsCents: number;
+	/** Refunds received so far: they lower the spending so far but are never projected forward. */
+	refundsCents: number;
 	/** Bills due this month that aren't paid. */
 	billsDueCents: number;
 };
+/** Money out so far that doesn't pay a bill, with refunds added back, so the pace never projects them. */
+const everydayOut = (p: Pace) =>
+	p.soFarCents - p.paysBillsCents + p.refundsCents;
 /** The rule: spending so far, plus the bills still due, plus the everyday pace times the days left. */
 const forecastEnd = (p: Pace) =>
 	p.soFarCents +
 	p.billsDueCents +
-	Math.round(
-		((p.soFarCents - p.paysBillsCents) * (p.daysInMonth - p.day)) / p.day,
-	);
+	Math.round((everydayOut(p) * (p.daysInMonth - p.day)) / p.day);
 
 /** How the days of spending ran up to today: a plain shape, scaled so it ends on the real total. */
 const WEIGHTS = [3, 5, 1, 7, 2, 9, 4, 1, 6, 8, 2, 5, 1, 7, 4];
@@ -678,6 +681,7 @@ const UNDER_PACE: Pace = {
 	daysInMonth: 31,
 	soFarCents: spentOf(UNDER_MONTH),
 	paysBillsCents: 13000, // Swim lessons $60 and Internet $70
+	refundsCents: 0,
 	billsDueCents: UNDER_MONTH.billsDueCents,
 };
 /** Oct 15, on pace to finish over: Eating Out is already $25 over and the pace is $53 a day. */
@@ -782,7 +786,7 @@ function Forecast({ pace }: { pace: Pace }) {
 
 /** The worked rule under the drawing, so the owner can check the picture adds up. */
 const workedPace = (p: Pace) => {
-	const everyday = p.soFarCents - p.paysBillsCents;
+	const everyday = everydayOut(p);
 	const left = p.daysInMonth - p.day;
 	const perDay = Math.round(everyday / p.day);
 	return `Oct ${p.day}: ${whole(p.soFarCents)} spent, ${whole(p.billsDueCents)} in bills still due, and ${whole(Math.round((everyday * left) / p.day))} more at about ${whole(perDay)} a day for ${left} days, so ${whole(forecastEnd(p))} against ${whole(BUDGET_CENTS)}.`;
