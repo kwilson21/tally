@@ -364,7 +364,7 @@ export const DECIDED: readonly {
 		title: "P115 · The money box's corners",
 		outcome:
 			"Option A: the money box and its cent arrows use the 12px corner token, rounded-control, like every input, and become squircles with them (decision 85).",
-		issue: 80,
+		issue: 253,
 	},
 	{
 		title: "P116 · A suggested amount in the budget sheet",
