@@ -88,6 +88,23 @@ describe("BudgetDiagram", () => {
 		expect(desc(html)).toContain("minus $142.00 for bills due");
 	});
 
+	it("names the savings goal separately from bills due", async () => {
+		const html = await render(
+			BudgetDiagram({
+				totalBudgetCents: 140000,
+				totalSpentCents: 46000,
+				savingsGoalCents: 50000,
+				safeToSpendCents: 29800,
+			}),
+		);
+		expect(words(html)).toContain(
+			"Budget $1,400.00 − Spent $460.00 − Bills due $142.00 − Savings goal $500.00 = Safe to spend $298.00",
+		);
+		expect(desc(html)).toBe(
+			"The $1,400.00 budget minus $460.00 spent minus $142.00 for bills due minus $500.00 for the savings goal leaves $298.00 safe to spend.",
+		);
+	});
+
 	it("marks a negative result in red, still with its words", async () => {
 		const html = await render(
 			BudgetDiagram({

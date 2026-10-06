@@ -247,7 +247,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							Safe to spend is the whole month's budget, minus all counted
 							spending (including uncategorized and unbudgeted), minus bills
-							that are due or overdue and not yet paid.
+							that are due or overdue and not yet paid, minus the full monthly
+							savings goal from the 1st.
 						</li>
 					</ul>
 					{!demo && summary.categories.length === 0 && (
@@ -264,7 +265,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							<Example demo={demo} monthName={monthLabel}>
 								{budgetExample(summary)} This includes{" "}
 								{demo ? "the demo's " : ""}
-								due and overdue, unpaid bills.
+								due and overdue, unpaid bills and the savings goal.
 							</Example>
 						</>
 					) : null}

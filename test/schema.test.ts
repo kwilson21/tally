@@ -56,6 +56,7 @@ describe("schema", () => {
 			"household_settings",
 			"merchants",
 			"plaid_items",
+			"savings_goal_amounts",
 			"transactions",
 		]);
 	});

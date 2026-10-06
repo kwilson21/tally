@@ -13,6 +13,7 @@ import {
 	threeMonthAverageSpentCents,
 } from "../db/budgets";
 import { loadMonth } from "../db/month";
+import { setSavingsGoal } from "../db/savings-goals";
 import { centsToAmount, formatCents } from "../money";
 import { flaggedBanks, staleBankWords } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
@@ -22,9 +23,11 @@ import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
 import { HomeTop } from "../views/home-top";
+import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
+import { SavingsGoalRow } from "../views/savings-goal-row";
 import { ThingsToTry } from "../views/things-to-try";
 import { loadBillRows } from "./bills";
 
@@ -68,9 +71,13 @@ const nudgeAttrs = inPlace;
 
 type HomeOptions = {
 	/** The budget sheet over Home, drawn with this month's numbers. */
-	sheet?: (spentCents: (id: number) => number) => Child;
+	sheet?: (
+		spentCents: (id: number) => number,
+		savingsGoalCents: number | null,
+	) => Child;
 	/** Move focus to this category's row: after a save, or when the sheet closes. */
 	focusId?: number;
+	focusSavingsGoal?: boolean;
 	/** Adjust mode: − and + on every budgeted row (#94). */
 	adjusting?: boolean;
 	/** After a tap reaches a limit, focus goes to the row's other button. */
@@ -84,7 +91,14 @@ type HomeOptions = {
 async function renderHome(
 	c: Context<App>,
 	today: string,
-	{ sheet, focusId, adjusting, nudgeFocus, status = 200 }: HomeOptions = {},
+	{
+		sheet,
+		focusId,
+		focusSavingsGoal,
+		adjusting,
+		nudgeFocus,
+		status = 200,
+	}: HomeOptions = {},
 ) {
 	const month = today.slice(0, 7);
 	const data = await loadMonth(c.env.DB, month);
@@ -96,6 +110,7 @@ async function renderHome(
 		month,
 		...data,
 		unpaidDueBillsCents: dueBills.reduce((sum, b) => sum + b.amountCents, 0),
+		savingsGoalCents: data.savingsGoalCents,
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));
@@ -110,6 +125,7 @@ async function renderHome(
 	const focusHeading = focusId !== undefined && !linked.has(focusId);
 	// Adjust is offered when there's a budget it can change: a budgeted category that isn't archived.
 	const canAdjust = summary.categories.some((cat) => linked.has(cat.id));
+	const hasSavingsGoal = (data.savingsGoalCents ?? 0) > 0;
 	const { count, spentCents } = summary.uncategorized;
 	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
 	const demo = c.env.DEMO === "true";
@@ -172,8 +188,16 @@ async function renderHome(
 									/>
 								)}
 							</div>
-							{summary.categories.length > 0 && (
+							{(summary.categories.length > 0 || hasSavingsGoal) && (
 								<ul class="mt-2 divide-y divide-rule">
+									{hasSavingsGoal && (
+										<SavingsGoalRow
+											amountCents={data.savingsGoalCents}
+											href="/savings-goal"
+											attrs={openAttrs("/savings-goal")}
+											autofocus={focusSavingsGoal}
+										/>
+									)}
 									{summary.categories.map((cat) => {
 										// An archived category shows for a month it has spending in (spec §7), but it
 										// can't be budgeted, so its row isn't a link.
@@ -208,10 +232,18 @@ async function renderHome(
 									})}
 								</ul>
 							)}
-							{notBudgeted.length > 0 && (
+							{(notBudgeted.length > 0 || !hasSavingsGoal) && (
 								<>
 									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
 									<ul class="divide-y divide-rule">
+										{!hasSavingsGoal && (
+											<SavingsGoalRow
+												amountCents={data.savingsGoalCents}
+												href="/savings-goal"
+												attrs={openAttrs("/savings-goal")}
+												autofocus={focusSavingsGoal}
+											/>
+										)}
 										{notBudgeted.map((cat) => {
 											const href = `/budget/${cat.id}`;
 											return (
@@ -234,14 +266,16 @@ async function renderHome(
 									</ul>
 								</>
 							)}
-							{summary.categories.length === 0 && notBudgeted.length === 0 && (
-								<EmptyState
-									kind="done"
-									sentence="No categories to budget yet."
-									hint="Add a category in Settings to get started."
-									action={{ href: "/settings", label: "Open Settings" }}
-								/>
-							)}
+							{!hasSavingsGoal &&
+								summary.categories.length === 0 &&
+								notBudgeted.length === 0 && (
+									<EmptyState
+										kind="done"
+										sentence="No categories to budget yet."
+										hint="Add a category in Settings to get started."
+										action={{ href: "/settings", label: "Open Settings" }}
+									/>
+								)}
 						</section>
 						{dueBills.length > 0 && (
 							<section class="mt-8" aria-labelledby="home-bills-title">
@@ -270,11 +304,85 @@ async function renderHome(
 							</div>
 						)}
 					</div>
-					<div id="sheet">{sheet?.(spent)}</div>
+					<div id="sheet">{sheet?.(spent, data.savingsGoalCents)}</div>
 				</div>
 			</div>
 		</Layout>,
 		status,
+	);
+}
+
+function SavingsGoalSheet({
+	value,
+	error,
+	month: monthPeriod,
+}: {
+	value: string;
+	error?: string;
+	month: string;
+}) {
+	const month = monthName(monthPeriod);
+	const closeAttrs = {
+		"hx-get": "/?focus=savings-goal",
+		"hx-target": "#page",
+		"hx-select": "#page",
+		"hx-swap": "outerHTML",
+		"hx-push-url": "/",
+	};
+	return (
+		<BottomSheet
+			labelledBy="savings-goal-sheet-title"
+			closeHref="/"
+			closeAttrs={closeAttrs}
+			still={error !== undefined}
+		>
+			<div class="flex items-center gap-3">
+				<Icon name="bank" class="size-6 shrink-0 text-ink" />
+				<h2
+					id="savings-goal-sheet-title"
+					class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight"
+					tabindex={-1}
+				>
+					Savings
+				</h2>
+			</div>
+			<p class="mt-1 text-muted">
+				Set aside from Safe to spend at the start of every month.
+			</p>
+			<form
+				method="post"
+				action="/savings-goal"
+				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
+				hx-post="/savings-goal"
+				hx-disable="findAll button[type=submit]"
+				hx-indicator="#savings-goal-save"
+				hx-target="#page"
+				hx-select="#page"
+				hx-swap="outerHTML"
+			>
+				<MoneyInput
+					id="savings-goal"
+					name="goal"
+					label={`Save each month, from ${month} on`}
+					value={value}
+					error={error}
+					autofocus
+				/>
+				<div class="mt-2 grid grid-cols-2 gap-3">
+					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
+						Cancel
+					</Button>
+					<Button
+						id="savings-goal-save"
+						type="submit"
+						class="w-full"
+						busyLabel="Saving…"
+					>
+						Save
+					</Button>
+				</div>
+			</form>
+		</BottomSheet>
 	);
 }
 
@@ -387,6 +495,7 @@ home.get("/", async (c) => {
 	const focus = Number(c.req.query("focus"));
 	return renderHome(c, await householdToday(c.env.DB), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		focusSavingsGoal: c.req.query("focus") === "savings-goal",
 		adjusting: c.req.query("adjust") === "1",
 	});
 });
@@ -418,6 +527,48 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 			/>
 		),
 	});
+});
+
+home.get("/savings-goal", async (c) => {
+	const today = await householdToday(c.env.DB);
+	return renderHome(c, today, {
+		sheet: (_spent, amountCents) => (
+			<SavingsGoalSheet
+				value={
+					amountCents !== null && amountCents > 0
+						? centsToAmount(amountCents)
+						: ""
+				}
+				month={today.slice(0, 7)}
+			/>
+		),
+	});
+});
+
+home.post("/savings-goal", async (c) => {
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
+	const typed = String((await c.req.formData()).get("goal") ?? "");
+	const parsed = parseBudgetAmount(typed);
+	if (!parsed.ok) {
+		return renderHome(c, today, {
+			status: 422,
+			sheet: () => (
+				<SavingsGoalSheet value={typed} error={parsed.error} month={month} />
+			),
+		});
+	}
+	await setSavingsGoal(c.env.DB, parsed.cents, month);
+	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message: "Saved the savings goal", type: "success" },
+			announce: `Savings is ${amount(parsed.cents)} a month from ${monthName(month)} on.`,
+		}),
+	);
+	c.header("HX-Push-Url", "/");
+	return renderHome(c, today, { focusSavingsGoal: true });
 });
 
 // Saving a budget, from this month on (spec §7). htmx gets Home back with a toast; plain browsers are redirected.

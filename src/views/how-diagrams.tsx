@@ -128,34 +128,47 @@ function Figure({
 const down = (x: number, y1: number, y2: number) =>
 	`M${x} ${y1} V${y2} M${x - 6} ${y2 - 6} L${x} ${y2} L${x + 6} ${y2 - 6}`;
 
-/** Budget − Spent (− Bills due) = Safe to spend, as boxes. */
+/** Budget − Spent − bills due − savings goal = Safe to spend, as boxes. */
 export function BudgetDiagram(
 	s: Pick<
 		MonthSummary,
-		"totalBudgetCents" | "totalSpentCents" | "safeToSpendCents"
+		| "totalBudgetCents"
+		| "totalSpentCents"
+		| "safeToSpendCents"
+		| "savingsGoalCents"
 	>,
 ) {
-	// As in the worked example: what was set aside for bills is whatever makes the sum add up.
+	const savingsGoalCents = s.savingsGoalCents ?? 0;
 	const billsCents =
-		s.totalBudgetCents - s.totalSpentCents - s.safeToSpendCents;
+		s.totalBudgetCents -
+		s.totalSpentCents -
+		s.safeToSpendCents -
+		savingsGoalCents;
 	const over = s.safeToSpendCents < 0;
 	const boxes: [string, number][] = [
 		["Budget", s.totalBudgetCents],
 		["Spent", s.totalSpentCents],
 		...(billsCents > 0 ? [["Bills due", billsCents] as [string, number]] : []),
+		...(savingsGoalCents > 0
+			? [["Savings goal", savingsGoalCents] as [string, number]]
+			: []),
 		["Safe to spend", s.safeToSpendCents],
 	];
-	const width = boxes.length === 4 ? 440 : W;
+	const width = boxes.length === 5 ? 550 : boxes.length === 4 ? 440 : W;
 	const gap = 22;
 	const boxW = (width - 2 - gap * (boxes.length - 1)) / boxes.length;
 	const money = (cents: number) => formatCents(cents);
 	const bills =
 		billsCents > 0 ? ` minus ${money(billsCents)} for bills due` : "";
+	const savings =
+		savingsGoalCents > 0
+			? ` minus ${money(savingsGoalCents)} for the savings goal`
+			: "";
 	return (
 		<Figure
 			id="budget-diagram"
 			title="How safe to spend is worked out"
-			desc={`The ${money(s.totalBudgetCents)} budget minus ${money(s.totalSpentCents)} spent${bills} leaves ${money(s.safeToSpendCents)} safe to spend.`}
+			desc={`The ${money(s.totalBudgetCents)} budget minus ${money(s.totalSpentCents)} spent${bills}${savings} leaves ${money(s.safeToSpendCents)} safe to spend.`}
 			width={width}
 			height={68}
 		>

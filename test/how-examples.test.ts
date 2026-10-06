@@ -169,6 +169,19 @@ describe("budgetExample", () => {
 		);
 	});
 
+	it("names the monthly savings goal separately from bills due", () => {
+		expect(
+			budgetExample({
+				totalBudgetCents: 140000,
+				totalSpentCents: 46000,
+				safeToSpendCents: 29800,
+				savingsGoalCents: 50000,
+			}),
+		).toBe(
+			"$1,400.00 budget − $460.00 spent − $142.00 for bills due − $500.00 savings goal = $298.00 safe to spend.",
+		);
+	});
+
 	it("shows a negative result plainly when spending is over the budget", () => {
 		expect(
 			budgetExample({

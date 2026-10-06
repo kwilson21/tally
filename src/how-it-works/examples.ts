@@ -11,15 +11,25 @@ const plural = (n: number, one: string, many: string) =>
 export function budgetExample(
 	s: Pick<
 		MonthSummary,
-		"totalBudgetCents" | "totalSpentCents" | "safeToSpendCents"
+		| "totalBudgetCents"
+		| "totalSpentCents"
+		| "safeToSpendCents"
+		| "savingsGoalCents"
 	>,
 ): string {
-	// What was set aside for bills is whatever makes the sum add up (spec §6); 0 until bills ship.
+	const savingsGoalCents = s.savingsGoalCents ?? 0;
 	const billsCents =
-		s.totalBudgetCents - s.totalSpentCents - s.safeToSpendCents;
+		s.totalBudgetCents -
+		s.totalSpentCents -
+		s.safeToSpendCents -
+		savingsGoalCents;
 	const bills =
 		billsCents > 0 ? ` − ${formatCents(billsCents)} for bills due` : "";
-	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent${bills} = ${formatCents(s.safeToSpendCents)} safe to spend.`;
+	const savings =
+		savingsGoalCents > 0
+			? ` − ${formatCents(savingsGoalCents)} savings goal`
+			: "";
+	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent${bills}${savings} = ${formatCents(s.safeToSpendCents)} safe to spend.`;
 }
 
 /**
