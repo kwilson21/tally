@@ -4,9 +4,12 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
+import { AutofillProposals } from "./proposals-autofill";
 import { P75 } from "./proposals-corners";
+import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
+import { MixedStoreProposals } from "./proposals-mixed";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
@@ -14,6 +17,7 @@ import { Phase5PlansProposals } from "./proposals-phase5-plans";
 import { Phase5TransactionsProposals } from "./proposals-phase5-transactions";
 import { Phase35Proposals } from "./proposals-phase35";
 import { Phase35StatesProposals } from "./proposals-phase35-states";
+import { RulesProposals } from "./proposals-rules";
 
 // What the owner decided on 2026-09-26, 2026-09-28 and 2026-09-29 (decisions 46, 48, 50, 54, 55, 59
 // and 60), and the issue each ships in.
@@ -210,7 +214,7 @@ export const DECIDED: readonly {
 	{
 		title: "P44 · See it without AI",
 		outcome:
-			"Option A: two links under the Transactions title, “What Tally made of it · As the bank sends it” (decision 73).",
+			"Option A: two links under the Transactions title, “Tidied by Tally · Straight from the bank” (decisions 73 and 79).",
 	},
 	{
 		title: "P46–P53 · Home",
@@ -252,6 +256,79 @@ export const DECIDED: readonly {
 		outcome:
 			"Option A: squircle corners on every button, field and the sheet, in CSS only; chips stay pills, and Safari and Firefox keep today's corners until they support it (decision 76).",
 	},
+	{
+		title: "P76 · Where “Maybe income” shows",
+		outcome:
+			"Option A: “Maybe income” shows on the row, in the panel and on the review screen (decision 80).",
+	},
+	{
+		title: "P77 · A switched-off feature in “What AI did”",
+		outcome:
+			"Option A: the line stays and says “Off” in muted words (decision 80).",
+	},
+	{
+		title: "P78 · “Part paid” before it's overdue",
+		outcome:
+			"Option A: “Part paid” stays in the group its due date puts it in (decision 80).",
+	},
+	{
+		title: "P79 · The category from a bill",
+		outcome:
+			"Option E: a Why? link beside Category explains where it came from (decision 80).",
+	},
+	{
+		title: "P80 · Finding one in “Always for these merchants”",
+		outcome:
+			"Option A: A–Z, with a search box once there are more than 20 (decision 80).",
+	},
+	{
+		title: "P81 · Select all's words",
+		outcome: "Option A: Select all says its count and month (decision 80).",
+	},
+	{
+		title: "P82 · Save in a form with no sheet",
+		outcome: "Option A: a form with no sheet ends with Save (decision 80).",
+	},
+	{
+		title: "P83 · An empty “Match payments from”",
+		outcome:
+			"Option A: an empty “Match payments from” reads “None yet” (decision 80).",
+	},
+	{
+		title: "P84 · The over-$100,000 chip in the quiet Add a bill",
+		outcome:
+			"Option A: the over-$100,000 chip sits under the amount's alert (decision 80).",
+	},
+	{
+		title: "P85 · Desktop's side panel entering",
+		outcome:
+			"Option A: desktop's side panel slides in from the right (decision 80).",
+	},
+	{
+		title: "P86 · Clearer words for the AI switches",
+		outcome:
+			"Option A: the switches read “Suggest store names”, “Guess categories”, “Spot paychecks” and “Sort right away”, each with an example (decision 80).",
+	},
+	{
+		title: "P87 · Where a suggested name comes from",
+		outcome:
+			"Option B: a name Tally guessed has a sparkles icon before it in the list, and the icon with the words “Tally's guess” in the edit panel and on the review screen, while the bank's own name says “From your bank” (decision 80).",
+	},
+	{
+		title: "P88 · Never-ask-again, as rules you can change",
+		outcome:
+			"Option A: “Tally's rules” in Settings holds “Always for these merchants” and “Never suggest” together (decision 80).",
+	},
+	{
+		title: "P89 · Tally fills in a transaction's details",
+		outcome:
+			"Option A: Tally fills in a clean name, what it was, its kind and who it was for, dashed until kept, with a “Fill in details” switch (decision 80).",
+	},
+	{
+		title: "P90 · A store that sells many kinds of things",
+		outcome:
+			"Option A, combined with B: Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80).",
+	},
 ];
 
 /** The proposals page body. */
@@ -271,7 +348,22 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="followups-title" class="mt-10">
+			<section aria-labelledby="details-title" class="mt-10">
+				<h2 id="details-title" class="font-serif text-3xl font-semibold">
+					Picked: details from the issues
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					The questions in docs/reviews/open-questions-2026-10-05.md that change
+					how a screen looks, drawn to decide by seeing. The owner's answers are
+					decision 79; the picks marked Picked are decision 80.
+				</p>
+				<DetailsProposals />
+				<RulesProposals />
+				<AutofillProposals />
+				<MixedStoreProposals />
+			</section>
+
+			<section aria-labelledby="followups-title" class="mt-12">
 				<h2 id="followups-title" class="font-serif text-3xl font-semibold">
 					Picked: follow-ups
 				</h2>

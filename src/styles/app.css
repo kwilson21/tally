@@ -138,7 +138,7 @@ html:not(.js) [data-money-js] {
 }
 
 /*
- * P74, the proposals page only (delete this block when P74 A ships, decision 76). Each motion
+ * P74 and P85, the proposals page only (delete this block when P74 A ships, decision 76). Each motion
  * picture loops --proposal-t from 0 (before) to 1 (after) at the move's real speed, pauses, then
  * plays back to repeat: 150 ms is 1/30 of 4.5 s, and 200 ms is 1/30 of 6 s. The parts are drawn
  * from it. The end state is held longest and the negative delay starts each loop on it, so a still
@@ -189,6 +189,9 @@ html:not(.js) [data-money-js] {
 .proposal-slide-in {
 	opacity: var(--proposal-t);
 	transform: translateX(calc((1 - var(--proposal-t)) * 25%));
+}
+.proposal-slide-right {
+	transform: translateX(calc((1 - var(--proposal-t)) * 100%));
 }
 .proposal-morph {
 	opacity: min(1, calc(var(--proposal-t) * 3));

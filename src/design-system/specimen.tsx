@@ -119,11 +119,14 @@ export function UseSpec({ spec }: { spec: UseSpecText }) {
 export function PhoneFrame({
 	label,
 	demo = true,
+	tall = false,
 	children,
 }: {
 	label: string;
 	/** The demo banner on top; false draws the family app. */
 	demo?: boolean;
+	/** A taller screen, for a group that doesn't fit in the usual 790px. */
+	tall?: boolean;
 	children?: Child;
 }) {
 	// A picture of a screen, not a working one: one labelled image with nothing inside to Tab to.
@@ -132,7 +135,7 @@ export function PhoneFrame({
 			<div
 				role="img"
 				aria-label={label}
-				class="h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+				class={`${tall ? "h-[880px]" : "h-[790px]"} w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper`}
 			>
 				<div inert>
 					{demo && (
