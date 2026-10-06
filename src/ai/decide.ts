@@ -9,6 +9,8 @@ export const NONE_FIT = "None of these fit";
 export type JevAnswer = {
 	category: { label: string; confidence: number };
 	flags: Record<Flag, number>;
+	kind?: { label: string; confidence: number };
+	forPerson?: { label: string; confidence: number };
 };
 
 export type Decision = {
@@ -39,12 +41,13 @@ export function decide(
 		answer.category.label === NONE_FIT || !categoriesOn
 			? undefined
 			: categories.find((c) => c.name === answer.category.label);
-	const confident = answer.category.confidence >= threshold;
+	const confidence = answer.category.confidence;
+	const confident = confidence >= threshold;
 	return {
 		noneFit: answer.category.label === NONE_FIT && categoriesOn,
 		categoryId: match && confident ? match.id : null,
 		suggestedCategoryId: match ? match.id : null,
-		confidence: answer.category.confidence,
+		confidence,
 		flags: {
 			transfer: categoriesOn && answer.flags.transfer >= threshold,
 			reimbursement: categoriesOn && answer.flags.reimbursement >= threshold,

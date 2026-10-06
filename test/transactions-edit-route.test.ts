@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -31,6 +32,7 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 let bakery: number;
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	await saveAiSwitches(env.DB, { details: false });
 	bakery = (
 		await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
@@ -167,7 +169,7 @@ describe("GET /transactions/:id", () => {
 		expect(html).toContain("Always for this merchant");
 		expect(html).toContain("Count as income");
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value="Local Bakery"/);
-		expect(html).toMatch(/<label for="note"[^>]*>Note<\/label>/);
+		expect(html).toMatch(/<label for="note"[^>]*>What it was<\/label>/);
 		expect(html).toMatch(
 			/<a href="\/transactions\?uncategorized=1"[^>]*>Cancel<\/a>/,
 		);
@@ -503,29 +505,30 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 			).first<{ id: number }>()
 		)?.id as number;
 
-	it("keeps renaming and the note behind one closed disclosure", async () => {
+	it("keeps each transaction detail in its own closed row", async () => {
 		const { html } = await get(`/transactions/${bakery}`);
-		expect(html).toMatch(
-			/<details class="[^"]*group[^"]*">\s*<summary[^>]*>[\s\S]*Rename or add a note/,
-		);
 		expect(html).not.toMatch(/<details[^>]*\bopen/);
-		// The name field is inside the disclosure.
-		expect(html.indexOf('name="merchant"')).toBeGreaterThan(
-			html.indexOf("Rename or add a note"),
-		);
+		for (const row of [
+			"detail-name",
+			"detail-note",
+			"detail-kind",
+			"detail-for",
+		])
+			expect(html).toContain(`id="${row}"`);
 	});
 
-	it("opens the disclosure when there's a note to see", async () => {
+	it("shows an existing note in its detail row", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET note = 'birthday' WHERE id = ?",
 		)
 			.bind(bakery)
 			.run();
 		const { html } = await get(`/transactions/${bakery}`);
-		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(html).toContain("birthday");
+		expect(html).not.toMatch(/<details[^>]*\bopen/);
 	});
 
-	it("opens the disclosure when a failed save brings back a typed new name", async () => {
+	it("opens the Name row when a failed save brings back a typed new name", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: "99",
 			merchant: "Corner Bakery",
@@ -533,7 +536,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 			back: "/transactions",
 		});
 		expect(res.status).toBe(422);
-		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(html).toMatch(/<details id="detail-name"[^>]*\bopen/);
 		expect(html).toMatch(/name="merchant"[^>]*value="Corner Bakery"/);
 	});
 

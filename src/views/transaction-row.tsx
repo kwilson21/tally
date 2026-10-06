@@ -76,7 +76,10 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.followsPurchase) return { kind: "needs", caption: pair, tag: false };
 	return {
 		kind: "needs",
-		caption: pair ?? (row.rawName === row.displayName ? null : row.rawName),
+		caption:
+			row.note ||
+			pair ||
+			(row.rawName === row.displayName ? null : row.rawName),
 		tag: true,
 	};
 }
@@ -194,7 +197,16 @@ export function TransactionRow({
 								kind={maybeCategory.kind}
 							/>
 						) : (
-							caption && <span class="truncate text-muted">{caption}</span>
+							caption && (
+								<span
+									class={`truncate text-muted ${row.noteGuessed ? SUGGESTED_NAME_CLASS : ""}`}
+								>
+									{row.noteGuessed && (
+										<span class="sr-only">Tally's guess: </span>
+									)}
+									{caption}
+								</span>
+							)
 						)}
 						{/* A linked refund's caption names its purchase; the month shows only when a bill moved it. */}
 						{countsIn && (

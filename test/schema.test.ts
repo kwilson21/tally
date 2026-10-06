@@ -53,6 +53,7 @@ describe("schema", () => {
 			"category_suggestions",
 			"documents",
 			"feedback",
+			"household_people",
 			"household_settings",
 			"merchants",
 			"plaid_items",

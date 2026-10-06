@@ -6,7 +6,7 @@ import { categoryCallLimit } from "../src/category-suggestions-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
-import { resetDemo } from "../src/demo/reset";
+import { resetDemo as resetDemoBase } from "../src/demo/reset";
 import { monthOffset } from "../src/demo/seed";
 import handler, {
 	runFirstSort,
@@ -17,6 +17,15 @@ import { encryptToken } from "../src/plaid/token-crypto";
 import { nameCallLimit } from "../src/suggest-names-pending";
 
 const KEY = btoa("01234567890123456789012345678901");
+
+async function resetDemo(
+	db: D1Database,
+	today: string,
+	options?: { categoryExample?: boolean },
+) {
+	await resetDemoBase(db, today, options);
+	await saveAiSwitches(db, { details: false });
+}
 
 // The Workers runtime supports scheduled() on the Worker's own export, but the
 // generated Fetcher type only declares fetch() and connect().
@@ -283,7 +292,7 @@ describe("scheduled handler", () => {
 	it("asks Jev about what the first sort left, so the day still reaches its cap (decision 56)", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const fetchImpl = vi.fn(async () => jevAnswer());
 
 		await runSecondSort(
@@ -307,6 +316,7 @@ describe("scheduled handler", () => {
 			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 			await saveAiSwitches(env.DB, {
 				...AI_SWITCHES_ALL_ON,
+				details: false,
 				categories,
 				income,
 			});
@@ -326,7 +336,7 @@ describe("scheduled handler", () => {
 	it("asks Jev nothing in production's 09:00 run, which only syncs (decision 56)", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const fetchImpl = vi.fn(async () => jevAnswer());
 
 		await runScheduled(
@@ -341,7 +351,7 @@ describe("scheduled handler", () => {
 	it("takes the 09:20 run's up to 200 calls and the 09:40 run's up to 300 from one day's 500", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
@@ -372,7 +382,7 @@ describe("scheduled handler", () => {
 describe("scheduled handler: which run a cron starts", () => {
 	async function seedWaiting() {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 	}
 	/** Fires one cron in production with a fake Jev (the global fetch) and a fake Workers AI. */
 	async function fire(cron: string) {
@@ -569,7 +579,7 @@ describe("scheduled handler: merchant names", () => {
 	it("ends production's 09:00 run at the feedback retry, asking no names and no Jev", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await linkOneBank();
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		// A report old enough for the retry to file.
 		await env.DB.prepare(
 			"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', 'Why?', '/', 'Desktop browser')",
@@ -608,7 +618,7 @@ describe("scheduled handler: merchant names", () => {
 	it("asks Jev first in the 09:20 run, then names, so the sort is never delayed by them", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await oneUnnamedCharge();
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const order: string[] = [];
 		const ai = {
 			run: vi.fn(async () => {
@@ -641,7 +651,7 @@ describe("scheduled handler: merchant names", () => {
 	it("stops Jev at 9 minutes in the 09:20 run, gives back the calls it didn't ask, and lets names run until 13 minutes", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		await addUnsorted(250);
 		const clock = fakeClock();
 		const order: string[] = [];
@@ -677,7 +687,7 @@ describe("scheduled handler: merchant names", () => {
 	it("stops Jev at 13 minutes in the 09:40 run, which asks no names", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		await addUnsorted(400);
 		const clock = fakeClock();
 		const fetchImpl = vi.fn(async () => {
@@ -734,7 +744,7 @@ describe("scheduled handler: merchant names", () => {
 	it("leaves the names to the 09:20 run, however big 09:00's sync was", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await linkOneBank();
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const production = {
 			...env,
 			...bank,
@@ -765,7 +775,7 @@ describe("scheduled handler: merchant names", () => {
 	it("caps the 09:20 run's Jev pass at 200 calls, so its sort and names stay under D1's query limit", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
@@ -804,7 +814,7 @@ describe("scheduled handler: merchant names", () => {
 
 	it("keeps going when Workers AI fails, so the run still ends well after its sort", async () => {
 		await oneUnnamedCharge();
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const ai = {
@@ -842,7 +852,7 @@ describe("scheduled handler: merchant names", () => {
 
 	it("still makes the names in the 09:20 run when the sort throws, and logs only the error's name", async () => {
 		await oneUnnamedCharge();
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		const ai = aiThatSays("Blue Bottle Coffee");
@@ -940,7 +950,7 @@ describe("scheduled handler: new category suggestions", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await noneFitGroup();
 		await addUnsortedAndUnnamed();
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const order: string[] = [];
 		const ai = aiThatHears(order);
 		const jev = vi.fn(async () => {
@@ -997,7 +1007,7 @@ describe("scheduled handler: new category suggestions", () => {
 		await runFirstSort({ ...env, DEMO: "false", AI: ai });
 		expect(heard).toEqual([]);
 		expect(await suggested()).toEqual([]);
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		vi.restoreAllMocks();
 	});
 
@@ -1166,7 +1176,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM feedback"),
 		]);
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		await env.DB.prepare(
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20)
 			 INSERT INTO feedback (created_at, actor, type, feeling, message, page, device)
@@ -1288,7 +1298,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 	it("production's 09:40 run, which asks Jev about up to 300 and no names", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		await addWaiting(400);
 		const counted = countingDb();
 		const ai = aiThatSays("Some Place Name");

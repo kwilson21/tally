@@ -10,6 +10,7 @@ import {
 	markJevFailed,
 	merchantCategoryHistoryForJev,
 	pendingForJev,
+	saveJevDetails,
 	saveJevResult,
 } from "./db/transactions";
 import { type Deadline, pastDeadline } from "./run-budget";
@@ -106,11 +107,16 @@ export async function categorizePending(
 	const { results: categories } = await env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
 	).all<{ id: number; name: string }>();
-	// With nothing to offer, Jev could only say "none fit", which would mark every row as looked at.
-	if (categories.length === 0) return done;
+	// With no categories, details or income can still be asked without a category question.
+	if (categories.length === 0 && !start.details && !start.income) return done;
 	// Sent even when only income is on: the one call asks everything together (spec §7), and a row is
 	// marked as asked by the category confidence the answer carries (decision 27).
 	const names = categories.map((c) => c.name);
+	const people = start.details
+		? await env.DB.prepare(
+				"SELECT id, name FROM household_people ORDER BY id",
+			).all<{ id: number; name: string }>()
+		: { results: [] as { id: number; name: string }[] };
 
 	// The household's zone is read once; each call then works out the date from it, with no query.
 	const timeZone = await householdTimeZone(env.DB);
@@ -119,6 +125,8 @@ export async function categorizePending(
 	// The run asks about no more than the query limit allows, and reserves no more than that.
 	const waiting = await pendingForJev(env.DB, Math.min(cap, maxCalls), {
 		categories: start.categories,
+		income: start.income,
+		details: start.details,
 		ids: onlyIds,
 	});
 	if (waiting.length === 0 || pastDeadline(time)) return done;
@@ -127,6 +135,11 @@ export async function categorizePending(
 	if (granted === 0) return done;
 
 	let failuresInARow = 0;
+	const detailsAnswers: {
+		id: number;
+		kind: string | null;
+		forPersonId: number | null;
+	}[] = [];
 	try {
 		const histories = start.categories
 			? await merchantCategoryHistoryForJev(env.DB, waiting)
@@ -143,7 +156,7 @@ export async function categorizePending(
 			const before = await readAiSwitches(env.DB);
 			if (!asksJev(before) || (bySync && !before.sortOnArrival)) return done;
 			// A credit a person reviewed, or an excluded payment that pays a bill, is asked about only for its category.
-			if (tx.categoryOnly && !before.categories) continue;
+			if (tx.categoryOnly && !before.categories && !before.details) continue;
 			done.asked += 1;
 			const result = await askJev(
 				{
@@ -155,6 +168,10 @@ export async function categorizePending(
 				names,
 				env.JEV_API_KEY,
 				fetchImpl,
+				{
+					details: before.details && !tx.detailsAsked,
+					people: people.results.map((person) => person.name),
+				},
 			);
 			if (!result.ok) {
 				// Status and request id only: never the key or anything about the transaction.
@@ -175,17 +192,48 @@ export async function categorizePending(
 			// Read again, since the request took a while: an answer is used only as the switches stand now.
 			const now = await readAiSwitches(env.DB);
 			if (!asksJev(now)) return done;
-			if (tx.categoryOnly && !now.categories) continue;
-			const decision = decide(result.answer, categories, JEV_THRESHOLD, {
-				categories: now.categories,
-			});
-			const written = await saveJevResult(env.DB, tx.id, decision, {
-				categoryOnly: tx.categoryOnly,
-				switches: { income: now.income },
-			});
-			if (written && decision.categoryId !== null) done.applied += 1;
+			if (
+				(now.categories || now.income) &&
+				(!tx.categoryOnly || now.categories)
+			) {
+				const decision = decide(result.answer, categories, JEV_THRESHOLD, {
+					categories: now.categories,
+				});
+				const written = await saveJevResult(env.DB, tx.id, decision, {
+					categoryOnly: tx.categoryOnly,
+					switches: { income: now.income },
+				});
+				if (written && decision.categoryId !== null) done.applied += 1;
+			}
+			if (now.details && !tx.detailsAsked) {
+				const kind = result.answer.kind;
+				const kindValue =
+					kind &&
+					kind.confidence >= JEV_THRESHOLD &&
+					kind.label !== "None of these"
+						? kind.label
+						: null;
+				const person = result.answer.forPerson;
+				const personValue =
+					person &&
+					person.confidence >= JEV_THRESHOLD &&
+					person.label !== "Not sure"
+						? (people.results.find((entry) => entry.name === person.label)
+								?.id ?? null)
+						: null;
+				detailsAnswers.push({
+					id: tx.id,
+					kind: kindValue,
+					forPersonId: personValue,
+				});
+			}
 		}
 	} finally {
+		try {
+			await saveJevDetails(env.DB, detailsAnswers);
+		} catch {
+			console.error("jev: couldn't save transaction details");
+		}
 		// What was reserved and not asked goes back to the day it came from. Should this fail, or the run
 		// be cut off before it gets here, those calls are only lost for the day, never over-spent.
 		try {

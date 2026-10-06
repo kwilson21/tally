@@ -201,6 +201,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM category_suggestions"),
 		db.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'"),
 	]);
+	await saveAiSwitches(db, { details: false });
 });
 
 describe("GET /settings with a suggestion", () => {

@@ -85,6 +85,9 @@ describe("parseEdit", () => {
 				income: false,
 				creditReviewed: false,
 				creditReviewedProvided: false,
+				kind: undefined,
+				forPersonId: undefined,
+				keepDetails: false,
 			},
 		});
 	});

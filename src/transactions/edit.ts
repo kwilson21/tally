@@ -27,6 +27,9 @@ export type Edit = {
 	creditReviewed: boolean;
 	/** False when the edit form omitted the credit-review control for an income credit. */
 	creditReviewedProvided?: boolean;
+	kind?: "subscription" | "one_off" | "bill" | "transfer" | null;
+	forPersonId?: number | null;
+	keepDetails?: boolean;
 	/**
 	 * The purchase this refund refunds. Left out, the link stays; null unlinks. A purchase links it,
 	 * unless it's more than what's left of that purchase (saveEdit refuses it, spec §8.5), and
@@ -36,7 +39,10 @@ export type Edit = {
 };
 
 export type EditErrors = Partial<
-	Record<"category" | "merchant" | "note" | "refund", string>
+	Record<
+		"category" | "merchant" | "note" | "refund" | "kind" | "forPerson",
+		string
+	>
 >;
 
 const MAX_NAME = 80;
@@ -49,6 +55,7 @@ const text = (form: FormData, key: string) =>
 export function parseEdit(
 	form: FormData,
 	categoryIds: number[],
+	peopleIds?: number[],
 ): { ok: true; value: Edit } | { ok: false; errors: EditErrors } {
 	const errors: EditErrors = {};
 	const rawCategory = text(form, "category");
@@ -74,6 +81,14 @@ export function parseEdit(
 				? false
 				: fieldChanged;
 	const note = text(form, "note");
+	const rawKind = text(form, "kind");
+	const allowedKinds = ["subscription", "one_off", "bill", "transfer"];
+	const kind = allowedKinds.includes(rawKind)
+		? (rawKind as "subscription" | "one_off" | "bill" | "transfer")
+		: null;
+	const rawPerson = text(form, "for_person_id");
+	const forPersonId = rawPerson ? Number(rawPerson) : null;
+	const keepDetails = form.get("details_action") === "keep";
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
 	const creditReviewed = form.get("creditReviewed") === "1";
@@ -89,6 +104,14 @@ export function parseEdit(
 		errors.merchant = `Keep the name under ${MAX_NAME} characters.`;
 	if (note.length > MAX_NOTE)
 		errors.note = `Keep the note under ${MAX_NOTE} characters.`;
+	if (rawKind && !allowedKinds.includes(rawKind))
+		errors.kind = "Pick a kind from the list.";
+	if (
+		rawPerson &&
+		(!Number.isInteger(forPersonId) ||
+			(peopleIds && !peopleIds.includes(forPersonId as number)))
+	)
+		errors.forPerson = "Pick a person from the household list.";
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };
 	return {
@@ -104,6 +127,9 @@ export function parseEdit(
 			income,
 			creditReviewed,
 			creditReviewedProvided,
+			kind: form.has("kind") ? kind : undefined,
+			forPersonId: form.has("for_person_id") ? forPersonId : undefined,
+			keepDetails,
 		},
 	};
 }

@@ -118,6 +118,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM transactions"),
 		db.prepare("DELETE FROM merchants"),
 	]);
+	await saveAiSwitches(db, { details: false });
 });
 
 describe("the Transactions list", () => {
@@ -353,7 +354,7 @@ describe("the edit panel's name choices", () => {
 		const id = await charge("PLAIN SHOP 123");
 		const { html } = await get(`/transactions/${id}?month=all`);
 		expect(html).not.toContain('name="name_pick"');
-		expect(html).toMatch(/<label[^>]*>Merchant name<\/label>/);
+		expect(html).toMatch(/<label[^>]*>Name<\/label>/);
 	});
 
 	it("leaves out a name that says what the tidied bank text already says", async () => {
@@ -401,11 +402,14 @@ describe("the edit panel's name choices", () => {
 		const off = (await get(`/transactions/${guessed}`)).html;
 		expect(off).not.toContain('name="name_pick"');
 		expect(off).not.toContain("Tally&#39;s guess");
-		expect(off).toMatch(/<label[^>]*>Merchant name<\/label>/);
+		expect(off).toMatch(/<label[^>]*>Name<\/label>/);
 		const bank = (await get(`/transactions/${banked}`)).html;
 		expect(bank).toContain('value="s:Lupita&#39;s Taqueria"');
 		expect(bank).toContain("From your bank");
-		expect(bank).not.toContain("Tally&#39;s guess");
+		const nameRow =
+			bank.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
+			"";
+		expect(nameRow).not.toContain("Tally&#39;s guess");
 	});
 
 	describe("saving", () => {

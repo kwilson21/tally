@@ -2,9 +2,13 @@
 // production it runs last in the 09:20 run, after that run's Jev pass, and the demo's one run names after
 // Jev too (src/index.tsx); in both it stops starting requests once its deadline has passed
 // (src/run-budget.ts). It only ever makes pending suggestions; a person chooses (decision 64).
-import { suggestNames } from "./ai/suggest-name";
+import { suggestNames, suggestNote } from "./ai/suggest-name";
 import { readAiSwitches } from "./db/ai-switches";
 import { merchantsToAsk, saveAskedNames } from "./db/merchant-names";
+import {
+	saveNoteGuesses,
+	transactionsNeedingNoteGuess,
+} from "./db/transactions";
 import { type Deadline, pastDeadline } from "./run-budget";
 
 /**
@@ -23,6 +27,39 @@ type NamesEnv = {
 	/** Workers AI. Production and the demo have it (wrangler.jsonc); local development and tests don't, so no name is asked for there. */
 	AI?: Ai;
 };
+
+/** Writes notes for details Jev has already asked about, sharing the night's Workers AI call limit. */
+export async function suggestTransactionNotes(
+	env: NamesEnv,
+	limit = nameCallLimit,
+	time?: Deadline,
+): Promise<{ asked: number; suggested: number }> {
+	const done = { asked: 0, suggested: 0 };
+	if (!env.AI || limit <= 0 || pastDeadline(time)) return done;
+	if (!(await readAiSwitches(env.DB)).details) return done;
+	const guesses: { id: number; note: string }[] = [];
+	let failuresInARow = 0;
+	for (const transaction of await transactionsNeedingNoteGuess(env.DB, limit)) {
+		if (pastDeadline(time)) break;
+		if (!(await readAiSwitches(env.DB)).details) break;
+		done.asked += 1;
+		const note = await suggestNote(env.AI, transaction.rawName);
+		if (note === null) {
+			failuresInARow += 1;
+			if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
+			continue;
+		}
+		failuresInARow = 0;
+		if ((await readAiSwitches(env.DB)).details)
+			guesses.push({ id: transaction.id, note });
+	}
+	await saveNoteGuesses(env.DB, guesses);
+	done.suggested = guesses.length;
+	console.log(
+		`workers-ai: notes asked ${done.asked}, suggested ${done.suggested}`,
+	);
+	return done;
+}
 
 /**
  * Asks Workers AI for each bank text that needs it, most charges first, while the household's names

@@ -21,6 +21,8 @@ export type JevInput = {
 	accountType: string;
 	plaidCategory?: string | null;
 	note?: string | null;
+	kind?: string | null;
+	forPerson?: string | null;
 	/** The merchant's five most recent trips, each with distinct chosen categories in split-part order. */
 	merchantCategoryHistory?: string[][];
 };
@@ -43,6 +45,7 @@ export async function askJev(
 	categories: string[],
 	apiKey: string,
 	fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = fetch,
+	options: { details?: boolean; people?: string[] } = {},
 ): Promise<JevResult> {
 	const categoryInstructions = [
 		"Which of this household's budget categories does this bank transaction belong to?",
@@ -62,26 +65,63 @@ export async function askJev(
 			account_type: input.accountType,
 			...(input.plaidCategory ? { plaid_category: input.plaidCategory } : {}),
 			...(input.note ? { note: input.note } : {}),
+			...(input.kind ? { kind: input.kind } : {}),
+			...(input.forPerson ? { for_person: input.forPerson } : {}),
 			...(input.merchantCategoryHistory?.length
 				? { merchant_category_history: input.merchantCategoryHistory }
 				: {}),
 		},
 		questions: {
-			category: {
-				type: "choice",
-				instructions: categoryInstructions,
-				criteria: {
-					...Object.fromEntries(categories.map((name) => [name, null])),
-					[NONE_FIT]:
-						"None of these categories fits this transaction, so a person should decide.",
-				},
-			},
+			...(categories.length > 0
+				? {
+						category: {
+							type: "choice",
+							instructions: categoryInstructions,
+							criteria: {
+								...Object.fromEntries(categories.map((name) => [name, null])),
+								[NONE_FIT]:
+									"None of these categories fits this transaction, so a person should decide.",
+							},
+						},
+					}
+				: {}),
 			...Object.fromEntries(
 				Object.entries(FLAG_QUESTIONS).map(([flag, instructions]) => [
 					flag,
 					{ type: "noul", instructions },
 				]),
 			),
+			...(options.details
+				? {
+						kind: {
+							type: "choice",
+							instructions:
+								"What kind of spending is this purchase? Choose one, or None of these.",
+							criteria: Object.fromEntries([
+								["subscription", "A repeating subscription or membership."],
+								["one_off", "A one-off purchase."],
+								[
+									"bill",
+									"A household bill; this label never creates or pays a bill.",
+								],
+								[
+									"transfer",
+									"A transfer; this label never changes the amount or excludes it.",
+								],
+								["None of these", "The kind isn't clear."],
+							]),
+						},
+						for_person: {
+							type: "choice",
+							instructions:
+								"Who was this purchase for? Choose a household person, or Not sure.",
+							criteria: Object.fromEntries([
+								...(options.people ?? []).map((person) => [person, null]),
+								["Not sure", "It isn't clear who this was for."],
+							]),
+						},
+					}
+				: {}),
 		},
 	};
 
@@ -103,10 +143,14 @@ export async function askJev(
 	const requestId = response.headers.get("x-typesafe-request-id");
 	if (!response.ok) return { ok: false, status: response.status, requestId };
 
-	const answer = parseAnswer(await response.json().catch(() => null), [
-		...categories,
-		NONE_FIT,
-	]);
+	const answer = parseAnswer(
+		await response.json().catch(() => null),
+		categories.length ? [...categories, NONE_FIT] : [],
+		options.details
+			? ["subscription", "one_off", "bill", "transfer", "None of these"]
+			: [],
+		options.people ? [...options.people, "Not sure"] : [],
+	);
 	return answer
 		? { ok: true, answer }
 		: { ok: false, status: response.status, requestId };
@@ -117,28 +161,57 @@ export async function askJev(
  * A choice that wasn't one of the options offered is malformed, so it's never stored and can't
  * be mistaken for "None of these fit".
  */
-function parseAnswer(data: unknown, options: string[]): JevAnswer | null {
+function parseAnswer(
+	data: unknown,
+	options: string[],
+	kinds: string[],
+	people: string[],
+): JevAnswer | null {
 	const answers = (data as { answers?: Record<string, unknown> } | null)
 		?.answers;
 	const category = answers?.category as
 		| { choice?: unknown; confidence?: unknown }
 		| undefined;
 	if (
-		typeof category?.choice !== "string" ||
-		!options.includes(category.choice) ||
-		!isProbability(category.confidence)
+		category &&
+		(typeof category.choice !== "string" ||
+			!options.includes(category.choice) ||
+			!isProbability(category.confidence))
 	) {
 		return null;
 	}
+	if (!category && options.length > 0) return null;
 	const flags = {} as Record<Flag, number>;
 	for (const flag of Object.keys(FLAG_QUESTIONS) as Flag[]) {
 		const noul = (answers?.[flag] as { noul?: unknown } | undefined)?.noul;
 		if (!isProbability(noul)) return null;
 		flags[flag] = noul;
 	}
+	const choice = (key: string, allowed: string[]) => {
+		const item = answers?.[key] as
+			| { choice?: unknown; confidence?: unknown }
+			| undefined;
+		if (!item) return undefined;
+		return typeof item.choice === "string" &&
+			allowed.includes(item.choice) &&
+			isProbability(item.confidence)
+			? { label: item.choice, confidence: item.confidence }
+			: undefined;
+	};
+	const kind = choice("kind", kinds);
+	const forPerson = choice("for_person", people);
+	if (kinds.length && answers?.kind && !kind) return null;
+	if (people.length && answers?.for_person && !forPerson) return null;
 	return {
-		category: { label: category.choice, confidence: category.confidence },
+		category: category
+			? {
+					label: category.choice as string,
+					confidence: category.confidence as number,
+				}
+			: { label: NONE_FIT, confidence: 0 },
 		flags,
+		...(kind ? { kind } : {}),
+		...(forPerson ? { forPerson } : {}),
 	};
 }
 

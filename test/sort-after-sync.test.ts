@@ -63,6 +63,7 @@ const callsUsed = async () =>
 
 beforeEach(async () => {
 	await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
+	await saveAiSwitches(db, { details: false });
 	// The demo's reset keeps the day's Jev count, so each test starts a day of its own.
 	await newDay();
 });
@@ -134,6 +135,7 @@ describe("sortAfterSync", () => {
 
 	it("keeps a full 50-call sync sort under D1's 1,000-statement limit", async () => {
 		quiet();
+		await saveAiSwitches(db, { details: true });
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 70)
@@ -170,7 +172,11 @@ describe("sortAfterSync", () => {
 
 	it("doesn't run when the sorting switch is off, and leaves everything waiting for the nightly run", async () => {
 		quiet();
-		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, sortOnArrival: false });
+		await saveAiSwitches(db, {
+			...AI_SWITCHES_ALL_ON,
+			details: false,
+			sortOnArrival: false,
+		});
 		const jev = fakeJev();
 		await sortAfterSync(
 			withKey,
@@ -187,6 +193,7 @@ describe("sortAfterSync", () => {
 	it("doesn't run when Jev isn't asked at all, with categories and income both off", async () => {
 		await saveAiSwitches(db, {
 			...AI_SWITCHES_ALL_ON,
+			details: false,
 			categories: false,
 			income: false,
 		});
@@ -206,7 +213,11 @@ describe("sortAfterSync", () => {
 		"runs with categories $categories and income $income",
 		async (switches) => {
 			quiet();
-			await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...switches });
+			await saveAiSwitches(db, {
+				...AI_SWITCHES_ALL_ON,
+				details: false,
+				...switches,
+			});
 			const jev = fakeJev();
 			await sortAfterSync(
 				withKey,

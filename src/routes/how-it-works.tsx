@@ -376,6 +376,11 @@ howItWorks.get("/how-it-works", async (c) => {
 						A suggested category is only an idea; nothing is created until a
 						person says so.
 					</p>
+					<p class="mt-3">
+						With Fill in details on, Tally can also guess what a purchase was,
+						its kind, and who it was for. These stay Tally's guess until a
+						person changes or keeps them. A person's choices always win.
+					</p>
 					{hasTransactions ? (
 						<>
 							<Diagram>

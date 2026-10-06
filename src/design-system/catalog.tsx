@@ -29,12 +29,14 @@ import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
+import { DetailRow } from "../views/detail-row";
 import { EmptyState } from "../views/empty-state";
 import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { FilterSelect } from "../views/filter-select";
 import { HomeTop } from "../views/home-top";
+import { HouseholdPeople } from "../views/household-people";
 import {
 	BillsDiagram,
 	BudgetDiagram,
@@ -492,6 +494,44 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. With one transaction the muted line says “For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
 	words:
 		"Name · Tally's guess · From your bank · Why? · Keep “{Blue bottle cof}” · Or your own · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+};
+
+const DETAIL_ROW_SPEC: UseSpecText = {
+	purpose:
+		"Let a person keep or change one of the four transaction details in the edit panel.",
+	affordance:
+		"A ruled disclosure row names the detail and its source at the left, with the current value at the right. An unkept guess is dashed; a guessed name also has the sparkles icon.",
+	states:
+		"Closed: label, source and value are visible. Open: the row's plain field or choices appear below it. A saved guess stays dashed until kept; editing one row clears only that row's guess flag.",
+	feedback:
+		"The person edits one or more rows and presses the panel's one Save. Looks right keeps all four current details. The server announces the saved change and focuses the list row.",
+	input:
+		"Touch: the row and its choices are at least 44px tall. Keyboard: summary opens with Enter or Space; native fields and choices remain reachable. Screen reader: the label, source, value and disclosure state are read in order.",
+	motion:
+		"The chevron turns in 150 ms; reduced motion shows the open state at once.",
+	edges:
+		"An empty detail stays empty until a person fills it. A missing household list prompts Settings. No JavaScript: native details, labeled fields, chips and the panel form.",
+	words:
+		"Name · What it was · Kind · For · Tally's guess · From your bank · Your choice · Looks right.",
+};
+
+const HOUSEHOLD_PEOPLE_SPEC: UseSpecText = {
+	purpose:
+		"Let anyone in the shared household add, rename or remove the names used by a transaction's For choice.",
+	affordance:
+		"A ruled list under Household. Each name is a disclosure row with a chevron; a terracotta Add a person row opens a labeled name field with Add and Cancel.",
+	states:
+		"Closed rows show each name. An open row has its name field, Save and Remove. Add opens its own field. Everyone is always first and cannot be changed or removed. Errors stay beside the field in role=alert.",
+	feedback:
+		"Each form posts without JavaScript. The people list swaps in place, an aria-live announcement gives the change, and focus returns to the row. Removing a name clears it from marked purchases and says how many.",
+	input:
+		"Touch targets are at least 44px. Keyboard opens disclosures with Enter or Space and reaches every labeled field and action. Screen readers hear each person's name and the expanded state.",
+	motion:
+		"The chevron turns in 150 ms; reduced motion shows the open state at once.",
+	edges:
+		"Names are household labels, not logins. Everyone is always available. Empty names and duplicates are refused. No JavaScript: native disclosures and plain form posts.",
+	words:
+		"People · Everyone · Add a person · Name · Add · Save · Remove · Cancel.",
 };
 
 // The BottomSheet's use spec: every line answered, with its motion (decisions 76 and 80, P74 A, P85 A).
@@ -1727,6 +1767,92 @@ function Controls() {
 					</div>
 				</State>
 				<UseSpec spec={NAME_CHOICES_SPEC} />
+			</Specimen>
+			<Specimen
+				id="detail-row"
+				title="Transaction detail row"
+				tier="interactive"
+				components={["DetailRow"]}
+				sentence="One of the four details in a transaction's edit panel, dashed until a person keeps it (P89 A, decisions 64 and 81)."
+			>
+				<div class="max-w-xl divide-y divide-rule border-y border-rule">
+					<State label="Tally's guessed note and kind stay dashed until kept">
+						<DetailRow
+							id="ds-detail-note"
+							label="What it was"
+							value="Coffee with a friend"
+							source="guess"
+							guessed
+							open
+						>
+							<TextInput
+								id="ds-detail-note-input"
+								name="note"
+								label="What it was"
+								value="Coffee with a friend"
+							/>
+						</DetailRow>
+						<DetailRow
+							id="ds-detail-kind"
+							label="Kind"
+							value="One-off"
+							source="guess"
+							guessed
+						>
+							<div class="flex flex-wrap gap-2">
+								{["Subscription", "One-off", "Bill", "Transfer"].map((kind) => (
+									<Chip type="radio" name="ds-kind" value={kind}>
+										{kind}
+									</Chip>
+								))}
+							</div>
+						</DetailRow>
+					</State>
+					<State label="Name the bank sent, and a choice a person kept">
+						<DetailRow
+							id="ds-detail-bank-name"
+							label="Name"
+							value="Blue Bottle Coffee"
+							source="bank"
+							guessed
+						/>
+						<DetailRow
+							id="ds-detail-person"
+							label="For"
+							value="Kids"
+							source="person"
+						>
+							<div class="flex flex-wrap gap-2">
+								{["Everyone", "Kids", "Morgan"].map((person) => (
+									<Chip type="radio" name="ds-for" value={person}>
+										{person}
+									</Chip>
+								))}
+							</div>
+						</DetailRow>
+					</State>
+				</div>
+				<UseSpec spec={DETAIL_ROW_SPEC} />
+			</Specimen>
+			<Specimen
+				id="household-people"
+				title="Household people"
+				tier="visual"
+				components={["HouseholdPeople"]}
+				sentence="Names a transaction can be for, shared by the household and never used as logins (P89 A, decision 81)."
+			>
+				<div inert class="max-w-3xl border-t border-rule">
+					<HouseholdPeople
+						people={[
+							{ id: 1, name: "Everyone" },
+							{ id: 2, name: "Kids" },
+							{ id: 3, name: "Morgan" },
+						]}
+						openId={2}
+						addOpen
+					/>
+				</div>
+				<UseSpec spec={HOUSEHOLD_PEOPLE_SPEC} />
 			</Specimen>
 			<Specimen
 				id="time-zone-row"

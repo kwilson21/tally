@@ -64,6 +64,52 @@ export async function suggestNames(
 	return { ok: true, names: cleanSuggestedNames(text, rawName) };
 }
 
+/** Workers AI's short, one-line guess for what a purchase was, from only the bank text. */
+export async function suggestNote(
+	ai: Ai,
+	rawName: string,
+): Promise<string | null> {
+	try {
+		const answer = await ai.run(
+			NAME_MODEL,
+			{
+				messages: [
+					{
+						role: "system",
+						content:
+							"Describe what this purchase was in a few plain words. Reply with one short line and nothing else. If the bank text does not make it clear, reply with nothing. Do not guess a person, amount or date.",
+					},
+					{ role: "user", content: `Bank text: ${rawName}` },
+				],
+				max_tokens: 40,
+				temperature: 0.2,
+			},
+			{ signal: AbortSignal.timeout(TIMEOUT_MS) },
+		);
+		const text =
+			typeof answer === "string"
+				? answer
+				: (answer as { response?: unknown } | null)?.response;
+		if (typeof text !== "string") return null;
+		const note = text
+			.split(/\r?\n/)[0]
+			?.trim()
+			.replace(/^['"“”]+|['"“”]+$/g, "")
+			.replace(/\s+/g, " ");
+		return note &&
+			note.length >= 2 &&
+			note.length <= 80 &&
+			!/https?:|www\.|\d{3,}|[$#]/i.test(note)
+			? note
+			: null;
+	} catch (error) {
+		console.error(
+			`workers-ai: note ${error instanceof Error ? error.name : "failed"}`,
+		);
+		return null;
+	}
+}
+
 export function cleanCategoryName(
 	answer: unknown,
 	avoid: string[],
