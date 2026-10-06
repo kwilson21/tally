@@ -651,20 +651,21 @@ describe("the cash form's Category group", () => {
 			}),
 		);
 
-	it("spaces its error under the chips, like the edit panel and Organize", async () => {
+	it("spaces its error 8px under the chips, as the chips sit 8px under the legend", async () => {
 		const html = await form("Pick a category from the list.");
+		// A legend is not a flex item, so a flex gap would not space it from the chips: both use mt-2.
 		expect(html).toMatch(
-			/<fieldset class="flex flex-col gap-2" aria-describedby="cash-category-error"><legend class="text-base text-ink">Category<\/legend><div class="flex flex-wrap gap-2">/,
+			/<fieldset aria-describedby="cash-category-error"><legend>Category<\/legend><div class="mt-2 flex flex-wrap gap-2">/,
 		);
 		expect(html).toContain(
-			'<p id="cash-category-error" role="alert" class="text-sm text-over">Pick a category from the list.</p>',
+			'<p id="cash-category-error" role="alert" class="mt-2 text-sm text-over">Pick a category from the list.</p>',
 		);
 	});
 
-	it("draws the same group when there is no error", async () => {
+	it("draws no error line when there is no error", async () => {
 		const html = await form();
 		expect(html).toMatch(
-			/<fieldset class="flex flex-col gap-2"><legend class="text-base text-ink">Category<\/legend><div class="flex flex-wrap gap-2">/,
+			/<fieldset><legend>Category<\/legend><div class="mt-2 flex flex-wrap gap-2">/,
 		);
 		expect(html).not.toContain("cash-category-error");
 	});
