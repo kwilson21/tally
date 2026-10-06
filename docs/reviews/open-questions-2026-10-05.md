@@ -47,7 +47,7 @@ Writing the issues for decisions 73–76 turned up 53 questions the spec doesn't
 
 24. *#74's pace line (Home's top, #199).* Close #74 as covered by the daily amount; no "cut back" line when over budget, which reads as blame (DESIGN.md voice).
 25. *Nearly spent (budget rows, #200).* 80% of the budget or more, and not over; written into §8.4.
-26. *How Tally sends email (reconnect email, #203).* Cloudflare's own email sending from the Worker, to family addresses verified in Cloudflare, so there's no new vendor or key; checked against Cloudflare's docs when built, as its own decision entry first.
+26. *How Tally sends email (reconnect email, #203).* Cloudflare's own email sending from the Worker, to family addresses verified in Cloudflare, so there's no new vendor or key; checked against Cloudflare's docs when built, as its own decision entry first. (Replaced by decision 86: Resend sends it first, with Cloudflare's email as the fallback.)
 27. *Every-two-weeks and quarterly keys (#204).* A biweekly bill's `due_day` holds its anchor date's day of the week; `Qn` is the calendar quarter that holds the due date.
 28. *Part paid (#205).* "Part paid: $600 of $1,200" in whichever status group it would be in; the link picker sorts by closeness to what's left.
 29. *A bill's category on its payment (#206).* The edit panel says so in a muted line under the chips, "Category from the Rent bill", as it does for Tally's picks.
@@ -91,7 +91,7 @@ Recommended answers were taken unless listed here.
 - **New (the owner's idea):** Tally fills in a transaction's details, dashed until kept: a clean name, what it was, its kind (subscription, one-off, bill or transfer) and who it was for, from a household people list, with a "Fill in details" switch (P89 A).
 - **20:** P77 A, as recommended.
 - **21–23:** as recommended, and the demo's links read "Tidied by Tally · Straight from the bank".
-- **26:** Cloudflare's email (Resend is already set up if it's ever needed); the template is designed from emailcn's notification blocks (emailcn.run), written in Hono JSX with no new dependency.
+- **26:** Cloudflare's email (Resend is already set up if it's ever needed; decision 86 later put Resend first); the template is designed from emailcn's notification blocks (emailcn.run), written in Hono JSX with no new dependency.
 - **28, 40, 41, 45, 46, 47, 51:** P78, P80–P85 A, as recommended.
 - **29:** a Why? link beside Category explains it (P79 E), rather than a line under the chips.
 - **33:** a store whose trips go in different categories (Costco: Groceries and Household) is never offered an "always" rule (a person can still tick Always themselves). Tally guesses one category from the trip's details, or, when the details point to more than one, suggests a split with the categories filled in and the amounts left to the person (P90, A combined with B). Rule offers stay for stores with one category.
@@ -140,7 +140,7 @@ The owner answered these on Oct 6 by seeing a picture of each, so they have no r
 76. *The Band with two actions, and with two unpaid plans.* It asks about one plan at a time: "Car registration wasn't paid", with Move to Nov and Drop, and a dot for each plan waiting (P105).
 
 **The reconnect email (#203)**
-77. *Where "everyone in the family" comes from.* Everyone who has signed in to Tally in the last 90 days: Tally notes each verified sign-in address the first time it sees it and updates it at each sign-in (a new `household_members` table with `email`, `first_seen_at` and `last_seen_at`), and each address is also verified in Cloudflare Email Routing. Settings lists each address with Remove for anyone in the family, so a person who has left stops getting it; a removed address comes back only if that person signs in again, which needs Cloudflare Access.
+77. *Where "everyone in the family" comes from.* Everyone who has signed in to Tally in the last 90 days: Tally notes each verified sign-in address the first time it sees it and updates it at each sign-in (a new `household_members` table with `email`, `first_seen_at` and `last_seen_at`). Nothing else needs confirming: Resend sends it (decision 86, which replaces the Cloudflare Email Routing verification this answer first had). Settings lists each address with Remove for anyone in the family, so a person who has left stops getting it; a removed address comes back only if that person signs in again, which needs Cloudflare Access.
 78. *Whole household or per person, and On or Off to start.* One household switch, "Bank sign-in emails", on to start, with the people shown as initials (P107).
 79. *When the first email goes.* At the nightly run after a bank needs attention, then every 3 days until it's fixed (P108).
 80. *Where "when the last one went" is kept.* A nullable column on `plaid_items` (`reconnect_emailed_at`), listed in §5.
