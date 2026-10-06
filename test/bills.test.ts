@@ -12,6 +12,58 @@ import { loadBillRows } from "../src/routes/bills";
 describe("Bills", () => {
 	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 	it("shows grouped active bills and inactive disclosure", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const day = Number(today.slice(8, 10));
+		const month = today.slice(0, 7);
+		const currentMonth = Number(today.slice(5, 7));
+		const laterMonth = (Number(today.slice(5, 7)) % 12) + 1;
+		await env.DB.prepare("DELETE FROM bills").run();
+		const paidBy = await env.DB.prepare(
+			"SELECT id, amount_cents FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
+		).first<{ id: number; amount_cents: number }>();
+		const priorPayments = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE amount_cents > 0 AND id != ? ORDER BY id LIMIT 2",
+		)
+			.bind(paidBy?.id ?? 0)
+			.all<{ id: number }>();
+		expect(paidBy).toBeDefined();
+		expect(priorPayments.results).toHaveLength(2);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9301,'Overdue fixture',12345,?,'monthly',5,'OVERDUE FIXTURE')",
+			).bind(day === 1 ? 31 : day - 1),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9302,'Due fixture',23456,?,'monthly',5,'DUE FIXTURE')",
+			).bind(day + 3),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9303,'Upcoming this month',34567,20,'yearly',?,5,'UPCOMING FIXTURE')",
+			).bind(currentMonth),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9304,'Upcoming later this year',99900,20,'yearly',?,5,'YEARLY FIXTURE')",
+			).bind(laterMonth),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9305,'Paid fixture',? ,3,'monthly',5,'PAID FIXTURE')",
+			).bind((paidBy?.amount_cents ?? 0) + 1234),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,active) VALUES(9306,'Inactive fixture',1000,1,'monthly',5,'INACTIVE FIXTURE',0)",
+			),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9305,?,?,'user','linked')",
+		)
+			.bind(month, paidBy?.id ?? 0)
+			.run();
+		await env.DB.batch(
+			[9303, 9304].map((billId, index) =>
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,? ,?,'user','linked')",
+				).bind(
+					billId,
+					String(Number(today.slice(0, 4)) - 1),
+					priorPayments.results[index]?.id ?? 0,
+				),
+			),
+		);
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
@@ -28,8 +80,13 @@ describe("Bills", () => {
 		expect(html).toMatch(
 			/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
 		);
-		expect(html).toMatch(/Overdue[\s\S]*?\$[\d,]+\.\d{2}/);
-		expect(html).toContain("this month");
+		for (const heading of [
+			/Overdue<\/span><span class="ml-auto shrink-0">\$123\.45<\/span>/,
+			/Due in the next 7 days<\/span><span class="ml-auto shrink-0">\$234\.56<\/span>/,
+			/Upcoming<\/span><span class="ml-auto shrink-0">\$345\.67 this month<\/span>/,
+			/Paid this month<\/span><span class="ml-auto shrink-0">\$12\.34<\/span>/,
+		])
+			expect(html).toMatch(heading);
 	});
 
 	it("has a How this works link to the Bills section, under the status sentence (decision 84)", async () => {
