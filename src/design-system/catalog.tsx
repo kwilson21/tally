@@ -517,7 +517,7 @@ const TOAST_SPEC: UseSpecText = {
 	input:
 		"Touch and keyboard: none, and nothing in it takes focus. Screen reader: a success is role=status and an error is role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
-		"It fades in and rises 8 px in 150 ms, ease-out, holds, then fades out over its last 150 ms. That is one animation as long as its stay, 4 seconds, the same as toast.js's DISPLAY_MS, so it is gone when the script takes it out; the script doesn't change. The CSS is set on whatever #toasts holds, on the toast and confirmation tokens. Reduced motion shows it at once with nothing moving, and it is still taken out after 4 seconds.",
+		"It fades in and rises 8 px in 150 ms, ease-out, holds, then fades out in 150 ms. That is one animation as long as its stay, 4 seconds, the same as toast.js's DISPLAY_MS, and the fade-out is over 150 ms early, so the toast is invisible 150 ms before the script takes it out (the script's timer starts a frame before the animation does, so a fade-out timed to the very end would be cut off); the script doesn't change. The CSS is set on whatever #toasts holds, on the toast and confirmation tokens. Reduced motion shows it at once with nothing moving, and it is still taken out after 4 seconds.",
 	edges:
 		"Long words wrap inside the pill. It sits above an open sheet (z-60), so a failed save can be read over it. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:

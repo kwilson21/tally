@@ -277,7 +277,7 @@ describe("pages", () => {
 describe("toasts", () => {
 	const DISPLAY_MS = Number(toastSource.match(/DISPLAY_MS\s*=\s*(\d+)/)?.[1]);
 
-	it("lives as long as toast.js keeps it: the toast's animation ends at its 4 seconds", () => {
+	it("lives as long as toast.js keeps it: the animation is as long as the stay, 4 seconds", () => {
 		expect(DISPLAY_MS).toBe(4000);
 		expect(ms(token("toast"))).toBe(DISPLAY_MS);
 	});
@@ -292,17 +292,40 @@ describe("toasts", () => {
 		expect(toastSource).not.toMatch(/animation|transition|style\./);
 	});
 
-	it("fades in and rises 8 px in 150 ms, holds, then fades out so it ends at the 4 seconds", () => {
+	it("fades in and rises 8 px in 150 ms, holds, then fades out", () => {
 		const stops = new Map(keyframes("toast").map((r) => [r.selector, r.decls]));
 		const confirm = ms(token("confirm"));
 		const inEnds = `${(confirm * 100) / DISPLAY_MS}%`;
-		const outStarts = `${100 - (confirm * 100) / DISPLAY_MS}%`;
+		// The fade-out starts 300 ms before the end and is over 150 ms before it (see the next test).
+		const outStarts = `${100 - (2 * confirm * 100) / DISPLAY_MS}%`;
+		const outEnds = `${100 - (confirm * 100) / DISPLAY_MS}%`;
 		expect(stops.get("0%")?.get("opacity")).toBe("0");
 		expect(stops.get("0%")?.get("transform")).toBe("translateY(8px)");
 		expect(stops.get(inEnds)?.get("opacity")).toBe("1");
 		expect(stops.get(inEnds)?.get("transform")).toBe("none");
 		expect(stops.get(outStarts)?.get("opacity")).toBe("1");
+		expect(stops.get(outEnds)?.get("opacity")).toBe("0");
 		expect(stops.get("100%")?.get("opacity")).toBe("0");
+	});
+
+	it("is already invisible when toast.js takes it out: the fade-out ends well before the 4 seconds, and the fill holds it at 0", () => {
+		// toast.js starts its timer when it appends the toast, but the animation starts a frame or more
+		// later, so a fade-out timed to end exactly at DISPLAY_MS is cut off: the toast pops out
+		// part-way through it. The slack covers a few slow frames.
+		const stops = keyframes("toast").map((r) => ({
+			at: (Number.parseFloat(r.selector) * DISPLAY_MS) / 100,
+			opacity: r.decls.get("opacity"),
+		}));
+		const fadeOutFrom = stops.filter((stop) => stop.opacity === "1").at(-1);
+		const gone = stops.find(
+			(stop) => stop.opacity === "0" && stop.at > (fadeOutFrom?.at ?? 0),
+		);
+		expect((gone?.at ?? 0) - (fadeOutFrom?.at ?? 0)).toBeCloseTo(
+			ms(token("confirm")),
+		);
+		expect(DISPLAY_MS - (gone?.at ?? DISPLAY_MS)).toBeGreaterThanOrEqual(100);
+		// `both` holds the last stop (opacity 0) from there until the toast is removed.
+		expect(rule("#toasts > *")[0]?.decls.get("animation")).toMatch(/\bboth$/);
 	});
 });
 
@@ -654,6 +677,7 @@ describe("the catalog and DESIGN.md", () => {
 		const toast = text(section(html, "toast"));
 		expect(toast).toMatch(/Motion\s+It fades in and rises 8 px in 150 ms/);
 		expect(toast).toContain("DISPLAY_MS");
+		expect(toast).toContain("invisible 150 ms before the script takes it out");
 		expect(toast).toContain("Reduced motion shows it at once");
 		// Pages: Layout's specimen.
 		const layout = text(section(html, "layout"));

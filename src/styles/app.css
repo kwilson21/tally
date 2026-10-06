@@ -189,10 +189,13 @@ html:not(.js) [data-money-js] {
 
 /*
  * A toast fades in and rises 8 px in 150 ms, holds, then fades out, all in one animation as long as
- * its stay: toast.js removes it after DISPLAY_MS, the same 4 seconds as --duration-toast, so it is
- * gone by the time it is taken out, and (both) it stays gone until then. toast.js builds the toast
- * with no class of ours, so this styles whatever #toasts holds. The stops are 150 ms as a share of
- * the 4 seconds: 3.75% in, and 96.25% to start out (test/motion.test.tsx keeps them true).
+ * its stay: toast.js removes it after DISPLAY_MS, the same 4 seconds as --duration-toast. toast.js
+ * starts that timer when it adds the toast, and the animation starts a frame or more later, so a
+ * fade-out that ended exactly at 4 seconds would be cut off, the toast popping out part-way through
+ * it. It is over 150 ms early instead, and (both) it stays at opacity 0 until the script takes it
+ * out. toast.js builds the toast with no class of ours, so this styles whatever #toasts holds. The
+ * stops are 150 ms as a share of the 4 seconds: 3.75% in; fade-out from 92.5% (3.7 s) to 96.25%
+ * (3.85 s). test/motion.test.tsx keeps them true.
  */
 @keyframes toast {
 	0% {
@@ -203,9 +206,12 @@ html:not(.js) [data-money-js] {
 		opacity: 1;
 		transform: none;
 	}
-	96.25% {
+	92.5% {
 		opacity: 1;
 		transform: none;
+	}
+	96.25% {
+		opacity: 0;
 	}
 	100% {
 		opacity: 0;
