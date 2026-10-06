@@ -247,7 +247,7 @@ async function renderHome(
 								<div class="flex items-baseline justify-between">
 									<h2
 										id="home-bills-title"
-										class="font-serif text-2xl font-semibold"
+										class="font-serif text-3xl font-semibold"
 									>
 										Bills due soon
 									</h2>
@@ -313,7 +313,7 @@ function BudgetSheet({
 				<CategoryIcon icon={category.icon} color={category.color} />
 				<h2
 					id="budget-sheet-title"
-					class="font-serif text-3xl font-semibold"
+					class="font-serif text-4xl font-semibold tracking-tight"
 					tabindex={-1}
 				>
 					{category.name}

@@ -88,6 +88,13 @@ describe("GET /budget/:id", () => {
 		// Its own heading id: Home's Budget heading keeps "budget-title".
 		expect(html).toMatch(/<h2 id="budget-sheet-title"[^>]*>Groceries<\/h2>/);
 		expect(html.match(/id="budget-title"/g)).toHaveLength(1);
+		// DESIGN.md Type roles: a sheet's title is 4xl, a size above the Budget section title (3xl) behind it.
+		expect(html).toMatch(
+			/<h2 id="budget-sheet-title" class="font-serif text-4xl font-semibold tracking-tight"/,
+		);
+		expect(html).toMatch(
+			/<h2 id="budget-title" class="font-serif text-3xl font-semibold"/,
+		);
 		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="700.00"/);
 		expect(html).toMatch(/<input[^>]*inputmode="decimal"/);
 		for (const [delta, label] of <[string, string][]>[
