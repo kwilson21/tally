@@ -35,19 +35,19 @@ Decision 62 (the owner's picks on Oct 4): a missed bill stays overdue until it's
 
 Phase 4 waits for Phase 3.5 (decision 67), except #170, which was already being built. Claude Sonnet subagents build Phases 3.5 to 5 from the main session's briefs (decision 78, replacing decision 71's Codex), and a separate ultracode session handles design and polish.
 
-## Where Phase 3.5 stands (Oct 6)
+## Where Phase 3.5 stands (Oct 6: all on `main`)
 
-Every visual piece is picked (P34–P40, P45, decision 72).
+Every visual piece was picked (P34–P40, P45, decision 72), and every part is merged.
 
 | Part | Issue | State |
 |---|---|---|
 | Income: "Count as income", unreviewed credits held (decision 70) | [#153](https://github.com/kwilson21/tally/pull/153) | Merged |
 | Income from Plaid's INCOME category | [#177](https://github.com/kwilson21/tally/issues/177) | Merged ([#225](https://github.com/kwilson21/tally/pull/225)) |
-| Today in the household's time zone | [#174](https://github.com/kwilson21/tally/issues/174) | Backend merged ([#189](https://github.com/kwilson21/tally/pull/189)); the Settings field (P35 A) next |
+| Today in the household's time zone | [#174](https://github.com/kwilson21/tally/issues/174) | Merged ([#189](https://github.com/kwilson21/tally/pull/189); the Settings field, P35 A, in [#237](https://github.com/kwilson21/tally/pull/237) and [#252](https://github.com/kwilson21/tally/pull/252)) |
 | Plaid's `merchant_name` as the merchant key | [#175](https://github.com/kwilson21/tally/issues/175) | Merged ([#190](https://github.com/kwilson21/tally/pull/190)) |
-| Transfers and card payments excluded at sync | [#176](https://github.com/kwilson21/tally/issues/176) | To build |
+| Transfers and card payments excluded at sync; a linked bill payment always counts (decision 83) | [#176](https://github.com/kwilson21/tally/issues/176) | Merged ([#224](https://github.com/kwilson21/tally/pull/224); a reviewed credit counts, [#254](https://github.com/kwilson21/tally/pull/254)) |
 | Merchant rules after every sync | [#178](https://github.com/kwilson21/tally/issues/178) | Merged ([#223](https://github.com/kwilson21/tally/pull/223)) |
-| Pending counted and marked (P34 A) | [#179](https://github.com/kwilson21/tally/issues/179) | To build |
+| Pending counted and marked (P34 A) | [#179](https://github.com/kwilson21/tally/issues/179) | Merged ([#227](https://github.com/kwilson21/tally/pull/227)) |
 | Bill matching: excluded payments, "Price changed?" (P36 B) | [#180](https://github.com/kwilson21/tally/issues/180) | Merged ([#228](https://github.com/kwilson21/tally/pull/228)) |
 | Refund guards | [#181](https://github.com/kwilson21/tally/issues/181) | Merged ([#226](https://github.com/kwilson21/tally/pull/226)) |
 | Bill guards (P45 A) | [#182](https://github.com/kwilson21/tally/issues/182) | Merged ([#188](https://github.com/kwilson21/tally/pull/188)) |
@@ -65,23 +65,27 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Trends (P23 D, P24 A) | [#30](https://github.com/kwilson21/tally/issues/30) | Merged ([#229](https://github.com/kwilson21/tally/pull/229)) |
 | Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Merged ([#230](https://github.com/kwilson21/tally/pull/230)) |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
-| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | To build (decision 78) |
+| Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | In review ([#245](https://github.com/kwilson21/tally/pull/245)) |
 | New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 78) |
 
 ## AI that earns its place (decisions 68, 73; spec §8.6)
 
+#191 is merged ([#231](https://github.com/kwilson21/tally/pull/231)), and so is #193 ([#238](https://github.com/kwilson21/tally/pull/238)). The nightly Jev pass runs twice, so a new bank's backfill of up to 500 is sorted in one night (decision 56); a queue replaces the per-run caps next ([#248](https://github.com/kwilson21/tally/issues/248)).
+
 | Part | Issue | Depends on |
 |---|---|---|
-| The AI suggestions switches in Settings (P41 B, a new Switch component) | [#191](https://github.com/kwilson21/tally/issues/191) | #189's settings table |
+| The AI suggestions switches in Settings (P41 B, a new Switch component) | [#191](https://github.com/kwilson21/tally/issues/191) | Merged |
 | Jev's income answer: applied or "Maybe income" | [#192](https://github.com/kwilson21/tally/issues/192) | #177, #51, #191 |
-| Sort new transactions right after each sync | [#193](https://github.com/kwilson21/tally/issues/193) | #178, #191 |
-| Plaid's merchant name as the first name suggestion | [#194](https://github.com/kwilson21/tally/issues/194) | #175, #33 |
+| Sort new transactions right after each sync | [#193](https://github.com/kwilson21/tally/issues/193) | Merged |
+| Plaid's merchant name as the first name suggestion | [#194](https://github.com/kwilson21/tally/issues/194) | #175, #33 (built, stacked on #245) |
 | One review screen for every "Maybe …" (P42 A) | [#195](https://github.com/kwilson21/tally/issues/195) | #33, #51, #192 |
 | What AI did this month (P43 A) | [#196](https://github.com/kwilson21/tally/issues/196) | #191 |
 | The demo's See it without AI (P44 A, "Tidied by Tally · Straight from the bank") | [#197](https://github.com/kwilson21/tally/issues/197) | — |
 | Tally fills in a transaction's details (P89 A) | [#232](https://github.com/kwilson21/tally/issues/232) | #191, #194 |
 
-## Phase 5 (decisions 66, 74, 76; spec §8.4)
+## Phase 5 (decisions 66, 74, 76, 82; spec §8.4)
+
+The owner picked each open question's answer from a picture (decision 82, P91–P109 on the proposals page, and decision 86 for the bank email).
 
 | Part | Issue |
 |---|---|
@@ -90,14 +94,14 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Budget rows: nearly spent, Not budgeted amounts, a link to transactions (P49, P51, P53) | [#200](https://github.com/kwilson21/tally/issues/200) |
 | A monthly savings goal (P54 A, R1) | [#201](https://github.com/kwilson21/tally/issues/201) |
 | Planned one-time expenses (P55 A) | [#202](https://github.com/kwilson21/tally/issues/202) |
-| Reconnect reminder email (P56 B); needs an email decision first | [#203](https://github.com/kwilson21/tally/issues/203) |
+| Reconnect reminder email (P56 B, P107–P109); Resend first (decision 86) | [#203](https://github.com/kwilson21/tally/issues/203) |
 | Weekly, every-two-weeks and quarterly bills (P57 A) | [#204](https://github.com/kwilson21/tally/issues/204) |
 | Partial bill payments (P58 A) | [#205](https://github.com/kwilson21/tally/issues/205) |
 | A linked payment takes its bill's category (P59 A) | [#206](https://github.com/kwilson21/tally/issues/206) |
 | The monthly bills total (P60 A and B) | [#207](https://github.com/kwilson21/tally/issues/207) |
 | A bill's amount history (P61 A, H1) | [#208](https://github.com/kwilson21/tally/issues/208) |
 | Offer a merchant rule after three saves (P62 B) | [#209](https://github.com/kwilson21/tally/issues/209) |
-| Filter by account and by type (P63 A, P64 B) | [#210](https://github.com/kwilson21/tally/issues/210) |
+| Filter by account and by type (P63 A, P64 B); merged ([#243](https://github.com/kwilson21/tally/pull/243), [#251](https://github.com/kwilson21/tally/pull/251)) | [#210](https://github.com/kwilson21/tally/issues/210) |
 | Search by category or amount, in every month (P65 A, P66 A) | [#211](https://github.com/kwilson21/tally/issues/211) |
 | A New category chip, then likely transactions (P67 A, P73 A) | [#212](https://github.com/kwilson21/tally/issues/212) |
 | Rename one transaction only (P68 A) | [#213](https://github.com/kwilson21/tally/issues/213) |
