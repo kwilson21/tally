@@ -502,21 +502,15 @@ describe("a save that moves the household into another month", () => {
 		expect(noteOf(html, 5)).toBe("No budget yet. Add one on Home");
 	});
 
-	it("sends nothing out of band when the month stays the same", async () => {
+	it("sends the amounts when the month stays the same too, unchanged", async () => {
 		// Chicago is still October at this moment, as Eastern is.
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "America/Chicago",
 		});
 		expect(res.status).toBe(200);
-		expect(html).not.toContain("hx-swap-oob");
+		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
 		expect(amountOf(html, 1)).toBe("$700 a month");
-	});
-
-	it("posts the month the page was drawn for with the zone", async () => {
-		const { html } = await get("/settings");
-		expect(group(html)).toContain(
-			'<input type="hidden" name="month" value="2026-10"/>',
-		);
+		expect(amountOf(html, 5)).toBe("No budget");
 	});
 
 	it("sends the new month's amounts when the page was drawn before midnight and both zones have moved on", async () => {
@@ -525,29 +519,23 @@ describe("a save that moves the household into another month", () => {
 		at("2026-11-01T06:30:00Z");
 		const { html } = await post("/settings/time-zone", {
 			time_zone: "America/Chicago",
-			month: "2026-10",
 		});
 		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
 		expect(amountOf(html, 1)).toBe("$900 a month");
 		expect(amountOf(html, 5)).toBe("$300 a month");
 	});
 
-	it("sends nothing out of band when the page already shows the new zone's month", async () => {
+	it("sends them after a refused save too, so the corrected one still brings the new month", async () => {
 		at("2026-11-01T06:30:00Z");
+		const refused = await post("/settings/time-zone", {
+			time_zone: "Not/AZone",
+		});
+		expect(refused.res.status).toBe(422);
 		const { html } = await post("/settings/time-zone", {
 			time_zone: "America/Chicago",
-			month: "2026-11",
-		});
-		expect(html).not.toContain("hx-swap-oob");
-	});
-
-	it("reads a month that isn't one as missing, and compares the zones instead", async () => {
-		const { html } = await post("/settings/time-zone", {
-			time_zone: "Europe/London",
-			month: "<b>",
 		});
 		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
-		expect(html).not.toContain("<b>");
+		expect(amountOf(html, 1)).toBe("$900 a month");
 	});
 
 	it("keeps a refusal and a fresh visit free of it, and the page a plain browser lands on shows the new month", async () => {
