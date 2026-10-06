@@ -1138,7 +1138,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			).bind(n),
 		]);
 
-	it("the scheduled names pass stays within 110 statements for 100 names", async () => {
+	it("the scheduled names pass saves 100 names in a small fixed statement count", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
 		await addWaiting(100);
@@ -1146,8 +1146,8 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		const ai = aiThatSays("Some Place Name");
 		await suggestMerchantNames({ DB: counted.db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(100);
-		// One candidate query, 100 writes and a fixed number of switch reads per 25-name batch.
-		expect(counted.statements()).toBeLessThanOrEqual(110);
+		// One candidate query, one batch write and a fixed number of switch reads.
+		expect(counted.statements()).toBeLessThanOrEqual(10);
 	});
 
 	it("the demo's one run, which resets, sorts and names", async () => {

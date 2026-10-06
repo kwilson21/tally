@@ -38,6 +38,9 @@ import {
 	unlinkSplitOverRefundedSql,
 } from "./refunded";
 
+/** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
+const EMPTY_NOTE = "(t.note IS NULL OR trim(t.note) = '')";
+
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
 // A split part is its own row, stored as posted; it is as pending as its parent (the purchase), read
@@ -1095,7 +1098,7 @@ export async function pendingForJev(
 			${COUNTED_JOINS}
 			WHERE NOT ${FOLLOWS_PURCHASE} AND (
 				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL)
-				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (t.note IS NULL OR trim(t.note) = '' OR t.kind IS NULL OR t.for_person_id IS NULL))
+				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (${EMPTY_NOTE} OR t.kind IS NULL OR t.for_person_id IS NULL))
 			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
 				${ids ? "AND t.id IN (SELECT value FROM json_each(?))" : ""}
@@ -1268,8 +1271,8 @@ export async function transactionsNeedingNoteGuess(
 ): Promise<{ id: number; rawName: string }[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT id, raw_name AS rawName FROM transactions
-			 WHERE details_asked = 1 AND note IS NULL ORDER BY date DESC, id DESC LIMIT ?`,
+			`SELECT t.id, t.raw_name AS rawName FROM transactions t
+			 WHERE t.details_asked = 1 AND ${EMPTY_NOTE} ORDER BY t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
 		.all<{ id: number; rawName: string }>();
@@ -1287,9 +1290,9 @@ export async function saveNoteGuesses(
 			`WITH guesses AS (
 				SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?)
 			)
-			UPDATE transactions SET note = (SELECT note FROM guesses WHERE guesses.id = transactions.id),
+			UPDATE transactions AS t SET note = (SELECT note FROM guesses WHERE guesses.id = t.id),
 				note_guessed = 1, updated_at = datetime('now')
-			WHERE note IS NULL AND details_asked = 1 AND id IN (SELECT id FROM guesses)`,
+			WHERE ${EMPTY_NOTE} AND t.details_asked = 1 AND t.id IN (SELECT id FROM guesses)`,
 		)
 		.bind(JSON.stringify(notes))
 		.run();

@@ -19,6 +19,8 @@ import { type Deadline, pastDeadline } from "./run-budget";
  */
 export const nameCallLimit = 100;
 const SWITCH_CHECK_BATCH = 25;
+// Details are the only work here whose raw text goes to a second model after Jev; cap switch lag at five calls.
+const DETAIL_SWITCH_CHECK_BATCH = 5;
 
 /** Failures in a row that point at every call (the service is down) rather than one bank text. */
 const MAX_FAILURES_IN_A_ROW = 3;
@@ -40,9 +42,12 @@ export async function suggestTransactionNotes(
 	if (!(await readAiSwitches(env.DB)).details) return done;
 	const transactions = await transactionsNeedingNoteGuess(env.DB, limit);
 	let failuresInARow = 0;
-	for (let i = 0; i < transactions.length; i += SWITCH_CHECK_BATCH) {
+	for (let i = 0; i < transactions.length; i += DETAIL_SWITCH_CHECK_BATCH) {
 		const guesses: { id: number; note: string }[] = [];
-		for (const transaction of transactions.slice(i, i + SWITCH_CHECK_BATCH)) {
+		for (const transaction of transactions.slice(
+			i,
+			i + DETAIL_SWITCH_CHECK_BATCH,
+		)) {
 			if (pastDeadline(time)) break;
 			done.asked += 1;
 			const note = await suggestNote(env.AI, transaction.rawName);
@@ -54,8 +59,7 @@ export async function suggestTransactionNotes(
 			failuresInARow = 0;
 			guesses.push({ id: transaction.id, note });
 		}
-		// This used to protect against a switch turned off during an AI call. Check once after each
-		// batch of at most 25 answers, then keep or discard the whole batch together.
+		// Keep or discard this small batch together if the details switch changed during an AI call.
 		if (!(await readAiSwitches(env.DB)).details) break;
 		await saveNoteGuesses(env.DB, guesses);
 		done.suggested += guesses.length;
@@ -108,11 +112,7 @@ export async function suggestMerchantNames(
 		// The old per-answer read protected against a switch turned off mid-run. One read per batch
 		// preserves that boundary without spending two D1 queries on every merchant.
 		if (!(await readAiSwitches(env.DB)).names) break;
-		for (const answer of answers) {
-			if (await saveAskedNames(env.DB, answer.rawName, answer.names)) {
-				if (answer.names.length > 0) done.suggested += 1;
-			}
-		}
+		done.suggested += await saveAskedNames(env.DB, answers);
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
 	console.log(`workers-ai: asked ${done.asked}, suggested ${done.suggested}`);

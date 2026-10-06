@@ -51,7 +51,7 @@ beforeEach(async () => {
 });
 
 describe("transaction detail guesses", () => {
-	it("checks the detail switch once per batch of at most 25 notes", async () => {
+	it("checks the detail switch at a bounded interval for 100 notes", async () => {
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
@@ -75,33 +75,75 @@ describe("transaction detail guesses", () => {
 			run: vi.fn(async () => ({ response: "Coffee purchase" })),
 		} as unknown as Ai;
 		await suggestTransactionNotes({ DB: counted as D1Database, AI: ai });
-		expect(statements).toBeLessThanOrEqual(12);
+		expect(statements).toBeLessThanOrEqual(45);
 	});
 
-	it("drops note answers when the detail switch turns off during a batch", async () => {
+	it("stops within five further AI calls when the detail switch turns off", async () => {
 		await db
 			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked)
-			 VALUES (1, '2026-09-20', 500, 'COFFEE SHOP A', 1),
-			        (1, '2026-09-20', 600, 'COFFEE SHOP B', 1)`,
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
+			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked)
+			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1 FROM n`,
 			)
 			.run();
-		const ai = {
-			run: vi.fn(async () => {
-				await saveAiSwitches(db, { details: false });
-				return { response: "Coffee purchase" };
-			}),
-		} as unknown as Ai;
+		const run = vi.fn(async () => {
+			await saveAiSwitches(db, { details: false });
+			return { response: "Coffee purchase" };
+		});
+		const ai = { run } as unknown as Ai;
 		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
-			asked: 2,
+			asked: 5,
 			suggested: 0,
 		});
+		expect(run).toHaveBeenCalledTimes(5);
+		// After the first callback flips the switch, no more than five additional names may be sent.
+		expect(run.mock.calls.length - 1).toBeLessThanOrEqual(5);
 		const { results } = await db
 			.prepare(
 				"SELECT note FROM transactions WHERE raw_name LIKE 'COFFEE SHOP %'",
 			)
 			.all<{ note: string | null }>();
-		expect(results).toEqual([{ note: null }, { note: null }]);
+		expect(results).toHaveLength(100);
+		expect(results.every((row) => row.note === null)).toBe(true);
+	});
+
+	it("guesses only empty notes and keeps a note typed after candidates were read", async () => {
+		await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, details_asked)
+			 VALUES (1, '2026-09-20', 500, 'EMPTY STRING', '', 1),
+			        (1, '2026-09-20', 600, 'WHITESPACE NOTE', '   ', 1),
+			        (1, '2026-09-20', 700, 'NULL NOTE', NULL, 1),
+			        (1, '2026-09-20', 800, 'PERSON NOTE', 'Costco run', 1),
+			        (1, '2026-09-20', 900, 'RACE NOTE', NULL, 1)`,
+			)
+			.run();
+		const run = vi.fn(
+			async (_model: string, input: { messages: { content: string }[] }) => {
+				const rawName = input.messages[1]?.content.replace("Bank text: ", "");
+				if (rawName === "RACE NOTE")
+					await db
+						.prepare(
+							"UPDATE transactions SET note = 'Typed meanwhile' WHERE raw_name = ?",
+						)
+						.bind(rawName)
+						.run();
+				return { response: `Guess for ${rawName}` };
+			},
+		);
+		const ai = { run } as unknown as Ai;
+
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		const { results } = await db
+			.prepare("SELECT raw_name, note FROM transactions ORDER BY id")
+			.all<{ raw_name: string; note: string | null }>();
+		expect(results).toEqual([
+			{ raw_name: "EMPTY STRING", note: "Guess for EMPTY STRING" },
+			{ raw_name: "WHITESPACE NOTE", note: "Guess for WHITESPACE NOTE" },
+			{ raw_name: "NULL NOTE", note: "Guess for NULL NOTE" },
+			{ raw_name: "PERSON NOTE", note: "Costco run" },
+			{ raw_name: "RACE NOTE", note: "Typed meanwhile" },
+		]);
 	});
 
 	it("stores the note, kind, and person as guesses without making them a person's choices", async () => {

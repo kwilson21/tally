@@ -109,8 +109,8 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi(() => ({ response: "Unique Shop" }));
 		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
-		// Includes one candidate query, 100 individual saves and at most four batch switch checks.
-		expect(statements).toBeLessThanOrEqual(110);
+		// One candidate query, one batch save and fixed switch reads; 100 per-row saves exceed this.
+		expect(statements).toBeLessThanOrEqual(10);
 	});
 
 	it("asks once for a merchant Plaid didn't name and keeps the names, pending, without renaming it", async () => {
