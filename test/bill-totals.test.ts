@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BillStatus } from "../src/bills/status";
 import { calculateBillTotals } from "../src/bills/totals";
 
 const bill = (
@@ -54,6 +55,51 @@ describe("bill totals", () => {
 		});
 		expect(totals.stillToPayCents).toBe(5000);
 	});
+
+	it.each([
+		["2026-10-08", "2026-09-28", "overdue", 10000, 10000],
+		["2026-10-08", "2026-10-28", "upcoming", 0, 10000],
+		["2026-10-05", "2026-09-20", "overdue", 10000, 10000],
+		["2026-10-25", "2026-10-20", "overdue", 10000, 10000],
+	] as const)(
+		"counts this month's occurrence with displayed %s when its date is %s",
+		(today, displayedDate, displayedStatus, overdueCents, stillToPayCents) => {
+			const totals = calculateBillTotals({
+				month: today.slice(0, 7),
+				bills: [bill(10000)],
+				occurrences: [
+					{
+						billId: 10000,
+						dueDate: displayedDate,
+						status: displayedStatus,
+						amountCents: 10000,
+						paidCents: 0,
+					},
+					...(displayedDate.slice(0, 7) === today.slice(0, 7)
+						? []
+						: [
+								{
+									billId: 10000,
+									dueDate: "2026-10-20",
+									status: (today >= "2026-10-20"
+										? "overdue"
+										: "upcoming") as BillStatus,
+									amountCents: 10000,
+									paidCents: 0,
+								},
+							]),
+				],
+			});
+			expect(totals.stillToPayCents).toBe(stillToPayCents);
+			expect(totals.groups.overdueCents).toBe(overdueCents);
+			expect(
+				totals.groups.overdueCents +
+					totals.groups.dueCents +
+					totals.groups.upcomingCents +
+					totals.groups.paidCents,
+			).toBe(displayedDate.slice(0, 7) === today.slice(0, 7) ? 10000 : 20000);
+		},
+	);
 
 	it("counts only this month's occurrences in Upcoming", () => {
 		const totals = calculateBillTotals({

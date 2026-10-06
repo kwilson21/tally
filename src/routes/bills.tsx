@@ -26,7 +26,7 @@ import {
 	insertBill,
 	updateBill,
 } from "../bills/write";
-import { householdToday, ordinal, shortDay } from "../dates";
+import { daysBefore, householdToday, ordinal, shortDay } from "../dates";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -117,6 +117,12 @@ export async function loadBillRows(db: D1Database, today: string) {
 		active: boolean;
 		frequency: BillTotalFrequency;
 		paidCents: number;
+		totalOccurrences: {
+			dueDate: string;
+			status: BillStatus;
+			amountCents: number;
+			paidCents: number;
+		}[];
 		/** The occurrence the row shows, as bill_payments keys it, and the merchant it's matched on. */
 		period: string;
 		merchantRawName: string;
@@ -156,6 +162,43 @@ export async function loadBillRows(db: D1Database, today: string) {
 			today,
 			new Set(payments.keys()),
 		);
+		const totalOccurrences = [
+			{
+				dueDate: occurrence.dueDate,
+				status: occurrence.status,
+				amountCents: b.amount_cents,
+				paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
+			},
+		];
+		if (
+			b.frequency === "monthly" ||
+			b.anchor_month === Number(today.slice(5, 7))
+		) {
+			const current = billOccurrenceForMonth(
+				{
+					frequency: b.frequency,
+					dueDay: b.due_day,
+					anchorMonth: b.anchor_month,
+				},
+				Number(today.slice(0, 4)),
+				Number(today.slice(5, 7)),
+			);
+			if (!totalOccurrences.some((item) => item.dueDate === current.dueDate)) {
+				const linked = payments.has(current.period);
+				totalOccurrences.push({
+					dueDate: current.dueDate,
+					status: linked
+						? "paid"
+						: current.dueDate < today
+							? "overdue"
+							: current.dueDate <= daysBefore(today, -7)
+								? "due"
+								: "upcoming",
+					amountCents: b.amount_cents,
+					paidCents: paymentsByPeriod.get(current.period) ?? 0,
+				});
+			}
+		}
 		result.push({
 			id: b.id,
 			name: b.name,
@@ -171,6 +214,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			merchantRawText: b.merchant_raw_text,
 			frequency: b.frequency,
 			paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
+			totalOccurrences,
 		});
 	}
 	return { today, rows: result };
@@ -223,13 +267,12 @@ async function page(
 			frequency: bill.frequency,
 			active: true,
 		})),
-		occurrences: active.map((bill) => ({
-			billId: bill.id,
-			dueDate: bill.dueDate,
-			status: bill.status,
-			amountCents: bill.amountCents,
-			paidCents: bill.paidCents,
-		})),
+		occurrences: active.flatMap((bill) =>
+			bill.totalOccurrences.map((occurrence) => ({
+				billId: bill.id,
+				...occurrence,
+			})),
+		),
 	});
 	return c.html(
 		<Layout

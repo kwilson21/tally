@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { matchBillPayments } from "../src/bills/match";
 import { summarizeMonth } from "../src/budget";
@@ -11,83 +11,154 @@ import { loadBillRows } from "../src/routes/bills";
 
 describe("Bills", () => {
 	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
-	it("shows grouped active bills and inactive disclosure", async () => {
-		const today = todayIn(DEFAULT_TIME_ZONE);
-		const day = Number(today.slice(8, 10));
-		const month = today.slice(0, 7);
-		const currentMonth = Number(today.slice(5, 7));
-		const laterMonth = (Number(today.slice(5, 7)) % 12) + 1;
-		await env.DB.prepare("DELETE FROM bills").run();
-		const paidBy = await env.DB.prepare(
-			"SELECT id, amount_cents FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
-		).first<{ id: number; amount_cents: number }>();
-		const priorPayments = await env.DB.prepare(
-			"SELECT id FROM transactions WHERE amount_cents > 0 AND id != ? ORDER BY id LIMIT 2",
-		)
-			.bind(paidBy?.id ?? 0)
-			.all<{ id: number }>();
-		expect(paidBy).toBeDefined();
-		expect(priorPayments.results).toHaveLength(2);
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9301,'Overdue fixture',12345,?,'monthly',5,'OVERDUE FIXTURE')",
-			).bind(day === 1 ? 31 : day - 1),
-			env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9302,'Due fixture',23456,?,'monthly',5,'DUE FIXTURE')",
-			).bind(day + 3),
-			env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9303,'Upcoming this month',34567,20,'yearly',?,5,'UPCOMING FIXTURE')",
-			).bind(currentMonth),
-			env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9304,'Upcoming later this year',99900,20,'yearly',?,5,'YEARLY FIXTURE')",
-			).bind(laterMonth),
-			env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9305,'Paid fixture',? ,3,'monthly',5,'PAID FIXTURE')",
-			).bind((paidBy?.amount_cents ?? 0) + 1234),
-			env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,active) VALUES(9306,'Inactive fixture',1000,1,'monthly',5,'INACTIVE FIXTURE',0)",
-			),
-		]);
-		await env.DB.prepare(
-			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9305,?,?,'user','linked')",
-		)
-			.bind(month, paidBy?.id ?? 0)
-			.run();
-		await env.DB.batch(
-			[9303, 9304].map((billId, index) =>
+	afterEach(() => vi.useRealTimers());
+	it.each(["2026-10-10T16:00:00Z", "2027-04-10T16:00:00Z"])(
+		"shows grouped active bills and inactive disclosure on %s",
+		async (instant) => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date(instant));
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			const today = todayIn(DEFAULT_TIME_ZONE);
+			const month = today.slice(0, 7);
+			const currentMonth = Number(today.slice(5, 7));
+			await env.DB.prepare("DELETE FROM bills").run();
+			const paidBy = await env.DB.prepare(
+				"SELECT id, amount_cents FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
+			).first<{ id: number; amount_cents: number }>();
+			const priorPayments = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE amount_cents > 0 AND id != ? ORDER BY id LIMIT 2",
+			)
+				.bind(paidBy?.id ?? 0)
+				.all<{ id: number }>();
+			expect(paidBy).toBeDefined();
+			expect(priorPayments.results).toHaveLength(2);
+			await env.DB.batch([
 				env.DB.prepare(
-					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,? ,?,'user','linked')",
-				).bind(
-					billId,
-					String(Number(today.slice(0, 4)) - 1),
-					priorPayments.results[index]?.id ?? 0,
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9301,'Overdue fixture',12345,3,'yearly',?,5,'OVERDUE FIXTURE')",
+				).bind(currentMonth === 1 ? 12 : currentMonth - 1),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9302,'Due fixture',23456,?,'monthly',5,'DUE FIXTURE')",
+				).bind(12),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9303,'Upcoming this month',34567,18,'yearly',?,5,'UPCOMING FIXTURE')",
+				).bind(currentMonth),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9304,'Upcoming next March',99900,25,'yearly',?,5,'YEARLY FIXTURE')",
+				).bind(3),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9305,'Paid fixture',? ,3,'monthly',5,'PAID FIXTURE')",
+				).bind((paidBy?.amount_cents ?? 0) + 1234),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,active) VALUES(9306,'Inactive fixture',1000,25,'monthly',5,'INACTIVE FIXTURE',0)",
 				),
-			),
-		);
-		const html = await (
-			await exports.default.fetch("http://tally.test/bills")
-		).text();
-		expect(html).toContain("<title>Bills · Tally</title>");
-		for (const heading of [
-			"Overdue",
-			"Due in the next 7 days",
-			"Upcoming",
-			"Paid this month",
-			"Inactive (1)",
-		])
-			expect(html).toContain(heading);
-		expect(html).toContain("bills to pay soon");
-		expect(html).toMatch(
-			/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
-		);
-		for (const heading of [
-			/Overdue<\/span><span class="ml-auto shrink-0">\$123\.45<\/span>/,
-			/Due in the next 7 days<\/span><span class="ml-auto shrink-0">\$234\.56<\/span>/,
-			/Upcoming<\/span><span class="ml-auto shrink-0">\$345\.67 this month<\/span>/,
-			/Paid this month<\/span><span class="ml-auto shrink-0">\$12\.34<\/span>/,
-		])
-			expect(html).toMatch(heading);
-	});
+			]);
+			await env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9305,?,?,'user','linked')",
+			)
+				.bind(month, paidBy?.id ?? 0)
+				.run();
+			await env.DB.batch(
+				[
+					[9303, String(Number(today.slice(0, 4)) - 1)],
+					[9304, today.slice(0, 4)],
+				].map(([billId, period], index) =>
+					env.DB.prepare(
+						"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,? ,?,'user','linked')",
+					).bind(billId, period, priorPayments.results[index]?.id ?? 0),
+				),
+			);
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills")
+			).text();
+			expect(html).toContain("<title>Bills · Tally</title>");
+			for (const heading of [
+				"Overdue",
+				"Due in the next 7 days",
+				"Upcoming",
+				"Paid this month",
+				"Inactive (1)",
+			])
+				expect(html).toContain(heading);
+			expect(html).toContain("bills to pay soon");
+			expect(html).toMatch(
+				/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
+			);
+			for (const heading of [
+				/Overdue<\/span><span class="ml-auto shrink-0">\$123\.45<\/span>/,
+				/Due in the next 7 days<\/span><span class="ml-auto shrink-0">\$234\.56<\/span>/,
+				/Upcoming<\/span><span class="ml-auto shrink-0">\$345\.67 this month<\/span>/,
+				/Paid this month<\/span><span class="ml-auto shrink-0">\$12\.34<\/span>/,
+			])
+				expect(html).toMatch(heading);
+		},
+	);
+	it.each([
+		{
+			instant: "2026-10-08T16:00:00Z",
+			dueDay: 28,
+			paidPeriod: null,
+			groups: ["Overdue"],
+		},
+		{
+			instant: "2026-10-08T16:00:00Z",
+			dueDay: 28,
+			paidPeriod: "2026-09",
+			groups: ["Upcoming"],
+		},
+		{
+			instant: "2026-10-05T16:00:00Z",
+			dueDay: 20,
+			paidPeriod: null,
+			groups: ["Overdue"],
+		},
+		{
+			instant: "2026-10-25T16:00:00Z",
+			dueDay: 20,
+			paidPeriod: null,
+			groups: ["Overdue"],
+		},
+	])(
+		"counts October's unpaid occurrence for due day $dueDay at $instant",
+		async ({ instant, dueDay, paidPeriod, groups }) => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date(instant));
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await env.DB.prepare("DELETE FROM bills").run();
+			await env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9399,'Monthly occurrence fixture',10000,?,'monthly',5,'MONTHLY OCCURRENCE FIXTURE')",
+			)
+				.bind(dueDay)
+				.run();
+			if (paidPeriod) {
+				const transaction = await env.DB.prepare(
+					"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
+				).first<{ id: number }>();
+				expect(transaction).toBeDefined();
+				await env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9399,?,?,'user','linked')",
+				)
+					.bind(paidPeriod, transaction?.id ?? 0)
+					.run();
+			}
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills")
+			).text();
+			expect(html).toContain("$100 still to pay in October");
+			for (const status of [
+				"Overdue",
+				"Due in the next 7 days",
+				"Upcoming",
+				"Paid this month",
+			])
+				expect(html.includes(status)).toBe(groups.includes(status));
+			for (const status of groups)
+				expect(html).toMatch(
+					new RegExp(
+						`${status}<\\/span><span class="ml-auto shrink-0">\\$100\\.00`,
+					),
+				);
+		},
+	);
 
 	it("has a How this works link to the Bills section, under the status sentence (decision 84)", async () => {
 		const html = await (
