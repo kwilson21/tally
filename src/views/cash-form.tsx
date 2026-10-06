@@ -15,6 +15,7 @@ export function CashForm({
 	action = "/transactions/cash",
 	back = "/transactions",
 	entryKey,
+	idPrefix = "cash",
 }: {
 	values: CashValues;
 	errors?: CashErrors;
@@ -24,6 +25,8 @@ export function CashForm({
 	back?: string;
 	/** A one-time key (a UUID) made when the form is drawn, so posting the form twice saves once. */
 	entryKey?: string;
+	/** What every id on the form starts with, so two forms drawn on one page don't share ids. */
+	idPrefix?: string;
 }) {
 	return (
 		<form
@@ -39,7 +42,7 @@ export function CashForm({
 			<input type="hidden" name="back" value={back} />
 			{entryKey && <input type="hidden" name="entry_key" value={entryKey} />}
 			<MoneyInput
-				id="cash-amount"
+				id={`${idPrefix}-amount`}
 				name="amount"
 				label="Amount"
 				value={values.amount}
@@ -47,7 +50,7 @@ export function CashForm({
 			/>
 			<div class="grid grid-cols-2 gap-3">
 				<TextInput
-					id="cash-date"
+					id={`${idPrefix}-date`}
 					name="date"
 					label="Date"
 					type="date"
@@ -57,7 +60,7 @@ export function CashForm({
 					error={errors.date}
 				/>
 				<TextInput
-					id="cash-merchant"
+					id={`${idPrefix}-merchant`}
 					name="merchant"
 					label="Where"
 					value={values.merchant}
@@ -67,7 +70,9 @@ export function CashForm({
 				/>
 			</div>
 			<fieldset
-				aria-describedby={errors.category ? "cash-category-error" : undefined}
+				aria-describedby={
+					errors.category ? `${idPrefix}-category-error` : undefined
+				}
 			>
 				<legend>Category</legend>
 				<div class="mt-2 flex flex-wrap gap-2">
@@ -85,7 +90,7 @@ export function CashForm({
 				</div>
 				{errors.category && (
 					<p
-						id="cash-category-error"
+						id={`${idPrefix}-category-error`}
 						role="alert"
 						class="mt-2 text-sm text-over"
 					>
@@ -93,10 +98,14 @@ export function CashForm({
 					</p>
 				)}
 			</fieldset>
-			<FormField id="cash-note" label="Note (optional)" error={errors.note}>
+			<FormField
+				id={`${idPrefix}-note`}
+				label="Note (optional)"
+				error={errors.note}
+			>
 				{({ class: errorClass, ...a11y }) => (
 					<input
-						id="cash-note"
+						id={`${idPrefix}-note`}
 						name="note"
 						class={`rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
 						value={values.note}

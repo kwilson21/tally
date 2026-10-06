@@ -184,47 +184,88 @@ describe("GET /design-system/proposals", () => {
 		};
 		const picked = (chunk: string) => chunk.includes(">Picked<");
 		const recommended = (chunk: string) => chunk.includes(">Recommended<");
+		// An option's picture alone. The heading and note above it quote the very words asserted
+		// below, so asserting on the whole option would pass with the picture changed or emptied.
+		const picture = (chunk: string) => {
+			const at = chunk.indexOf('data-screen="picture"');
+			expect(at).toBeGreaterThan(-1);
+			return chunk.slice(at);
+		};
 		const cant = "This can&#39;t be undone.";
 
 		// P114: once Undo ships, the sheet asks only the question; Delete and Keep it are its answers.
 		const p114 = section("p114-delete-wording");
 		const p114a = option(p114, "Option A · Just the question");
 		expect(picked(p114a) && recommended(p114a)).toBe(true);
-		expect(p114a).toContain("Delete Farmers market, $20.00?");
-		expect(p114a).not.toContain(cant);
-		expect(p114a).toContain(">Delete<");
-		expect(p114a).toContain(">Keep it<");
+		const p114aPicture = picture(p114a);
+		expect(p114aPicture).toContain(">Delete Farmers market, $20.00?</p>");
+		expect(p114aPicture).not.toContain(cant);
+		expect(p114aPicture).not.toContain("undo it");
+		expect(p114aPicture).toContain(">Delete<");
+		expect(p114aPicture).toContain(">Keep it<");
 		const p114b = option(p114, "Option B · ");
 		expect(picked(p114b)).toBe(false);
-		expect(p114b).toContain(`Delete Farmers market, $20.00? ${cant}`);
+		expect(picture(p114b)).toContain(
+			`>Delete Farmers market, $20.00? ${cant}</p>`,
+		);
 		const p114c = option(p114, "Option C · ");
 		expect(picked(p114c)).toBe(false);
-		expect(p114c).toContain(
-			"Delete Farmers market, $20.00? You can undo it for 10 seconds.",
+		expect(picture(p114c)).toContain(
+			">Delete Farmers market, $20.00? You can undo it for 10 seconds.</p>",
 		);
+		expect(picture(p114c)).not.toContain(cant);
 		expect(p114).toContain("decision 85");
 
-		// P115: the money box in the 12px control corner (picked); B keeps the 8px it had.
+		// P115: the money box in the 12px control corner (picked); B keeps the 8px it had. Date and
+		// Where are in both pictures and use rounded-control, so the money box is found by its own
+		// markup: its box by its fixed size, its cent arrows by their outer corners.
 		const p115 = section("p115-money-corners");
+		const box = (pic: string) =>
+			pic.match(/<div class="([^"]*min-h-\[90px\][^"]*)"/)?.[1] ?? "";
 		const p115a = option(p115, "Option A · ");
 		expect(picked(p115a) && recommended(p115a)).toBe(true);
-		expect(p115a).toContain("rounded-control");
-		expect(p115a).not.toContain("rounded-lg");
+		const p115aPicture = picture(p115a);
+		expect(p115aPicture).toContain("data-money");
+		expect(box(p115aPicture)).toContain("rounded-control");
+		expect(p115aPicture).toContain("rounded-tr-control");
+		expect(p115aPicture).toContain("rounded-br-control");
+		expect(p115aPicture).not.toContain("rounded-lg");
+		expect(p115aPicture).not.toContain("rounded-tr-lg");
 		const p115b = option(p115, "Option B · ");
 		expect(picked(p115b)).toBe(false);
-		expect(p115b).toContain("rounded-lg");
+		const p115bPicture = picture(p115b);
+		expect(p115bPicture).toContain("data-money");
+		// B's wrapper turns all three of the money box's corners back to 8px, and only those.
+		for (const [control, eight] of [
+			["rounded-control", "rounded-lg"],
+			["rounded-tr-control", "rounded-tr-lg"],
+			["rounded-br-control", "rounded-br-lg"],
+		] as const)
+			expect(p115bPicture).toContain(
+				`[&amp;_[data-money]_.${control}]:${eight}`,
+			);
 		expect(p115).toContain("decision 85");
+		// The two pictures draw the same form twice: no id may repeat, or a label would point at the
+		// other picture's field.
+		const p115Ids = [...p115.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+		expect(p115Ids.length).toBeGreaterThan(2);
+		expect(new Set(p115Ids).size).toBe(p115Ids.length);
+		for (const pic of [p115aPicture, p115bPicture])
+			for (const [, target] of pic.matchAll(/<label for="([^"]+)"/g))
+				expect(pic).toContain(` id="${target}"`);
 
 		// P116: the budget sheet with a second chip, the 3-month average (picked), or Last month alone.
 		const p116 = section("p116-budget-average");
 		const p116a = option(p116, "Option A · ");
 		expect(picked(p116a)).toBe(false);
-		expect(p116a).toContain("Last month: $");
-		expect(p116a).not.toContain("3-month average");
+		const p116aPicture = picture(p116a);
+		expect(p116aPicture).toContain("Last month: $");
+		expect(p116aPicture).not.toContain("3-month average");
 		const p116b = option(p116, "Option B · ");
 		expect(picked(p116b) && recommended(p116b)).toBe(true);
-		expect(p116b).toContain("Last month: $");
-		expect(p116b).toContain("3-month average: $650.00");
+		const p116bPicture = picture(p116b);
+		expect(p116bPicture).toContain("Last month: $");
+		expect(p116bPicture).toContain("3-month average: $650.00");
 		expect(p116).toContain("decision 85");
 	});
 

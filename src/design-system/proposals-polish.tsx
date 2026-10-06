@@ -340,7 +340,7 @@ const EIGHT_PX =
 	"[&_[data-money]_.rounded-control]:rounded-lg [&_[data-money]_.rounded-tr-control]:rounded-tr-lg [&_[data-money]_.rounded-br-control]:rounded-br-lg";
 
 /** The Add cash sheet as the route draws it, with its list behind. */
-function AddCash({ corners }: { corners?: string }) {
+function AddCash({ p, corners }: { p: string; corners?: string }) {
 	return (
 		<PanelSheet behind={behind} tall>
 			<h2 class="font-serif text-4xl font-semibold tracking-tight">
@@ -352,6 +352,7 @@ function AddCash({ corners }: { corners?: string }) {
 					values={CASH_VALUES}
 					categories={THREE.map((c, i) => ({ id: i + 1, ...c }))}
 					action="#"
+					idPrefix={p}
 				/>
 			</div>
 		</PanelSheet>
@@ -364,12 +365,11 @@ function AddCash({ corners }: { corners?: string }) {
 
 const GROCERIES_ROW = OCTOBER[0] as (typeof OCTOBER)[number];
 const LAST_MONTH_CENTS = SEPTEMBER[0]?.spentCents ?? 0;
-/** What Groceries spent in the last three finished months: July, August and September. */
-const THREE_MONTHS_CENTS = [66200, 65200, LAST_MONTH_CENTS];
-/** Their sum over 3, to the nearest cent (spec §7); code works it out, nobody types it. */
-const AVERAGE_CENTS = Math.round(
-	THREE_MONTHS_CENTS.reduce((sum, cents) => sum + cents, 0) / 3,
-);
+/**
+ * The 3-month average as drawn: July $662.00, August $652.00, September $636.00 make $650.00. It is
+ * a picture, not a sum: #250 builds the average.
+ */
+const AVERAGE_CENTS = 65000;
 
 /**
  * The budget sheet as the route draws it, over Home's budget list. The 3-month average chip isn't
@@ -666,7 +666,7 @@ export function PolishProposals() {
 							recommended:
 								"one corner size for every control, and nothing left off the tokens.",
 							tall: true,
-							screen: <AddCash />,
+							screen: <AddCash p="p115-a-cash" />,
 						},
 						{
 							name: "Option B · Keep 8px",
@@ -674,7 +674,7 @@ export function PolishProposals() {
 							tradeoff:
 								"the one field off the tokens, with no squircle, and an exception in the design-token test.",
 							tall: true,
-							screen: <AddCash corners={EIGHT_PX} />,
+							screen: <AddCash p="p115-b-cash" corners={EIGHT_PX} />,
 						},
 					]}
 				/>
