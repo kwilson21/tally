@@ -18,7 +18,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 
 const step = (text) => console.log(`✓ ${text}`);
 const rows = () => page.locator("#results li[data-transaction]").count();
-const assertPhoneFocusClearsTabs = async (path) => {
+const assertPhoneFocusClearsFixedControls = async (path) => {
 	await goto(`${BASE}${path}`, { waitUntil: "networkidle" });
 	await page.evaluate(() => document.activeElement?.blur());
 	const tabStops = await page
@@ -36,15 +36,20 @@ const assertPhoneFocusClearsTabs = async (path) => {
 				key: el?.id || el?.getAttribute("href") || el?.textContent?.trim(),
 				bottom: rect?.bottom,
 				isTab: !!el?.closest('nav[aria-label="Tabs"]'),
+				isFeedback: el?.matches('a[href="/feedback"]'),
 				tabTop: document
 					.querySelector('nav[aria-label="Tabs"]')
 					?.getBoundingClientRect().top,
+				feedbackTop: document
+					.querySelector('a[href="/feedback"]')
+					?.getBoundingClientRect().top,
 			};
 		});
-		if (focused.key && !focused.isTab) {
+		if (focused.key && !focused.isTab && !focused.isFeedback) {
 			assert(
-				focused.bottom <= focused.tabTop,
-				`${path}: focused item ${focused.key} overlaps phone tabs`,
+				focused.bottom <=
+					Math.min(focused.tabTop, focused.feedbackTop ?? Infinity),
+				`${path}: focused item ${focused.key} overlaps phone tabs or Feedback`,
 			);
 			seen.add(focused.key);
 		}
@@ -70,10 +75,14 @@ await page.route("**/assets/app.css", async (route) => {
 	});
 });
 
-await assertPhoneFocusClearsTabs("/transactions?uncategorized=1");
-step("Tab keeps every focused transaction control above the phone tabs");
-await assertPhoneFocusClearsTabs("/settings");
-step("Tab keeps every focused Settings control above the phone tabs");
+await assertPhoneFocusClearsFixedControls("/transactions?uncategorized=1");
+step(
+	"Tab keeps every focused transaction control above the phone tabs and Feedback",
+);
+await assertPhoneFocusClearsFixedControls("/settings");
+step(
+	"Tab keeps every focused Settings control above the phone tabs and Feedback",
+);
 
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.keyboard.press("Tab");

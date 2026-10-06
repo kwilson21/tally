@@ -47,7 +47,9 @@ describe("app shell", () => {
 		expect(html).toContain(
 			"pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))]",
 		);
-		expect(html).toContain("bottom-[calc(6.5rem+var(--safe-area-bottom))]");
+		expect(html).toContain(
+			"bottom-[calc(var(--feedback-bottom)+var(--safe-area-bottom))]",
+		);
 	});
 
 	it("has a polite live region and a toast container for HTMX feedback", async () => {

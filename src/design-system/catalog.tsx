@@ -371,7 +371,7 @@ function Shell() {
 				</p>
 				<p class="max-w-prose">
 					On phones, keyboard scrolling leaves room below focused content for
-					the fixed tabs and Feedback button; desktop has no bottom bar.
+					the fixed tabs and Feedback pill; desktop has no bottom padding.
 				</p>
 				<MotionSpec>
 					Pages cross-fade in 150 ms through the browser's own View Transitions,

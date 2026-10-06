@@ -62,6 +62,10 @@
 		--safe-area-right: env(safe-area-inset-right, 0px);
 		--safe-area-bottom: env(safe-area-inset-bottom, 0px);
 		--safe-area-left: env(safe-area-inset-left, 0px);
+		--tabs-height: calc(3.5rem + 1px);
+		--feedback-bottom: 6.5rem;
+		--feedback-height: 2.75rem;
+		--focus-scroll-gap: 0.5rem;
 	}
 	html {
 		background: var(--color-paper);
@@ -73,8 +77,11 @@
 	@media (max-width: 63.999rem) {
 		html {
 			scroll-padding-bottom: calc(
-				28 *
-				var(--spacing) +
+				max(
+					var(--tabs-height),
+					calc(var(--feedback-bottom) + var(--feedback-height))
+				) +
+				var(--focus-scroll-gap) +
 				var(--safe-area-bottom)
 			);
 		}

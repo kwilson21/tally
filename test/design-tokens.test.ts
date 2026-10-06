@@ -292,15 +292,39 @@ function problems(file: string, text: string): string[] {
 
 describe("design tokens (DESIGN.md)", () => {
 	it("keeps focused content clear of the phone tab bar and Feedback button", () => {
-		const rule = cssRules(css).find(
-			({ selector, body, within }) =>
-				selector === "html" &&
-				body.includes("scroll-padding-bottom") &&
-				within.some((rule) => rule.startsWith("@media (max-width:")),
+		const scrollRules = cssRules(css).filter(
+			({ selector, body }) =>
+				selector === "html" && body.includes("scroll-padding-bottom"),
 		);
+		expect(scrollRules).toHaveLength(1);
+		const rule = scrollRules[0];
+		expect(
+			rule?.within.some((item) => item.startsWith("@media (max-width:")),
+		).toBe(true);
 		expect(rule?.body).toMatch(
-			/scroll-padding-bottom:\s*calc\(28\s*\*\s*var\(--spacing\)\s*\+\s*var\(--safe-area-bottom\)\)/,
+			/scroll-padding-bottom:\s*calc\(\s*max\(\s*var\(--tabs-height\),\s*calc\(var\(--feedback-bottom\)\s*\+\s*var\(--feedback-height\)\)\s*\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\)/,
 		);
+		expect(css).toContain("--tabs-height: calc(3.5rem + 1px)");
+		expect(css).toContain("--feedback-bottom: 6.5rem");
+		expect(css).toContain("--feedback-height: 2.75rem");
+		expect(css).toContain("--focus-scroll-gap: 0.5rem");
+		const rem = (token: string) => {
+			const value = css.match(new RegExp(`${token}: ([0-9.]+)rem`))?.[1];
+			expect(value, `${token} is a rem token`).toBeDefined();
+			return Number(value);
+		};
+		const feedbackTopOffset =
+			rem("--feedback-bottom") + rem("--feedback-height");
+		const scrollPadding =
+			Math.max(3.5 + 1 / 16, feedbackTopOffset) + rem("--focus-scroll-gap");
+		expect(scrollPadding).toBeGreaterThanOrEqual(
+			feedbackTopOffset + rem("--focus-scroll-gap"),
+		);
+		const nav = SOURCES["../src/views/nav.tsx"];
+		const feedback = SOURCES["../src/views/feedback-button.tsx"];
+		expect(nav).toContain("var(--tabs-height)");
+		expect(feedback).toContain("var(--feedback-bottom)");
+		expect(feedback).toContain("var(--feedback-height)");
 	});
 
 	it("reads the views, routes and scripts", () => {
