@@ -12,10 +12,15 @@ import {
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
+	TRENDS_EARLY_INPUT,
+	TRENDS_EMPTY_INPUT,
+	TRENDS_INPUT,
+	TRENDS_PART_INPUT,
 } from "../src/design-system/mock";
 import { USE_SPEC_PARTS } from "../src/design-system/specimen";
 import { CATEGORY_COLORS } from "../src/design-system/tokens";
 import { designSystem } from "../src/routes/design-system";
+import { buildTrends } from "../src/trends";
 import { AdjustLink } from "../src/views/adjust-link";
 import { Band } from "../src/views/band";
 import { TallyMark, Wordmark } from "../src/views/brand";
@@ -40,6 +45,7 @@ import { Switch } from "../src/views/switch";
 import { SystemDiagram } from "../src/views/system-diagram";
 import { ThingsToTry } from "../src/views/things-to-try";
 import { TransactionRow } from "../src/views/transaction-row";
+import { TrendsScreen } from "../src/views/trends";
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -141,6 +147,17 @@ describe("GET /design-system in the demo", () => {
 			TransactionsDiagram(TRANSACTIONS_EXAMPLE),
 			ExclusionsDiagram(EXCLUSIONS_EXAMPLE),
 			CategoriesDiagram(CATEGORIES_EXAMPLE),
+			// Trends' parts, drawn as the page draws them: full, one month in, and empty.
+			TrendsScreen({ page: buildTrends(TRENDS_INPUT) }),
+			TrendsScreen({
+				id: "ds-screen-part",
+				page: buildTrends(TRENDS_PART_INPUT),
+			}),
+			TrendsScreen({
+				id: "ds-screen-early",
+				page: buildTrends(TRENDS_EARLY_INPUT),
+			}),
+			TrendsScreen({ page: buildTrends(TRENDS_EMPTY_INPUT) }),
 		];
 		for (const output of outputs) {
 			expect(html).toContain(await String(output ?? ""));

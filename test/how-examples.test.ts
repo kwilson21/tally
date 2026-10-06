@@ -6,7 +6,100 @@ import {
 	exclusionsExample,
 	netWorthExample,
 	transactionsExample,
+	trendsExample,
 } from "../src/how-it-works/examples";
+import type { MonthPoint, TrendRowData, TrendsPage } from "../src/trends";
+
+describe("trendsExample", () => {
+	const months = (cents: number[]): MonthPoint[] =>
+		cents.map((c, i) => ({
+			month: `2026-${String(5 + i).padStart(2, "0")}`,
+			cents: c,
+			partial: i === cents.length - 1,
+		}));
+	const row = (name: string, run: number, cents: number[]): TrendRowData => ({
+		id: 1,
+		name,
+		icon: "list",
+		color: "cat-blue",
+		line: "",
+		run,
+		note: null,
+		months: months(cents),
+		label: "",
+	});
+	const full = (over: Partial<Extract<TrendsPage, { kind: "full" }>>) =>
+		({
+			kind: "full",
+			monthName: "October",
+			lastMonthName: "September",
+			soFarCents: 124000,
+			sentence: "",
+			caption: "Oct 1–5 against Sep 1–5",
+			sameDaysCents: { now: 124000, last: 133000 },
+			changes: [],
+			goingWell: [],
+			worthALook: [],
+			others: [],
+			rangeLabel: "May to October",
+			...over,
+		}) satisfies TrendsPage;
+
+	it("names the months a going-well category stayed under budget", () => {
+		expect(
+			trendsExample(
+				full({
+					goingWell: [row("Groceries", 3, [1, 1, 1, 1, 1, 1])],
+				}),
+			),
+		).toBe(
+			"Groceries stayed under its budget in July, August and September, so it's going well.",
+		);
+	});
+
+	it("names the months a worth-a-look category rose through", () => {
+		expect(
+			trendsExample(
+				full({
+					worthALook: [row("Eating Out", 3, [1, 2, 3, 4, 5, 6])],
+				}),
+			),
+		).toBe(
+			"Eating Out spent more each month from June to September, so it's worth a look.",
+		);
+	});
+
+	it("prefers the good news when there is some", () => {
+		expect(
+			trendsExample(
+				full({
+					goingWell: [row("Gas", 3, [1, 1, 1, 1, 1, 1])],
+					worthALook: [row("Eating Out", 3, [1, 2, 3, 4, 5, 6])],
+				}),
+			),
+		).toMatch(/^Gas stayed under/);
+	});
+
+	it("compares the two ranges when no category has a run", () => {
+		expect(trendsExample(full({}))).toBe(
+			"Oct 1–5: $1,240 spent, against $1,330 for Sep 1–5.",
+		);
+	});
+
+	it("has none before there's a month to compare", () => {
+		expect(trendsExample({ kind: "empty" })).toBeNull();
+		expect(
+			trendsExample({
+				kind: "early",
+				monthName: "October",
+				soFarCents: 0,
+				startMonthName: "September",
+				months: [],
+				label: "",
+			}),
+		).toBeNull();
+	});
+});
 
 describe("netWorthExample", () => {
 	const checking = { balanceCents: 421055, isLiability: false };

@@ -7,6 +7,7 @@ import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type NetWorthPoint, netWorthView } from "../net-worth";
 import { type BankSync, flaggedBanks, staleBankWords } from "../stale-bank";
 import { tidyName } from "../transactions/tidy-name";
+import type { MonthSpend, TrendCategory, TrendsInput } from "../trends";
 
 // An unnamed merchant: nobody has chosen a display name for it yet, so the row shows tidyName's
 // output (spec §7), with the raw bank text underneath.
@@ -382,6 +383,111 @@ export const NET_WORTH_CENTS = BANKS.flatMap((b) => b.accounts).reduce(
 	(sum, a) => sum + (a.isLiability ? -a.balanceCents : a.balanceCents),
 	0,
 );
+
+// ---------------------------------------------------------------------------------------------
+// Trends (spec §8.3): rows in the demo's style, as buildTrends takes them, so the catalog draws
+// the page exactly as the app does. Today is Oct 5; spending is May to October so far.
+
+const TREND_CATEGORIES: TrendCategory[] = [
+	{
+		id: 1,
+		name: "Groceries",
+		icon: "groceries",
+		color: "cat-blue",
+		archived: false,
+	},
+	{
+		id: 2,
+		name: "Eating Out",
+		icon: "eating-out",
+		color: "cat-plum",
+		archived: false,
+	},
+	{ id: 3, name: "Kids", icon: "kids", color: "cat-ochre", archived: false },
+	{ id: 4, name: "Gas", icon: "gas", color: "cat-slate", archived: false },
+	{
+		id: 5,
+		name: "Household",
+		icon: "household",
+		color: "cat-brown",
+		archived: false,
+	},
+];
+const TREND_SERIES: [number, number[]][] = [
+	[1, [82000, 79000, 84500, 81000, 86000, 19600]],
+	[2, [21000, 24500, 28000, 31800, 36500, 9200]],
+	[3, [26000, 24000, 30000, 28000, 25500, 6000]],
+	[4, [18000, 17500, 19000, 17200, 18500, 4800]],
+	[5, [14000, 19000, 12000, 16000, 15000, 3000]],
+];
+const TREND_MONTHS_MOCK = [
+	"2026-05",
+	"2026-06",
+	"2026-07",
+	"2026-08",
+	"2026-09",
+	"2026-10",
+];
+const TREND_SPEND: MonthSpend[] = [
+	...TREND_SERIES.flatMap(([categoryId, cents]) =>
+		cents.map((c, i) => ({
+			month: TREND_MONTHS_MOCK[i] as string,
+			categoryId,
+			cents: c,
+		})),
+	),
+	{ month: "2026-10", categoryId: null, cents: 2300 },
+];
+
+/** A household with history from before these six months, Eating Out creeping up. */
+export const TRENDS_INPUT: TrendsInput = {
+	today: "2026-10-05",
+	firstDate: "2026-04-15",
+	categories: TREND_CATEGORIES,
+	amounts: [
+		{ categoryId: 1, effectiveMonth: "2026-01", amountCents: 90000 },
+		{ categoryId: 2, effectiveMonth: "2026-01", amountCents: 30000 },
+		{ categoryId: 3, effectiveMonth: "2026-01", amountCents: 30000 },
+		{ categoryId: 4, effectiveMonth: "2026-01", amountCents: 20000 },
+		{ categoryId: 5, effectiveMonth: "2026-01", amountCents: 15000 },
+	],
+	spend: TREND_SPEND,
+	sameDays: [
+		{ categoryId: 1, cents: 22400 },
+		{ categoryId: 2, cents: 6100 },
+		{ categoryId: 3, cents: 4500 },
+		{ categoryId: 4, cents: 5200 },
+		{ categoryId: 5, cents: 5800 },
+	],
+};
+
+/** History started May 12: May is a part month, so it's drawn striped but not judged. */
+export const TRENDS_PART_INPUT: TrendsInput = {
+	...TRENDS_INPUT,
+	firstDate: "2026-05-12",
+};
+
+/** Only last month and this one: Tally started in September, so there's nothing to compare yet (P31). */
+export const TRENDS_EARLY_INPUT: TrendsInput = {
+	...TRENDS_INPUT,
+	firstDate: "2026-09-12",
+	spend: TREND_SPEND.filter((r) => r.month >= "2026-09"),
+};
+
+/** Tally's very first month. */
+export const TRENDS_FIRST_MONTH_INPUT: TrendsInput = {
+	...TRENDS_INPUT,
+	firstDate: "2026-10-02",
+	spend: TREND_SPEND.filter((r) => r.month === "2026-10"),
+};
+
+/** No transactions at all. */
+export const TRENDS_EMPTY_INPUT: TrendsInput = {
+	...TRENDS_INPUT,
+	firstDate: null,
+	spend: [],
+	sameDays: [],
+};
 
 /** The net-worth chart's fake "today", so its words don't change with the calendar. */
 export const NET_WORTH_TODAY = "2026-10-05";
