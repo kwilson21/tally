@@ -73,6 +73,48 @@ beforeEach(async () => {
 });
 
 describe("the list, straight from the bank (?raw=1, in the demo)", () => {
+	it("shows a split purchase once as the bank sent it and counts it once", async () => {
+		const seed = await env.DB.prepare(
+			"SELECT id, amount_cents FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431'",
+		).first<{ id: number; amount_cents: number }>();
+		expect(seed).toBeDefined();
+		const parts = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ?",
+		)
+			.bind(seed?.id)
+			.all<{ id: number }>();
+		const realTotal = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL",
+		).first<{ n: number }>();
+		const raw = await demo(
+			"/transactions?raw=1&month=all&q=COSTCO+WHSE+%230431",
+		);
+		const rows = rowsOf(raw.html);
+		const seedRows = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id IS NULL",
+		).all<{ id: number }>();
+		expect(rows.map((row) => row.id)).toEqual([seed?.id]);
+		expect(textOf(rows[0]?.html ?? "")).toContain("COSTCO WHSE #0431");
+		expect(textOf(rows[0]?.html ?? "")).toContain("$187.42");
+		expect(
+			parts.results.every((part) => !rows.some((row) => row.id === part.id)),
+		).toBe(true);
+		const full = await demo("/transactions?raw=1&month=all");
+		expect(countOf(full.html)).toContain(`of ${realTotal?.n} transactions`);
+		expect(countOf(full.html)).toContain(
+			`${seedRows.results.length + parts.results.length} transactions`,
+		);
+	});
+
+	it("does not show a person's note", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET note = 'private note' WHERE id = 1",
+		).run();
+		expect(
+			(await demo("/transactions?raw=1&month=all&q=AMAZON")).html,
+		).not.toContain("private note");
+	});
+
 	it("lists each transaction under the bank's own text with no category and no Excluded or income mark", async () => {
 		const { html } = await demo("/transactions?raw=1");
 		const rows = rowsOf(html);
@@ -116,6 +158,18 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			expect(words).not.toContain("Paycheck, Acme Corp");
 			expect(words).not.toContain("Income");
 		}
+	});
+
+	it("shows the transfer in the Excluded filter as bank text without its mark", async () => {
+		const { html } = await demo(
+			"/transactions?raw=1&month=all&show=excluded&q=ONLINE+TRANSFER",
+		);
+		const rows = rowsOf(html);
+		expect(rows.length).toBeGreaterThan(0);
+		expect(textOf(rows[0]?.html ?? "")).toContain(
+			"ONLINE TRANSFER TO SAV ...5678",
+		);
+		expect(textOf(rows[0]?.html ?? "")).not.toContain("Excluded");
 	});
 
 	it("takes away what Plaid marked at sync too", async () => {
