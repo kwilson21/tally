@@ -367,6 +367,13 @@ describe("saveJevResult", () => {
 
 	it("stores Jev's confident income answer so it is excluded from spending", async () => {
 		const id = await idOf("VENMO *J RIVERA");
+		// Income is money coming in, so this is a credit (Jev's income answer never marks money out).
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -amount_cents WHERE id = ?",
+			)
+			.bind(id)
+			.run();
 		await saveJevResult(
 			db,
 			id,
@@ -443,6 +450,12 @@ describe("saveJevResult", () => {
 
 	it("keeps the income flag and Jev source consistent when an answer is explicitly cleared", async () => {
 		const id = await idOf("VENMO *J RIVERA");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -amount_cents WHERE id = ?",
+			)
+			.bind(id)
+			.run();
 		await saveJevResult(
 			db,
 			id,

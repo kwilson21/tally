@@ -20,7 +20,6 @@ import {
 	withinBillAmount,
 } from "./match";
 import type { BillStatus } from "./status";
-import { putBackInBudget } from "./write";
 
 /** The payment on offer for a bill's occurrence. */
 export type PriceOffer = {
@@ -171,11 +170,12 @@ const stillOffered = (charge: string, seen: string) =>
 	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ${seen}))`;
 
 /**
- * A person says yes: the payment pays the occurrence (`matched_by = user`, and an excluded payment is put
- * back in the budget) and the bill's amount becomes what was charged, in one batch. `seenBillCents` is the
- * bill's amount on the page they answered, and the offer's amount is the charge on it.
+ * A person says yes: the payment pays the occurrence (`matched_by = user`) and the bill's amount becomes
+ * what was charged, in one batch. An excluded payment counts once linked, whatever its exclusion (spec
+ * §8.5), which this never writes. `seenBillCents` is the bill's amount on the page they answered, and the
+ * offer's amount is the charge on it.
  *
- * All three statements carry the same condition (`stillOffered`), checked as the batch runs, so they
+ * Both statements carry the same condition (`stillOffered`), checked as the batch runs, so they
  * write together or not at all: if another tab linked this payment or this month in the meantime, or the
  * bill was edited, or the charge corrected, nothing is written and this returns false. The amount update
  * goes before the link on purpose, since it is the one that has to see the amount as it was.
@@ -186,7 +186,6 @@ export async function acceptPriceOffer(
 	period: string,
 	offer: PriceOffer,
 	seenBillCents: number,
-	actor: string,
 ): Promise<boolean> {
 	const binds = [
 		offer.transactionId,
@@ -196,10 +195,6 @@ export async function acceptPriceOffer(
 		seenBillCents,
 	];
 	const results = await db.batch([
-		putBackInBudget(db, billId, period, offer.transactionId, actor, {
-			sql: stillOffered("?5", "?6"),
-			binds: [offer.amountCents, seenBillCents],
-		}),
 		db
 			.prepare(
 				`UPDATE bills SET amount_cents = ?4 WHERE id = ?2 AND ${stillOffered("?4", "?5")}`,
@@ -212,7 +207,7 @@ export async function acceptPriceOffer(
 			)
 			.bind(...binds),
 	]);
-	return (results[2]?.meta.changes ?? 0) > 0;
+	return (results[1]?.meta.changes ?? 0) > 0;
 }
 
 /**

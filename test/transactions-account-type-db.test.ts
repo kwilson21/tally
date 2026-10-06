@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { accountChoices, uniqueAccountLabels } from "../src/db/accounts";
+import { PAYS_A_BILL } from "../src/db/counted-month";
 import { loadMonth } from "../src/db/month";
 import { listTransactions, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -158,8 +159,11 @@ describe("listTransactions by type", () => {
 			expect(refunds, `row ${id}`).not.toContain(id);
 		}
 		const rows = await listAll("month=2026-09&show=refunds");
+		// A payment linked to a bill isn't excluded in effect (decision 83), so a linked credit may be here.
 		expect(
-			rows.every((r) => r.amountCents < 0 && !r.income && !r.excluded),
+			rows.every(
+				(r) => r.amountCents < 0 && !r.income && (!r.excluded || r.paysBill),
+			),
 		).toBe(true);
 	});
 
@@ -232,7 +236,10 @@ describe("listTransactions by type", () => {
 		for (const id of [860, 864, 865, 867]) {
 			expect(listed.has(id), `row ${id}`).toBe(false);
 		}
-		expect(spending.some((r) => r.income || r.excluded)).toBe(false);
+		// A payment linked to a bill counts whatever its exclusion (decision 83).
+		expect(spending.some((r) => r.income || (r.excluded && !r.paysBill))).toBe(
+			false,
+		);
 		const data = await loadMonth(env.DB, "2026-09");
 		const home = summarizeMonth({
 			month: "2026-09",
@@ -246,8 +253,9 @@ describe("listTransactions by type", () => {
 
 	it("Show Excluded matches the old Excluded filter", async () => {
 		const shown = await listAll("month=all&show=excluded");
+		// A payment linked to a bill counts, so it isn't listed as excluded (spec §8.5).
 		const stored = await env.DB.prepare(
-			"SELECT id FROM transactions WHERE excluded = 1 ORDER BY date DESC, id DESC",
+			`SELECT id FROM transactions WHERE excluded = 1 AND NOT ${PAYS_A_BILL} ORDER BY date DESC, id DESC`,
 		).all<{ id: number }>();
 		expect(shown.map((r) => r.id)).toEqual(stored.results.map((r) => r.id));
 		expect(shown.map((r) => r.id)).toContain(865);
