@@ -148,7 +148,9 @@ export async function categorizePending(
 			const result = await askJev(
 				{
 					...tx,
-					merchantCategoryHistory: histories.get(tx.merchantKey),
+					merchantCategoryHistory: before.categories
+						? histories.get(tx.merchantKey)
+						: undefined,
 				},
 				names,
 				env.JEV_API_KEY,
