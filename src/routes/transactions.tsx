@@ -1014,6 +1014,9 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				{/* While the delete question is open there's no Save, so Enter in the name field would save the
+				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
+				{deleteConfirm && <button type="submit" disabled hidden />}
 				<fieldset
 					class="flex flex-col gap-2"
 					disabled={purchase !== undefined}
@@ -1204,7 +1207,7 @@ function EditSheet({
 					</div>
 				</details>
 				{/* Asking about a delete takes this row's place (below, in the delete form), so the sheet never
-				    has two ways to leave it side by side (decision 82). */}
+				    has two ways to leave it side by side (decision 84). */}
 				{!deleteConfirm && (
 					<div class="mt-2 grid grid-cols-2 gap-3">
 						<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>

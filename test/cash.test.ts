@@ -358,7 +358,7 @@ describe("cash lifecycle", () => {
 		).toBe(0);
 	});
 
-	describe("asking before a cash entry is deleted (decision 82, Q57 B)", () => {
+	describe("asking before a cash entry is deleted (decision 84, Q57 B)", () => {
 		const form = { "content-type": "application/x-www-form-urlencoded" };
 		const ask = (id: number, back = "/transactions") =>
 			request(`/transactions/${id}/delete`, {
@@ -411,11 +411,26 @@ describe("cash lifecycle", () => {
 					`<a[^>]*href="/transactions/${id}"[^>]*class="[^"]*border-ink[^"]*"[^>]*>Keep it</a>`,
 				),
 			);
-			// One submit button in the whole sheet: Delete.
-			expect(dialog(html).match(/<button[^>]*type="submit"/g)).toHaveLength(1);
+			// One submit button in the whole sheet that can be pressed: Delete.
+			expect(
+				dialog(html)
+					.match(/<button[^>]*type="submit"[^>]*>/g)
+					?.filter((b) => !/\sdisabled[\s>=]/.test(b)),
+			).toHaveLength(1);
 			expect(dialog(html).match(/<button[^>]*bg-ink/g)).toHaveLength(1);
 			// Both are 44px targets.
 			expect(deleting.match(/min-h-11/g)).toHaveLength(2);
+		});
+
+		it("can't save the edit form with Enter while it asks: the form's default button is disabled", async () => {
+			const id = await farmersMarket();
+			const { html } = await ask(id);
+			const from = html.indexOf(`action="/transactions/${id}"`);
+			const editing = html.slice(from, html.indexOf("</form>", from));
+			// Enter in a text field presses the form's first submit button; a disabled one sends nothing.
+			const first = editing.match(/<button[^>]*type="submit"[^>]*>/)?.[0];
+			expect(first).toMatch(/\sdisabled[\s>=]/);
+			expect(first).toMatch(/\shidden[\s>=]/);
 		});
 
 		it("Keep it goes back to this entry's edit sheet with the same filters, as Cancel did", async () => {
