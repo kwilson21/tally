@@ -12,6 +12,10 @@ export type FeedbackValues = {
 const TYPES = ["Bug", "Idea", "Question", "Other"];
 const FEELINGS = ["Frustrated", "Confused", "Okay", "Happy", "Delighted"];
 
+/** What a person is told before a report is sent; the proposals page draws the same words (P93). */
+export const FEEDBACK_PRIVACY =
+	"Before a new report is sent, Tally applies deterministic pattern redaction to recognizable links, email addresses, phone numbers, labeled passwords, tokens, API keys, authorization values, street addresses, account-like numbers, currency amounts, IPv4-formatted addresses, and some title-case name patterns, then asks you to review the cleaned text. It cannot reliably identify arbitrary names or every sensitive detail in prose; inspect the text and remove anything you do not want to send. The Worker repeats redaction before storage and private GitHub filing. New feedback records do not include your sign-in email. A random one-hour limiter cookie provides a best-effort per-browser rate limit; it can be cleared and is not a person-level identity or security boundary. Tally stores the report type, feeling, cleaned message, approved route category, coarse device category, and submission time in Cloudflare D1. Private GitHub filing receives the cleaned report fields without the sign-in email or submission time. This is best-effort redaction, not a guarantee that a report contains no personal information.";
+
 /** The short, labeled form used to tell Tally's builder what happened. */
 export function FeedbackForm({
 	values,
@@ -36,22 +40,7 @@ export function FeedbackForm({
 				</p>
 			)}
 			<p class={demo ? "mt-4 text-muted" : "mt-2 text-muted"}>
-				Before a new report is sent, Tally applies deterministic pattern
-				redaction to recognizable links, email addresses, phone numbers, labeled
-				passwords, tokens, API keys, authorization values, street addresses,
-				account-like numbers, currency amounts, IPv4-formatted addresses, and
-				some title-case name patterns, then asks you to review the cleaned text.
-				It cannot reliably identify arbitrary names or every sensitive detail in
-				prose; inspect the text and remove anything you do not want to send. The
-				Worker repeats redaction before storage and private GitHub filing. New
-				feedback records do not include your sign-in email. A random one-hour
-				limiter cookie provides a best-effort per-browser rate limit; it can be
-				cleared and is not a person-level identity or security boundary. Tally
-				stores the report type, feeling, cleaned message, approved route
-				category, coarse device category, and submission time in Cloudflare D1.
-				Private GitHub filing receives the cleaned report fields without the
-				sign-in email or submission time. This is best-effort redaction, not a
-				guarantee that a report contains no personal information.
+				{FEEDBACK_PRIVACY}
 			</p>
 			{!demo && (
 				<form method="post" action="/feedback" class="mt-8 grid gap-7">
