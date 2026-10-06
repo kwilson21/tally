@@ -4,8 +4,10 @@ import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
 // Names Workers AI suggested are saved under each bank text (spec §7). When Plaid later gives several bank
-// texts one merchant name, sync starts that merchant's row as a copy of the first text's row, and a waiting
-// suggestion on another text's row must not be lost along the way.
+// texts one merchant name, sync starts that merchant's row as a copy of the first text's row. Workers AI is
+// asked only about texts Plaid doesn't name (decision 68), and a Plaid name that is only the text tidied has
+// nothing to suggest (decision 79), so a guess made for a text is not left waiting on the merchant Plaid
+// named, whichever text's row it was on.
 
 const KEY = btoa("01234567890123456789012345678901");
 const T1 = "TARGET 1234";
@@ -94,8 +96,8 @@ beforeEach(async () => {
 	]);
 });
 
-describe("a waiting suggestion survives Plaid naming several bank texts one merchant", () => {
-	it("takes the names from the second text's row when the first copied has none", async () => {
+describe("a guess made for a bank text does not wait on the merchant Plaid names", () => {
+	it("leaves the first text's row as it was copied, empty answer and all, and carries nothing from the second", async () => {
 		const id = await addItem();
 		await env.DB.batch([
 			// Asked about, nothing usable: the empty answer that stops it being asked again.
@@ -108,26 +110,31 @@ describe("a waiting suggestion survives Plaid naming several bank texts one merc
 		]);
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: GUESSES,
+			suggested_name: "",
 			display_name: null,
-			suggestion_status: "pending",
+			suggestion_status: "none",
 		});
+		// The text's own row keeps its guess for any charge that still has no Plaid name.
+		expect((await row(T2))?.suggestion_status).toBe("pending");
 	});
 
-	it("does the same whichever text comes first, and when the first text was never asked about", async () => {
+	it("clears the guess copied from a text's row, whichever text comes first", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
 		)
 			.bind(T2, GUESSES)
 			.run();
-		// T1 has no row at all, so T2's is the only one to carry.
+		// T1 has no row at all, so T2's is the one copied.
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
-		expect((await row(PLAID))?.suggestion_status).toBe("pending");
-		expect((await row(PLAID))?.suggested_name).toBe(GUESSES);
+		expect(await row(PLAID)).toEqual({
+			suggested_name: null,
+			display_name: null,
+			suggestion_status: "none",
+		});
 	});
 
-	it("keeps the first row's waiting names when both have some, so one set is still there to choose", async () => {
+	it("clears the first row's guess when both have some", async () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
@@ -138,13 +145,26 @@ describe("a waiting suggestion survives Plaid naming several bank texts one merc
 			).bind(T2, GUESSES),
 		]);
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
-		expect(await row(PLAID)).toMatchObject({
-			suggested_name: "First Names",
-			suggestion_status: "pending",
+		expect(await row(PLAID)).toEqual({
+			suggested_name: null,
+			display_name: null,
+			suggestion_status: "none",
 		});
 	});
 
-	it("never revives a suggestion a person already decided, or touches a name a person chose", async () => {
+	it("copies the first text that has a row, even when an earlier text has none", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'My coffee')",
+		)
+			.bind(T2)
+			.run();
+		// T1 comes first and has no row; T2's is the first there is, so its name carries over.
+		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
+		expect(await row(PLAID)).toMatchObject({ display_name: "My coffee" });
+	});
+
+	it("never changes a suggestion a person already decided, or a name a person chose", async () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
