@@ -331,7 +331,10 @@ howItWorks.get("/how-it-works", async (c) => {
 							once a person marks it as income it counts toward Income instead,
 							unless it's excluded too (see Transactions).
 						</li>
-						<li>The Excluded filter shows only excluded transactions.</li>
+						<li>
+							Choose Excluded in the Show choice on Transactions to see only the
+							excluded ones.
+						</li>
 					</ul>
 					{hasTransactions ? (
 						<>
