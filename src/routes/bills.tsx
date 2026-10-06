@@ -267,11 +267,22 @@ async function page(
 			frequency: bill.frequency,
 			active: true,
 		})),
-		occurrences: active.flatMap((bill) =>
-			bill.totalOccurrences.map((occurrence) => ({
-				billId: bill.id,
-				...occurrence,
-			})),
+		displayedOccurrences: active.map((bill) => ({
+			billId: bill.id,
+			dueDate: bill.dueDate,
+			status: bill.status,
+			amountCents: bill.amountCents,
+			paidCents: bill.paidCents,
+		})),
+		thisMonthOccurrences: active.flatMap((bill) =>
+			bill.totalOccurrences
+				.filter((occurrence) =>
+					occurrence.dueDate.startsWith(today.slice(0, 7)),
+				)
+				.map((occurrence) => ({
+					billId: bill.id,
+					...occurrence,
+				})),
 		),
 	});
 	return c.html(

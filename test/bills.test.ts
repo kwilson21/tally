@@ -159,6 +159,78 @@ describe("Bills", () => {
 				);
 		},
 	);
+	it.each([true, false])(
+		"keeps October headings equal to their rendered rows when the September occurrence is %s present",
+		async (includeOverdueBill) => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date("2026-10-08T16:00:00Z"));
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await env.DB.prepare("DELETE FROM bills").run();
+			if (includeOverdueBill) {
+				await env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9398,'Monthly occurrence fixture',10000,28,'monthly',5,'MONTHLY OCCURRENCE FIXTURE')",
+				).run();
+			}
+			await env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9397,'Upcoming fixture',5000,20,'monthly',5,'UPCOMING FIXTURE')",
+			).run();
+			const transaction = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
+			).first<{ id: number }>();
+			expect(transaction).toBeDefined();
+			await env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9397,'2026-09',?,'user','linked')",
+			)
+				.bind(transaction?.id ?? 0)
+				.run();
+
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills")
+			).text();
+			const sections = [
+				...html.matchAll(/<section class="mt-4">([\s\S]*?)<\/section>/g),
+			];
+			const groups = new Map<string, { total: number; rowTotal: number }>();
+			for (const [, section] of sections) {
+				const heading = section?.match(
+					/<h2[^>]*>[\s\S]*?<span class="ml-auto shrink-0">\$([\d,]+\.\d{2})/,
+				);
+				if (!heading || !section) continue;
+				const title = section.match(
+					/>(Overdue|Due in the next 7 days|Upcoming|Paid this month)<\/span>/,
+				)?.[1];
+				if (!title) continue;
+				const rows = [
+					...section.matchAll(
+						/<span class="shrink-0 text-lg">\$([\d,]+\.\d{2})<\/span>/g,
+					),
+				];
+				const cents = (value: string) =>
+					Math.round(Number(value.replaceAll(",", "")) * 100);
+				const headingTotal = heading[1];
+				if (!headingTotal) continue;
+				groups.set(title, {
+					total: cents(headingTotal),
+					rowTotal: rows.reduce(
+						(sum, row) => sum + (row[1] ? cents(row[1]) : 0),
+						0,
+					),
+				});
+			}
+			expect(groups.size).toBe(includeOverdueBill ? 2 : 1);
+			for (const group of groups.values())
+				expect(group.total).toBe(group.rowTotal);
+			if (includeOverdueBill) expect(groups.get("Overdue")?.total).toBe(10000);
+			else expect(groups.has("Overdue")).toBe(false);
+			expect(groups.get("Upcoming")?.total).toBe(5000);
+			// October still to pay is October's $100 + $50 = $150; September's $100 is overdue but wasn't due this month.
+			expect(html).toContain(
+				includeOverdueBill
+					? "$150 still to pay in October"
+					: "$50 still to pay in October",
+			);
+		},
+	);
 
 	it("has a How this works link to the Bills section, under the status sentence (decision 84)", async () => {
 		const html = await (

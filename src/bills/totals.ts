@@ -32,7 +32,14 @@ type BillTotalInput = {
 		frequency: BillTotalFrequency;
 		active: boolean;
 	}[];
-	occurrences: {
+	displayedOccurrences: {
+		billId: number;
+		dueDate: string;
+		status: BillStatus;
+		amountCents: number;
+		paidCents: number;
+	}[];
+	thisMonthOccurrences: {
 		billId: number;
 		dueDate: string;
 		status: BillStatus;
@@ -44,7 +51,8 @@ type BillTotalInput = {
 export function calculateBillTotals({
 	month,
 	bills,
-	occurrences,
+	displayedOccurrences,
+	thisMonthOccurrences,
 }: BillTotalInput) {
 	const activeIds = new Set(
 		bills.filter((bill) => bill.active).map((bill) => bill.id),
@@ -62,7 +70,7 @@ export function calculateBillTotals({
 		paidCents: 0,
 	};
 	let stillToPayCents = 0;
-	for (const occurrence of occurrences) {
+	for (const occurrence of displayedOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
 		const left = Math.max(0, occurrence.amountCents - occurrence.paidCents);
 		const key =
@@ -72,7 +80,14 @@ export function calculateBillTotals({
 			occurrence.dueDate.startsWith(month)
 		)
 			groups[key] += left;
-		if (occurrence.dueDate.startsWith(month)) stillToPayCents += left;
+	}
+	for (const occurrence of thisMonthOccurrences) {
+		if (!activeIds.has(occurrence.billId)) continue;
+		if (occurrence.dueDate.startsWith(month))
+			stillToPayCents += Math.max(
+				0,
+				occurrence.amountCents - occurrence.paidCents,
+			);
 	}
 	return { monthlyCents, stillToPayCents, groups };
 }

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { BillStatus } from "../src/bills/status";
 import { calculateBillTotals } from "../src/bills/totals";
 
 const bill = (
@@ -26,7 +25,8 @@ describe("bill totals", () => {
 				calculateBillTotals({
 					month: "2026-10",
 					bills: [bill(amountCents, frequency)],
-					occurrences: [],
+					displayedOccurrences: [],
+					thisMonthOccurrences: [],
 				}).monthlyCents,
 			).toBe(expected);
 		},
@@ -36,7 +36,7 @@ describe("bill totals", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(5000), { ...bill(12000, "yearly"), id: 2 }],
-			occurrences: [
+			displayedOccurrences: [
 				{
 					billId: 5000,
 					dueDate: "2026-10-02",
@@ -52,8 +52,65 @@ describe("bill totals", () => {
 					paidCents: 0,
 				},
 			],
+			thisMonthOccurrences: [
+				{
+					billId: 5000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 5000,
+					paidCents: 0,
+				},
+			],
 		});
 		expect(totals.stillToPayCents).toBe(5000);
+	});
+
+	it("uses displayed occurrences for headings and all October occurrences for still to pay", () => {
+		const upcomingBill = { ...bill(5000), id: 2 };
+		const bills = [bill(10000), upcomingBill];
+		const septemberDisplayed = {
+			billId: 10000,
+			dueDate: "2026-09-28",
+			status: "overdue" as const,
+			amountCents: 10000,
+			paidCents: 0,
+		};
+		const octoberDisplayed = {
+			billId: 2,
+			dueDate: "2026-10-20",
+			status: "upcoming" as const,
+			amountCents: 5000,
+			paidCents: 0,
+		};
+		const octoberOccurrence = {
+			billId: 10000,
+			dueDate: "2026-10-28",
+			status: "upcoming" as const,
+			amountCents: 10000,
+			paidCents: 0,
+		};
+		const displayedOccurrences = [septemberDisplayed, octoberDisplayed];
+		const octoberOccurrences = [octoberOccurrence, octoberDisplayed];
+		const withOverdueBill = calculateBillTotals({
+			month: "2026-10",
+			bills,
+			displayedOccurrences,
+			thisMonthOccurrences: octoberOccurrences,
+		});
+		expect(withOverdueBill.groups.overdueCents).toBe(10000);
+		expect(withOverdueBill.groups.upcomingCents).toBe(5000);
+		// Issue #207: October still to pay is October's $100 + $50 = $150. September's $100 is the separate overdue row, not due this month.
+		expect(withOverdueBill.stillToPayCents).toBe(15000);
+
+		const withoutOverdueBill = calculateBillTotals({
+			month: "2026-10",
+			bills: [upcomingBill],
+			displayedOccurrences: [octoberDisplayed],
+			thisMonthOccurrences: [octoberDisplayed],
+		});
+		expect(withoutOverdueBill.groups.overdueCents).toBe(0);
+		expect(withoutOverdueBill.groups.upcomingCents).toBe(5000);
+		expect(withoutOverdueBill.stillToPayCents).toBe(5000);
 	});
 
 	it.each([
@@ -67,7 +124,7 @@ describe("bill totals", () => {
 			const totals = calculateBillTotals({
 				month: today.slice(0, 7),
 				bills: [bill(10000)],
-				occurrences: [
+				displayedOccurrences: [
 					{
 						billId: 10000,
 						dueDate: displayedDate,
@@ -75,19 +132,23 @@ describe("bill totals", () => {
 						amountCents: 10000,
 						paidCents: 0,
 					},
-					...(displayedDate.slice(0, 7) === today.slice(0, 7)
-						? []
-						: [
-								{
-									billId: 10000,
-									dueDate: "2026-10-20",
-									status: (today >= "2026-10-20"
-										? "overdue"
-										: "upcoming") as BillStatus,
-									amountCents: 10000,
-									paidCents: 0,
-								},
-							]),
+				],
+				thisMonthOccurrences: [
+					{
+						billId: 10000,
+						dueDate:
+							displayedDate.slice(0, 7) === today.slice(0, 7)
+								? displayedDate
+								: "2026-10-20",
+						status:
+							displayedDate.slice(0, 7) === today.slice(0, 7)
+								? displayedStatus
+								: today >= "2026-10-20"
+									? "overdue"
+									: "upcoming",
+						amountCents: 10000,
+						paidCents: 0,
+					},
 				],
 			});
 			expect(totals.stillToPayCents).toBe(stillToPayCents);
@@ -97,7 +158,7 @@ describe("bill totals", () => {
 					totals.groups.dueCents +
 					totals.groups.upcomingCents +
 					totals.groups.paidCents,
-			).toBe(displayedDate.slice(0, 7) === today.slice(0, 7) ? 10000 : 20000);
+			).toBe(10000);
 		},
 	);
 
@@ -108,7 +169,7 @@ describe("bill totals", () => {
 				{ ...bill(18800), id: 1 },
 				{ ...bill(45000), id: 2 },
 			],
-			occurrences: [
+			displayedOccurrences: [
 				{
 					billId: 1,
 					dueDate: "2026-10-20",
@@ -124,6 +185,15 @@ describe("bill totals", () => {
 					paidCents: 0,
 				},
 			],
+			thisMonthOccurrences: [
+				{
+					billId: 1,
+					dueDate: "2026-10-20",
+					status: "upcoming",
+					amountCents: 18800,
+					paidCents: 0,
+				},
+			],
 		});
 		expect(totals.groups.upcomingCents).toBe(18800);
 	});
@@ -132,7 +202,16 @@ describe("bill totals", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(10000, "monthly", false)],
-			occurrences: [
+			displayedOccurrences: [
+				{
+					billId: 10000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 10000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
 				{
 					billId: 10000,
 					dueDate: "2026-10-02",
@@ -150,7 +229,16 @@ describe("bill totals", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(120000)],
-			occurrences: [
+			displayedOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 120000,
+					paidCents: 60000,
+				},
+			],
+			thisMonthOccurrences: [
 				{
 					billId: 120000,
 					dueDate: "2026-10-02",
