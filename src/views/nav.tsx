@@ -6,13 +6,13 @@ export type NavKey =
 	| "bills"
 	| "trends"
 	| "accounts"
-	| "documents"
 	| "settings"
 	| "more";
 
 type NavItem = { key: NavKey; label: string; href: string; icon: IconName };
 
-// Desktop sidebar shows every destination; phone tabs show four plus "More".
+// Desktop sidebar shows every destination; phone tabs show four plus "More". Documents isn't
+// listed: it isn't built until receipts are (decisions 66 and 82), so no menu item leads to it.
 export const SIDEBAR_ITEMS: NavItem[] = [
 	{ key: "home", label: "Home", href: "/", icon: "home" },
 	{
@@ -24,12 +24,6 @@ export const SIDEBAR_ITEMS: NavItem[] = [
 	{ key: "bills", label: "Bills", href: "/bills", icon: "bills" },
 	{ key: "trends", label: "Trends", href: "/trends", icon: "trends" },
 	{ key: "accounts", label: "Accounts", href: "/accounts", icon: "accounts" },
-	{
-		key: "documents",
-		label: "Documents",
-		href: "/documents",
-		icon: "documents",
-	},
 	{ key: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
 
@@ -38,7 +32,7 @@ const TAB_ITEMS: NavItem[] = [
 	{ key: "more", label: "More", href: "/more", icon: "more" },
 ];
 
-const MORE_KEYS: NavKey[] = ["accounts", "documents", "settings", "more"];
+const MORE_KEYS: NavKey[] = ["accounts", "settings", "more"];
 
 function isCurrent(item: NavItem, active?: NavKey) {
 	if (item.key === "more")
