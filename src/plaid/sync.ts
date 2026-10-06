@@ -1,3 +1,4 @@
+import { householdToday } from "../dates";
 import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import {
@@ -121,6 +122,35 @@ function accountUpsert(
 		lockId,
 		balance,
 	);
+}
+
+/**
+ * Today's balance of each account Plaid gave one for, for the net-worth chart (spec §5, §8.3): one
+ * row per account per household day, and a later sync the same day overwrites it. It's the same
+ * `balances.current` the account row takes, so a card's is the amount owed, positive.
+ */
+function balanceSnapshots(
+	env: SyncEnv,
+	itemRowId: number,
+	lockId: string,
+	today: string,
+	accounts: PlaidAccount[],
+): D1PreparedStatement[] {
+	return accounts.flatMap((account) => {
+		const current = account.balances.current;
+		if (current === null || current === undefined) return [];
+		return env.DB.prepare(
+			`INSERT INTO balance_history (account_id, date, balance_cents)
+			 SELECT id, ?, ? FROM accounts WHERE plaid_account_id = ? AND ${OWNS_LOCK}
+			 ON CONFLICT(account_id, date) DO UPDATE SET balance_cents = excluded.balance_cents`,
+		).bind(
+			today,
+			plaidAmountToCents(current),
+			account.account_id,
+			itemRowId,
+			lockId,
+		);
+	});
 }
 
 async function handlePlaidError(
@@ -299,6 +329,16 @@ export async function syncItem(
 				for (const account of accounts) {
 					statements.push(accountUpsert(env, itemRowId, lockId, account));
 				}
+				// After the upserts, so a newly seen account already has its row to snapshot.
+				statements.push(
+					...balanceSnapshots(
+						env,
+						itemRowId,
+						lockId,
+						await householdToday(env.DB),
+						accounts,
+					),
+				);
 			}
 			const firstAddedStatement = statements.length;
 			for (const transaction of posted) {

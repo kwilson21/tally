@@ -19,6 +19,7 @@ import { MoneyInput } from "../views/money-input";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
+import { netWorthViewEnding } from "./mock";
 import { Fixed, Options } from "./proposal-parts";
 import { Specimen } from "./specimen";
 
@@ -584,7 +585,10 @@ function AccountLink({ name, mask, cents, credit }: AccountLinkProps) {
 
 const accountLinks = (
 	<>
-		<AccountsTop netWorthCents={2340000} />
+		<AccountsTop
+			netWorthCents={2340000}
+			history={netWorthViewEnding(2340000)}
+		/>
 		<p class="mt-4 text-muted">Tap an account to see its transactions.</p>
 		<section class="mt-4">
 			<h2 class="text-muted">Chase</h2>

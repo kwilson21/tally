@@ -20,6 +20,30 @@ export function budgetExample(
 	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent${bills} = ${formatCents(s.safeToSpendCents)} safe to spend.`;
 }
 
+/**
+ * Net worth in two sums, from the accounts Accounts adds up (a disconnected bank's are left out, as
+ * its headline does): what they hold, less what is owed. Null when no account counts.
+ */
+export function netWorthExample(
+	accounts: {
+		balanceCents: number;
+		isLiability: boolean;
+		connected?: boolean;
+	}[],
+): string | null {
+	const counted = accounts.filter((a) => a.connected !== false);
+	if (counted.length === 0) return null;
+	const held = counted
+		.filter((a) => !a.isLiability)
+		.reduce((sum, a) => sum + a.balanceCents, 0);
+	const owed = counted
+		.filter((a) => a.isLiability)
+		.reduce((sum, a) => sum + a.balanceCents, 0);
+	if (owed === 0)
+		return `${formatCents(held)} in accounts and nothing owed, so net worth is ${formatCents(held)}.`;
+	return `${formatCents(held)} in accounts − ${formatCents(owed)} owed = ${formatCents(held - owed)} net worth.`;
+}
+
 export function transactionsExample(c: {
 	counted: number;
 	needsCategory: number;
