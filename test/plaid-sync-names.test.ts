@@ -308,6 +308,39 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 	});
 
 	describe("one bank text with different Plaid names suggests the newest (decision 79)", () => {
+		it("keeps a shared Plaid name while it is still newest for an untouched bank text", async () => {
+			const id = await addItem();
+			await syncPages(id, [
+				{
+					added: [
+						transaction({
+							transaction_id: "a",
+							name: "TARGET STORE 1111",
+							merchant_name: "Target",
+						}),
+						transaction({
+							transaction_id: "b",
+							name: "TARGET SHOP 2222",
+							merchant_name: "Target",
+						}),
+					],
+					hasMore: true,
+				},
+				{
+					added: [
+						transaction({
+							transaction_id: "a-new",
+							name: "TARGET STORE 1111",
+							date: "2026-10-01",
+							merchant_name: "Target Corp",
+						}),
+					],
+				},
+			]);
+
+			expect(await pendingNames()).toEqual(["Target", "Target Corp"]);
+		});
+
 		it("suggests the newer name when it arrives in a later sync, and withdraws the older one", async () => {
 			const id = await addItem();
 			await sync(id, {

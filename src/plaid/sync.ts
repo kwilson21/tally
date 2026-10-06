@@ -125,7 +125,8 @@ const suggestPlaidNamesSql = (ownsLock: string) =>
 
 /**
  * Withdraws the waiting suggestion of a Plaid name that is no longer the newest for a bank text (spec §8.6,
- * decision 79). One `?`: the bank texts to look at, a JSON array of `[text, text tidied]` pairs. A row is
+ * decision 79). One `?`: the bank texts to look at, a JSON array of `[text, text tidied]` pairs. It
+ * includes every text using a Plaid name changed on this page, so a shared name stays while newest for any text. A row is
  * the bank's own suggestion when its suggested name is its key (src/transactions/name-suggestions.ts), and
  * it is withdrawn only when nobody has named it, it has a charge with one of these bank texts, and it is
  * the newest Plaid name (latest date, then latest id) for none of its charges' bank texts.
@@ -811,6 +812,30 @@ export async function syncItem(
 					.bind(JSON.stringify(changing))
 					.all<{ raw_name: string }>();
 				for (const row of results) textsOfCharges.add(row.raw_name);
+			}
+			if (textsOfCharges.size > 0) {
+				const names = new Set<string>();
+				const current = await env.DB.prepare(
+					`SELECT DISTINCT merchant_name FROM transactions
+					 WHERE parent_id IS NULL AND raw_name IN (SELECT value FROM json_each(?))
+					   AND NULLIF(merchant_name, '') IS NOT NULL`,
+				)
+					.bind(JSON.stringify([...textsOfCharges]))
+					.all<{ merchant_name: string }>();
+				for (const row of current.results) names.add(row.merchant_name);
+				for (const transaction of [...added, ...page.modified]) {
+					const name = merchantNameOf(transaction);
+					if (name) names.add(name);
+				}
+				if (names.size > 0) {
+					const related = await env.DB.prepare(
+						`SELECT DISTINCT raw_name FROM transactions
+						 WHERE parent_id IS NULL AND merchant_name IN (SELECT value FROM json_each(?))`,
+					)
+						.bind(JSON.stringify([...names]))
+						.all<{ raw_name: string }>();
+					for (const row of related.results) textsOfCharges.add(row.raw_name);
+				}
 			}
 			if (textsOfCharges.size > 0) {
 				const texts = JSON.stringify(
