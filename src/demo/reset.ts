@@ -1,5 +1,6 @@
 import { matchBillPayments } from "../bills/match";
 import { DEFAULT_TIME_ZONE, daysBefore } from "../dates";
+import { storeSuggestedNames } from "../transactions/name-suggestions";
 import {
 	buildSeed,
 	monthOffset,
@@ -125,9 +126,16 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 		...seed.merchants.map((m) =>
 			db
 				.prepare(
-					"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, ?, ?, ?)",
+					"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill, suggested_name, suggestion_status) VALUES (?, ?, ?, ?, ?, ?)",
 				)
-				.bind(m.key, m.displayName, m.defaultCategoryId, m.notABill ? 1 : 0),
+				.bind(
+					m.key,
+					m.displayName,
+					m.defaultCategoryId,
+					m.notABill ? 1 : 0,
+					m.suggestedNames ? storeSuggestedNames(m.suggestedNames) : null,
+					m.suggestedNames ? "pending" : "none",
+				),
 		),
 		...seed.budgetAmounts.map((a) =>
 			db

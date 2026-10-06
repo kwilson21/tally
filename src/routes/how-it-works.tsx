@@ -394,6 +394,31 @@ howItWorks.get("/how-it-works", async (c) => {
 					)}
 				</Section>
 
+				<Section id="names" title="Store names">
+					<p class="mt-2">
+						The list shows what your bank printed, tidied by code. Tally can
+						also guess a clean name for it, and you decide whether to use it.
+					</p>
+					<ul class="mt-3 list-disc space-y-1 pl-5">
+						<li>
+							A name Tally guessed shows with a sparkles icon and a dashed
+							underline. It stays a guess: nothing is renamed until you choose
+							it.
+						</li>
+						<li>
+							You choose in a transaction's edit panel, or in Settings under
+							Merchant names. Pick a suggestion, keep the bank's name, or type
+							your own. A name you typed always wins.
+						</li>
+						<li>
+							Tally asks once for each bank text, overnight, and only for texts
+							your bank sent no name for. Turn it off with Suggest store names
+							in Settings; guesses already made wait, hidden, until you turn it
+							back on.
+						</li>
+					</ul>
+				</Section>
+
 				<Section id="bills" title="Bills">
 					<p class="mt-2">
 						Tally matches each bill occurrence to at most one payment, while you

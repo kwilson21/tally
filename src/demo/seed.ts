@@ -33,6 +33,8 @@ export type SeedMerchant = {
 	defaultCategoryId: number | null;
 	/** "Not a bill" (decision 60): the finder never suggests this merchant. */
 	notABill?: boolean;
+	/** Names Tally guessed for it, up to three, waiting for a person (spec §7), so suggestions show right after a reset. */
+	suggestedNames?: string[];
 };
 export type SeedTransaction = {
 	id?: number;
@@ -231,6 +233,15 @@ const THIS_MONTH: [number, string, number, number][] = [
 	[7, "THE HOME DEPOT #6612", HOUSEHOLD, 6125],
 	[13, "AMAZON.COM*RT4K2", HOUSEHOLD, 3375],
 ];
+
+// Names Tally "guessed" for a few of the unnamed merchants below, as Workers AI would suggest them (spec §7).
+// They show dashed in the list until a person chooses, and the demo never calls Workers AI itself.
+const GUESSED_NAMES: Record<string, string[]> = {
+	"TST* CORNER DELI": ["Corner Deli Cafe"],
+	"SP * CRAFTSUPPLY": ["Craft Supply Co", "Craft Supply"],
+	"CHECKCARD 0921 CVS": ["CVS Pharmacy", "CVS Health"],
+	"POS 4417 CITY PARKING": ["City Parking Garage", "City Parking Lot"],
+};
 
 // This month, uncategorized (12 transactions, $228.01): [targetDay, rawName, cents, displayName].
 const UNCATEGORIZED: [number, string, number, string | null][] = [
@@ -543,6 +554,7 @@ export function buildSeed(today: string): Seed {
 			key: seedMerchantKey(rawName),
 			displayName,
 			defaultCategoryId: null,
+			suggestedNames: GUESSED_NAMES[rawName],
 		})),
 		{
 			key: "Farmers market",

@@ -275,6 +275,14 @@ describe("resetDemo", () => {
 		expect(row?.raw_name).toBe("SQ *LOCAL BAKERY 4432");
 	});
 
+	it("gives the Craft Supply charge id 116, whose merchant has guessed names, which the names edit-sheet screenshot uses", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const row = await env.DB.prepare(
+			"SELECT raw_name FROM transactions WHERE id = 116",
+		).first<{ raw_name: string }>();
+		expect(row?.raw_name).toBe("SP * CRAFTSUPPLY");
+	});
+
 	it("gives a Jev-picked Trader Joe's id 94, which the Jev edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		const row = await env.DB.prepare(
@@ -309,6 +317,31 @@ describe("resetDemo", () => {
 			WHERE NOT EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")})`,
 		).first<{ n: number }>();
 		expect(unresolved?.n).toBe(0);
+	});
+
+	it("seeds a few names Tally guessed, waiting for a person, on merchants nobody named (the demo never calls Workers AI)", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const { results } = await env.DB.prepare(
+			"SELECT raw_name, suggested_name, display_name FROM merchants WHERE suggestion_status = 'pending' ORDER BY raw_name",
+		).all<{
+			raw_name: string;
+			suggested_name: string;
+			display_name: string | null;
+		}>();
+		expect(results.map((m) => m.raw_name)).toEqual([
+			"CHECKCARD 0921 CVS",
+			"POS 4417 CITY PARKING",
+			"SP * CRAFTSUPPLY",
+			"TST* CORNER DELI",
+		]);
+		// Up to three names, one per line, and none of them chosen.
+		for (const m of results) {
+			expect(m.display_name).toBeNull();
+			expect(m.suggested_name.split("\n").length).toBeLessThanOrEqual(3);
+		}
+		expect(
+			results.find((m) => m.raw_name === "SP * CRAFTSUPPLY"),
+		).toMatchObject({ suggested_name: "Craft Supply Co\nCraft Supply" });
 	});
 
 	it("gives the seed's Jev-categorized rows a matching Jev pick", async () => {

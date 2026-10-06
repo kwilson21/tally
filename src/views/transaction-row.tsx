@@ -3,6 +3,7 @@ import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
+import { GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
 
 type Caption = {
 	kind: "category" | "income" | "excluded" | "needs";
@@ -156,11 +157,24 @@ export function TransactionRow({
 			>
 				<RowIcon row={row} kind={kind} />
 				<span class="min-w-0 flex-1">
-					<span
-						class={`block truncate text-lg leading-6 ${kind === "excluded" ? "text-muted" : ""}`}
-					>
-						{row.displayName}
-					</span>
+					{row.nameSuggested ? (
+						// A name Tally guessed: the sparkles icon before it, and the dashed underline that says
+						// "not decided yet" (P29 A, P87 B, decisions 64 and 80). Both are for the eye; the words are for a screen reader.
+						<span
+							class={`flex min-w-0 items-center gap-2 text-lg leading-6 ${kind === "excluded" ? "text-muted" : ""}`}
+						>
+							<GuessMark />
+							<span class={`truncate ${SUGGESTED_NAME_CLASS}`}>
+								{row.displayName}
+							</span>
+						</span>
+					) : (
+						<span
+							class={`block truncate text-lg leading-6 ${kind === "excluded" ? "text-muted" : ""}`}
+						>
+							{row.displayName}
+						</span>
+					)}
 					<span class="flex min-w-0 items-center gap-2 leading-6">
 						{pendingFirst && (
 							<span class="shrink-0 text-muted">

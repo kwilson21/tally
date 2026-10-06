@@ -348,6 +348,62 @@ describe("adding a clearer name to a transaction that still needs a category", (
 		expect(waitUntil).not.toHaveBeenCalled();
 		expect(jev.bodies).toHaveLength(0);
 	});
+
+	it("asks when a panel that says what it showed (merchant_was) has its name changed", async () => {
+		const jev = fakeJev();
+		await save(bakery, {
+			category: "",
+			merchant_was: "Local Bakery",
+			merchant: "Neighborhood Bakery",
+			note: "",
+		});
+		expect(waitUntil).toHaveBeenCalledTimes(1);
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+	});
+
+	it("doesn't ask when an out-of-date panel is saved after another tab renamed the merchant, and keeps the new name", async () => {
+		const jev = fakeJev();
+		// The panel was drawn with "Local Bakery"; another tab renamed the merchant since.
+		await db
+			.prepare(
+				"UPDATE merchants SET display_name = 'Corner Bakery' WHERE display_name = 'Local Bakery'",
+			)
+			.run();
+		await save(bakery, {
+			category: "",
+			merchant_was: "Local Bakery",
+			merchant: "Local Bakery",
+			note: "",
+		});
+		expect(waitUntil).not.toHaveBeenCalled();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await callsUsed()).toBe(0);
+		const name = await db
+			.prepare(
+				"SELECT display_name FROM merchants WHERE display_name LIKE '%Bakery'",
+			)
+			.first<{ display_name: string }>();
+		expect(name?.display_name).toBe("Corner Bakery");
+	});
+
+	it("doesn't ask when a panel that showed no name is saved after another tab chose one", async () => {
+		const jev = fakeJev();
+		const deli = await idOf("TST* CORNER DELI");
+		await db
+			.prepare(
+				"UPDATE merchants SET display_name = 'Deli Counter', suggestion_status = 'accepted' WHERE raw_name = 'TST* CORNER DELI'",
+			)
+			.run();
+		await save(deli, {
+			category: "",
+			merchant_was: "",
+			merchant: "",
+			note: "",
+		});
+		expect(waitUntil).not.toHaveBeenCalled();
+		expect(jev.bodies).toHaveLength(0);
+	});
 });
 
 describe("asking again honors what everything else does", () => {

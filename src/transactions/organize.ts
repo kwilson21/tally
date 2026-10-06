@@ -6,6 +6,7 @@ import {
 	INCLUDED_ROW,
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
+import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
@@ -158,7 +159,8 @@ export async function saveOrganizeGroup(
 				.prepare(
 					`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)
 					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
-						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END`,
+						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
+						${SETTLE_SUGGESTION_SQL}`,
 				)
 				.bind(merchantKey, displayName, categoryId, displayName),
 		);

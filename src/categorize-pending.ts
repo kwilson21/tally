@@ -1,4 +1,5 @@
-// The nightly categorization step (spec §7): merchant rules first, then Jev for the rest.
+// The nightly categorization step (spec §7): merchant rules first, then Jev for the rest. Production
+// makes it twice a morning, in two runs of their own (src/index.tsx); the demo makes it once.
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { decide } from "./ai/decide";
 import { householdTimeZone, todayIn } from "./dates";
@@ -10,13 +11,14 @@ import {
 	pendingForJev,
 	saveJevResult,
 } from "./db/transactions";
+import { type Deadline, pastDeadline } from "./run-budget";
 
 /**
  * How many transactions Jev is asked about in a day (decisions 56 and 68). The demo's reset needs few.
- * Production sorts a new bank's backfill in a day; each answer is saved as it arrives,
- * so a run cut short keeps its work, and the rest wait for the next run. The count is the household's
+ * Production's 500 lets a new bank's backfill be sorted in a day or two; each answer is saved as it
+ * arrives, so a run cut short keeps its work, and the rest wait for the next run. The count is the household's
  * whole day, midnight to midnight in its time zone, shared by the runs right after a sync and the
- * nightly run (db/jev-calls.ts).
+ * nightly runs (db/jev-calls.ts).
  */
 export const jevCallLimit = (env: { DEMO?: string }) =>
 	env.DEMO === "false" ? 500 : 40;
@@ -24,16 +26,16 @@ export const jevCallLimit = (env: { DEMO?: string }) =>
 /**
  * The most calls one run makes, whatever the day's cap still allows; what's left waits for the next
  * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read
- * before it and after it, and saving its answer), plus a few for the run's setup. A nightly invocation
- * has also synced the banks before it asks anything, and that spends queries too, so a run stays well
- * under: 300 calls is about 900 queries, and the rest of the room is the sync's.
+ * before it and after it, and saving its answer), plus a few for the run's setup: 300 calls is about 900
+ * queries. So production's 09:40 run does nothing else, and the sync (09:00) and the names with the first
+ * pass (09:20, where 100 names and 200 calls are about the same) are runs of their own.
  */
 export const MAX_CALLS_PER_RUN = 300;
 
 /**
  * The most transactions the run right after a sync asks about, newest first among that sync's own.
  * A sync that imports a lot of rows has already spent most of its invocation's 1,000 queries saving
- * them, so this run stays small (50 calls is about 150 queries); the rest wait for the nightly run.
+ * them, so this run stays small (50 calls is about 150 queries); the rest wait for the nightly runs.
  */
 export const AFTER_SYNC_BATCH = 50;
 
@@ -42,26 +44,32 @@ const MAX_FAILURES_IN_A_ROW = 3;
 
 type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
 
-/** What a run is asked to do, beyond the default of the nightly run. */
+/** What a run is asked to do, beyond the default of a nightly run. */
 export type PassOptions = {
-	// The nightly catch-up has just applied merchant rules after its syncs; without banks (the demo)
-	// or when that step failed, this run applies them itself.
+	// The demo's one run may have just applied merchant rules after a sync; without banks (the demo)
+	// or when that step failed, this run applies them itself. Production's sorting runs always do.
 	rulesApplied?: boolean;
 	/**
 	 * Ask only about these transaction rows (their ids), and only the ones still unsorted once the
 	 * rules have run: what one sync just brought in, or the one transaction a person added a note to.
-	 * Everything else waits for the nightly run, which has no list.
+	 * Everything else waits for the nightly runs, which have no list.
 	 */
 	onlyIds?: number[];
 	/** The run was started by a sync, so it also stops when "sort as they arrive" is turned off. */
 	bySync?: boolean;
 	/** Ask about at most this many (newest first), fewer than the most a run may; the rest wait. */
 	maxCalls?: number;
+	/**
+	 * Start no new call once this deadline has passed (src/run-budget.ts), so a slow Jev can't use up the
+	 * rest of the run. What it didn't ask is given back to the day, and waits for the next run. The syncs'
+	 * runs and the re-ask have none.
+	 */
+	time?: Deadline;
 };
 
 /**
  * Merchant rules, then Jev for what they left, honoring the household's saved AI switches (spec
- * §8.6, decision 73), so the nightly run and a run after a sync agree: with categories and income
+ * §8.6, decision 73), so the nightly runs and a run after a sync agree: with categories and income
  * both off Jev isn't asked at all, with categories off its category and its transfer and
  * reimbursement flags are dropped, and with income off its income answer is. The switches can be
  * saved while a run is going, so each transaction reads them again before it's sent and before its
@@ -82,6 +90,7 @@ export async function categorizePending(
 		onlyIds,
 		bySync = false,
 		maxCalls = MAX_CALLS_PER_RUN,
+		time,
 	}: PassOptions = {},
 ): Promise<{ asked: number; applied: number }> {
 	const done = { asked: 0, applied: 0 };
@@ -111,7 +120,7 @@ export async function categorizePending(
 		categories: start.categories,
 		ids: onlyIds,
 	});
-	if (waiting.length === 0) return done;
+	if (waiting.length === 0 || pastDeadline(time)) return done;
 	// The day's cap is shared with every other run: take what's wanted and left in one step.
 	const granted = await reserveJevCalls(env.DB, day, cap, waiting.length);
 	if (granted === 0) return done;
@@ -121,6 +130,11 @@ export async function categorizePending(
 		for (const tx of waiting.slice(0, granted)) {
 			// Past the household's midnight the calls belong to the next day, which this run didn't reserve.
 			if (todayIn(timeZone) !== day) return done;
+			// Out of time: the calls not asked are given back below, and the next run asks about them.
+			if (pastDeadline(time)) {
+				console.log("jev: stopped at the time budget");
+				return done;
+			}
 			// One small read per transaction: someone may have turned a switch off since the last one.
 			const before = await readAiSwitches(env.DB);
 			if (!asksJev(before) || (bySync && !before.sortOnArrival)) return done;

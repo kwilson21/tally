@@ -45,6 +45,7 @@ import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
+import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
@@ -421,6 +422,25 @@ const SWITCH_SPEC: UseSpecText = {
 		"A long name or line wraps beside the switch and never under it; the word and the track keep their width. With no muted line it is the name alone. No JavaScript: it's a plain checkbox that posts “on” when on and nothing when off, so the server reads a field left out as off, and the form always carries the whole group. At 320px the row still fits the name, word and track side by side.",
 	words:
 		"The label is the person's word for the feature (“Categories and exclusions”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Categories and exclusions on, income off.",
+};
+
+// The merchant-name choices' use spec (decision 64, P29 A, decision 80, P87 B): every line answered before the owner signs it off.
+const NAME_CHOICES_SPEC: UseSpecText = {
+	purpose:
+		"Let a person decide what a merchant is called when Tally has guessed names for it: take one of the guesses, keep the bank's own text tidied, or type their own. Nothing is renamed until they do.",
+	affordance:
+		"Up to three guessed names as pill choices, with the sparkles icon, “Tally's guess” and a Why? under them, then a pill that says Keep with the bank's text tidied, then a field called “Or your own”, then a muted line saying how many transactions the name is for. Each pill is 44px tall and a real radio button. Nothing is chosen to start with, so saving the panel for another reason never renames the merchant.",
+	states:
+		"Resting: no pill chosen, the field empty. Chosen: the pill shows an ink border and a pale fill (never color alone: the choice is also the one ticked for a screen reader), and only one of the names or Keep can be chosen. Typing: a name in the field wins over a pill. Hover: no change. Focus: the focus-visible ring around the pill or the field. Error: the field's message in role=alert and the field shaking once (“Keep the name under 80 characters.”, “Pick one of the names shown.”); what was chosen and typed stays. Disabled and loading: not applicable; the form's own Save shows its busy state.",
+	feedback:
+		"Choosing changes the pill at once. Saving swaps the panel back to the list with a toast that says what was done (“Renamed 9 transactions to Blue Bottle Coffee”, “Kept the bank's name for 9 transactions”), the announcer repeats it, and focus returns to the row. In Settings the next merchant comes up with the toast and the count left, and focus moves to the bank's text above it. Without JavaScript Save posts and redirects.",
+	input:
+		"Touch: every pill and the field are 44px tall. Keyboard: Tab to the group, the arrow keys move between the pills, Tab on to the field. Screen reader: “Name, group”; each guess reads “Blue Bottle Coffee, radio button, not checked, Tally's guess”; the Keep pill reads without it; then “Or your own, edit”, then the count.",
+	motion: "None added. Reduced motion changes nothing.",
+	edges:
+		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. With one transaction the muted line says “For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
+	words:
+		"Name · Tally's guess · Why? · Keep “{Blue bottle cof}” · Or your own · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -930,7 +950,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A pending one adds “Pending” to the same caption line in muted words, with no new tag or color (P34 A, decision 72). Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A pending one adds “Pending” to the same caption line in muted words, with no new tag or color (P34 A, decision 72). A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it (P29 A, P87 B, decisions 64 and 80). Here the rows don't link anywhere."
 			>
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
@@ -1460,6 +1480,48 @@ function Controls() {
 					</div>
 				</State>
 				<UseSpec spec={SWITCH_SPEC} />
+			</Specimen>
+			<Specimen
+				id="name-choices"
+				title="NameChoices"
+				tier="interactive"
+				components={["NameChoices"]}
+				sentence="Choosing what a merchant is called when Tally has guessed names for it (P29 A, decision 64): the guesses, with where they came from under them (P87 B, decision 80), keeping the bank's tidied text, or a name of your own. Nothing is chosen to start with, so nothing is renamed until a person decides."
+			>
+				<State label="Three guesses waiting: nothing chosen yet (tap one: it fills as it does in the edit panel)">
+					<div class="max-w-xl">
+						<NameChoices
+							id="ds-names-three"
+							names={["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"]}
+							tidied="Blue bottle cof"
+							count={9}
+						/>
+					</div>
+				</State>
+				<State label="One guess, for one transaction, with it chosen">
+					<div class="max-w-xl">
+						<NameChoices
+							id="ds-names-one"
+							names={["DoorDash"]}
+							tidied="Doordash taco"
+							count={1}
+							picked={pickValue("DoorDash")}
+						/>
+					</div>
+				</State>
+				<State label="With an error in the field">
+					<div class="max-w-xl">
+						<NameChoices
+							id="ds-names-error"
+							names={["Craft Supply Co", "Craft Supply"]}
+							tidied="Craftsupply"
+							count={2}
+							own="A very long name"
+							error="Keep the name under 80 characters."
+						/>
+					</div>
+				</State>
+				<UseSpec spec={NAME_CHOICES_SPEC} />
 			</Specimen>
 			<Specimen
 				id="time-zone-row"

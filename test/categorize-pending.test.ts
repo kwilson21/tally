@@ -437,7 +437,7 @@ describe("categorizePending", () => {
 		expect(jev.calls()).toBe(40);
 	});
 
-	it("goes past the demo's cap in production, so a new bank's backfill is sorted in a night", async () => {
+	it("goes past the demo's cap in production, so a new bank's backfill isn't held to 40 a day", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		for (let i = 0; i < 50; i++) {
 			await db
@@ -683,6 +683,36 @@ describe("categorizePending", () => {
 			await categorizePending(withKey, next.fetchImpl);
 			expect(next.calls()).toBe(12);
 			expect(await callsUsed()).toBe(13);
+		});
+
+		it("starts no new call once its deadline has passed, and gives back what it didn't ask", async () => {
+			quiet();
+			let now = 0;
+			const jev = fakeJev(() => {
+				now += 1_000;
+				return reply(0.95);
+			});
+			// Calls start at 0, 1,000 and 2,000; the next would start at 3,000, past the deadline.
+			expect(
+				await categorizePending(withKey, jev.fetchImpl, {
+					time: { deadline: 2_500, now: () => now },
+				}),
+			).toMatchObject({ asked: 3 });
+			expect(jev.calls()).toBe(3);
+			// It reserved the twelve waiting, and the other nine are free again.
+			expect(await callsUsed()).toBe(3);
+		});
+
+		it("reserves and asks nothing when its deadline has passed before it starts", async () => {
+			quiet();
+			const jev = fakeJev(() => reply(0.95));
+			expect(
+				await categorizePending(withKey, jev.fetchImpl, {
+					time: { deadline: 5_000, now: () => 5_000 },
+				}),
+			).toEqual({ asked: 0, applied: 0 });
+			expect(jev.calls()).toBe(0);
+			expect(await callsUsed()).toBe(0);
 		});
 
 		it("loses the unused part for the day, and still ends well, when giving it back fails", async () => {

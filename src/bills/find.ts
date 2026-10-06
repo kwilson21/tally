@@ -97,9 +97,8 @@ export function threeMonthsBack(today: string) {
 /** A charge's merchant key and raw name; a split part has its purchase's. */
 const CHARGE_KEY = `COALESCE(${merchantKeySql("p")},${merchantKeySql("t")})`;
 const CHARGE_RAW = "COALESCE(p.raw_name,t.raw_name)";
-const chargeMerchant = (
-	column: "display_name" | "suggested_name" | "default_category_id",
-) => merchantColumnOfSql(CHARGE_KEY, column);
+const chargeMerchant = (column: "display_name" | "default_category_id") =>
+	merchantColumnOfSql(CHARGE_KEY, column);
 
 /**
  * Suggests bills from the last three months of charges, one per merchant key. A charge is left out when
@@ -112,7 +111,7 @@ export async function loadBillSuggestions(
 ): Promise<BillSuggestion[]> {
 	const { results } = await db
 		.prepare(`SELECT ${CHARGE_KEY} AS rawName,
-	  COALESCE(${chargeMerchant("display_name")},${chargeMerchant("suggested_name")},${CHARGE_KEY}) AS displayName,
+	  COALESCE(${chargeMerchant("display_name")},${CHARGE_KEY}) AS displayName,
 	  t.date, t.amount_cents AS amountCents,
 	  CASE WHEN tc.archived=0 THEN t.category_id END AS categoryId,
 	  CASE WHEN dc.archived=0 THEN dc.id END AS defaultCategoryId
