@@ -180,6 +180,25 @@ describe("excludedBreakdown", () => {
 		});
 	});
 
+	it("counts a transaction Plaid excluded as a transfer, not a person's choice", async () => {
+		const before = await excludedBreakdown(db, MONTH);
+		// A card payment with no flag, and one Jev also flagged as a reimbursement.
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, flag_reimbursement) SELECT 9101, id, '2026-09-10', 50000, 'CARD PAYMENT', 1, 'plaid', 0 FROM accounts LIMIT 1",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, flag_reimbursement) SELECT 9102, id, '2026-09-11', 20000, 'TRANSFER OUT', 1, 'plaid', 1 FROM accounts LIMIT 1",
+			),
+		]);
+		// Plaid's word puts both with the transfers, ahead of a reimbursement flag.
+		expect(await excludedBreakdown(db, MONTH)).toEqual({
+			transfer: before.transfer + 2,
+			reimbursement: before.reimbursement,
+			byPerson: before.byPerson,
+		});
+	});
+
 	it("counts a flagged transaction a person excluded as the person's choice", async () => {
 		const before = await excludedBreakdown(db, MONTH);
 		await db
