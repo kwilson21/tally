@@ -16,6 +16,7 @@ import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { TextInput } from "../views/text-input";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { LedgerField } from "./proposals-forms";
 import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
@@ -419,7 +420,10 @@ const MONTHS = [
 	"December",
 ];
 
-/** P55 A: Plan an expense opens a sheet like Add a bill's: what it's for, the amount, the month. */
+/**
+ * P55 A: Plan an expense opens a sheet like Add a bill's: what it's for, the amount, the month.
+ * The amount is P72 A's plain amount field, since Plan an expense takes it rather than MoneyInput (decision 79, question 44).
+ */
 const planSheet = (
 	<Sheet behind={plannedBills}>
 		<h2 class="font-serif text-3xl font-semibold tracking-tight">
@@ -432,7 +436,15 @@ const planSheet = (
 				value="Car registration"
 				surface="paper"
 			/>
-			<MoneyInput id="p55-amount" name="amount" label="Amount" value="180.00" />
+			<LedgerField
+				big
+				prefix="$"
+				id="p55-amount"
+				name="amount"
+				label="Amount"
+				value="180.00"
+				inputmode="decimal"
+			/>
 			<label class="flex flex-col gap-1">
 				<span>Month</span>
 				<select
@@ -849,10 +861,10 @@ export function Phase5PlansProposals() {
 				sentence="An email when a bank needs signing in again, so sync doesn't stop unnoticed. Each picture is the email itself, as it reads on a phone."
 			>
 				<Fixed>
-					an email when a bank needs signing in again; how Tally sends email is
-					its own decision (§8.4). Fix connection lives on Accounts (§8, §10),
-					and Home flags a bank that needs attention or hasn't synced for 3 days
-					(§8.5).
+					an email when a bank needs signing in again, sent with Cloudflare's
+					own email sending, with Resend as a fallback (§8.4, decision 79). Fix
+					connection lives on Accounts (§8, §10), and Home flags a bank that
+					needs attention or hasn't synced for 3 days (§8.5).
 				</Fixed>
 				<NeedsLine settled="decision 74">
 					It goes to everyone in the family, once and then every 3 days until

@@ -1052,13 +1052,12 @@ export function Phase5HomeProposals() {
 					only with an icon and a word (DESIGN.md).
 				</Fixed>
 				<NeedsLine>
-					the sentence under the number when Safe to spend is below $0 (today's
-					still names the categories over and says “Everything else is on
-					track”), what Home says at exactly $0 (today “$0”), and how a category
-					reads when refunds outweigh its spending (gap E9; today “-$20 of
-					$250”). Already settled (decision 74): when Safe to spend is below $0,
-					Home shows “$120 over” with the alert icon and “Over budget this
-					month”.
+					how a category reads when refunds outweigh its spending (gap E9; today
+					“-$20 of $250”). At exactly $0 Home says “$0” under “Safe to spend”,
+					as today. Already settled (decision 74): when Safe to spend is below
+					$0, Home shows “$120 over” with the alert icon, and the sentence under
+					the number reads “Over budget this month. Spending more takes it
+					further over.”
 				</NeedsLine>
 				<Options
 					options={[

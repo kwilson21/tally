@@ -968,9 +968,10 @@ export function Phase35Proposals() {
 				<NeedsLine>
 					the offer only looks at payments inside §6.1's ±5-day window and not
 					already linked; if two qualify, the one closest to the due date, as
-					§6.1 picks. Nothing changes until a person taps Update the bill, which
-					links that payment and sets the new amount from this month on. Not
-					this bill remembers that payment for that month, as Not this one does.
+					§6.1 picks. Already settled (decision 72): nothing changes until a
+					person taps “Update the bill to $X”, which links that payment and
+					changes the bill's amount from this month on, and “Not this bill”
+					turns that payment away for that month, as “Not this one” does.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1023,8 +1024,9 @@ export function Phase35Proposals() {
 				</Fixed>
 				<NeedsLine>
 					a bank that both needs signing in and hasn't synced says the sign-in
-					words; with two or more banks, the line names the first and counts the
-					rest; the line goes once the bank is fixed or syncs again.
+					words. Already settled (decision 72): with two or more banks, the line
+					names the first and counts the rest (“…, and 1 other bank needs a
+					look, so …”), and it goes once the bank is fixed or syncs again.
 				</NeedsLine>
 				<Options
 					options={[

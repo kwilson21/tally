@@ -312,7 +312,7 @@ export const DECIDED: readonly {
 	{
 		title: "P87 · Where a suggested name comes from",
 		outcome:
-			"Option B: a name Tally guessed carries a sparkles icon and the words “Tally's guess”, while the bank's own name says “From your bank” (decision 80).",
+			"Option B: a name Tally guessed has a sparkles icon before it in the list, and the icon with the words “Tally's guess” in the edit panel and on the review screen, while the bank's own name says “From your bank” (decision 80).",
 	},
 	{
 		title: "P88 · Never-ask-again, as rules you can change",

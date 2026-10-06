@@ -970,11 +970,18 @@ export function Phase5BillsProposals() {
 					holds its due date (Q1 is January to March), so each key names exactly
 					one occurrence. The bill_payments period check widens to allow both.
 				</NeedsLine>
-				<NeedsLine settled="decisions 62 and 74">
-					Bills lists a bill's next unpaid occurrence only. A missed one stays
-					overdue, with its amount set aside, until it is paid or the next one
-					is due, which then takes its place, the same as for monthly and yearly
-					bills.
+				<NeedsLine>
+					how long a missed weekly, every-two-weeks or quarterly occurrence
+					stays set aside. The rule for monthly and yearly bills would drop a
+					missed Friday the next day, because the next Friday is always inside
+					the 7-day “due” window, while Option A's tradeoff says a missed Friday
+					is set aside too. Proposed: Safe to spend sets aside every occurrence
+					that is due or overdue and not paid, and an unpaid one from an earlier
+					month shows Not paid and stops being set aside, as for a monthly bill.
+					Already settled (decisions 62 and 74): Bills lists a bill's next
+					unpaid occurrence only; and for a monthly or yearly bill a missed one
+					stays overdue, with its amount set aside, until it is paid or the next
+					one is due, which then takes its place.
 				</NeedsLine>
 				<NeedsLine settled="decision 74">
 					A weekly bill's payment is matched within ±3 days of its due date, so
@@ -1037,12 +1044,13 @@ export function Phase5BillsProposals() {
 				</Fixed>
 				<NeedsLine settled="decisions 74 and 79">
 					One occurrence can have several linked payments, a bill paid in parts,
-					while each transaction still pays at most one bill or planned expense.
-					The matcher still links one; a person links more by hand. An
-					occurrence is Paid once its payments add up to at least 90% of its
-					amount (paying more is still Paid), and until then it shows “Part
-					paid” in its usual group while Safe to spend sets aside only what's
-					left.
+					so bill_payments' unique on (bill_id, period) goes and only the unique
+					on transaction_id stays, while each transaction still pays at most one
+					bill or planned expense. The matcher still links one; a person links
+					more by hand. An occurrence is Paid once its payments add up to at
+					least 90% of its amount (paying more is still Paid), and until then it
+					shows “Part paid” in its usual group while Safe to spend and Bills'
+					sentence both count only what's left.
 				</NeedsLine>
 				<Options
 					options={[

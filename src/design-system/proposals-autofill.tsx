@@ -51,7 +51,7 @@ export const DASHED =
 
 type From = "bank" | "tally";
 
-/** Where a guess came from, in words (P87 A); a detail a person has kept says nothing. */
+/** Where a guess came from, in words (P87 B); a detail a person has kept says nothing. */
 const SOURCE: Record<From, string> = {
 	bank: "From your bank",
 	tally: "Tally's guess",
@@ -89,7 +89,7 @@ export function DetailRow({ label, value, from }: Detail) {
 }
 
 /**
- * The panel's top with the name left out: it's a row now, as in P87 A, so the amount is the one
+ * The panel's top with the name left out: it's a row now, as in P87 B, so the amount is the one
  * big thing. It's Blue Bottle's unless given another store's bank text and amount (P90 B).
  */
 export function PanelHead({
@@ -375,7 +375,7 @@ export function AutofillProposals() {
 				one-off, bill or transfer); and who it was for (a household member, or
 				Everyone). A suggestion shows dashed until a person keeps or changes it,
 				and screens call it “Tally's guess”, never the AI service's name
-				(decision 64); a name the bank sent says “From your bank” (P87 A). Tally
+				(decision 64); a name the bank sent says “From your bank” (P87 B). Tally
 				is told the note when it sorts, and a person's own choice always wins
 				(§7). Each AI feature has its own switch, all on to start, drawn as
 				switches with On or Off in words and one Save (decision 73). There is no

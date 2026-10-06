@@ -1288,11 +1288,14 @@ export function Phase5TransactionsProposals() {
 					its purchase counts in the purchase's month and category (§6). The
 					Excluded filter shows only excluded transactions (§8).
 				</Fixed>
-				<NeedsLine settled="decisions 74 and 79">
-					The Show choice for type has all, spending, income, refunds and
-					excluded, and replaces the Excluded filter. Refunds holds money in
-					that isn't income or a transfer, so money in that nothing explains
-					lands there.
+				<NeedsLine>
+					what Spending, Income and Excluded each hold (proposed: Spending is
+					counted and not income; Income is flagged income; Excluded is left out
+					of the budget, where transfers and card payments go). Already settled
+					(decisions 74 and 79): the Show choice for type has all, spending,
+					income, refunds and excluded, and replaces the Excluded filter;
+					Refunds holds money in that isn't income or a transfer, so money in
+					that nothing explains lands there.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1327,11 +1330,12 @@ export function Phase5TransactionsProposals() {
 					integer cents (§5).
 				</Fixed>
 				<NeedsLine>
-					what a number matches as an amount (proposed: with or without $, “$42”
-					anything from $42.00 to $42.99). Already settled (decisions 74 and
-					79): a word also matches a category's name, and a number matches an
-					amount, money out and money in alike (“42.17” finds a $42.17 purchase
-					and a $42.17 refund).
+					whether a whole number typed without $ (“42”) also matches $42.00 to
+					$42.99 (proposed: yes, with or without $). Already settled (decisions
+					74 and 79): a word also matches a category's name; “$42” finds
+					anything from $42.00 to $42.99, and the count says what matched; and a
+					number matches an amount, money out and money in alike (“42.17” finds
+					a $42.17 purchase and a $42.17 refund).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1487,9 +1491,10 @@ export function Phase5TransactionsProposals() {
 				<NeedsLine>
 					what saving the toggle unticked does (proposed: it removes the rule),
 					that removing a rule never changes a transaction already sorted, what
-					the list says with no rules (proposed: an EmptyState) and how it marks
-					a rule on an archived category (proposed: paused). Already settled
-					(decisions 79 and 80): in the edit panel the toggle is ticked when the
+					the EmptyState says when there are no rules and how the list marks a
+					rule on an archived category (proposed: paused). Already settled
+					(decisions 54, 79 and 80, and DESIGN.md's empty-list rule): an empty
+					list is an EmptyState; in the edit panel the toggle is ticked when the
 					chosen category is the rule's and unticked when it isn't, and ticking
 					it makes the new category the rule; the list is A to Z, with a search
 					box once there are more than 20.
@@ -1529,9 +1534,12 @@ export function Phase5TransactionsProposals() {
 				</Fixed>
 				<NeedsLine>
 					how “all 112” is applied. Bulk actions take at most 100 rows today (D1
-					binds 100 values), so it would send the filters, not ids: the server
-					changes everything they match at that moment, skips split parents, and
-					says how many.
+					binds 100 values), so it would send the filters and the ids of any
+					rows the person unticked afterward, not every selected id: the server
+					changes everything the filters match at that moment except those
+					unticked rows, skips split parents, and says how many. Already settled
+					(decisions 79 and 80): unticking a row after Select all leaves the
+					rest selected (“111 selected”).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1572,14 +1580,15 @@ export function Phase5TransactionsProposals() {
 					person (§8.4).
 				</Fixed>
 				<NeedsLine>
-					whether a date can be in the future and which month a changed entry
-					counts in (proposed: it can't be in the future; it counts in its new
-					date's month). Already settled (decision 79): a split cash entry's new
-					date moves to its parts, and a new amount that no longer matches its
-					parts can't be saved until the parts are corrected, so the split is
-					never reset. Its links (a bill payment, a refund) are kept: a new date
-					keeps them, and a new amount is checked by the same guards as linking
-					and refused with a field error if it breaks one.
+					whether a date can be in the future (proposed: it can't be). Already
+					settled (decisions 58, 60 and 79, and §6): a changed entry counts in
+					its new date's month, or, while it is linked, in the month of the
+					earlier bill occurrence it pays or of the purchase it refunds; a split
+					cash entry's new date moves to its parts, and a new amount that no
+					longer matches its parts can't be saved until the parts are corrected,
+					so the split is never reset. Its links (a bill payment, a refund) are
+					kept: a new date keeps them, and a new amount is checked by the same
+					guards as linking and refused with a field error if it breaks one.
 				</NeedsLine>
 				<Options
 					options={[

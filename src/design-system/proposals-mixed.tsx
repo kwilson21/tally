@@ -268,14 +268,17 @@ export function MixedStoreProposals() {
 				need a person or a receipt, and receipts are on the Later list (§12).
 			</Fixed>
 			<NeedsLine>
-				what makes a store “mixed”, where the suggested parts come from, and who
-				sets the amounts. Proposed: a store is mixed when a person has put its
-				transactions in two or more categories in the last 3 months (a split's
-				parts count, each in its own category; Tally's own picks don't). The
-				suggested parts are the categories this store's trips were split into or
-				put in before, most used first, the top two to start, and Add a part
-				adds a blank one. The amounts are always the person's: Tally never fills
-				one in, and the split saves only when it adds up exactly.
+				how far back a store's categories are counted and whether a split's
+				parts count (proposed: the last 3 months, each part in its own
+				category), which categories the suggested parts start with (proposed:
+				the ones this store's trips were split into or put in before, most used
+				first, the top two; Add a part adds a blank one), and whether “Split
+				this one?” shows on every trip to a mixed store, as drawn, or only when
+				the trip's details point to more than one category (§7). Already settled
+				(decision 80): a store is mixed when a person has put its trips in two
+				or more categories, counted from the transactions a person categorized;
+				the amounts are always the person's, Tally never fills one in, and the
+				split saves only when it adds up exactly (§6.1).
 			</NeedsLine>
 			<Options
 				options={[

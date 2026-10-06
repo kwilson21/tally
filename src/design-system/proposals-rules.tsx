@@ -295,11 +295,12 @@ export function RulesProposals() {
 			<NeedsLine>
 				whether Something else on a category or name, which P42 A gives no No
 				button, also makes a rule, whether Remove changes one already answered
-				(proposed: never), and what Settings says with no rules (proposed: an
-				EmptyState). Already settled (decisions 79 and 80): a rule is kept when
-				a person says No, for one merchant and one kind of suggestion (for a
-				category, which category), and Tally never makes that suggestion again
-				until the family removes the rule from “Tally's rules” in Settings.
+				(proposed: never), and what the EmptyState in Settings says with no
+				rules. Already settled (decisions 79 and 80, and DESIGN.md's empty-list
+				rule): an empty list shows an EmptyState; a rule is kept when a person
+				says No, for one merchant and one kind of suggestion (for a category,
+				which category), and Tally never makes that suggestion again until the
+				family removes the rule from “Tally's rules” in Settings.
 			</NeedsLine>
 			<Options
 				options={[

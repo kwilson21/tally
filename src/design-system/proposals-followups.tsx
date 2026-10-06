@@ -1,4 +1,4 @@
-// P73–P74: follow-ups from the owner's picks (decisions 74 and 75). P73 draws "suggested transactions
+// P73–P74: follow-ups from the owner's picks (decision 74), picked in decision 76. P73 draws "suggested transactions
 // for a new category", the owner's addition to P67 A; P74 (motion) is drawn in proposals-motion.tsx.
 // Each option is drawn on a phone's first screen from the real components with demo-style data
 // (today is Mon Oct 5), so the owner can pick by seeing (decision 47). Nothing here is decided until
@@ -316,8 +316,16 @@ function P73() {
 				(§2 rule 6, §7); screens say “Tally's guess”, never the AI's name
 				(decision 64).
 			</Fixed>
-			<NeedsLine settled="decisions 76 and 79">
-				Each row gives one of two reasons: “Same merchant”, which names the
+			<NeedsLine>
+				which transactions the offer covers (proposed: only those that still
+				need a category, as drawn), how “Same merchant” is decided (proposed: by
+				code from the merchant key, §6.1, never by AI or by how alike two names
+				look), how the number on Add follows the ticks (proposed: redrawn by the
+				server on each tick like Split's “left to assign” line, with no new
+				script, and the redraw is announced) and how each row's reason is read
+				out with its row (proposed: a small change to SelectableTransactionRow,
+				built in the catalog first). Already settled (decisions 76 and 79): each
+				row gives one of two reasons: “Same merchant”, which names the
 				transaction it matches and starts ticked, or “Tally's guess”, which
 				starts unticked with a Why? and only when the new name is one Tally had
 				suggested for them. The offer is up to 6 other transactions from this
