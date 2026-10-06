@@ -41,9 +41,15 @@ describe("GET /transactions", () => {
 			expect((await get("/transactions/905")).html).toContain(
 				"Counts in August",
 			);
+			// Excluded but still paying the bill, it still counts, in the bill's month (spec §8.5).
 			await env.DB.prepare(
 				"UPDATE transactions SET excluded=1 WHERE id=905",
 			).run();
+			const panel = (await get("/transactions/905")).html;
+			expect(panel).toContain("Counts in August");
+			expect(panel).toContain("It pays a bill, so it counts in the budget.");
+			// Unlinked and excluded, it counts nowhere.
+			await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=95").run();
 			expect((await get("/transactions/905")).html).not.toContain(
 				"Counts in August",
 			);

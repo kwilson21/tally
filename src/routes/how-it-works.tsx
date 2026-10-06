@@ -265,8 +265,8 @@ howItWorks.get("/how-it-works", async (c) => {
 					</p>
 					<ul class="mt-3 list-disc space-y-1 pl-5">
 						<li>
-							A counted transaction is in the month, not excluded, and not a
-							split parent (its parts count instead).
+							A counted transaction is in the month, not excluded (unless it
+							pays a bill), and not a split parent (its parts count instead).
 						</li>
 						<li>
 							A refund linked to its purchase counts in that purchase's month
@@ -316,7 +316,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>
 							An excluded transaction doesn't count toward spending,
-							uncategorized, or safe to spend.
+							uncategorized, or safe to spend, unless it pays a bill: a payment
+							linked to a bill always counts.
 						</li>
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>
@@ -402,7 +403,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>
 							A payment you left out of the budget can still pay a bill, and
-							linking it puts it back in the budget, so it counts once.
+							once it's linked it counts in the budget, so the bill counts once.
+							Unlinking it leaves it excluded, as it was.
 						</li>
 						<li>A payment can pay only one bill occurrence.</li>
 						<li>

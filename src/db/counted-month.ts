@@ -15,11 +15,23 @@ export const FOLLOWS_PURCHASE =
 	"(rp.id IS NOT NULL AND rp.excluded = 0 AND t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(t.credit_reviewed, 0) = 1)";
 
 /**
- * What counts as spending, once the joins are added (spec §6): not excluded, not a split parent
- * (its parts count), not income, and not an unreviewed bank credit; a refund that follows its
- * purchase counts. Home's budget rows, last month's amount and Trends all use this one definition.
+ * True when a transaction isn't left out of the budget, once the joins are added (spec §6.1 rule 4,
+ * §8.5): it is not excluded, or it pays a bill. A payment linked to a bill counts in Spent whatever its
+ * exclusion, so the bill counts once; its exclusion is never written over by the link, so it is as it was
+ * when the link goes. (A split part counts on its own link, not its parent's.)
  */
-export const COUNTED_SPENDING = `t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0
+export const INCLUDED = "(t.excluded = 0 OR bp.id IS NOT NULL)";
+
+/** The same test for an UPDATE or a subquery on `transactions` itself, where no joins or alias exist. */
+export const INCLUDED_ROW =
+	"(excluded = 0 OR EXISTS (SELECT 1 FROM bill_payments WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked'))";
+
+/**
+ * What counts as spending, once the joins are added (spec §6): not excluded (or paying a bill), not a
+ * split parent (its parts count), not income, and not an unreviewed bank credit; a refund that follows
+ * its purchase counts. Home's budget rows, last month's amount and Trends all use this one definition.
+ */
+export const COUNTED_SPENDING = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0
 	AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR ${FOLLOWS_PURCHASE})`;
 
 /** The month a transaction's own date and bill payment put it in. */

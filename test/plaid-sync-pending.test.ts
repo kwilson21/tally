@@ -847,6 +847,36 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		]);
 	});
 
+	it("counts a card payment Plaid excluded in Spent once the pending one's bill link moves onto it", async () => {
+		const item = await addItem();
+		const loan = { personal_finance_category: { primary: "LOAN_PAYMENTS" } };
+		const ids = await bothStored(item, loan);
+		await addBillLinkedTo(ids.pending);
+		const spent = async () =>
+			summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(env.DB, "2026-09")),
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		await post(item, loan);
+
+		// The bill is paid by the posted row, which Plaid excluded as a card payment; the link counts it,
+		// so the bill's payment is in Spent once, and the exclusion is as Plaid made it.
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			excluded: 1,
+			excluded_source: "plaid",
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, status FROM bill_payments",
+				).all()
+			).results,
+		).toEqual([{ transaction_id: ids.posted, status: "linked" }]);
+		expect(await spent()).toBe(1234);
+	});
+
 	it("leaves a bill payment the posted one already has, and drops the pending one's", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);

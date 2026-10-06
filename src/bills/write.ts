@@ -12,8 +12,6 @@
 // Only a name that is new is checked: adding, reactivating and renaming. Editing a bill under the
 // name it already has isn't, so two bills that already share a name stay editable.
 
-import { restoreExclusionStatements } from "../db/plaid-transfers";
-
 export type BillFields = {
 	name: string;
 	amountCents: number;
@@ -94,14 +92,6 @@ export async function updateBill(
 			f.name,
 		);
 	if (!dropDismissals) return (await update.run()).meta.changes > 0;
-	// The schedule form allows this only without linked payments; if one is dropped here anyway, what
-	// it paid gets back the exclusion a machine set aside (spec §8.5), in the same batch.
-	const { results: links } = await db
-		.prepare(
-			"SELECT transaction_id FROM bill_payments WHERE bill_id=? AND status='linked'",
-		)
-		.bind(id)
-		.all<{ transaction_id: number }>();
 	// The bill has its new name exactly when the update just applied (it set it, and a refused update
 	// leaves a name that differs), so the dismissals go only then.
 	const [result] = await db.batch([
@@ -111,58 +101,8 @@ export async function updateBill(
 				"DELETE FROM bill_payments WHERE bill_id=? AND EXISTS (SELECT 1 FROM bills WHERE id=? AND name=?)",
 			)
 			.bind(id, id, f.name),
-		...restoreExclusionStatements(
-			db,
-			links.map((link) => link.transaction_id),
-		),
 	]);
 	return (result?.meta.changes ?? 0) > 0;
-}
-
-/**
- * The statement that goes right before a payment is linked to a bill occurrence (spec §6.1 rule 4,
- * decision 67): an excluded payment can pay a bill, and linking it puts it back in the budget
- * (`excluded = 0`), so the bill stops being set aside only because its payment now counts as spending.
- * A person linking it, by hand or by accepting a price change, makes that their choice
- * (`excluded_source = 'user'`). The matcher is not a person, so it keeps the source ('plaid' or 'jev'):
- * the machine's exclusion is set aside while the link stands, not erased, and the write that removes
- * the link gives it back (`restoreExclusionStatements`). While it pays the bill, neither Plaid's rule
- * nor Jev takes it out again (both skip a linked payment).
- *
- * It runs first, in the same batch as the link's insert, and only when that insert will be new: no
- * linked row for the transaction, and none for the occurrence. So a refused link (already linked, or the
- * occurrence taken) changes nothing, and an excluded payment can't be put back without the link that
- * explains why. A split is one bank transaction (the edit panel excludes it whole), so its parent and
- * parts come back together. `actor` is who is linking by hand; the matcher passes null, keeps the
- * source and leaves `updated_by` as it was.
- *
- * `also` is a further condition for a caller whose link is conditional too (accepting a price change,
- * which must put nothing back when the offer has gone stale). Its SQL may use ?1 to ?3 as above and
- * numbers its own parameters from ?5, after `actor` (?4); its `binds` are those values, in order.
- */
-export function putBackInBudget(
-	db: D1Database,
-	billId: number,
-	period: string,
-	transactionId: number,
-	actor: string | null,
-	also?: { sql: string; binds: (string | number)[] },
-): D1PreparedStatement {
-	return db
-		.prepare(
-			`UPDATE transactions SET excluded = 0, excluded_source = CASE WHEN ?4 IS NULL THEN excluded_source ELSE 'user' END, updated_by = COALESCE(?4, updated_by), updated_at = datetime('now')
-			 WHERE excluded = 1 AND (
-				id = ?1
-				OR parent_id = ?1
-				OR id = (SELECT parent_id FROM transactions WHERE id = ?1)
-				OR parent_id = (SELECT parent_id FROM transactions WHERE id = ?1)
-			 )
-			 AND NOT EXISTS (
-				SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
-				  AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3))
-			 )${also ? ` AND (${also.sql})` : ""}`,
-		)
-		.bind(transactionId, billId, period, actor, ...(also?.binds ?? []));
 }
 
 /**

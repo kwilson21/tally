@@ -237,15 +237,15 @@ describe("bill writes", () => {
 			["plaid", "plaid_category", "'TRANSFER_OUT'"],
 			["jev", "flag_transfer", "1"],
 		] as const)(
-			"gives a %s exclusion back when a changed schedule drops its link",
+			"leaves a %s exclusion as it was when a changed schedule drops the payment's link",
 			async (source, column, value) => {
-				// The payment counts only because it pays the bill; its exclusion was set aside, source kept.
+				// Linking never wrote the exclusion, so dropping the link has nothing to give back.
 				await env.DB.batch([
 					env.DB.prepare(
 						"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9200,'Mortgage',150000,1,'monthly',5,'LANDLORD LLC')",
 					),
 					env.DB.prepare(
-						`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,${column},excluded,excluded_source) SELECT 9201,id,'2026-09-01',150000,'LANDLORD LLC',${value},0,'${source}' FROM accounts LIMIT 1`,
+						`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,${column},excluded,excluded_source) SELECT 9201,id,'2026-09-01',150000,'LANDLORD LLC',${value},1,'${source}' FROM accounts LIMIT 1`,
 					),
 					env.DB.prepare(
 						"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9200,'2026-09',9201,'auto','linked')",
@@ -259,6 +259,11 @@ describe("bill writes", () => {
 						true,
 					),
 				).toBe(true);
+				expect(
+					await env.DB.prepare(
+						"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=9200",
+					).first("n"),
+				).toBe(0);
 				expect(
 					await env.DB.prepare(
 						"SELECT excluded, excluded_source FROM transactions WHERE id=9201",

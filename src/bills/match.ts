@@ -1,7 +1,6 @@
 import { householdToday } from "../dates";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
 import { billOccurrenceForMonth } from "./status";
-import { putBackInBudget } from "./write";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
 export const BILL_DATE_WINDOW_DAYS = 5;
@@ -176,18 +175,12 @@ export async function matchBillPayments(
 			a.bill.id - b.bill.id ||
 			a.candidate.id - b.candidate.id,
 	);
-	// A payment Plaid or Jev excluded qualifies (§6.1 rule 4, decision 67; one a person excluded is theirs, and
-	// only their hand link takes it), and linking it puts it back in the budget:
-	// each link is a put-back statement, then the insert it depends on, and only the inserts are counted.
-	// Income is never a bill payment, excluded or not (the candidate query leaves `flag_income` ones out,
-	// as the hand-link picker does), so putting a payment back can't turn a paycheck into spending.
+	// A payment Plaid or Jev excluded qualifies (§6.1 rule 4, decision 67), and once linked it counts in Spent
+	// whatever its exclusion (spec §8.5), which linking never writes. One a person excluded is theirs: the
+	// matcher leaves it, and only their hand link takes it. Income is never a bill payment (the candidate
+	// query leaves `flag_income` ones out, as the hand-link picker does).
 	const statements: D1PreparedStatement[] = [];
-	const inserts: number[] = [];
-	for (const pair of assignPairs(pairs, reserved)) {
-		statements.push(
-			putBackInBudget(db, pair.bill.id, pair.period, pair.candidate.id, null),
-		);
-		inserts.push(statements.length);
+	for (const pair of assignPairs(pairs, reserved))
 		statements.push(
 			db
 				.prepare(
@@ -195,11 +188,10 @@ export async function matchBillPayments(
 				)
 				.bind(pair.bill.id, pair.period, pair.candidate.id),
 		);
-	}
 	if (!statements.length) return 0;
 	const results = await db.batch(statements);
-	return inserts.reduce(
-		(total, at) => total + (results[at]?.meta.changes ?? 0),
+	return results.reduce(
+		(total, result) => total + (result.meta.changes ?? 0),
 		0,
 	);
 }

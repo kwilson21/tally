@@ -1,0 +1,246 @@
+import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+import { summarizeMonth } from "../src/budget";
+import { loadMonth } from "../src/db/month";
+import {
+	excludedBreakdown,
+	listTransactions,
+	monthCounts,
+	needsCategoryCount,
+	pendingForJev,
+	saveJevResult,
+} from "../src/db/transactions";
+import { loadTrends } from "../src/db/trends";
+import { resetDemo } from "../src/demo/reset";
+import { parseFilters } from "../src/transactions/filters";
+import { rowCaption } from "../src/views/transaction-row";
+
+// Spec §6.1 rule 4 and §8.5: a payment linked to a bill counts in Spent, whatever its exclusion, so the
+// bill counts once. It is decided where spending is read; linking and unlinking never write the
+// transaction's exclusion, so a machine's or a person's choice is always as it was.
+
+const db = env.DB;
+const TODAY = "2026-09-22";
+const MONTH = "2026-09";
+
+type Source = "plaid" | "jev" | "user";
+
+const spendFor = async () =>
+	summarizeMonth({
+		month: MONTH,
+		...(await loadMonth(db, MONTH)),
+		unpaidDueBillsCents: 0,
+	}).totalSpentCents;
+
+const trendFor = async () =>
+	(await loadTrends(db, TODAY)).spend
+		.filter((row) => row.month === MONTH)
+		.reduce((sum, row) => sum + row.cents, 0);
+
+const excludedListed = async () =>
+	(await listTransactions(db, excludedFilter())).total;
+
+const excludedFilter = () =>
+	parseFilters(new URLSearchParams("excluded=1"), MONTH);
+
+/** Everything that reads "what counts", in one place, so they can be compared. */
+const readings = async () => ({
+	home: await spendFor(),
+	trends: await trendFor(),
+	counted: (await monthCounts(db, MONTH)).counted,
+	needsCategory: await needsCategoryCount(db, MONTH),
+	breakdownExcluded: await excludedBreakdown(db, MONTH).then(
+		(b) => b.transfer + b.reimbursement + b.byPerson,
+	),
+	filterExcluded: await excludedListed(),
+});
+
+const link = (transactionId: number, by: "auto" | "user" = "auto") =>
+	db
+		.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9500, ?, ?, ?, 'linked')",
+		)
+		.bind(MONTH, transactionId, by);
+
+const unlink = () =>
+	db.prepare("DELETE FROM bill_payments WHERE bill_id = 9500");
+
+const stored = async (...ids: number[]) =>
+	(
+		await db
+			.prepare(
+				`SELECT id, excluded, excluded_source FROM transactions WHERE id IN (${ids.join(",")}) ORDER BY id`,
+			)
+			.all()
+	).results;
+
+const rowOf = async (id: number) => {
+	const { rows } = await listTransactions(
+		db,
+		parseFilters(new URLSearchParams("month=all&q=LANDLORD"), MONTH),
+	);
+	return rows.find((row) => row.id === id);
+};
+
+/** A 1500.00 payment the machine or a person excluded. */
+const addPayment = (source: Source) =>
+	db
+		.prepare(
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, plaid_category, flag_transfer)
+			 SELECT 9501, id, '2026-09-04', 150000, 'LANDLORD LLC', 1, ?1,
+				CASE WHEN ?1 = 'plaid' THEN 'LOAN_PAYMENTS' END, CASE WHEN ?1 = 'jev' THEN 1 ELSE 0 END FROM accounts LIMIT 1`,
+		)
+		.bind(source);
+
+beforeEach(async () => {
+	await resetDemo(db, TODAY);
+	await db
+		.prepare(
+			"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9500, 'Mortgage', 150000, 5, 'monthly', 5, 'LANDLORD LLC')",
+		)
+		.run();
+});
+
+describe("a payment linked to a bill", () => {
+	it.each(["plaid", "jev", "user"] as const)(
+		"counts in Home, Trends and How Tally works while it pays a bill, and stops when the link goes (%s-excluded)",
+		async (source) => {
+			await addPayment(source).run();
+			const before = await readings();
+			const exclusion = { id: 9501, excluded: 1, excluded_source: source };
+			expect(await stored(9501)).toEqual([exclusion]);
+
+			await link(9501, source === "user" ? "user" : "auto").run();
+			const linked = await readings();
+			// Spent, Trends and the counted number take it in, and the excluded number and filter let it go,
+			// so the month still adds up.
+			expect(linked).toEqual({
+				home: before.home + 150000,
+				trends: before.trends + 150000,
+				counted: before.counted + 1,
+				// It has no category, so it needs one like anything else that counts.
+				needsCategory: before.needsCategory + 1,
+				breakdownExcluded: before.breakdownExcluded - 1,
+				filterExcluded: before.filterExcluded - 1,
+			});
+			// Linking wrote nothing to the exclusion.
+			expect(await stored(9501)).toEqual([exclusion]);
+			// And the list doesn't call it excluded: it says what it is, a payment that counts.
+			const row = await rowOf(9501);
+			expect(row).toMatchObject({ excluded: true, paysBill: true });
+			expect(rowCaption(row as NonNullable<typeof row>).kind).not.toBe(
+				"excluded",
+			);
+
+			await unlink().run();
+			expect(await readings()).toEqual(before);
+			expect(await stored(9501)).toEqual([exclusion]);
+			const after = await rowOf(9501);
+			expect(after).toMatchObject({ excluded: true, paysBill: false });
+			expect(rowCaption(after as NonNullable<typeof after>).caption).toBe(
+				"Excluded",
+			);
+		},
+	);
+
+	it("counts only the part that pays the bill when a split is excluded", async () => {
+		await db.batch([
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, is_split, plaid_category)
+				 SELECT 9510, id, '2026-09-04', 200000, 'LANDLORD LLC', 1, 'plaid', 1, 'TRANSFER_OUT' FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id)
+				 SELECT 9511, id, '2026-09-04', 150000, 'LANDLORD LLC', 1, 'plaid', 9510 FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id)
+				 SELECT 9512, id, '2026-09-04', 50000, 'ELSEWHERE', 1, 'plaid', 9510 FROM accounts LIMIT 1`,
+			),
+		]);
+		const before = await readings();
+
+		await link(9511).run();
+		const linked = await readings();
+		// The part counts; its sibling and the split's parent don't.
+		expect(linked.home).toBe(before.home + 150000);
+		expect(linked.trends).toBe(before.trends + 150000);
+		expect(linked.counted).toBe(before.counted + 1);
+		expect(linked.breakdownExcluded).toBe(before.breakdownExcluded - 1);
+		expect(await stored(9510, 9511, 9512)).toEqual([
+			{ id: 9510, excluded: 1, excluded_source: "plaid" },
+			{ id: 9511, excluded: 1, excluded_source: "plaid" },
+			{ id: 9512, excluded: 1, excluded_source: "plaid" },
+		]);
+
+		await unlink().run();
+		expect(await readings()).toEqual(before);
+	});
+
+	it("counts once however it came to count: the link, a person's include, or both", async () => {
+		await addPayment("user").run();
+		const before = await spendFor();
+		await link(9501, "user").run();
+		expect(await spendFor()).toBe(before + 150000);
+		// A person's include or exclude is a separate choice; excluding a linked payment still counts it.
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = 9501",
+			)
+			.run();
+		expect(await spendFor()).toBe(before + 150000);
+		await unlink().run();
+		expect(await spendFor()).toBe(before + 150000);
+	});
+});
+
+describe("Jev and a payment that pays a bill", () => {
+	const answer = (flags: { transfer: boolean }) => ({
+		categoryId: 5,
+		suggestedCategoryId: 5,
+		confidence: 0.95,
+		flags: { ...flags, reimbursement: false, income: false },
+	});
+	const askedIds = async () => (await pendingForJev(db, 500)).map((t) => t.id);
+
+	it("is asked about it while it pays a bill, like any counted payment, and not once the link is gone", async () => {
+		await addPayment("plaid").run();
+		expect(await askedIds()).not.toContain(9501);
+		await link(9501).run();
+		expect(await askedIds()).toContain(9501);
+		await unlink().run();
+		expect(await askedIds()).not.toContain(9501);
+	});
+
+	it("files its category without taking over Plaid's exclusion, and a transfer answer changes nothing it counts", async () => {
+		await addPayment("plaid").run();
+		await link(9501).run();
+		const before = await spendFor();
+		expect(await saveJevResult(db, 9501, answer({ transfer: true }))).toBe(
+			true,
+		);
+		expect(await stored(9501)).toEqual([
+			{ id: 9501, excluded: 1, excluded_source: "plaid" },
+		]);
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source FROM transactions WHERE id = 9501",
+				)
+				.first(),
+		).toEqual({ category_id: 5, category_source: "jev" });
+		expect(await spendFor()).toBe(before);
+	});
+
+	it("never writes to a payment that isn't linked and is excluded", async () => {
+		await addPayment("plaid").run();
+		expect(await saveJevResult(db, 9501, answer({ transfer: false }))).toBe(
+			false,
+		);
+		await link(9501).run();
+		await unlink().run();
+		expect(await saveJevResult(db, 9501, answer({ transfer: false }))).toBe(
+			false,
+		);
+	});
+});

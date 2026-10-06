@@ -268,38 +268,8 @@ describe("Bills", () => {
 		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
 	});
 
-	it("excludes a payment Plaid called a transfer once a person unlinks it", async () => {
-		const linked = await env.DB.prepare(
-			"SELECT period, transaction_id FROM bill_payments WHERE bill_id=1 AND status='linked'",
-		).first<{ period: string; transaction_id: number }>();
-		await env.DB.prepare(
-			"UPDATE transactions SET plaid_category='TRANSFER_OUT' WHERE id=?",
-		)
-			.bind(linked?.transaction_id)
-			.run();
-		const state = () =>
-			env.DB.prepare(
-				"SELECT excluded, excluded_source FROM transactions WHERE id=?",
-			)
-				.bind(linked?.transaction_id)
-				.first();
-		// While it pays the bill it counts.
-		expect(await state()).toEqual({ excluded: 0, excluded_source: null });
-		const unlink = await exports.default.fetch(
-			`http://tally.test/bills/1/occurrences/${linked?.period}/unlink`,
-			{
-				method: "POST",
-				redirect: "manual",
-				headers: { Origin: "http://tally.test", "HX-Request": "true" },
-			},
-		);
-		expect(unlink.headers.get("HX-Trigger")).toContain("Payment unlinked");
-		expect(await state()).toEqual({ excluded: 1, excluded_source: "plaid" });
-	});
-
-	// A payment Plaid or Jev excluded can still pay a bill. While the link stands the exclusion is set
-	// aside (`excluded = 0`, its source kept), and it comes back when the link is removed (spec §6.1
-	// rule 4, §8.5). A person's choice is never set aside.
+	// A payment Plaid or Jev excluded can still pay a bill. Once linked it counts in Spent whatever its
+	// exclusion, and linking or unlinking never writes the exclusion (spec §6.1 rule 4, §8.5).
 	describe("a payment Plaid or Jev excluded that pays a bill", () => {
 		const MONTH = "2026-07";
 		type Machine = "plaid" | "jev";
@@ -377,99 +347,90 @@ describe("Bills", () => {
 			)?.matched_by;
 
 		it.each(["plaid", "jev"] as const)(
-			"sets a %s exclusion aside while the matcher's link stands, and brings it back when the link is removed",
+			"counts a %s-excluded payment while the matcher's link stands, and not after Not this one, leaving its exclusion as it was",
 			async (source) => {
 				await setUp(source);
 				const base = await spent();
-				expect(await state(9301)).toEqual([
-					{ id: 9301, excluded: 1, excluded_source: source },
-				]);
+				const exclusion = [{ id: 9301, excluded: 1, excluded_source: source }];
+				expect(await state(9301)).toEqual(exclusion);
 
 				await matchBillPayments(env.DB, "2026-07-12");
 				expect(await linkedBy()).toBe("auto");
-				// Counted now, and still the machine's: its exclusion is set aside, not erased.
-				expect(await state(9301)).toEqual([
-					{ id: 9301, excluded: 0, excluded_source: source },
-				]);
+				// It counts because it pays the bill; nothing was written to its exclusion.
+				expect(await state(9301)).toEqual(exclusion);
 				expect(await spent()).toBe(base + 150000);
 
 				await unlink();
-				expect(await state(9301)).toEqual([
-					{ id: 9301, excluded: 1, excluded_source: source },
-				]);
+				expect(await state(9301)).toEqual(exclusion);
 				expect(await spent()).toBe(base);
 			},
 		);
 
 		it.each(["plaid", "jev"] as const)(
-			"brings a %s exclusion back for the whole split when the matcher's link on one part is removed",
+			"counts only the part that pays the bill when the matcher links one part of a %s-excluded split, and leaves the split as it was",
 			async (source) => {
 				await setUpSplit(source);
 				const base = await spent();
+				const whole = [9310, 9311, 9312].map((id) => ({
+					id,
+					excluded: 1,
+					excluded_source: source,
+				}));
 
 				await matchBillPayments(env.DB, "2026-07-12");
 				expect(await linkedBy()).toBe("auto");
-				const whole = (excluded: number) => [
-					{ id: 9310, excluded, excluded_source: source },
-					{ id: 9311, excluded, excluded_source: source },
-					{ id: 9312, excluded, excluded_source: source },
-				];
-				expect(await state(9310, 9311, 9312)).toEqual(whole(0));
-				expect(await spent()).toBe(base + 200000);
+				expect(await state(9310, 9311, 9312)).toEqual(whole);
+				// The 1500.00 part counts; its 500.00 sibling and the split's parent don't.
+				expect(await spent()).toBe(base + 150000);
 
 				await unlink();
-				expect(await state(9310, 9311, 9312)).toEqual(whole(1));
+				expect(await state(9310, 9311, 9312)).toEqual(whole);
 				expect(await spent()).toBe(base);
 			},
 		);
 
 		it.each(["plaid", "jev"] as const)(
-			"keeps a person's hand link of a %s-excluded payment included after Not this one",
+			"counts a person's hand link of a %s-excluded payment while it stands, and writes nothing to its exclusion",
 			async (source) => {
 				await setUp(source);
 				const base = await spent();
+				const exclusion = [{ id: 9301, excluded: 1, excluded_source: source }];
 
 				await link(9301);
 				expect(await linkedBy()).toBe("user");
-				expect(await state(9301)).toEqual([
-					{ id: 9301, excluded: 0, excluded_source: "user" },
-				]);
+				expect(await state(9301)).toEqual(exclusion);
 				expect(await spent()).toBe(base + 150000);
 
 				await unlink();
-				expect(await state(9301)).toEqual([
-					{ id: 9301, excluded: 0, excluded_source: "user" },
-				]);
-				expect(await spent()).toBe(base + 150000);
+				expect(await state(9301)).toEqual(exclusion);
+				expect(await spent()).toBe(base);
 			},
 		);
 
-		it("leaves a payment a person excluded alone, until a person links it by hand, and then it stays theirs", async () => {
+		it("leaves a payment a person excluded to the matcher, counts it once they link it by hand, and keeps it excluded after", async () => {
 			await setUp("plaid");
 			await env.DB.prepare(
 				"UPDATE transactions SET excluded_source='user' WHERE id=9301",
 			).run();
 			const base = await spent();
+			const exclusion = [{ id: 9301, excluded: 1, excluded_source: "user" }];
 			await matchBillPayments(env.DB, "2026-07-12");
 			expect(
 				await env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=9300 AND status='linked'",
 				).first("n"),
 			).toBe(0);
-			expect(await state(9301)).toEqual([
-				{ id: 9301, excluded: 1, excluded_source: "user" },
-			]);
+			expect(await spent()).toBe(base);
 
 			await link(9301);
 			expect(await linkedBy()).toBe("user");
-			expect(await state(9301)).toEqual([
-				{ id: 9301, excluded: 0, excluded_source: "user" },
-			]);
-			await unlink();
-			expect(await state(9301)).toEqual([
-				{ id: 9301, excluded: 0, excluded_source: "user" },
-			]);
+			// A person's hand link counts it because it's linked; their exclusion is as they left it.
+			expect(await state(9301)).toEqual(exclusion);
 			expect(await spent()).toBe(base + 150000);
+
+			await unlink();
+			expect(await state(9301)).toEqual(exclusion);
+			expect(await spent()).toBe(base);
 		});
 	});
 

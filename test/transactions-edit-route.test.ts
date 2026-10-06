@@ -447,6 +447,47 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 		);
 	});
 
+	it("says an excluded payment that pays a bill counts, instead of calling it excluded, in the panel and the list (spec §8.5)", async () => {
+		const id = await reimbursement();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9600,'Venmo',1000,5,'monthly',5,'VENMO')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 9600, substr(date,1,7), id, 'user', 'linked' FROM transactions WHERE id = ?",
+			).bind(id),
+		]);
+		const panel = (await get(`/transactions/${id}`)).html;
+		expect(panel).not.toContain("Excluded from the budget");
+		expect(panel).toContain("It pays a bill, so it counts in the budget.");
+		// The chip still shows the saved exclusion, so saving a note doesn't change it.
+		expect(panel).toMatch(/name="excluded"[^>]*checked/);
+
+		const list = (await get("/transactions?month=all&q=MARTIN")).html;
+		expect(list).toContain(`data-transaction="${id}"`);
+		const row = list.split(`data-transaction="${id}"`)[1]?.split("</li>")[0];
+		expect(row).not.toContain("Excluded");
+		const filtered = (await get("/transactions?month=all&excluded=1")).html;
+		expect(filtered).not.toContain(`data-transaction="${id}"`);
+
+		// Saving a note leaves the exclusion exactly as it was.
+		const saved = await post(`/transactions/${id}`, {
+			category: "",
+			merchant: "",
+			note: "rent",
+			excluded: "1",
+			back: "/transactions",
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toMatchObject({ excluded: 1 });
+	});
+
 	it("has one How this works link", async () => {
 		const html = (await get(`/transactions/${bakery}`)).html;
 		const sheet = html.slice(html.indexOf('id="edit-title"'));

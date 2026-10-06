@@ -5,9 +5,9 @@
 --
 -- Only a transaction nobody has decided about is changed: it counts (`excluded = 0`) and has no
 -- source (`excluded_source IS NULL`), so a person's include or exclude and Jev's exclusion stay. A
--- payment linked to a bill also stays, so the bill isn't paid by something nothing counts, and so
--- does income a person chose and a credit a person reviewed while it is still a credit, since a
--- person's choice about what it is wins (decision 70).
+-- payment linked to a bill also stays as it is (decision 77; it counts in Spent through its link
+-- either way), and so does income a person chose and a credit a person reviewed while it is still
+-- a credit, since a person's choice about what it is wins (decision 70).
 -- No schema change; running it twice changes nothing the second time.
 
 -- 1. The bank transactions Plaid categorised as a transfer or a loan or card payment.
