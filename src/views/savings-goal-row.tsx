@@ -12,35 +12,38 @@ export function SavingsGoalRow({
 	attrs?: Record<string, string>;
 	autofocus?: boolean;
 }) {
-	const content = (
-		<>
-			<Icon name="bank" class="size-6 shrink-0 text-ink" />
-			<span class="min-w-0 flex-1 truncate text-lg">Savings</span>
-			{amountCents !== null && amountCents > 0 ? (
-				<span class="tabular-nums">
-					{formatCents(amountCents, { wholeDollars: amountCents % 100 === 0 })}
-					<span class="ml-1 text-muted">a month</span>
-				</span>
-			) : (
-				<span class="text-accent">Set a goal</span>
-			)}
-		</>
-	);
 	return (
 		<li>
 			<a
 				href={href}
 				autofocus={autofocus}
-				class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+				class="flex min-h-11 items-start gap-4 py-3 text-ink no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 				{...attrs}
 			>
-				{content}
+				<span class="shrink-0 text-ink">
+					<Icon name="bank" class="size-7" />
+				</span>
+				<div class="min-w-0 flex-1">
+					<div class="flex flex-wrap items-baseline justify-between gap-x-3">
+						<span class="text-lg">Savings</span>
+						{amountCents !== null && amountCents > 0 ? (
+							<span class="ml-auto text-right text-lg">
+								{formatCents(amountCents, {
+									wholeDollars: amountCents % 100 === 0,
+								})}{" "}
+								<span class="text-muted">a month</span>
+							</span>
+						) : (
+							<span class="ml-auto text-right text-lg text-accent">
+								Set a goal
+							</span>
+						)}
+					</div>
+					{amountCents !== null && amountCents > 0 && (
+						<p class="text-muted">Set aside from Safe to spend</p>
+					)}
+				</div>
 			</a>
-			{amountCents !== null && amountCents > 0 && (
-				<p class="-mt-2 pb-2 pl-10 text-sm text-muted">
-					Set aside from Safe to spend
-				</p>
-			)}
 		</li>
 	);
 }

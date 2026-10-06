@@ -41,6 +41,20 @@ describe("summarizeMonth with a savings goal", () => {
 			expect(result.categories).toHaveLength(1);
 		},
 	);
+
+	it("keeps Safe to spend exact below zero cents", () => {
+		const result = summarizeMonth({
+			month: "2026-10",
+			categories: [{ id: 1, name: "Home" }],
+			amounts: [
+				{ categoryId: 1, effectiveMonth: "2026-10", amountCents: 140000 },
+			],
+			transactions: [{ categoryId: 1, amountCents: 46000, income: false }],
+			unpaidDueBillsCents: 14200,
+			savingsGoalCents: 90000,
+		});
+		expect(result.safeToSpendCents).toBe(-10200);
+	});
 });
 
 describe("savings goal routes", () => {
@@ -100,9 +114,15 @@ describe("savings goal routes", () => {
 		);
 		expect(goalRow).not.toContain("bar-fill");
 		expect(goalRow).not.toContain("nudge-");
+		expect(goalRow).toMatch(
+			/<a href="\/savings-goal"[^>]*class="flex min-h-11 items-start gap-4 py-3[^"]*focus-visible:outline-accent"[^>]*>[\s\S]*Set aside from Safe to spend<\/p><\/div><\/a>/,
+		);
+		expect(goalRow).toContain('class="size-7"');
 
 		const sheet = await exports.default.fetch("http://tally.test/savings-goal");
 		const sheetHtml = await sheet.text();
+		expect(sheetHtml).toContain('class="size-7"');
+		expect(sheetHtml).toContain('class="font-serif text-3xl font-semibold"');
 		expect(sheetHtml).toContain("Save each month, from ");
 		expect(sheetHtml).toContain(
 			"Set aside from Safe to spend at the start of every month.",
@@ -166,6 +186,54 @@ describe("savings goal routes", () => {
 		});
 		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
 	});
+
+	it.each([
+		["not a number", "abc"],
+		["negative", "-1"],
+		["over the shared budget maximum", "1000000.01"],
+		["empty", ""],
+	])(
+		"rejects a %s goal without changing the saved amount",
+		async (_label, typed) => {
+			const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+			await env.DB.prepare(
+				"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES (?, 50000)",
+			)
+				.bind(month)
+				.run();
+			const response = await homeRoutes.fetch(
+				new Request("http://tally.test/savings-goal", {
+					method: "POST",
+					headers: {
+						"content-type": "application/x-www-form-urlencoded",
+						"HX-Request": "true",
+					},
+					body: `goal=${encodeURIComponent(typed)}`,
+				}),
+				env,
+			);
+			const html = await response.text();
+			expect(response.status).toBe(422);
+			expect(html).toMatch(/role="alert"/);
+			expect(html).toContain(`value="${typed}"`);
+			expect(html).toMatch(/<input[^>]*name="goal"[^>]*autofocus/);
+			expect(html).toMatch(/<input[^>]*name="goal"[^>]*aria-invalid="true"/);
+			expect(
+				JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+			).toBe(
+				typed === "1000000.01"
+					? "Keep the budget to $1,000,000 a month or less."
+					: "Enter a dollar amount, like 250 or 250.50.",
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT amount_cents FROM savings_goal_amounts WHERE effective_month = ?",
+				)
+					.bind(month)
+					.first(),
+			).toEqual({ amount_cents: 50000 });
+		},
+	);
 
 	it("does not change Safe to spend for an excluded transfer into savings", async () => {
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);

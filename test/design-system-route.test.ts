@@ -95,6 +95,18 @@ describe("GET /design-system in the demo", () => {
 		for (const name of names) expect(shown).toContain(name);
 	});
 
+	it("renders the savings goal sheet specimen and documents it", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain('data-ds-components="SavingsGoalSheet"');
+		expect(html).toContain(
+			"Set aside from Safe to spend at the start of every month.",
+		);
+		expect(html).toContain("Save each month, from October on");
+		expect(html).toContain(">Cancel</a>");
+		expect(html).toContain(">Save</button>");
+		expect(design).toMatch(/\| SavingsGoalSheet \|/);
+	});
+
 	it("renders each component's own output, with the catalog's sample data", async () => {
 		const { html } = await get("/design-system");
 		const outputs = [

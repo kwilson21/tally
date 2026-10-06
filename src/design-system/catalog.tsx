@@ -56,6 +56,7 @@ import { NetWorthChart } from "../views/net-worth-chart";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
+import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
 import { Switch } from "../views/switch";
@@ -1093,6 +1094,19 @@ function Rows() {
 						<ul class="max-w-xl divide-y divide-rule">
 							<SavingsGoalRow amountCents={null} href="#" />
 						</ul>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="savings-goal-sheet"
+				title="SavingsGoalSheet"
+				tier="visual"
+				components={["SavingsGoalSheet"]}
+				sentence="The sheet for choosing how much to save each month, with one labeled amount field and Cancel and Save."
+			>
+				<State label="Goal set">
+					<div class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5">
+						<SavingsGoalSheet value="500.00" month="October" />
 					</div>
 				</State>
 			</Specimen>

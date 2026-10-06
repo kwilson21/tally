@@ -23,11 +23,11 @@ import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
 import { HomeTop } from "../views/home-top";
-import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
+import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { ThingsToTry } from "../views/things-to-try";
 import { loadBillRows } from "./bills";
 
@@ -50,6 +50,14 @@ const openAttrs = (href: string) => ({
 	"hx-swap": "outerHTML",
 	"hx-push-url": "true",
 });
+
+const closeSavingsGoalAttrs = {
+	"hx-get": "/?focus=savings-goal",
+	"hx-target": "#page",
+	"hx-select": "#page",
+	"hx-swap": "outerHTML",
+	"hx-push-url": "/",
+};
 
 // Adjust mode (#94): Adjust, Done and each − or + swap Home in place. They share one queue on the
 // body, so rapid taps apply one after another and Done waits for a tap still saving; focus stays on
@@ -312,80 +320,6 @@ async function renderHome(
 	);
 }
 
-function SavingsGoalSheet({
-	value,
-	error,
-	month: monthPeriod,
-}: {
-	value: string;
-	error?: string;
-	month: string;
-}) {
-	const month = monthName(monthPeriod);
-	const closeAttrs = {
-		"hx-get": "/?focus=savings-goal",
-		"hx-target": "#page",
-		"hx-select": "#page",
-		"hx-swap": "outerHTML",
-		"hx-push-url": "/",
-	};
-	return (
-		<BottomSheet
-			labelledBy="savings-goal-sheet-title"
-			closeHref="/"
-			closeAttrs={closeAttrs}
-			still={error !== undefined}
-		>
-			<div class="flex items-center gap-3">
-				<Icon name="bank" class="size-6 shrink-0 text-ink" />
-				<h2
-					id="savings-goal-sheet-title"
-					class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight"
-					tabindex={-1}
-				>
-					Savings
-				</h2>
-			</div>
-			<p class="mt-1 text-muted">
-				Set aside from Safe to spend at the start of every month.
-			</p>
-			<form
-				method="post"
-				action="/savings-goal"
-				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
-				hx-post="/savings-goal"
-				hx-disable="findAll button[type=submit]"
-				hx-indicator="#savings-goal-save"
-				hx-target="#page"
-				hx-select="#page"
-				hx-swap="outerHTML"
-			>
-				<MoneyInput
-					id="savings-goal"
-					name="goal"
-					label={`Save each month, from ${month} on`}
-					value={value}
-					error={error}
-					autofocus
-				/>
-				<div class="mt-2 grid grid-cols-2 gap-3">
-					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
-						Cancel
-					</Button>
-					<Button
-						id="savings-goal-save"
-						type="submit"
-						class="w-full"
-						busyLabel="Saving…"
-					>
-						Save
-					</Button>
-				</div>
-			</form>
-		</BottomSheet>
-	);
-}
-
 /** The budget sheet: one amount, from this month on, with the money input's helpers. */
 function BudgetSheet({
 	category,
@@ -533,14 +467,20 @@ home.get("/savings-goal", async (c) => {
 	const today = await householdToday(c.env.DB);
 	return renderHome(c, today, {
 		sheet: (_spent, amountCents) => (
-			<SavingsGoalSheet
-				value={
-					amountCents !== null && amountCents > 0
-						? centsToAmount(amountCents)
-						: ""
-				}
-				month={today.slice(0, 7)}
-			/>
+			<BottomSheet
+				labelledBy="savings-goal-sheet-title"
+				closeHref="/"
+				closeAttrs={closeSavingsGoalAttrs}
+			>
+				<SavingsGoalSheet
+					value={
+						amountCents !== null && amountCents > 0
+							? centsToAmount(amountCents)
+							: ""
+					}
+					month={today.slice(0, 7)}
+				/>
+			</BottomSheet>
 		),
 	});
 });
@@ -551,10 +491,20 @@ home.post("/savings-goal", async (c) => {
 	const typed = String((await c.req.formData()).get("goal") ?? "");
 	const parsed = parseBudgetAmount(typed);
 	if (!parsed.ok) {
+		if (c.req.header("HX-Request")) {
+			c.header("HX-Trigger", JSON.stringify({ announce: parsed.error }));
+		}
 		return renderHome(c, today, {
 			status: 422,
 			sheet: () => (
-				<SavingsGoalSheet value={typed} error={parsed.error} month={month} />
+				<BottomSheet
+					labelledBy="savings-goal-sheet-title"
+					closeHref="/"
+					closeAttrs={closeSavingsGoalAttrs}
+					still
+				>
+					<SavingsGoalSheet value={typed} error={parsed.error} month={month} />
+				</BottomSheet>
 			),
 		});
 	}
