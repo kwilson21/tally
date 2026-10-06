@@ -291,6 +291,18 @@ function problems(file: string, text: string): string[] {
 }
 
 describe("design tokens (DESIGN.md)", () => {
+	it("keeps focused content clear of the phone tab bar and Feedback button", () => {
+		const rule = cssRules(css).find(
+			({ selector, body, within }) =>
+				selector === "html" &&
+				body.includes("scroll-padding-bottom") &&
+				within.some((rule) => rule.startsWith("@media (max-width:")),
+		);
+		expect(rule?.body).toMatch(
+			/scroll-padding-bottom:\s*calc\(28\s*\*\s*var\(--spacing\)\s*\+\s*var\(--safe-area-bottom\)\)/,
+		);
+	});
+
 	it("reads the views, routes and scripts", () => {
 		expect(Object.keys(SOURCES)).toContain("../src/views/money-input.tsx");
 		expect(Object.keys(SOURCES)).toContain("../public/js/toast.js");

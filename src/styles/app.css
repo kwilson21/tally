@@ -70,6 +70,15 @@
 		font-variant-numeric: tabular-nums;
 		-webkit-font-smoothing: antialiased;
 	}
+	@media (max-width: 63.999rem) {
+		html {
+			scroll-padding-bottom: calc(
+				28 *
+				var(--spacing) +
+				var(--safe-area-bottom)
+			);
+		}
+	}
 	a {
 		color: var(--color-accent);
 	}
