@@ -132,6 +132,62 @@ describe("cash delete undo", () => {
 		).toEqual({ status: "linked" });
 	});
 
+	it("rolls back restored rows when consuming the token fails", async () => {
+		const id = await cashEntry();
+		const token = await holdCashDelete(env.DB, id, "Market");
+		if (!token) throw new Error("cash delete token missing");
+		const failingDb = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) =>
+						target.prepare(
+							sql.includes("DELETE FROM cash_delete_holds")
+								? "DELETE FROM missing_cash_delete_holds"
+								: sql,
+						);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+
+		await expect(restoreCashDelete(failingDb, token)).resolves.toBeNull();
+		expect(
+			await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toBeNull();
+		expect(
+			await env.DB.prepare("SELECT token FROM cash_delete_holds WHERE token=?")
+				.bind(token)
+				.first(),
+		).toEqual({ token });
+	});
+
+	it("restores a token only once when two restores race", async () => {
+		const id = await cashEntry();
+		const token = await holdCashDelete(env.DB, id, "Market");
+		if (!token) throw new Error("cash delete token missing");
+
+		const results = await Promise.all([
+			restoreCashDelete(env.DB, token),
+			restoreCashDelete(env.DB, token),
+		]);
+		expect(results.filter(Boolean)).toHaveLength(1);
+		expect(results.filter((result) => result === null)).toHaveLength(1);
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ n: 1 });
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM cash_delete_holds WHERE token=?",
+			)
+				.bind(token)
+				.first(),
+		).toEqual({ n: 0 });
+	});
+
 	it("names an omitted refund link when its purchase row is gone", async () => {
 		const id = await cashEntry();
 		const bank = await env.DB.prepare(
