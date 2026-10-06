@@ -883,6 +883,43 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			});
 		});
 
+		it("does not move an income guess onto a posted row with its own income choice", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.5 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: null,
+				income_source: "user",
+				credit_reviewed_by: "user",
+			});
+		});
+
+		it("does not move a transfer guess onto a posted row with its own exclusion choice", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET transfer_confidence = 0.6 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				transfer_confidence: null,
+				excluded_source: "user",
+			});
+		});
+
 		it("moves a none-fit answer with its confidence, so the posted row still counts toward a suggested category (#51)", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item);

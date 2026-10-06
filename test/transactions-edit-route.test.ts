@@ -140,7 +140,29 @@ describe("GET /transactions/:id", () => {
 		expect(incomeLabel?.[1]).not.toContain("border-dashed");
 	});
 
-	it("drops the income guess treatment when the posted choice is unchecked on a validation error", async () => {
+	it("drops the income guess when a stored income choice is unchecked on a validation error", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, flag_income=1, income_source='user', credit_reviewed=1, credit_reviewed_by='user', income_confidence=0.5 WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			category: "invalid",
+			creditReviewedVisible: "1",
+			creditReviewed: "0",
+		});
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
+		expect(sheet).not.toContain('id="income-suggestion-confidence-');
+	});
+
+	it("keeps the income guess when an unrelated field errors and income is untouched", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
 		).run();
@@ -158,8 +180,11 @@ describe("GET /transactions/:id", () => {
 			creditReviewed: "0",
 		});
 		const sheet = html.slice(html.indexOf('role="dialog"'));
-		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
-		expect(sheet).not.toContain('id="income-suggestion-confidence-');
+		expect(sheet).toContain("Tally&#39;s guess · 50% sure");
+		const incomeLabel = sheet.match(
+			/<label class="([^"]+)"[^>]*><input type="checkbox" name="income"/,
+		);
+		expect(incomeLabel?.[1]).toContain("border-dashed");
 	});
 
 	it("renders a confident 0.8 income answer as applied, without Maybe income", async () => {

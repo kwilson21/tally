@@ -1068,10 +1068,7 @@ function EditSheet({
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
-	const showIncomeGuess =
-		Object.keys(errors).length === 0 &&
-		!values.income &&
-		maybeIncomeVisible(tx);
+	const showIncomeGuess = values.income === tx.income && maybeIncomeVisible(tx);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
