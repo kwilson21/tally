@@ -2,6 +2,7 @@
 // in, words and geometry out. Nothing here reads a database or draws markup. All money is integer
 // cents, formatted only into the sentences; code writes every sentence, never AI.
 import { type BudgetAmount, budgetForMonth } from "./budget";
+import { MAX_BUDGET_CENTS } from "./budgets/amount";
 import {
 	daysInMonth,
 	monthName,
@@ -15,6 +16,23 @@ import { formatCents } from "./money";
 export const TREND_MONTHS = 6;
 /** Months in a row a category must be under budget, or up, to be Going well or Worth a look. */
 export const RUN_MONTHS = 3;
+
+/** The positive, whole-cent average of exactly three finished months; halves round up. */
+export function averageMonthlyCents(months: number[]): number | null {
+	if (months.length !== 3) return null;
+	const average = Math.floor(
+		(months.reduce((sum, cents) => sum + cents, 0) * 2 + 3) / 6,
+	);
+	return average > 0 && average <= MAX_BUDGET_CENTS ? average : null;
+}
+
+/** Whether history starts after the 1st of `month`; no history has no partial first month. */
+export function firstMonthIsPart(
+	firstDate: string | null,
+	month: string,
+): boolean {
+	return firstDate !== null && firstDate > `${month}-01`;
+}
 
 export type TrendCategory = {
 	id: number;
@@ -346,7 +364,7 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	const startMonth = firstDate.slice(0, 7);
 	// That month is a part month unless history starts on its 1st: Tally can't tell how much of it
 	// is there. A part month is drawn (striped) but never judged, compared or put in a run.
-	const startIsPart = firstDate.slice(8, 10) !== "01";
+	const startIsPart = firstMonthIsPart(firstDate, startMonth);
 	const months = shownMonths(input.today, startMonth);
 	const judged = months.filter(
 		(m) =>

@@ -300,12 +300,18 @@ async function renderList(
 	// Select and Done keep every filter and the page; Done drops only select mode.
 	const doneHref = `/transactions${listQuery ? `?${listQuery}` : ""}`;
 	const selectHref = `/transactions?${listQuery ? `${listQuery}&` : ""}select=1`;
+	// The demo's raw view draws each row as the bank sends it; which rows are listed, and what a tap does, don't change.
+	const shown = (row: ListRow) => (filters.raw ? bankRow(row) : row);
+	const suggestedNameNote = rows.some((row) => shown(row).nameSuggested) ? (
+		<p class="mb-2 flex flex-wrap items-center gap-x-1 text-sm text-muted">
+			Dashed names are suggestions.
+			<WhyLink section="names" topic="suggested name" />
+		</p>
+	) : null;
 	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
 	// shows the no-JS hint, and htmx re-counts on load.
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
 	const htmx = c.req.header("HX-Request") === "true";
-	// The demo's raw view draws each row as the bank sends it; which rows are listed, and what a tap does, don't change.
-	const shown = (row: ListRow) => (filters.raw ? bankRow(row) : row);
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
 	return c.html(
@@ -526,6 +532,7 @@ async function renderList(
 					>
 						<input id="selection-back" type="hidden" name="back" value={back} />
 						<section id="results" class="mt-2" aria-label="Results">
+							{suggestedNameNote}
 							{selectionError && (
 								<p role="alert" class="my-3 text-sm text-over">
 									{selectionError}
@@ -586,6 +593,7 @@ async function renderList(
 					</form>
 				) : (
 					<section id="results" class="mt-2" aria-label="Results">
+						{suggestedNameNote}
 						{rows.length === 0 ? (
 							firstVisit !== null ? (
 								<FirstVisitList state={firstVisit} />
@@ -1066,7 +1074,9 @@ function EditSheet({
 			still={still || deleteConfirm || Object.keys(errors).length > 0}
 		>
 			{tx.rawName !== tx.displayName && (
-				<p class="text-sm text-muted">{tx.rawName}</p>
+				<p class="min-w-0 max-w-full wrap-anywhere text-sm text-muted">
+					{tx.rawName}
+				</p>
 			)}
 			<h2
 				id="edit-title"
@@ -1074,7 +1084,7 @@ function EditSheet({
 				// Focused only so screen readers start here; it isn't a control, so no ring. While the sheet
 				// asks about a delete, the question takes the focus instead (one autofocus, or htmx picks the first).
 				autofocus={!deleteConfirm}
-				class={`font-serif text-4xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
+				class={`min-w-0 max-w-full wrap-anywhere font-serif text-4xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
 			>
 				{tx.displayName}
 				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}

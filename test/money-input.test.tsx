@@ -15,6 +15,21 @@ const inputTag = (error?: string) =>
 	).match(/<input [^>]*data-money-input[^>]*>/)?.[0] ?? "";
 
 describe("MoneyInput", () => {
+	it("draws a three-month average chip with its pressed state and 44px target", () => {
+		const html = renderToString(
+			<MoneyInput
+				id="amount"
+				name="amount"
+				label="Budget"
+				value="650.00"
+				averageCents={65000}
+			/>,
+		);
+		expect(html).toMatch(/data-set="65000"[^>]*aria-pressed="true"/);
+		expect(html).toContain("3-month average: $650.00");
+		expect(html).toMatch(/data-set="65000"[^>]*class="[^"]*min-h-11/);
+	});
+
 	it("makes the input fill the whole 90px box, so tapping anywhere in the box focuses it", () => {
 		// The box is a div, not a label: an input only as tall as its text (42px) leaves the box's top and
 		// bottom bands dead. self-stretch and -my-3 (undoing the box's py-3) give the input the box's
