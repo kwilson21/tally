@@ -326,8 +326,10 @@ howItWorks.get("/how-it-works", async (c) => {
 							uncategorized, or safe to spend.
 						</li>
 						<li>
-							A credit held for review isn't excluded: it waits, and counts once
-							it is reviewed (see Transactions).
+							A credit held for review isn't excluded: it waits until Tally
+							confidently sorts it as non-income or a person reviews it, and
+							once a person marks it as income it counts toward Income instead
+							(see Transactions).
 						</li>
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>

@@ -457,7 +457,7 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 	it("is pointed to from Excluding, where the held slice is drawn, and never names Jev", async () => {
 		for (const html of [(await get("/how-it-works")).html, await family()]) {
 			expect(sectionOf(html, "exclusions")).toContain(
-				"A credit held for review isn't excluded: it waits, and counts once it is reviewed (see Transactions).",
+				"A credit held for review isn't excluded: it waits until Tally confidently sorts it as non-income or a person reviews it, and once a person marks it as income it counts toward Income instead (see Transactions).",
 			);
 		}
 		expect(sectionOf(await family(), "transactions")).not.toMatch(/jev/i);
