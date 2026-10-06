@@ -390,7 +390,7 @@ describe("GET /transactions/:id", () => {
 		expect(rowCount(html)).toBe(12);
 		expect(html).toMatch(/<section role="dialog" aria-labelledby="edit-title"/);
 		expect(html).toMatch(
-			/<h2 id="edit-title"[^>]*autofocus[^>]*>Local Bakery<\/h2>/,
+			/<h2 id="edit-title"[^>]*autofocus[^>]*class="[^"]*\bmin-w-0\b[^"]*\bwrap-anywhere\b[^"]*">Local Bakery<\/h2>/,
 		);
 		expect(html).toContain("SQ *LOCAL BAKERY 4432");
 		expect(html).toContain("$12.00");
@@ -422,6 +422,23 @@ describe("GET /transactions/:id", () => {
 		expect(sheet).toMatch(/<h2 id="edit-title"[^>]*>Xyzshop<\/h2>/);
 		// The raw text differs from the tidied heading, so it shows underneath and as the placeholder.
 		expect(sheet.match(/PAYPAL \*XYZSHOP/g)).toHaveLength(2);
+	});
+
+	it("keeps an unbroken merchant name inside the edit-sheet heading", async () => {
+		const longName = "x".repeat(48);
+		const id = Number(
+			(
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name) VALUES (1,'2026-09-14',1200,?) RETURNING id",
+				)
+					.bind(longName)
+					.first<{ id: number }>()
+			)?.id,
+		);
+		const { html } = await get(`/transactions/${id}`);
+		const heading = html.match(/<h2 id="edit-title"[^>]*>/)?.[0] ?? "";
+		expect(heading).toMatch(/class="[^"]*\bmin-w-0\b[^"]*\bwrap-anywhere\b/);
+		expect(html).toContain(`${heading}${longName}</h2>`);
 	});
 
 	it("is a 404 page for an unknown id", async () => {

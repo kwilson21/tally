@@ -359,6 +359,17 @@ describe("TransactionRow", () => {
 		);
 	});
 
+	it("truncates an unbroken merchant name inside the fixed-height row", async () => {
+		const html = await TransactionRow({
+			row: { ...base, displayName: "x".repeat(48) },
+		}).toString();
+		expect(html).toMatch(
+			new RegExp(
+				`<span class="[^"]*\\btruncate\\b[^"]*">${"x".repeat(48)}<\\/span>`,
+			),
+		);
+	});
+
 	it("shows Maybe only when the row still needs a category", async () => {
 		const suggested = {
 			...base,
