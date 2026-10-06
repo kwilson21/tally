@@ -483,3 +483,30 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 		expect(sectionOf(await family(), "transactions")).not.toMatch(/jev/i);
 	});
 });
+
+describe("new category suggestions in the Categories section (spec §7, #51)", () => {
+	const sectionOf = (html: string) =>
+		(
+			html.split('id="categorization"')[1]?.split("</section>")[0] ?? ""
+		).replace(/\s+/g, " ");
+	const family = async () =>
+		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+	const RULE =
+		"When Tally is sure that none of your categories fit, it keeps that answer, and once three or more of those transactions share a theme it may suggest a new category in Settings.";
+
+	it("is stated in the spec, and the Categories section says it in the spec's words", async () => {
+		expect(spec).toContain(RULE);
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = decodeHtml(sectionOf(html));
+			expect(text).toContain(RULE);
+			// A person decides, and what they dismiss stays dismissed.
+			expect(text).toContain("You create it or dismiss it");
+			expect(text).toContain("a dismissed one isn't suggested again");
+			expect(text).toContain("Guess categories");
+		}
+	});
+
+	it("never names Jev in the family app", async () => {
+		expect(sectionOf(await family())).not.toMatch(/jev/i);
+	});
+});

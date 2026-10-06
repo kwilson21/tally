@@ -50,6 +50,7 @@ describe("schema", () => {
 			"bills",
 			"budget_amounts",
 			"categories",
+			"category_suggestions",
 			"documents",
 			"feedback",
 			"household_settings",

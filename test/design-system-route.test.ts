@@ -388,6 +388,54 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows CategorySuggestion ticked, with one unticked, with an error and on a narrow phone, with its whole use spec, as Settings draws it (P30 A)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) =>
+			t.includes('id="category-suggestion"'),
+		);
+		// Visual: it posts nothing here, and the specimen is inert to htmx.
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain('data-ds-components="CategorySuggestion"');
+		expect(tag).toContain("hx-ignore");
+		const section =
+			html.split('id="category-suggestion"')[1]?.split("</section>")[0] ?? "";
+		// Four states, each in an inert box so nothing in them can be tapped or can take focus, each open.
+		expect(section.match(/<div inert/g)).toHaveLength(4);
+		expect(
+			[...section.matchAll(/<details[^>]*>/g)].every((m) =>
+				/\sopen(\s|>|=)/.test(m[0]),
+			),
+		).toBe(true);
+		// The dashed row, its words, and its two ways out.
+		expect(section).toContain("border-dashed");
+		expect(section).toContain("Suggested: Pet Care");
+		expect(section).toContain("Untick any that don&#39;t belong.");
+		expect(section).toContain("Create Pet Care with 3");
+		expect(section).toContain(">Dismiss<");
+		// Ticked rows, and the unticked one whose note field shows only while it is.
+		const boxes = [...section.matchAll(/<input[^>]*name="ids"[^>]*>/g)];
+		expect(boxes.some((m) => /\schecked(\s|>|=)/.test(m[0]))).toBe(true);
+		expect(boxes.some((m) => !/\schecked(\s|>|=)/.test(m[0]))).toBe(true);
+		expect(section).toContain("A note for Amazon (optional)");
+		expect(section).toMatch(
+			/role="alert"[^>]*>[^<]*Tick at least one transaction/,
+		);
+		expect(section).toContain('href="/how-it-works#categorization"');
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		// Screens say Tally, never Jev.
+		expect(section).not.toMatch(/jev/i);
+		// DESIGN.md says what it is, and that it works without a script.
+		expect(design).toMatch(
+			/\| CategorySuggestion \|[^\n]*dashed[^\n]*Create[^\n]*Dismiss[^\n]*without JavaScript/,
+		);
+		// SelectableTransactionRow can carry the note field, and says so.
+		expect(design).toMatch(
+			/\| SelectableTransactionRow \|[^\n]*only while it is unticked/,
+		);
+	});
+
 	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {
 		const { html } = await get("/design-system");
 		const tag = specimens(html).find((t) => t.includes('id="time-zone-row"'));
