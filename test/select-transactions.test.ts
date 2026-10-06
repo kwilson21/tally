@@ -14,6 +14,16 @@ const request = async (path: string, init?: RequestInit) => {
 
 beforeEach(async () => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
+/** The selectable ids on the first page of all months, newest first. The demo seed follows the
+ * date, so which ids land on page 1 changes from day to day; tests that need a row on the page
+ * take theirs from here rather than naming one. */
+const firstPageIds = async () => {
+	const html = await (await request("/transactions?month=all&select=1")).text();
+	return [...html.matchAll(/name="ids" value="(\d+)"/g)].map((m) =>
+		Number(m[1]),
+	);
+};
+
 describe("select several transactions", () => {
 	it("keeps every list parameter in Select and Done drops only select", async () => {
 		const html = await (
@@ -264,22 +274,28 @@ describe("select several transactions", () => {
 	});
 
 	it("keeps the chosen ids ticked when the sheet is cancelled", async () => {
+		const ids = await firstPageIds();
+		expect(ids.length).toBeGreaterThan(1);
+		// The sheet lists the ids in ascending order.
+		const [a, b] = ids.slice(0, 2).sort((x, y) => x - y) as [number, number];
 		const res = await post(
 			"/transactions/select/category",
-			form([112, 113], { back: "/transactions?month=all" }),
+			form([a, b], { back: "/transactions?month=all" }),
 		);
 		const html = await res.text();
-		const cancel = "/transactions?month=all&amp;select=1&amp;ids=112,113";
+		const cancel = `/transactions?month=all&amp;select=1&amp;ids=${a},${b}`;
 		expect(html).toContain(`href="${cancel}"`);
 		expect(
 			html.match(new RegExp(`href="${cancel.replace(/[?]/g, "\\?")}"`, "g"))
 				?.length,
 		).toBe(2);
 		const list = await (
-			await request("/transactions?month=all&select=1&ids=112,113,abc,-3,1.5,0")
+			await request(
+				`/transactions?month=all&select=1&ids=${a},${b},abc,-3,1.5,0`,
+			)
 		).text();
-		expect(list).toMatch(/value="112"[^>]*checked/);
-		expect(list).toMatch(/value="113"[^>]*checked/);
+		expect(list).toMatch(new RegExp(`value="${a}"[^>]*checked`));
+		expect(list).toMatch(new RegExp(`value="${b}"[^>]*checked`));
 		expect((list.match(/name="ids"[^>]*checked/g) ?? []).length).toBe(2);
 	});
 
@@ -313,8 +329,9 @@ describe("select several transactions", () => {
 	});
 
 	it("re-derives the count from the ticked rows still in the list", async () => {
+		const [id] = await firstPageIds();
 		const res = await request(
-			"/transactions?month=all&select=1&ids=112&ids=999999",
+			`/transactions?month=all&select=1&ids=${id}&ids=999999`,
 			{ headers: { "HX-Request": "true" } },
 		);
 		const html = await res.text();
