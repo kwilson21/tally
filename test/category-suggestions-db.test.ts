@@ -649,6 +649,80 @@ describe("createFromSuggestion", () => {
 		});
 		expect((await row(made[0] as number))?.category_id).toBeNull();
 	});
+
+	it("saves notes for 300 unticked transactions in a fixed number of statements", async () => {
+		const made: number[] = [];
+		for (let i = 0; i < 301; i++)
+			made.push(await add({ rawName: `SHOP ${i}`, date: "2026-09-10" }));
+		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements++;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+		const notes = Object.fromEntries(
+			made.slice(1).map((tx) => [tx, `Note for ${tx}`]),
+		);
+
+		const result = await createFromSuggestion(
+			counted,
+			id,
+			{ ticked: [made[0] as number], shown: made, notes },
+			"person",
+		);
+
+		expect(result).toMatchObject({ ok: true, moved: 1 });
+		expect(statements).toBeLessThanOrEqual(12);
+		expect((await row(made[300] as number))?.note).toBe(
+			`Note for ${made[300]}`,
+		);
+	});
+
+	it("rolls back the category and transaction writes if the final batch statement fails", async () => {
+		const { id, made } = await pending();
+		const before = (await categories()).length;
+		await db
+			.prepare(`
+			CREATE TRIGGER fail_suggestion_created
+			BEFORE UPDATE OF status ON category_suggestions
+			WHEN NEW.status = 'created'
+			BEGIN SELECT RAISE(ABORT, 'forced final statement failure'); END
+			`)
+			.run();
+
+		try {
+			await expect(
+				createFromSuggestion(
+					db,
+					id,
+					{
+						ticked: made.slice(0, 3),
+						shown: made,
+						notes: { [made[3] as number]: "Gift" },
+					},
+					"person",
+				),
+			).rejects.toThrow();
+		} finally {
+			await db.prepare("DROP TRIGGER fail_suggestion_created").run();
+		}
+
+		expect(await categories()).toHaveLength(before);
+		expect(await suggestion(id)).toMatchObject({ status: "pending" });
+		for (const tx of made)
+			expect(await row(tx)).toMatchObject({
+				category_id: null,
+				category_suggestion_id: id,
+			});
+		expect((await row(made[3] as number))?.note).toBeNull();
+	});
 });
 
 describe("dismissSuggestion", () => {

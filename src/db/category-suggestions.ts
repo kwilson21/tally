@@ -212,49 +212,48 @@ export async function createFromSuggestion(
 			"SELECT COUNT(*) n, COALESCE(MAX(sort_order),0) last FROM categories",
 		)
 		.first<{ n: number; last: number }>();
-	const category = await db
-		.prepare(
-			"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', ?, ?)",
+	const notes = Object.entries(input.notes)
+		.filter(
+			([tx, note]) =>
+				!ticked.includes(Number(tx)) &&
+				attached.includes(Number(tx)) &&
+				note.trim(),
 		)
-		.bind(
-			name,
-			["cat-blue", "cat-plum", "cat-slate", "cat-ochre", "cat-brown"][
-				(count?.n ?? 0) % 5
-			],
-			(count?.last ?? 0) + 1,
-		)
-		.run();
-	const categoryId = Number(category.meta.last_row_id);
-	await db
-		.prepare(
-			`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, category_suggestion_id = NULL, updated_by = ?, updated_at = datetime('now') WHERE category_suggestion_id = ? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL`,
-		)
-		.bind(categoryId, actor, id, JSON.stringify(ticked))
-		.run();
-	for (const [tx, note] of Object.entries(input.notes))
-		if (
-			!ticked.includes(Number(tx)) &&
-			attached.includes(Number(tx)) &&
-			note.trim()
-		)
-			await db
-				.prepare(
-					"UPDATE transactions SET note = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL",
-				)
-				.bind(note.trim(), actor, Number(tx), id)
-				.run();
+		.map(([tx, note]) => ({ id: Number(tx), note: note.trim() }));
+	await db.batch([
+		db
+			.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', ?, ?)",
+			)
+			.bind(
+				name,
+				["cat-blue", "cat-plum", "cat-slate", "cat-ochre", "cat-brown"][
+					(count?.n ?? 0) % 5
+				],
+				(count?.last ?? 0) + 1,
+			),
+		db
+			.prepare(
+				`UPDATE transactions SET category_id = (SELECT id FROM categories WHERE name = ? COLLATE NOCASE), category_source = 'user', category_confidence = NULL, category_suggestion_id = NULL, updated_by = ?, updated_at = datetime('now') WHERE category_suggestion_id = ? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL`,
+			)
+			.bind(name, actor, id, JSON.stringify(ticked)),
+		db
+			.prepare(
+				"UPDATE transactions SET note = json_extract(note.value, '$.note'), updated_by = ?, updated_at = datetime('now') FROM json_each(?) AS note WHERE transactions.id = json_extract(note.value, '$.id') AND transactions.category_suggestion_id = ? AND transactions.category_id IS NULL AND transactions.category_source IS NULL",
+			)
+			.bind(actor, JSON.stringify(notes), id),
+		db
+			.prepare(
+				"UPDATE category_suggestions SET status = 'created', decided_at = datetime('now') WHERE id = ?",
+			)
+			.bind(id),
+	]);
 	const { results: leftOut } = await db
 		.prepare(
 			`SELECT id FROM transactions WHERE category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL AND id IN (${placeholders()})`,
 		)
 		.bind(id, JSON.stringify(attached))
 		.all<{ id: number }>();
-	await db
-		.prepare(
-			"UPDATE category_suggestions SET status = 'created', decided_at = datetime('now') WHERE id = ?",
-		)
-		.bind(id)
-		.run();
 	return {
 		ok: true,
 		name,
