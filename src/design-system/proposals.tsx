@@ -369,7 +369,7 @@ export const DECIDED: readonly {
 	{
 		title: "P116 · A suggested amount in the budget sheet",
 		outcome:
-			"Option B: a second chip beside Last month, “3-month average”, with the average of what the category spent in the last three finished months, shown once there are three finished months and the average is above $0 (decision 85).",
+			"Option B: a second chip beside Last month, “3-month average”, with the average of what the category spent in the last three finished months, shown once there are three finished months and the average is above $0; a part first month isn't one of them (decision 85).",
 		issue: 250,
 	},
 ];
@@ -396,7 +396,7 @@ export function Proposals() {
 					Picked: the polish pass
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Choices the polish pass turned up (questions 56 to 62), each drawn on
+					Choices the polish pass turned up (questions 56 to 63), each drawn on
 					a phone. The owner's picks marked Picked are decisions 84 and 85.
 				</p>
 				<PolishProposals />

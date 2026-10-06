@@ -704,7 +704,7 @@ export function PolishProposals() {
 						{
 							name: "Option B · Add a 3-month average",
 							picked: true,
-							note: "A second chip beside it, “3-month average: $650.00”, fills the box with the last three finished months' average. It shows once there are three finished months and the average is above $0.",
+							note: "A second chip beside it, “3-month average: $650.00”, fills the box with the last three finished months' average. It shows once there are three finished months, a part first month not counting (Q63 A), and the average is above $0.",
 							tradeoff:
 								"one more chip, and on a phone it wraps to a second line.",
 							recommended:
