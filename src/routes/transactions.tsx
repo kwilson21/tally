@@ -120,7 +120,7 @@ function FirstVisitList({ state }: { state: FirstVisit }) {
 		<EmptyState
 			kind="search"
 			sentence="Importing your transactions…"
-			hint="Your bank sends about 90 days. It usually takes a few minutes."
+			hint="Your bank sends about 90 days of them. It usually takes a few minutes."
 		/>
 	);
 }
@@ -442,10 +442,15 @@ async function renderList(
 						{count}
 					</p>
 				)}
-				{firstVisit === null && filters.uncategorized && (
-					<Button kind="text" href="/transactions/organize" class="-ml-2">
-						Organize by merchant
-					</Button>
+				{/* Always drawn on a list, so a filter change can add or remove the link inside it (LIST_OOB). */}
+				{firstVisit === null && (
+					<div id="organize-link">
+						{filters.uncategorized && (
+							<Button kind="text" href="/transactions/organize" class="-ml-2">
+								Organize by merchant
+							</Button>
+						)}
+					</div>
 				)}
 				{selecting ? (
 					<form
@@ -595,6 +600,7 @@ transactions.get("/transactions", async (c) => {
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
 const LIST_OOB = [
 	"#result-count:innerHTML",
+	"#organize-link:innerHTML",
 	"#add-cash:outerHTML",
 	"#select-toggle:outerHTML",
 	"#selection-back:outerHTML",

@@ -76,8 +76,11 @@ export function BankGroup({
 			)}
 			{disconnected && <p class="mt-3 text-muted">Disconnected</p>}
 			{manageHref && !disconnected && (
-				<details class="mt-3">
-					<summary class="inline-flex min-h-11 cursor-pointer items-center text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+				<details class="group mt-3">
+					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+						<span class="shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none">
+							<Icon name="chevron-right" class="size-5" />
+						</span>
 						Manage
 					</summary>
 					<Button kind="secondary" href={manageHref} class="mt-2">

@@ -45,7 +45,7 @@ const NO_BANK = "Link a bank to see transactions.";
 const NO_BANK_HINT = "Tally can only read them; it can&#39;t move money.";
 const IMPORTING = "Importing your transactions…";
 const IMPORTING_HINT =
-	"Your bank sends about 90 days. It usually takes a few minutes.";
+	"Your bank sends about 90 days of them. It usually takes a few minutes.";
 const NO_MATCH = "No transactions match these filters.";
 
 // EmptyState's accent marks: the add sign's circle, and the magnifier's.
