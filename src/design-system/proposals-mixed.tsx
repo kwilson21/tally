@@ -21,6 +21,7 @@ import {
 	COSTCO,
 	Days,
 	FIVE,
+	GROCERIES,
 	HOUSEHOLD,
 	NeedsLine,
 	PanelForm,
@@ -93,11 +94,24 @@ type Part = { category: number; amount: string };
  * (decision 64), until a person types its amount or changes it (`kept`). The amounts start empty:
  * the bank sent only the total.
  */
-function SuggestedSplit({ parts, kept }: { parts: Part[]; kept?: boolean }) {
+function SuggestedSplit({
+	parts,
+	kept,
+	idPrefix = "p90",
+	note = "Tally's guess: Household from this trip's details, Groceries from your other Costco trips",
+}: {
+	parts: Part[];
+	kept?: boolean;
+	idPrefix?: string;
+	note?: string;
+}) {
 	return (
 		<div class="mt-4 flex flex-col gap-4 border-t border-rule pt-4">
 			<div class="flex items-center justify-between gap-3">
-				<div id={`p90-split-line${kept ? "-kept" : ""}`} aria-live="polite">
+				<div
+					id={`${idPrefix}-split-line${kept ? "-kept" : ""}`}
+					aria-live="polite"
+				>
 					<SplitLine
 						parentCents={TRIP.amountCents}
 						amounts={parts.map((p) => p.amount)}
@@ -107,24 +121,19 @@ function SuggestedSplit({ parts, kept }: { parts: Part[]; kept?: boolean }) {
 					Add a part
 				</Button>
 			</div>
-			{!kept && (
-				<p class="text-sm text-muted">
-					Tally's guess: Household from this trip's details, Groceries from your
-					other Costco trips
-				</p>
-			)}
+			{!kept && <p class="text-sm text-muted">{note}</p>}
 			{parts.map((part, index) => (
 				<div
 					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
 				>
 					<label
-						for={`p90-part-category-${index}${kept ? "-kept" : ""}`}
+						for={`${idPrefix}-part-category-${index}${kept ? "-kept" : ""}`}
 						class="sr-only"
 					>
 						Part {index + 1} category
 					</label>
 					<select
-						id={`p90-part-category-${index}${kept ? "-kept" : ""}`}
+						id={`${idPrefix}-part-category-${index}${kept ? "-kept" : ""}`}
 						name="part_category"
 						class={`min-h-11 rounded-full border ${kept ? "border-rule" : "border-dashed border-ink"} bg-paper px-3`}
 					>
@@ -135,7 +144,7 @@ function SuggestedSplit({ parts, kept }: { parts: Part[]; kept?: boolean }) {
 						))}
 					</select>
 					<LedgerField
-						id={`p90-part-amount-${index}${kept ? "-kept" : ""}`}
+						id={`${idPrefix}-part-amount-${index}${kept ? "-kept" : ""}`}
 						name="part_amount"
 						label={`Part ${index + 1} amount`}
 						value={part.amount}
@@ -165,6 +174,7 @@ const splitSuggested = (
 	<PanelSheet tall behind="">
 		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
 		<SuggestedSplit
+			idPrefix="p90-suggested"
 			parts={[
 				{ category: 5, amount: "" },
 				{ category: 1, amount: "" },
@@ -181,6 +191,7 @@ const splitFilled = (
 	<PanelSheet tall behind="">
 		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
 		<SuggestedSplit
+			idPrefix="p90-filled"
 			kept
 			parts={[
 				{ category: 5, amount: "49.36" },
@@ -189,6 +200,138 @@ const splitFilled = (
 		/>
 	</PanelSheet>
 );
+
+// ---------------------------------------------------------------------------------------------
+// P117 (decision 89): Jev spots a mixed trip from this household's own transaction details.
+
+const SMALL_TRIP = tx(31, TODAY, "Costco", 8217);
+const smallBehind = (
+	<>
+		<TxHeader />
+		<h2 class="mt-3 text-sm text-muted">Today, Oct 5</h2>
+		<ul class="divide-y divide-rule">
+			<MaybeRow name="Costco" cents={8217} maybe="Groceries" />
+		</ul>
+		<Days rows={[TRIP, COSTCO]} />
+	</>
+);
+
+const oneThingPanel = (
+	<PanelSheet behind={smallBehind}>
+		<PanelTop row={SMALL_TRIP} raw={BANK_TEXT} account={CARD} />
+		<PanelForm>
+			<Categories p="p117-one" cats={FIVE} maybe={GROCERIES} />
+			<Toggles p="p117-one" />
+			{actions}
+		</PanelForm>
+	</PanelSheet>
+);
+
+const mixedPanel = (
+	<PanelSheet behind={behind}>
+		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
+		<PanelForm>
+			<Categories p="p117-mixed" cats={FIVE}>
+				<p class="flex flex-wrap items-center gap-x-1 text-sm text-muted">
+					Costco trips go in Groceries and Household.
+					<Button
+						href="#p117-when-split-this-one"
+						kind="text"
+						class="-ml-2 text-sm"
+					>
+						Split this one?
+					</Button>
+				</p>
+			</Categories>
+			<Toggles p="p117-mixed" />
+			{actions}
+		</PanelForm>
+	</PanelSheet>
+);
+
+const oneThingWithNudge = (
+	<PanelSheet behind={smallBehind}>
+		<PanelTop row={SMALL_TRIP} raw={BANK_TEXT} account={CARD} />
+		<PanelForm>
+			<Categories p="p117-old" cats={FIVE} maybe={GROCERIES}>
+				<p class="flex flex-wrap items-center gap-x-1 text-sm text-muted">
+					Costco trips go in Groceries and Household.
+					<Button
+						href="#p117-when-split-this-one"
+						kind="text"
+						class="-ml-2 text-sm"
+					>
+						Split this one?
+					</Button>
+				</p>
+			</Categories>
+			<Toggles p="p117-old" />
+			{actions}
+		</PanelForm>
+	</PanelSheet>
+);
+
+const decision89Split = (
+	<PanelSheet tall behind="">
+		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
+		<SuggestedSplit
+			idPrefix="p117"
+			note="Tally's guess: Groceries and Household from this trip's details"
+			parts={[
+				{ category: 1, amount: "" },
+				{ category: 5, amount: "" },
+			]}
+		/>
+	</PanelSheet>
+);
+
+export function SplitThisOneProposal() {
+	return (
+		<Specimen
+			id="p117-when-split-this-one"
+			title="P117 · When Split this one? shows"
+			tier="visual"
+			sentence="Jev tells when a trip looks mixed; nothing in code counts a store as mixed."
+		>
+			<Fixed>
+				Decision 89 (pictures 14–16): Jev learns from this household's
+				categories and transaction details, guesses the trip's category, and
+				says when it looks like it spans more than one.
+			</Fixed>
+			<NeedsLine settled="decision 89">
+				“Split this one?” appears only on a trip Jev thinks is mixed. Its
+				suggested parts start with Jev's categories, dashed as “Tally's guess”;
+				amounts start empty because the bank sends only the total.
+			</NeedsLine>
+			<Options
+				options={[
+					{
+						name: "Option A · One thing",
+						picked: true,
+						note: "A Costco trip that looks like one thing: Maybe Groceries, $82.17, and no split line.",
+						screen: oneThingPanel,
+					},
+					{
+						name: "Option A, next · Mixed trip",
+						note: "Jev says this $214.36 trip looks mixed and offers Split this one?",
+						screen: mixedPanel,
+					},
+					{
+						name: "Option A, next · The split",
+						note: "Two dashed category guesses, Groceries and Household, with empty amounts and $214.36 left to assign.",
+						tall: true,
+						screen: decision89Split,
+					},
+					{
+						name: "Option B · The line on every Costco trip",
+						note: "Replaced by decision 89: the old rule showed the split line even when the trip looked like one thing.",
+						screen: oneThingWithNudge,
+					},
+				]}
+			/>
+		</Specimen>
+	);
+}
 
 // ---------------------------------------------------------------------------------------------
 // Option B: the category from the filled-in details only.
@@ -269,19 +412,12 @@ export function MixedStoreProposals() {
 				can suggest which categories a split has, never the amounts. Amounts
 				need a person or a receipt, and receipts are on the Later list (§12).
 			</Fixed>
-			<NeedsLine settled="decision 87">
-				a store is mixed when a person has put its trips in two or more
-				categories in the last 3 months, and a split trip counts through its
-				parts, not the category it had before it was split (Q64 A). “Split this
-				one?” shows on every trip to a mixed store, as drawn in Option A (Q66
-				A). The two parts start with the categories the trip's details point to;
-				when the details name only one, the store's most-used other category
-				fills the second part (Q65 A), and when they name none, the store's two
-				most-used categories fill both (Q67 A), all counted over the same 3
-				months and skipping archived categories, which a split can't use; a part
-				with nothing left to suggest starts blank. The amounts are always the
-				person's, Tally never fills one in, and the split saves only when it
-				adds up exactly (§6.1).
+			<NeedsLine settled="decision 89">
+				Decision 89 replaced Q64 A, Q65 A, Q66 A and Q67 A: Jev learns from this
+				household's categories and the details of recent transactions, then
+				tells when a trip looks mixed. “Split this one?” appears only then; the
+				suggested categories are dashed and amounts stay empty because the bank
+				sends only the total. See <a href="#p117-when-split-this-one">P117</a>.
 			</NeedsLine>
 			<Options
 				options={[
