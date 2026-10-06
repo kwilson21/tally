@@ -24,6 +24,33 @@ describe("Bills", () => {
 		expect(html).toContain("bills to pay soon");
 	});
 
+	it("has a How this works link to the Bills section, under the status sentence (decision 82)", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		const link =
+			/<a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a>/;
+		expect(html).toMatch(link);
+		expect(html.match(/\/how-it-works#bills/g)).toHaveLength(1);
+		const at = (text: string | RegExp) =>
+			typeof text === "string" ? html.indexOf(text) : html.search(text);
+		expect(at("bills to pay soon")).toBeLessThan(at(link));
+		expect(at(link)).toBeLessThan(at("Add a bill"));
+		// The section it points to is on How Tally works.
+		const how = await (
+			await exports.default.fetch("http://tally.test/how-it-works")
+		).text();
+		expect(how).toMatch(/<section[^>]*id="bills"/);
+	});
+
+	it("keeps the How this works link when there are no bills", async () => {
+		await env.DB.prepare("DELETE FROM bills").run();
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html).toContain('href="/how-it-works#bills"');
+	});
+
 	it("adds a bill and returns htmx feedback", async () => {
 		const body = new URLSearchParams({
 			name: "Gym",

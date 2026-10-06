@@ -620,6 +620,37 @@ it("retries unfiled feedback in the nightly job", async () => {
 });
 
 describe("demo", () => {
+	it("puts the feedback-is-off box right under the title, before the privacy paragraph (decision 82)", async () => {
+		const html = await (
+			await productionApp(undefined, { demo: true }).fetch("/feedback")
+		).text();
+		const at = (text: string) => html.indexOf(text);
+		expect(at("Feedback is off in the demo")).toBeGreaterThan(-1);
+		expect(at("Send feedback</h1>")).toBeGreaterThan(-1);
+		expect(at("Send feedback</h1>")).toBeLessThan(
+			at("Feedback is off in the demo"),
+		);
+		expect(at("Feedback is off in the demo")).toBeLessThan(
+			at("Before a new report is sent"),
+		);
+		// Nothing sits between the title and the box.
+		expect(
+			html.slice(at("Send feedback</h1>"), at("Feedback is off in the demo")),
+		).toMatch(/^Send feedback<\/h1><p class="[^"]*"[^>]*>$/);
+		expect(html).not.toContain('action="/feedback"');
+	});
+
+	it("leaves the family app's page as it was: the privacy paragraph, then the form, and no demo box", async () => {
+		const html = await (await productionApp().fetch("/feedback")).text();
+		expect(html).not.toContain("Feedback is off in the demo");
+		expect(html.indexOf("Send feedback</h1>")).toBeLessThan(
+			html.indexOf("Before a new report is sent"),
+		);
+		expect(html.indexOf("Before a new report is sent")).toBeLessThan(
+			html.indexOf('action="/feedback"'),
+		);
+	});
+
 	it("shows that feedback is off and returns 404 on POST without GitHub", async () => {
 		const get = await exports.default.fetch(`${BASE}/feedback?from=/settings`);
 		expect(await get.text()).toContain("Feedback is off in the demo");

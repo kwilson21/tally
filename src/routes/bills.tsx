@@ -51,6 +51,7 @@ import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
+import { HowLink } from "../views/how-link";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { TextInput } from "../views/text-input";
@@ -212,6 +213,7 @@ async function page(
 					{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
 					{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
 				</p>
+				<HowLink section="bills" />
 				<div class="mt-3">
 					<Button
 						kind="secondary"

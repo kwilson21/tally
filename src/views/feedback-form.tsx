@@ -29,7 +29,13 @@ export function FeedbackForm({
 	return (
 		<div class="max-w-2xl">
 			<h1 class="font-serif text-4xl font-semibold">Send feedback</h1>
-			<p class="mt-2 text-muted">
+			{/* In the demo nothing can be sent, so that comes first, before the privacy text (decision 82). */}
+			{demo && (
+				<p class="mt-3 rounded-control border border-rule bg-band p-4">
+					Feedback is off in the demo. Sign in to your Tally to send it.
+				</p>
+			)}
+			<p class={demo ? "mt-4 text-muted" : "mt-2 text-muted"}>
 				Before a new report is sent, Tally applies deterministic pattern
 				redaction to recognizable links, email addresses, phone numbers, labeled
 				passwords, tokens, API keys, authorization values, street addresses,
@@ -47,11 +53,7 @@ export function FeedbackForm({
 				sign-in email or submission time. This is best-effort redaction, not a
 				guarantee that a report contains no personal information.
 			</p>
-			{demo ? (
-				<p class="mt-8 rounded-control border border-rule bg-band p-4">
-					Feedback is off in the demo. Sign in to your Tally to send it.
-				</p>
-			) : (
+			{!demo && (
 				<form method="post" action="/feedback" class="mt-8 grid gap-7">
 					<input type="hidden" name="from" value={values.from} />
 					<input

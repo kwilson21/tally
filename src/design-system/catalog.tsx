@@ -1558,7 +1558,7 @@ function Demo() {
 				title="HowLink"
 				tier="visual"
 				components={["HowLink"]}
-				sentence="A small “How this works” link under a screen's title to its section of How Tally works in both environments."
+				sentence="A small “How this works” link under a screen's title, or under its status sentence on Home and Bills, to its section of How Tally works in both environments."
 			>
 				<HowLink section="budget" />
 			</Specimen>
