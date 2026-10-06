@@ -199,6 +199,34 @@ describe("rowCaption", () => {
 			}).caption,
 		).toBe("Split transaction · paid Rent bill");
 		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				billName: "Internet",
+			}).caption,
+		).toBe("Split from Costco · paid Internet bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				parentBillName: "Rent",
+			}).caption,
+		).toBe("Split from Costco · paid Rent bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				billName: "Internet",
+				parentBillName: "Rent",
+			}).caption,
+		).toBe("Split from Costco · paid Internet bill");
+		expect(
 			rowCaption({ ...base, parentId: 9, parentName: "Costco" }).caption,
 		).toBe("Split from Costco");
 	});

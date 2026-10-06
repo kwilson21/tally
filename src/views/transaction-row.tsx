@@ -14,7 +14,9 @@ type Caption = {
 
 /** What a row says under its name, and which icon it gets. Status is always in words, never color alone. */
 export function rowCaption(row: ListRow): Caption {
-	const paidBillName = row.parentId ? row.parentBillName : row.billName;
+	const paidBillName = row.parentId
+		? (row.billName ?? row.parentBillName)
+		: row.billName;
 	const paidBill =
 		row.paysBill && paidBillName ? `paid ${paidBillName} bill` : null;
 	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.

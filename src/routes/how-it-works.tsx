@@ -376,13 +376,15 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>A person's choice, which nothing overwrites.</li>
 						<li>
 							A merchant rule: "Always use this category for this merchant," set
-							with "Always for this merchant" in the edit panel.
+							with "Always for this merchant" in the edit panel. It replaces a
+							bill category or Tally's unconfirmed guess, but never a person's
+							choice.
 						</li>
 						<li>
 							A bill: a payment linked by the matcher or by hand takes its
 							bill's category when it has none, a Tally pick or an earlier
-							bill's category. A person's choice or a merchant rule is never
-							replaced, and unlinking leaves the category.
+							bill's category. A person's choice is never replaced, and
+							unlinking leaves the category.
 						</li>
 						<li>
 							{demo
