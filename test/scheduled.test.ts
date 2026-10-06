@@ -324,7 +324,7 @@ describe("scheduled handler", () => {
 });
 
 // Which run each cron starts (decision 56): production has three, 20 minutes apart, so each has D1's 1,000
-// queries to itself; the demo has one. The entry point routes by the cron that fired.
+// queries to itself (09:00 syncs and names, 09:20 and 09:40 ask Jev); the demo has one. The entry point routes by the cron that fired.
 describe("scheduled handler: which run a cron starts", () => {
 	async function seedWaiting() {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
@@ -343,10 +343,12 @@ describe("scheduled handler: which run a cron starts", () => {
 		return { jev: jev.mock.calls.length, names: ai.run.mock.calls.length };
 	}
 
-	it("asks Jev and Workers AI nothing at 09:00, which syncs and retries feedback", async () => {
+	it("asks Jev nothing at 09:00, which syncs, retries feedback and then makes the names", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await seedWaiting();
-		expect(await fire("0 9 * * *")).toEqual({ jev: 0, names: 0 });
+		const { jev, names } = await fire("0 9 * * *");
+		expect(jev).toBe(0);
+		expect(names).toBeGreaterThan(0);
 		vi.restoreAllMocks();
 	});
 
@@ -357,20 +359,18 @@ describe("scheduled handler: which run a cron starts", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("asks Jev, then names, at 09:40", async () => {
+	it("asks Jev, and no names, at 09:40", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await seedWaiting();
-		const { jev, names } = await fire("40 9 * * *");
-		expect(jev).toBe(12);
-		expect(names).toBeGreaterThan(0);
+		expect(await fire("40 9 * * *")).toEqual({ jev: 12, names: 0 });
 		vi.restoreAllMocks();
 	});
 });
 
 // The nightly names step (spec §7, §9, #33): Workers AI suggests names where there is a binding. In
-// production it runs in the 09:40 run, after that run's Jev pass and within a time budget, in an invocation of
-// its own (the 09:00 run syncs, the 09:20 run asks Jev about up to 300); the demo has one run, which names
-// after Jev, within the same budget.
+// production it runs last in the 09:00 run, after the sync and the feedback retry, which ask Jev nothing, so
+// a slow Jev can never delay or be delayed by it; the demo has one run, which names after Jev. Both stop
+// starting requests once the names time budget, counted from the start of the run, has passed.
 describe("scheduled handler: merchant names", () => {
 	async function oneUnnamedCharge() {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
@@ -388,22 +388,22 @@ describe("scheduled handler: merchant names", () => {
 			"SELECT raw_name, suggested_name, display_name, suggestion_status FROM merchants",
 		).all();
 
-	it("asks no names in production's 09:00 or 09:20 run, each of which has queries enough to do already", async () => {
+	it("asks no names in production's 09:20 or 09:40 run, which are for Jev", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await oneUnnamedCharge();
 		const ai = aiThatSays("Blue Bottle Coffee");
-		await runScheduled({ ...env, DEMO: "false", AI: ai });
 		await runFirstSort({ ...env, DEMO: "false", AI: ai });
+		await runSecondSort({ ...env, DEMO: "false", AI: ai });
 		expect(ai.run).not.toHaveBeenCalled();
 		expect((await pending()).results).toEqual([]);
 		vi.restoreAllMocks();
 	});
 
-	it("suggests names for a bank text Plaid didn't name in the 09:40 run, as pending suggestions", async () => {
+	it("suggests names for a bank text Plaid didn't name in production's 09:00 run, as pending suggestions", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await oneUnnamedCharge();
 		const ai = aiThatSays("Blue Bottle Coffee\nBlue Bottle");
-		await runSecondSort({ ...env, DEMO: "false", AI: ai });
+		await runScheduled({ ...env, DEMO: "false", AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(1);
 		expect((await pending()).results).toEqual([
 			{
@@ -422,29 +422,6 @@ describe("scheduled handler: merchant names", () => {
 		await runScheduled({ ...env, DEMO: "false" });
 		await runFirstSort({ ...env, DEMO: "false" });
 		expect((await pending()).results).toEqual([]);
-	});
-
-	it("asks Jev first in the 09:40 run, then names, so a slow names step can't hold up the sort", async () => {
-		vi.spyOn(console, "log").mockImplementation(() => {});
-		await oneUnnamedCharge();
-		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
-		const order: string[] = [];
-		const ai = {
-			run: vi.fn(async () => {
-				order.push("names");
-				return { response: "Blue Bottle Coffee" };
-			}),
-		} as unknown as Ai;
-		const fetchImpl = vi.fn(async () => {
-			order.push("jev");
-			return jevAnswer();
-		});
-		await runSecondSort(
-			{ ...env, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
-			fetchImpl as unknown as typeof fetch,
-		);
-		expect(order).toEqual(["jev", "names"]);
-		vi.restoreAllMocks();
 	});
 
 	// A fake clock the test moves by hand: a slow request is a `tick`, never a real wait.
@@ -469,38 +446,135 @@ describe("scheduled handler: merchant names", () => {
 				 SELECT 'plaid-' || i, 1, '2026-09-20', 500 + i, 'SHOP NUMBER ' || i FROM n`,
 			).bind(n),
 		]);
+	/** One linked bank, so the 09:00 run has a sync to make. */
+	async function linkOneBank() {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare("DELETE FROM feedback"),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', 'item')",
+		)
+			.bind(await encryptToken("access-token", KEY))
+			.run();
+	}
+	/** A fake Plaid sending `n` new transactions, each from a store of its own, and a fake GitHub; `seen` hears each request. */
+	const fakeBanks =
+		(n: number, seen: (what: "plaid" | "feedback" | "other") => void) =>
+		async (url: RequestInfo | URL) => {
+			const text = String(url);
+			if (text.includes("api.github.com")) {
+				seen("feedback");
+				return Response.json({ number: 5 }, { status: 201 });
+			}
+			if (!text.includes("/accounts/get") && !text.includes("/transactions/")) {
+				seen("other");
+				return new Response(null, { status: 500 });
+			}
+			seen("plaid");
+			return text.endsWith("/accounts/get")
+				? Response.json({
+						accounts: [
+							{
+								account_id: "account",
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					})
+				: Response.json({
+						added: Array.from({ length: n }, (_, i) => ({
+							transaction_id: `new-${i}`,
+							account_id: "account",
+							date: "2026-09-27",
+							amount: 12 + i,
+							name: `SHOP NUMBER ${i}`,
+							pending: false,
+						})),
+						modified: [],
+						removed: [],
+						next_cursor: "next",
+						has_more: false,
+					});
+		};
+	const bank = {
+		PLAID_CLIENT_ID: "client",
+		PLAID_SECRET: "secret",
+		TOKEN_ENCRYPTION_KEY: KEY,
+	};
 
-	it("stops starting names once the names time budget has passed, counted from the start of the 09:40 run, and Jev still made every call", async () => {
+	it("makes the names last in production's 09:00 run, after the sync and the feedback retry, and asks Jev nothing", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await linkOneBank();
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
-		await addUnsorted(20);
-		const clock = fakeClock();
+		// A report old enough for the retry to file.
+		await env.DB.prepare(
+			"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', 'Why?', '/', 'Desktop browser')",
+		).run();
 		const order: string[] = [];
-		// Jev takes 10 seconds a call (3 minutes 20 seconds in all), a name 4 minutes.
-		const fetchImpl = vi.fn(async () => {
-			order.push("jev");
-			clock.tick(10_000);
-			return jevAnswer();
+		const note = (what: string) => {
+			if (order.at(-1) !== what) order.push(what);
+		};
+		const fetchImpl = fakeBanks(3, note);
+		const ai = {
+			run: vi.fn(async () => {
+				note("names");
+				return { response: "Some Place Name" };
+			}),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
+		await runScheduled(
+			{
+				...env,
+				...bank,
+				DEMO: "false",
+				AI: ai,
+				JEV_API_KEY: "jev",
+				FEEDBACK_GITHUB_TOKEN: "token",
+			},
+			fetchImpl as unknown as typeof fetch,
+		);
+
+		// No "other" request: Jev, which the run never asks, would be one.
+		expect(order).toEqual(["plaid", "feedback", "names"]);
+		expect(ai.run).toHaveBeenCalledTimes(3);
+		await env.DB.prepare("DELETE FROM feedback").run();
+		vi.restoreAllMocks();
+	});
+
+	it("stops starting names once the names time budget has passed, counted from the start of the 09:00 run, so a long sync uses some of it", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await linkOneBank();
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		const clock = fakeClock();
+		// The sync takes 3 minutes, and each name 4.
+		let synced = false;
+		const fetchImpl = fakeBanks(20, (what) => {
+			if (what === "plaid" && !synced) {
+				synced = true;
+				clock.tick(3 * 60_000);
+			}
 		});
 		const ai = {
 			run: vi.fn(async () => {
-				order.push("names");
 				clock.tick(4 * 60_000);
 				return { response: "Some Place Name" };
 			}),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
 
-		await runSecondSort(
-			{ ...env, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
+		await runScheduled(
+			{ ...env, ...bank, DEMO: "false", AI: ai },
 			fetchImpl as unknown as typeof fetch,
 			{ now: clock.now, namesBudgetMs: 10 * 60_000 },
 		);
 
-		// The names started at 3:20 and 7:20, and the next would have started at 11:20, past the 10 minutes.
-		expect(fetchImpl).toHaveBeenCalledTimes(20);
+		// The names started at 3:00 and 7:00; the next would have started at 11:00, past the 10 minutes.
 		expect(ai.run).toHaveBeenCalledTimes(2);
-		expect(order).toEqual([...Array(20).fill("jev"), "names", "names"]);
 		vi.restoreAllMocks();
 	});
 
@@ -534,7 +608,39 @@ describe("scheduled handler: merchant names", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("caps the 09:40 run's Jev pass at 200 calls, so its names and sort stay under D1's query limit", async () => {
+	it("leaves the names alone when 09:40's Jev is slow: they were asked at 09:00, and 09:40 asks none", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await addUnsorted(20);
+		const production = { ...env, DEMO: "false", JEV_API_KEY: "jev" };
+		const ai = {
+			run: vi.fn(async () => ({ response: "Some Place Name" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
+		// 09:00: no Jev, so the names have the run to themselves.
+		await runScheduled({ ...production, AI: ai });
+		expect(ai.run).toHaveBeenCalledTimes(20);
+
+		// 09:40: Jev takes a minute a call, 20 minutes in all, past the 10 minutes a names step may have.
+		const clock = fakeClock();
+		const slowJev = vi.fn(async () => {
+			clock.tick(60_000);
+			return jevAnswer();
+		});
+		await env.DB.prepare("DELETE FROM merchants").run();
+		await runSecondSort(
+			{ ...production, AI: ai },
+			slowJev as unknown as typeof fetch,
+		);
+
+		expect(slowJev).toHaveBeenCalledTimes(20);
+		// It asked no more names at 09:40, however long Jev took.
+		expect(ai.run).toHaveBeenCalledTimes(20);
+		vi.restoreAllMocks();
+	});
+
+	it("caps the 09:40 run's Jev pass at 200 calls, so its sort stays under D1's query limit", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
@@ -583,7 +689,7 @@ describe("scheduled handler: merchant names", () => {
 			}),
 		} as unknown as Ai;
 		await expect(
-			runSecondSort({ ...env, DEMO: "false", AI: ai }),
+			runScheduled({ ...env, DEMO: "false", AI: ai }),
 		).resolves.toBeUndefined();
 		expect((await pending()).results).toEqual([]);
 		logged.mockRestore();
@@ -653,8 +759,9 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 	}, 60_000);
 
 	// A sync costs about five queries for each new transaction and isn't capped here: a backfill bigger than
-	// a busy night's is for the queue that lifts the per-run limit (#248).
-	it("production's 09:00 run, which syncs a busy night's 100 new transactions", async () => {
+	// a busy night's is for the queue that lifts the per-run limit (#248). The names come after it in the same
+	// invocation, and so does the feedback retry's worst case, 20 old reports, so all three are in the count.
+	it("production's 09:00 run, which syncs a busy night's 100 new transactions, retries 20 reports and asks 100 names", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
@@ -662,39 +769,49 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
 			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare("DELETE FROM feedback"),
 		]);
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20)
+			 INSERT INTO feedback (created_at, actor, type, feeling, message, page, device)
+			 SELECT datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', 'Why ' || i, '/', 'Desktop browser' FROM n`,
+		).run();
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', 'item')",
 		)
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 		const fetchImpl = async (url: RequestInfo | URL) =>
-			String(url).endsWith("/accounts/get")
-				? Response.json({
-						accounts: [
-							{
+			String(url).includes("api.github.com")
+				? Response.json({ number: 5 }, { status: 201 })
+				: String(url).endsWith("/accounts/get")
+					? Response.json({
+							accounts: [
+								{
+									account_id: "account",
+									name: "Checking",
+									type: "depository",
+									balances: { current: 10 },
+								},
+							],
+						})
+					: Response.json({
+							added: Array.from({ length: NEW_TRANSACTIONS }, (_, i) => ({
+								transaction_id: `new-${i}`,
 								account_id: "account",
-								name: "Checking",
-								type: "depository",
-								balances: { current: 10 },
-							},
-						],
-					})
-				: Response.json({
-						added: Array.from({ length: NEW_TRANSACTIONS }, (_, i) => ({
-							transaction_id: `new-${i}`,
-							account_id: "account",
-							date: "2026-09-27",
-							amount: 12 + i,
-							name: `SHOP NUMBER ${i}`,
-							pending: false,
-						})),
-						modified: [],
-						removed: [],
-						next_cursor: "next",
-						has_more: false,
-					});
+								date: "2026-09-27",
+								amount: 12 + i,
+								name: `SHOP NUMBER ${i}`,
+								pending: false,
+							})),
+							modified: [],
+							removed: [],
+							next_cursor: "next",
+							has_more: false,
+						});
 		const counted = countingDb();
+		const ai = aiThatSays("Some Place Name");
 
 		await runScheduled(
 			{
@@ -705,12 +822,23 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 				PLAID_SECRET: "secret",
 				TOKEN_ENCRYPTION_KEY: KEY,
 				JEV_API_KEY: "jev",
+				FEEDBACK_GITHUB_TOKEN: "token",
+				AI: ai,
 			},
 			fetchImpl,
 		);
 
 		expect(await count()).toBe(NEW_TRANSACTIONS);
+		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM feedback WHERE github_issue_number IS NOT NULL",
+				).first<{ n: number }>()
+			)?.n,
+		).toBe(20);
 		expect(counted.statements()).toBeLessThan(D1_LIMIT);
+		await env.DB.prepare("DELETE FROM feedback").run();
 		vi.restoreAllMocks();
 	}, 60_000);
 
@@ -732,7 +860,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		vi.restoreAllMocks();
 	}, 60_000);
 
-	it("production's 09:40 run, which asks Jev about up to 200 and then 100 names", async () => {
+	it("production's 09:40 run, which asks Jev about up to 200 and no names", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
@@ -746,7 +874,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			jev as unknown as typeof fetch,
 		);
 
-		expect(ai.run).toHaveBeenCalledTimes(100);
+		expect(ai.run).not.toHaveBeenCalled();
 		expect(jev).toHaveBeenCalledTimes(200);
 		expect(counted.statements()).toBeLessThan(D1_LIMIT);
 		vi.restoreAllMocks();
