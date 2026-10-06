@@ -657,14 +657,12 @@ settings.post("/settings/time-zone", async (c) => {
 	const parsed = parseTimeZone(await c.req.formData());
 	if (!parsed.ok)
 		return renderSettings(c, { zoneError: parsed.error, status: 422 });
-	// One instant for both zones, so "did the month change" can't be answered by two clocks.
-	const now = new Date();
-	const before = await householdTimeZone(c.env.DB);
 	await saveTimeZone(c.env.DB, parsed.zone);
-	const today = todayIn(parsed.zone, now);
+	const today = todayIn(parsed.zone);
 	// The month is the one thing in Settings that follows the zone (each category's amount is the
-	// month's), and the swap below replaces only #household, so a new month sends those amounts along.
-	const newMonth = todayIn(before, now).slice(0, 7) !== today.slice(0, 7);
+	// month's), and the swap below replaces only #household, so every save sends those amounts along.
+	// Always, not only when the two zones' months differ: a page left open past midnight can show last
+	// month whichever zone is saved.
 	return done(
 		c,
 		"Saved time zone",
@@ -674,7 +672,7 @@ settings.post("/settings/time-zone", async (c) => {
 			hash: "household",
 			today,
 			timeZone: parsed.zone,
-			budgetsOob: newMonth,
+			budgetsOob: true,
 		},
 	);
 });
