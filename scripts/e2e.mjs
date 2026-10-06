@@ -11,7 +11,10 @@ assert.equal(reset.status, 200, "resetting the demo data failed");
 const browser = await chromium.launch({
 	executablePath: process.env.CHROMIUM_PATH || undefined,
 });
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+const page = await browser.newPage({
+	viewport: { width: 390, height: 844 },
+	reducedMotion: "reduce",
+});
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(e.message));
@@ -21,19 +24,25 @@ const rows = () => page.locator("#results li[data-transaction]").count();
 const assertPhoneFocusClearsFixedControls = async (path) => {
 	await goto(`${BASE}${path}`, { waitUntil: "networkidle" });
 	await page.evaluate(() => document.activeElement?.blur());
-	const tabStops = await page
-		.locator(
-			"a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), summary",
-		)
-		.count();
+	const maxTabPresses = 200;
 	const seen = new Set();
-	for (let i = 0; i < tabStops; i++) {
+	let focusLeftPage = false;
+	for (let i = 0; i < maxTabPresses; i++) {
 		await page.keyboard.press("Tab");
 		const focused = await page.evaluate(() => {
 			const el = document.activeElement;
+			if (!el || el === document.body || el === document.documentElement) {
+				return { focusLeftPage: true };
+			}
 			const rect = el?.getBoundingClientRect();
 			return {
-				key: el?.id || el?.getAttribute("href") || el?.textContent?.trim(),
+				focusLeftPage: false,
+				key:
+					el.getAttribute("aria-label")?.trim() ||
+					el.id ||
+					el.getAttribute("href") ||
+					el.textContent?.trim().slice(0, 40) ||
+					`unnamed <${el.tagName.toLowerCase()}>`,
 				bottom: rect?.bottom,
 				isTab: !!el?.closest('nav[aria-label="Tabs"]'),
 				isFeedback: el?.matches('a[href="/feedback"]'),
@@ -45,6 +54,10 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 					?.getBoundingClientRect().top,
 			};
 		});
+		if (focused.focusLeftPage) {
+			focusLeftPage = true;
+			break;
+		}
 		if (focused.key && !focused.isTab && !focused.isFeedback) {
 			assert(
 				focused.bottom <=
@@ -54,6 +67,7 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 			seen.add(focused.key);
 		}
 	}
+	assert(focusLeftPage, `${path}: focus never left the page`);
 	assert(seen.size > 0, `${path}: no page controls received focus`);
 };
 // A link opens its page with a 150 ms cross-fade (decision 76). A page.goto while it runs makes the

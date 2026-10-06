@@ -1,4 +1,6 @@
 import { type Context, Hono } from "hono";
+import { actor } from "../actor";
+import { AFTER_SYNC_BATCH, askAgainMany } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import {
 	type AiSwitches,
@@ -15,6 +17,11 @@ import {
 	setArchived,
 	settingsCategories,
 } from "../db/categories";
+import {
+	createFromSuggestion,
+	dismissSuggestion,
+	pendingSuggestions,
+} from "../db/category-suggestions";
 import { namesToReview } from "../db/merchant-names";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
@@ -29,6 +36,7 @@ import { parseTimeZone, zoneLabel } from "../settings/time-zones";
 import { Band } from "../views/band";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { EmptyState } from "../views/empty-state";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
@@ -88,6 +96,12 @@ type View = {
 	restoreError?: string;
 	/** Why the change didn't happen, shown above the list. */
 	listError?: string;
+	suggestionError?: string;
+	suggestionValues?: {
+		id: number;
+		ticked: number[];
+		notes: Record<number, string>;
+	};
 	status?: 200 | 404 | 422;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
@@ -392,6 +406,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
+	const categorySuggestions = await pendingSuggestions(c.env.DB);
 	const adding = view.open === "new";
 
 	return c.html(
@@ -447,6 +462,32 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							last={i === active.length - 1}
 						/>
 					))}
+					{categorySuggestions.map((suggestion) => (
+						<CategorySuggestionCard
+							suggestion={suggestion}
+							error={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionError
+									: undefined
+							}
+							ticked={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionValues.ticked
+									: undefined
+							}
+							notes={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionValues.notes
+									: undefined
+							}
+						/>
+					))}
+					{categorySuggestions.more > 0 && (
+						<p class="py-2 text-sm text-muted">
+							{categorySuggestions.more} more suggestions will show once you
+							decide these.
+						</p>
+					)}
 					<details
 						class="group border-b border-rule"
 						data-row="new"
@@ -564,6 +605,79 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		view.status ?? 200,
 	);
 }
+
+settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
+	const id = Number(c.req.param("id"));
+	const form = await c.req.formData();
+	const ids = form
+		.getAll("ids")
+		.map(Number)
+		.filter((n) => Number.isInteger(n) && n > 0);
+	const shown = form
+		.getAll("shown")
+		.map(Number)
+		.filter((n) => Number.isInteger(n) && n > 0);
+	const notes = Object.fromEntries(
+		shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
+	);
+	const result = await createFromSuggestion(
+		c.env.DB,
+		id,
+		{ ticked: ids, shown, notes },
+		actor(c as Context<App> & { env: Env & { DEMO: string } }),
+	);
+	if (!result.ok) {
+		const current = await renderSettings(
+			c,
+			result.reason === "gone"
+				? {
+						listError:
+							"That suggestion was changed somewhere else. Here's the current list.",
+						status: 404,
+					}
+				: {
+						suggestionError: result.error,
+						suggestionValues: { id, ticked: ids, notes },
+						status: 422,
+					},
+		);
+		return current;
+	}
+	const env = c.env as Env & { JEV_API_KEY?: string };
+	if (
+		result.leftOut.length &&
+		env.JEV_API_KEY &&
+		(await readAiSwitches(c.env.DB)).categories
+	)
+		c.executionCtx.waitUntil(
+			askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
+		);
+	const out = result.leftOut.length;
+	const count = result.moved;
+	const message = `Created ${result.name} with ${count} transaction${count === 1 ? "" : "s"}`;
+	return done(
+		c,
+		message,
+		`${message}.${out ? ` The ${out} you left out ${out === 1 ? "goes" : "go"} back to Tally to sort again.` : ""}`,
+		{ hash: "categories" },
+	);
+});
+
+settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
+	const result = await dismissSuggestion(c.env.DB, Number(c.req.param("id")));
+	if (!result)
+		return renderSettings(c, {
+			listError:
+				"That suggestion was changed somewhere else. Here's the current list.",
+			status: 404,
+		});
+	return done(
+		c,
+		`Dismissed ${result.name}`,
+		`Dismissed ${result.name}. Tally won't suggest it again.`,
+		{ hash: "categories" },
+	);
+});
 
 /** After a change: htmx gets the updated section with a toast and announcement; plain browsers go back to Settings. */
 function done(

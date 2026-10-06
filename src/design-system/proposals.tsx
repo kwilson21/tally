@@ -9,7 +9,7 @@ import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
-import { MixedStoreProposals } from "./proposals-mixed";
+import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
@@ -328,7 +328,7 @@ export const DECIDED: readonly {
 	{
 		title: "P90 · A store that sells many kinds of things",
 		outcome:
-			"Option A, combined with B: Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80). A store is mixed from the last 3 months, split parts counting; “Split this one?” shows on every trip there; the parts start from the trip's details, and the store's most-used categories fill in when they name one or none (decision 87).",
+			"Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80). Decision 89 and P117 replace the mixed-store count, showing “Split this one?” on every trip, and filling parts with the store's most-used categories.",
 		issue: 233,
 	},
 	{
@@ -415,6 +415,12 @@ export const DECIDED: readonly {
 			"Option B: a second chip beside Last month, “3-month average”, with the average of what the category spent in the last three finished months, shown once there are three finished months and the average is above $0; a part first month isn't one of them (decision 85).",
 		issue: 250,
 	},
+	{
+		title: "P117 · When Split this one? shows",
+		outcome:
+			"Option A: Jev says when a trip looks mixed, using this household's categories and transaction details; “Split this one?” appears only for that trip, and suggested category parts start dashed with empty amounts (decision 89, pictures 14–16).",
+		issue: 233,
+	},
 ];
 
 /** The proposals page body. */
@@ -458,6 +464,7 @@ export function Proposals() {
 				<RulesProposals />
 				<AutofillProposals />
 				<MixedStoreProposals />
+				<SplitThisOneProposal />
 			</section>
 
 			<section aria-labelledby="followups-title" class="mt-12">

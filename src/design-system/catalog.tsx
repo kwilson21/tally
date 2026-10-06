@@ -27,6 +27,7 @@ import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
+import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
 import { ErrorPage } from "../views/error-page";
@@ -44,6 +45,7 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
+import { MaybeCategory, SuggestedCategoryChip } from "../views/maybe-category";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
@@ -76,6 +78,7 @@ import {
 	BANKS,
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
+	CATEGORY_SUGGESTION,
 	CHECKING,
 	CREDIT_CARD,
 	EXCLUSIONS_EXAMPLE,
@@ -373,8 +376,10 @@ function Shell() {
 					here, because the catalog isn't one of the destinations.
 				</p>
 				<p class="max-w-prose">
-					On phones, keyboard scrolling leaves room below focused content for
-					the fixed tabs and Feedback pill; desktop has no bottom padding.
+					On phones, keyboard scrolling and the bottom of main use the same
+					room, calculated from the fixed tabs, Feedback pill, focus gap and
+					safe-area inset, so the last row or form can clear both controls.
+					Desktop keeps its existing main spacing.
 				</p>
 				<MotionSpec>
 					Pages cross-fade in 150 ms through the browser's own View Transitions,
@@ -873,6 +878,30 @@ function Rows() {
 	return (
 		<Group id="rows" title="Rows">
 			<Specimen
+				id="maybe-category"
+				title="MaybeCategory and SuggestedCategoryChip"
+				tier="visual"
+				components={["MaybeCategory", "SuggestedCategoryChip"]}
+				sentence="The dashed Maybe row and first Suggested category chip carry Tally's guess where people already choose a category."
+			>
+				<div class="flex flex-wrap gap-3">
+					<MaybeCategory name="Eating Out" kind="category" />
+					<MaybeCategory name="Pet Care" kind="new" />
+					<SuggestedCategoryChip
+						name="Eating Out"
+						value="2"
+						sure={64}
+						transactionId={1}
+					/>
+					<SuggestedCategoryChip
+						name="Pet Care"
+						value="3"
+						sure={72}
+						transactionId={2}
+					/>
+				</div>
+			</Specimen>
+			<Specimen
 				id="bill-occurrence"
 				title="Bill occurrence and payment picker"
 				tier="visual"
@@ -1228,6 +1257,28 @@ function Rows() {
 							<SelectableTransactionRow row={state.row} checked />
 						))}
 					</ul>
+				</State>
+			</Specimen>
+			<Specimen
+				id="category-suggestion-card"
+				title="CategorySuggestionCard"
+				tier="visual"
+				components={[
+					"CategorySuggestionCard",
+					"SelectableTransactionRow",
+					"Button",
+					"WhyLink",
+				]}
+				sentence="An open dashed card shows a suggested category and its transactions; each real round checkbox decides which transactions go in, and only unticked rows reveal a note."
+			>
+				<State label="P30 A: three selected, one unticked with a note">
+					<div class="max-w-xl" inert>
+						<CategorySuggestionCard
+							suggestion={CATEGORY_SUGGESTION}
+							ticked={[31, 32, 33]}
+							notes={{ 34: "Birthday present" }}
+						/>
+					</div>
 				</State>
 			</Specimen>
 			<Specimen
