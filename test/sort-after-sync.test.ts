@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, householdToday, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
-import { jevCallsLeft } from "../src/db/jev-calls";
+import { reserveJevCalls } from "../src/db/jev-calls";
 import { pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { runScheduled } from "../src/index";
@@ -48,9 +48,23 @@ const newDay = () =>
 	db
 		.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'")
 		.run();
+/** The rows waiting for Jev, as the ids a sync would report for them. */
+const waitingIds = async () => (await pendingForJev(db, 1000)).map((t) => t.id);
+/** How many of the household day's calls are spoken for. */
+const callsUsed = async () =>
+	Number(
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(`jev_calls_${await householdToday(db)}`)
+				.first<{ value: string }>()
+		)?.value ?? 0,
+	);
 
 beforeEach(async () => {
 	await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
+	// The demo's reset keeps the day's Jev count, so each test starts a day of its own.
+	await newDay();
 });
 
 afterEach(async () => {
@@ -59,34 +73,41 @@ afterEach(async () => {
 });
 
 describe("sortAfterSync", () => {
-	it("asks Jev about what's still unsorted after a sync that added transactions", async () => {
+	it("asks Jev about the rows the sync reports, and leaves the older waiting ones for the night", async () => {
 		quiet();
 		const jev = fakeJev();
-		await sortAfterSync(withKey, { added: 3, modified: 0 }, jev.fetchImpl);
-		// The seed's 12 unsorted transactions, each asked about once.
+		const [a, b, c] = await waitingIds();
+		await sortAfterSync(
+			withKey,
+			{ changedIds: [a as number, b as number, c as number] },
+			jev.fetchImpl,
+		);
+		// Three of the seed's twelve unsorted transactions, each asked about once.
+		expect(jev.asked).toHaveLength(3);
+		expect(new Set(jev.asked).size).toBe(3);
+		expect(await pendingForJev(db, 100)).toHaveLength(9);
+		// The nightly run takes the nine that waited.
+		await categorizePending(withKey, jev.fetchImpl);
 		expect(jev.asked).toHaveLength(12);
-		expect(new Set(jev.asked).size).toBe(12);
 		expect(await pendingForJev(db, 100)).toHaveLength(0);
-	});
-
-	it("also runs after a sync that only changed transactions", async () => {
-		quiet();
-		const jev = fakeJev();
-		await sortAfterSync(withKey, { added: 0, modified: 2 }, jev.fetchImpl);
-		expect(jev.asked).toHaveLength(12);
 	});
 
 	it("doesn't run after a sync that brought nothing", async () => {
 		const jev = fakeJev();
-		await sortAfterSync(withKey, { added: 0, modified: 0 }, jev.fetchImpl);
+		await sortAfterSync(withKey, { changedIds: [] }, jev.fetchImpl);
 		expect(jev.asked).toEqual([]);
+		expect(await callsUsed()).toBe(0);
 	});
 
 	it("doesn't run when the sorting switch is off, and leaves everything waiting for the nightly run", async () => {
 		quiet();
 		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, sortOnArrival: false });
 		const jev = fakeJev();
-		await sortAfterSync(withKey, { added: 3, modified: 0 }, jev.fetchImpl);
+		await sortAfterSync(
+			withKey,
+			{ changedIds: await waitingIds() },
+			jev.fetchImpl,
+		);
 		expect(jev.asked).toEqual([]);
 		expect(await pendingForJev(db, 100)).toHaveLength(12);
 		// The nightly run isn't held back by that switch.
@@ -101,7 +122,11 @@ describe("sortAfterSync", () => {
 			income: false,
 		});
 		const jev = fakeJev();
-		await sortAfterSync(withKey, { added: 3, modified: 0 }, jev.fetchImpl);
+		await sortAfterSync(
+			withKey,
+			{ changedIds: await waitingIds() },
+			jev.fetchImpl,
+		);
 		expect(jev.asked).toEqual([]);
 	});
 
@@ -114,14 +139,22 @@ describe("sortAfterSync", () => {
 			quiet();
 			await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...switches });
 			const jev = fakeJev();
-			await sortAfterSync(withKey, { added: 3, modified: 0 }, jev.fetchImpl);
+			await sortAfterSync(
+				withKey,
+				{ changedIds: await waitingIds() },
+				jev.fetchImpl,
+			);
 			expect(jev.asked).toHaveLength(12);
 		},
 	);
 
 	it("doesn't run without a Jev key", async () => {
 		const jev = fakeJev();
-		await sortAfterSync({ DB: db }, { added: 3, modified: 0 }, jev.fetchImpl);
+		await sortAfterSync(
+			{ DB: db },
+			{ changedIds: await waitingIds() },
+			jev.fetchImpl,
+		);
 		expect(jev.asked).toEqual([]);
 	});
 
@@ -133,7 +166,11 @@ describe("sortAfterSync", () => {
 			)
 			.run();
 		const jev = fakeJev();
-		await sortAfterSync(withKey, { added: 1, modified: 0 }, jev.fetchImpl);
+		await sortAfterSync(
+			withKey,
+			{ changedIds: await waitingIds() },
+			jev.fetchImpl,
+		);
 		// Jev was asked about it, since the rule wasn't applied here.
 		expect(jev.asked).toContain("SQ *FARMERS MKT");
 	});
@@ -146,9 +183,14 @@ describe("sortAfterSync", () => {
 			)
 			.run();
 		const jev = fakeJev();
-		await sortAfterSync(withKey, { added: 1, modified: 0 }, jev.fetchImpl, {
-			rulesApplied: false,
-		});
+		await sortAfterSync(
+			withKey,
+			{ changedIds: await waitingIds() },
+			jev.fetchImpl,
+			{
+				rulesApplied: false,
+			},
+		);
 		expect(jev.asked).not.toContain("SQ *FARMERS MKT");
 		expect(
 			await db
@@ -163,7 +205,7 @@ describe("sortAfterSync", () => {
 		const errors = quiet();
 		const jev = fakeJev(() => new Response("{}", { status: 503 }));
 		await expect(
-			sortAfterSync(withKey, { added: 3, modified: 0 }, jev.fetchImpl),
+			sortAfterSync(withKey, { changedIds: await waitingIds() }, jev.fetchImpl),
 		).resolves.toBeUndefined();
 		expect(jev.asked).toHaveLength(1);
 		expect(errors.mock.calls).toEqual([["jev: 503"]]);
@@ -179,7 +221,7 @@ describe("sortAfterSync", () => {
 			.run();
 		const jev = fakeJev();
 		await expect(
-			sortAfterSync(withKey, { added: 3, modified: 0 }, jev.fetchImpl),
+			sortAfterSync(withKey, { changedIds: await waitingIds() }, jev.fetchImpl),
 		).resolves.toBeUndefined();
 		const logged = JSON.stringify(errors.mock.calls);
 		expect(logged).toContain("sort after sync failed Error");
@@ -206,18 +248,26 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		quiet();
 		// The demo's cap is 40. A run after a sync sorts the seed's 12 ...
 		const atSync = fakeJev();
-		await sortAfterSync(withKey, { added: 12, modified: 0 }, atSync.fetchImpl);
+		await sortAfterSync(
+			withKey,
+			{ changedIds: await waitingIds() },
+			atSync.fetchImpl,
+		);
 		expect(atSync.asked).toHaveLength(12);
 		// ... another sync brings 50 more, and its run takes 28 before the cap is reached ...
 		await addPending(50);
 		const second = fakeJev();
-		await sortAfterSync(withKey, { added: 50, modified: 0 }, second.fetchImpl);
+		await sortAfterSync(
+			withKey,
+			{ changedIds: await waitingIds() },
+			second.fetchImpl,
+		);
 		expect(second.asked).toHaveLength(28);
 		// ... so the nightly run the same day has nothing left to spend.
 		const nightly = fakeJev();
 		await categorizePending(withKey, nightly.fetchImpl);
 		expect(nightly.asked).toEqual([]);
-		expect(await jevCallsLeft(db, await householdToday(db), 40)).toBe(0);
+		expect(await callsUsed()).toBe(40);
 		expect(await pendingForJev(db, 100)).toHaveLength(22);
 	});
 
@@ -229,7 +279,11 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		const flaky = fakeJev(() =>
 			++calls <= 5 ? reply(0.95) : new Response("{}", { status: 503 }),
 		);
-		await sortAfterSync(withKey, { added: 62, modified: 0 }, flaky.fetchImpl);
+		await sortAfterSync(
+			withKey,
+			{ changedIds: await waitingIds() },
+			flaky.fetchImpl,
+		);
 		expect(flaky.asked).toHaveLength(6);
 		// The failed sixth call counted too, since it was asked: 34 left for the nightly run.
 		const nightly = fakeJev();
@@ -249,13 +303,25 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 			.bind(`jev_calls_${today}`)
 			.run();
 		const jev = fakeJev();
-		// Production, not the demo, whose nightly reset would clear the count.
 		await runScheduled(
 			{ ...env, DEMO: "false", JEV_API_KEY: "jev" },
 			jev.fetchImpl,
 		);
 		expect(jev.asked).toHaveLength(5);
-		expect(await jevCallsLeft(db, today, 500)).toBe(0);
+		expect(await callsUsed()).toBe(500);
+	});
+
+	it("keeps the day's count through the demo's nightly reset, so a second run can't spend the cap again", async () => {
+		quiet();
+		// 35 of the demo's 40 were spent earlier today; the reset seeds twelve unsorted ones again.
+		await reserveJevCalls(db, await householdToday(db), 40, 35);
+		const jev = fakeJev();
+		await runScheduled(
+			{ ...env, DEMO: "true", JEV_API_KEY: "jev" },
+			jev.fetchImpl,
+		);
+		expect(jev.asked).toHaveLength(5);
+		expect(await callsUsed()).toBe(40);
 	});
 
 	it("starts the next day with the whole cap again", async () => {
@@ -301,28 +367,54 @@ describe("syncItemAndSort", () => {
 		itemId = row?.id as number;
 	});
 
-	/** Plaid gives `added` and `modified`; Jev, if asked, answers with `jev`. */
+	/** A transaction Plaid sends: just its bank text, or more, such as a pending one. */
+	type Item =
+		| string
+		| {
+				name: string;
+				id?: string;
+				pending?: boolean;
+				pendingOf?: string;
+				amount?: number;
+		  };
+
+	/**
+	 * Plaid gives `added`, `modified` and `removed`; Jev, if asked, answers with `jev`. With
+	 * `failSecondPage`, the first page is saved (it says more is coming) and the second fails.
+	 */
 	function fakes(
-		added: string[],
+		added: Item[],
 		{
 			modified = [],
+			removed = [],
 			jev = () => reply(0.95),
-		}: { modified?: string[]; jev?: () => Response } = {},
+			failSecondPage = false,
+		}: {
+			modified?: Item[];
+			removed?: string[];
+			jev?: () => Response | Promise<Response>;
+			failSecondPage?: boolean;
+		} = {},
 	) {
 		const asked: string[] = [];
-		const tx = (name: string) => ({
-			transaction_id: `tx-${name}`,
-			account_id: "account-1",
-			date: "2026-09-27",
-			amount: 4.25,
-			name,
-			pending: false,
-		});
+		const tx = (item: Item) => {
+			const o = typeof item === "string" ? { name: item } : item;
+			return {
+				transaction_id: o.id ?? `tx-${o.name}`,
+				account_id: "account-1",
+				date: "2026-09-27",
+				amount: o.amount ?? 4.25,
+				name: o.name,
+				pending: o.pending ?? false,
+				pending_transaction_id: o.pendingOf ?? null,
+			};
+		};
+		let syncCalls = 0;
 		const fetchImpl = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				if (String(url) === JEV_URL) {
 					asked.push(JSON.parse(String(init?.body)).state.bank_description);
-					return jev();
+					return await jev();
 				}
 				if (String(url).endsWith("/accounts/get"))
 					return Response.json({
@@ -335,12 +427,18 @@ describe("syncItemAndSort", () => {
 							},
 						],
 					});
+				syncCalls += 1;
+				if (failSecondPage && syncCalls === 2)
+					return Response.json(
+						{ error_type: "API_ERROR", request_id: "request-safe" },
+						{ status: 500 },
+					);
 				return Response.json({
 					added: added.map(tx),
 					modified: modified.map(tx),
-					removed: [],
+					removed: removed.map((transaction_id) => ({ transaction_id })),
 					next_cursor: "next",
-					has_more: false,
+					has_more: failSecondPage,
 				});
 			},
 		);
@@ -372,7 +470,7 @@ describe("syncItemAndSort", () => {
 
 		const synced = await syncItemAndSort(plaidEnv, itemId, fetchImpl);
 
-		expect(synced).toEqual({ added: 2, modified: 0, removed: 0 });
+		expect(synced).toMatchObject({ added: 2, modified: 0, removed: 0 });
 		// The rule sorted one, so Jev was asked about the other only.
 		expect(asked).toEqual(["NEW SHOP"]);
 		expect(await categoryOf("RULED SHOP")).toEqual({
@@ -405,7 +503,7 @@ describe("syncItemAndSort", () => {
 		quiet();
 		const { fetchImpl, asked } = fakes([]);
 		const synced = await syncItemAndSort(plaidEnv, itemId, fetchImpl);
-		expect(synced).toEqual({ added: 0, modified: 0, removed: 0 });
+		expect(synced).toMatchObject({ added: 0, modified: 0, removed: 0 });
 		expect(asked).toEqual([]);
 	});
 
@@ -442,12 +540,19 @@ describe("syncItemAndSort", () => {
 			jev: () => new Response("{}", { status: 503 }),
 		});
 		const synced = await syncItemAndSort(plaidEnv, itemId, fetchImpl);
-		expect(synced).toEqual({ added: 1, modified: 0, removed: 0 });
+		expect(synced).toMatchObject({ added: 1, modified: 0, removed: 0 });
 		expect(asked).toEqual(["NEW SHOP"]);
 		expect(await categoryOf("NEW SHOP")).toEqual({
 			category_source: null,
 			category_confidence: null,
 		});
+		// A failure about the whole service marks nothing as failed.
+		expect(
+			await db
+				.prepare("SELECT jev_failed_at FROM transactions WHERE raw_name = ?")
+				.bind("NEW SHOP")
+				.first(),
+		).toEqual({ jev_failed_at: null });
 		const logged = JSON.stringify(errors.mock.calls);
 		expect(logged).not.toContain("NEW SHOP");
 		expect(logged).not.toContain("jev-key");
@@ -463,13 +568,167 @@ describe("syncItemAndSort", () => {
 			.run();
 		const { fetchImpl } = fakes(["NEW SHOP"]);
 		const synced = await syncItemAndSort(plaidEnv, itemId, fetchImpl);
-		expect(synced).toEqual({ added: 1, modified: 0, removed: 0 });
+		expect(synced).toMatchObject({ added: 1, modified: 0, removed: 0 });
 		expect(
 			await db.prepare("SELECT COUNT(*) AS n FROM transactions").first(),
 		).toEqual({ n: 1 });
 		expect(JSON.stringify(errors.mock.calls)).toContain(
 			"sort after sync failed",
 		);
+	});
+
+	it("asks about this sync's three new transactions only, and an older one waits for the night", async () => {
+		quiet();
+		// An older transaction nobody sorted, saved while sorting right away was off.
+		await saveAiSwitches(db, { sortOnArrival: false });
+		const earlier = fakes(["OLD SHOP"]);
+		await syncItemAndSort(plaidEnv, itemId, earlier.fetchImpl);
+		expect(earlier.asked).toEqual([]);
+		await saveAiSwitches(db, { sortOnArrival: true });
+
+		const { fetchImpl, asked } = fakes(["NEW A", "NEW B", "NEW C"]);
+		await syncItemAndSort(plaidEnv, itemId, fetchImpl);
+		expect(asked.sort()).toEqual(["NEW A", "NEW B", "NEW C"]);
+		expect(await categoryOf("OLD SHOP")).toEqual({
+			category_source: null,
+			category_confidence: null,
+		});
+
+		// The night's run asks about it, within the same day's count.
+		const night = fakeJev();
+		await categorizePending(plaidEnv, night.fetchImpl);
+		expect(night.asked).toEqual(["OLD SHOP"]);
+		expect(await callsUsed()).toBe(4);
+	});
+
+	it("with room for 2 of 5 new transactions, asks 2 and leaves 3 for the night", async () => {
+		quiet();
+		// Production's cap is 500; 498 are spent earlier in the household's day.
+		await reserveJevCalls(db, await householdToday(db), 500, 498);
+		const { fetchImpl, asked } = fakes(["A", "B", "C", "D", "E"]);
+		await syncItemAndSort(plaidEnv, itemId, fetchImpl);
+		expect(asked).toHaveLength(2);
+		expect(await pendingForJev(db, 100)).toHaveLength(3);
+		expect(await callsUsed()).toBe(500);
+		// Tomorrow the night's run, with a fresh day, takes the three.
+		await newDay();
+		const night = fakeJev();
+		await categorizePending(plaidEnv, night.fetchImpl);
+		expect(night.asked).toHaveLength(3);
+	});
+
+	it("stops asking about the sync's rows when sorting right away is turned off partway", async () => {
+		quiet();
+		const names = ["A", "B", "C", "D", "E"];
+		const { fetchImpl, asked } = fakes(names, {
+			jev: async () => {
+				// Someone turns the switch off while the second answer is on its way.
+				if (asked.length === 2)
+					await saveAiSwitches(db, { sortOnArrival: false });
+				return reply(0.95);
+			},
+		});
+		await syncItemAndSort(plaidEnv, itemId, fetchImpl);
+		// The second answer was already on its way, so it's kept; the third is never asked.
+		expect(asked).toHaveLength(2);
+		expect(await pendingForJev(db, 100)).toHaveLength(3);
+		// The night's run isn't held back by that switch, and takes the three.
+		const night = fakeJev();
+		await categorizePending(plaidEnv, night.fetchImpl);
+		expect(night.asked).toHaveLength(3);
+	});
+
+	describe("a pending transaction", () => {
+		const row = (plaidId: string) =>
+			db
+				.prepare(
+					"SELECT category_source, category_confidence, jev_category_id, pending FROM transactions WHERE plaid_transaction_id = ?",
+				)
+				.bind(plaidId)
+				.first();
+
+		it("is asked about like any other", async () => {
+			quiet();
+			const { fetchImpl, asked } = fakes([
+				{ name: "CARD SHOP", id: "pending-1", pending: true },
+			]);
+			await syncItemAndSort(plaidEnv, itemId, fetchImpl);
+			expect(asked).toEqual(["CARD SHOP"]);
+			expect(await row("pending-1")).toMatchObject({
+				pending: 1,
+				category_source: "jev",
+				category_confidence: 0.95,
+			});
+		});
+
+		it("has its answer on the posted transaction once the bank posts it, with no second call", async () => {
+			quiet();
+			const first = fakes([
+				{ name: "CARD SHOP", id: "pending-1", pending: true },
+			]);
+			await syncItemAndSort(plaidEnv, itemId, first.fetchImpl);
+			const second = fakes(
+				[{ name: "CARD SHOP", id: "posted-1", pendingOf: "pending-1" }],
+				{ removed: ["pending-1"] },
+			);
+			await syncItemAndSort(plaidEnv, itemId, second.fetchImpl);
+			expect(second.asked).toEqual([]);
+			expect(await row("pending-1")).toBeNull();
+			expect(await row("posted-1")).toMatchObject({
+				pending: 0,
+				category_source: "jev",
+				category_confidence: 0.95,
+			});
+		});
+
+		it("is asked again when the bank posts it for a different amount, as for any correction", async () => {
+			quiet();
+			const first = fakes([
+				{ name: "CARD SHOP", id: "pending-1", pending: true },
+			]);
+			await syncItemAndSort(plaidEnv, itemId, first.fetchImpl);
+			const second = fakes(
+				[
+					{
+						name: "CARD SHOP",
+						id: "posted-1",
+						pendingOf: "pending-1",
+						amount: 5.5,
+					},
+				],
+				{ removed: ["pending-1"] },
+			);
+			await syncItemAndSort(plaidEnv, itemId, second.fetchImpl);
+			expect(second.asked).toEqual(["CARD SHOP"]);
+			expect(await row("posted-1")).toMatchObject({
+				category_source: "jev",
+				category_confidence: 0.95,
+			});
+		});
+	});
+
+	it("leaves the rows of a sync that failed partway for the night, which asks about them", async () => {
+		quiet();
+		const { fetchImpl, asked } = fakes(["SAVED SHOP"], {
+			failSecondPage: true,
+		});
+		await expect(syncItemAndSort(plaidEnv, itemId, fetchImpl)).rejects.toThrow(
+			"Plaid request failed",
+		);
+		// The first page was saved; the failed sync reported nothing, so nothing was asked right away.
+		expect(asked).toEqual([]);
+		expect(await categoryOf("SAVED SHOP")).toEqual({
+			category_source: null,
+			category_confidence: null,
+		});
+		// The nightly run has no list: it asks about everything still waiting.
+		const night = fakeJev();
+		await categorizePending(plaidEnv, night.fetchImpl);
+		expect(night.asked).toEqual(["SAVED SHOP"]);
+		expect(await categoryOf("SAVED SHOP")).toEqual({
+			category_source: "jev",
+			category_confidence: 0.95,
+		});
 	});
 
 	it("still throws a failed sync's own error, and sorts nothing", async () => {

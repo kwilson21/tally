@@ -168,9 +168,9 @@ accounts.post("/accounts/sync", async (c) => {
 	let alert: string | undefined;
 	try {
 		const result = await syncAllItems(c.env, undefined, Date.now, true);
-		// Even when one bank failed, the others may have brought transactions in. When the rules step
-		// failed, the pass applies them itself, as the nightly run does.
-		if (result.added + result.modified > 0)
+		// Even when one bank failed, the others may have brought transactions in. Jev is asked about
+		// those only. When the rules step failed, the pass applies them itself, as the nightly run does.
+		if (result.changedIds.length > 0)
 			c.executionCtx.waitUntil(
 				sortAfterSync(c.env, result, undefined, {
 					rulesApplied: !result.afterSyncFailed,

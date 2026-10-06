@@ -102,6 +102,7 @@ describe("syncAllItems", () => {
 		expect(await syncAllItems(withoutDb, fetchImpl)).toEqual({
 			added: 0,
 			modified: 0,
+			changedIds: [],
 			synced: 0,
 			skipped: 0,
 			busy: 0,
@@ -124,6 +125,7 @@ describe("syncAllItems", () => {
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
 			added: 2,
 			modified: 0,
+			changedIds: expect.any(Array),
 			synced: 2,
 			skipped: 0,
 			busy: 0,
@@ -135,6 +137,19 @@ describe("syncAllItems", () => {
 			"SELECT plaid_item_id FROM accounts ORDER BY plaid_item_id",
 		).all<{ plaid_item_id: number }>();
 		expect(results.map((row) => row.plaid_item_id)).toEqual([first, second]);
+	});
+
+	it("lists the rows every bank added, so the sort that follows asks about those", async () => {
+		await addItem();
+		await addItem();
+		const result = await syncAllItems(enabledEnv, fakePlaid());
+		const { results } = await env.DB.prepare(
+			"SELECT id FROM transactions ORDER BY id",
+		).all<{ id: number }>();
+		expect(results).toHaveLength(2);
+		expect([...result.changedIds].sort((a, b) => a - b)).toEqual(
+			results.map((row) => row.id),
+		);
 	});
 
 	it("counts what the banks changed apart from what they added, so a sort can follow either", async () => {
@@ -212,6 +227,7 @@ describe("syncAllItems", () => {
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
 			added: 0,
 			modified: 0,
+			changedIds: [],
 			synced: 1,
 			skipped: 0,
 			busy: 0,
@@ -284,6 +300,7 @@ describe("syncAllItems", () => {
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
 			added: 0,
 			modified: 0,
+			changedIds: [],
 			synced: 0,
 			skipped: 1,
 			busy: 1,
@@ -303,6 +320,7 @@ describe("syncAllItems", () => {
 		).toEqual({
 			added: 1,
 			modified: 0,
+			changedIds: expect.any(Array),
 			synced: 1,
 			skipped: 1,
 			busy: 0,
@@ -332,6 +350,7 @@ describe("syncAllItems", () => {
 		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
 			added: 1,
 			modified: 0,
+			changedIds: expect.any(Array),
 			synced: 1,
 			skipped: 1,
 			busy: 0,
@@ -353,6 +372,7 @@ describe("syncAllItems", () => {
 		expect(await syncAllItems(enabledEnv, fakePlaid())).toEqual({
 			added: 0,
 			modified: 0,
+			changedIds: [],
 			synced: 0,
 			skipped: 0,
 			busy: 0,
@@ -431,6 +451,7 @@ describe("syncAllItems", () => {
 		expect(await syncAllItems({ ...enabledEnv, DB: db }, fakePlaid())).toEqual({
 			added: 1,
 			modified: 0,
+			changedIds: expect.any(Array),
 			synced: 1,
 			skipped: 0,
 			busy: 0,

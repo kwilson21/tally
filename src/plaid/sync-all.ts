@@ -9,6 +9,8 @@ export type SyncAllResult = {
 	added: number;
 	/** Transactions the banks changed (a pending one posting, a corrected amount); `added` doesn't count them. */
 	modified: number;
+	/** The ids of the transaction rows the banks added or modified, for the run that sorts them (spec §8.6). */
+	changedIds: number[];
 	synced: number;
 	skipped: number;
 	/** Of the skipped: banks attempted within the last minute, or locked by a sync already running. */
@@ -30,6 +32,7 @@ export async function syncAllItems(
 	const result: SyncAllResult = {
 		added: 0,
 		modified: 0,
+		changedIds: [],
 		synced: 0,
 		skipped: 0,
 		busy: 0,
@@ -86,6 +89,7 @@ export async function syncAllItems(
 				result.synced += 1;
 				result.added += synced.added;
 				result.modified += synced.modified;
+				for (const id of synced.changedIds) result.changedIds.push(id);
 			}
 		} catch (error) {
 			result.failed += 1;

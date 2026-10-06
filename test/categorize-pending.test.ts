@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending, jevCallLimit } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
-import { claimJevCall, jevCallsLeft } from "../src/db/jev-calls";
+import { reserveJevCalls } from "../src/db/jev-calls";
 import { loadMonth } from "../src/db/month";
 import {
 	monthCounts,
@@ -56,11 +56,28 @@ const newDay = () =>
 		.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'")
 		.run();
 
+/** How many of the household day's calls are spoken for (spec §8.6); 40 is the demo's cap. */
+const callsUsed = async (day?: string) =>
+	Number(
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(`jev_calls_${day ?? (await householdToday(db))}`)
+				.first<{ value: string }>()
+		)?.value ?? 0,
+	);
+
+const switchTo = (over: Partial<typeof AI_SWITCHES_ALL_ON>) =>
+	saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...over });
+
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
+	// The demo's reset keeps the day's Jev count, so each test starts a day of its own.
+	await newDay();
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 });
 
@@ -475,8 +492,7 @@ describe("categorizePending", () => {
 		}
 		/** Counts n calls against today's cap, as earlier runs the same day would have. */
 		async function spend(n: number, cap = 40) {
-			const today = await householdToday(db);
-			for (let i = 0; i < n; i++) await claimJevCall(db, today, cap);
+			await reserveJevCalls(db, await householdToday(db), cap, n);
 		}
 		const quiet = () => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
@@ -491,7 +507,7 @@ describe("categorizePending", () => {
 			const result = await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(5);
 			expect(result.asked).toBe(5);
-			expect(await jevCallsLeft(db, await householdToday(db), 40)).toBe(0);
+			expect(await callsUsed()).toBe(40);
 		});
 
 		it("splits one day's cap between two runs, never past it", async () => {
@@ -507,7 +523,7 @@ describe("categorizePending", () => {
 			const second = fakeJev(() => reply(0.5));
 			await categorizePending(withKey, second.fetchImpl);
 			expect(second.calls()).toBe(28);
-			expect(await jevCallsLeft(db, await householdToday(db), 40)).toBe(0);
+			expect(await callsUsed()).toBe(40);
 		});
 
 		it("asks nothing once the day's cap is used, leaving the rest for the next day", async () => {
@@ -527,7 +543,7 @@ describe("categorizePending", () => {
 			const jev = fakeJev(() => new Response("{}", { status: 503 }));
 			await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(1);
-			expect(await jevCallsLeft(db, await householdToday(db), 40)).toBe(39);
+			expect(await callsUsed()).toBe(1);
 		});
 
 		it("doesn't count a transaction it didn't ask about", async () => {
@@ -540,7 +556,7 @@ describe("categorizePending", () => {
 			const jev = fakeJev(() => reply(0.95));
 			await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(0);
-			expect(await jevCallsLeft(db, await householdToday(db), 40)).toBe(40);
+			expect(await callsUsed()).toBe(0);
 		});
 
 		it("starts the next household day at zero", async () => {
@@ -564,7 +580,346 @@ describe("categorizePending", () => {
 				}),
 			);
 			expect(runs.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(40);
-			expect(await jevCallsLeft(db, await householdToday(db), 40)).toBe(0);
+			expect(await callsUsed()).toBe(40);
+		});
+	});
+
+	describe("the calls it reserves for the day (spec §8.6)", () => {
+		const quiet = () => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			return vi.spyOn(console, "error").mockImplementation(() => {});
+		};
+
+		/** A DB that counts every statement a run prepares, for D1's 1,000 queries per invocation. */
+		function countingDb() {
+			let statements = 0;
+			const counted = new Proxy(db, {
+				get(target, property) {
+					const value = Reflect.get(target, property);
+					if (property === "prepare")
+						return (sql: string) => {
+							statements += 1;
+							return target.prepare(sql);
+						};
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+			return { db: counted as D1Database, statements: () => statements };
+		}
+
+		it("costs at most three queries a call, none of them for the cap", async () => {
+			quiet();
+			const ids = (await pendingForJev(db, 100)).map((t) => t.id);
+			const few = countingDb();
+			await categorizePending(
+				{ ...withKey, DB: few.db },
+				fakeJev(() => reply(0.95)).fetchImpl,
+				{ rulesApplied: true, onlyIds: ids.slice(0, 6) },
+			);
+			// Another day, so the same cap and the same twelve waiting.
+			await resetDemo(db, TODAY);
+			await newDay();
+			const many = countingDb();
+			await categorizePending(
+				{ ...withKey, DB: many.db },
+				fakeJev(() => reply(0.95)).fetchImpl,
+				{ rulesApplied: true, onlyIds: ids },
+			);
+			// Six more calls cost the switches read before and after each (two) and its save (one).
+			const perCall = (many.statements() - few.statements()) / 6;
+			expect(perCall).toBeLessThanOrEqual(3);
+		});
+
+		it("gives back what it reserved and didn't ask when the run stops early", async () => {
+			quiet();
+			const jev = fakeJev(() => new Response("{}", { status: 503 }));
+			await categorizePending(withKey, jev.fetchImpl);
+			// It reserved the twelve waiting, asked one, and the other eleven are free again.
+			expect(jev.calls()).toBe(1);
+			expect(await callsUsed()).toBe(1);
+			const next = fakeJev(() => reply(0.95));
+			await categorizePending(withKey, next.fetchImpl);
+			expect(next.calls()).toBe(12);
+			expect(await callsUsed()).toBe(13);
+		});
+
+		it("loses the unused part for the day, and still ends well, when giving it back fails", async () => {
+			const errors = quiet();
+			await db
+				.prepare(
+					`CREATE TRIGGER fail_give_back BEFORE UPDATE ON household_settings
+					 WHEN OLD.key GLOB 'jev_calls_*' BEGIN SELECT RAISE(ABORT, 'nope'); END`,
+				)
+				.run();
+			try {
+				const jev = fakeJev(() => new Response("{}", { status: 503 }));
+				await expect(
+					categorizePending(withKey, jev.fetchImpl),
+				).resolves.toEqual({ asked: 1, applied: 0 });
+				// Lost, never over-spent: all twelve stay counted.
+				expect(await callsUsed()).toBe(12);
+				expect(JSON.stringify(errors.mock.calls)).not.toContain("nope");
+			} finally {
+				await db.prepare("DROP TRIGGER fail_give_back").run();
+			}
+		});
+
+		describe("when the household's day changes under a run", () => {
+			// Eastern, the demo's zone: 03:59:50 UTC is 23:59:50 the evening before.
+			const BEFORE_MIDNIGHT = "2026-10-06T03:59:50Z";
+			const AFTER_MIDNIGHT = "2026-10-06T04:00:05Z";
+
+			it("stops before the next call, and charges nothing to the new day", async () => {
+				quiet();
+				vi.useFakeTimers({ toFake: ["Date"] });
+				vi.setSystemTime(new Date(BEFORE_MIDNIGHT));
+				let calls = 0;
+				const asked = async () => {
+					calls += 1;
+					// Midnight passes while the second call is on its way.
+					if (calls === 2) vi.setSystemTime(new Date(AFTER_MIDNIGHT));
+					return reply(0.95);
+				};
+				const result = await categorizePending(withKey, asked);
+				// The second call was already made; the third is never sent.
+				expect(calls).toBe(2);
+				expect(result.asked).toBe(2);
+				// The evening's day keeps its two; the new day has nothing charged to it.
+				expect(await callsUsed("2026-10-05")).toBe(2);
+				expect(await callsUsed("2026-10-06")).toBe(0);
+			});
+
+			it("leaves the rest for a run on the new day, which has the whole cap", async () => {
+				quiet();
+				vi.useFakeTimers({ toFake: ["Date"] });
+				vi.setSystemTime(new Date(BEFORE_MIDNIGHT));
+				let calls = 0;
+				await categorizePending(withKey, async () => {
+					calls += 1;
+					if (calls === 2) vi.setSystemTime(new Date(AFTER_MIDNIGHT));
+					return reply(0.95);
+				});
+				const next = fakeJev(() => reply(0.95));
+				await categorizePending(withKey, next.fetchImpl);
+				expect(next.calls()).toBe(10);
+				expect(await callsUsed("2026-10-06")).toBe(10);
+			});
+
+			it("takes the household's own zone, not the server's", async () => {
+				quiet();
+				vi.useFakeTimers({ toFake: ["Date"] });
+				// Tokyo's date is already the 6th at 15:00 UTC on the 5th, and turns the 7th at 15:00 UTC the 6th.
+				await db
+					.prepare(
+						"UPDATE household_settings SET value = 'Asia/Tokyo' WHERE key = 'time_zone'",
+					)
+					.run();
+				vi.setSystemTime(new Date("2026-10-06T14:59:55Z"));
+				let calls = 0;
+				const result = await categorizePending(withKey, async () => {
+					calls += 1;
+					if (calls === 1) vi.setSystemTime(new Date("2026-10-06T15:00:05Z"));
+					return reply(0.95);
+				});
+				expect(result.asked).toBe(1);
+				expect(await callsUsed("2026-10-06")).toBe(1);
+			});
+
+			it("reads the household's zone once, not for every call", async () => {
+				quiet();
+				const zoneReads = countingDb();
+				const spy = vi.spyOn(zoneReads.db, "prepare");
+				await categorizePending(
+					{ ...withKey, DB: zoneReads.db },
+					fakeJev(() => reply(0.95)).fetchImpl,
+				);
+				const reads = spy.mock.calls.filter(([sql]) =>
+					String(sql).includes("key = 'time_zone'"),
+				);
+				expect(reads).toHaveLength(1);
+			});
+		});
+	});
+
+	describe("asking only about the rows it's given", () => {
+		const quiet = () => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			return vi.spyOn(console, "error").mockImplementation(() => {});
+		};
+		const waitingIds = async () =>
+			(await pendingForJev(db, 100)).map((t) => t.id);
+
+		it("asks about those and leaves older waiting ones for the night", async () => {
+			quiet();
+			const [a, b, c] = await waitingIds();
+			const jev = fakeJev(() => reply(0.95));
+			const result = await categorizePending(withKey, jev.fetchImpl, {
+				rulesApplied: true,
+				onlyIds: [a as number, b as number, c as number],
+			});
+			expect(jev.calls()).toBe(3);
+			expect(result.asked).toBe(3);
+			// The nine older ones are still waiting, and the night's run takes them.
+			expect(await pendingForJev(db, 100)).toHaveLength(9);
+			const night = fakeJev(() => reply(0.95));
+			await categorizePending(withKey, night.fetchImpl);
+			expect(night.calls()).toBe(9);
+		});
+
+		it("counts only the calls it makes against the day", async () => {
+			quiet();
+			const [a, b] = await waitingIds();
+			await categorizePending(withKey, fakeJev(() => reply(0.95)).fetchImpl, {
+				rulesApplied: true,
+				onlyIds: [a as number, b as number],
+			});
+			expect(await callsUsed()).toBe(2);
+		});
+
+		it("asks about nothing for an empty list, and counts nothing", async () => {
+			const jev = fakeJev(() => reply(0.95));
+			await categorizePending(withKey, jev.fetchImpl, { onlyIds: [] });
+			expect(jev.calls()).toBe(0);
+			expect(await callsUsed()).toBe(0);
+		});
+
+		it("skips a listed row that was already looked at, or already has a category", async () => {
+			quiet();
+			const [a, b, c] = (await waitingIds()) as [number, number, number];
+			await db.batch([
+				db
+					.prepare(
+						"UPDATE transactions SET category_confidence = 0.4 WHERE id = ?",
+					)
+					.bind(a),
+				db
+					.prepare(
+						"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ?",
+					)
+					.bind(b),
+			]);
+			const jev = fakeJev(() => reply(0.95));
+			await categorizePending(withKey, jev.fetchImpl, {
+				rulesApplied: true,
+				onlyIds: [a, b, c],
+			});
+			expect(jev.calls()).toBe(1);
+		});
+
+		it("lets a merchant rule sort a listed row before Jev is asked", async () => {
+			quiet();
+			await db
+				.prepare(
+					"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'SQ *FARMERS MKT'",
+				)
+				.run();
+			const ids = await waitingIds();
+			const jev = fakeJev(() => reply(0.95));
+			const result = await categorizePending(withKey, jev.fetchImpl, {
+				onlyIds: ids,
+			});
+			expect(result.asked).toBe(11);
+			expect(
+				await db
+					.prepare(
+						"SELECT category_source FROM transactions WHERE raw_name = 'SQ *FARMERS MKT'",
+					)
+					.first(),
+			).toEqual({ category_source: "merchant_rule" });
+		});
+
+		it("takes more rows than D1's 100 bound values in one statement", async () => {
+			quiet();
+			await db
+				.prepare(
+					`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 250)
+					 INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+					 SELECT 1, '2026-09-01', 100, 'EXTRA ' || i FROM n`,
+				)
+				.run();
+			const { results } = await db
+				.prepare("SELECT id FROM transactions WHERE raw_name LIKE 'EXTRA %'")
+				.all<{ id: number }>();
+			const ids = results.map((r) => r.id);
+			expect(ids).toHaveLength(250);
+			const jev = fakeJev(() => reply(0.95));
+			await categorizePending({ ...withKey, DEMO: "false" }, jev.fetchImpl, {
+				rulesApplied: true,
+				onlyIds: ids,
+			});
+			expect(jev.calls()).toBe(250);
+			// The seed's twelve weren't listed, so they still wait.
+			expect(await pendingForJev(db, 100)).toHaveLength(12);
+		}, 30_000);
+	});
+
+	// A run right after a sync honors "Sort new transactions as they arrive" before each call (spec §8.6).
+	describe("a run started by a sync", () => {
+		const quiet = () => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			vi.spyOn(console, "error").mockImplementation(() => {});
+		};
+		const bySync = async () => ({
+			rulesApplied: true,
+			bySync: true,
+			onlyIds: (await pendingForJev(db, 100)).map((t) => t.id),
+		});
+		/** A Jev that runs `during` as its nth answer is on its way back, then answers. */
+		function jevWith(during: (call: number) => Promise<void>) {
+			let calls = 0;
+			return {
+				calls: () => calls,
+				fetchImpl: async () => {
+					calls += 1;
+					await during(calls);
+					return reply(0.95);
+				},
+			};
+		}
+
+		it("asks nothing when the switch is off to begin with, and counts nothing", async () => {
+			await switchTo({ sortOnArrival: false });
+			const jev = fakeJev(() => reply(0.95));
+			await categorizePending(withKey, jev.fetchImpl, await bySync());
+			expect(jev.calls()).toBe(0);
+			expect(await callsUsed()).toBe(0);
+		});
+
+		it("stops sending once the switch is turned off mid-run, keeping what it saved", async () => {
+			quiet();
+			const jev = jevWith(async (call) => {
+				if (call === 2) await switchTo({ sortOnArrival: false });
+			});
+			const result = await categorizePending(
+				withKey,
+				jev.fetchImpl,
+				await bySync(),
+			);
+			// The second call was on its way when it went off, so its answer is kept; no third goes out.
+			expect(jev.calls()).toBe(2);
+			expect(result).toEqual({ asked: 2, applied: 2 });
+			expect(await needsCategoryCount(db, MONTH)).toBe(10);
+			// And the ten it didn't ask about are free for the night.
+			expect(await callsUsed()).toBe(2);
+		});
+
+		it("is not what stops the nightly run, which has no such switch", async () => {
+			quiet();
+			const jev = jevWith(async (call) => {
+				if (call === 2) await switchTo({ sortOnArrival: false });
+			});
+			const result = await categorizePending(withKey, jev.fetchImpl);
+			expect(jev.calls()).toBe(12);
+			expect(result.asked).toBe(12);
+		});
+
+		it("still stops for the switches every run honors", async () => {
+			quiet();
+			const jev = jevWith(async (call) => {
+				if (call === 1) await switchTo({ categories: false, income: false });
+			});
+			await categorizePending(withKey, jev.fetchImpl, await bySync());
+			expect(jev.calls()).toBe(1);
 		});
 	});
 

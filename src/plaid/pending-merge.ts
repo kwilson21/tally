@@ -6,8 +6,11 @@
  *
  * What moves, and what wins:
  * - A person's category, note, exclusion and income choice move over a machine's value on the posted
- *   row. Where the posted row already holds a person's choice, it keeps it. A machine's pick on the
- *   pending row (a merchant rule, Jev) doesn't move: rules and Jev run on the posted row as on any new one.
+ *   row. Where the posted row already holds a person's choice, it keeps it.
+ * - Tally's own answer (Jev's category pick and how sure it was, its transfer, reimbursement and income
+ *   answers, decision 79) moves too, when the amount is unchanged and the posted row has no answer or
+ *   choice of its own, so the posted row isn't asked again for nothing. A merchant rule's pick doesn't
+ *   move: rules run on the posted row as on any new one.
  * - A bill payment is re-pointed to the posted row unless that row already pays a bill (one bill per
  *   transaction); a refund of the pending row now refunds the posted one, and the pending row's own
  *   refund link moves unless the posted row has one.
@@ -58,6 +61,29 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.income_source = 'user' AND COALESCE(transactions.income_source, '') != 'user'`,
 	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = 'user'
 	 ${FROM_PENDING} AND p.credit_reviewed_by = 'user' AND COALESCE(transactions.credit_reviewed_by, '') != 'user'`,
+	// Tally's own answer, after the person's choices above, so it only fills what's still unanswered. Each
+	// answer was made for the pending amount, so it moves only while the amount is unchanged; a changed
+	// amount is a new question, as for any bank correction.
+	// Jev's category: a confident pick, or one below the threshold kept with its confidence (decision 27).
+	`UPDATE transactions SET category_id = p.category_id, category_source = p.category_source,
+		category_confidence = p.category_confidence, jev_category_id = p.jev_category_id
+	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
+	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
+	 AND transactions.category_confidence IS NULL`,
+	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
+	`UPDATE transactions SET excluded = p.excluded, excluded_source = 'jev',
+		flag_transfer = p.flag_transfer, flag_reimbursement = p.flag_reimbursement
+	 ${FROM_PENDING} AND p.excluded_source = 'jev' AND p.amount_cents = ?3
+	 AND transactions.excluded = 0 AND transactions.excluded_source IS NULL`,
+	// Its income answer, and the credit review a confident answer gives a credit.
+	`UPDATE transactions SET flag_income = p.flag_income, income_source = 'jev'
+	 ${FROM_PENDING} AND p.income_source = 'jev' AND p.amount_cents = ?3
+	 AND transactions.income_source IS NULL AND transactions.flag_income = 0
+	 AND transactions.credit_reviewed_by IS NULL`,
+	`UPDATE transactions SET credit_reviewed = 1
+	 ${FROM_PENDING} AND p.amount_cents < 0 AND p.amount_cents = ?3 AND p.credit_reviewed = 1
+	 AND p.credit_reviewed_by IS NULL AND p.category_confidence IS NOT NULL
+	 AND COALESCE(transactions.credit_reviewed, 0) = 0 AND transactions.credit_reviewed_by IS NULL`,
 	`UPDATE transactions SET updated_by = p.updated_by
 	 ${FROM_PENDING} AND p.updated_by IS NOT NULL AND transactions.updated_by IS NULL`,
 	// A bill payment (and a dismissal) moves, unless the posted row is already linked to a bill.

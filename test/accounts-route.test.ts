@@ -580,6 +580,33 @@ describe("POST /accounts/sync feedback", () => {
 		});
 	});
 
+	it("asks Jev about what this sync brought in, and leaves an older unsorted transaction for the night", async () => {
+		await addBank("Chase");
+		// An older transaction nobody sorted, saved while sorting right away was off.
+		await saveAiSwitches(env.DB, { sortOnArrival: false });
+		stubPlaid({ Chase: ["OLD SHOP"] }, [], jevSays(0.95));
+		await sync({ JEV_API_KEY: "jev-key" });
+		await background();
+		await saveAiSwitches(env.DB, { sortOnArrival: true });
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_sync_attempt_at = NULL",
+		).run();
+		waitUntil.mockClear();
+
+		await addBank("Ally");
+		const fetchImpl = stubPlaid({ Ally: ["NEW SHOP"] }, [], jevSays(0.95));
+		await sync({ JEV_API_KEY: "jev-key" });
+		await background();
+		expect(jevCalls(fetchImpl)).toHaveLength(1);
+		expect(await categoryOf("NEW SHOP")).toMatchObject({
+			category_source: "jev",
+		});
+		expect(await categoryOf("OLD SHOP")).toEqual({
+			category_source: null,
+			category_confidence: null,
+		});
+	});
+
 	it("answers without waiting for Jev", async () => {
 		await addBank("Chase");
 		let release: (r: Response) => void = () => {};
