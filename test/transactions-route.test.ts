@@ -105,7 +105,9 @@ describe("GET /transactions", () => {
 		const now = (await get("/transactions?show=excluded")).html;
 		expect(rowCount(old)).toBe(2);
 		expect(old).toContain("Transfer to Savings");
-		expect(old).toMatch(/<option value="excluded" selected[^>]*>Excluded<\/option>/);
+		expect(old).toMatch(
+			/<option value="excluded" selected[^>]*>Excluded<\/option>/,
+		);
 		expect(countOf(old)).toBe(countOf(now));
 		expect(countOf(old)).toMatch(/^2 excluded transactions in /);
 	});
@@ -342,9 +344,13 @@ describe("GET /transactions: Account and Show", () => {
 		expect(n).toBeGreaterThan(0);
 		expect(html).toContain("Paycheck, Acme Corp");
 		expect(countOf(html)).toMatch(
-			new RegExp(`^(Showing 1–25 of \\d+|${n}) income transactions across all months$`),
+			new RegExp(
+				`^(Showing 1–25 of \\d+|${n}) income transactions across all months$`,
+			),
 		);
-		expect(optionsOf(html, "show").find((o) => o.selected)?.value).toBe("income");
+		expect(optionsOf(html, "show").find((o) => o.selected)?.value).toBe(
+			"income",
+		);
 		const month = (await get("/transactions?show=income")).html;
 		expect(countOf(month)).toMatch(
 			/^\d+ income transactions in [A-Z][a-z]+( \d{4})?$/,

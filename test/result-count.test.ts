@@ -74,9 +74,9 @@ describe("resultCount", () => {
 		expect(resultCount(one, f, null, TODAY, CARD)).toBe(
 			"12 transactions in Chase Card ••9921, September",
 		);
-		expect(resultCount(one, { ...f, category: 1 }, "Groceries", TODAY, CARD)).toBe(
-			"12 transactions in Groceries, Chase Card ••9921, September",
-		);
+		expect(
+			resultCount(one, { ...f, category: 1 }, "Groceries", TODAY, CARD),
+		).toBe("12 transactions in Groceries, Chase Card ••9921, September");
 		expect(resultCount(one, { ...f, month: "all" }, null, TODAY, CARD)).toBe(
 			"12 transactions in Chase Card ••9921, across all months",
 		);

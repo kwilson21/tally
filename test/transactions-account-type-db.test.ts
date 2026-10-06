@@ -101,22 +101,40 @@ describe("listTransactions by type", () => {
 			);
 		await env.DB.batch([
 			// A paycheck flagged income.
-			row(`(860,${CHECKING},'2026-09-04',-300000,'EXTRA PAYCHECK',NULL,1,0,0,0,NULL,NULL,1)`),
+			row(
+				`(860,${CHECKING},'2026-09-04',-300000,'EXTRA PAYCHECK',NULL,1,0,0,0,NULL,NULL,1)`,
+			),
 			// A purchase, and a refund of it that counts with it.
-			row(`(861,${CARD},'2026-09-05',5000,'GADGET STORE',1,0,0,0,0,NULL,NULL,NULL)`),
-			row(`(862,${CARD},'2026-09-06',-2000,'GADGET STORE REFUND',1,0,0,0,0,NULL,861,1)`),
+			row(
+				`(861,${CARD},'2026-09-05',5000,'GADGET STORE',1,0,0,0,0,NULL,NULL,NULL)`,
+			),
+			row(
+				`(862,${CARD},'2026-09-06',-2000,'GADGET STORE REFUND',1,0,0,0,0,NULL,861,1)`,
+			),
 			// A refund nobody linked, and a credit nobody has identified.
-			row(`(863,${CARD},'2026-09-07',-1500,'UNLINKED REFUND',1,0,0,0,0,NULL,NULL,1)`),
-			row(`(864,${CHECKING},'2026-09-08',-900,'MYSTERY CREDIT',NULL,0,0,0,0,NULL,NULL,NULL)`),
+			row(
+				`(863,${CARD},'2026-09-07',-1500,'UNLINKED REFUND',1,0,0,0,0,NULL,NULL,1)`,
+			),
+			row(
+				`(864,${CHECKING},'2026-09-08',-900,'MYSTERY CREDIT',NULL,0,0,0,0,NULL,NULL,NULL)`,
+			),
 			// A transfer in, left out of the budget; and one a person put back in, which is still a transfer.
-			row(`(865,${CHECKING},'2026-09-09',-50000,'TRANSFER FROM SAVINGS',NULL,0,1,1,0,NULL,NULL,1)`),
-			row(`(866,${CHECKING},'2026-09-10',-7000,'TRANSFER KEPT',NULL,0,1,0,0,NULL,NULL,1)`),
+			row(
+				`(865,${CHECKING},'2026-09-09',-50000,'TRANSFER FROM SAVINGS',NULL,0,1,1,0,NULL,NULL,1)`,
+			),
+			row(
+				`(866,${CHECKING},'2026-09-10',-7000,'TRANSFER KEPT',NULL,0,1,0,0,NULL,NULL,1)`,
+			),
 			// A split refund counts by its parts, not its parent.
-			row(`(867,${CARD},'2026-09-11',-4000,'SPLIT REFUND',NULL,0,0,0,1,NULL,NULL,1)`),
+			row(
+				`(867,${CARD},'2026-09-11',-4000,'SPLIT REFUND',NULL,0,0,0,1,NULL,NULL,1)`,
+			),
 			row(
 				`(868,${CARD},'2026-09-11',-2500,'SPLIT REFUND',1,0,0,0,0,867,NULL,1),(869,${CARD},'2026-09-11',-1500,'SPLIT REFUND',4,0,0,0,0,867,NULL,1)`,
 			),
-			row(`(870,${CARD},'2026-09-12',1000,'PLAIN PURCHASE',1,0,0,0,0,NULL,NULL,NULL)`),
+			row(
+				`(870,${CARD},'2026-09-12',1000,'PLAIN PURCHASE',1,0,0,0,0,NULL,NULL,NULL)`,
+			),
 		]);
 	});
 

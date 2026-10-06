@@ -9,7 +9,7 @@ export const SHOWS = [
 	"excluded",
 ] as const;
 
-/** Which kind of transaction to list: what each holds is `showSql` in `src/db/transactions.ts`. */
+/** Which kind of transaction to list: what each holds is `SHOW_SQL` in `src/db/transactions.ts`. */
 export type Show = (typeof SHOWS)[number];
 
 export const SHOW_LABELS: Record<Show, string> = {
