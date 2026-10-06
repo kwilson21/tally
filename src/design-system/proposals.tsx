@@ -328,7 +328,8 @@ export const DECIDED: readonly {
 	{
 		title: "P90 · A store that sells many kinds of things",
 		outcome:
-			"Option A, combined with B: Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80).",
+			"Option A, combined with B: Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80). A store is mixed from the last 3 months, split parts counting; the parts start from the trip's details, and the store's most-used other category fills in when they name only one (decision 87).",
+		issue: 233,
 	},
 	{
 		title: "P91–P93 · Browse past months",
