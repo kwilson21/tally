@@ -74,7 +74,7 @@ Wrangler environments deploy the same code twice:
 | R2 bucket (unused until receipts, decision 66) | `tally-prod-docs` | `tally-demo-docs` |
 | Plaid | On | **Off.** No Plaid secrets exist in this environment. |
 | Jev | On | On |
-| Workers AI | On (`AI` binding) | **Off.** No binding exists in this environment; the demo shows name suggestions seeded in the data (§7). |
+| Workers AI | On (`AI` binding) | On (`AI` binding), after each nightly reset; the seed also holds a few suggestions, so they show right after a reset (§7). |
 | Login | Cloudflare Access | Public, with a demo banner on every page |
 | Nightly job | Sync, categorization retry, then name suggestions (§7) | Reset the database and bucket to the seed, then categorize |
 

@@ -33,7 +33,7 @@ export type SeedMerchant = {
 	defaultCategoryId: number | null;
 	/** "Not a bill" (decision 60): the finder never suggests this merchant. */
 	notABill?: boolean;
-	/** Names Tally guessed for it, up to three, waiting for a person (spec §7). The demo has no Workers AI, so these are seeded. */
+	/** Names Tally guessed for it, up to three, waiting for a person (spec §7), so suggestions show right after a reset. */
 	suggestedNames?: string[];
 };
 export type SeedTransaction = {

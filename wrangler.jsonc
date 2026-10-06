@@ -51,7 +51,9 @@
 					"database_id": "ce0d954f-0f85-46bf-9a25-0890c589e383",
 					"migrations_dir": "migrations"
 				}
-			]
+			],
+			// Workers AI suggests merchant names in the demo too (spec §4.1), after each nightly reset.
+			"ai": { "binding": "AI" }
 		},
 		// The family's app (#23). Deploy with: npx wrangler deploy --env production (owner-approved only).
 		// Cloudflare Access guards every path but /webhooks/plaid. Secrets and Plaid settings are set with
@@ -79,10 +81,10 @@
 				}
 			],
 			// Workers AI suggests merchant names (spec §7, #33), only through src/ai/suggest-name.ts. It needs no
-			// secret. Bindings aren't inherited, so the demo has none (it shows seeded suggestions) and the nightly
-			// job skips the step where there is no binding. Local development has none either: an AI binding always
-			// runs on Cloudflare's side, so at the top level it would make every `npm test` and `npm run dev` open a
-			// remote connection and may incur usage charges. Tests hand the code a fake `AI` instead.
+			// secret. Bindings aren't inherited, so it's repeated in each environment; the nightly job skips the step
+			// where there is none. Local development has none: an AI binding always runs on Cloudflare's side, so at
+			// the top level it would make every `npm test` and `npm run dev` open a remote connection and may incur
+			// usage charges. Tests hand the code a fake `AI` instead.
 			"ai": { "binding": "AI" }
 		}
 	}
