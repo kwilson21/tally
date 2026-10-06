@@ -26,17 +26,8 @@ import { MoneyInput } from "../views/money-input";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before the feature is built. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 const TODAY = "2026-10-05";
 export const dollars = (cents: number) =>
@@ -973,28 +964,21 @@ export function Phase5BillsProposals() {
 					one is due (§6, decision 62). A bill's page lists each month's
 					occurrence with its payment (§8.2).
 				</Fixed>
-				<NeedsLine>
-					the period key. K1 (Recommended): a weekly or every-two-weeks
-					occurrence is keyed by its own due date, YYYY-MM-DD, and a quarterly
-					one by YYYY-Qn, so each key names exactly one occurrence and nothing
-					needs a rule for a week that crosses a month or a year. K2: weekly is
-					keyed by its ISO week, YYYY-Www, which is shorter but does need that
-					rule. Either way the bill_payments period check, which allows only
-					YYYY and YYYY-MM today, widens.
+				<NeedsLine settled="decisions 74 and 77">
+					A weekly or every-two-weeks occurrence is keyed by its own due date,
+					YYYY-MM-DD, and a quarterly one by YYYY-Qn, the calendar quarter that
+					holds its due date (Q1 is January to March), so each key names exactly
+					one occurrence. The bill_payments period check widens to allow both.
 				</NeedsLine>
-				<NeedsLine>
-					how status counts several occurrences in a month. S1 (Recommended,
-					drawn as A): the list shows the next unpaid occurrence only, and Safe
-					to spend sets aside every occurrence due or overdue; an unpaid one
-					from an earlier month shows Not paid and stops being set aside, as for
-					a monthly bill. S2 (drawn as B): the month's occurrences together as
-					one line, “1 of 5 paid this month”.
+				<NeedsLine settled="decisions 62 and 74">
+					Bills lists a bill's next unpaid occurrence only. A missed one stays
+					overdue, with its amount set aside, until it is paid or the next one
+					is due, which then takes its place, the same as for monthly and yearly
+					bills.
 				</NeedsLine>
-				<NeedsLine>
-					the matching window. §6.1 matches a payment within ±5 days of an
-					occurrence, which is wider than half a week, so one Friday's payment
-					could also fit the Friday before or after; a weekly bill needs a
-					narrower window (not drawn).
+				<NeedsLine settled="decision 74">
+					A weekly bill's payment is matched within ±3 days of its due date, so
+					two weeks' windows never overlap; other bills keep §6.1's ±5 days.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1051,15 +1035,14 @@ export function Phase5BillsProposals() {
 					one unlinks it (§6.1, §8.2); a month with a linked payment is Paid,
 					and a missed one stays overdue (§6).
 				</Fixed>
-				<NeedsLine>
-					bill_payments' unique on bill_id, period goes, and §6.1's “at most one
-					payment per period” with it, so one occurrence can have several linked
-					payments (a transaction still pays one bill). A month is Paid once its
-					payments add up to within ±10% of the amount (the matcher's
-					tolerance); until then Safe to spend, and Bills' sentence, set aside
-					only what's left ($600 here). The matcher still takes one payment
-					within ±10% of the amount, so a half payment is linked by hand, as
-					drawn.
+				<NeedsLine settled="decisions 74 and 77">
+					One occurrence can have several linked payments, a bill paid in parts,
+					while each transaction still pays at most one bill or planned expense.
+					The matcher still links one; a person links more by hand. An
+					occurrence is Paid once its payments add up to at least 90% of its
+					amount (paying more is still Paid), and until then it shows “Part
+					paid” in its usual group while Safe to spend sets aside only what's
+					left.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1100,11 +1083,11 @@ export function Phase5BillsProposals() {
 					category choice is never overwritten (§7), and a payment linked to a
 					bill's month counts in that month (§6, decision 58).
 				</Fixed>
-				<NeedsLine>
-					§7 gains a fourth way a category is set: a linked payment with no
-					category takes its bill's (a new category_source, “bill”), below a
-					person's choice and a merchant rule, which replace it. Unlinking the
-					payment leaves the category on it.
+				<NeedsLine settled="decisions 74 and 78">
+					A linked payment with no category takes its bill's (its
+					category_source is “bill”). A person's choice or a merchant rule
+					replaces it, and unlinking the payment leaves the category on it. The
+					edit panel explains it with a Why? link beside Category.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1144,10 +1127,13 @@ export function Phase5BillsProposals() {
 					yearly bill is due once a year, in its anchor month (§5, §8.5).
 				</Fixed>
 				<NeedsLine>
-					what “a month” means for each frequency: a yearly bill counts as a
-					twelfth (drawn); if P57 ships, weekly is × 52 ÷ 12, every two weeks ×
-					26 ÷ 12 and quarterly ÷ 3. “Still to pay” counts every occurrence due
-					this month that isn't paid yet, overdue ones included.
+					what “a month” means for weekly, every-two-weeks and quarterly bills
+					(proposed: weekly × 52 ÷ 12, every two weeks × 26 ÷ 12 and quarterly ÷
+					3), and that “still to pay” counts every occurrence due this month
+					that isn't paid yet, overdue ones included. Already settled (decisions
+					74 and 77): a yearly bill counts as a twelfth; both totals count
+					active bills only; and a part-paid bill counts in full in the monthly
+					total and by what's left in “still to pay”.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1189,14 +1175,13 @@ export function Phase5BillsProposals() {
 					(§8.4, A9). A budget's amount in a month is the latest budget_amounts
 					row with effective_month on or before it (§6).
 				</Fixed>
-				<NeedsLine>
-					where the amount history lives. H1 (Recommended): a bill_amounts table
-					like budget_amounts (bill_id, effective_month, amount_cents); an
-					occurrence's amount is the latest row with effective_month on or
-					before its month, the same rule as budgets, which is already
-					explained. H2: store the amount on each occurrence when it's created,
-					which means occurrences become rows; today one is worked out from its
-					bill.
+				<NeedsLine settled="decisions 74 and 77">
+					A bill_amounts table like budget_amounts (bill_id, effective_month,
+					amount_cents) holds a bill's amount from a month on: an occurrence's
+					amount is the row with the latest effective_month on or before its
+					month, the same rule as budgets. An existing bill's first row starts
+					at the month of its earliest linked payment, or this month if it has
+					none.
 				</NeedsLine>
 				<Options
 					options={[

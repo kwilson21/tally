@@ -1478,7 +1478,7 @@ export function DetailsProposals() {
 						{
 							name: "Option E · A Why? link",
 							picked: true,
-							note: "A terracotta “Why?” follows the label “Category” and leads to How Tally works, as the Why? beside a guess does.",
+							note: "A terracotta “Why?” follows the label “Category” and leads to How Tally works, as the Why? beside a guess does. Its categorization section gains the rule when this is built: “A payment linked to a bill takes the bill's category when it has none, until a person or a merchant rule picks another.”",
 							tradeoff:
 								"it hides the answer behind a tap, on another page, and the panel itself never says a bill was involved.",
 							screen: (

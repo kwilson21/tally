@@ -22,11 +22,25 @@ import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options } from "./proposal-parts";
 import { Specimen } from "./specimen";
 
-/** A rule the spec still needs before the feature is built. */
-export function NeedsLine({ children }: { children?: Child }) {
+/**
+ * A rule the spec still needs before the feature is built, or, once the owner has answered it,
+ * the rule as settled and the decision that settled it (`settled`), so a picked drawing never
+ * shows an answered question as open.
+ */
+export function NeedsLine({
+	children,
+	settled,
+}: {
+	children?: Child;
+	settled?: string;
+}) {
 	return (
 		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
+			<span class="font-medium">
+				{settled
+					? `Rule settled (${settled}): `
+					: "Rule to write before building: "}
+			</span>
 			{children}
 		</p>
 	);
@@ -1183,10 +1197,13 @@ export function Phase5TransactionsProposals() {
 					(§8.6); a rule offer isn't on that list, so whether it joins is part
 					of this pick.
 				</Fixed>
-				<NeedsLine>
-					when Tally asks and stops. Proposed: three picks of one category in a
-					row for one merchant; never for a merchant that has a rule; after Not
-					now, again only after 3 more.
+				<NeedsLine settled="decisions 74, 77 and 78">
+					The offer comes on the third save of one category for one merchant,
+					and on every matching save after, until the merchant has a rule; Not
+					now only skips that one. Only transactions a person put in that
+					category for that merchant count, from any screen, counted from the
+					transactions themselves, not “in a row”. A store whose trips a person
+					has put in two or more categories gets no offer.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1267,12 +1284,11 @@ export function Phase5TransactionsProposals() {
 					its purchase counts in the purchase's month and category (§6). The
 					Excluded filter shows only excluded transactions (§8).
 				</Fixed>
-				<NeedsLine>
-					what each type holds. Proposed: Spending is counted and not income;
-					Income is flagged income; Refunds is money in linked to a purchase;
-					Excluded is left out of the budget, where transfers and card payments
-					go. Open: a refund nobody linked has no type of its own; it could stay
-					under Spending, or Refunds could hold every credit that isn't income.
+				<NeedsLine settled="decisions 74 and 77">
+					The Show choice for type has all, spending, income, refunds and
+					excluded, and replaces the Excluded filter. Refunds holds money in
+					that isn't income or a transfer, so money in that nothing explains
+					lands there.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1307,9 +1323,11 @@ export function Phase5TransactionsProposals() {
 					integer cents (§5).
 				</Fixed>
 				<NeedsLine>
-					what a search matches. Proposed: a word also matches a category's
-					name; a number, with or without $, matches an amount: “42.17” only
-					$42.17, “$42” anything from $42.00 to $42.99.
+					what a number matches as an amount (proposed: with or without $, “$42”
+					anything from $42.00 to $42.99). Already settled (decisions 74 and
+					77): a word also matches a category's name, and a number matches an
+					amount, money out and money in alike (“42.17” finds a $42.17 purchase
+					and a $42.17 refund).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1345,9 +1363,10 @@ export function Phase5TransactionsProposals() {
 					count).
 				</Fixed>
 				<NeedsLine>
-					what the month choice does while a search is typed. Proposed: it moves
-					to All months; picking a month, or Only October, narrows; clearing the
-					search returns to this month.
+					what picking a month does, and what clearing the search does, while a
+					search is typed (proposed: picking a month narrows it; clearing the
+					search returns to this month). Already settled (decision 74): a search
+					looks in every month, with an “Only October” link to narrow.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1422,9 +1441,11 @@ export function Phase5TransactionsProposals() {
 					own rename always wins over a suggested or tidied name.
 				</Fixed>
 				<NeedsLine>
-					a name kept on one transaction, winning over the merchant's, and which
-					choice starts ticked. Proposed: This one only (today's behavior is
-					All). Search matches both names; the bank's text stays.
+					which choice starts ticked (proposed: This one only; today's behavior
+					is All) and whether search matches both names. Already settled
+					(decisions 74 and 77): a name kept on one transaction is its own_name,
+					shown in place of its merchant's name and on its split's parts; the
+					merchant's name and the bank's text stay as they are.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1460,13 +1481,14 @@ export function Phase5TransactionsProposals() {
 					rule on an archived category is skipped until it's restored (§7).
 				</Fixed>
 				<NeedsLine>
-					what the toggle means once it tells the truth, and how the list
-					behaves. Proposed: ticked means the rule is the category chosen above;
-					unticked and saved removes it; removing a rule never changes a
-					transaction already sorted. For the list: with no rules an EmptyState
-					says so; a rule on an archived category says it is paused; and since
-					Organize makes a rule for every merchant it sorts (§8.1), a long list
-					needs a way to find one.
+					what saving the toggle unticked does (proposed: it removes the rule),
+					that removing a rule never changes a transaction already sorted, what
+					the list says with no rules (proposed: an EmptyState) and how it marks
+					a rule on an archived category (proposed: paused). Already settled
+					(decisions 77 and 78): in the edit panel the toggle is ticked when the
+					chosen category is the rule's and unticked when it isn't, and ticking
+					it makes the new category the rule; the list is A to Z, with a search
+					box once there are more than 20.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1546,9 +1568,14 @@ export function Phase5TransactionsProposals() {
 					person (§8.4).
 				</Fixed>
 				<NeedsLine>
-					what a changed cash entry does to what's attached. Proposed: a new
-					amount removes its split, as a bank's change does (decision 62); a
-					date can't be in the future; it counts in its new date's month.
+					whether a date can be in the future and which month a changed entry
+					counts in (proposed: it can't be in the future; it counts in its new
+					date's month). Already settled (decision 77): a split cash entry's new
+					date moves to its parts, and a new amount that no longer matches its
+					parts can't be saved until the parts are corrected, so the split is
+					never reset. Its links (a bill payment, a refund) are kept: a new date
+					keeps them, and a new amount is checked by the same guards as linking
+					and refused with a field error if it breaks one.
 				</NeedsLine>
 				<Options
 					options={[

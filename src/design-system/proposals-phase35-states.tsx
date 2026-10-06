@@ -16,17 +16,8 @@ import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
 import { TextInput } from "../views/text-input";
 import { Fixed, Options, Sheet } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before the feature is built: open, not fixed. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 // ---------------------------------------------------------------------------------------------
 // P38: a failed save, drawn on the budget sheet over Home.
@@ -541,12 +532,12 @@ export function Phase35StatesProposals() {
 					a failed htmx request shows “{COULDNT_SAVE}” in role="alert" (§8.5).
 				</Fixed>
 				<NeedsLine>
-					any failed request (a dropped connection or an error reply) raises the
-					existing toast event with type "error" and these words, and leaves the
-					page as it is, so an open sheet keeps what was typed and Save comes
-					back to rest. For A or C, toast.js also draws the alert icon, and the
-					toast region goes above an open sheet: today it has no z-index and the
-					sheet is z-50, so the toast would sit behind it.
+					that Save comes back to rest after a failed save, and that the toast
+					region goes above an open sheet (today it has no z-index and the sheet
+					is z-50, so the toast would sit behind it). Already settled (decision
+					72): a failed save is an error toast with the alert icon, “Couldn't
+					save. Check your connection and try again.”, and the sheet stays open
+					with what was typed.
 				</NeedsLine>
 				<Options
 					options={[
@@ -697,12 +688,14 @@ export function Phase35StatesProposals() {
 					share a name (§8.5); the form is in a bottom sheet (§8.2), and invalid
 					input comes back as a field error in role="alert" (§10).
 				</Fixed>
-				<NeedsLine>
-					“over” means more than $100,000.00, so exactly that saves without
-					asking, and editing a bill's amount asks too; the confirmation covers
-					that amount only, so changing it asks again; names match ignoring
-					case, as categories do (§7), and reactivating an inactive bill that
-					would duplicate an active one is refused the same way.
+				<NeedsLine settled="decisions 72 and 78">
+					“Over” means more than $100,000.00, so exactly that saves without
+					asking. Adding or editing an amount over it comes back unsaved until a
+					“Yes, $X is right” chip under the amount's alert is ticked, and the
+					tick covers that exact amount only, so changing the amount asks again.
+					Names are compared ignoring A to Z capitals and spaces around them,
+					and reactivating an inactive bill that would repeat an active one's
+					name is refused the same way.
 				</NeedsLine>
 				<Options
 					options={[

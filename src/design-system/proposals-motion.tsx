@@ -13,17 +13,8 @@ import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before the feature is built: open, not fixed. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 /** What the browser and htmx give us, checked against their docs, so no option promises more. */
 function Gives({ children }: { children?: Child }) {
@@ -331,19 +322,18 @@ export function P74() {
 				unless CSS sets another length.
 			</Gives>
 			<NeedsLine>
-				View Transitions are an enhancement only: a browser without them just
-				switches pages. Under reduced motion the page rule sits inside a{" "}
+				Under reduced motion the page rule sits inside a{" "}
 				<code>prefers-reduced-motion: no-preference</code> query, and another
 				rule sets a transition's animations to none for the swaps htmx wraps.
 				htmx's <code>transitions</code> setting stays off, so a filter or one of
-				Adjust's taps never fades the whole page; only B's swap that opens a
-				sheet asks for one with <code>transition:true</code>. Durations are
-				tokens in app.css (150 ms for a confirmation, 200 ms for something
-				rising), never numbers scattered through components. Every motion gets
-				its reduced-motion version and a line in its component's use spec (part
-				6, Motion), in the same PR. A toast's fade-out is part of its own
-				4-second animation, set in CSS on what <code>#toasts</code> holds and
-				matching toast.js's 4 seconds, so that script doesn't change.
+				Adjust's taps never fades the whole page. A toast's fade-out is part of
+				its own 4-second animation, set in CSS on what <code>#toasts</code>{" "}
+				holds and matching toast.js's 4 seconds, so that script doesn't change.
+				Already settled (decisions 76 and 77): motion is CSS only, each in 150
+				to 200 ms, with durations as tokens in app.css that the older animations
+				move onto too; View Transitions are an enhancement, so a browser without
+				them just switches pages; under reduced motion everything shows its end
+				state; and every motion is written into its component's use spec.
 			</NeedsLine>
 			<Options
 				options={[

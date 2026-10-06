@@ -9,10 +9,10 @@
 // today's date (Mon Oct 5). Nothing here is decided until the owner picks (decision 47).
 
 import { Button } from "../views/button";
-import { MoneyInput } from "../views/money-input";
-import { SplitForm, SplitLine } from "../views/split-form";
+import { SplitLine } from "../views/split-form";
 import { Fixed, Options, Title } from "./proposal-parts";
 import { DetailsPanel, PanelHead } from "./proposals-autofill";
+import { LedgerField } from "./proposals-forms";
 import { MaybeRow } from "./proposals-phase4";
 import {
 	actions,
@@ -87,16 +87,17 @@ type Part = { category: number; amount: string };
 
 /**
  * P17 A's split as it opens from the nudge (prototype, laid out as SplitForm is): the same live
- * line, the same part rows with the real MoneyInput, and Cancel and Save split. What's new is the
- * label saying where the parts came from, and each part's category drawn dashed, as every guess is
- * (decision 64), until a person types its amount or changes it. The amounts are empty: the bank
- * sent only the total.
+ * line and Cancel and Save split, with each part's amount in P72 A's plain amount field, since
+ * split parts take it rather than MoneyInput (decision 77, question 44). What's new is the label
+ * saying where the parts came from, and each part's category drawn dashed, as every guess is
+ * (decision 64), until a person types its amount or changes it (`kept`). The amounts start empty:
+ * the bank sent only the total.
  */
-function SuggestedSplit({ parts }: { parts: Part[] }) {
+function SuggestedSplit({ parts, kept }: { parts: Part[]; kept?: boolean }) {
 	return (
 		<div class="mt-4 flex flex-col gap-4 border-t border-rule pt-4">
 			<div class="flex items-center justify-between gap-3">
-				<div id="p90-split-line" aria-live="polite">
+				<div id={`p90-split-line${kept ? "-kept" : ""}`} aria-live="polite">
 					<SplitLine
 						parentCents={TRIP.amountCents}
 						amounts={parts.map((p) => p.amount)}
@@ -106,20 +107,25 @@ function SuggestedSplit({ parts }: { parts: Part[] }) {
 					Add a part
 				</Button>
 			</div>
-			<p class="text-sm text-muted">
-				Tally's guess, from your last 5 Costco trips
-			</p>
+			{!kept && (
+				<p class="text-sm text-muted">
+					Tally's guess, from your last 5 Costco trips
+				</p>
+			)}
 			{parts.map((part, index) => (
 				<div
 					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
 				>
-					<label for={`p90-part-category-${index}`} class="sr-only">
+					<label
+						for={`p90-part-category-${index}${kept ? "-kept" : ""}`}
+						class="sr-only"
+					>
 						Part {index + 1} category
 					</label>
 					<select
-						id={`p90-part-category-${index}`}
+						id={`p90-part-category-${index}${kept ? "-kept" : ""}`}
 						name="part_category"
-						class="min-h-11 rounded-full border border-dashed border-ink bg-paper px-3"
+						class={`min-h-11 rounded-full border ${kept ? "border-rule" : "border-dashed border-ink"} bg-paper px-3`}
 					>
 						{CATEGORIES.map((cat) => (
 							<option value={cat.id} selected={part.category === cat.id}>
@@ -127,11 +133,13 @@ function SuggestedSplit({ parts }: { parts: Part[] }) {
 							</option>
 						))}
 					</select>
-					<MoneyInput
-						id={`p90-part-amount-${index}`}
+					<LedgerField
+						id={`p90-part-amount-${index}${kept ? "-kept" : ""}`}
 						name="part_amount"
 						label={`Part ${index + 1} amount`}
 						value={part.amount}
+						prefix="$"
+						inputmode="decimal"
 					/>
 				</div>
 			))}
@@ -164,21 +172,18 @@ const splitSuggested = (
 );
 
 /**
- * The same split once the person has typed both amounts: the real SplitForm, unchanged from P17 A
- * (decision 60), so nothing is dashed any more and the line says it adds up.
+ * The same split once the person has typed both amounts: nothing is dashed any more, the label
+ * has gone, and the line says it adds up, as P17 A's split does (decision 60).
  */
 const splitFilled = (
 	<PanelSheet tall behind="">
 		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
-		<SplitForm
-			id={TRIP.id}
-			parentCents={TRIP.amountCents}
-			categories={CATEGORIES}
-			values={[
-				{ category: "1", amount: "165.00" },
-				{ category: "5", amount: "49.36" },
+		<SuggestedSplit
+			kept
+			parts={[
+				{ category: 1, amount: "165.00" },
+				{ category: 5, amount: "49.36" },
 			]}
-			back="#p90-mixed-store"
 		/>
 	</PanelSheet>
 );
@@ -277,7 +282,7 @@ export function MixedStoreProposals() {
 					{
 						name: "Option A · A nudge to split, with the parts suggested",
 						picked: true,
-						note: "Picked, combined with B: Tally guesses one category from the trip's details, or suggests a split when they point to more than one. At a mixed store the panel never asks “Always use …?”. Under the category chips a quiet line says “Costco trips go in Groceries and Household. Split this one?”, with Split this one? in terracotta, on every Costco trip. Each trip's own category is still guessed from its “what it was” line (P89), as at any store.",
+						note: "Picked, combined with B: Tally guesses one category from the trip's details, or suggests a split when they point to more than one. At a mixed store the panel never asks “Always use …?”, though a person can still tick Always for this merchant themselves. Under the category chips a quiet line says “Costco trips go in Groceries and Household. Split this one?”, with Split this one? in terracotta, on every Costco trip. Each trip's own category is still guessed from its “what it was” line (P89), as at any store.",
 						tradeoff:
 							"the panel has one more line, and the person types the amounts, because the bank's total is all Tally has.",
 						recommended:
@@ -292,7 +297,7 @@ export function MixedStoreProposals() {
 					},
 					{
 						name: "Option A, next · Filled in, adding up",
-						note: "The person types the amounts and the line counts down, then says “Adds up to $214.36” with a check. This is P17 A's form as it is today. A split that doesn't add up exactly is still rejected (§6.1).",
+						note: "The person types the amounts and the line counts down, then says “Adds up to $214.36” with a check. This is P17 A's form, with the plain amount field split parts now take (question 44). A split that doesn't add up exactly is still rejected (§6.1).",
 						tall: true,
 						screen: splitFilled,
 					},

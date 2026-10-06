@@ -18,17 +18,8 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec didn't settle until the owner's picks (decision 64). */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Spec line added (decision 64): </span>
-			{children}
-		</p>
-	);
-}
 
 const dollars = (cents: number) => formatCents(cents, { wholeDollars: true });
 
@@ -1633,9 +1624,10 @@ export function Phase4Proposals() {
 					this one so far, dashed (the owner's pick); it isn't judged against
 					its budget until it's over.
 				</Fixed>
-				<NeedsLine>
-					the sentences in D and E are worked out by code, not AI: "under budget
-					N months running" (3 or more) and "up N months in a row" (3 or more).
+				<NeedsLine settled="decision 64">
+					“Going well” is categories under budget 3 or more months running, and
+					“Worth a look” is categories up 3 or more months running. Code writes
+					the sentences, not AI.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1689,9 +1681,10 @@ export function Phase4Proposals() {
 					isn't a status, so it stays ink (green and brick mean on track and
 					over budget).
 				</Fixed>
-				<NeedsLine>
-					what "last month" is while this one isn't over (drawn: the same days,
-					Oct 1–5 against Sep 1–5, so early in a month doesn't always look low).
+				<NeedsLine settled="decision 64">
+					While this month isn't over, it is compared with the same days last
+					month (as drawn, Oct 1–5 against Sep 1–5), in a sentence such as “$90
+					less than by this time in September”.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1725,8 +1718,10 @@ export function Phase4Proposals() {
 					Cash account and disconnected banks (decision 60, §8.1). It's drawn
 					from balance_history, one balance per account per day (§5).
 				</Fixed>
-				<NeedsLine>
-					how far back it goes (drawn: 6 months, like Trends).
+				<NeedsLine settled="decision 64">
+					It goes back 6 months: a line through the last 6 months of net worth,
+					the 6 including this one so far. Before two days of balances, the
+					space says when the chart starts.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1796,7 +1791,10 @@ export function Phase4Proposals() {
 					added it, when, and a note. Uploading is a plain form post, so it
 					needs no script.
 				</Fixed>
-				<NeedsLine>the largest file allowed (drawn: 10 MB).</NeedsLine>
+				<NeedsLine settled="decision 64">
+					PDFs go up to 10 MB. Documents isn't being built now: decision 66
+					moved it to the Later list with receipts.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -1860,10 +1858,11 @@ export function Phase4Proposals() {
 					merchant, and a person's own name always wins. Nothing is renamed
 					without a tap.
 				</Fixed>
-				<NeedsLine>
-					up to three suggested names per merchant (§5 has room for one), and a
-					suggestion showing in the list before anyone accepts it (§7 says
-					Settings only).
+				<NeedsLine settled="decision 64">
+					Tally suggests up to three names per merchant (§5). Until a person
+					chooses, the first one shows in the list in place of the tidied name
+					with a dashed underline; the person chooses one, keeps the tidied name
+					or types their own, from the edit panel or the Settings review (§7).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1913,12 +1912,11 @@ export function Phase4Proposals() {
 					nothing is created without a person (§7). A new category gets the tag
 					icon and the next color, and Jev offers it from then on.
 				</Fixed>
-				<NeedsLine>
-					each transaction is ticked to go in the new category (a person's
-					choice); an unticked one is asked about again right away, after the
-					page has answered, not overnight (§7 runs Jev only nightly), with its
-					note if one is added (Jev isn't told the note today). Product words
-					never name Jev; it's "Tally".
+				<NeedsLine settled="decision 64">
+					The suggested category lists its transactions, each ticked to go in as
+					a person's own pick. An unticked one can get a note and is asked about
+					again right away, after the page has answered rather than overnight,
+					and Jev is told the note. Screens never name Jev: it's “Tally”.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1952,9 +1950,10 @@ export function Phase4Proposals() {
 					threshold (§7, #49), so showing it needs no new AI call. Rows stay one
 					link to their panel, so the choice is made in the panel.
 				</Fixed>
-				<NeedsLine>
-					a guess below the threshold shows as a suggestion, never applied
-					without a tap.
+				<NeedsLine settled="decision 64">
+					A pick below the threshold shows as a dashed “Maybe …” tag on the row,
+					never applied without a tap. The edit panel puts that category first,
+					marked Suggested, with “Tally's guess · N% sure”.
 				</NeedsLine>
 				<Options
 					options={[

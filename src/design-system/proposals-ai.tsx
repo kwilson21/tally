@@ -20,6 +20,7 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
 const TODAY = "2026-10-05";
@@ -45,16 +46,6 @@ export function Why({ topic, href }: { topic: string; href: string }) {
 		>
 			Why?
 		</a>
-	);
-}
-
-/** A rule the spec still needs before this is built: open, not fixed (as in the other proposal files). */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
 	);
 }
 
@@ -832,7 +823,7 @@ type Story = {
 	excluded?: boolean;
 };
 
-/** Six October transactions, each as Tally made it and as the bank sends it. */
+/** Six October transactions, each as Tally made it and as the bank sends it; the transfer is the demo seed's own. */
 const STORY: Story[] = [
 	{
 		id: 1,
@@ -861,9 +852,9 @@ const STORY: Story[] = [
 	{
 		id: 4,
 		date: "2026-10-02",
-		name: "Chase card payment",
-		bank: "CHASE CREDIT CRD AUTOPAY",
-		cents: 81240,
+		name: "Transfer to Savings",
+		bank: "ONLINE TRANSFER TO SAV ...5678",
+		cents: 50000,
 		excluded: true,
 	},
 	{
@@ -884,7 +875,7 @@ const STORY: Story[] = [
 	},
 ];
 
-/** A row as Tally made it: a clean name, a category, the paycheck as income, the card payment excluded. */
+/** A row as Tally made it: a clean name, a category, the paycheck as income, the transfer excluded. */
 const madeRow = (s: Story): ListRow => ({
 	id: s.id,
 	date: s.date,
@@ -925,7 +916,7 @@ const MADE = list(STORY.map(madeRow));
 const BANK = list(STORY.map(bankRow));
 
 const WITHOUT_LINE =
-	"No clean names or categories, and the card payment and the paycheck both count in Spent.";
+	"No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.";
 
 /** A's two links under the title: the current one in ink, the other a terracotta link, each 44px. */
 function ViewLinks({ current }: { current: "made" | "bank" }) {
@@ -1036,11 +1027,11 @@ export function AiProposals() {
 					them (§8.6, decision 68). There is no new JavaScript (§8.1), so each
 					switch has to work without it.
 				</Fixed>
-				<NeedsLine>
-					what “Sort new transactions as they arrive” does, and says, when
-					categories and exclusions and income are both off (nothing is left to
-					sort); and whether turning a switch back on goes over what was skipped
-					while it was off.
+				<NeedsLine settled="decision 77">
+					“Sort right away” is greyed out, with “Needs Guess categories or Spot
+					paychecks on”, while both of those are off. A switch turned back on
+					catches up overnight: the next nightly run asks about what Tally
+					skipped while it was off, within the daily cap.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1089,10 +1080,12 @@ export function AiProposals() {
 					never applied without a tap (decision 64), and no screen names the AI
 					service (§7).
 				</Fixed>
-				<NeedsLine>
-					whether No is remembered so Tally doesn't ask again; whether Skip
-					keeps a suggestion in the Band's count; and the order the kinds come
-					in (mixed, or one kind at a time).
+				<NeedsLine settled="decision 77">
+					A No is remembered as a “Never suggest” rule, so Tally doesn't ask it
+					again until the family removes the rule. A Skip stays in the count and
+					comes back at the end. Suggestions come money first: income and
+					transfers, then categories and new categories, then names, newest
+					first within each.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1163,12 +1156,13 @@ export function AiProposals() {
 					found, and how many a person changed (§8.6). Code does the counting
 					(§2). The numbers drawn are an example October.
 				</Fixed>
-				<NeedsLine>
-					what counts as sorted (a category Tally picked, not a merchant
-					rule's), cleaned (a suggested name a person kept) and changed
-					(something Tally set that a person then changed: only categories, or
-					names and paychecks too); which month shows early in a new one; and
-					what a switched-off feature's line says.
+				<NeedsLine settled="decisions 77 and 78">
+					It counts all of Tally's work this month: transactions it sorted (gave
+					a category), names it cleaned (a suggested name a person kept) and
+					paychecks it found (income Tally set), and how many of those a person
+					later changed (a category, a name or income). Until this month has
+					any, it shows last month's, labelled with that month's name. A
+					switched-off feature's line says “Off” in muted words.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1203,18 +1197,18 @@ export function AiProposals() {
 				id="p44-without"
 				title="P44 · See it without AI"
 				tier="visual"
-				sentence="In the demo, a visitor can see the same Transactions list as the bank sends it, next to what Tally made of it. Without AI means the bank's own names, no categories (Needs category), and a card payment and a paycheck counted in Spent; the pictures show that state. Pick how they switch."
+				sentence="In the demo, a visitor can see the same Transactions list as the bank sends it, next to what Tally made of it. Without AI means the bank's own names, no categories (Needs category), and the transfer to Savings and a paycheck counted in Spent, as in the demo's own data; the pictures show that state. Pick how they switch."
 			>
 				<Fixed>
 					in the demo only, a toggle shows the same Transactions list as the
 					bank sends it, next to what Tally made of it (§8.6), with no new
 					JavaScript (§8.1).
 				</Fixed>
-				<NeedsLine>
-					exactly what the without view takes away: Tally's AI names, categories
-					and flags go, but a transfer or paycheck that Plaid itself marks
-					(§8.5) isn't the AI's, so whether it still shows is a choice; and
-					whether only this list changes, or Home's numbers too.
+				<NeedsLine settled="decision 77">
+					The without view takes away everything Tally decided, including what
+					it marked at sync from Plaid's categories, so the list shows the
+					bank's raw data only. Home stays as usual: its numbers don't change,
+					only the list switches.
 				</NeedsLine>
 				<Options
 					options={[

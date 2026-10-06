@@ -115,6 +115,6 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Squircle corners (P75 A) | [#219](https://github.com/kwilson21/tally/issues/219) |
 | MoneyInput sign-off, the budget, categorize and Settings flows, the component review | [#80](https://github.com/kwilson21/tally/issues/80), [#83](https://github.com/kwilson21/tally/issues/83)–[#86](https://github.com/kwilson21/tally/issues/86) |
 
-The owner answered every open question on these issues by seeing a picture of each answer (decisions 77 and 78, [docs/reviews/open-questions-2026-10-05.md](docs/reviews/open-questions-2026-10-05.md)), and each issue now states its answers, so nothing waits on a question. #74's pace line is covered by #199 and closed.
+The owner answered the 53 open questions on these issues by seeing a picture of each answer (decisions 77–79, [docs/reviews/open-questions-2026-10-05.md](docs/reviews/open-questions-2026-10-05.md)), and the picked drawings now say which rules are settled. Some issues still list smaller points under "Open (ask the owner)"; each goes to the owner, with a picture, before that issue is briefed. #74's pace line is covered by #199 and closed.
 
 Later list (not scheduled): see spec §12.

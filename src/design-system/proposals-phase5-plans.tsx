@@ -16,17 +16,8 @@ import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { TextInput } from "../views/text-input";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before the feature is built. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 const dollars = (cents: number) => formatCents(cents, { wholeDollars: true });
 
@@ -697,9 +688,9 @@ export function Phase5PlansProposals() {
 					subtracts it and the goal's table joins §5 (§8.4). A budget is set on
 					Home, in a sheet with the money input (decision 38).
 				</Fixed>
-				<NeedsLine>
-					the goal's table in §5 (drawn: one amount a month, from a given month
-					on, like budget_amounts, so changing it never rewrites a past month).
+				<NeedsLine settled="decision 74">
+					The goal's table is savings_goal_amounts (§5): one amount a month,
+					from a given month on, like budget_amounts.
 				</NeedsLine>
 				<Options
 					options={[
@@ -752,10 +743,11 @@ export function Phase5PlansProposals() {
 					a transfer starts excluded, so it isn't counted as spending (§6,
 					§8.5).
 				</Fixed>
-				<NeedsLine>
-					the line §6's Safe to spend gains (drawn as R1: “minus the month's
-					savings goal”), and how Home says it when the goal takes Safe to spend
-					below $0 (with B1's wording).
+				<NeedsLine settled="decision 74">
+					Safe to spend subtracts the month's savings goal in full from the 1st,
+					so it never counts on savings not yet made. When that takes it below
+					$0, Home says it the way it does for any Safe to spend below $0: “$120
+					over” with the alert icon and “Over budget this month”.
 				</NeedsLine>
 				<Options
 					options={[
@@ -810,11 +802,12 @@ export function Phase5PlansProposals() {
 					spend already sets aside bills that are due and not paid, and a
 					payment is linked to a bill by the matcher or by hand (§6, §6.1).
 				</Fixed>
-				<NeedsLine>
-					how it enters Safe to spend: like a due bill for its whole month
-					(drawn), or only once its date is near (it would need a day, not just
-					a month); what happens if its month ends before it's paid; and its
-					table in §5.
+				<NeedsLine settled="decision 74">
+					A planned expense is set aside for its whole month, like a due bill,
+					until a payment is linked on its page. If its month ends unpaid, a
+					Band on Bills asks on the 1st, “Car registration wasn't paid. Move it
+					to November?”, with Move it or Drop it, and until it's answered it
+					stays set aside. Its table is planned_expenses (§5).
 				</NeedsLine>
 				<Options
 					options={[
@@ -861,12 +854,11 @@ export function Phase5PlansProposals() {
 					and Home flags a bank that needs attention or hasn't synced for 3 days
 					(§8.5).
 				</Fixed>
-				<NeedsLine>
-					who it goes to (every family email in Cloudflare Access, one address
-					set in Settings, or whoever linked the bank, which §5 already stores
-					as linked_by) and how often it repeats (drawn: once, then every 3 days
-					until it's fixed); and, as logs never do (§10), no email carries
-					amounts or transaction details.
+				<NeedsLine settled="decision 74">
+					It goes to everyone in the family, once and then every 3 days until
+					the bank is fixed. It gives a little detail (the bank, its account
+					endings and when it last synced) and never carries amounts or
+					transaction details.
 				</NeedsLine>
 				<Options
 					options={[

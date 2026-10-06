@@ -38,21 +38,12 @@ import {
 	Categories,
 	FOUR,
 	LUPITAS,
+	NeedsLine,
 	TODAY,
 	Toggles,
 	TRADER_JOES,
 } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before this is built: open, not fixed (as in the other proposal files). */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 /** A guess is dashed until a person keeps or changes it (decision 64), as P29 A's list draws it. */
 export const DASHED =
@@ -390,17 +381,16 @@ export function AutofillProposals() {
 				switches with On or Off in words and one Save (decision 73). There is no
 				new JavaScript (§8.1).
 			</Fixed>
-			<NeedsLine>
-				“who it was for” needs a people list the spec doesn't have (§3 says one
-				shared household with no per-person accounts), so it's a label, not a
-				login: who can add and remove names, and what happens to a purchase
-				marked for a name that's removed, are open. Which AI fills the details
-				is open too: Workers AI through src/ai/suggest-name.ts could write the
-				name and the “what it was” line, the kind could be one more question in
-				the one Jev call per transaction (decision 18), and who guesses “who it
-				was for” isn't decided. Whether the “transfer” and “bill” kinds change
-				anything (today only the Exclude toggle and a bill's linked payment do)
-				is for the owner to settle.
+			<NeedsLine settled="decision 79">
+				the people list holds names, not logins, and anyone in the family adds,
+				renames or removes one in Settings (§3); removing a name clears it from
+				the purchases marked for it. A kind is a word about the purchase and
+				never changes a number: Exclude and Bills work as before. Kind and who
+				it was for are two more questions in the one Jev call per transaction;
+				what it was is a short line Workers AI writes through
+				src/ai/suggest-name.ts. Each detail is Tally's guess until a person
+				keeps or changes it, tracked one by one, and Tally only fills a detail
+				that's empty, so a note someone wrote is never replaced.
 			</NeedsLine>
 			<Options
 				options={[

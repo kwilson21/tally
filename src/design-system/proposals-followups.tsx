@@ -18,17 +18,8 @@ import { TransactionRow } from "../views/transaction-row";
 import { WhyLink } from "../views/why-link";
 import { Fixed, Options } from "./proposal-parts";
 import { P74 } from "./proposals-motion";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before the feature is built: open, not fixed. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 // ---------------------------------------------------------------------------------------------
 // P73: a new category with its likely transactions.
@@ -325,23 +316,14 @@ function P73() {
 				(§2 rule 6, §7); screens say “Tally's guess”, never the AI's name
 				(decision 64).
 			</Fixed>
-			<NeedsLine>
-				which reasons Tally may give, how far back it looks, and what moves.
-				Proposed: two reasons only. “Same merchant” is code (the same merchant
-				key, §8.5); it names the transaction it matches, and its rows start
-				ticked. “Tally's guess” is for a transaction that Tally's sorting said
-				none of your categories fit, and only when the name you made is the one
-				Tally had suggested (decision 30); its rows start unticked and carry a
-				Why?, and a name Tally never suggested shows same-merchant rows only. No
-				“similar name” reason: nothing in Tally compares names, so it couldn't
-				be shown honestly. It looks at transactions that still need a category
-				in this month and last: same merchant first, then guesses, each newest
-				first, up to 6. Nothing moves until a person taps Add (Save, in C); only
-				what's ticked moves, as the person's own pick, and what's unticked stays
-				as it was (§2 rule 6). The number on Add follows the ticks, redrawn by
-				the server like Split's “left to assign” line. Each row's reason is read
-				with its row, a small change to SelectableTransactionRow, built in the
-				catalog first.
+			<NeedsLine settled="decisions 76 and 77">
+				Each row gives one of two reasons: “Same merchant”, which names the
+				transaction it matches and starts ticked, or “Tally's guess”, which
+				starts unticked with a Why? and only when the new name is one Tally had
+				suggested for them. The offer is up to 6 other transactions from this
+				month and last, same merchant first, then guesses, newest first within
+				each, in the edit panel only for now. Nothing moves until a person taps
+				Add.
 			</NeedsLine>
 			<Options
 				options={[
