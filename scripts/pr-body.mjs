@@ -19,6 +19,12 @@ export const PAGES = [
 	// 116 is a Craft Supply charge whose merchant has two names Tally guessed, so the sheet offers them (P29 A, P87 B);
 	// test/seed.test.ts keeps that true.
 	{ name: "transaction-edit-names", path: "/transactions/116?uncategorized=1" },
+	// 118 is a CVS charge whose merchant has the bank's own name suggested, so the sheet says "From your bank" (P87 B);
+	// test/seed.test.ts keeps that true.
+	{
+		name: "transaction-edit-names-bank",
+		path: "/transactions/118?uncategorized=1",
+	},
 	// 94 is a Trader Joe's that Jev categorized, so the sheet shows "Picked by Jev"; test/seed.test.ts keeps that true.
 	{ name: "transaction-edit-jev", path: "/transactions/94" },
 	{ name: "bills", path: "/bills" },
@@ -30,6 +36,11 @@ export const PAGES = [
 	{ name: "settings-edit", path: "/settings?open=3" },
 	// The one-at-a-time review of the names Tally guessed that a Band on Settings leads to (P29 A).
 	{ name: "settings-names", path: "/settings/names" },
+	// The same review for a name Tally guessed (the first one, CVS Pharmacy, is the bank's own).
+	{
+		name: "settings-names-guess",
+		path: "/settings/names?skip=CVS%20Pharmacy",
+	},
 	{ name: "more", path: "/more" },
 	{ name: "how-it-works", path: "/how-it-works" },
 	{ name: "feedback", path: "/feedback" },

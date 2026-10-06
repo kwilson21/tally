@@ -379,14 +379,18 @@ howItWorks.get("/how-it-works", async (c) => {
 
 				<Section id="names" title="Store names">
 					<p class="mt-2">
-						The list shows what your bank printed, tidied by code. Tally can
-						also guess a clean name for it, and you decide whether to use it.
+						The list shows what your bank printed, tidied by code. Names can be
+						suggested for it, and you decide whether to use them.
 					</p>
 					<ul class="mt-3 list-disc space-y-1 pl-5">
 						<li>
-							A name Tally guessed shows with a sparkles icon and a dashed
-							underline. It stays a guess: nothing is renamed until you choose
-							it.
+							Your bank sometimes sends a clean name of its own. That is the
+							first suggestion, and it says "From your bank".
+						</li>
+						<li>
+							When it sends none, Tally guesses one. A name Tally guessed shows
+							with a sparkles icon and a dashed underline. It stays a guess:
+							nothing is renamed until you choose it.
 						</li>
 						<li>
 							You choose in a transaction's edit panel, or in Settings under
@@ -394,10 +398,9 @@ howItWorks.get("/how-it-works", async (c) => {
 							your own. A name you typed always wins.
 						</li>
 						<li>
-							Tally asks once for each bank text, overnight, and only for texts
-							your bank sent no name for. Turn it off with Suggest store names
-							in Settings; guesses already made wait, hidden, until you turn it
-							back on.
+							Tally asks once for each bank text, overnight. Turn it off with
+							Suggest store names in Settings: its guesses are hidden until you
+							turn it back on, and the bank's own names still show.
 						</li>
 					</ul>
 				</Section>

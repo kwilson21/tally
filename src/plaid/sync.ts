@@ -79,6 +79,24 @@ function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
 	return name;
 }
 
+/**
+ * Withdraws the waiting suggestion of a Plaid name that is no longer the newest for a bank text (spec §8.6,
+ * decision 79). One `?` is the bank text; `ownsLock` brings its own two. A row is the bank's own suggestion
+ * when its suggested name is its key (src/transactions/name-suggestions.ts), and it is withdrawn only when
+ * nobody has named it, it has a charge with this bank text, and it is the newest Plaid name (latest
+ * date, then latest id) for none of its charges' bank texts.
+ */
+const withdrawOlderPlaidNameSql = (ownsLock: string) =>
+	`UPDATE merchants SET suggested_name = NULL, suggestion_status = 'none'
+	 WHERE suggestion_status = 'pending' AND display_name IS NULL AND suggested_name = raw_name
+	   AND EXISTS (SELECT 1 FROM transactions t WHERE t.raw_name = ? AND t.parent_id IS NULL AND t.merchant_name = merchants.raw_name)
+	   AND NOT EXISTS (
+	     SELECT 1 FROM transactions c WHERE c.parent_id IS NULL AND c.merchant_name = merchants.raw_name
+	       AND c.merchant_name = (SELECT n.merchant_name FROM transactions n
+	         WHERE n.raw_name = c.raw_name AND n.parent_id IS NULL AND NULLIF(n.merchant_name, '') IS NOT NULL
+	         ORDER BY n.date DESC, n.id DESC LIMIT 1))
+	   AND ${ownsLock}`;
+
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
 	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
@@ -565,8 +583,8 @@ export async function syncItem(
 			// Plaid's cleaned name is the merchant's first suggested name, with no AI call (spec §8.6, decision 68). It
 			// is a fact the bank sent, so it doesn't depend on the AI switches. Only a merchant nobody has named or
 			// decided about takes it: a person's own name, and a suggestion they already accepted or turned down,
-			// are never touched, and a name still waiting is replaced, so the newest Plaid name is the one offered.
-			// It is only a suggestion: nothing is renamed until a person chooses it.
+			// are never touched, and a guess still waiting (Workers AI's, copied from the bank text's row) gives way
+			// to it. It is only a suggestion: nothing is renamed until a person chooses it.
 			const suggested = new Set<string>();
 			for (const transaction of [...added, ...page.modified]) {
 				const name = plaidNameToSuggest(transaction);
@@ -579,6 +597,22 @@ export async function syncItem(
 						 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = 'pending'
 						 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`,
 					).bind(name, name, itemRowId, lockId),
+				);
+			}
+			// One bank text can come with different Plaid names, since Plaid's names change over time. Only the newest
+			// charge's name is suggested for it (decision 79): a name still waiting that is no charge's newest is
+			// withdrawn, so a person is never asked about both. A name that is the newest for another bank text stays.
+			const namedTexts = new Set<string>();
+			for (const transaction of [...added, ...page.modified]) {
+				if (merchantNameOf(transaction)) namedTexts.add(transaction.name);
+			}
+			for (const text of namedTexts) {
+				statements.push(
+					env.DB.prepare(withdrawOlderPlaidNameSql(OWNS_LOCK)).bind(
+						text,
+						itemRowId,
+						lockId,
+					),
 				);
 			}
 			// A pending transaction the bank drops waits for the update's last page before it is deleted, because

@@ -2,6 +2,8 @@
 // its names are kept, and how a person's choice settles a suggestion. Which names to show is decided by
 // src/transactions/name-suggestions.ts.
 import {
+	type NameSource,
+	nameSource,
 	offeredNames,
 	storeSuggestedNames,
 } from "../transactions/name-suggestions";
@@ -80,6 +82,8 @@ export type NameReview = {
 	tidied: string;
 	/** The suggested names to choose from, never empty. */
 	names: string[];
+	/** Where they came from: the bank sent Plaid's name, or Tally guessed (P87 B). */
+	source: NameSource;
 	/** Its charges, a split counted once. */
 	count: number;
 };
@@ -87,7 +91,7 @@ export type NameReview = {
 /**
  * The merchants with names waiting for a person (P29 A): pending suggestions that say something the
  * tidied bank text doesn't, for a merchant that still has charges, most charges first. With the names
- * switch off there are none (src/transactions/name-suggestions.ts).
+ * switch off only the bank's own names are left, Tally's guesses being hidden (src/transactions/name-suggestions.ts).
  */
 export async function namesToReview(
 	db: D1Database,
@@ -109,7 +113,7 @@ export async function namesToReview(
 	const reviews: NameReview[] = [];
 	for (const row of results) {
 		const names = offeredNames(
-			{ stored: row.stored, status: "pending", namesOn },
+			{ stored: row.stored, status: "pending", key: row.key, namesOn },
 			row.bankText,
 		);
 		if (names.length === 0) continue;
@@ -118,6 +122,7 @@ export async function namesToReview(
 			bankText: row.bankText,
 			tidied: tidyName(row.bankText),
 			names,
+			source: nameSource(names, row.key),
 			count: row.count,
 		});
 	}

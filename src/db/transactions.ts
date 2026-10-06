@@ -3,7 +3,12 @@ import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern } from "../transactions/filters";
-import { offeredNames, shownName } from "../transactions/name-suggestions";
+import {
+	type NameSource,
+	nameSource,
+	offeredNames,
+	shownName,
+} from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { readAiSwitches } from "./ai-switches";
@@ -62,13 +67,16 @@ export type ListRow = {
 	pending?: boolean;
 	/** The name is a suggestion nobody has chosen yet, so the row draws it dashed (P29 A, decision 64). */
 	nameSuggested?: boolean;
+	/** The suggested name is the bank's own, so it has no sparkles icon (P87 B, decision 80). */
+	nameFromBank?: boolean;
 };
 
 /** What a row needs from its merchant to decide the name it shows (src/transactions/name-suggestions.ts). */
-const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus`;
+const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus, ${merchantKeySql("t")} AS merchantKey`;
 type NameSuggestionColumns = {
 	suggestedNames: string | null;
 	suggestionStatus: string | null;
+	merchantKey: string;
 };
 
 export const PAGE_SIZE = 25;
@@ -173,12 +181,14 @@ export async function listTransactions(
 			parentRawName,
 			suggestedNames,
 			suggestionStatus,
+			merchantKey,
 			...r
 		}) => {
 			const shown = shownName({
 				chosen: merchantName,
 				stored: suggestedNames,
 				status: suggestionStatus,
+				key: merchantKey,
 				rawName: r.rawName,
 				namesOn,
 			});
@@ -195,6 +205,7 @@ export async function listTransactions(
 				pending: r.pending === 1,
 				displayName: shown.name,
 				nameSuggested: shown.suggested,
+				nameFromBank: shown.fromBank,
 			};
 		},
 	);
@@ -269,7 +280,13 @@ export type TransactionDetail = ListRow & {
 	 * (up to three), the bank's text as the list shows it without a choice, and how many transactions
 	 * a name applies to. Null when there is nothing to choose.
 	 */
-	nameChoices?: { names: string[]; tidied: string; count: number } | null;
+	nameChoices?: {
+		names: string[];
+		/** Where the names came from: the bank sent them, or Tally guessed (P87 B). */
+		source: NameSource;
+		tidied: string;
+		count: number;
+	} | null;
 };
 
 export type RefundPurchase = {
@@ -319,7 +336,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${merchantKeySql("t")} AS merchantKey, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -350,7 +367,6 @@ export async function getTransaction(
 				| "pending"
 			> &
 				NameSuggestionColumns & {
-					merchantKey: string;
 					excluded: number;
 					income: number;
 					creditReviewed: number;
@@ -367,6 +383,7 @@ export async function getTransaction(
 	const merchant = {
 		stored: suggestedNames,
 		status: suggestionStatus,
+		key: merchantKey,
 		namesOn,
 	};
 	const shown = shownName({
@@ -385,10 +402,12 @@ export async function getTransaction(
 		pending: r.pending === 1,
 		displayName: shown.name,
 		nameSuggested: shown.suggested,
+		nameFromBank: shown.fromBank,
 		nameChoices:
 			offered.length > 0
 				? {
 						names: offered,
+						source: nameSource(offered, merchantKey),
 						tidied: tidyName(r.rawName),
 						count: await merchantTransactionCount(db, merchantKey),
 					}

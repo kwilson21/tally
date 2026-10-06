@@ -133,36 +133,69 @@ describe("the Transactions list", () => {
 		});
 	});
 
-	it("with the names switch off shows the tidied bank text, and the suggestion comes back when it is on", async () => {
-		const id = await charge();
+	it("with the names switch off hides Tally's guesses but still shows the bank's own name, and the guesses come back when it is on (decision 80)", async () => {
+		const guessed = await charge(RAW);
 		await suggest(RAW, "Blue Bottle Coffee");
+		const banked = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
 		await saveAiSwitches(db, { names: false });
-		expect(await rowOf(id)).toMatchObject({
+		expect(await rowOf(guessed)).toMatchObject({
 			displayName: "Blue bottle cof",
 			nameSuggested: false,
 		});
+		expect(await rowOf(banked)).toMatchObject({
+			displayName: "Lupita's Taqueria",
+			nameSuggested: true,
+			nameFromBank: true,
+		});
 		await saveAiSwitches(db, { names: true });
-		expect(await rowOf(id)).toMatchObject({
+		expect(await rowOf(guessed)).toMatchObject({
 			displayName: "Blue Bottle Coffee",
 			nameSuggested: true,
+			nameFromBank: false,
 		});
 	});
 
-	it("draws a suggested name dashed, with the sparkles icon and the words for a screen reader (P87 B), and a chosen name plain", async () => {
+	it("draws a name Tally guessed dashed, with the sparkles icon and the words for a screen reader (P87 B), and a chosen name plain", async () => {
 		await charge();
 		await suggest(RAW, "Blue Bottle Coffee");
 		await charge("LOCAL SHOP 99");
-		const named = await charge("NAMED SHOP 7");
+		await charge("NAMED SHOP 7");
 		await suggest("NAMED SHOP 7", "A Guess", "pending", "Mine");
-		expect(named).toBeGreaterThan(0);
 		const { html } = await get("/transactions?month=all");
-		// The icon and "Tally's guess" come before the dashed name; only the one suggested row has them.
+		// The icon and "Tally's guess" come before the dashed name; only the one guessed row has them.
 		expect(html).toMatch(
 			/<svg[^>]*>.*?<\/svg><span class="sr-only">Tally&#39;s guess: <\/span><span class="[^"]*decoration-dashed[^"]*">Blue Bottle Coffee<\/span>/,
 		);
 		expect(html.match(/decoration-dashed/g)).toHaveLength(1);
 		expect(html.match(/Tally&#39;s guess: /g)).toHaveLength(1);
 		expect(html).toContain(">Mine<");
+	});
+
+	it("draws the bank's own name dashed but with no icon, and says it is from the bank only to a screen reader", async () => {
+		await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		const { html } = await get("/transactions?month=all");
+		expect(html).toMatch(
+			/<span class="sr-only">From your bank: <\/span><span class="[^"]*decoration-dashed[^"]*">Lupita&#39;s Taqueria<\/span>/,
+		);
+		expect(html).not.toContain("Tally&#39;s guess");
+		// No sparkles: the only svg before the name is the row's own category-less circle.
+		const row =
+			html.split("Lupita&#39;s Taqueria")[0]?.split("<li")?.pop() ?? "";
+		expect(row).not.toContain("M11.017 2.814");
+	});
+
+	it("shows a guess and the bank's name in one list, one with the icon and one without", async () => {
+		await charge();
+		await suggest(RAW, "Blue Bottle Coffee");
+		await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		const { html } = await get("/transactions?month=all");
+		expect(html.match(/decoration-dashed/g)).toHaveLength(2);
+		expect(html.match(/Tally&#39;s guess: /g)).toHaveLength(1);
+		expect(html.match(/From your bank: /g)).toHaveLength(1);
+		expect(html.match(/M11\.017 2\.814/g)).toHaveLength(1);
 	});
 });
 
@@ -223,14 +256,34 @@ describe("the edit panel's name choices", () => {
 		expect(html.match(/aria-describedby="name-source"/g)).toHaveLength(1);
 	});
 
-	it("with the names switch off offers no names and keeps the rename field", async () => {
-		const id = await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
-		await saveAiSwitches(db, { names: false });
-		const { html } = await get(`/transactions/${id}`);
-		expect(html).not.toContain('name="name_pick"');
+	it("says the bank's own name is from your bank, in muted words, with no icon and no Why? (P87 B)", async () => {
+		const id = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		const { html } = await get(`/transactions/${id}?month=all`);
+		expect(html).toMatch(
+			/<p id="name-source" class="text-sm text-muted">From your bank<\/p>/,
+		);
+		expect(html).toContain('value="s:Lupita&#39;s Taqueria"');
 		expect(html).not.toContain("Tally&#39;s guess");
-		expect(html).toMatch(/<label[^>]*>Merchant name<\/label>/);
+		expect(html).not.toContain("/how-it-works#names");
+		expect(html).not.toContain("M11.017 2.814");
+		expect(html.match(/aria-describedby="name-source"/g)).toHaveLength(1);
+	});
+
+	it("with the names switch off offers the bank's name, labelled From your bank, but not Tally's guesses (decision 80)", async () => {
+		const guessed = await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+		const banked = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await saveAiSwitches(db, { names: false });
+		const off = (await get(`/transactions/${guessed}`)).html;
+		expect(off).not.toContain('name="name_pick"');
+		expect(off).not.toContain("Tally&#39;s guess");
+		expect(off).toMatch(/<label[^>]*>Merchant name<\/label>/);
+		const bank = (await get(`/transactions/${banked}`)).html;
+		expect(bank).toContain('value="s:Lupita&#39;s Taqueria"');
+		expect(bank).toContain("From your bank");
+		expect(bank).not.toContain("Tally&#39;s guess");
 	});
 
 	describe("saving", () => {

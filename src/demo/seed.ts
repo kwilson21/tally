@@ -197,6 +197,8 @@ const PLAID_MERCHANT_NAMES: Record<string, string> = {
 	"CHEVRON 0098812": "Chevron",
 	"AMAZON.COM*RT4K2": "Amazon",
 	"AMZN MKTP US*2K4": "Amazon",
+	// Plaid names this one, so its first suggestion is the bank's own name (spec §8.6, #194).
+	"CHECKCARD 0921 CVS": "CVS Pharmacy",
 };
 
 /** The demo's one subscription that raised its price: the bill is $15.49, the charge $17.99 (P36 B). */
@@ -234,12 +236,13 @@ const THIS_MONTH: [number, string, number, number][] = [
 	[13, "AMAZON.COM*RT4K2", HOUSEHOLD, 3375],
 ];
 
-// Names Tally "guessed" for a few of the unnamed merchants below, as Workers AI would suggest them (spec §7).
-// They show dashed in the list until a person chooses, and the demo never calls Workers AI itself.
-const GUESSED_NAMES: Record<string, string[]> = {
+// Suggested names for a few of the unnamed merchants below, waiting for a person (spec §7, §8.6). They show
+// dashed in the list until a person chooses, and the demo never calls Workers AI itself. Most are names Tally
+// "guessed", as Workers AI would suggest them; CVS's is the bank's own, Plaid's merchant name above.
+const SUGGESTED_NAMES: Record<string, string[]> = {
 	"TST* CORNER DELI": ["Corner Deli"],
 	"SP * CRAFTSUPPLY": ["Craft Supply Co", "Craft Supply"],
-	"CHECKCARD 0921 CVS": ["CVS Pharmacy", "CVS Health"],
+	"CHECKCARD 0921 CVS": ["CVS Pharmacy"],
 	"POS 4417 CITY PARKING": ["City Parking", "City Parking Garage"],
 };
 
@@ -554,7 +557,7 @@ export function buildSeed(today: string): Seed {
 			key: seedMerchantKey(rawName),
 			displayName,
 			defaultCategoryId: null,
-			suggestedNames: GUESSED_NAMES[rawName],
+			suggestedNames: SUGGESTED_NAMES[rawName],
 		})),
 		{
 			key: "Farmers market",
