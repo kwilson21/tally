@@ -5,6 +5,10 @@ import {
 	MAX_CALLS_PER_RUN,
 	type PassOptions,
 } from "./categorize-pending";
+import {
+	categoryCallLimit,
+	suggestNewCategories,
+} from "./category-suggestions-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
@@ -94,7 +98,9 @@ export async function runScheduled(
 ) {
 	const budgets = budgetsFor(time);
 	if (canResetDemo(env)) {
-		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE), {
+			categoryExample: true,
+		});
 	}
 	const synced = await syncAllItems(env, fetchImpl);
 	// Production stops here for Jev and names: the 09:20 and 09:40 runs make them, in invocations of their
@@ -111,6 +117,7 @@ export async function runScheduled(
 			time: budgets.sort,
 		});
 		await nameMerchants(env, budgets.run);
+		await suggestCategories(env, budgets.run);
 	}
 	await retryFeedback(env, fetchImpl);
 }
@@ -175,6 +182,16 @@ async function nameMerchants(env: ScheduledEnv, deadline: Deadline) {
 	}
 }
 
+async function suggestCategories(env: ScheduledEnv, deadline: Deadline) {
+	try {
+		await suggestNewCategories(env, categoryCallLimit, deadline);
+	} catch (error) {
+		console.error(
+			`workers-ai: category suggestions step failed ${error instanceof Error ? error.name : "unknown"}`,
+		);
+	}
+}
+
 /**
  * Production's 09:20 run, the first sort and the names (decision 56). It asks Jev about up to
  * `FIRST_SORT_MAX_CALLS`, 200, within what the day's 500 still allows, starting no call after the sort
@@ -196,6 +213,7 @@ export async function runFirstSort(
 		time: budgets.sort,
 	});
 	await nameMerchants(env, budgets.run);
+	await suggestCategories(env, budgets.run);
 }
 
 /**

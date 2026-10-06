@@ -12,6 +12,8 @@ export type JevAnswer = {
 };
 
 export type Decision = {
+	/** Jev's explicit no-fit answer, distinct from an unanswered category question. */
+	noneFit?: boolean;
 	/** The category to apply, or null when Jev wasn't confident enough (or named no known category). */
 	categoryId: number | null;
 	/** Jev's pick whether or not it's applied; null when Jev said none fit (decision 29). */
@@ -39,6 +41,7 @@ export function decide(
 			: categories.find((c) => c.name === answer.category.label);
 	const confident = answer.category.confidence >= threshold;
 	return {
+		noneFit: answer.category.label === NONE_FIT && categoriesOn,
 		categoryId: match && confident ? match.id : null,
 		suggestedCategoryId: match ? match.id : null,
 		confidence: answer.category.confidence,

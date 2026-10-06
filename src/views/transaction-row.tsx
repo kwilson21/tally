@@ -3,6 +3,7 @@ import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
+import { MaybeCategory } from "./maybe-category";
 import { BankMark, GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
 
 type Caption = {
@@ -131,6 +132,12 @@ export function TransactionRow({
 	bare?: boolean;
 }) {
 	const { kind, caption: said, tag } = rowCaption(row);
+	const maybeCategory =
+		kind === "needs" && tag && row.maybeCategoryName?.startsWith("new:")
+			? { name: row.maybeCategoryName.slice(4), kind: "new" as const }
+			: kind === "needs" && tag && row.maybeCategoryName
+				? { name: row.maybeCategoryName, kind: "category" as const }
+				: null;
 	// "Counts in …" shows when a bill moved the month, except where a refund's caption already names it.
 	const countsIn =
 		row.countsInMonth &&
@@ -186,7 +193,14 @@ export function TransactionRow({
 								Pending{(caption || countsIn) && " ·"}
 							</span>
 						)}
-						{caption && <span class="truncate text-muted">{caption}</span>}
+						{maybeCategory ? (
+							<MaybeCategory
+								name={maybeCategory.name}
+								kind={maybeCategory.kind}
+							/>
+						) : (
+							caption && <span class="truncate text-muted">{caption}</span>
+						)}
 						{/* A linked refund's caption names its purchase; the month shows only when a bill moved it. */}
 						{countsIn && (
 							<span class="shrink-0 text-muted">
@@ -198,7 +212,7 @@ export function TransactionRow({
 							</span>
 						)}
 						{pendingLast && <span class="shrink-0 text-muted">· Pending</span>}
-						{tag && (
+						{tag && !row.maybeCategoryName && (
 							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
 								Needs category
 							</span>

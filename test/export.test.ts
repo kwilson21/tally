@@ -10,6 +10,32 @@ beforeEach(async () => {
 });
 
 describe("data exports", () => {
+	it("includes category suggestion decisions and transaction links in the JSON export", async () => {
+		await env.DB.prepare(
+			"INSERT INTO category_suggestions (name,status) VALUES ('Pet Care','dismissed')",
+		).run();
+		const suggestion = await env.DB.prepare(
+			"SELECT id FROM category_suggestions WHERE name='Pet Care'",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET jev_none_fit=1,category_suggestion_id=? WHERE id=1",
+		)
+			.bind(suggestion?.id)
+			.run();
+		const data = (await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).json()) as {
+			category_suggestions: Record<string, unknown>[];
+			transactions: Record<string, unknown>[];
+		};
+		expect(data.category_suggestions).toContainEqual(
+			expect.objectContaining({ name: "Pet Care", status: "dismissed" }),
+		);
+		expect(data.transactions[0]).toMatchObject({
+			jev_none_fit: 1,
+			category_suggestion_id: suggestion?.id,
+		});
+	});
 	it("includes income and credit review decisions in the JSON transaction export", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET income_source = 'jev', credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = 1",
@@ -168,6 +194,9 @@ describe("data exports", () => {
 				"INSERT INTO bill_payments (id, bill_id, period, transaction_id, matched_by, status) VALUES (1, 1, '2026-09', 1, 'user', 'linked')",
 			),
 		]);
+		await env.DB.prepare(
+			"INSERT INTO category_suggestions(name,status) VALUES('Archived idea','dismissed')",
+		).run();
 
 		const res = await exports.default.fetch(
 			`${BASE}/settings/export/tally.json`,
@@ -184,6 +213,7 @@ describe("data exports", () => {
 		expect(data).toHaveProperty("exported_at");
 		for (const table of [
 			"categories",
+			"category_suggestions",
 			"budget_amounts",
 			"merchants",
 			"accounts",
@@ -199,6 +229,13 @@ describe("data exports", () => {
 		}
 		const exportedColumns = {
 			categories: ["archived", "color", "icon", "id", "name", "sort_order"],
+			category_suggestions: [
+				"created_at",
+				"decided_at",
+				"id",
+				"name",
+				"status",
+			],
 			budget_amounts: ["amount_cents", "category_id", "effective_month"],
 			merchants: [
 				"default_category_id",
@@ -229,6 +266,7 @@ describe("data exports", () => {
 				"category_confidence",
 				"category_id",
 				"category_source",
+				"category_suggestion_id",
 				"credit_reviewed",
 				"credit_reviewed_by",
 				"date",
@@ -242,6 +280,7 @@ describe("data exports", () => {
 				"is_split",
 				"jev_category_id",
 				"jev_failed_at",
+				"jev_none_fit",
 				"merchant_name",
 				"note",
 				"parent_id",

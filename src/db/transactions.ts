@@ -78,6 +78,8 @@ export type ListRow = {
 	pending?: boolean;
 	/** The name is a suggestion nobody has chosen yet, so the row draws it dashed (P29 A, decision 64). */
 	nameSuggested?: boolean;
+	maybeCategoryName?: string | null;
+	maybeCategoryNew?: boolean;
 	/** The suggested name is the bank's own, so it has no sparkles icon (P87 B, decision 80). */
 	nameFromBank?: boolean;
 };
@@ -188,6 +190,8 @@ export async function listTransactions(
 	const from = `FROM transactions t
 			${COUNTED_JOINS}
 			LEFT JOIN categories c ON c.id = ${COUNTED_CATEGORY}
+			LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
+			LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending'
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
@@ -211,6 +215,8 @@ export async function listTransactions(
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
 				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
+				CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
 			ORDER BY t.date DESC, t.id DESC
@@ -373,6 +379,8 @@ export type TransactionDetail = ListRow & {
 	categorySource: "user" | "merchant_rule" | "bill" | "jev" | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
+	suggestedCategoryId: number | null;
+	suggestedCategoryName: string | null;
 	/**
 	 * The names the panel offers while the merchant's suggestions wait (P29 A): the suggested names
 	 * (up to three), the bank's text as the list shows it without a choice, and how many transactions
@@ -444,12 +452,17 @@ export async function getTransaction(
 				${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,
+				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
+				CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
+			LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending'
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${COUNTED_JOINS}
 			WHERE t.id = ?`,
@@ -906,7 +919,7 @@ export async function saveSplit(
 		),
 		db
 			.prepare(
-				"UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
+				"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
 			)
 			.bind(by, parentId, total),
 	]);
@@ -1161,7 +1174,7 @@ export async function saveJevResult(
 		const category = await db
 			.prepare(
 				`UPDATE transactions SET
-					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
+					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
 					updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
@@ -1174,6 +1187,7 @@ export async function saveJevResult(
 				d.categoryId === null ? null : "jev",
 				d.confidence,
 				d.suggestedCategoryId,
+				d.noneFit ? 1 : 0,
 				id,
 			)
 			.run();
@@ -1192,7 +1206,7 @@ export async function saveJevResult(
 			category_confidence = ?,
 			-- A credit counts only after a confident category (non-income classification) or an income decision.
 			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ?) OR ? = 1) THEN 1 ELSE credit_reviewed END,
-				jev_category_id = ?,
+				jev_category_id = ?, jev_none_fit = ?,
 				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				-- Income is money coming in: Jev's income answer never marks money out (a positive amount).
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income WHEN amount_cents > 0 THEN 0 ELSE ? END,
@@ -1218,6 +1232,7 @@ export async function saveJevResult(
 			JEV_THRESHOLD,
 			income ? 1 : 0,
 			d.suggestedCategoryId,
+			d.noneFit ? 1 : 0,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
 			income ? 1 : 0,

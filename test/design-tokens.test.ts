@@ -302,7 +302,10 @@ describe("design tokens (DESIGN.md)", () => {
 			rule?.within.some((item) => item.startsWith("@media (max-width:")),
 		).toBe(true);
 		expect(rule?.body).toMatch(
-			/scroll-padding-bottom:\s*calc\(\s*max\(\s*var\(--tabs-height\),\s*calc\(var\(--feedback-bottom\)\s*\+\s*var\(--feedback-height\)\)\s*\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\)/,
+			/scroll-padding-bottom:\s*var\(--focus-scroll-room\)/,
+		);
+		expect(css).toMatch(
+			/--focus-scroll-room:\s*calc\(\s*max\(\s*var\(--tabs-height\),\s*calc\(var\(--feedback-bottom\)\s*\+\s*var\(--feedback-height\)\)\s*\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\)/,
 		);
 		expect(css).toContain("--tabs-height: calc(3.5rem + 1px)");
 		expect(css).toContain("--feedback-bottom: 6.5rem");

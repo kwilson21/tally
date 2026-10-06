@@ -1,3 +1,4 @@
+import type { Child } from "hono/jsx";
 import { DEFAULT_TIME_ZONE, dayLabel, todayIn } from "../dates";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
@@ -9,18 +10,21 @@ export function SelectableTransactionRow({
 	row,
 	checked = false,
 	today = todayIn(DEFAULT_TIME_ZONE),
+	after,
 }: {
 	row: ListRow;
 	/** Ticked already (coming back from the Set category sheet). */
 	checked?: boolean;
 	/** The household's date. Pages pass it; the catalog, which has no household, takes Eastern's. */
 	today?: string;
+	/** Optional content below the row, shown when this row is unchecked. */
+	after?: Child;
 }) {
 	const nameId = `select-${row.id}-name`;
 	return (
-		<li data-transaction={row.id}>
+		<li data-transaction={row.id} class="group/tx">
 			{/* relative keeps the visually hidden checkbox inside its own row. */}
-			<label class="group relative flex min-h-16 cursor-pointer items-center gap-3 has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
+			<label class="group relative flex min-h-16 min-w-11 cursor-pointer items-center gap-3 has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
 				<input
 					class="peer sr-only"
 					type="checkbox"
@@ -46,6 +50,7 @@ export function SelectableTransactionRow({
 					<TransactionRow row={row} bare />
 				</span>
 			</label>
+			{after}
 		</li>
 	);
 }

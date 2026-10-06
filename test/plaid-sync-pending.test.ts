@@ -854,6 +854,26 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			expect(await pendingForJev(env.DB, 10)).toEqual([]);
 		});
 
+		it("moves a none-fit answer with its confidence, so the posted row still counts toward a suggested category (#51)", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_confidence = 0.95, jev_category_id = NULL, jev_none_fit = 1 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item);
+			expect(
+				await env.DB.prepare(
+					"SELECT jev_none_fit, jev_category_id, category_confidence FROM transactions WHERE plaid_transaction_id = 'posted-1'",
+				).first(),
+			).toEqual({
+				jev_none_fit: 1,
+				jev_category_id: null,
+				category_confidence: 0.95,
+			});
+		});
+
 		it("moves Jev's transfer and income answers with the exclusion and review they made", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item, { amount: -42 });

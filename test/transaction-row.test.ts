@@ -236,6 +236,25 @@ describe("TransactionRow", () => {
 		);
 	});
 
+	it("shows Maybe only when the row still needs a category", async () => {
+		const suggested = {
+			...base,
+			maybeCategoryName: "Groceries",
+			categoryConfidence: 0.6,
+		};
+		const needs = await TransactionRow({ row: suggested }).toString();
+		expect(needs).toContain("Maybe");
+		for (const row of [
+			{ ...suggested, categoryId: 1, categoryName: "Groceries" },
+			{ ...suggested, excluded: true },
+			{ ...suggested, amountCents: -1200, creditReviewed: false },
+			{ ...suggested, income: true },
+		]) {
+			const html = await TransactionRow({ row }).toString();
+			expect(html).not.toContain("Maybe");
+		}
+	});
+
 	it("is a plain row without a link otherwise", async () => {
 		const html = await TransactionRow({ row: base }).toString();
 		expect(html).not.toContain("<a ");
