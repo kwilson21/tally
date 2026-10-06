@@ -36,11 +36,9 @@ export const PAGES = [
 	{ name: "settings-edit", path: "/settings?open=3" },
 	// The one-at-a-time review of the names Tally guessed that a Band on Settings leads to (P29 A).
 	{ name: "settings-names", path: "/settings/names" },
-	// The same review for a name Tally guessed (the first one, CVS Pharmacy, is the bank's own).
-	{
-		name: "settings-names-guess",
-		path: "/settings/names?skip=CVS%20Pharmacy",
-	},
+	// The same review for a name Tally guessed: 24 is CVS Pharmacy's row, the bank's own name that comes first.
+	// Skip names a merchant by its row number, never its bank text; test/seed.test.ts keeps 24 true.
+	{ name: "settings-names-guess", path: "/settings/names?skip=24" },
 	{ name: "more", path: "/more" },
 	{ name: "how-it-works", path: "/how-it-works" },
 	{ name: "feedback", path: "/feedback" },

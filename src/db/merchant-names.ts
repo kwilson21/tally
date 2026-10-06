@@ -24,9 +24,10 @@ export const SETTLE_SUGGESTION_SQL = `suggestion_status = CASE
 
 /**
  * The bank texts to ask Workers AI about, most charges first, at most `limit` (spec §7): a text Plaid
- * didn't name on a charge Plaid sent (never a hand-entered cash one), whose merchant has no name a
- * person chose, no suggestion, and no earlier answer. A merchant is asked about once, so an answer with
- * no usable name is kept as an empty suggestion.
+ * sent no `merchant_name` for, whose merchant has no name a person chose, no suggestion, and no earlier
+ * answer. A cash entry a person typed (on the Cash account) is never asked about, nor a split part. A
+ * Plaid id isn't needed, so the demo's seeded bank texts are asked too. A merchant is asked about
+ * once, so an answer with no usable name is kept as an empty suggestion.
  */
 export async function merchantsToAsk(
 	db: D1Database,
@@ -35,7 +36,8 @@ export async function merchantsToAsk(
 	const { results } = await db
 		.prepare(
 			`SELECT t.raw_name AS rawName FROM transactions t
-			 WHERE t.parent_id IS NULL AND t.plaid_transaction_id IS NOT NULL AND NULLIF(t.merchant_name, '') IS NULL
+			 WHERE t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
+			   AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
 			   AND NOT EXISTS (
 				SELECT 1 FROM merchants m WHERE m.raw_name = t.raw_name
 				  AND (m.display_name IS NOT NULL OR m.suggested_name IS NOT NULL OR m.suggestion_status != 'none'))
@@ -76,6 +78,11 @@ export async function saveAskedNames(
 export type NameReview = {
 	/** The merchant's key: the `merchants` row to settle. */
 	key: string;
+	/**
+	 * The row's number, which is what Skip puts in the address, so the bank's text never lands in the
+	 * browser's history. It only names a row for as long as the review is open.
+	 */
+	id: number;
 	/** The bank text most of its charges carry, shown as "The bank says". */
 	bankText: string;
 	/** What the list shows when nothing is chosen: the bank text, tidied. */
@@ -88,45 +95,67 @@ export type NameReview = {
 	count: number;
 };
 
+/** Plain code-point order, as the database sorts text, so ties fall the same way everywhere. */
+const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
 /**
  * The merchants with names waiting for a person (P29 A): pending suggestions that say something the
  * tidied bank text doesn't, for a merchant that still has charges, most charges first. With the names
  * switch off only the bank's own names are left, Tally's guesses being hidden (src/transactions/name-suggestions.ts).
+ *
+ * A merchant can have several bank texts ("TARGET 1234", "TGT*0099"), and a name that repeats one
+ * text's tidied form still reads as a suggestion on the others, as the list shows it. So a merchant
+ * is reviewed when any of its texts has a name to offer, and the text shown is the one with the most
+ * charges among those; the names are the ones offered against it.
  */
 export async function namesToReview(
 	db: D1Database,
 	switches?: AiSwitches,
 ): Promise<NameReview[]> {
 	const namesOn = (switches ?? (await readAiSwitches(db))).names;
-	const key = merchantKeySql("t");
 	const { results } = await db
 		.prepare(
-			`SELECT m.raw_name AS key, m.suggested_name AS stored, COUNT(*) AS count,
-				(SELECT x.raw_name FROM transactions x WHERE ${merchantKeySql("x")} = m.raw_name AND x.parent_id IS NULL
-				 GROUP BY x.raw_name ORDER BY COUNT(*) DESC, x.raw_name LIMIT 1) AS bankText
-			 FROM merchants m JOIN transactions t ON ${key} = m.raw_name AND t.parent_id IS NULL
+			`SELECT m.raw_name AS key, m.rowid AS id, m.suggested_name AS stored, t.raw_name AS bankText, COUNT(*) AS count
+			 FROM merchants m JOIN transactions t ON ${merchantKeySql("t")} = m.raw_name AND t.parent_id IS NULL
 			 WHERE m.suggestion_status = 'pending' AND m.display_name IS NULL AND COALESCE(m.suggested_name, '') != ''
-			 GROUP BY m.raw_name
-			 ORDER BY count DESC, m.raw_name`,
+			 GROUP BY m.raw_name, t.raw_name`,
 		)
-		.all<{ key: string; stored: string; count: number; bankText: string }>();
+		.all<{
+			key: string;
+			id: number;
+			stored: string;
+			bankText: string;
+			count: number;
+		}>();
+	const byKey = new Map<string, typeof results>();
+	for (const row of results)
+		byKey.set(row.key, [...(byKey.get(row.key) ?? []), row]);
 	const reviews: NameReview[] = [];
-	for (const row of results) {
-		const names = offeredNames(
-			{ stored: row.stored, status: "pending", key: row.key, namesOn },
-			row.bankText,
+	for (const [key, texts] of byKey) {
+		const total = texts.reduce((sum, text) => sum + text.count, 0);
+		// The text with the most charges first, then A to Z, so the choice is the same every time.
+		texts.sort(
+			(a, b) => b.count - a.count || compareText(a.bankText, b.bankText),
 		);
-		if (names.length === 0) continue;
-		reviews.push({
-			key: row.key,
-			bankText: row.bankText,
-			tidied: tidyName(row.bankText),
-			names,
-			source: nameSource(names, row.key),
-			count: row.count,
-		});
+		for (const text of texts) {
+			const names = offeredNames(
+				{ stored: text.stored, status: "pending", key, namesOn },
+				text.bankText,
+			);
+			if (names.length === 0) continue;
+			reviews.push({
+				key,
+				id: text.id,
+				bankText: text.bankText,
+				tidied: tidyName(text.bankText),
+				names,
+				source: nameSource(names, key),
+				count: total,
+			});
+			break;
+		}
 	}
-	return reviews;
+	return reviews.sort((a, b) => b.count - a.count || compareText(a.key, b.key));
 }
 
 /** What a person picked for one merchant in the review. */

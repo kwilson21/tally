@@ -55,8 +55,8 @@ describe("cleanSuggestedNames", () => {
 
 	it("keeps a number that is part of a name", () => {
 		expect(
-			cleanSuggestedNames("7-Eleven\nPier 39\nMotel 6", "7-ELEVEN 3321"),
-		).toEqual(["7-Eleven", "Pier 39", "Motel 6"]);
+			cleanSuggestedNames("7-Eleven Store\nPier 39\nMotel 6", "7-ELEVEN 3321"),
+		).toEqual(["7-Eleven Store", "Pier 39", "Motel 6"]);
 	});
 
 	it("drops a name that is only the bank's text again, or its tidied form", () => {
@@ -66,6 +66,19 @@ describe("cleanSuggestedNames", () => {
 				RAW,
 			),
 		).toEqual(["Blue Bottle Coffee"]);
+	});
+
+	it("drops a name that only recapitalizes the tidied text, so it isn't offered beside it", () => {
+		expect(
+			cleanSuggestedNames(
+				"Blue Bottle Cof\nBLUE BOTTLE COF\nBlue Bottle Coffee",
+				RAW,
+			),
+		).toEqual(["Blue Bottle Coffee"]);
+		// The bank's own text in other capitals is the same words too.
+		expect(
+			cleanSuggestedNames("Sq *Blue Bottle Cof 0412\nBlue Bottle", RAW),
+		).toEqual(["Blue Bottle"]);
 	});
 
 	it("drops repeats, ignoring capitals", () => {

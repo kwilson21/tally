@@ -237,13 +237,13 @@ const THIS_MONTH: [number, string, number, number][] = [
 ];
 
 // Suggested names for a few of the unnamed merchants below, waiting for a person (spec §7, §8.6). They show
-// dashed in the list until a person chooses, and the demo never calls Workers AI itself. Most are names Tally
+// dashed in the list until a person chooses, so suggestions show right after a reset. Most are names Tally
 // "guessed", as Workers AI would suggest them; CVS's is the bank's own, Plaid's merchant name above.
 const SUGGESTED_NAMES: Record<string, string[]> = {
-	"TST* CORNER DELI": ["Corner Deli"],
+	"TST* CORNER DELI": ["Corner Deli Cafe"],
 	"SP * CRAFTSUPPLY": ["Craft Supply Co", "Craft Supply"],
 	"CHECKCARD 0921 CVS": ["CVS Pharmacy"],
-	"POS 4417 CITY PARKING": ["City Parking", "City Parking Garage"],
+	"POS 4417 CITY PARKING": ["City Parking Garage", "City Parking Lot"],
 };
 
 // This month, uncategorized (12 transactions, $228.01): [targetDay, rawName, cents, displayName].

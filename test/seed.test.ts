@@ -283,6 +283,14 @@ describe("resetDemo", () => {
 		expect(row?.raw_name).toBe("SP * CRAFTSUPPLY");
 	});
 
+	it("gives the CVS Pharmacy merchant row number 24, which the review's Skip screenshot uses", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const row = await env.DB.prepare(
+			"SELECT raw_name FROM merchants WHERE rowid = 24",
+		).first<{ raw_name: string }>();
+		expect(row?.raw_name).toBe("CVS Pharmacy");
+	});
+
 	it("gives the CVS charge id 118, whose merchant has the bank's own name suggested, which the bank-name edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		const row = await env.DB.prepare(

@@ -166,6 +166,8 @@ function AiSuggestions({
 				hx-indicator="#ai-save"
 				hx-target="#ai-suggestions"
 				hx-select="#ai-suggestions"
+				// The names Band above Categories follows the names switch, so it is drawn again with the group.
+				hx-select-oob="#names-band"
 				hx-swap="outerHTML"
 			>
 				<ul class="mt-3 divide-y divide-rule border-y border-rule">
@@ -357,15 +359,18 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>
-			{/* Suggested merchant names waiting for a person (P29 A): a Band to the one-at-a-time review. */}
-			{namesWaiting > 0 && (
-				<div class="mt-4 lg:max-w-3xl">
-					<Band href="/settings/names" detail="Suggested names; you choose">
-						{namesWaiting} merchant {namesWaiting === 1 ? "name" : "names"} to
-						check
-					</Band>
-				</div>
-			)}
+			{/* Suggested merchant names waiting for a person (P29 A): a Band to the one-at-a-time review. It is
+			    always in the page, empty when nothing waits, so saving the names switch can draw it again. */}
+			<div id="names-band">
+				{namesWaiting > 0 && (
+					<div class="mt-4 lg:max-w-3xl">
+						<Band href="/settings/names" detail="Suggested names; you choose">
+							{namesWaiting} merchant {namesWaiting === 1 ? "name" : "names"} to
+							check
+						</Band>
+					</div>
+				)}
+			</div>
 			<section
 				id="categories"
 				aria-labelledby="categories-title"
@@ -589,15 +594,26 @@ settings.post("/settings/ai", async (c) => {
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
+	const waitingBefore = (await namesToReview(c.env.DB)).length;
 	await saveAiSwitches(c.env.DB, next);
+	const waitingAfter = (await namesToReview(c.env.DB)).length;
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${next[f.key] ? "on" : "off"}`,
 	).join(", ");
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
-	return done(c, "Saved AI suggestions", `Saved AI suggestions. ${spoken}.`, {
-		aiSaved: true,
-		hash: "ai-suggestions",
-	});
+	// The Band above Categories changes with the names switch, so a change in what it says is announced too.
+	const band =
+		waitingAfter === waitingBefore
+			? ""
+			: waitingAfter === 0
+				? " No merchant names to check."
+				: ` ${waitingAfter} merchant ${waitingAfter === 1 ? "name" : "names"} to check.`;
+	return done(
+		c,
+		"Saved AI suggestions",
+		`Saved AI suggestions. ${spoken}.${band}`,
+		{ aiSaved: true, hash: "ai-suggestions" },
+	);
 });
 
 settings.post("/settings/categories", async (c) => {

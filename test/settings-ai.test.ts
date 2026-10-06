@@ -182,7 +182,9 @@ describe("POST /settings/ai", () => {
 		expect(trigger(res)).toEqual({
 			toast: { message: "Saved AI suggestions", type: "success" },
 			announce:
-				"Saved AI suggestions. Suggest store names off, categories and exclusions off, income on.",
+				// The demo has four merchant names waiting. The names switch hides Tally's three guesses but not the
+				// bank's own CVS Pharmacy, so the Band stays, saying one.
+				"Saved AI suggestions. Suggest store names off, categories and exclusions off, income on. 1 merchant name to check.",
 		});
 	});
 
@@ -199,7 +201,8 @@ describe("POST /settings/ai", () => {
 			income: true,
 		});
 		expect(trigger(res).announce).toBe(
-			"Saved AI suggestions. Suggest store names on, categories and exclusions on, income on.",
+			// Four merchant names come back with the switch, and the Band says so.
+			"Saved AI suggestions. Suggest store names on, categories and exclusions on, income on. 4 merchant names to check.",
 		);
 	});
 
