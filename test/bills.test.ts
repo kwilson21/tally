@@ -766,6 +766,74 @@ describe("Bills", () => {
 		});
 	});
 
+	it("re-links a hand-linked payment to the new bill category, keeps manual choices, and leaves its category on unlink", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const period = today.slice(0, 7);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare(
+				"UPDATE bills SET due_day=?,frequency='monthly',category_id=1 WHERE id=1",
+			).bind(Number(today.slice(8, 10))),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9200,'Second bill',10000,?,'monthly',2,'SECOND BILL')",
+			).bind(Number(today.slice(8, 10))),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source,category_confidence,jev_category_id) SELECT 9200,id,?,10000,'HAND LINK',3,'jev',0.72,3 FROM accounts LIMIT 1",
+			).bind(today),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9201,id,?,10000,'USER CHOICE',3,'user' FROM accounts LIMIT 1",
+			).bind(today),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9202,id,?,10000,'MERCHANT RULE',3,'merchant_rule' FROM accounts LIMIT 1",
+			).bind(today),
+		]);
+		const link = (bill: number, transaction: number) =>
+			exports.default.fetch(`http://tally.test/bills/${bill}/link`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					transaction_id: String(transaction),
+					period,
+					opened_period: period,
+				}),
+			});
+
+		await link(1, 9200);
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id,category_source FROM transactions WHERE id=9200",
+			).first(),
+		).toEqual({ category_id: 1, category_source: "bill" });
+
+		await exports.default.fetch(
+			`http://tally.test/bills/1/occurrences/${period}/unlink`,
+			{ method: "POST", headers: { Origin: "http://tally.test" } },
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id,category_source FROM transactions WHERE id=9200",
+			).first(),
+		).toEqual({ category_id: 1, category_source: "bill" });
+
+		await link(9200, 9200);
+		await link(1, 9201);
+		await link(1, 9202);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT id,category_id AS categoryId,category_source AS categorySource FROM transactions WHERE id BETWEEN 9200 AND 9202 ORDER BY id",
+				).all()
+			).results,
+		).toEqual([
+			{ id: 9200, categoryId: 2, categorySource: "bill" },
+			{ id: 9201, categoryId: 3, categorySource: "user" },
+			{ id: 9202, categoryId: 3, categorySource: "merchant_rule" },
+		]);
+	});
+
 	it("picker uses a 30-day window, preferred order, every eligible payment, and exclusions", async () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		const period = today.slice(0, 7);

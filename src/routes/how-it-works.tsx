@@ -367,9 +367,10 @@ howItWorks.get("/how-it-works", async (c) => {
 							with "Always for this merchant" in the edit panel.
 						</li>
 						<li>
-							A bill: a linked payment with no category takes its bill's. A
-							person's choice and a merchant rule replace it, and unlinking
-							leaves the category.
+							A bill: a payment linked by the matcher or by hand takes its
+							bill's category when it has none, a Tally pick or an earlier
+							bill's category. A person's choice or a merchant rule is never
+							replaced, and unlinking leaves the category.
 						</li>
 						<li>
 							{demo

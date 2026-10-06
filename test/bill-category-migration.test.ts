@@ -19,6 +19,13 @@ describe("migration 0026: bill categories", () => {
 			"SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'",
 		).first<{ sql: string }>();
 		expect(schema?.sql).toContain("'bill'");
+		expect(schema?.sql).toContain("jev_none_fit");
+		expect(schema?.sql).toContain("category_suggestion_id");
+		expect(
+			await env.DB.prepare(
+				"SELECT name FROM sqlite_master WHERE type='index' AND name='transactions_category_suggestion_id'",
+			).first(),
+		).toEqual({ name: "transactions_category_suggestion_id" });
 		await expect(
 			env.DB.prepare(
 				"SELECT id,category_id,category_source FROM transactions ORDER BY id LIMIT 1",
@@ -27,6 +34,51 @@ describe("migration 0026: bill categories", () => {
 		expect(
 			(await env.DB.prepare("PRAGMA foreign_key_check").all()).results,
 		).toEqual([]);
+	});
+
+	it("backfills only linked payments that have no category, leaving a Jev pick alone", async () => {
+		const backfill = migration.match(
+			/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
+		)?.[0];
+		const triggers = [
+			migration.match(
+				/CREATE TRIGGER bill_payment_category\n[\s\S]*?END;/,
+			)?.[0],
+			migration.match(
+				/CREATE TRIGGER bill_payment_category_on_repoint\n[\s\S]*?END;/,
+			)?.[0],
+		];
+		expect(backfill).toBeDefined();
+		expect(triggers.every(Boolean)).toBe(true);
+		await env.DB.batch([
+			env.DB.prepare("DROP TRIGGER bill_payment_category"),
+			env.DB.prepare("DROP TRIGGER bill_payment_category_on_repoint"),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9920,'Backfill test',1000,10,'monthly',5,'BACKFILL TEST')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9920,id,'2026-09-10',1000,'BACKFILL TEST',3,'jev' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(id,bill_id,period,transaction_id,matched_by,status) VALUES(9920,9920,'2026-09',9920,'user','linked')",
+			),
+		]);
+		try {
+			await env.DB.prepare(backfill as string).run();
+			expect(
+				await env.DB.prepare(
+					"SELECT category_id,category_source FROM transactions WHERE id=9920",
+				).first(),
+			).toEqual({ category_id: 3, category_source: "jev" });
+		} finally {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments WHERE id=9920"),
+				env.DB.prepare("DELETE FROM transactions WHERE id=9920"),
+				env.DB.prepare("DELETE FROM bills WHERE id=9920"),
+				env.DB.prepare(triggers[0] as string),
+				env.DB.prepare(triggers[1] as string),
+			]);
+		}
 	});
 
 	it("copies transactions, self references, and bill links through the rebuild", async () => {
@@ -67,10 +119,13 @@ describe("migration 0026: bill categories", () => {
 					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9910,'Migration test',1000,10,'monthly',5,'MIGRATION TEST')",
 				),
 				env.DB.prepare(
+					"INSERT INTO category_suggestions(id,name,status) VALUES(9910,'Migration test suggestion','pending')",
+				),
+				env.DB.prepare(
 					`INSERT INTO ${sourceName}(id,account_id,date,amount_cents,raw_name,is_split) SELECT 9910,id,'2026-09-10',1000,'MIGRATION TEST',1 FROM accounts LIMIT 1`,
 				),
 				env.DB.prepare(
-					`INSERT INTO ${sourceName}(id,account_id,date,amount_cents,raw_name,parent_id) SELECT 9911,id,'2026-09-10',600,'MIGRATION TEST',9910 FROM accounts LIMIT 1`,
+					`INSERT INTO ${sourceName}(id,account_id,date,amount_cents,raw_name,parent_id,jev_none_fit,category_suggestion_id) SELECT 9911,id,'2026-09-10',600,'MIGRATION TEST',9910,1,9910 FROM accounts LIMIT 1`,
 				),
 				env.DB.prepare(
 					`INSERT INTO ${sourceName}(id,account_id,date,amount_cents,raw_name,refund_of_id) SELECT 9912,id,'2026-09-11',-100,'MIGRATION REFUND',9910 FROM accounts LIMIT 1`,
@@ -97,13 +152,31 @@ describe("migration 0026: bill categories", () => {
 			expect(
 				(
 					await env.DB.prepare(
-						`SELECT id,parent_id,refund_of_id FROM ${targetName} ORDER BY id`,
+						`SELECT id,parent_id,refund_of_id,jev_none_fit,category_suggestion_id FROM ${targetName} ORDER BY id`,
 					).all()
 				).results,
 			).toEqual([
-				{ id: 9910, parent_id: null, refund_of_id: null },
-				{ id: 9911, parent_id: 9910, refund_of_id: null },
-				{ id: 9912, parent_id: null, refund_of_id: 9910 },
+				{
+					id: 9910,
+					parent_id: null,
+					refund_of_id: null,
+					jev_none_fit: 0,
+					category_suggestion_id: null,
+				},
+				{
+					id: 9911,
+					parent_id: 9910,
+					refund_of_id: null,
+					jev_none_fit: 1,
+					category_suggestion_id: 9910,
+				},
+				{
+					id: 9912,
+					parent_id: null,
+					refund_of_id: 9910,
+					jev_none_fit: 0,
+					category_suggestion_id: null,
+				},
 			]);
 			expect(
 				await env.DB.prepare(
@@ -117,6 +190,7 @@ describe("migration 0026: bill categories", () => {
 				env.DB.prepare(`DROP TABLE IF EXISTS ${sourceName}`),
 				env.DB.prepare(`DROP TABLE IF EXISTS ${targetName}`),
 				env.DB.prepare("DELETE FROM bills WHERE id=9910"),
+				env.DB.prepare("DELETE FROM category_suggestions WHERE id=9910"),
 			]);
 		}
 	});

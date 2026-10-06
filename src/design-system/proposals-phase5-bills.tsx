@@ -1084,7 +1084,7 @@ export function Phase5BillsProposals() {
 				id="p59-bill-category"
 				title="P59 · A bill's category on its payments"
 				tier="visual"
-				sentence="A bill's category isn't given to its payments today (gap D2), so the rent payment shows Needs category. Pick how a linked payment gets it. Each is drawn with the Rent bill's $1,200 payment."
+				sentence="A linked payment takes its bill's category over a Tally pick or an earlier bill's, while preserving a person's or merchant rule's category. Each is drawn with the Rent bill's $1,200 payment."
 			>
 				<Fixed>
 					every bill has a category (the bill form requires one). A person's
@@ -1092,10 +1092,10 @@ export function Phase5BillsProposals() {
 					bill's month counts in that month (§6, decision 58).
 				</Fixed>
 				<NeedsLine settled="decisions 74 and 80">
-					A linked payment with no category takes its bill's (its
-					category_source is “bill”). A person's choice or a merchant rule
-					replaces it, and unlinking the payment leaves the category on it. The
-					edit panel explains it with a Why? link beside Category.
+					A linked payment takes its bill's category when it has none, a Tally
+					pick or an earlier bill's. A person's choice or a merchant rule is
+					never replaced, and unlinking the payment leaves the category on it.
+					The edit panel explains it with a Why? link beside Category.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1107,7 +1107,7 @@ export function Phase5BillsProposals() {
 						{
 							name: "Option A · It takes the bill's category",
 							picked: true,
-							note: "Linking gives a payment with no category the bill's, and a linked payment's row says which bill it paid. Spectrum stays Utilities, not the Internet bill's Household: a person put it there.",
+							note: "Linking gives the bill's category to a payment with no category, a Tally pick or an earlier bill's. A linked payment's row says which bill it paid. Spectrum stays Utilities, not the Internet bill's Household: a person put it there.",
 							recommended:
 								"no extra step, and a person's own choice is never touched.",
 							screen: categoryOnList,

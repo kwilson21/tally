@@ -1435,11 +1435,12 @@ export function DetailsProposals() {
 				id="p79-bill-category-line"
 				title="P79 · The category from a bill"
 				tier="visual"
-				sentence="A payment with no category takes its bill's. Pick whether the edit panel says so, and how. Each is drawn with Harbor Property paying the Rent bill, and the row above the panel."
+				sentence="A payment linked by the matcher or by hand takes its bill's category over a Tally pick or an earlier bill's, while preserving a person's or merchant rule's choice. Pick how the edit panel explains it."
 			>
 				<Fixed>
-					question 29, on decision 74 (P59 A). A linked payment with no category
-					takes its bill's, and a person's own choice keeps theirs; the row's
+					question 29, on decision 74 (P59 A). A payment linked by the matcher
+					or by hand takes its bill's category over a Jev pick or an earlier
+					bill's; a person's or merchant rule's category stays. The row's
 					caption says “Rent · paid Rent bill”. When Tally picked a category the
 					panel already says so in a muted line under the chips, “Picked by
 					Tally · N% sure” (§7), and a person's choice or a merchant rule shows
@@ -1481,7 +1482,7 @@ export function DetailsProposals() {
 						{
 							name: "Option E · A Why? link",
 							picked: true,
-							note: "A terracotta “Why?” follows the label “Category” and leads to How Tally works, as the Why? beside a guess does. Its categorization section gains the rule when this is built: “A payment linked to a bill takes the bill's category when it has none, until a person or a merchant rule picks another.”",
+							note: "A terracotta “Why?” follows the label “Category” and leads to How Tally works, as the Why? beside a guess does. Its categorization section says a payment linked by the matcher or by hand takes the bill's category when it has none, a Tally pick or an earlier bill's category, while a person's choice or a merchant rule is never replaced and unlinking leaves the category.",
 							tradeoff:
 								"it hides the answer behind a tap, on another page, and the panel itself never says a bill was involved.",
 							screen: (
