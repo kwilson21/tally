@@ -96,9 +96,9 @@ describe("production environment config (#23)", () => {
 		expect(production.triggers).toEqual({ crons: ["0 9 * * *"] });
 	});
 
-	it("binds Workers AI for merchant names (#33), and only here: the demo and local development have none", () => {
+	it("binds Workers AI for merchant names (#33) in production and the demo, not in local development", () => {
 		expect(production.ai).toEqual({ binding: "AI" });
-		expect(demo.ai).toBeUndefined();
+		expect(demo.ai).toEqual({ binding: "AI" });
 		expect(config.ai).toBeUndefined();
 	});
 
