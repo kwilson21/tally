@@ -216,18 +216,35 @@ await page.getByText(/of \$690/).waitFor();
 await page.unroute("**/nudge/**", slowNudge);
 step("Done right after a tap keeps the tap ($690) and puts the buttons away");
 
-// Split a transaction, see the server-computed confirmation, then restore it.
+// Split a transaction, see the server-computed confirmation, then restore it. The first answer
+// about the line is held back until after the second part is typed, so a late answer about older
+// amounts must not be the line's last word.
 await page.goto(`${BASE}/transactions?q=Local+Bakery`, {
 	waitUntil: "networkidle",
 });
 await page.getByRole("link", { name: /Local Bakery/ }).click();
 await page.getByRole("link", { name: "Split" }).click();
+let lineAnswers = 0;
+const slowFirstLine = async (route) => {
+	if (++lineAnswers === 1)
+		await new Promise((resolve) => setTimeout(resolve, 1500));
+	await route.continue();
+};
+await page.route("**/split/line", slowFirstLine);
 const amounts = page.getByLabel(/^Part \d amount$/);
 await amounts.nth(0).fill("5.00");
+// Past the 300ms delay, so part 1's request goes out before part 2 is typed.
+await page.waitForTimeout(400);
 await page.getByLabel("Part 1 category").selectOption("1");
 await amounts.nth(1).fill("7.00");
 await page.getByLabel("Part 2 category").selectOption("5");
 await page.getByText("Adds up to $12.00").waitFor();
+await page.waitForTimeout(1500);
+assert.equal(
+	(await page.locator("#split-line").textContent())?.trim(),
+	"Adds up to $12.00",
+);
+await page.unroute("**/split/line", slowFirstLine);
 await page.getByRole("button", { name: "Save split" }).click();
 await page.locator("#toasts").getByText("Split Local Bakery").waitFor();
 assert.equal(await rows(), 3);
