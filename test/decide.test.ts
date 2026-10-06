@@ -21,6 +21,7 @@ describe("decide", () => {
 			categoryId: 2,
 			suggestedCategoryId: 2,
 			confidence: 0.93,
+			noneFit: false,
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -36,6 +37,7 @@ describe("decide", () => {
 			categoryId: null,
 			suggestedCategoryId: 1,
 			confidence: 0.62,
+			noneFit: false,
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -52,8 +54,21 @@ describe("decide", () => {
 			categoryId: null,
 			suggestedCategoryId: null,
 			confidence: 0.97,
+			noneFit: true,
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
+	});
+
+	// Spec §5, §7 (#51): "none fit" is what a new category is suggested from, so it is kept as its own fact,
+	// whatever the confidence (the threshold is applied when suggestions are made), and only for a real answer.
+	it("marks a none-fit answer at any confidence, and nothing else", () => {
+		expect(decide(answer(NONE_FIT, 0.97), categories, 0.8).noneFit).toBe(true);
+		expect(decide(answer(NONE_FIT, 0.3), categories, 0.8).noneFit).toBe(true);
+		expect(decide(answer("Groceries", 0.97), categories, 0.8).noneFit).toBe(
+			false,
+		);
+		// A label that isn't one of the household's categories is no answer at all.
+		expect(decide(answer("Travel", 0.99), categories, 0.8).noneFit).toBe(false);
 	});
 
 	it("sets each flag on its own probability, independent of the category", () => {
@@ -80,8 +95,15 @@ describe("decide", () => {
 				categoryId: null,
 				suggestedCategoryId: null,
 				confidence: 0.97,
+				noneFit: false,
 				flags: { transfer: false, reimbursement: false, income: false },
 			});
+		});
+
+		it("doesn't call a none-fit answer none-fit while the switch is off, since nothing about the category is kept", () => {
+			expect(decide(answer(NONE_FIT, 0.97), categories, 0.8, off).noneFit).toBe(
+				false,
+			);
 		});
 
 		it("lets no transfer or reimbursement flag through, so nothing is excluded", () => {

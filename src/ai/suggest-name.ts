@@ -64,6 +64,83 @@ export async function suggestNames(
 	return { ok: true, names: cleanSuggestedNames(text, rawName) };
 }
 
+export function cleanCategoryName(
+	answer: unknown,
+	avoid: string[],
+): string | null {
+	if (typeof answer !== "string") return null;
+	for (const raw of answer.split(/\r?\n/)) {
+		const name = raw
+			.replace(/^\s*(?:[-*•·]|\d+[.)])\s*/, "")
+			.trim()
+			.replace(/[.]+$/, "")
+			.replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, "")
+			.replace(/\s+/g, " ");
+		if (
+			name.length < 2 ||
+			name.length > 30 ||
+			name.split(" ").length > 3 ||
+			/[$#*<>:]|\d{3,}|\d+[.,]\d{2}\b|https?:|www\./i.test(name)
+		)
+			continue;
+		if (
+			!/^[\p{L}][\p{L} &'-]*$/u.test(name) ||
+			/\b(?:here is|category|suggest|because|would be)\b/i.test(name)
+		)
+			continue;
+		if (
+			/^(?:none(?: of these fit)?|nothing|n\/?a)\.?$/i.test(name) ||
+			avoid.some((n) => n.toLowerCase() === name.toLowerCase())
+		)
+			continue;
+		if (name === name.toUpperCase() || name === name.toLowerCase())
+			return name
+				.toLowerCase()
+				.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
+		return name;
+	}
+	return null;
+}
+
+export async function suggestCategoryName(
+	ai: Ai,
+	merchants: string[],
+	avoid: string[],
+): Promise<{ ok: true; name: string | null } | { ok: false }> {
+	try {
+		const answer = await ai.run(
+			NAME_MODEL,
+			{
+				messages: [
+					{
+						role: "system",
+						content:
+							"Suggest one short, plain category name for this group of purchases. Reply with only the name.",
+					},
+					{
+						role: "user",
+						content: `Places: ${merchants.join("; ")}\nCategories to avoid: ${avoid.join("; ")}`,
+					},
+				],
+				max_tokens: 40,
+				temperature: 0.2,
+			},
+			{ signal: AbortSignal.timeout(TIMEOUT_MS) },
+		);
+		const text =
+			typeof answer === "string"
+				? answer
+				: (answer as { response?: unknown } | null)?.response;
+		if (typeof text !== "string") return { ok: false };
+		return { ok: true, name: cleanCategoryName(text, avoid) };
+	} catch (error) {
+		console.error(
+			`workers-ai: category name ${error instanceof Error ? error.name : "failed"}`,
+		);
+		return { ok: false };
+	}
+}
+
 /** Marks a model puts before a list item ("1.", "-", "•") and quotes it wraps a name in. */
 const LIST_MARK = /^\s*(?:[-•·]|\*(?=\s)|\d+[.)])\s*/;
 const QUOTES = /^["'“”‘’`]+|["'“”‘’`]+$/g;
