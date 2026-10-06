@@ -26,6 +26,10 @@ import {
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
+// A split part is its own row, stored as posted; it is as pending as its parent (the purchase), read
+// from the parent so there's nothing to keep in sync. Needs the parent joined as `p`.
+const PENDING_SQL =
+	"CASE WHEN t.parent_id IS NOT NULL THEN p.pending ELSE t.pending END";
 
 export type ListRow = {
 	id: number;
@@ -51,6 +55,8 @@ export type ListRow = {
 	/** A linked refund whose purchase counts, so it takes that purchase's month and category. */
 	followsPurchase?: boolean;
 	refundedCents?: number;
+	/** The bank hasn't finished it: it counts like any other, and says "Pending" (decision 67). */
+	pending?: boolean;
 };
 
 export const PAGE_SIZE = 25;
@@ -113,7 +119,7 @@ export async function listTransactions(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
+				t.excluded, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
@@ -130,6 +136,7 @@ export async function listTransactions(
 				| "displayName"
 				| "isSplit"
 				| "followsPurchase"
+				| "pending"
 			> & {
 				merchantName: string | null;
 				parentMerchantName: string | null;
@@ -139,6 +146,7 @@ export async function listTransactions(
 				creditReviewed: number;
 				isSplit: number;
 				followsPurchase: number;
+				pending: number;
 			}
 		>();
 
@@ -154,6 +162,7 @@ export async function listTransactions(
 			creditReviewed: r.creditReviewed === 1,
 			isSplit: r.isSplit === 1,
 			followsPurchase: r.followsPurchase === 1,
+			pending: r.pending === 1,
 			displayName: merchantName ?? tidyName(r.rawName),
 		}),
 	);
@@ -277,7 +286,7 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				t.excluded, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
@@ -286,6 +295,7 @@ export async function getTransaction(
 			JOIN accounts a ON a.id = t.account_id
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN transactions p ON p.id = t.parent_id
 			${COUNTED_JOINS}
 			WHERE t.id = ?`,
 		)
@@ -299,12 +309,14 @@ export async function getTransaction(
 				| "displayName"
 				| "isSplit"
 				| "followsPurchase"
+				| "pending"
 			> & {
 				excluded: number;
 				income: number;
 				creditReviewed: number;
 				isSplit: number;
 				followsPurchase: number;
+				pending: number;
 			}
 		>();
 	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
@@ -316,6 +328,7 @@ export async function getTransaction(
 				creditReviewed: r.creditReviewed === 1,
 				isSplit: r.isSplit === 1,
 				followsPurchase: r.followsPurchase === 1,
+				pending: r.pending === 1,
 				displayName: r.merchantName ?? tidyName(r.rawName),
 			}
 		: null;
@@ -720,31 +733,40 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 		.run();
 }
 
+// A credit a person already decided about: Jev can only help with its category. The review columns
+// are NULL on older rows, which SQL won't compare, so a missing review counts as no review: COALESCE
+// makes this 0 rather than NULL, and `NOT` of it can't drop the row.
+const CATEGORY_ONLY =
+	"COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)";
+
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
  * unreviewed negative credits, even when a category was selected already. A user-reviewed
- * uncategorized credit is eligible for category help only. A stored confidence means Jev already
- * looked and wasn't sure (decision 27).
+ * uncategorized credit is eligible for category help only, so it's left out when the household's
+ * categories switch is off (spec §8.6): that answer would go unused. A stored confidence means Jev
+ * already looked and wasn't sure (decision 27).
  */
 export async function pendingForJev(
 	db: D1Database,
 	limit: number,
+	{ categories = true }: { categories?: boolean } = {},
 ): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory,
-				(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')) AS categoryOnly
+				${CATEGORY_ONLY} AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND NOT ${FOLLOWS_PURCHASE}
+				AND (? = 1 OR NOT ${CATEGORY_ONLY})
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
 			LIMIT ?`,
 		)
-		.bind(limit)
+		.bind(categories ? 1 : 0, limit)
 		.all<JevInput & { id: number; categoryOnly: number }>();
 	return results.map((transaction) => ({
 		...transaction,

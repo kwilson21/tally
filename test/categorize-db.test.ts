@@ -101,6 +101,89 @@ describe("pendingForJev", () => {
 		);
 		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
 	});
+
+	describe("with categories and exclusions off (spec §8.6)", () => {
+		const reviewedCredit = async () => {
+			const id = await idOf("SQ *LOCAL BAKERY 4432");
+			await db
+				.prepare(
+					"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				)
+				.bind(id)
+				.run();
+			return id;
+		};
+
+		it("still asks about a credit a person reviewed when categories are on, for its category", async () => {
+			const id = await reviewedCredit();
+			expect(await pendingForJev(db, 40)).toContainEqual(
+				expect.objectContaining({ id, categoryOnly: true }),
+			);
+			expect(await pendingForJev(db, 40, { categories: true })).toContainEqual(
+				expect.objectContaining({ id, categoryOnly: true }),
+			);
+		});
+
+		it("leaves it out, since only its category could be asked and that answer is unused", async () => {
+			const id = await reviewedCredit();
+			const pending = await pendingForJev(db, 40, { categories: false });
+			expect(pending.map((p) => p.id)).not.toContain(id);
+			// Everything else is still asked about, for the income answer.
+			expect(pending).toHaveLength(11);
+		});
+
+		// A review that was never recorded is NULL, not 0: it means "not reviewed by a person", so the
+		// credit is still asked about for income, however its review columns read.
+		it.each([
+			{
+				shape: "credit_reviewed never set",
+				set: "credit_reviewed = NULL, credit_reviewed_by = NULL, income_source = NULL",
+			},
+			{
+				shape: "credit_reviewed 0",
+				set: "credit_reviewed = 0, credit_reviewed_by = NULL, income_source = NULL",
+			},
+			{
+				shape: "reviewed, but not by a person",
+				set: "credit_reviewed = 1, credit_reviewed_by = NULL, income_source = NULL",
+			},
+			{
+				shape: "reviewed, and its income set by Jev",
+				set: "credit_reviewed = 1, credit_reviewed_by = NULL, income_source = 'jev'",
+			},
+		])(
+			"still asks about an older credit with $shape, for its income answer",
+			async ({ set }) => {
+				const id = await idOf("SQ *LOCAL BAKERY 4432");
+				await db
+					.prepare(
+						`UPDATE transactions SET amount_cents = -1200, ${set} WHERE id = ?`,
+					)
+					.bind(id)
+					.run();
+				const withoutCategories = await pendingForJev(db, 40, {
+					categories: false,
+				});
+				expect(withoutCategories).toContainEqual(
+					expect.objectContaining({
+						id,
+						amountCents: -1200,
+						categoryOnly: false,
+					}),
+				);
+				expect(withoutCategories).toHaveLength(12);
+				// The same rows are listed with categories on.
+				expect(await pendingForJev(db, 40)).toHaveLength(12);
+			},
+		);
+
+		it("doesn't let those rows use up the limit", async () => {
+			await reviewedCredit();
+			expect(await pendingForJev(db, 11, { categories: false })).toHaveLength(
+				11,
+			);
+		});
+	});
 });
 
 describe("applyMerchantRules", () => {

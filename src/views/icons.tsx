@@ -237,6 +237,12 @@ const PATHS = {
 			<path d="M6 14h2" />
 		</>
 	),
+	clock: (
+		<>
+			<circle cx="12" cy="12" r="10" />
+			<path d="M12 6v6l4 2" />
+		</>
+	),
 	"circle-dashed": (
 		<>
 			<path d="M10.1 2.182a10 10 0 0 1 3.8 0" />

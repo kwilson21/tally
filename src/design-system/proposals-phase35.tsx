@@ -18,6 +18,7 @@ import { Chip } from "../views/chip";
 import { FormField } from "../views/form-field";
 import { HomeTop } from "../views/home-top";
 import { Icon } from "../views/icons";
+import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
 import { rowCaption, TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
@@ -239,25 +240,6 @@ function transactions(look: PendingLook) {
 	);
 }
 
-/** A clock in Lucide's style (1.75 stroke, currentColor); a prototype that joins icons.tsx if A is picked. */
-function Clock() {
-	return (
-		<svg
-			class="size-5"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="1.75"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true"
-		>
-			<circle cx="12" cy="12" r="10" />
-			<path d="M12 6v6l4 2" />
-		</svg>
-	);
-}
-
 /**
  * The edit panel for a pending charge. A: a muted line under the date, with a clock, like the
  * Excluded line's transfer icon, saying what pending means. B: the same tag by the amount.
@@ -283,14 +265,8 @@ function pendingPanel(look: "caption" | "tag") {
 					{dayLabel(TRADER_JOES.date, TODAY)} · Checking ••1234
 				</p>
 			</div>
-			{look === "caption" && (
-				<p class="flex items-start gap-2 text-muted">
-					<span class="mt-0.5 shrink-0">
-						<Clock />
-					</span>
-					Pending. The bank hasn't finished it, so its amount can still change.
-				</p>
-			)}
+			{/* Option A was picked, so the real PendingNote (with the clock icon) is drawn. */}
+			{look === "caption" && <PendingNote />}
 			<fieldset class="flex flex-col gap-2">
 				<legend class="text-base text-ink">Category</legend>
 				<div class="flex flex-wrap gap-2">
