@@ -374,6 +374,145 @@ describe("the edit panel's name choices", () => {
 						.first<{ category_id: number | null }>()
 				)?.category_id;
 
+			describe("after a form error the panel keeps what it first showed in merchant_was (a 422 redraw)", () => {
+				/** Posts the edit form as htmx does and reads the redrawn panel's name fields. */
+				const redraw = async (id: number, fields: Record<string, string>) => {
+					const { res, html } = await save(id, fields, true);
+					return {
+						status: res.status,
+						was: html.match(/name="merchant_was" value="([^"]*)"/)?.[1],
+						typed: html.match(/name="merchant"[^>]*value="([^"]*)"/)?.[1],
+					};
+				};
+				const BAD_CATEGORY = "999999";
+
+				it("carries the posted merchant_was through, not the name another tab chose, so fixing the form doesn't erase it", async () => {
+					const id = await charge();
+					await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+					// The panel was drawn with nothing chosen; another tab then chooses a name.
+					await save(id, { name_pick: "s:Blue Bottle", merchant_was: "" });
+					expect(await merchant(RAW)).toMatchObject({
+						display_name: "Blue Bottle",
+					});
+					// The stale panel posts with a mistake.
+					const failed = await redraw(id, {
+						merchant_was: "",
+						merchant: "",
+						category: BAD_CATEGORY,
+					});
+					expect(failed.status).toBe(422);
+					expect(failed.was).toBe("");
+					// It posts again, fixed, without touching the name: the other tab's name survives.
+					const picked = (await category())?.id;
+					await save(id, {
+						merchant_was: failed.was ?? "",
+						merchant: failed.typed ?? "",
+						category: String(picked),
+					});
+					expect(await merchant(RAW)).toMatchObject({
+						display_name: "Blue Bottle",
+						suggestion_status: "accepted",
+					});
+					expect(await categoryOf(id)).toBe(picked);
+				});
+
+				it("keeps the original merchant_was through two errors in a row", async () => {
+					const id = await charge();
+					await db
+						.prepare(
+							"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Old Name')",
+						)
+						.bind(RAW)
+						.run();
+					await db
+						.prepare("UPDATE merchants SET display_name = 'New Name'")
+						.run();
+					const first = await redraw(id, {
+						merchant_was: "Old Name",
+						merchant: "Old Name",
+						category: BAD_CATEGORY,
+					});
+					expect(first.was).toBe("Old Name");
+					const second = await redraw(id, {
+						merchant_was: first.was ?? "",
+						merchant: first.typed ?? "",
+						category: BAD_CATEGORY,
+					});
+					expect(second.was).toBe("Old Name");
+					await save(id, {
+						merchant_was: second.was ?? "",
+						merchant: second.typed ?? "",
+						note: "fixed",
+					});
+					expect(await merchant(RAW)).toMatchObject({
+						display_name: "New Name",
+					});
+				});
+
+				it("a name typed before the error is still the person's own once the form is fixed", async () => {
+					const id = await charge();
+					await suggest(RAW, "Blue Bottle Coffee");
+					const failed = await redraw(id, {
+						merchant_was: "",
+						merchant: "My Bottle",
+						category: BAD_CATEGORY,
+					});
+					expect(failed.status).toBe(422);
+					// What was typed comes back in the field, and the original merchant_was beside it.
+					expect(failed.typed).toBe("My Bottle");
+					expect(failed.was).toBe("");
+					const picked = (await category())?.id;
+					await save(id, {
+						merchant_was: failed.was ?? "",
+						merchant: failed.typed ?? "",
+						category: String(picked),
+					});
+					expect(await merchant(RAW)).toMatchObject({
+						display_name: "My Bottle",
+						suggestion_status: "rejected",
+					});
+					expect(await categoryOf(id)).toBe(picked);
+				});
+
+				it("a name cleared before the error is still cleared once the form is fixed", async () => {
+					const id = await charge();
+					await db
+						.prepare(
+							"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Old Name')",
+						)
+						.bind(RAW)
+						.run();
+					const failed = await redraw(id, {
+						merchant_was: "Old Name",
+						merchant: "",
+						category: BAD_CATEGORY,
+					});
+					expect(failed.was).toBe("Old Name");
+					expect(failed.typed ?? "").toBe("");
+					await save(id, {
+						merchant_was: failed.was ?? "",
+						merchant: failed.typed ?? "",
+						note: "fixed",
+					});
+					expect(await merchant(RAW)).toMatchObject({ display_name: null });
+				});
+
+				it("draws the current name when the form carried no merchant_was, as a panel first drawn does", async () => {
+					const id = await charge();
+					await db
+						.prepare(
+							"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Current')",
+						)
+						.bind(RAW)
+						.run();
+					const failed = await redraw(id, {
+						merchant: "Current",
+						category: BAD_CATEGORY,
+					});
+					expect(failed.was).toBe("Current");
+				});
+			});
+
 			it("draws what the name field held, so a save can tell", async () => {
 				const id = await charge();
 				await suggest(RAW, "Blue Bottle Coffee");

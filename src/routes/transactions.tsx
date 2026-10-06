@@ -923,6 +923,11 @@ type SheetProps = {
 	today: string;
 	/** The name chip that was chosen when the form was posted, shown again after an error. */
 	namePick?: string | null;
+	/**
+	 * What the name field held when the panel was first drawn, which a redraw after an error carries
+	 * through from the posted form, unchanged. Without it the panel is first drawn: the merchant's name now.
+	 */
+	nameWas?: string | null;
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -936,6 +941,7 @@ function EditSheet({
 	refunds = [],
 	today,
 	namePick = null,
+	nameWas = null,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -1052,12 +1058,13 @@ function EditSheet({
 				{/* While the delete question is open there's no Save, so Enter in the name field would save the
 				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
 				{deleteConfirm && <button type="submit" disabled hidden />}
-				{/* What the name field held when this panel was drawn, so a save can tell a rename from a panel that
-				    is only out of date: another tab may have named the merchant since (src/transactions/edit.ts). */}
+				{/* What the name field held when this panel was first drawn, so a save can tell a rename from a panel that
+				    is only out of date: another tab may have named the merchant since (src/transactions/edit.ts). After
+				    an error the panel is drawn again with the posted value, never the merchant's name as it is now. */}
 				<input
 					type="hidden"
 					name="merchant_was"
-					value={tx.merchantName ?? ""}
+					value={nameWas ?? tx.merchantName ?? ""}
 				/>
 				{/* A merchant with suggested names waiting (P29 A): choose one, keep the bank's, or type your own.
 				    Nothing is chosen to start with, so saving for another reason never renames the merchant. */}
@@ -1761,6 +1768,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					errors={errors}
 					today={today}
 					namePick={form.get("name_pick")?.toString() ?? null}
+					nameWas={form.get("merchant_was")?.toString() ?? null}
 				/>
 			),
 		});
