@@ -435,6 +435,8 @@ describe("cash lifecycle", () => {
 				html.match(/<p[^>]*>Delete Farmers market, \$20\.00\?/)?.[0] ?? "";
 			expect(question).toContain("autofocus");
 			expect(question).toContain('tabindex="-1"');
+			// Focusing it scrolls Delete and Keep it into view with it on a phone.
+			expect(question).toContain("scroll-mb-24");
 			expect(html.match(/<h2 id="edit-title"[^>]*>/)?.[0]).not.toContain(
 				"autofocus",
 			);

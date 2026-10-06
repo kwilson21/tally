@@ -1234,7 +1234,8 @@ function EditSheet({
 								tabindex={-1}
 								autofocus
 								// Focused so the swap is announced with the question; it isn't a control, so no ring.
-								class="text-lg outline-none"
+								// The bottom scroll margin brings Delete and Keep it into view with it on a phone.
+								class="scroll-mb-24 text-lg outline-none"
 							>
 								{`Delete ${tx.displayName}, ${formatCents(tx.amountCents)}? This can't be undone.`}
 							</p>
