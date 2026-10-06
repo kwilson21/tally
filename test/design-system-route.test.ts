@@ -635,6 +635,12 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toMatch(/data-ds-toast="error"/);
 	});
 
+	it("renders the long unbroken merchant name in the Toast specimen", async () => {
+		const { html } = await get("/design-system");
+		const toast = html.split('id="toast"')[1]?.split("</section>")[0] ?? "";
+		expect(toast).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV");
+	});
+
 	it("shows a disconnected bank, and DESIGN.md's BankGroup row mentions it", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain("A disconnected bank, its history kept");
