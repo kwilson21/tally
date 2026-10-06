@@ -76,10 +76,12 @@ async function page() {
 	vi.stubGlobal("document", document);
 	vi.stubGlobal("location", { search: "", pathname: "/", hash: "" });
 	vi.stubGlobal("history", { replaceState: () => {} });
+	const htmx = { process: vi.fn() };
+	vi.stubGlobal("window", { htmx });
 	vi.stubGlobal("requestAnimationFrame", (run: () => void) => run());
 	vi.resetModules();
 	await load?.();
-	return { document, body, toasts };
+	return { document, body, toasts, htmx };
 }
 
 const fire = (target: EventTarget, name: string, detail: unknown) =>
@@ -426,5 +428,25 @@ describe("the toasts the server sends", () => {
 		expect(toast.attrs.get("role")).toBe("status");
 		expect(toast.textContent).toBe("Saved Groceries' budget.");
 		expect(toast.children).toHaveLength(0);
+	});
+
+	it("shows the cash-delete words and an accessible Undo form for a split entry", async () => {
+		const { body, toasts, htmx } = await page();
+		fire(body, "toast", {
+			message: "Deleted Farmers market, $20.00.",
+			type: "success",
+			undo: crypto.randomUUID(),
+		});
+		const toast = toasts.children[0] as FakeNode;
+		expect(toast.attrs.get("role")).toBe("status");
+		expect(toast.words()).toBe("Deleted Farmers market, $20.00.Undo");
+		const button = toast.all().find((node) => node.tag === "button");
+		expect(button?.textContent).toBe("Undo");
+		expect(button?.className).toContain("min-h-11");
+		const form = toast.all().find((node) => node.tag === "form");
+		expect(form?.attrs.get("hx-post")).toBe("/transactions/undo-cash-delete");
+		expect(htmx.process).toHaveBeenCalledWith(toast);
+		vi.advanceTimersByTime(10_000);
+		expect(toasts.children).toHaveLength(0);
 	});
 });

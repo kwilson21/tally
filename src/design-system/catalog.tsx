@@ -516,17 +516,17 @@ const TOAST_SPEC: UseSpecText = {
 	affordance:
 		"A small paper pill with a hairline rule and the only lift Tally allows, near the bottom of the screen (above the tab bar on a phone). It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
 	states:
-		"Success: the words. Error: the alert icon, then the words. Each stays for 4 seconds and goes; several at once stack with a gap. Hover, focus, pressed, disabled and loading: not applicable, because it can't be touched.",
+		"Success: the words. A deleted cash entry adds a 44px Undo button and stays for 10 seconds. Error: the alert icon, then the words. Other messages stay for 4 seconds; several at once stack with a gap.",
 	feedback:
 		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, and taps pass through the toast, so a Save under it can be tapped again.",
 	input:
-		"Touch and keyboard: none, and nothing in it takes focus. Screen reader: a success is role=status and an error is role=alert; the announcer region says the HX-Trigger announce text.",
+		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
-		"It fades in and rises 8 px in 150 ms, ease-out, holds, then fades out in 150 ms. That is one animation as long as its stay, 4 seconds, the same as toast.js's DISPLAY_MS, and the fade-out is over 150 ms early, so the toast is invisible 150 ms before the script takes it out (the script's timer starts a frame before the animation does, so a fade-out timed to the very end would be cut off); the script doesn't change. The CSS is set on whatever #toasts holds, on the toast and confirmation tokens. Reduced motion shows it at once with nothing moving, and it is still taken out after 4 seconds.",
+		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its 10-second token and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
-		"Long words wrap inside the pill. It sits above an open sheet (z-60), so a failed save can be read over it. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
+		"Long words wrap inside the pill. It sits above an open sheet (z-60); Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
-		"A success says what was saved (“Saved Groceries' budget.”). A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
+		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo. A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -1896,6 +1896,15 @@ function Feedback() {
 						data-ds-message="Couldn't save. Check your connection and try again."
 					>
 						Show an error toast
+					</Button>
+					<Button
+						type="button"
+						kind="secondary"
+						data-ds-toast="success"
+						data-ds-message="Deleted Farmers market, $20.00."
+						data-ds-undo="catalog-demo-token"
+					>
+						Show an Undo toast
 					</Button>
 				</div>
 				<UseSpec spec={TOAST_SPEC} />

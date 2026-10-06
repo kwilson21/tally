@@ -296,14 +296,23 @@ describe("cash lifecycle", () => {
 				})
 			).res.status,
 		).toBe(404);
-		const bill = await env.DB.prepare("SELECT id FROM bills LIMIT 1").first<{
+		const bill = await env.DB.prepare(
+			"SELECT id FROM bills WHERE id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
+		).first<{
 			id: number;
 		}>();
 		await env.DB.prepare(
-			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, '2099-01', ?, 'user', 'linked')",
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, '2026-10', ?, 'user', 'linked')",
 		)
 			.bind(bill?.id, cash?.id)
 			.run();
+		const refund = await env.DB.prepare(`INSERT INTO transactions
+			(account_id,date,amount_cents,raw_name,refund_of_id,flag_income,updated_by)
+			SELECT id, '2026-10-06', -500, 'Cash refund', ?, 0, 'demo'
+			FROM accounts WHERE type!='cash' LIMIT 1`)
+			.bind(cash?.id)
+			.run();
+		const refundId = Number(refund.meta.last_row_id);
 		const sheet = await request(`/transactions/${cash?.id}`);
 		expect(sheet.html).toContain("Delete cash transaction");
 		const bank = await env.DB.prepare(
@@ -321,8 +330,11 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=/transactions",
 		});
-		expect(confirm.html).toContain("This can&#39;t be undone.");
+		expect(confirm.html).not.toContain("This can&#39;t be undone.");
 		expect(confirm.html).toContain(">Keep it</a>");
+		const safeBeforeDelete = (await request("/")).html
+			.match(/Safe to spend<\/p>\s*<p[^>]*>(.*?)<\/p>/s)?.[1]
+			?.trim();
 		const deleted = await request(`/transactions/${cash?.id}/delete`, {
 			method: "POST",
 			headers: {
@@ -332,7 +344,12 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=/transactions&confirm=1",
 		});
+		const feedback = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}");
 		expect(deleted.res.status).toBe(200);
+		expect(feedback.toast).toMatchObject({
+			message: "Deleted Farmers market, $20.00.",
+			undo: expect.any(String),
+		});
 		expect(
 			await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
 				.bind(cash?.id)
@@ -347,12 +364,186 @@ describe("cash lifecycle", () => {
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(0);
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				token: feedback.toast.undo,
+				back: "/transactions",
+			}),
+		});
+		expect(restored.res.status).toBe(200);
+		expect(
+			JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Farmers market is back.");
+		expect(
+			await env.DB.prepare(
+				"SELECT raw_name, amount_cents, date FROM transactions WHERE id=?",
+			)
+				.bind(cash?.id)
+				.first(),
+		).toMatchObject({ raw_name: "Farmers market", amount_cents: 2000 });
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) n FROM transactions WHERE parent_id=?",
+				)
+					.bind(cash?.id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(2);
+		expect(
+			(
+				await env.DB.prepare("SELECT refund_of_id FROM transactions WHERE id=?")
+					.bind(refundId)
+					.first<{ refund_of_id: number }>()
+			)?.refund_of_id,
+		).toBe(cash?.id);
+		expect(
+			(await request("/")).html
+				.match(/Safe to spend<\/p>\s*<p[^>]*>(.*?)<\/p>/s)?.[1]
+				?.trim(),
+		).toBe(safeBeforeDelete);
 		expect(
 			(
 				await env.DB.prepare(
 					"SELECT COUNT(*) n FROM bill_payments WHERE transaction_id=?",
 				)
 					.bind(cash?.id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(1);
+		const reused = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				token: feedback.toast.undo,
+				back: "/transactions",
+			}),
+		});
+		expect(
+			JSON.parse(reused.res.headers.get("HX-Trigger") ?? "{}").toast.type,
+		).toBe("error");
+		expect(
+			(
+				await env.DB.prepare("SELECT COUNT(*) n FROM transactions WHERE id=?")
+					.bind(cash?.id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(1);
+	});
+
+	it("refuses expired and unknown undo tokens without changing the deleted entry", async () => {
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Farmers market'",
+			).first<{ id: number }>()
+		)?.id;
+		const deleted = await request(`/transactions/${id}/delete`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "back=%2Ftransactions&confirm=1",
+		});
+		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.undo as string;
+		await env.DB.prepare(
+			"UPDATE cash_delete_holds SET created_at=? WHERE token=?",
+		)
+			.bind(Date.now() - 10_001, token)
+			.run();
+		for (const value of [token, crypto.randomUUID()]) {
+			const refused = await request("/transactions/undo-cash-delete", {
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({ token: value, back: "/transactions" }),
+			});
+			expect(
+				JSON.parse(refused.res.headers.get("HX-Trigger") ?? "{}").toast.type,
+			).toBe("error");
+			expect(
+				await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
+					.bind(id)
+					.first(),
+			).toBeNull();
+		}
+	});
+
+	it("restores the entry but names a bill link that became unavailable", async () => {
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Farmers market'",
+			).first<{ id: number }>()
+		)?.id;
+		const bill = await env.DB.prepare(
+			"SELECT id, name FROM bills WHERE id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
+		).first<{ id: number; name: string }>();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, '2026-10', ?, 'user', 'linked')",
+		)
+			.bind(bill?.id, id)
+			.run();
+		const deleted = await request(`/transactions/${id}/delete`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "back=%2Ftransactions&confirm=1",
+		});
+		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.undo as string;
+		const otherTransaction = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE id!=? LIMIT 1",
+		)
+			.bind(id)
+			.first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, '2026-10', ?, 'user', 'linked')",
+		)
+			.bind(bill?.id, otherTransaction?.id)
+			.run();
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back: "/transactions" }),
+		});
+		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.message;
+		expect(message).toContain(
+			`${bill?.name} payment no longer fits and was left off.`,
+		);
+		expect(
+			await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).not.toBeNull();
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) n FROM bill_payments WHERE transaction_id=?",
+				)
+					.bind(id)
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(0);
@@ -382,9 +573,7 @@ describe("cash lifecycle", () => {
 		it("asks one sentence with the name and amount, where Cancel and Save were", async () => {
 			const id = await farmersMarket();
 			const { html } = await ask(id);
-			expect(html).toContain(
-				"Delete Farmers market, $20.00? This can&#39;t be undone.",
-			);
+			expect(html).toContain("Delete Farmers market, $20.00?");
 			// The edit form's own Cancel and Save are not there while it asks.
 			expect(html).not.toContain('id="edit-save"');
 			expect(html).not.toContain(">Save</span>");
