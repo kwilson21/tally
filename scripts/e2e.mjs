@@ -15,9 +15,16 @@ const page = await browser.newPage({
 	viewport: { width: 390, height: 844 },
 	reducedMotion: "reduce",
 });
-const errors = [];
-page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-page.on("pageerror", (e) => errors.push(e.message));
+const consoleErrors = [];
+const pageErrors = [];
+const expected422 = [];
+page.on(
+	"console",
+	(m) =>
+		m.type() === "error" &&
+		consoleErrors.push({ text: m.text(), url: m.location().url }),
+);
+page.on("pageerror", (e) => pageErrors.push(e.message));
 
 const step = (text) => console.log(`✓ ${text}`);
 const rows = () => page.locator("#results li[data-transaction]").count();
@@ -139,7 +146,17 @@ step("phone shell controls stay clear of simulated safe areas");
 for (const width of [390, 1280]) {
 	await page.setViewportSize({ width, height: 844 });
 	await goto(`${BASE}/settings/names`, { waitUntil: "networkidle" });
+	const failedSave = page.waitForResponse(
+		(response) =>
+			response.status() === 422 && response.request().method() === "POST",
+	);
 	await page.getByRole("button", { name: "Save and next" }).click();
+	const response = await failedSave;
+	expected422.push({
+		status: response.status(),
+		method: response.request().method(),
+		url: response.url(),
+	});
 	await page.locator("#names-page [role=alert]").waitFor();
 	assert.equal(
 		await page.evaluate(() => document.activeElement?.name),
@@ -457,5 +474,24 @@ step(
 );
 
 await browser.close();
-assert.deepEqual(errors, [], `console errors:\n${errors.join("\n")}`);
+// Tie the two intentional failed saves to their resource URLs; unrelated 422s cannot substitute.
+const expected422Errors = consoleErrors.filter((error) =>
+	error.text.includes("status of 422"),
+);
+const otherErrors = consoleErrors.filter(
+	(error) => !error.text.includes("status of 422"),
+);
+const expected422Urls = expected422.map(({ url }) => url).sort();
+const logged422Urls = expected422Errors.map(({ url }) => url).sort();
+const diagnostics = `expected 422 responses (method + URL): ${JSON.stringify(expected422)}\n422 console errors (text + URL): ${JSON.stringify(expected422Errors)}\nother console errors: ${JSON.stringify(otherErrors)}\npage errors: ${JSON.stringify(pageErrors)}`;
+assert.deepEqual(
+	logged422Urls,
+	expected422Urls,
+	`each deliberate 422 response must have exactly one matching console error by URL; missing messages may indicate Chromium folded duplicates\n${diagnostics}`,
+);
+assert.deepEqual(
+	{ console: otherErrors, page: pageErrors },
+	{ console: [], page: [] },
+	`expected 422 responses: ${JSON.stringify(expected422)}\n422 console errors: ${JSON.stringify(expected422Errors)}\nother console errors: ${JSON.stringify(otherErrors)}\npage errors: ${JSON.stringify(pageErrors)}`,
+);
 step("no console errors");
