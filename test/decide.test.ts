@@ -69,4 +69,47 @@ describe("decide", () => {
 			).flags,
 		).toEqual({ transfer: true, reimbursement: false, income: true });
 	});
+
+	// Spec §8.6: with the categories-and-exclusions switch off, Jev's category answer and its transfer
+	// and reimbursement flags are dropped, so nothing is applied, suggested or excluded.
+	describe("with categories and exclusions off", () => {
+		const off = { categories: false };
+
+		it("applies and suggests no category, however sure Jev is, but keeps the confidence so it isn't asked again", () => {
+			expect(decide(answer("Eating Out", 0.97), categories, 0.8, off)).toEqual({
+				categoryId: null,
+				suggestedCategoryId: null,
+				confidence: 0.97,
+				flags: { transfer: false, reimbursement: false, income: false },
+			});
+		});
+
+		it("lets no transfer or reimbursement flag through, so nothing is excluded", () => {
+			const result = decide(
+				answer("Groceries", 0.9, { transfer: 0.99, reimbursement: 0.99 }),
+				categories,
+				0.8,
+				off,
+			);
+			expect(result.flags.transfer).toBe(false);
+			expect(result.flags.reimbursement).toBe(false);
+		});
+
+		it("leaves the income answer to the income switch", () => {
+			expect(
+				decide(answer("Groceries", 0.9, { income: 0.95 }), categories, 0.8, off)
+					.flags.income,
+			).toBe(true);
+		});
+	});
+
+	it("decides as before with categories on, or with no switches given", () => {
+		const jev = answer("Eating Out", 0.93, { transfer: 0.9 });
+		const asBefore = decide(jev, categories, 0.8);
+		expect(decide(jev, categories, 0.8, { categories: true })).toEqual(
+			asBefore,
+		);
+		expect(asBefore.categoryId).toBe(2);
+		expect(asBefore.flags.transfer).toBe(true);
+	});
 });

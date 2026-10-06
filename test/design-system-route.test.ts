@@ -36,6 +36,7 @@ import { LedgerIllustration } from "../src/views/illustration";
 import { MoneyInput } from "../src/views/money-input";
 import { BottomTabs, Sidebar } from "../src/views/nav";
 import { ProgressRow } from "../src/views/progress-row";
+import { Switch } from "../src/views/switch";
 import { SystemDiagram } from "../src/views/system-diagram";
 import { ThingsToTry } from "../src/views/things-to-try";
 import { TransactionRow } from "../src/views/transaction-row";
@@ -117,6 +118,13 @@ describe("GET /design-system in the demo", () => {
 				name: "ds-exclude",
 				value: "1",
 				children: "Exclude from budget",
+			}),
+			Switch({
+				id: "ds-switch-on",
+				name: "ds-switch-on",
+				label: "Categories and exclusions",
+				hint: "Picks categories, and leaves out transfers and reimbursements.",
+				checked: true,
 			}),
 			...MONEY_STATES.map((s) => MoneyInput(s.props)),
 			ThingsToTry(),
@@ -203,6 +211,37 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(
 			/\| BankLine \|[^\n]*Check Accounts[^\n]*between the status sentence and the Band/,
 		);
+	});
+
+	it("shows the Switch on, off and without a muted line, with its whole use spec, as the AI suggestions group uses it (decision 73)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="switch"'));
+		expect(tag).toContain('data-ds-tier="interactive"');
+		expect(tag).toContain('data-ds-components="Switch"');
+		const section = html.split('id="switch"')[1]?.split("</section>")[0] ?? "";
+		const inputs = [...section.matchAll(/<input[^>]*role="switch"[^>]*>/g)].map(
+			(m) => m[0],
+		);
+		expect(inputs).toHaveLength(4);
+		const on = (input: string) => /\schecked(\s|>|=)/.test(input);
+		expect(inputs.filter(on)).toHaveLength(3);
+		expect(inputs.filter((i) => !on(i))).toHaveLength(1);
+		// The real checkboxes are the only controls here: nothing posts from the catalog.
+		expect(section).not.toContain("<form");
+		expect(section).not.toContain("<button");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		// DESIGN.md says what it is and that it works without a script.
+		expect(design).toMatch(
+			/\| Switch \|[^\n]*"On" or "Off" in words[^\n]*without JavaScript/,
+		);
+		// Its name for the AI never says Jev, since this is the family's screen too.
+		expect(section).not.toMatch(/jev/i);
+		// It lists only the AI switches that have a feature behind them, as Settings does.
+		expect(design).toMatch(/Categories and exclusions; Income/);
+		expect(section).not.toContain("Merchant names");
+		expect(section).not.toContain("Sort new transactions as they arrive");
 	});
 
 	it("shows the price-changed offer on the bill's row and page, with its whole use spec (P36 B)", async () => {

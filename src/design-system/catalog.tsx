@@ -38,6 +38,7 @@ import { NetWorthChart } from "../views/net-worth-chart";
 import { ProgressRow } from "../views/progress-row";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
+import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
@@ -373,6 +374,26 @@ const BANK_LINE_SPEC: UseSpecText = {
 		"A bank that needs signing in and hasn't synced says the sign-in words. With two or more, the first in the order they were linked is named and the rest counted. A long bank name wraps with the sentence. With no Band (nothing needs a category) the line is the last thing in Home's top. A last sync from another year adds its year (“Dec 30, 2025”). No JavaScript: it's a plain link. The demo never shows it: it has no real banks to fix.",
 	words:
 		"“{bank} hasn't synced since {Oct 1}, so Safe to spend may be too high.” · “{bank} needs you to sign in again, so Safe to spend may be too high.” · “{bank} needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high.” (“2 other banks need a look” for more) · Link: Check Accounts.",
+};
+
+// The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
+const SWITCH_SPEC: UseSpecText = {
+	purpose:
+		"Let a person turn one thing on or off and see which, in words. It's the control for the AI suggestions in Settings, where the household chooses what Tally may suggest.",
+	affordance:
+		"A track with a knob, and “On” or “Off” written beside it, so the state never rests on color or position alone. The whole row is the target, 44px tall, with the pointer hand. Off is a pale track with the knob on the left; on is an ink track with the knob on the right.",
+	states:
+		"Off: pale track, ink knob left, the word Off. On: ink track, paper knob right, the word On. Hover: no change (touch has none). Focus: the focus-visible ring around the row, for the keyboard. Pressed: it turns at once, with no separate pressed look. Disabled, loading, done and error: not applicable. A switch that can't be changed isn't shown, and a switch changes nothing until its form's Save, which has its own busy and error states.",
+	feedback:
+		"The track, knob and word change the moment it is tapped. Nothing is saved until Save is pressed. Then the toast says what was saved, the announcer reads every switch's state, and focus returns to Save. Without JavaScript Save posts the form and the page comes back at the group.",
+	input:
+		"Touch: the whole 44px row. Keyboard: Tab to it, Space turns it. Screen reader: “Income, switch, on”, then its muted line. The On and Off words and the track are hidden from it, because it already says its state.",
+	motion:
+		"The knob slides and the track changes tone in 150 ms. Reduced motion shows the end state at once.",
+	edges:
+		"A long name or line wraps beside the switch and never under it; the word and the track keep their width. With no muted line it is the name alone. No JavaScript: it's a plain checkbox that posts “on” when on and nothing when off, so the server reads a field left out as off, and the form always carries the whole group. At 320px the row still fits the name, word and track side by side.",
+	words:
+		"The label is the person's word for the feature (“Categories and exclusions”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Categories and exclusions on, income off.",
 };
 
 // The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
@@ -1133,6 +1154,55 @@ function Controls() {
 						</div>
 					</div>
 				</fieldset>
+			</Specimen>
+			<Specimen
+				id="switch"
+				title="Switch"
+				tier="interactive"
+				components={["Switch"]}
+				sentence="A real checkbox drawn as a switch, with On or Off in words beside it (decision 73, P41 B). It works without JavaScript, and its whole 44px row is the target."
+			>
+				<State label="Off, on, and with no muted line (tap one: it turns here as it does in Settings)">
+					<ul class="max-w-xl divide-y divide-rule border-y border-rule">
+						<li>
+							<Switch
+								id="ds-switch-off"
+								name="ds-switch-off"
+								label="Income"
+								hint="Spots paychecks and other money coming in."
+							/>
+						</li>
+						<li>
+							<Switch
+								id="ds-switch-on"
+								name="ds-switch-on"
+								label="Categories and exclusions"
+								hint="Picks categories, and leaves out transfers and reimbursements."
+								checked
+							/>
+						</li>
+						<li>
+							<Switch
+								id="ds-switch-plain"
+								name="ds-switch-plain"
+								label="Income"
+								checked
+							/>
+						</li>
+					</ul>
+				</State>
+				<State label="On a narrow phone (320px): the name wraps, and the word and the track keep their place">
+					<div class="w-[320px] max-w-full border-y border-rule">
+						<Switch
+							id="ds-switch-narrow"
+							name="ds-switch-narrow"
+							label="Categories and exclusions"
+							hint="Picks categories, and leaves out transfers and reimbursements."
+							checked
+						/>
+					</div>
+				</State>
+				<UseSpec spec={SWITCH_SPEC} />
 			</Specimen>
 			<Specimen
 				id="form-field"

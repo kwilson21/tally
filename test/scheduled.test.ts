@@ -1,5 +1,8 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { resetDemo } from "../src/demo/reset";
 import { runScheduled } from "../src/index";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -182,4 +185,48 @@ describe("scheduled handler", () => {
 			).first(),
 		).toEqual({ category_id: category?.id, category_source: "merchant_rule" });
 	});
+
+	// Spec §8.6: the nightly run reads the household's AI switches too.
+	it.each([
+		{ categories: false, income: false, calls: 0 },
+		{ categories: true, income: false, calls: 12 },
+		{ categories: false, income: true, calls: 12 },
+	])(
+		"asks Jev $calls times at night with categories $categories and income $income",
+		async ({ categories, income, calls }) => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await saveAiSwitches(env.DB, {
+				...AI_SWITCHES_ALL_ON,
+				categories,
+				income,
+			});
+			const fetchImpl = vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							answers: {
+								category: {
+									type: "choice",
+									choice: "Eating Out",
+									confidence: 0.5,
+								},
+								transfer: { type: "noul", noul: 0.01 },
+								reimbursement: { type: "noul", noul: 0.01 },
+								income: { type: "noul", noul: 0.01 },
+							},
+						}),
+					),
+			);
+
+			// Production, not the demo, whose nightly reset would turn the switches back on.
+			await runScheduled(
+				{ ...env, DEMO: "false", JEV_API_KEY: "jev" },
+				fetchImpl as unknown as typeof fetch,
+			);
+
+			expect(fetchImpl).toHaveBeenCalledTimes(calls);
+			vi.restoreAllMocks();
+		},
+	);
 });

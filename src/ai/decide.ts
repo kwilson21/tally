@@ -21,13 +21,20 @@ export type Decision = {
 	flags: Record<Flag, boolean>;
 };
 
+/**
+ * `categories` is the household's categories-and-exclusions switch (spec §8.6). Off, Jev's category
+ * answer is neither applied nor suggested and its transfer and reimbursement flags exclude nothing;
+ * the confidence is still kept, so the transaction isn't asked about again. The income answer
+ * belongs to the income switch, which `saveJevResult` honors.
+ */
 export function decide(
 	answer: JevAnswer,
 	categories: { id: number; name: string }[],
 	threshold: number,
+	{ categories: categoriesOn = true }: { categories?: boolean } = {},
 ): Decision {
 	const match =
-		answer.category.label === NONE_FIT
+		answer.category.label === NONE_FIT || !categoriesOn
 			? undefined
 			: categories.find((c) => c.name === answer.category.label);
 	const confident = answer.category.confidence >= threshold;
@@ -36,8 +43,8 @@ export function decide(
 		suggestedCategoryId: match ? match.id : null,
 		confidence: answer.category.confidence,
 		flags: {
-			transfer: answer.flags.transfer >= threshold,
-			reimbursement: answer.flags.reimbursement >= threshold,
+			transfer: categoriesOn && answer.flags.transfer >= threshold,
+			reimbursement: categoriesOn && answer.flags.reimbursement >= threshold,
 			income: answer.flags.income >= threshold,
 		},
 	};
