@@ -271,6 +271,41 @@ describe("GET /transactions/:id", () => {
 		expect(reviewedPanel).not.toContain("Tally&#39;s guess · 71% sure");
 	});
 
+	it("keeps the edit-panel income guess consistent with posted choices on validation errors", async () => {
+		const id = Number(
+			(
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,credit_reviewed,income_confidence) VALUES (1,'2026-09-14',-71000,'PAYROLL GUESS',0,0.71) RETURNING id",
+				).first<{ id: number }>()
+			)?.id,
+		);
+		const panel = async (fields: Record<string, string>) => {
+			const { res, html } = await post(`/transactions/${id}`, {
+				category: "99",
+				merchant: "PAYROLL GUESS",
+				note: "",
+				back: "/transactions",
+				income: "0",
+				creditReviewedVisible: "1",
+				...fields,
+			});
+			expect(res.status).toBe(422);
+			return html.includes("Tally&#39;s guess · 71% sure");
+		};
+		const { html: firstRender } = await get(`/transactions/${id}`);
+		expect(firstRender).toContain("Tally&#39;s guess · 71% sure");
+		expect(await panel({ creditReviewed: "1" })).toBe(false);
+		expect(await panel({ income: "1" })).toBe(false);
+		expect(await panel({})).toBe(true);
+
+		await env.DB.prepare(
+			"UPDATE transactions SET credit_reviewed = 1 WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		expect(await panel({ creditReviewed: "0" })).toBe(false);
+	});
+
 	it("hides an income guess when Spot paychecks is off", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('ai_income', 'off') ON CONFLICT(key) DO UPDATE SET value = 'off'",

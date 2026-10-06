@@ -1036,6 +1036,14 @@ type SheetProps = {
 	still?: boolean;
 };
 
+function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
+	return (
+		posted.income === tx.income &&
+		posted.creditReviewed === tx.creditReviewed &&
+		maybeIncomeVisible(tx)
+	);
+}
+
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
 function EditSheet({
 	tx,
@@ -1068,7 +1076,7 @@ function EditSheet({
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
-	const showIncomeGuess = values.income === tx.income && maybeIncomeVisible(tx);
+	const showIncomeGuess = showEditIncomeGuess(tx, values);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1664,7 +1672,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		note: tx.note,
 		excluded: tx.excluded,
 		income: tx.income,
-		creditReviewed: tx.income ? false : tx.creditReviewed,
+		creditReviewed: tx.creditReviewed,
 		refundOfId: tx.refundOfId ?? null,
 	};
 	const refunds = await refundPurchases(c.env.DB, tx);
