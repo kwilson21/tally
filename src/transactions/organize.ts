@@ -2,6 +2,8 @@ import {
 	COUNTED_JOINS,
 	countedCategorySql,
 	FOLLOWS_PURCHASE,
+	INCLUDED,
+	INCLUDED_ROW,
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
@@ -9,9 +11,8 @@ import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
 // A linked refund is left to its purchase, as in src/db/transactions.ts.
-const NEEDS_CATEGORY = `${countedCategorySql()} IS NULL AND t.excluded = 0 AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
-const NEEDS_CATEGORY_UPDATE =
-	"category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0 AND (amount_cents >= 0 OR credit_reviewed = 1) AND (refund_of_id IS NULL OR refund_of_id IN (SELECT id FROM transactions WHERE excluded = 1))";
+const NEEDS_CATEGORY = `${countedCategorySql()} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+const NEEDS_CATEGORY_UPDATE = `category_id IS NULL AND ${INCLUDED_ROW} AND is_split = 0 AND flag_income = 0 AND (amount_cents >= 0 OR credit_reviewed = 1) AND (refund_of_id IS NULL OR refund_of_id IN (SELECT id FROM transactions WHERE excluded = 1))`;
 const KEY = merchantKeySql("t");
 const KEY_UPDATE = merchantKeySql("transactions");
 const CHUNK_SIZE = 90;

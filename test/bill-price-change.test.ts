@@ -244,10 +244,11 @@ describe("bill matching and price changes", () => {
 			expect(
 				await rows("bill_payments", "status='linked' AND transaction_id=1"),
 			).toHaveLength(1);
+			// Linking writes nothing to the exclusion: the payment counts because it pays the bill.
 			expect(
 				await rows(
 					"transactions",
-					"id=1 AND excluded=0 AND excluded_source='user'",
+					"id=1 AND excluded=1 AND excluded_source='jev'",
 				),
 			).toHaveLength(1);
 
@@ -259,7 +260,7 @@ describe("bill matching and price changes", () => {
 			expect(now.summary.safeToSpendCents).toBe(500000 - 185000);
 		});
 
-		it("is offered in the hand-link picker, marked Excluded, and linking it puts it back", async () => {
+		it("is offered in the hand-link picker, marked Excluded, and linking it counts it", async () => {
 			const picker = await get(`/bills/1/occurrences/${period}/link`);
 			expect(picker).toContain('name="transaction_id" value="1"');
 			expect(picker).toContain("Excluded");
@@ -276,10 +277,11 @@ describe("bill matching and price changes", () => {
 			expect(
 				await rows("bill_payments", "status='linked' AND matched_by='user'"),
 			).toHaveLength(1);
+			// The hand link counts the payment without changing its exclusion.
 			expect(
 				await rows(
 					"transactions",
-					"id=1 AND excluded=0 AND excluded_source='user'",
+					"id=1 AND excluded=1 AND excluded_source='jev'",
 				),
 			).toHaveLength(1);
 			const after = await home();
@@ -438,7 +440,7 @@ describe("bill matching and price changes", () => {
 			expect((await billRow())?.amount_cents).toBe(11500);
 		});
 
-		it("puts an excluded payment back in the budget when it's accepted", async () => {
+		it("counts an excluded payment once it's accepted, and leaves its exclusion as it was", async () => {
 			await env.DB.prepare(
 				"UPDATE transactions SET excluded=1,excluded_source='plaid' WHERE id=1",
 			).run();
@@ -447,7 +449,7 @@ describe("bill matching and price changes", () => {
 			expect(
 				await rows(
 					"transactions",
-					"id=1 AND excluded=0 AND excluded_source='user'",
+					"id=1 AND excluded=1 AND excluded_source='plaid'",
 				),
 			).toHaveLength(1);
 			expect((await billRow())?.amount_cents).toBe(11500);
@@ -643,8 +645,7 @@ describe("bill matching and price changes", () => {
 				amountCents: 11500,
 				merchant: "Netflix",
 			};
-			const accepts = () =>
-				acceptPriceOffer(env.DB, 1, period, offer, 10000, "demo");
+			const accepts = () => acceptPriceOffer(env.DB, 1, period, offer, 10000);
 			const unchanged = async (excluded = 1) => {
 				expect((await billRow())?.amount_cents).toBe(10000);
 				expect(
@@ -657,14 +658,14 @@ describe("bill matching and price changes", () => {
 				).run(),
 			);
 
-			it("links, un-excludes and updates the amount together when it still holds", async () => {
+			it("links and updates the amount together when it still holds, leaving the exclusion as it was", async () => {
 				expect(await accepts()).toBe(true);
 				expect(await rows("bill_payments", "status='linked'")).toHaveLength(1);
 				expect((await billRow())?.amount_cents).toBe(11500);
 				expect(
 					await rows(
 						"transactions",
-						"id=1 AND excluded=0 AND excluded_source='user'",
+						"id=1 AND excluded=1 AND excluded_source='jev'",
 					),
 				).toHaveLength(1);
 			});

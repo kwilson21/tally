@@ -12,6 +12,7 @@ import {
 	monthsWithTransactions,
 	needsCategoryCount,
 	PAGE_SIZE,
+	payingBillsCount,
 	type RefundPurchase,
 	refundPurchases,
 	removeSplit,
@@ -914,11 +915,22 @@ transactions.post("/transactions/select/exclude", async (c) => {
 			).bind(id, actor(c)),
 		),
 	);
+	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
+	// the edit panel's does.
+	const paying = await payingBillsCount(c.env.DB, ids);
+	const stillCounts =
+		paying === 0
+			? ""
+			: ids.length === 1
+				? " It still counts while it pays a bill."
+				: paying === 1
+					? " 1 still counts while it pays a bill."
+					: ` ${paying} still count while they pay a bill.`;
 	return finishSelection(
 		c,
 		today,
 		back,
-		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.`,
+		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.${stillCounts}`,
 	);
 });
 
@@ -1006,7 +1018,7 @@ function EditSheet({
 					split was removed.
 				</p>
 			)}
-			{tx.countsInMonth && !tx.excluded && (
+			{tx.countsInMonth && (!tx.excluded || tx.paysBill) && (
 				<p class="text-muted">
 					Counts in{" "}
 					{new Intl.DateTimeFormat("en-US", {
@@ -1016,11 +1028,15 @@ function EditSheet({
 				</p>
 			)}
 			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
-			{tx.excluded && (
+			{tx.excluded && !tx.paysBill && (
 				<p class="flex items-center gap-2 text-muted">
 					<Icon name="transfer" class="size-5" />
 					Excluded from the budget
 				</p>
+			)}
+			{/* A payment linked to a bill counts whatever its exclusion (spec §8.5), so the panel says so. */}
+			{tx.excluded && tx.paysBill && (
+				<p class="text-muted">It pays a bill, so it counts in the budget.</p>
 			)}
 			{/* Outside the form, so following it never happens by accident mid-edit. */}
 			<p>
@@ -1844,7 +1860,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		excludedNow === tx.excluded
 			? ""
 			: excludedNow
-				? " It's excluded from the budget."
+				? tx.paysBill
+					? " It still counts while it pays a bill."
+					: " It's excluded from the budget."
 				: " It counts in the budget again.";
 	c.header(
 		"HX-Trigger",
