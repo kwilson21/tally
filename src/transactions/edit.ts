@@ -4,6 +4,8 @@ export type Edit = {
 	/** null leaves the category as it is. */
 	categoryId: number | null;
 	alwaysForMerchant: boolean;
+	/** Rule category shown when this panel opened, for clearing only the unchanged rule on save. */
+	merchantRuleWas?: number | null;
 	/** null falls back to the bank's raw name. */
 	displayName: string | null;
 	/**
@@ -96,6 +98,9 @@ export function parseEdit(
 		value: {
 			categoryId,
 			alwaysForMerchant,
+			...(form.has("merchant_rule_was")
+				? { merchantRuleWas: Number(form.get("merchant_rule_was")) || null }
+				: {}),
 			displayName: displayName || null,
 			nameChanged,
 			keepBankName,

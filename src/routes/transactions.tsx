@@ -1065,6 +1065,9 @@ function EditSheet({
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
+	const ruleCategory = categories.find(
+		(cat) => cat.id === tx.merchantRuleCategoryId,
+	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1167,6 +1170,13 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				{!purchase && (
+					<input
+						type="hidden"
+						name="merchant_rule_was"
+						value={values.merchantRuleWas ?? ""}
+					/>
+				)}
 				{/* While the delete question is open there's no Save, so Enter in the name field would save the
 				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
 				{deleteConfirm && <button type="submit" disabled hidden />}
@@ -1333,6 +1343,12 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
+				{ruleCategory && values.alwaysForMerchant && (
+					<p class="text-sm text-muted">
+						{tx.displayName} is always {ruleCategory.name}. Untick it and save
+						to stop.
+					</p>
+				)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">
@@ -1639,7 +1655,10 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
-		alwaysForMerchant: false,
+		alwaysForMerchant:
+			tx.merchantRuleCategoryId !== null &&
+			tx.merchantRuleCategoryId === tx.categoryId,
+		merchantRuleWas: tx.merchantRuleCategoryId,
 		displayName: tx.merchantName,
 		note: tx.note,
 		excluded: tx.excluded,
@@ -1926,6 +1945,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
+			merchantRuleWas: Number(form.get("merchant_rule_was")) || null,
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
@@ -2038,7 +2058,10 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			categoryId: tx.categoryId,
 			income: tx.income,
 			creditReviewed: tx.creditReviewed,
-			alwaysForMerchant: false,
+			alwaysForMerchant:
+				tx.merchantRuleCategoryId !== null &&
+				tx.merchantRuleCategoryId === tx.categoryId,
+			merchantRuleWas: tx.merchantRuleCategoryId,
 			displayName: tx.merchantName,
 			note: tx.note,
 			excluded: tx.excluded,

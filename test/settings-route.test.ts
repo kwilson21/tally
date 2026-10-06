@@ -69,6 +69,97 @@ describe("GET /settings", () => {
 		expect(html).not.toMatch(/<details[^>]*data-row[^>]*\bopen/);
 	});
 
+	it("lists merchant rules under one Tally's rules heading in A to Z order", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE Z', 'Zed', 1), ('RULE A', 'Acme', 2)",
+		).run();
+		const { html } = await get("/settings");
+		const rules = html.slice(html.indexOf('id="merchant-rules"'));
+		expect((html.match(/Tally&#39;s rules/g) ?? []).length).toBe(1);
+		expect(rules.indexOf("Acme")).toBeLessThan(rules.indexOf("Zed"));
+		expect(rules).toContain("Always for these merchants");
+		expect(rules).toContain(
+			"What Tally does on its own, and what it won&#39;t suggest.",
+		);
+	});
+
+	it("shows an empty state for an empty merchant rule list", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		const { html } = await get("/settings");
+		expect(html).toContain("No merchants have an Always rule yet.");
+	});
+
+	it("shows paused rules and a transaction count, with search only above 20 merchants", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 1",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE Costco', 'Costco', 1)",
+		).run();
+		const twenty = Array.from(
+			{ length: 19 },
+			(_, i) =>
+				`('RULE ${String(i).padStart(2, "0")}', 'Merchant ${String(i).padStart(2, "0")}', 2)`,
+		).join(",");
+		await env.DB.prepare(
+			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${twenty}`,
+		).run();
+		const exactlyTwenty = await get("/settings");
+		expect(exactlyTwenty.html).not.toContain('name="search"');
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE 20', 'Cobalt', 2)",
+		).run();
+		const twentyOne = await get("/settings");
+		expect(twentyOne.html).toContain('name="rules_search"');
+		expect(twentyOne.html).toContain("21 merchants, A to Z");
+		const narrowed = await get("/settings?rules_search=co");
+		expect(narrowed.html).toContain('value="co"');
+		expect(narrowed.html).toContain("2 merchants matching “co”");
+		expect(narrowed.html).toContain("Paused while Groceries is archived");
+		expect(narrowed.html).not.toContain("Merchant 01");
+	});
+
+	it("removing an Always rule leaves already sorted transactions unchanged", async () => {
+		const merchant = "RULE REMOVE TEST";
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, 'Remove Test', 1)",
+		)
+			.bind(merchant)
+			.run();
+		const transaction = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, '2026-09-14', -1200, ?, ?, 1, 'merchant_rule') RETURNING id",
+		)
+			.bind(merchant, merchant)
+			.first<{ id: number }>();
+		const { res } = await post("/settings/merchant-rules/remove", { merchant });
+		expect(res.status).toBe(200);
+		expect(trigger(res).announce).toBe(
+			"Removed the Always rule for Remove Test.",
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchant)
+				.first(),
+		).toEqual({ default_category_id: null });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+			)
+				.bind(transaction?.id)
+				.first(),
+		).toEqual({ category_id: 1, category_source: "merchant_rule" });
+	});
+
 	it("shows an empty state when there are no active categories", async () => {
 		await env.DB.prepare("UPDATE categories SET archived = 1").run();
 		const { html } = await get("/settings");

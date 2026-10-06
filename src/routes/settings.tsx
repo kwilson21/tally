@@ -23,6 +23,7 @@ import {
 	pendingSuggestions,
 } from "../db/category-suggestions";
 import { namesToReview } from "../db/merchant-names";
+import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
 import {
@@ -40,6 +41,10 @@ import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { EmptyState } from "../views/empty-state";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import {
+	MERCHANT_RULE_SEARCH_THRESHOLD,
+	MerchantRules,
+} from "../views/merchant-rules";
 import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
 import { TimeZoneRow } from "../views/time-zone-row";
@@ -118,6 +123,7 @@ type View = {
 	zoneError?: string;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
 	aiSaved?: boolean;
+	rulesSearch?: string;
 	/** Where a plain browser lands after a save: a section's id, so it isn't sent back to the top. */
 	hash?: string;
 };
@@ -407,6 +413,15 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const aiSwitches = await readAiSwitches(c.env.DB);
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
+	const rulesSearch =
+		view.rulesSearch ??
+		new URL(c.req.url).searchParams.get("rules_search") ??
+		"";
+	const ruleData = await merchantRules(c.env.DB, rulesSearch);
+	const visibleRuleData =
+		ruleData.total <= MERCHANT_RULE_SEARCH_THRESHOLD && rulesSearch
+			? await merchantRules(c.env.DB)
+			: ruleData;
 	const adding = view.open === "new";
 
 	return c.html(
@@ -564,6 +579,16 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					)}
 				</div>
 			</section>
+			<MerchantRules
+				rules={visibleRuleData.rules.map((rule) => ({
+					...rule,
+					archived: rule.archived === 1,
+				}))}
+				total={ruleData.total}
+				search={
+					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
+				}
+			/>
 			<section
 				id="household"
 				aria-labelledby="household-title"
@@ -605,6 +630,38 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		view.status ?? 200,
 	);
 }
+
+settings.post("/settings/merchant-rules/remove", async (c) => {
+	const form = await c.req.formData();
+	const merchantKey = String(form.get("merchant") ?? "");
+	if (!merchantKey) return c.text("Invalid merchant.", 400);
+	const removed = await removeMerchantRule(c.env.DB, merchantKey);
+	const search = String(form.get("rules_search") ?? "");
+	const view = { rulesSearch: search };
+	if (!removed) {
+		if (c.req.header("HX-Request"))
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({ announce: "Merchant rules list updated." }),
+			);
+		return renderSettings(c, view);
+	}
+	const message = `Removed the Always rule for ${removed}`;
+	if (c.req.header("HX-Request")) {
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: `${message}.`,
+			}),
+		);
+		return renderSettings(c, view);
+	}
+	return c.redirect(
+		`/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`,
+		303,
+	);
+});
 
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	const id = Number(c.req.param("id"));

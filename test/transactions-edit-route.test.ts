@@ -176,6 +176,93 @@ describe("GET /transactions/:id", () => {
 		);
 	});
 
+	it("opens the Always toggle checked for its saved category, and unticking removes only the rule", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, 2) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+		)
+			.bind(merchantKey)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toMatch(/name="always" value="1" checked/);
+		expect(sheet).toContain("Local Bakery is always");
+		const { res } = await post(`/transactions/${bakery}`, {
+			category: "2",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+			merchant_rule_was: "2",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first(),
+		).toEqual({ default_category_id: null });
+		expect(
+			await env.DB.prepare("SELECT category_id FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first(),
+		).toEqual({ category_id: 2 });
+	});
+
+	it("unticks the toggle for another selected category and ticking saves that category as the rule", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = ?",
+		)
+			.bind(merchantKey)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).not.toMatch(/name="always" value="1" checked/);
+		const { res } = await post(`/transactions/${bakery}`, {
+			category: "2",
+			always: "1",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+			merchant_rule_was: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first(),
+		).toEqual({ default_category_id: 2 });
+	});
+
 	it("tidies an unnamed merchant's raw text for the heading, showing the raw text underneath and as the input placeholder", async () => {
 		const paypal = (
 			await env.DB.prepare(

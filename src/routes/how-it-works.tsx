@@ -385,6 +385,10 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 					</ol>
 					<p class="mt-3">
+						See every rule in Settings under Tally's rules. Removing a rule
+						doesn't change transactions it already sorted.
+					</p>
+					<p class="mt-3">
 						A suggested category is only an idea; nothing is created until a
 						person says so.
 					</p>
