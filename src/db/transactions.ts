@@ -664,15 +664,30 @@ export async function saveEdit(
 				[current.merchantKey],
 			),
 		);
-	// A credit a person newly marks as income counts as income, so an exclusion Plaid put on it (a
-	// transfer category) comes off, even though the panel sends its Exclude chip as it was drawn, on.
-	// This runs after the panel's own update: a chip the person turned off already made the exclusion
-	// theirs, and a person's or Jev's exclusion is never Plaid's to lift.
-	if (edit.income && current.income === 0)
+	// A credit a person newly marks as income, or newly reviews as a refund or other non-income credit,
+	// is theirs to count (decision 70), so an exclusion Plaid put on it (a transfer category) comes off,
+	// even though the panel sends its Exclude chip as it was drawn, on. This runs after the panel's own
+	// update: a chip the person turned off already made the exclusion theirs, and a person's or Jev's
+	// exclusion is never Plaid's to lift.
+	if ((edit.income && current.income === 0) || creditReviewByUser)
 		statements.push(
 			gated(
 				`UPDATE transactions SET excluded = 0, excluded_source = NULL, updated_by = ?, updated_at = datetime('now')
 				WHERE id = ? AND amount_cents < 0 AND excluded_source = 'plaid'`,
+				[actor, id],
+			),
+		);
+	// A split credit is one bank transaction and only its parts count, so a person reviewing it from
+	// the split's own panel reviews its parts too, and Plaid's exclusion comes off them. A part that is
+	// income keeps that, and so does one a person or Jev excluded.
+	if (creditReviewByUser && current.isSplit === 1)
+		statements.push(
+			gated(
+				`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user',
+					excluded = CASE WHEN excluded_source = 'plaid' THEN 0 ELSE excluded END,
+					excluded_source = CASE WHEN excluded_source = 'plaid' THEN NULL ELSE excluded_source END,
+					updated_by = ?, updated_at = datetime('now')
+				WHERE parent_id = ? AND amount_cents < 0 AND flag_income = 0`,
 				[actor, id],
 			),
 		);
