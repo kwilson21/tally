@@ -369,6 +369,10 @@ function Shell() {
 					narrow the window to see the sidebar and the tabs. No item is current
 					here, because the catalog isn't one of the destinations.
 				</p>
+				<p class="max-w-prose">
+					On phones, keyboard scrolling leaves room below focused content for
+					the fixed tabs and Feedback pill; desktop has no bottom padding.
+				</p>
 				<MotionSpec>
 					Pages cross-fade in 150 ms through the browser's own View Transitions,
 					with no script: every page opts in with{" "}

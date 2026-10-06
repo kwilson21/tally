@@ -18,6 +18,44 @@ page.on("pageerror", (e) => errors.push(e.message));
 
 const step = (text) => console.log(`✓ ${text}`);
 const rows = () => page.locator("#results li[data-transaction]").count();
+const assertPhoneFocusClearsFixedControls = async (path) => {
+	await goto(`${BASE}${path}`, { waitUntil: "networkidle" });
+	await page.evaluate(() => document.activeElement?.blur());
+	const tabStops = await page
+		.locator(
+			"a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), summary",
+		)
+		.count();
+	const seen = new Set();
+	for (let i = 0; i < tabStops; i++) {
+		await page.keyboard.press("Tab");
+		const focused = await page.evaluate(() => {
+			const el = document.activeElement;
+			const rect = el?.getBoundingClientRect();
+			return {
+				key: el?.id || el?.getAttribute("href") || el?.textContent?.trim(),
+				bottom: rect?.bottom,
+				isTab: !!el?.closest('nav[aria-label="Tabs"]'),
+				isFeedback: el?.matches('a[href="/feedback"]'),
+				tabTop: document
+					.querySelector('nav[aria-label="Tabs"]')
+					?.getBoundingClientRect().top,
+				feedbackTop: document
+					.querySelector('a[href="/feedback"]')
+					?.getBoundingClientRect().top,
+			};
+		});
+		if (focused.key && !focused.isTab && !focused.isFeedback) {
+			assert(
+				focused.bottom <=
+					Math.min(focused.tabTop, focused.feedbackTop ?? Infinity),
+				`${path}: focused item ${focused.key} overlaps phone tabs or Feedback`,
+			);
+			seen.add(focused.key);
+		}
+	}
+	assert(seen.size > 0, `${path}: no page controls received focus`);
+};
 // A link opens its page with a 150 ms cross-fade (decision 76). A page.goto while it runs makes the
 // browser cancel it and log an error, so wait for it to end first, as a person would.
 const goto = async (url, options) => {
@@ -36,6 +74,15 @@ await page.route("**/assets/app.css", async (route) => {
 		body: `${css}\n:root { --safe-area-top: 59px; --safe-area-right: 44px; --safe-area-bottom: 34px; --safe-area-left: 44px; }`,
 	});
 });
+
+await assertPhoneFocusClearsFixedControls("/transactions?uncategorized=1");
+step(
+	"Tab keeps every focused transaction control above the phone tabs and Feedback",
+);
+await assertPhoneFocusClearsFixedControls("/settings");
+step(
+	"Tab keeps every focused Settings control above the phone tabs and Feedback",
+);
 
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.keyboard.press("Tab");
