@@ -174,6 +174,7 @@ const splitSuggested = (
 	<PanelSheet tall behind="">
 		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
 		<SuggestedSplit
+			idPrefix="p90-suggested"
 			parts={[
 				{ category: 5, amount: "" },
 				{ category: 1, amount: "" },
@@ -190,6 +191,7 @@ const splitFilled = (
 	<PanelSheet tall behind="">
 		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
 		<SuggestedSplit
+			idPrefix="p90-filled"
 			kept
 			parts={[
 				{ category: 5, amount: "49.36" },

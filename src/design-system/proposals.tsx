@@ -328,7 +328,7 @@ export const DECIDED: readonly {
 	{
 		title: "P90 · A store that sells many kinds of things",
 		outcome:
-			"Option A, combined with B: Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80). A store is mixed from the last 3 months, split parts counting; “Split this one?” shows on every trip there; the parts start from the trip's details, and the store's most-used categories fill in when they name one or none (decision 87).",
+			"Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80). Decision 89 and P117 replace the mixed-store count, showing “Split this one?” on every trip, and filling parts with the store's most-used categories.",
 		issue: 233,
 	},
 	{
@@ -419,6 +419,7 @@ export const DECIDED: readonly {
 		title: "P117 · When Split this one? shows",
 		outcome:
 			"Option A: Jev says when a trip looks mixed, using this household's categories and transaction details; “Split this one?” appears only for that trip, and suggested category parts start dashed with empty amounts (decision 89, pictures 14–16).",
+		issue: 233,
 	},
 ];
 

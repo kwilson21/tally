@@ -114,17 +114,24 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(p90Start, p90End)).toContain(
 			'href="#p117-when-split-this-one"',
 		);
+		const p90 = DECIDED.find((entry) => entry.title.startsWith("P90 ·"));
+		expect(p90?.outcome).not.toContain("from the last 3 months");
+		expect(p90?.outcome).not.toContain("on every trip there");
+		expect(p90?.outcome).not.toContain("most-used categories fill in");
+		expect(p90?.outcome).toMatch(/P117|decision 89/);
+		const p117Decision = DECIDED.find((entry) =>
+			entry.title.startsWith("P117 ·"),
+		);
+		expect(p117Decision?.issue).toBe(233);
+		expect(html).not.toContain("Its issue is written when it's built.");
 	});
 
 	it("uses unique IDs throughout the proposals page", async () => {
 		const { html } = await get("/design-system/proposals");
-		const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+		const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(
+			(match) => match[1] ?? "",
+		);
 		const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
-		expect(duplicates).not.toContain("p117-split-line");
-		expect(duplicates).not.toContain("p117-part-category-0");
-		expect(duplicates).not.toContain("p117-part-amount-0");
-		expect(duplicates).not.toContain("p117-part-category-1");
-		expect(duplicates).not.toContain("p117-part-amount-1");
 		expect(duplicates).toEqual([
 			"p27-file",
 			"p27-file-hint",
@@ -133,6 +140,17 @@ describe("GET /design-system/proposals", () => {
 			"select-2-name",
 			"select-3-name",
 		]);
+		expect(duplicates).not.toContain("p90-suggested-split-line");
+		expect(duplicates).not.toContain("p90-filled-split-line-kept");
+		expect(duplicates).not.toContain("p117-split-line");
+		const idsByValue = new Map<string, number>();
+		for (const id of ids) idsByValue.set(id, (idsByValue.get(id) ?? 0) + 1);
+		const knownOtherPageDuplicates = new Set(duplicates);
+		for (const [, labelFor] of html.matchAll(/\sfor="([^"]+)"/g)) {
+			const id = labelFor ?? "";
+			if (knownOtherPageDuplicates.has(id)) continue;
+			expect(idsByValue.get(id)).toBe(1);
+		}
 	});
 
 	it("draws a $0 budget and a far-over category without breaking the bars", async () => {
