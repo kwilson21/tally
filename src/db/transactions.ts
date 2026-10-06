@@ -123,12 +123,14 @@ export async function listTransactions(
 	const where: string[] = [];
 	const args: (string | number)[] = [];
 	const { names: namesOn } = await readAiSwitches(db);
+	const rowMonth = f.raw ? "substr(t.date,1,7)" : COUNTED_MONTH;
+	const rowCategory = f.raw ? "t.category_id" : COUNTED_CATEGORY;
 	if (f.month !== "all") {
-		where.push(`${COUNTED_MONTH} = ?`);
+		where.push(`${rowMonth} = ?`);
 		args.push(f.month);
 	}
 	if (f.category !== null) {
-		where.push(`${COUNTED_CATEGORY} = ?`);
+		where.push(`${rowCategory} = ?`);
 		where.push("t.is_split = 0");
 		args.push(f.category);
 	}

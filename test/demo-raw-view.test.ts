@@ -73,6 +73,16 @@ beforeEach(async () => {
 });
 
 describe("the list, straight from the bank (?raw=1, in the demo)", () => {
+	it("counts the split purchase parent once: 38 transactions, not 37", async () => {
+		const { html: raw } = await demo("/transactions?raw=1");
+		expect(countOf(raw)).toMatch(
+			/^Showing 1–25 of 38 transactions in [A-Z][a-z]+, as the bank sends them$/,
+		);
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const { html: normal } = await demo(`/transactions?month=${month}`);
+		expect(countOf(normal)).toMatch(/^Showing 1–25 of 39 transactions in /);
+	});
+
 	it("shows a split purchase once as the bank sent it and counts it once", async () => {
 		const seed = await env.DB.prepare(
 			"SELECT id, amount_cents FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431' AND amount_cents = 18742",
@@ -86,8 +96,9 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const realTotal = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL",
 		).first<{ n: number }>();
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const raw = await demo(
-			"/transactions?raw=1&month=all&q=COSTCO+WHSE+%230431",
+			`/transactions?raw=1&month=${month}&q=COSTCO+WHSE+%230431`,
 		);
 		const rows = rowsOf(raw.html);
 		const seedRows = rows.filter((row) => row.id === seed?.id);
@@ -97,6 +108,22 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(
 			parts.results.every((part) => !rows.some((row) => row.id === part.id)),
 		).toBe(true);
+		const normalMonth = await demo(
+			`/transactions?month=${month}&show=spending&q=COSTCO+WHSE+%230431`,
+		);
+		const normalRows = rowsOf(normalMonth.html);
+		expect(normalRows.some((row) => row.id === seed?.id)).toBe(false);
+		expect(
+			parts.results.every((part) =>
+				normalRows.some((row) => row.id === part.id),
+			),
+		).toBe(true);
+		const normalCostco = await demo(
+			`/transactions?month=${month}&show=spending&q=COSTCO+WHSE`,
+		);
+		expect(countOf(normalCostco.html)).toContain(
+			"2 spending transactions matching",
+		);
 		const full = await demo("/transactions?raw=1&month=all");
 		expect(countOf(full.html)).toContain(`of ${realTotal?.n} transactions`);
 	});

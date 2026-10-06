@@ -1777,6 +1777,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			),
 		});
 	}
+	// Add a part: the open sheet again, with one more part.
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
