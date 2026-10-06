@@ -176,13 +176,16 @@ function demoBills(
 	transactions: { date: string; rawName: string; amountCents: number }[],
 ): (string | number | null)[][] {
 	const day = Number(today.slice(8, 10));
-	// The soccer payment the yearly bill is linked to, so its amount matches.
+	// The soccer payment the yearly bill is linked to, so its amount matches. History is dated the
+	// 14th, or today's day-of-month when that is earlier (src/demo/seed.ts).
+	const soccerDay = Math.min(14, day);
 	const paidSoccer = {
 		cents:
 			transactions.find(
 				(t) =>
 					t.rawName === "YOUTH SOCCER LEAGUE" &&
-					t.date === `${monthOffset(today, 3)}-14`,
+					t.date ===
+						`${monthOffset(today, 3)}-${String(soccerDay).padStart(2, "0")}`,
 			)?.amountCents ?? 9000,
 	};
 	const paymentDay = (rawName: string) =>
@@ -261,7 +264,7 @@ function demoBills(
 			6,
 			"Soccer league",
 			paidSoccer.cents,
-			14,
+			soccerDay,
 			"yearly",
 			Number(monthOffset(today, 3).slice(5)),
 			4,

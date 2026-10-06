@@ -17,6 +17,7 @@ import {
 	excludedBreakdown,
 	monthCounts,
 } from "../db/transactions";
+import { loadTrends } from "../db/trends";
 import {
 	budgetExample,
 	categorizationExample,
@@ -24,8 +25,10 @@ import {
 	exclusionsExample,
 	netWorthExample,
 	transactionsExample,
+	trendsExample,
 } from "../how-it-works/examples";
 import { formatCents } from "../money";
+import { buildTrends, RUN_MONTHS, sameDaysCaption } from "../trends";
 import { TallyMark } from "../views/brand";
 import {
 	BillsDiagram,
@@ -137,13 +140,16 @@ howItWorks.get("/how-it-works", async (c) => {
 	const monthLabel = monthName(month);
 	// Screens call the AI "Tally"; only the demo's page names Jev (decision 64).
 	const ai: "Jev" | "Tally" = demo ? "Jev" : "Tally";
-	const [data, counts, excluded, billData, bankDated] = await Promise.all([
-		loadMonth(c.env.DB, month),
-		monthCounts(c.env.DB, month),
-		excludedBreakdown(c.env.DB, month),
-		loadBillRows(c.env.DB, today),
-		bankDatedCount(c.env.DB, month),
-	]);
+	const [data, counts, excluded, billData, bankDated, trendsData] =
+		await Promise.all([
+			loadMonth(c.env.DB, month),
+			monthCounts(c.env.DB, month),
+			excludedBreakdown(c.env.DB, month),
+			loadBillRows(c.env.DB, today),
+			bankDatedCount(c.env.DB, month),
+			loadTrends(c.env.DB, today),
+		]);
+	const trendsExampleText = trendsExample(buildTrends(trendsData));
 	const hasTransactions =
 		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
 	const unpaidDueBillsCents = billData.rows
@@ -435,6 +441,48 @@ howItWorks.get("/how-it-works", async (c) => {
 						</>
 					) : (
 						<p class="mt-3">No bill has been paid yet this month.</p>
+					)}
+				</Section>
+
+				<Section id="trends" title="Trends">
+					<p class="mt-2">
+						Trends compares this month with last month and shows which
+						categories are going well.
+					</p>
+					<ul class="mt-3 list-disc space-y-1 pl-5">
+						<li>
+							This month so far is compared with the same days of last month (
+							{sameDaysCaption(today)}).
+						</li>
+						<li>
+							Spending counts exactly as it does on Home: refunds reduce it, and
+							income, excluded transactions and credits held for review are left
+							out.
+						</li>
+						<li>
+							Going well: under budget {RUN_MONTHS} or more months running.
+						</li>
+						<li>
+							Worth a look: spending up {RUN_MONTHS} or more months running. A
+							category that is both is worth a look.
+						</li>
+						<li>
+							The month still going is drawn dashed and isn't judged against its
+							budget until it's over. When Tally's history starts after the 1st
+							of a month, that month is only partly there, so it's drawn striped
+							but never judged or compared; one that starts on the 1st counts
+							like any other.
+						</li>
+						<li>Code writes these sentences, not AI.</li>
+					</ul>
+					{trendsExampleText ? (
+						<Example demo={demo} monthName={monthLabel}>
+							{trendsExampleText}
+						</Example>
+					) : (
+						<p class="mt-3">
+							Trends fill in as months pass, so there is nothing to compare yet.
+						</p>
 					)}
 				</Section>
 

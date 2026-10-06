@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { accounts } from "../src/routes/accounts";
@@ -51,6 +51,20 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).toContain("due and overdue");
 		expect(html).toMatch(/including uncategorized and\s+unbudgeted/);
 		expect(html).not.toMatch(/small AI/);
+	});
+
+	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
+		const { html } = await get("/how-it-works");
+		const trends =
+			html.match(/<section[^>]*id="trends"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(trends).toContain("Trends compares this month with last month");
+		expect(trends).toContain("under budget 3 or more months running");
+		expect(trends).toContain("up 3 or more months running");
+		expect(trends).toMatch(/\(\w{3} 1(–\d+)? against \w{3} 1(–\d+)?\)/);
+		expect(trends).toContain("not AI");
+		expect(decodeHtml(trends)).toMatch(
+			/In the demo for \w+: <\/span>Groceries stayed under its budget in May, June, July, August and September, so it's going well\./,
+		);
 	});
 
 	it("keeps its budget example equal to Home", async () => {
@@ -124,6 +138,29 @@ describe("outside the demo", () => {
 		expect(html).not.toContain('id="architecture"');
 		expect(html).not.toContain("system-diagram");
 		expect(html).not.toContain("Cloudflare Worker (Hono, TypeScript)");
+	});
+
+	it("gives Trends the household's own numbers, or a plain sentence before there's a month to compare", async () => {
+		const own = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		const section = (html: string) =>
+			html.match(/<section[^>]*id="trends"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(section(own)).toMatch(/With your numbers for \w+: /);
+		expect(decodeHtml(section(own))).toContain("so it's going well.");
+
+		// With history that starts last month there is nothing to compare yet.
+		const last = monthsBefore(todayIn(DEFAULT_TIME_ZONE).slice(0, 7), 1);
+		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
+			.bind(`${last}-02`)
+			.run();
+		const early = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(section(early)).toContain(
+			"Trends fill in as months pass, so there is nothing to compare yet.",
+		);
+		expect(section(early)).not.toContain("With your numbers");
 	});
 
 	it("uses a plain sentence instead of transaction examples when the month is empty", async () => {

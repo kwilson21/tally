@@ -1,6 +1,7 @@
 import type { BudgetAmount, CountedTransaction } from "../budget";
 import {
 	COUNTED_JOINS,
+	COUNTED_SPENDING,
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
@@ -42,8 +43,7 @@ export async function loadMonth(
 				 WHERE archived = 0 OR EXISTS (
 					SELECT 1 FROM transactions t
 					${COUNTED_JOINS}
-					WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
-						AND t.flag_income = 0 AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR ${FOLLOWS_PURCHASE})
+					WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND ${COUNTED_SPENDING}
 				 )
 				 ORDER BY sort_order, name`,
 			)
