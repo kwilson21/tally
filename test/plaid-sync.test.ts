@@ -128,7 +128,7 @@ describe("syncItem", () => {
 
 		expect(
 			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-		).toEqual({ added: 2, modified: 0, removed: 0 });
+		).toEqual({ added: 3, modified: 0, removed: 0 });
 		expect(fetchImpl.mock.calls[0]?.[0].toString()).toContain("/accounts/get");
 		expect(fetchImpl.mock.calls[1]?.[0].toString()).toContain(
 			"/transactions/sync",
@@ -142,6 +142,11 @@ describe("syncItem", () => {
 			"SELECT amount_cents, raw_name, plaid_category FROM transactions ORDER BY id",
 		).all();
 		expect(results).toEqual([
+			{
+				amount_cents: 1234,
+				raw_name: "RAW SHOP",
+				plaid_category: "GENERAL_MERCHANDISE",
+			},
 			{
 				amount_cents: 1234,
 				raw_name: "RAW SHOP",
@@ -363,25 +368,6 @@ describe("syncItem", () => {
 			),
 		);
 		expect(await merchantNames()).toEqual([null, null, null]);
-	});
-
-	it("keeps a pending transaction out, as before: this only adds the column", async () => {
-		const id = await addItem();
-		await syncItem(
-			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
-			id,
-			plaidFetch(() =>
-				response(
-					page({
-						added: [transaction({ transaction_id: "p", pending: true })],
-					}),
-				),
-			),
-		);
-
-		expect(
-			await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions").first(),
-		).toEqual({ n: 0 });
 	});
 
 	it("matches a bill from raw names that share Plaid's merchant name", async () => {
@@ -881,28 +867,6 @@ describe("syncItem", () => {
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
 		).toEqual({ n: 1 });
-	});
-
-	it("ignores a pending transaction for an unknown account", async () => {
-		const id = await addItem();
-		expect(
-			await syncItem(
-				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
-				id,
-				plaidFetch(
-					() =>
-						response(
-							page({
-								added: [transaction({ account_id: "unknown", pending: true })],
-							}),
-						),
-					[],
-				),
-			),
-		).toEqual({ added: 0, modified: 0, removed: 0 });
-		expect(
-			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
-		).toEqual({ n: 0 });
 	});
 
 	it("adds and logs nothing when the same page is synced twice", async () => {

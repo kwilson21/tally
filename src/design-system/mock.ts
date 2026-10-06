@@ -66,6 +66,55 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 			excluded: true,
 		},
 	},
+	// Pending (P34 A, decision 72): the word joins the one caption line, and goes first when the caption says more.
+	{
+		label: "Pending, with a category: Pending follows it",
+		row: {
+			...row,
+			id: 5,
+			displayName: "Trader Joe's",
+			rawName: "TRADER JOE'S #552",
+			amountCents: 6412,
+			categoryId: 1,
+			categoryName: "Groceries",
+			categoryIcon: "groceries",
+			categoryColor: "cat-blue",
+			pending: true,
+		},
+	},
+	{
+		label: "Pending, needs a category: Pending takes the bank text's place",
+		row: { ...row, id: 6, pending: true },
+	},
+	{
+		label: "Pending and excluded: the caption says more, so Pending goes first",
+		row: {
+			...row,
+			id: 7,
+			displayName: "Transfer to savings",
+			rawName: "ONLINE TRANSFER",
+			amountCents: 50000,
+			excluded: true,
+			pending: true,
+		},
+	},
+	{
+		label: "Pending and a split part: Pending goes first",
+		row: {
+			...row,
+			id: 8,
+			displayName: "Costco",
+			rawName: "COSTCO WHSE #0421",
+			amountCents: 8240,
+			categoryId: 1,
+			categoryName: "Groceries",
+			categoryIcon: "groceries",
+			categoryColor: "cat-blue",
+			parentId: 9,
+			parentName: "Costco",
+			pending: true,
+		},
+	},
 ];
 
 /**

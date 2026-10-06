@@ -50,6 +50,7 @@ import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { ABOVE_TABS } from "../views/nav";
+import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
@@ -935,6 +936,7 @@ function EditSheet({
 			<p class="text-muted">
 				{dayLabel(tx.date, today)} · {account}
 			</p>
+			{tx.pending && <PendingNote />}
 			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}

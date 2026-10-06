@@ -27,6 +27,10 @@ import {
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
+// A split part is its own row, stored as posted; it is as pending as its parent (the purchase), read
+// from the parent so there's nothing to keep in sync. Needs the parent joined as `p`.
+const PENDING_SQL =
+	"CASE WHEN t.parent_id IS NOT NULL THEN p.pending ELSE t.pending END";
 
 export type ListRow = {
 	id: number;
@@ -52,6 +56,8 @@ export type ListRow = {
 	/** A linked refund whose purchase counts, so it takes that purchase's month and category. */
 	followsPurchase?: boolean;
 	refundedCents?: number;
+	/** The bank hasn't finished it: it counts like any other, and says "Pending" (decision 67). */
+	pending?: boolean;
 };
 
 export const PAGE_SIZE = 25;
@@ -114,7 +120,7 @@ export async function listTransactions(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
+				t.excluded, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
@@ -131,6 +137,7 @@ export async function listTransactions(
 				| "displayName"
 				| "isSplit"
 				| "followsPurchase"
+				| "pending"
 			> & {
 				merchantName: string | null;
 				parentMerchantName: string | null;
@@ -140,6 +147,7 @@ export async function listTransactions(
 				creditReviewed: number;
 				isSplit: number;
 				followsPurchase: number;
+				pending: number;
 			}
 		>();
 
@@ -155,6 +163,7 @@ export async function listTransactions(
 			creditReviewed: r.creditReviewed === 1,
 			isSplit: r.isSplit === 1,
 			followsPurchase: r.followsPurchase === 1,
+			pending: r.pending === 1,
 			displayName: merchantName ?? tidyName(r.rawName),
 		}),
 	);
@@ -278,7 +287,7 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				t.excluded, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
@@ -287,6 +296,7 @@ export async function getTransaction(
 			JOIN accounts a ON a.id = t.account_id
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN transactions p ON p.id = t.parent_id
 			${COUNTED_JOINS}
 			WHERE t.id = ?`,
 		)
@@ -300,12 +310,14 @@ export async function getTransaction(
 				| "displayName"
 				| "isSplit"
 				| "followsPurchase"
+				| "pending"
 			> & {
 				excluded: number;
 				income: number;
 				creditReviewed: number;
 				isSplit: number;
 				followsPurchase: number;
+				pending: number;
 			}
 		>();
 	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
@@ -317,6 +329,7 @@ export async function getTransaction(
 				creditReviewed: r.creditReviewed === 1,
 				isSplit: r.isSplit === 1,
 				followsPurchase: r.followsPurchase === 1,
+				pending: r.pending === 1,
 				displayName: r.merchantName ?? tidyName(r.rawName),
 			}
 		: null;
