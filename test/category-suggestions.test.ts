@@ -146,6 +146,7 @@ describe("shared Maybe parts", () => {
 		const html = renderToString(MaybeIncome());
 		expect(html).toContain("Maybe income");
 		expect(html).toContain("border-dashed");
+		expect(html).not.toContain('data-icon="circle-dashed"');
 	});
 	it("renders both new-category and below-threshold category row tags", async () => {
 		const { MaybeCategory } = await import("../src/views/maybe-category");
@@ -156,6 +157,9 @@ describe("shared Maybe parts", () => {
 		expect(
 			renderToString(MaybeCategory({ name: "Eating Out", kind: "category" })),
 		).toContain("Maybe Eating Out");
+		expect(
+			renderToString(MaybeCategory({ name: "Eating Out", kind: "category" })),
+		).toContain('data-icon="circle-dashed"');
 	});
 	it("renders the first dashed category chip as Suggested with Tally's confidence", async () => {
 		const { SuggestedCategoryChip } = await import(

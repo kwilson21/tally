@@ -56,6 +56,47 @@ describe("rowCaption", () => {
 		expect(html).toContain("Maybe income");
 		expect(html).not.toContain("Review credit");
 	});
+	it("hides a reviewed non-income credit's income guess", async () => {
+		const row = {
+			...base,
+			amountCents: -1200,
+			creditReviewed: true,
+			incomeConfidence: 0.71,
+		};
+		expect(rowCaption(row).caption).not.toBe("Maybe income");
+		const html = await TransactionRow({ row }).toString();
+		expect(html).not.toContain("Maybe income");
+	});
+	it("shows a selected income as plain Income even if confidence is low", async () => {
+		const row = {
+			...base,
+			amountCents: -1200,
+			income: true,
+			incomeConfidence: 0.71,
+		};
+		expect(rowCaption(row)).toMatchObject({
+			caption: "Income",
+			kind: "income",
+		});
+		const html = await TransactionRow({ row }).toString();
+		expect(html).toContain(">Income</span>");
+		expect(html).not.toContain("Maybe income");
+	});
+	it("leaves a confident Jev income as plain Income", async () => {
+		const row = {
+			...base,
+			amountCents: -1200,
+			income: true,
+			incomeConfidence: 0.95,
+		};
+		const html = await TransactionRow({ row }).toString();
+		expect(rowCaption(row)).toMatchObject({
+			caption: "Income",
+			kind: "income",
+		});
+		expect(html).toContain(">Income</span>");
+		expect(html).not.toContain("Maybe income");
+	});
 	const kids = {
 		categoryId: 4,
 		categoryName: "Kids",

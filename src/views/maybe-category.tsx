@@ -1,5 +1,44 @@
+import { JEV_THRESHOLD } from "../ai/categorize";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
+
+/** A low-confidence credit is a visible income guess only until someone decides what it is. */
+export function maybeIncomeVisible({
+	amountCents,
+	income,
+	incomeConfidence,
+	creditReviewed,
+}: {
+	amountCents: number;
+	income: boolean;
+	incomeConfidence?: number | null;
+	creditReviewed: boolean;
+}) {
+	return (
+		amountCents < 0 &&
+		!income &&
+		!creditReviewed &&
+		incomeConfidence != null &&
+		incomeConfidence < JEV_THRESHOLD
+	);
+}
+
+function MaybeTag({
+	word,
+	details,
+	icon = false,
+}: {
+	word: "category" | "income";
+	details?: string;
+	icon?: boolean;
+}) {
+	return (
+		<span class="inline-flex min-h-11 shrink-0 items-center gap-1 truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
+			{icon && <Icon name="circle-dashed" class="size-4" />}
+			Maybe {word === "income" ? word : details}
+		</span>
+	);
+}
 
 /** Shared dashed category guess: a row label distinguishes a new category; a chip is chosen by a person. */
 export function MaybeCategory({
@@ -10,22 +49,17 @@ export function MaybeCategory({
 	kind: "new" | "category";
 }) {
 	return (
-		<span class="inline-flex min-h-11 items-center gap-1 truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
-			<Icon name="circle-dashed" class="size-4" />
-			Maybe {kind === "new" ? "new: " : ""}
-			{name}
-		</span>
+		<MaybeTag
+			word="category"
+			details={`${kind === "new" ? "new: " : ""}${name}`}
+			icon
+		/>
 	);
 }
 
 /** A below-threshold paycheck answer uses the same dashed row tag as other Maybe suggestions. */
 export function MaybeIncome() {
-	return (
-		<span class="inline-flex min-h-11 items-center gap-1 truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
-			<Icon name="circle-dashed" class="size-4" />
-			Maybe income
-		</span>
-	);
+	return <MaybeTag word="income" />;
 }
 
 /** P32 A: first option in the category field, explicitly marked as a suggestion. */

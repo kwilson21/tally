@@ -98,6 +98,29 @@ describe("GET /transactions/:id", () => {
 		expect(sheet).toContain("border-dashed");
 		expect(sheet).toContain("Tally&#39;s guess · 71% sure");
 		expect(sheet).toContain('aria-label="Why? income"');
+		expect(sheet).toMatch(
+			/<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization" aria-label="Why\? income" class="inline-flex min-h-11 min-w-11/,
+		);
+		const savedAsRefund = await post(`/transactions/${id}`, {
+			merchant: "PAYROLL CREDIT",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewedVisible: "1",
+			creditReviewed: "1",
+		});
+		expect(savedAsRefund.res.status).toBe(200);
+		const { html: reviewedList } = await get(
+			"/transactions?show=all&month=all&q=PAYROLL",
+		);
+		const reviewedRow = reviewedList.slice(
+			reviewedList.indexOf(`data-transaction="${id}"`),
+		);
+		expect(reviewedRow.slice(0, reviewedRow.indexOf("</li>"))).not.toContain(
+			"Maybe income",
+		);
+		const { html: reviewedPanel } = await get(`/transactions/${id}`);
+		expect(reviewedPanel).not.toContain("Tally&#39;s guess · 71% sure");
 	});
 
 	it("hides an income guess when Spot paychecks is off", async () => {

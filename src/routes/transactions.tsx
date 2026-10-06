@@ -57,7 +57,10 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
-import { SuggestedCategoryChip } from "../views/maybe-category";
+import {
+	maybeIncomeVisible,
+	SuggestedCategoryChip,
+} from "../views/maybe-category";
 import {
 	KEEP_VALUE,
 	NameChoices,
@@ -1341,25 +1344,18 @@ function EditSheet({
 							name="income"
 							value="1"
 							checked={values.income}
-							dashed={
-								tx.incomeConfidence != null &&
-								tx.incomeConfidence < JEV_THRESHOLD &&
-								!tx.income
-							}
+							dashed={maybeIncomeVisible(tx)}
 						>
 							Count as income
 						</Chip>
 					</div>
-					{tx.incomeConfidence != null &&
-						tx.incomeConfidence < JEV_THRESHOLD &&
-						!tx.income && (
-							<div class="flex flex-col items-start">
-								<p class="text-sm text-muted">
-									Tally's guess · {Math.round(tx.incomeConfidence * 100)}% sure
-								</p>
-								<WhyLink section="categorization" topic="income" />
-							</div>
-						)}
+					{maybeIncomeVisible(tx) && (
+						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+							Tally's guess · {Math.round((tx.incomeConfidence ?? 0) * 100)}%
+							sure
+							<WhyLink section="categorization" topic="income" />
+						</p>
+					)}
 				</div>
 				{tx.amountCents < 0 && (
 					<div class="flex flex-col gap-2 border-t border-rule pt-3">
