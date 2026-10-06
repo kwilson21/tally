@@ -55,6 +55,12 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import {
+	KEEP_VALUE,
+	NameChoices,
+	pickValue,
+	SUGGESTED_NAME_CLASS,
+} from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -938,6 +944,13 @@ type SheetProps = {
 	refunds?: RefundPurchase[];
 	/** The household's date, for the transaction's "Today" label. */
 	today: string;
+	/** The name chip that was chosen when the form was posted, shown again after an error. */
+	namePick?: string | null;
+	/**
+	 * What the name field held when the panel was first drawn, which a redraw after an error carries
+	 * through from the posted form, unchanged. Without it the panel is first drawn: the merchant's name now.
+	 */
+	nameWas?: string | null;
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -950,6 +963,8 @@ function EditSheet({
 	deleteConfirm = false,
 	refunds = [],
 	today,
+	namePick = null,
+	nameWas = null,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -984,9 +999,10 @@ function EditSheet({
 				// Focused only so screen readers start here; it isn't a control, so no ring. While the sheet
 				// asks about a delete, the question takes the focus instead (one autofocus, or htmx picks the first).
 				autofocus={!deleteConfirm}
-				class="font-serif text-4xl font-semibold tracking-tight outline-none"
+				class={`font-serif text-4xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
 			>
 				{tx.displayName}
+				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}
 			</h2>
 			<p class="font-serif text-4xl font-semibold">
 				{formatCents(tx.amountCents, { signed: true })}
@@ -1069,6 +1085,27 @@ function EditSheet({
 				{/* While the delete question is open there's no Save, so Enter in the name field would save the
 				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
 				{deleteConfirm && <button type="submit" disabled hidden />}
+				{/* What the name field held when this panel was first drawn, so a save can tell a rename from a panel that
+				    is only out of date: another tab may have named the merchant since (src/transactions/edit.ts). After
+				    an error the panel is drawn again with the posted value, never the merchant's name as it is now. */}
+				<input
+					type="hidden"
+					name="merchant_was"
+					value={nameWas ?? tx.merchantName ?? ""}
+				/>
+				{/* A merchant with suggested names waiting (P29 A): choose one, keep the bank's, or type your own.
+				    Nothing is chosen to start with, so saving for another reason never renames the merchant. */}
+				{tx.nameChoices && (
+					<NameChoices
+						id="name"
+						names={tx.nameChoices.names}
+						tidied={tx.nameChoices.tidied}
+						count={tx.nameChoices.count}
+						picked={namePick}
+						own={values.displayName ?? ""}
+						error={errors.merchant}
+					/>
+				)}
 				<fieldset
 					class="flex flex-col gap-2"
 					disabled={purchase !== undefined}
@@ -1220,8 +1257,9 @@ function EditSheet({
 					class="group border-t border-rule"
 					open={Boolean(
 						values.note ||
-							(values.displayName || null) !== tx.merchantName ||
-							errors.merchant ||
+							(!tx.nameChoices &&
+								((values.displayName || null) !== tx.merchantName ||
+									errors.merchant)) ||
 							errors.note,
 					)}
 				>
@@ -1229,20 +1267,23 @@ function EditSheet({
 						<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
 							<Icon name="chevron-right" class="size-5" />
 						</span>
-						Rename or add a note
+						{tx.nameChoices ? "Add a note" : "Rename or add a note"}
 					</summary>
 					<div class="flex flex-col gap-4 pt-2">
-						<TextInput
-							id="merchant"
-							label="Merchant name"
-							name="merchant"
-							value={values.displayName ?? ""}
-							placeholder={tx.rawName}
-							autocomplete="off"
-							surface="paper"
-							hint="Renames every transaction from this merchant."
-							error={errors.merchant}
-						/>
+						{/* With names to choose from, the field is "Or your own" up with them. */}
+						{!tx.nameChoices && (
+							<TextInput
+								id="merchant"
+								label="Merchant name"
+								name="merchant"
+								value={values.displayName ?? ""}
+								placeholder={tx.rawName}
+								autocomplete="off"
+								surface="paper"
+								hint="Renames every transaction from this merchant."
+								error={errors.merchant}
+							/>
+						)}
 						<FormField id="note" label="Note" error={errors.note}>
 							{({ class: errorClass, ...a11y }) => (
 								<textarea
@@ -1713,6 +1754,16 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		form.delete("category");
 		form.delete("always");
 	}
+	// A name chip counts only while it is still offered: the panel may have been opened before "Suggest store
+	// names" went off or before the suggestion was settled elsewhere, and a person's save must not accept or
+	// turn down a guess they can no longer see. A name typed in the field is always their own.
+	const pick = form.get("name_pick")?.toString() ?? "";
+	const offered = tx.nameChoices?.names ?? [];
+	const stillOffered =
+		pick === KEEP_VALUE
+			? tx.nameChoices !== null && tx.nameChoices !== undefined
+			: offered.some((name) => pickValue(name) === pick);
+	if (pick && !stillOffered) form.delete("name_pick");
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),
@@ -1743,6 +1794,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					refunds={refunds}
 					errors={errors}
 					today={today}
+					namePick={form.get("name_pick")?.toString() ?? null}
+					nameWas={form.get("merchant_was")?.toString() ?? null}
 				/>
 			),
 		});
@@ -1770,7 +1823,10 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
+	// A name counts only when this form gave one (nameChanged, from the name the panel showed): a panel that
+	// is out of date, saved after another tab renamed the merchant, isn't a new name and asks nothing.
 	const addedName =
+		parsed.value.nameChanged !== false &&
 		parsed.value.displayName !== null &&
 		parsed.value.displayName !== tx.merchantName;
 	const addedNote = parsed.value.note !== null && parsed.value.note !== tx.note;
@@ -1782,8 +1838,13 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
-	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).
-	const name = parsed.value.displayName ?? tidyName(tx.rawName);
+	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
+	// suggestion its rows were showing when nothing was chosen (P29 A).
+	const name =
+		parsed.value.displayName ??
+		(tx.nameSuggested && !parsed.value.keepBankName
+			? tx.displayName
+			: tidyName(tx.rawName));
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;

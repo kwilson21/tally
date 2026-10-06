@@ -116,6 +116,32 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 			pending: true,
 		},
 	},
+	// A name Tally guessed (P29 A, P87 B, decisions 64 and 80): the sparkles icon and a dashed underline, until a person chooses.
+	{
+		label: "A name Tally guessed: the sparkles icon, then the name dashed",
+		row: {
+			...row,
+			id: 10,
+			displayName: "DoorDash",
+			nameSuggested: true,
+		},
+	},
+	{
+		label:
+			"A guessed name on a row with a category, and one long enough to be cut off",
+		row: {
+			...row,
+			id: 11,
+			displayName: "Blue Bottle Coffee Roasters and Cafe on Market Street",
+			rawName: "SQ *BLUE BOTTLE COF 0412",
+			amountCents: 650,
+			categoryId: 2,
+			categoryName: "Eating Out",
+			categoryIcon: "eating-out",
+			categoryColor: "cat-plum",
+			nameSuggested: true,
+		},
+	},
 ];
 
 /**

@@ -24,6 +24,7 @@ export function merchantKeySql(alias: string): string {
 type MerchantColumn =
 	| "display_name"
 	| "suggested_name"
+	| "suggestion_status"
 	| "default_category_id"
 	| "not_a_bill";
 

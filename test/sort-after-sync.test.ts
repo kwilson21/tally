@@ -6,7 +6,7 @@ import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
-import { runScheduled } from "../src/index";
+import { runFirstSort, runScheduled } from "../src/index";
 import { sortAfterSync, syncItemAndSort } from "../src/plaid/sort-after-sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -325,7 +325,7 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		expect(flaky.asked.length + nightly.asked.length).toBe(40);
 	});
 
-	it("counts the nightly run through runScheduled against the same day", async () => {
+	it("counts production's 09:20 sort run, through runFirstSort, against the same day", async () => {
 		quiet();
 		// 495 of production's 500 were spent at syncs earlier today.
 		const today = await householdToday(db);
@@ -336,7 +336,7 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 			.bind(`jev_calls_${today}`)
 			.run();
 		const jev = fakeJev();
-		await runScheduled(
+		await runFirstSort(
 			{ ...env, DEMO: "false", JEV_API_KEY: "jev" },
 			jev.fetchImpl,
 		);

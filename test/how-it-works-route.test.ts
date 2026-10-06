@@ -53,6 +53,18 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toMatch(/small AI/);
 	});
 
+	it('explains Store names, where the Why? after "Tally\'s guess" lands, without naming the AI', async () => {
+		const { html } = await get("/how-it-works");
+		const names =
+			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(decodeHtml(names)).toContain("sparkles icon and a dashed underline");
+		expect(decodeHtml(names)).toContain(
+			"nothing is renamed until you choose it",
+		);
+		expect(decodeHtml(names)).toContain("Suggest store names");
+		expect(names).not.toMatch(/jev|workers ai/i);
+	});
+
 	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
 		const { html } = await get("/how-it-works");
 		const trends =

@@ -3,8 +3,10 @@ import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern, type Show } from "../transactions/filters";
+import { offeredNames, shownName } from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
+import { readAiSwitches } from "./ai-switches";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
@@ -22,6 +24,7 @@ import {
 	merchantKeySql,
 	sameMerchantSql,
 } from "./merchant-key";
+import { SETTLE_SUGGESTION_SQL } from "./merchant-names";
 import {
 	refundedByOthersSql,
 	refundFitsSql,
@@ -65,7 +68,19 @@ export type ListRow = {
 	refundedCents?: number;
 	/** The bank hasn't finished it: it counts like any other, and says "Pending" (decision 67). */
 	pending?: boolean;
+	/** The name is a suggestion nobody has chosen yet, so the row draws it dashed (P29 A, decision 64). */
+	nameSuggested?: boolean;
 };
+
+/** What a row needs from its merchant to decide the name it shows (src/transactions/name-suggestions.ts). */
+const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus`;
+type NameSuggestionColumns = {
+	suggestedNames: string | null;
+	suggestionStatus: string | null;
+};
+
+/** True when a merchant's pending, unchosen suggested names (one per line) hold the search text; one `?`. */
+const SUGGESTED_NAME_MATCH = `EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL AND m.suggested_name LIKE ? ESCAPE '\\')`;
 
 export const PAGE_SIZE = 25;
 
@@ -107,6 +122,7 @@ export async function listTransactions(
 ): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
+	const { names: namesOn } = await readAiSwitches(db);
 	if (f.month !== "all") {
 		where.push(`${COUNTED_MONTH} = ?`);
 		args.push(f.month);
@@ -125,12 +141,15 @@ export async function listTransactions(
 	if (shown) where.push(shown);
 	if (f.q) {
 		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
-		// "google youtube" finds "GOOGLE *YOUTUBE".
+		// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
+		// while it is offered (the names switch is on), so what a row says can be searched for.
+		const suggested = namesOn ? SUGGESTED_NAME_MATCH : "0";
 		where.push(
-			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\')`,
+			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggested})`,
 		);
 		const pattern = likePattern(f.q);
 		args.push(pattern, pattern, pattern, pattern);
+		if (namesOn) args.push(pattern);
 	}
 
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
@@ -151,8 +170,8 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, t.note, t.parent_id AS parentId,
-				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, p.raw_name AS parentRawName,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
@@ -175,36 +194,66 @@ export async function listTransactions(
 				| "isSplit"
 				| "followsPurchase"
 				| "pending"
-			> & {
-				merchantName: string | null;
-				parentMerchantName: string | null;
-				parentRawName: string | null;
-				excluded: number;
-				paysBill: number;
-				income: number;
-				creditReviewed: number;
-				isSplit: number;
-				followsPurchase: number;
-				pending: number;
-			}
+			> &
+				NameSuggestionColumns & {
+					merchantName: string | null;
+					parentMerchantName: string | null;
+					parentSuggestedNames: string | null;
+					parentSuggestionStatus: string | null;
+					parentRawName: string | null;
+					excluded: number;
+					paysBill: number;
+					income: number;
+					creditReviewed: number;
+					isSplit: number;
+					followsPurchase: number;
+					pending: number;
+				}
 		>();
 
-	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
+	// A person's chosen name wins; until then the first pending suggestion, shown dashed; otherwise the
+	// bank's raw text, tidied for display (spec §7). A split part's "Split from" caption names its
+	// parent the same way, so it reads as the parent's own row does.
 	const rows = results.map(
-		({ merchantName, parentMerchantName, parentRawName, ...r }) => ({
-			...r,
-			parentName: parentRawName
-				? (parentMerchantName ?? tidyName(parentRawName))
-				: null,
-			excluded: r.excluded === 1,
-			paysBill: r.paysBill === 1,
-			income: r.income === 1,
-			creditReviewed: r.creditReviewed === 1,
-			isSplit: r.isSplit === 1,
-			followsPurchase: r.followsPurchase === 1,
-			pending: r.pending === 1,
-			displayName: merchantName ?? tidyName(r.rawName),
-		}),
+		({
+			merchantName,
+			parentMerchantName,
+			parentSuggestedNames,
+			parentSuggestionStatus,
+			parentRawName,
+			suggestedNames,
+			suggestionStatus,
+			...r
+		}) => {
+			const shown = shownName({
+				chosen: merchantName,
+				stored: suggestedNames,
+				status: suggestionStatus,
+				rawName: r.rawName,
+				namesOn,
+			});
+			return {
+				...r,
+				parentName: parentRawName
+					? shownName({
+							chosen: parentMerchantName,
+							stored: parentSuggestedNames,
+							status: parentSuggestionStatus,
+							rawName: parentRawName,
+							namesOn,
+						}).name
+					: null,
+				excluded: r.excluded === 1,
+				paysBill: r.paysBill === 1,
+				income: r.income === 1,
+				creditReviewed: r.creditReviewed === 1,
+				isSplit: r.isSplit === 1,
+				followsPurchase: r.followsPurchase === 1,
+				pending: r.pending === 1,
+				displayName: shown.name,
+				nameSuggested: shown.suggested,
+			};
+		},
 	);
 	return { rows, total, page, pages };
 }
@@ -272,6 +321,12 @@ export type TransactionDetail = ListRow & {
 	categorySource: "user" | "merchant_rule" | "jev" | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
+	/**
+	 * The names the panel offers while the merchant's suggestions wait (P29 A): the suggested names
+	 * (up to three), the bank's text as the list shows it without a choice, and how many transactions
+	 * a name applies to. Null when there is nothing to choose.
+	 */
+	nameChoices?: { names: string[]; tidied: string; count: number } | null;
 };
 
 export type RefundPurchase = {
@@ -321,7 +376,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${merchantKeySql("t")} AS merchantKey, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -351,30 +406,68 @@ export async function getTransaction(
 				| "isSplit"
 				| "followsPurchase"
 				| "pending"
-			> & {
-				excluded: number;
-				paysBill: number;
-				income: number;
-				creditReviewed: number;
-				isSplit: number;
-				followsPurchase: number;
-				pending: number;
-			}
+			> &
+				NameSuggestionColumns & {
+					merchantKey: string;
+					excluded: number;
+					paysBill: number;
+					income: number;
+					creditReviewed: number;
+					isSplit: number;
+					followsPurchase: number;
+					pending: number;
+				}
 		>();
-	// A person's chosen name wins; until then the bank's raw text is tidied for display (spec §7).
-	return r
-		? {
-				...r,
-				excluded: r.excluded === 1,
-				paysBill: r.paysBill === 1,
-				income: r.income === 1,
-				creditReviewed: r.creditReviewed === 1,
-				isSplit: r.isSplit === 1,
-				followsPurchase: r.followsPurchase === 1,
-				pending: r.pending === 1,
-				displayName: r.merchantName ?? tidyName(r.rawName),
-			}
-		: null;
+	if (!r) return null;
+	// A person's chosen name wins; until then the first pending suggestion, shown dashed; otherwise the
+	// bank's raw text is tidied for display (spec §7). The panel offers every pending suggestion.
+	const { suggestedNames, suggestionStatus, merchantKey, ...row } = r;
+	const { names: namesOn } = await readAiSwitches(db);
+	const merchant = {
+		stored: suggestedNames,
+		status: suggestionStatus,
+		namesOn,
+	};
+	const shown = shownName({
+		...merchant,
+		chosen: r.merchantName,
+		rawName: r.rawName,
+	});
+	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
+	return {
+		...row,
+		excluded: r.excluded === 1,
+		paysBill: r.paysBill === 1,
+		income: r.income === 1,
+		creditReviewed: r.creditReviewed === 1,
+		isSplit: r.isSplit === 1,
+		followsPurchase: r.followsPurchase === 1,
+		pending: r.pending === 1,
+		displayName: shown.name,
+		nameSuggested: shown.suggested,
+		nameChoices:
+			offered.length > 0
+				? {
+						names: offered,
+						tidied: tidyName(r.rawName),
+						count: await merchantTransactionCount(db, merchantKey),
+					}
+				: null,
+	};
+}
+
+/** How many transactions carry a merchant key, a split purchase counted once: what a name applies to. */
+async function merchantTransactionCount(
+	db: D1Database,
+	key: string,
+): Promise<number> {
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS n FROM transactions t WHERE t.parent_id IS NULL AND ${merchantKeySql("t")} = ?`,
+		)
+		.bind(key)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
 }
 
 /** Sets `excluded`, recording a person as its source only when the value changes. */
@@ -546,21 +639,55 @@ export async function saveEdit(
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[edit.note, ...excludeArgs, ...reviewArgs],
 				),
-		gated(
-			"INSERT INTO merchants (raw_name, display_name) SELECT ?, ? WHERE 1",
-			[current.merchantKey, edit.displayName],
-			" ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
-		),
 	);
-	// A credit a person newly marks as income counts as income, so an exclusion Plaid put on it (a
-	// transfer category) comes off, even though the panel sends its Exclude chip as it was drawn, on.
-	// This runs after the panel's own update: a chip the person turned off already made the exclusion
-	// theirs, and a person's or Jev's exclusion is never Plaid's to lift.
-	if (edit.income && current.income === 0)
+	// A name a person gives settles the merchant's pending suggestion: accepted when it is one of the
+	// suggested names, rejected when it is their own (spec §7). A form that gave no name leaves the
+	// merchant's name and suggestion alone; its row is still made, which a rule needs.
+	statements.push(
+		edit.nameChanged === false
+			? gated(
+					"INSERT INTO merchants (raw_name) SELECT ? WHERE 1",
+					[current.merchantKey],
+					" ON CONFLICT(raw_name) DO NOTHING",
+				)
+			: gated(
+					"INSERT INTO merchants (raw_name, display_name) SELECT ?, ? WHERE 1",
+					[current.merchantKey, edit.displayName],
+					` ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name, ${SETTLE_SUGGESTION_SQL}`,
+				),
+	);
+	// "Keep the bank's name": the tidied text stays and the suggestions are turned down, never offered again.
+	if (edit.keepBankName && edit.displayName === null)
+		statements.push(
+			gated(
+				"UPDATE merchants SET suggestion_status = 'rejected' WHERE raw_name = ? AND suggestion_status = 'pending'",
+				[current.merchantKey],
+			),
+		);
+	// A credit a person newly marks as income, or newly reviews as a refund or other non-income credit,
+	// is theirs to count (decision 70), so an exclusion Plaid put on it (a transfer category) comes off,
+	// even though the panel sends its Exclude chip as it was drawn, on. This runs after the panel's own
+	// update: a chip the person turned off already made the exclusion theirs, and a person's or Jev's
+	// exclusion is never Plaid's to lift.
+	if ((edit.income && current.income === 0) || creditReviewByUser)
 		statements.push(
 			gated(
 				`UPDATE transactions SET excluded = 0, excluded_source = NULL, updated_by = ?, updated_at = datetime('now')
 				WHERE id = ? AND amount_cents < 0 AND excluded_source = 'plaid'`,
+				[actor, id],
+			),
+		);
+	// A split credit is one bank transaction and only its parts count, so a person reviewing it from
+	// the split's own panel reviews its parts too, and Plaid's exclusion comes off them. A part that is
+	// income keeps that, and so does one a person or Jev excluded.
+	if (creditReviewByUser && current.isSplit === 1)
+		statements.push(
+			gated(
+				`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user',
+					excluded = CASE WHEN excluded_source = 'plaid' THEN 0 ELSE excluded END,
+					excluded_source = CASE WHEN excluded_source = 'plaid' THEN NULL ELSE excluded_source END,
+					updated_by = ?, updated_at = datetime('now')
+				WHERE parent_id = ? AND amount_cents < 0 AND flag_income = 0`,
 				[actor, id],
 			),
 		);

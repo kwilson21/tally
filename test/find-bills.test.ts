@@ -121,6 +121,27 @@ describe("finding bills", () => {
 		).toContainEqual(expect.objectContaining({ rawName: "KEEP ME" }));
 	});
 
+	it("names a suggestion by the merchant's chosen name, never by a name that is only suggested (decision 64)", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("SUGGESTED ONLY", 0, false);
+		await insertCandidate("CHOSEN NAME", 0, false);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('SUGGESTED ONLY', 'A Guess', 'pending')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES ('CHOSEN NAME', 'A Guess', 'accepted', 'Mine')",
+			),
+		]);
+		const found = await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		expect(
+			found.find((row) => row.rawName === "SUGGESTED ONLY")?.displayName,
+		).toBe("SUGGESTED ONLY");
+		expect(
+			found.find((row) => row.rawName === "CHOSEN NAME")?.displayName,
+		).toBe("Mine");
+	});
+
 	it("dismisses a merchant whose name has a percent sign", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("100% PURE");

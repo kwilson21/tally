@@ -15,6 +15,7 @@ import {
 	setArchived,
 	settingsCategories,
 } from "../db/categories";
+import { namesToReview } from "../db/merchant-names";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
 import {
@@ -25,6 +26,7 @@ import {
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
+import { Band } from "../views/band";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
@@ -111,10 +113,9 @@ type View = {
  * each posts, its words and its muted line, in the order the group shows them, and how each is read
  * aloud after a save. Screens say "Tally", never the name of the AI behind it.
  *
- * One more is stored (`names` in db/ai-switches.ts) but has no row yet, so no switch promises
- * something that isn't built. It gets its row here, with its words from the P41 drawing
- * (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant names" with
- * Workers AI names (#33, #194). Saving this group never changes a switch it doesn't list.
+ * Every switch db/ai-switches.ts stores has its row now: "Suggest store names" (Workers AI names, #33)
+ * and "Sort new transactions as they arrive" (the Jev run after a sync, #193). Saving this group never
+ * changes a switch it doesn't list.
  */
 const AI_FEATURES: {
 	key: keyof AiSwitches;
@@ -123,6 +124,14 @@ const AI_FEATURES: {
 	line: string;
 	spoken: string;
 }[] = [
+	{
+		key: "names",
+		id: "ai-names",
+		// P86 A's words and example (decision 80); the other rows take theirs when that change ships.
+		label: "Suggest store names",
+		line: "Turns bank text like SQ *BLUE BOTTLE COF into Blue Bottle Coffee. You pick the name.",
+		spoken: "suggest store names",
+	},
 	{
 		key: "categories",
 		id: "ai-categories",
@@ -184,6 +193,8 @@ function AiSuggestions({
 				hx-indicator="#ai-save"
 				hx-target="#ai-suggestions"
 				hx-select="#ai-suggestions"
+				// The names Band above Categories follows the names switch, so it is drawn again with the group.
+				hx-select-oob="#names-band"
 				hx-swap="outerHTML"
 			>
 				<ul class="mt-3 divide-y divide-rule border-y border-rule">
@@ -380,6 +391,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
+	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const adding = view.open === "new";
 
 	return c.html(
@@ -390,6 +402,18 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>
+			{/* Suggested merchant names waiting for a person (P29 A): a Band to the one-at-a-time review. It is
+			    always in the page, empty when nothing waits, so saving the names switch can draw it again. */}
+			<div id="names-band">
+				{namesWaiting > 0 && (
+					<div class="mt-4 lg:max-w-3xl">
+						<Band href="/settings/names" detail="Suggested names; you choose">
+							{namesWaiting} merchant {namesWaiting === 1 ? "name" : "names"} to
+							check
+						</Band>
+					</div>
+				)}
+			</div>
 			<section
 				id="categories"
 				aria-labelledby="categories-title"
@@ -639,16 +663,27 @@ settings.post("/settings/ai", async (c) => {
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
+	const waitingBefore = (await namesToReview(c.env.DB)).length;
 	await saveAiSwitches(c.env.DB, next);
 	const now = await readAiSwitches(c.env.DB);
+	const waitingAfter = (await namesToReview(c.env.DB, now)).length;
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
 	).join(", ");
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
-	return done(c, "Saved AI suggestions", `Saved AI suggestions. ${spoken}.`, {
-		aiSaved: true,
-		hash: "ai-suggestions",
-	});
+	// The Band above Categories changes with the names switch, so a change in what it says is announced too.
+	const band =
+		waitingAfter === waitingBefore
+			? ""
+			: waitingAfter === 0
+				? " No merchant names to check."
+				: ` ${waitingAfter} merchant ${waitingAfter === 1 ? "name" : "names"} to check.`;
+	return done(
+		c,
+		"Saved AI suggestions",
+		`Saved AI suggestions. ${spoken}.${band}`,
+		{ aiSaved: true, hash: "ai-suggestions" },
+	);
 });
 
 // Only a zone the select offers is saved, and nothing else changes: "today" reads it from there
