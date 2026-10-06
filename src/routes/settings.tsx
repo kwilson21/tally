@@ -1,6 +1,11 @@
 import { type Context, Hono } from "hono";
 import { householdToday } from "../dates";
 import {
+	type AiSwitches,
+	readAiSwitches,
+	saveAiSwitches,
+} from "../db/ai-switches";
+import {
 	addCategory,
 	categoryNames,
 	moveCategory,
@@ -22,6 +27,7 @@ import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
 
 type App = { Bindings: Env };
@@ -79,7 +85,106 @@ type View = {
 	status?: 200 | 404 | 422;
 	/** The household's date, when the handler already read it, so the request reads it once. */
 	today?: string;
+	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
+	aiSaved?: boolean;
+	/** Where a plain browser lands after a save: a section's id, so it isn't sent back to the top. */
+	hash?: string;
 };
+
+/**
+ * The AI suggestions switches that have a feature behind them (spec §8.6, decision 73): the field
+ * each posts, its words and its muted line, in the order the group shows them, and how each is read
+ * aloud after a save. Screens say "Tally", never the name of the AI behind it.
+ *
+ * Two more are stored (`names` and `sortOnArrival` in db/ai-switches.ts) but have no row yet, so no
+ * switch promises something that isn't built. Each gets its row here, with its words from the P41
+ * drawing (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant
+ * names" with Workers AI names (#33, #194) and "Sort new transactions as they arrive" with the
+ * Jev run after a sync (#193). Saving this group never changes a switch it doesn't list.
+ */
+const AI_FEATURES: {
+	key: keyof AiSwitches;
+	id: string;
+	label: string;
+	line: string;
+	spoken: string;
+}[] = [
+	{
+		key: "categories",
+		id: "ai-categories",
+		label: "Categories and exclusions",
+		line: "Picks categories, and leaves out transfers and reimbursements.",
+		spoken: "categories and exclusions",
+	},
+	{
+		key: "income",
+		id: "ai-income",
+		label: "Income",
+		line: "Spots paychecks and other money coming in.",
+		spoken: "income",
+	},
+];
+
+/** The switches above and one Save. Without JavaScript the form posts and Settings reloads at this group. */
+function AiSuggestions({
+	switches,
+	saved,
+}: {
+	switches: AiSwitches;
+	saved: boolean;
+}) {
+	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
+	return (
+		<section
+			id="ai-suggestions"
+			aria-labelledby="ai-title"
+			class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
+		>
+			<h2 id="ai-title" class="font-serif text-3xl font-semibold">
+				AI suggestions
+			</h2>
+			<p class="mt-1 text-muted">
+				{allOff
+					? "Tally sorts by your rules and choices only."
+					: "Off means your rules and choices only. Nothing already decided changes."}
+			</p>
+			<form
+				method="post"
+				action="/settings/ai"
+				hx-post="/settings/ai"
+				hx-disable="findAll button[type=submit]"
+				hx-indicator="#ai-save"
+				hx-target="#ai-suggestions"
+				hx-select="#ai-suggestions"
+				hx-swap="outerHTML"
+			>
+				<ul class="mt-3 divide-y divide-rule border-y border-rule">
+					{AI_FEATURES.map((f) => (
+						<li>
+							<Switch
+								id={f.id}
+								name={f.key}
+								label={f.label}
+								hint={f.line}
+								checked={switches[f.key]}
+							/>
+						</li>
+					))}
+				</ul>
+				<div class="mt-4">
+					<Button
+						id="ai-save"
+						type="submit"
+						busyLabel="Saving…"
+						autofocus={saved}
+					>
+						Save
+					</Button>
+				</div>
+			</form>
+		</section>
+	);
+}
 
 /** The name field, for adding a category or renaming one. Budgets are set on Home (decision 38). */
 function NameField({
@@ -230,6 +335,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const today = view.today ?? (await householdToday(c.env.DB));
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
+	const aiSwitches = await readAiSwitches(c.env.DB);
 	const adding = view.open === "new";
 
 	return c.html(
@@ -348,6 +454,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					)}
 				</div>
 			</section>
+			<AiSuggestions switches={aiSwitches} saved={Boolean(view.aiSaved)} />
 			<section
 				aria-labelledby="your-data-title"
 				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
@@ -380,7 +487,8 @@ function done(
 	announce: string,
 	view: View = {},
 ) {
-	if (!c.req.header("HX-Request")) return c.redirect("/settings", 303);
+	if (!c.req.header("HX-Request"))
+		return c.redirect(`/settings${view.hash ? `#${view.hash}` : ""}`, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message: toast, type: "success" }, announce }),
@@ -452,6 +560,24 @@ settings.get("/settings/export/tally.json", async (c) => {
 		`attachment; filename="tally-${await householdToday(c.env.DB)}.json"`,
 	);
 	return c.json(await tallyExport(c.env.DB));
+});
+
+// A switch that's on posts "on" and one that's off posts nothing, so a field left out is off; the
+// form always carries the whole group, so a save is always every switch it shows, and only those.
+settings.post("/settings/ai", async (c) => {
+	const form = await c.req.formData();
+	const next = Object.fromEntries(
+		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
+	) as Partial<AiSwitches>;
+	await saveAiSwitches(c.env.DB, next);
+	const states = AI_FEATURES.map(
+		(f) => `${f.spoken} ${next[f.key] ? "on" : "off"}`,
+	).join(", ");
+	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
+	return done(c, "Saved AI suggestions", `Saved AI suggestions. ${spoken}.`, {
+		aiSaved: true,
+		hash: "ai-suggestions",
+	});
 });
 
 settings.post("/settings/categories", async (c) => {
