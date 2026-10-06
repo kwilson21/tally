@@ -1,6 +1,11 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
+import {
+	DEFAULT_TIME_ZONE,
+	monthName,
+	monthsBefore,
+	todayIn,
+} from "../src/dates";
 import { lastMonthSpentCents } from "../src/db/budgets";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
@@ -78,6 +83,25 @@ describe("Home's budget rows", () => {
 });
 
 describe("GET /budget/:id", () => {
+	it("shows the three-month average chip in the demo budget sheet", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source) VALUES
+				(800, 1, ?, 60000, 'JULY', 1, 'user'),
+				(801, 1, ?, 65000, 'AUGUST', 1, 'user'),
+				(802, 1, ?, 70000, 'SEPTEMBER', 1, 'user')`).bind(
+				...[3, 2, 1].map((n) => `${monthsBefore(month, n)}-01`),
+			),
+		]);
+		const { html } = await get("/budget/1");
+		expect(html).toContain("3-month average: $650.00");
+		expect(html).toMatch(/data-set="65000"[^>]*aria-pressed="false"/);
+		expect(html).toMatch(/data-set="65000"[^>]*class="[^"]*min-h-11/);
+	});
+
 	it("opens the sheet with the amount, the nudges and last month's chip", async () => {
 		const { res, html } = await get("/budget/1");
 		expect(res.status).toBe(200);
