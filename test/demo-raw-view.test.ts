@@ -566,6 +566,27 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(made.replace(viewNav(made) ?? "", "")).not.toContain("raw=1");
 	});
 
+	it("clears filters without leaving the bank view", async () => {
+		const raw = await demo("/transactions?raw=1&q=no-such-transaction");
+		expect(raw.html).toMatch(
+			/<a[^>]*href="\/transactions\?raw=1"[^>]*>Clear filters<\/a>/,
+		);
+
+		const made = await demo("/transactions?q=no-such-transaction");
+		expect(made.html).toMatch(
+			/<a[^>]*href="\/transactions"[^>]*>Clear filters<\/a>/,
+		);
+		expect(made.html).not.toMatch(
+			/<a[^>]*href="\/transactions\?[^"]*raw=1[^"]*"[^>]*>Clear filters<\/a>/,
+		);
+
+		const family = await familyApp("/transactions?raw=1&q=no-such-transaction");
+		expect(family.html).toMatch(
+			/<a[^>]*href="\/transactions"[^>]*>Clear filters<\/a>/,
+		);
+		expect(family.html).not.toContain("raw=1");
+	});
+
 	it("keeps the list straight from the bank behind an open edit panel, and back from it", async () => {
 		const { html } = await demo("/transactions/5?raw=1");
 		const rows = rowsOf(html);

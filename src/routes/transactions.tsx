@@ -281,6 +281,19 @@ async function renderList(
 		</nav>
 	);
 	const back = listHref(filters, today.slice(0, 7));
+	const clearFiltersHref = listHref(
+		{
+			...filters,
+			q: "",
+			month: today.slice(0, 7),
+			category: null,
+			account: null,
+			show: "all",
+			uncategorized: false,
+			page: 1,
+		},
+		today.slice(0, 7),
+	);
 	// Select and Done keep every filter and the page; Done drops only select mode.
 	const doneHref = `/transactions${listQuery ? `?${listQuery}` : ""}`;
 	const selectHref = `/transactions?${listQuery ? `${listQuery}&` : ""}select=1`;
@@ -520,7 +533,7 @@ async function renderList(
 									kind="search"
 									sentence="No transactions match these filters."
 									hint="Try a wider month, or clear the search."
-									action={{ href: "/transactions", label: "Clear filters" }}
+									action={{ href: clearFiltersHref, label: "Clear filters" }}
 								/>
 							) : (
 								byDay(rows).map(([date, dayRows]) => (
@@ -584,7 +597,7 @@ async function renderList(
 									kind="search"
 									sentence="No transactions match these filters."
 									hint="Try a wider month, or clear the search."
-									action={{ href: "/transactions", label: "Clear filters" }}
+									action={{ href: clearFiltersHref, label: "Clear filters" }}
 								/>
 							)
 						) : (
