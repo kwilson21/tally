@@ -112,6 +112,7 @@ async function renderReview(
 							<NameChoices
 								id="review"
 								names={review.names}
+								source={review.source}
 								tidied={review.tidied}
 								count={review.count}
 								picked={values?.key === review.key ? values.picked : null}
