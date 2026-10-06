@@ -1,10 +1,13 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { summarizeMonth } from "../src/budget";
 import { jevCallLimit } from "../src/categorize-pending";
 import { categoryCallLimit } from "../src/category-suggestions-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { monthOffset } from "../src/demo/seed";
 import handler, {
 	runFirstSort,
 	runScheduled,
@@ -58,6 +61,46 @@ const count = async () =>
 	)?.n ?? 0;
 
 describe("scheduled handler", () => {
+	it("seeds Pet Care through the real demo scheduled reset without changing Home totals", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		await resetDemo(env.DB, today);
+		const beforeData = await loadMonth(env.DB, month);
+		const before = summarizeMonth({
+			month,
+			...beforeData,
+			unpaidDueBillsCents: 0,
+		});
+		await scheduledWith.scheduled(
+			{ cron: "0 8 * * *" },
+			{
+				...env,
+				DEMO: "true",
+				PLAID_SECRET: undefined,
+				PLAID_CLIENT_ID: undefined,
+				JEV_API_KEY: undefined,
+				AI: undefined,
+			},
+		);
+		const suggestion = await env.DB.prepare(
+			"SELECT id FROM category_suggestions WHERE name='Pet Care' AND status='pending'",
+		).first<{ id: number }>();
+		const rows = await env.DB.prepare(
+			"SELECT COUNT(*) AS n, MIN(date) AS earliest FROM transactions WHERE category_suggestion_id=?",
+		)
+			.bind(suggestion?.id)
+			.first<{ n: number; earliest: string }>();
+		expect(rows?.n).toBeGreaterThanOrEqual(3);
+		expect(rows?.earliest.slice(0, 7)).toBe(monthOffset(today, 2).slice(0, 7));
+		const afterData = await loadMonth(env.DB, month);
+		const after = summarizeMonth({
+			month,
+			...afterData,
+			unpaidDueBillsCents: 0,
+		});
+		expect(after).toEqual(before);
+	});
+
 	it("restores the demo seed through the Worker entry point when the guard allows it", async () => {
 		await env.DB.prepare("DELETE FROM transactions").run();
 		expect(await count()).toBe(0);

@@ -83,38 +83,71 @@ export async function namesToAvoid(db: D1Database): Promise<string[]> {
 }
 
 export type PendingSuggestion = { id: number; name: string; rows: ListRow[] };
+export type PendingSuggestions = PendingSuggestion[] & { more: number };
 export async function pendingSuggestions(
 	db: D1Database,
-): Promise<PendingSuggestion[]> {
+): Promise<PendingSuggestions> {
 	const { results: suggestions } = await db
 		.prepare(
 			"SELECT id, name FROM category_suggestions WHERE status = 'pending' ORDER BY id",
 		)
 		.all<{ id: number; name: string }>();
-	const out: PendingSuggestion[] = [];
-	for (const suggestion of suggestions) {
-		const { results } = await db
-			.prepare(`SELECT t.id, t.date, t.amount_cents amountCents, t.raw_name rawName, COALESCE(m.display_name, t.merchant_name, t.raw_name) displayName, t.note, t.excluded, t.flag_income income, t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending
-		FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
-		WHERE t.category_suggestion_id = ? AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 ORDER BY t.date DESC, t.id DESC`)
-			.bind(suggestion.id)
-			.all<Omit<ListRow, "pending"> & { pending: number }>();
-		if (results.length >= 3)
-			out.push({
-				...suggestion,
-				rows: results.map((row) => ({
-					...row,
-					displayName:
-						row.displayName === row.displayName.toUpperCase()
-							? tidyName(row.displayName)
-							: row.displayName,
-					excluded: !!row.excluded,
-					income: !!row.income,
-					pending: !!row.pending,
-				})),
-			});
+	if (!suggestions.length)
+		return Object.defineProperty([], "more", {
+			value: 0,
+		}) as unknown as PendingSuggestions;
+	const { results } = await db
+		.prepare(`WITH pending AS (
+			SELECT value AS id FROM json_each(?)
+		), candidates AS (
+			SELECT cs.id, cs.name, COUNT(t.id) AS n
+			FROM pending p JOIN category_suggestions cs ON cs.id = p.id AND cs.status = 'pending'
+			JOIN transactions t ON t.category_suggestion_id = cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0
+			GROUP BY cs.id HAVING COUNT(t.id) >= 3
+		), ranked AS (
+			SELECT *, COUNT(*) OVER() AS total, ROW_NUMBER() OVER(ORDER BY n DESC, id) AS rank FROM candidates
+		)
+		SELECT r.id, r.name, r.n, r.total, t.id AS transactionId, t.date, t.amount_cents amountCents, t.raw_name rawName,
+			COALESCE(m.display_name, t.merchant_name, t.raw_name) displayName, t.note, t.excluded, t.flag_income income,
+			t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending
+		FROM ranked r JOIN transactions t ON t.category_suggestion_id = r.id
+		LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
+		WHERE r.rank <= 10 AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0
+		ORDER BY r.rank, t.date DESC, t.id DESC`)
+		.bind(JSON.stringify(suggestions.map((s) => s.id)))
+		.all<
+			Omit<ListRow, "pending" | "id"> & {
+				id: number;
+				name: string;
+				transactionId: number;
+				pending: number;
+				n: number;
+				total: number;
+			}
+		>();
+	const byId = new Map<number, PendingSuggestion>();
+	for (const row of results) {
+		let suggestion = byId.get(row.id);
+		if (!suggestion) {
+			suggestion = { id: row.id, name: row.name, rows: [] };
+			byId.set(row.id, suggestion);
+		}
+		const { transactionId, n: _n, total: _total, ...tx } = row;
+		suggestion.rows.push({
+			...tx,
+			id: transactionId,
+			displayName:
+				tx.displayName === tx.displayName.toUpperCase()
+					? tidyName(tx.displayName)
+					: tx.displayName,
+			excluded: !!tx.excluded,
+			income: !!tx.income,
+			pending: !!tx.pending,
+		});
 	}
-	return out.sort((a, b) => b.rows.length - a.rows.length || a.id - b.id);
+	return Object.defineProperty([...byId.values()], "more", {
+		value: Math.max(0, (results[0]?.total ?? 0) - byId.size),
+	}) as PendingSuggestions;
 }
 
 export type CreateResult =

@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { askAgain } from "../categorize-pending";
+import { AFTER_SYNC_BATCH, askAgainMany } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import {
 	type AiSwitches,
@@ -563,6 +563,12 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							</form>
 						</details>
 					))}
+					{categorySuggestions.more > 0 && (
+						<p class="py-2 text-sm text-muted">
+							{categorySuggestions.more} more suggestions will show once you
+							decide these.
+						</p>
+					)}
 					<details
 						class="group border-b border-rule"
 						data-row="new"
@@ -725,7 +731,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		(await readAiSwitches(c.env.DB)).categories
 	)
 		c.executionCtx.waitUntil(
-			Promise.all(result.leftOut.map((tx) => askAgain(env, tx))),
+			askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
 		);
 	const out = result.leftOut.length;
 	const count = result.moved;

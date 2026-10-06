@@ -1,5 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { JEV_THRESHOLD } from "../src/ai/categorize";
+import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
@@ -48,6 +50,77 @@ describe("row links", () => {
 });
 
 describe("GET /transactions/:id", () => {
+	it("shows a below-threshold Jev pick as the first suggested chip after the real save path", async () => {
+		const id = Number(
+			(
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name) VALUES (1,'2026-09-14',1200,'LOW CONFIDENCE SHOP') RETURNING id",
+				).first<{ id: number }>()
+			)?.id,
+		);
+		await categorizePending({ DB: env.DB, JEV_API_KEY: "jev" }, async () =>
+			Response.json({
+				answers: {
+					category: {
+						type: "choice",
+						choice: "Groceries",
+						confidence: JEV_THRESHOLD - 0.01,
+					},
+					transfer: { type: "noul", noul: 0.01 },
+					reimbursement: { type: "noul", noul: 0.01 },
+					income: { type: "noul", noul: 0.01 },
+				},
+			}),
+		);
+		const saved = await env.DB.prepare(
+			"SELECT category_id, category_source, jev_category_id FROM transactions WHERE id=?",
+		)
+			.bind(id)
+			.first<{
+				category_id: number | null;
+				category_source: string | null;
+				jev_category_id: number | null;
+			}>();
+		expect(saved).toMatchObject({
+			category_id: null,
+			category_source: null,
+			jev_category_id: 1,
+		});
+		const { html } = await get(`/transactions/${id}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toMatch(
+			/<span class="relative inline-flex rounded-full border border-dashed border-ink">[\s\S]*?<input type="radio" name="category" value="1"/,
+		);
+		expect(sheet.indexOf('value="1"')).toBeLessThan(sheet.indexOf('value="2"'));
+		expect(sheet).toContain("Tally&#39;s guess · 79% sure");
+	});
+
+	it("shows no existing-category chip behind a pending new-category suggestion", async () => {
+		const id = Number(
+			(
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name) VALUES (1,'2026-09-14',1200,'PENDING NEW CATEGORY') RETURNING id",
+				).first<{ id: number }>()
+			)?.id,
+		);
+		const suggestion = await env.DB.prepare(
+			"INSERT INTO category_suggestions (name,status) VALUES ('Pet Care','pending') RETURNING id",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_suggestion_id=? WHERE id=?",
+		)
+			.bind(suggestion?.id, id)
+			.run();
+		const { html: sheetHtml } = await get(`/transactions/${id}`);
+		const sheet = sheetHtml.slice(sheetHtml.indexOf('role="dialog"'));
+		expect(sheet).not.toContain("Suggested");
+		const { html } = await get(
+			"/transactions?month=all&q=PENDING%20NEW%20CATEGORY",
+		);
+		expect(html).toContain("Maybe new: Pet Care");
+		expect(html).toContain("PENDING NEW CATEGORY");
+	});
+
 	it("shows the list and the edit sheet, labeled and focused", async () => {
 		const { res, html } = await get(`/transactions/${bakery}?uncategorized=1`);
 		expect(res.status).toBe(200);

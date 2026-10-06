@@ -202,17 +202,26 @@ export async function askAgain(
 	id: number,
 	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
 ): Promise<void> {
-	if (!env.JEV_API_KEY) return;
+	return askAgainMany(env, [id], 1, fetchImpl);
+}
+
+/** Clear every left-out answer, then re-ask a bounded newest-first batch; the rest wait for night. */
+export async function askAgainMany(
+	env: CategorizeEnv,
+	ids: number[],
+	maxCalls = AFTER_SYNC_BATCH,
+	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
+): Promise<void> {
+	if (!env.JEV_API_KEY || !ids.length) return;
 	try {
 		await env.DB.prepare(
 			`UPDATE transactions SET category_confidence = NULL
-			 WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NOT NULL`,
+			 WHERE id IN (SELECT value FROM json_each(?)) AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NOT NULL`,
 		)
-			.bind(id)
+			.bind(JSON.stringify(ids))
 			.run();
-		// Merchant rules come first, as in every run (spec §7): a rule that matches gives its category,
-		// and Jev is asked only if the transaction is still unsorted after it.
-		await categorizePending(env, fetchImpl, { onlyIds: [id] });
+		// Merchant rules come first (spec §7); categorizePending reserves against the household's daily cap.
+		await categorizePending(env, fetchImpl, { onlyIds: ids, maxCalls });
 	} catch (error) {
 		console.error(
 			`ask again failed ${error instanceof Error ? error.name : "unknown"}`,

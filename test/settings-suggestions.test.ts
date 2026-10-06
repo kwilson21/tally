@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
+import { categorizePending } from "../src/categorize-pending";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { saveSuggestion } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
@@ -12,6 +14,15 @@ import { settings } from "../src/routes/settings";
 // "Jev" (decision 64).
 
 const db = env.DB;
+type TestApp = { Bindings: Env; Variables: { actor: string } };
+// The route-only harness supplies the actor that src/index.tsx sets after verifying Access.
+const routeHarness = new Hono<TestApp>();
+routeHarness.use("*", async (c, next) => {
+	if ((c.env as { DEMO?: string }).DEMO === "false")
+		c.set("actor", "test@example.com");
+	await next();
+});
+routeHarness.route("/", settings as unknown as Hono<TestApp>);
 let waitUntil: ReturnType<typeof vi.fn<(promise: Promise<unknown>) => void>>;
 const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
 const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
@@ -21,7 +32,7 @@ async function request(
 	init: RequestInit = {},
 	bindings: Record<string, unknown> = {},
 ) {
-	const res = await settings.request(
+	const res = await routeHarness.request(
 		path,
 		init,
 		{ ...env, ...bindings },
@@ -63,6 +74,37 @@ const textOf = (html: string) =>
 		.replace(/<[^>]+>/g, "")
 		.replaceAll("&#39;", "'")
 		.replaceAll("&amp;", "&");
+
+function countingDb() {
+	let statements = 0;
+	const counted = new Proxy(db, {
+		get(target, property) {
+			const value = Reflect.get(target, property);
+			if (property === "prepare")
+				return (sql: string) => {
+					statements += 1;
+					return target.prepare(sql);
+				};
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+	return { db: counted as D1Database, statements: () => statements };
+}
+
+async function bulkSuggestion(name: string, count: number) {
+	const { results } = await db
+		.prepare(
+			"WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT 1,'2026-09-14',100,? || ' ' || i FROM n RETURNING id",
+		)
+		.bind(count, name)
+		.all<{ id: number }>();
+	const id = (await saveSuggestion(
+		db,
+		name,
+		results.map((row) => row.id),
+	)) as number;
+	return { id, ids: results.map((row) => row.id) };
+}
 
 async function addTx(
 	rawName: string,
@@ -227,6 +269,17 @@ describe("GET /settings with a suggestion", () => {
 		expect(names).toEqual(["Subscriptions", "Pet Care"]);
 	});
 
+	it("loads 30 pending suggestions in one grouped transaction query and lists the busiest 10", async () => {
+		for (let i = 0; i < 30; i++) await bulkSuggestion(`Batch ${i}`, 20);
+		const counted = countingDb();
+		const { html } = await get("/settings", { DB: counted.db });
+		expect((html.match(/data-suggestion=/g) ?? []).length).toBe(10);
+		expect(textOf(html)).toContain(
+			"20 more suggestions will show once you decide these.",
+		);
+		expect(counted.statements()).toBeLessThan(20);
+	});
+
 	it("shows nothing for a suggestion with fewer than three transactions still needing a category", async () => {
 		const { ids } = await petCare();
 		await db
@@ -254,6 +307,21 @@ describe("GET /settings with a suggestion", () => {
 });
 
 describe("creating the category", () => {
+	it("saves 100 unticked notes within D1's per-invocation query limit", async () => {
+		const { id, ids } = await bulkSuggestion("Note Batch", 101);
+		const counted = countingDb();
+		const { res } = await post(
+			`/settings/suggestions/${id}/create`,
+			[
+				...ids.map((n): [string, string] => ["shown", String(n)]),
+				["ids", String(ids[0])],
+				...ids.slice(1).map((n): [string, string] => [`note_${n}`, "left out"]),
+			],
+			{ bindings: { DB: counted.db } },
+		);
+		expect(res.status).toBe(200);
+		expect(counted.statements()).toBeLessThan(1000);
+	});
 	it("creates it with the tag icon and the next color, puts the ticked transactions in it as the person's own pick, and says so", async () => {
 		const { id, ids } = await petCare();
 		const { res, html } = await create(id, ids.slice(0, 3), ids);
@@ -378,6 +446,84 @@ describe("creating the category", () => {
 		);
 		await background();
 		expect(jev).toHaveBeenCalledTimes(3);
+	});
+
+	it("re-asks newest-first about at most 50 of 300 left-out transactions, leaving the rest for night", async () => {
+		const { id, ids } = await bulkSuggestion("Large Batch", 301);
+		const counted = countingDb();
+		const asked: string[] = [];
+		const jev = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+			asked.push(
+				JSON.parse(String(init?.body)).state.bank_description as string,
+			);
+			return Response.json({
+				answers: {
+					category: {
+						type: "choice",
+						choice: "None of these fit",
+						confidence: 0.5,
+					},
+					transfer: { type: "noul", noul: 0.01 },
+					reimbursement: { type: "noul", noul: 0.01 },
+					income: { type: "noul", noul: 0.01 },
+				},
+			});
+		});
+		vi.stubGlobal("fetch", jev);
+		const { res } = await post(
+			`/settings/suggestions/${id}/create`,
+			[
+				...ids.map((n): [string, string] => ["shown", String(n)]),
+				["ids", String(ids[0])],
+			],
+			{ bindings: { DB: counted.db, DEMO: "false", JEV_API_KEY: "jev-key" } },
+		);
+		expect(res.status).toBe(200);
+		expect(waitUntil).toHaveBeenCalledTimes(1);
+		await background();
+		expect(jev).toHaveBeenCalledTimes(50);
+		expect(counted.statements()).toBeLessThan(1000);
+		const rows = await db
+			.prepare(
+				"SELECT category_id, category_confidence FROM transactions WHERE raw_name LIKE 'Large Batch %'",
+			)
+			.all<{
+				category_id: number | null;
+				category_confidence: number | null;
+			}>();
+		expect(
+			rows.results.filter((row) => row.category_confidence === 0.5),
+		).toHaveLength(50);
+		expect(
+			rows.results.filter(
+				(row) => row.category_id === null && row.category_confidence === null,
+			),
+		).toHaveLength(250);
+		const newest = await db
+			.prepare(
+				"SELECT raw_name FROM transactions WHERE raw_name LIKE 'Large Batch %' AND category_suggestion_id IS NOT NULL ORDER BY date DESC, id DESC LIMIT 50",
+			)
+			.all<{ raw_name: string }>();
+		expect(asked).toEqual(newest.results.map((row) => row.raw_name));
+		const nightly = vi.fn(async () =>
+			Response.json({
+				answers: {
+					category: {
+						type: "choice",
+						choice: "None of these fit",
+						confidence: 0.5,
+					},
+					transfer: { type: "noul", noul: 0.01 },
+					reimbursement: { type: "noul", noul: 0.01 },
+					income: { type: "noul", noul: 0.01 },
+				},
+			}),
+		);
+		await categorizePending(
+			{ DB: db, DEMO: "false", JEV_API_KEY: "jev-key" },
+			nightly,
+		);
+		expect(nightly).toHaveBeenCalledTimes(250);
 	});
 
 	it("asks Jev nothing when every transaction stays ticked", async () => {
