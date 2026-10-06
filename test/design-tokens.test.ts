@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { COLOR_TOKENS, DURATION_TOKENS } from "../src/design-system/tokens";
+import {
+	COLOR_TOKENS,
+	DURATION_TOKENS,
+	SWIPE_MOTION_TOKENS,
+} from "../src/design-system/tokens";
 import css from "../src/styles/app.css?raw";
 import { Chip } from "../src/views/chip";
 
@@ -726,5 +730,11 @@ describe("design tokens (DESIGN.md)", () => {
 		);
 		expect(theme.length).toBeGreaterThan(5);
 		expect(DURATION_TOKENS.map((t) => [t.name, t.value])).toEqual(theme);
+	});
+
+	it("lists the swipe easing and distance as app.css tokens", () => {
+		for (const token of SWIPE_MOTION_TOKENS) {
+			expect(css).toContain(`--${token.name}: ${token.value};`);
+		}
 	});
 });

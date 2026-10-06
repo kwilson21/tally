@@ -7,103 +7,183 @@ const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
 const SHORT_NAMES: Record<string, string> = {
 	Groceries: "Groc.",
 	"Eating Out": "Eating",
+	Gas: "Gas",
+	Kids: "Kids",
 	Household: "Home",
 	Utilities: "Util.",
 	Clothing: "Cloth.",
+	Gifts: "Gifts",
+	Pets: "Pets",
 };
+/** Short labels for a finished-month chart, disambiguated in their given order. */
+export function monthEndLabels(names: string[]): string[] {
+	const words = names.map((name) => name.normalize("NFC").trim().split(/\s+/));
+	const extras = names.map(() => 0);
+	const labels = names.map((name, index) => {
+		if (Object.hasOwn(SHORT_NAMES, name)) return SHORT_NAMES[name] ?? name;
+		const first = Array.from(words[index]?.[0] ?? "");
+		return first.length > 6 ? `${first.slice(0, 6).join("")}.` : first.join("");
+	});
+	const labelAt = (index: number) => {
+		const name = names[index] ?? "";
+		if (Object.hasOwn(SHORT_NAMES, name)) return SHORT_NAMES[name] ?? name;
+		const parts = words[index] ?? [name];
+		let remainder = extras[index] ?? 0;
+		const suffix = parts
+			.slice(1)
+			.map((part) => {
+				const chars = Array.from(part);
+				if (remainder <= 0) return "";
+				const shown = chars.slice(0, remainder);
+				remainder -= shown.length;
+				return `${shown.join("")}${shown.length < chars.length ? "." : ""}`;
+			})
+			.filter(Boolean);
+		return [labels[index] ?? name, ...suffix].join(" ") || name;
+	};
+	for (let pass = 0; pass <= names.length; pass++) {
+		const groups = new Map<string, number[]>();
+		for (let index = 0; index < names.length; index++) {
+			const label = labelAt(index);
+			groups.set(label, [...(groups.get(label) ?? []), index]);
+		}
+		const duplicates = [...groups.values()].filter((group) => group.length > 1);
+		if (!duplicates.length) return names.map((_, index) => labelAt(index));
+		for (const group of duplicates) {
+			for (const index of group) {
+				if (!Object.hasOwn(SHORT_NAMES, names[index] ?? ""))
+					extras[index] = (extras[index] ?? 0) + 1;
+			}
+		}
+	}
+	const full = [...names];
+	return full.map((name, index) =>
+		full.indexOf(name) === index ? name : `${name} (${index + 1})`,
+	);
+}
 
 function EndBars({ rows }: { rows: CategorySummary[] }) {
-	const width = 350;
+	const width = Math.max(350, 4 + Math.max(0, rows.length - 1) * 66 + 42);
 	const left = 4;
-	const areaRight = 292;
 	const unit = 72;
 	const barWidth = 42;
-	const maxPerRow = 5;
-	const panels = Array.from(
-		{ length: Math.max(1, Math.ceil(rows.length / maxPerRow)) },
-		(_, index) => rows.slice(index * maxPerRow, (index + 1) * maxPerRow),
-	);
+	const labels = monthEndLabels(rows.map((row) => row.name));
+	const scrolls = rows.length > 5;
 	const names = rows
 		.map(
 			(row) =>
 				`${row.name} ${whole(row.spentCents)} of ${whole(row.budgetCents)}`,
 		)
 		.join(", ");
-	return (
+	const chart = (
 		<svg
-			viewBox={`0 0 ${width} ${panels.length * 142}`}
-			class="mt-4 w-full"
+			viewBox={`0 0 ${width} 142`}
+			width={scrolls ? width : undefined}
+			class={scrolls ? "block max-w-none" : "block w-full"}
 			role="img"
 			aria-label={`Spent against each budget: ${names || "no budgeted categories"}`}
 		>
-			{panels.map((panel, rowIndex) => {
+			<line
+				x1={left}
+				x2={width}
+				y1="40"
+				y2="40"
+				class="stroke-muted"
+				stroke-width="1"
+				stroke-dasharray="4 4"
+			/>
+			{!scrolls && (
+				<text x="298" y="45" class="fill-muted text-sm">
+					budget
+				</text>
+			)}
+			{rows.map((row, index) => {
 				const base = 112;
-				const step =
-					panel.length > 1
-						? Math.min(66, (areaRight - left - barWidth) / (panel.length - 1))
-						: 66;
-				const start =
-					left +
-					(areaRight - left - ((panel.length - 1) * step + barWidth)) / 2;
-				const lineY = base - unit;
+				const over = row.spentCents > row.budgetCents;
+				const height = Math.max(
+					3,
+					Math.round(endBarRatio(row.spentCents, row.budgetCents).ratio * unit),
+				);
+				const x = left + index * 66;
 				return (
-					<g transform={`translate(0 ${rowIndex * 142})`}>
-						<line
-							x1={left}
-							x2={areaRight}
-							y1={lineY}
-							y2={lineY}
-							class="stroke-muted"
-							stroke-width="1"
-							stroke-dasharray="4 4"
+					<g>
+						<rect
+							x={x}
+							y={base - height}
+							width={barWidth}
+							height={height}
+							rx="3"
+							class={over ? "fill-over" : "fill-muted/60"}
 						/>
-						<text x={areaRight + 6} y={lineY + 5} class="fill-muted text-sm">
-							budget
+						{over && (
+							<text
+								x={x + barWidth / 2}
+								y={base - height - 6}
+								text-anchor="middle"
+								class="fill-over text-sm font-semibold"
+							>
+								+{whole(row.spentCents - row.budgetCents)}
+							</text>
+						)}
+						<text
+							x={x + barWidth / 2}
+							y={base + 20}
+							text-anchor="middle"
+							class="fill-muted text-sm"
+						>
+							{labels[index]}
 						</text>
-						{panel.map((row, index) => {
-							const over = row.spentCents > row.budgetCents;
-							const height = Math.max(
-								3,
-								Math.round(
-									endBarRatio(row.spentCents, row.budgetCents).ratio * unit,
-								),
-							);
-							const x = start + index * step;
-							return (
-								<g>
-									<rect
-										x={x}
-										y={base - height}
-										width={barWidth}
-										height={height}
-										rx="3"
-										class={over ? "fill-over" : "fill-muted/60"}
-									/>
-									{over && (
-										<text
-											x={x + barWidth / 2}
-											y={base - height - 6}
-											text-anchor="middle"
-											class="fill-over text-sm font-semibold"
-										>
-											+{whole(row.spentCents - row.budgetCents)}
-										</text>
-									)}
-									<text
-										x={x + barWidth / 2}
-										y={base + 20}
-										text-anchor="middle"
-										class="fill-muted text-sm"
-									>
-										{SHORT_NAMES[row.name] ?? row.name.slice(0, 4)}
-									</text>
-								</g>
-							);
-						})}
 					</g>
 				);
 			})}
 		</svg>
+	);
+	if (!scrolls) return <div class="mt-4">{chart}</div>;
+	return (
+		<div class="relative mt-4">
+			{/* biome-ignore lint/a11y/useSemanticElements: this scroll container must expose role=region explicitly */}
+			<div
+				role="region"
+				tabindex={0}
+				aria-label={`${rows.length} categories; scroll sideways to see them all`}
+				class="max-w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+			>
+				<div class="flex w-max">
+					{chart}
+					<span
+						id="month-end-chart-end"
+						class="w-px shrink-0"
+						aria-hidden="true"
+					/>
+				</div>
+			</div>
+			<span class="month-end-budget-label" aria-hidden="true">
+				budget
+			</span>
+			<span class="month-end-chart-fade" aria-hidden="true" />
+			<a
+				href="#month-end-chart-end"
+				aria-label="Show the rest of the categories"
+				class="month-end-chart-more inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-rule bg-paper text-lg text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+			>
+				<span class="month-end-swipe-arrow" aria-hidden="true">
+					→
+				</span>
+				<span class="sr-only">Show the rest of the categories</span>
+			</a>
+			<p class="mt-1 flex items-center justify-center gap-2 text-sm text-muted">
+				<span
+					class="month-end-swipe-arrow month-end-swipe-arrow-left"
+					aria-hidden="true"
+				>
+					←
+				</span>
+				swipe sideways for the rest
+				<span class="month-end-swipe-arrow" aria-hidden="true">
+					→
+				</span>
+			</p>
+		</div>
 	);
 }
 

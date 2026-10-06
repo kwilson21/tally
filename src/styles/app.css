@@ -54,6 +54,9 @@
 	--duration-slow: 600ms; /* a budget bar filling on load */
 	--duration-spin: 700ms; /* one turn of the busy ring */
 	--duration-toast: 4s; /* a toast's whole stay; toast.js's DISPLAY_MS is the same 4 seconds */
+	--duration-swipe: 1.2s; /* one small movement of a finished-month chart cue */
+	--ease-swipe: ease-in-out; /* the finished-month chart's sideways cue */
+	--distance-swipe: 12px; /* the finished-month chart's sideways cue */
 }
 
 @layer base {
@@ -225,6 +228,52 @@ html:not(.js) [data-money-js] {
 }
 .field-shake {
 	animation: field-shake var(--duration-shake) ease-out;
+}
+
+/* A finished-month chart hints at sideways scrolling three times, then rests. */
+@keyframes month-end-nudge {
+	50% {
+		transform: translateX(var(--swipe-direction, var(--distance-swipe)));
+	}
+}
+.month-end-swipe-arrow {
+	display: inline-block;
+	animation: month-end-nudge var(--duration-swipe) var(--ease-swipe) 3;
+}
+.month-end-swipe-arrow-left {
+	--swipe-direction: calc(var(--distance-swipe) * -1);
+}
+.month-end-chart-fade {
+	position: absolute;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	width: 4rem;
+	background: linear-gradient(to right, transparent, var(--color-paper) 85%);
+	pointer-events: none;
+}
+.month-end-budget-label {
+	position: absolute;
+	top: 34px;
+	right: 0;
+	z-index: 1;
+	background: var(--color-paper);
+	padding-left: 0.25rem;
+	color: var(--color-muted);
+	font-size: 0.875rem;
+	line-height: 1.25rem;
+}
+.month-end-chart-more {
+	position: absolute;
+	top: 50%;
+	right: 0.25rem;
+	z-index: 2;
+	transform: translateY(-50%);
+}
+@media (prefers-reduced-motion: reduce) {
+	.month-end-swipe-arrow {
+		animation: none;
+	}
 }
 
 /* The request label remains visible; reduced motion only stops its ring. */

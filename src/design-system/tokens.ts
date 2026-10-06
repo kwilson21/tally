@@ -127,6 +127,20 @@ export const DURATION_TOKENS = [
 		value: "4s",
 		use: "a toast's whole stay: it fades in, holds and fades out; toast.js removes it after the same 4 seconds",
 	},
+	{
+		name: "swipe",
+		value: "1.2s",
+		use: "one finished-month chart arrow nudge; the cue moves three times",
+	},
+] as const;
+
+export const SWIPE_MOTION_TOKENS = [
+	{
+		name: "ease-swipe",
+		value: "ease-in-out",
+		use: "finished-month chart arrows",
+	},
+	{ name: "distance-swipe", value: "12px", use: "finished-month chart arrows" },
 ] as const;
 
 export const CATEGORY_COLORS = COLOR_TOKENS.filter((t) =>

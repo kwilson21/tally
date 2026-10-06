@@ -109,6 +109,7 @@ import {
 	CATEGORY_COLORS,
 	COLOR_TOKENS,
 	DURATION_TOKENS,
+	SWIPE_MOTION_TOKENS,
 	TYPE_ROLES,
 } from "./tokens";
 
@@ -265,7 +266,7 @@ function Foundation() {
 				id="motion"
 				title="Motion"
 				tier="visual"
-				sentence="Quiet confirmations in CSS only (decision 76): a switch's knob slides, a sheet rises, a toast fades in, and pages cross-fade, each over in 150 to 200 ms; the budget bars fill on load. Nothing counts up or bounces, and reduced motion shows every end state with nothing moving. Each move is a class in app.css that names a duration token below, never a length, and is written into its component's use spec: the Switch, the Toast, the BottomSheet and the page shell, in the sections that follow."
+				sentence="Quiet confirmations in CSS only (decision 76): a switch's knob slides, a sheet rises, a toast fades in, and pages cross-fade; the budget bars fill on load. A finished-month chart's arrows nudge three times when more than five categories need scrolling, then rest. Reduced motion stops them. Every move names motion tokens in app.css, and the component's use spec says how it behaves."
 			>
 				<State label="Duration tokens (app.css @theme): a rule names one, never a length">
 					<dl class="max-w-prose divide-y divide-rule border-y border-rule">
@@ -273,6 +274,18 @@ function Foundation() {
 							<div class="py-3 sm:grid sm:grid-cols-[14rem_1fr] sm:gap-4">
 								<dt class="font-medium">
 									duration-{t.name} <span class="text-muted">{t.value}</span>
+								</dt>
+								<dd class="mt-1 text-muted sm:mt-0">{t.use}</dd>
+							</div>
+						))}
+					</dl>
+				</State>
+				<State label="Swipe cue easing and distance tokens (app.css @theme)">
+					<dl class="max-w-prose divide-y divide-rule border-y border-rule">
+						{SWIPE_MOTION_TOKENS.map((t) => (
+							<div class="py-3 sm:grid sm:grid-cols-[14rem_1fr] sm:gap-4">
+								<dt class="font-medium">
+									{t.name} <span class="text-muted">{t.value}</span>
 								</dt>
 								<dd class="mt-1 text-muted sm:mt-0">{t.use}</dd>
 							</div>
@@ -700,11 +713,11 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	input:
 		"Touch targets are 44px. Keyboard Tab reaches each available arrow and month link in order; Enter follows it. Screen readers hear Previous month, August; Next month, October; and a month name with this month where applicable. Unavailable arrows are hidden because they are not controls.",
 	motion:
-		"No custom motion. The page uses the shell's browser page transition; reduced-motion preferences are honored by the shell.",
+		"When more than five categories need a sideways cue, its arrows nudge three times at 1.2 seconds per nudge, then rest. Reduced motion leaves them still. The page uses the shell's browser page transition.",
 	edges:
-		"The strip starts at the first month with a counted transaction and ends at the household's current month. At either end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A future or pre-history month address opens this month's Home.",
+		"The strip starts at the first month with a counted transaction and ends at the household's current month. At either end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month chart with more than five categories is one 42px-bar row inside its own keyboard-scrollable region; its dashed budget line continues across the row and its budget word stays at the visible right edge. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls. A future or pre-history month address opens this month's Home.",
 	words:
-		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget}.",
+		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
 };
 
 function HomeTopGroup() {
@@ -838,7 +851,23 @@ function HomeTopGroup() {
 						/>
 					</div>
 				</State>
-				<State label="Twelve budgeted categories: five bars per chart row">
+				<State label="Five budgeted categories: one row, no scrolling region or cue">
+					<div class="w-[320px] max-w-full">
+						<MonthEnd
+							monthName="September"
+							amountCents={0}
+							rows={Array.from({ length: 5 }, (_, index) => ({
+								id: index + 1,
+								name: `Category ${index + 1}`,
+								budgetCents: 10000,
+								spentCents: 8000,
+								leftCents: 2000,
+								over: false,
+							}))}
+						/>
+					</div>
+				</State>
+				<State label="Twelve budgeted categories: one row, keyboard-scrollable with fade, arrow link and swipe cue">
 					<div class="w-[320px] max-w-full">
 						<MonthEnd
 							monthName="September"
@@ -850,6 +879,22 @@ function HomeTopGroup() {
 								spentCents: index % 3 === 0 ? 12000 : 8000,
 								leftCents: index % 3 === 0 ? -2000 : 2000,
 								over: index % 3 === 0,
+							}))}
+						/>
+					</div>
+				</State>
+				<State label="The twelve-category swipe cue under prefers-reduced-motion: arrows rest">
+					<div class="w-[320px] max-w-full">
+						<MonthEnd
+							monthName="September"
+							amountCents={0}
+							rows={Array.from({ length: 12 }, (_, index) => ({
+								id: index + 1,
+								name: `Category ${index + 1}`,
+								budgetCents: 10000,
+								spentCents: 8000,
+								leftCents: 2000,
+								over: false,
 							}))}
 						/>
 					</div>
