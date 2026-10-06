@@ -11,6 +11,7 @@ import {
 	monthsWithTransactions,
 	needsCategoryCount,
 	PAGE_SIZE,
+	payingBillsCount,
 	type RefundPurchase,
 	refundPurchases,
 	removeSplit,
@@ -896,11 +897,22 @@ transactions.post("/transactions/select/exclude", async (c) => {
 			).bind(id, actor(c)),
 		),
 	);
+	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
+	// the edit panel's does.
+	const paying = await payingBillsCount(c.env.DB, ids);
+	const stillCounts =
+		paying === 0
+			? ""
+			: ids.length === 1
+				? " It still counts while it pays a bill."
+				: paying === 1
+					? " 1 still counts while it pays a bill."
+					: ` ${paying} still count while they pay a bill.`;
 	return finishSelection(
 		c,
 		today,
 		back,
-		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.`,
+		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.${stillCounts}`,
 	);
 });
 

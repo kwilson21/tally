@@ -6,8 +6,8 @@
  * category, never its own, while the purchase counts; unlinking it, or excluding the purchase,
  * brings back its own date and category.
  * Every query that uses these expressions adds COUNTED_JOINS, which names the aliases:
- * t (the transaction), bp/b (its bill payment), rp (the purchase it refunds) and rbp/rb
- * (that purchase's bill payment).
+ * t (the transaction), bp/b (its bill payment, or for a split part its parent's), rp (the purchase it
+ * refunds) and rbp/rb (that purchase's bill payment, read the same way).
  */
 
 /** True when a transaction is a refund that follows its purchase and its review is still valid. */
@@ -63,9 +63,19 @@ export function countedCategorySql() {
 	return `CASE WHEN ${FOLLOWS_PURCHASE} THEN rp.category_id ELSE t.category_id END`;
 }
 
+/**
+ * Joins, as `payment`, the bill payment the transaction `alias` names pays (see `paysBillSql`): its own
+ * link, or for a split part its parent's, so every part counts in the month the whole payment did. A
+ * part linked both ways reads its own, so it is one row.
+ */
+const linkedPaymentJoin = (payment: string, alias: string) =>
+	`LEFT JOIN bill_payments ${payment} ON ${payment}.id = COALESCE(
+		(SELECT own.id FROM bill_payments own WHERE own.transaction_id=${alias}.id AND own.status='linked'),
+		(SELECT whole.id FROM bill_payments whole WHERE whole.transaction_id=${alias}.parent_id AND whole.status='linked'))`;
+
 /** The joins countedMonthSql and countedCategorySql read from. */
-export const COUNTED_JOINS = `LEFT JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+export const COUNTED_JOINS = `${linkedPaymentJoin("bp", "t")}
 	LEFT JOIN bills b ON b.id=bp.bill_id
 	LEFT JOIN transactions rp ON rp.id=t.refund_of_id
-	LEFT JOIN bill_payments rbp ON rbp.transaction_id=rp.id AND rbp.status='linked'
+	${linkedPaymentJoin("rbp", "rp")}
 	LEFT JOIN bills rb ON rb.id=rbp.bill_id`;

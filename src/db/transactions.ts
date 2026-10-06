@@ -83,18 +83,21 @@ const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_inco
  * - Spending: what Home counts, so the list adds up to Home's Spent.
  * - Income: flagged income.
  * - Refunds: money in (a negative amount) that isn't income or a transfer and is in the budget or
- *   waiting to be, so a refund nobody linked and a credit nobody has identified are here. A split
- *   refund shows by its parts, as it counts; a part doesn't carry its parent's income or transfer
- *   flag, so it is a refund only when its parent isn't income or a transfer either.
+ *   waiting to be, so a refund nobody linked and a credit nobody has identified are here. A credit
+ *   linked to a bill is here whatever its transfer flag or exclusion, since it is never Excluded
+ *   (spec §8.5). A split refund shows by its parts, as it counts; a part doesn't carry its parent's
+ *   income or transfer flag, so it is a refund only when its parent isn't income or a transfer either.
  * - Excluded: left out of the budget, where transfers and card payments go (the old Excluded chip),
- *   so not a payment linked to a bill (spec §8.5), as How Tally works' excluded count reads it.
+ *   so not a payment linked to a bill (spec §8.5). A split shows by its parts, as the others do, so
+ *   it lists exactly what How Tally works' excluded count counts (`excludedBreakdown`).
  */
 const SHOW_SQL: Record<Show, string | null> = {
 	all: null,
 	spending: `(${COUNTED_SPENDING})`,
 	income: "t.flag_income = 1",
-	refunds: `(t.amount_cents < 0 AND t.flag_income = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_income, 0) = 0 AND COALESCE(p.flag_transfer, 0) = 0 AND ${INCLUDED} AND t.is_split = 0)`,
-	excluded: `NOT ${INCLUDED}`,
+	refunds: `(t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(p.flag_income, 0) = 0 AND t.is_split = 0
+		AND (${paysBillSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
+	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
 };
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
@@ -931,12 +934,27 @@ export async function saveJevResult(
 	return result.meta.changes > 0;
 }
 
-/** How many of a month's transactions are excluded (split parents aside), for How Tally works. */
+/** How many of these transactions pay a bill, on their own link or their split parent's (`paysBillSql`). */
+export async function payingBillsCount(
+	db: D1Database,
+	ids: number[],
+): Promise<number> {
+	if (ids.length === 0) return 0;
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (${ids.map(() => "?").join(",")}) AND ${paysBillSql("t")}`,
+		)
+		.bind(...ids)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
 /**
  * This month's excluded transactions by why (How Tally works, spec §9): a person's choice when a
  * person excluded it (even if it's also flagged) or it has no flag; otherwise its flag, transfer
  * first. One Plaid excluded as a transfer or card payment counts as a transfer. A payment linked to a
- * bill counts, so it isn't listed here (spec §8.5).
+ * bill counts, so it isn't listed here (spec §8.5). It counts the rows Show Excluded lists for the
+ * month (split parents aside, in the month the list puts them), so the two always agree.
  */
 export async function excludedBreakdown(
 	db: D1Database,
@@ -945,12 +963,14 @@ export async function excludedBreakdown(
 	const row = await db
 		.prepare(
 			`SELECT COALESCE(SUM(NOT person AND moved), 0) AS transfer,
-				COALESCE(SUM(NOT person AND NOT moved AND flag_reimbursement = 1), 0) AS reimbursement,
-				COALESCE(SUM(person OR (NOT moved AND flag_reimbursement = 0)), 0) AS byPerson
-			FROM (SELECT *, COALESCE(excluded_source = 'user', 0) AS person,
-				flag_transfer = 1 OR COALESCE(excluded_source = 'plaid', 0) AS moved FROM transactions) AS tx
-			WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0
-				AND NOT ${paysBillSql("tx")}`,
+				COALESCE(SUM(NOT person AND NOT moved AND reimbursement), 0) AS reimbursement,
+				COALESCE(SUM(person OR (NOT moved AND NOT reimbursement)), 0) AS byPerson
+			FROM (SELECT COALESCE(t.excluded_source = 'user', 0) AS person,
+					t.flag_transfer = 1 OR COALESCE(t.excluded_source = 'plaid', 0) AS moved,
+					t.flag_reimbursement = 1 AS reimbursement
+				FROM transactions t
+				${COUNTED_JOINS}
+				WHERE ${COUNTED_MONTH} = ? AND ${SHOW_SQL.excluded})`,
 		)
 		.bind(month)
 		.first<ExcludedBreakdown>();

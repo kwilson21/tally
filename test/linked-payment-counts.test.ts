@@ -9,7 +9,9 @@ import {
 	monthCounts,
 	needsCategoryCount,
 	pendingForJev,
+	saveEdit,
 	saveJevResult,
+	saveSplit,
 } from "../src/db/transactions";
 import { loadTrends } from "../src/db/trends";
 import { resetDemo } from "../src/demo/reset";
@@ -226,8 +228,8 @@ describe("a split whose bank transaction pays a bill", () => {
 			counted: before.counted + 2,
 			needsCategory: before.needsCategory + 2,
 			breakdownExcluded: before.breakdownExcluded - 2,
-			// The parent and its parts are all read as paying the bill.
-			filterExcluded: before.filterExcluded - 3,
+			// Show Excluded lists a split by its parts, as How Tally works counts it, so they move together.
+			filterExcluded: before.filterExcluded - 2,
 		});
 		expect(await stored(9530, 9531, 9532)).toEqual(
 			[9530, 9531, 9532].map((id) => ({
@@ -269,6 +271,121 @@ describe("a split whose bank transaction pays a bill", () => {
 	});
 });
 
+describe("a payment linked to an earlier month's occurrence, then split", () => {
+	const AUGUST = "2026-08";
+	const spentIn = async (month: string) =>
+		summarizeMonth({
+			month,
+			...(await loadMonth(db, month)),
+			unpaidDueBillsCents: 0,
+		}).totalSpentCents;
+	const trendIn = async (month: string) =>
+		(await loadTrends(db, TODAY)).spend
+			.filter((row) => row.month === month)
+			.reduce((sum, row) => sum + row.cents, 0);
+	const months = async () => ({
+		august: await spentIn(AUGUST),
+		september: await spentIn(MONTH),
+		augustTrend: await trendIn(AUGUST),
+		septemberTrend: await trendIn(MONTH),
+	});
+	const partIds = async (parentId: number) =>
+		(
+			await db
+				.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+				.bind(parentId)
+				.all<{ id: number }>()
+		).results.map((r) => r.id);
+
+	it.each([
+		["counted", 0],
+		["excluded", 1],
+	] as const)(
+		"keeps every part in the occurrence's month, where the whole payment counted (%s)",
+		async (_, excluded) => {
+			// A 1500.00 payment on September 4th, for August's occurrence: it counts in August.
+			await db
+				.prepare(
+					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, excluded, excluded_source)
+					 SELECT 9560, id, '2026-09-04', 150000, 'LANDLORD LLC', 5, ?1, CASE WHEN ?1 = 1 THEN 'plaid' END FROM accounts LIMIT 1`,
+				)
+				.bind(excluded)
+				.run();
+			const before = await months();
+			await db
+				.prepare(
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9500, ?, 9560, 'user', 'linked')",
+				)
+				.bind(AUGUST)
+				.run();
+			const linked = await months();
+			expect(linked.august).toBe(before.august + 150000);
+			expect(linked.september).toBe(before.september - (excluded ? 0 : 150000));
+
+			const split = await saveSplit(
+				db,
+				9560,
+				[
+					{ categoryId: 5, amountCents: 100000 },
+					{ categoryId: 1, amountCents: 50000 },
+				],
+				"test",
+			);
+			expect(split.saved).toBe(true);
+			// Split, it is still that payment whole: Spent and Trends read every month as before.
+			expect(await months()).toEqual(linked);
+			const parts = await partIds(9560);
+			expect(parts).toHaveLength(2);
+			const { rows } = await listTransactions(
+				db,
+				parseFilters(new URLSearchParams(`month=${AUGUST}&q=LANDLORD`), MONTH),
+			);
+			for (const id of parts)
+				expect(rows.find((row) => row.id === id)).toMatchObject({
+					countsInMonth: AUGUST,
+				});
+		},
+	);
+
+	it("counts a refund of one of its parts in that part's month, as it counts", async () => {
+		await db.batch([
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id)
+				 SELECT 9570, id, '2026-09-04', 150000, 'LANDLORD LLC', 5 FROM accounts LIMIT 1`,
+			),
+			db
+				.prepare(
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9500, ?, 9570, 'user', 'linked')",
+				)
+				.bind(AUGUST),
+		]);
+		await saveSplit(
+			db,
+			9570,
+			[
+				{ categoryId: 5, amountCents: 100000 },
+				{ categoryId: 1, amountCents: 50000 },
+			],
+			"test",
+		);
+		const [part] = await partIds(9570);
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, credit_reviewed, credit_reviewed_by, refund_of_id)
+				 SELECT 9573, id, '2026-09-10', -10000, 'LANDLORD LLC', 1, 'user', ? FROM accounts LIMIT 1`,
+			)
+			.bind(part)
+			.run();
+		const { rows } = await listTransactions(
+			db,
+			parseFilters(new URLSearchParams(`month=${AUGUST}&q=LANDLORD`), MONTH),
+		);
+		expect(rows.find((row) => row.id === 9573)).toMatchObject({
+			countsInMonth: AUGUST,
+		});
+	});
+});
+
 // Transactions' Show choice (#210, spec §8.4) reads what counts the same way (decision 83): Spending is
 // what Home counts, so a linked payment is there whatever its exclusion, and Excluded, Refunds and How
 // Tally works' excluded count leave it out of "excluded" alike.
@@ -292,16 +409,16 @@ describe("the Show choice and a payment linked to a bill", () => {
 	const ids = async (show: string) => (await shown(show)).map((r) => r.id);
 	const spendingListed = async () =>
 		(await shown("spending")).reduce((sum, r) => sum + r.amountCents, 0);
-	const breakdownTotal = async () =>
-		excludedBreakdown(db, MONTH).then(
+	const breakdownTotal = async (month = MONTH) =>
+		excludedBreakdown(db, month).then(
 			(b) => b.transfer + b.reimbursement + b.byPerson,
 		);
-	const excludedCount = async () =>
+	const excludedCount = async (month = MONTH) =>
 		(
 			await listTransactions(
 				db,
 				parseFilters(
-					new URLSearchParams(`month=${MONTH}&show=excluded`),
+					new URLSearchParams(`month=${month}&show=excluded`),
 					MONTH,
 				),
 			)
@@ -385,6 +502,124 @@ describe("the Show choice and a payment linked to a bill", () => {
 		expect(refunds).toContain(9550);
 		expect(excluded).not.toContain(9550);
 		expect(refunds.filter((id) => excluded.includes(id))).toEqual([]);
+	});
+
+	it.each([0, 1])(
+		"lists a linked credit Jev flagged as a transfer under Refunds once it leaves Excluded (reviewed: %i)",
+		async (reviewed) => {
+			await db
+				.prepare(
+					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, flag_transfer, credit_reviewed)
+					 SELECT 9580, id, '2026-09-08', -2000, 'LANDLORD LLC CREDIT', 1, 'jev', 1, ? FROM accounts LIMIT 1`,
+				)
+				.bind(reviewed)
+				.run();
+			expect(await ids("refunds")).not.toContain(9580);
+			expect(await ids("excluded")).toContain(9580);
+
+			await link(9580, "user").run();
+			expect(await ids("refunds")).toContain(9580);
+			expect(await ids("excluded")).not.toContain(9580);
+
+			await unlink().run();
+			expect(await ids("refunds")).not.toContain(9580);
+			expect(await ids("excluded")).toContain(9580);
+		},
+	);
+
+	it("lists the parts of a linked credit whose parent is flagged as a transfer under Refunds", async () => {
+		await db.batch([
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, flag_transfer, is_split, credit_reviewed)
+				 SELECT 9590, id, '2026-09-08', -3000, 'LANDLORD LLC CREDIT', 1, 'jev', 1, 1, 1 FROM accounts LIMIT 1`,
+			),
+			...[
+				[9591, -2000],
+				[9592, -1000],
+			].map(([id, cents]) =>
+				db
+					.prepare(
+						`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id, credit_reviewed)
+						 SELECT ?, id, '2026-09-08', ?, 'LANDLORD LLC CREDIT', 1, 'jev', 9590, 1 FROM accounts LIMIT 1`,
+					)
+					.bind(id, cents),
+			),
+		]);
+		await link(9590, "user").run();
+		const refunds = await ids("refunds");
+		expect(refunds).toEqual(expect.arrayContaining([9591, 9592]));
+		expect(refunds).not.toContain(9590);
+		const excluded = await ids("excluded");
+		for (const id of [9590, 9591, 9592]) expect(excluded).not.toContain(id);
+	});
+
+	it("lists an excluded split by its parts under Excluded, as How Tally works counts it", async () => {
+		const before = await excludedCount();
+		expect(before).toBe(await breakdownTotal());
+		await db.batch([
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, is_split)
+				 SELECT 9600, id, '2026-09-10', 200000, 'SOMEWHERE', 1, 'user', 1 FROM accounts LIMIT 1`,
+			),
+			...[
+				[9601, 150000],
+				[9602, 50000],
+			].map(([id, cents]) =>
+				db
+					.prepare(
+						`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id)
+						 SELECT ?, id, '2026-09-10', ?, 'SOMEWHERE', 1, 'user', 9600 FROM accounts LIMIT 1`,
+					)
+					.bind(id, cents),
+			),
+		]);
+		const excluded = await ids("excluded");
+		expect(excluded).toEqual(expect.arrayContaining([9601, 9602]));
+		expect(excluded).not.toContain(9600);
+		expect(await excludedCount()).toBe(before + 2);
+		expect(await excludedCount()).toBe(await breakdownTotal());
+	});
+
+	it("puts an excluded refund of last month's purchase in the same month in How Tally works and Show Excluded", async () => {
+		const AUGUST = "2026-08";
+		await db.batch([
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id)
+				 SELECT 9700, id, '2026-08-20', 5000, 'SOME SHOP', 1 FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, credit_reviewed, credit_reviewed_by, refund_of_id)
+				 SELECT 9701, id, '2026-09-03', -2000, 'SOME SHOP', 1, 'user', 9700 FROM accounts LIMIT 1`,
+			),
+		]);
+		for (const month of [AUGUST, MONTH])
+			expect(await excludedCount(month)).toBe(await breakdownTotal(month));
+		// A person excludes the refund and leaves its link as it is.
+		expect(
+			await saveEdit(
+				db,
+				9701,
+				{
+					categoryId: null,
+					alwaysForMerchant: false,
+					displayName: null,
+					note: null,
+					excluded: true,
+					income: false,
+					creditReviewed: true,
+				},
+				"test",
+			),
+		).toEqual({ saved: true });
+		expect(
+			await db
+				.prepare(
+					"SELECT excluded, refund_of_id AS refundOfId FROM transactions WHERE id = 9701",
+				)
+				.first(),
+		).toEqual({ excluded: 1, refundOfId: 9700 });
+		for (const month of [AUGUST, MONTH])
+			expect(await excludedCount(month)).toBe(await breakdownTotal(month));
 	});
 });
 
