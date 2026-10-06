@@ -851,8 +851,8 @@ describe("scheduled handler: merchant names", () => {
 });
 
 // D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one (a call to
-// Jev costs about three: the switches read before it and after it, and saving its answer; a name about
-// three too). Each of production's three runs and the demo's one is an invocation of its own, so each
+// Jev costs about three per call (switches before and after, saving its answer), plus one merchant-history
+// query per Jev run; a name costs about three too. Each of production's three runs and the demo's one is an invocation of its own, so each
 // has to fit, with its worst case in it: 09:00 the sync and the feedback retry, 09:20 100 names and 200
 // Jev calls, 09:40 300 Jev calls.
 describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
