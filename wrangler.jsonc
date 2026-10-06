@@ -36,7 +36,7 @@
 			],
 			"workers_dev": false,
 			"preview_urls": false,
-			// The nightly reset (spec §9), demo only. 09:00 UTC is 4–5 am Eastern and 1–2 am Pacific, depending on daylight saving.
+			// The nightly reset (spec §9), demo only, which also sorts and names in the one run. 09:00 UTC is 4–5 am Eastern and 1–2 am Pacific, depending on daylight saving.
 			"triggers": {
 				"crons": ["0 9 * * *"]
 			},
@@ -64,10 +64,12 @@
 			],
 			"workers_dev": false,
 			"preview_urls": false,
-			// The daily catch-up sync (spec §4), at the demo's hour, and 30 minutes later a second run that
-			// asks Jev about what the first left, so a new bank's backfill is sorted in a night (decision 56).
+			// Three runs a morning, 20 minutes apart, so each has D1's 1,000 queries per invocation to itself
+			// (decision 56): 09:00 the daily catch-up sync (spec §4), at the demo's hour, which asks Jev nothing;
+			// 09:20 the first sort, Jev asked about up to 300; 09:40 the names, then the second sort, Jev asked
+			// about up to 200 more. A new bank's backfill is still sorted in a night. src/index.tsx routes by these exact strings.
 			"triggers": {
-				"crons": ["0 9 * * *", "30 9 * * *"]
+				"crons": ["0 9 * * *", "20 9 * * *", "40 9 * * *"]
 			},
 			// Not the demo: no banner, and the nightly reset can never run (decision 25).
 			"vars": {

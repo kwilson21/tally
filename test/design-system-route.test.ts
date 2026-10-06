@@ -347,6 +347,19 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows the Chip disabled, as the edit panel draws it while a refund is linked to a purchase, and DESIGN.md says how it looks", async () => {
+		const { html } = await get("/design-system");
+		const section = html.split('id="chip"')[1]?.split("</section>")[0] ?? "";
+		const disabled = section.match(/<fieldset[^>]*disabled[^>]*>[\s\S]*$/)?.[0];
+		expect(disabled).toContain('type="radio"');
+		// Faded, with a not-allowed cursor, as Button fades: it must not look clickable.
+		expect(disabled).toContain("has-[:disabled]:opacity-40");
+		expect(disabled).toContain("has-[:disabled]:cursor-not-allowed");
+		expect(design).toMatch(
+			/\| Chip \|[^\n]*disabled fieldset[^\n]*40%[^\n]*not-allowed cursor/,
+		);
+	});
+
 	it("shows the FilterSelect as Transactions' filter bar draws it, on a phone too, with its whole use spec", async () => {
 		const { html } = await get("/design-system");
 		const tag = specimens(html).find((t) => t.includes('id="filter-select"'));

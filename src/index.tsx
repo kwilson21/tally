@@ -47,28 +47,55 @@ export const app = new Hono<App>();
 app.notFound(notFoundPage);
 app.onError(serverErrorPage);
 
+/**
+ * Production runs three times each morning, 20 minutes apart, because D1 allows 1,000 queries in one
+ * Worker invocation and a Jev call costs about three of them (the switches read before it and after it,
+ * and saving its answer). Each run has the whole limit to itself, and the day's Jev calls still add up
+ * to the 500 of decision 56:
+ *
+ * - 09:00, the sync run (`runScheduled`): syncs every bank, which applies the merchant rules, and retries
+ *   feedback. It asks Jev and Workers AI nothing.
+ * - 09:20, the first sort run (`runFirstSort`): asks Jev about up to `MAX_CALLS_PER_RUN`, 300.
+ * - 09:40, the names and second sort run (`runSecondSort`): makes the night's names, then asks Jev about
+ *   what is left, up to 200.
+ *
+ * The demo has the one 09:00 run, which does all of it: resets, syncs (nothing, it has no Plaid), sorts
+ * within 40 calls, names within 100 and retries feedback, far under the limit.
+ *
+ * The crons stay in this module, not exported: workerd refuses an entry module whose named exports
+ * aren't functions (test/entry-exports.test.ts).
+ */
+const FIRST_SORT_CRON = "20 9 * * *";
+const SECOND_SORT_CRON = "40 9 * * *";
+const SECOND_SORT_MAX_CALLS = 200;
+
+/**
+ * The 09:00 run, and the demo's only one. The demo resets first; production then catches up every
+ * healthy Plaid Item. The reset puts the household's time zone back to the default too, so it seeds that
+ * zone's date.
+ */
 export async function runScheduled(
 	env: ScheduledEnv,
 	fetchImpl?: typeof fetch,
 ) {
-	// The nightly job resets the demo first; production then catches up every healthy Plaid Item.
-	// The reset puts the household's time zone back to the default too, so it seeds that zone's date.
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	}
 	const synced = await syncAllItems(env, fetchImpl);
-	// The catch-up has already applied merchant rules unless Plaid is off (the demo) or that step
-	// failed; Jev then asks about what they left, so newly fetched transactions are sorted tonight. This
-	// is the nightly run: it asks about everything still waiting, not only what the catch-up brought
-	// in, so it doesn't wait on the "as they arrive" switch, and it only spends what's left of today's
-	// cap after any runs at the syncs (spec §8.6).
-	await categorizePending(env, fetchImpl, {
-		rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
-	});
-	// The demo has one run, which resets, sorts within 40 calls and names within 100, far under D1's limit.
-	// Production names in its second run instead (below): this one has synced and asked Jev about up to 300
-	// transactions, about 900 of the 1,000 queries one invocation may make.
-	if (env.DEMO !== "false") await nameMerchants(env);
+	// Production stops here for Jev and names: the 09:20 and 09:40 runs make them, in invocations of their
+	// own. This one has synced, at about five queries for each new transaction, so 16 new ones (about 110
+	// queries) plus 300 Jev calls (about 900) already go past 1,000. The merchant rules ran at the sync
+	// (`afterSync`), so they aren't waiting on Jev.
+	if (env.DEMO !== "false") {
+		// The demo has no banks, so this pass applies the merchant rules itself (and does when the sync's
+		// own step failed). It asks about everything still waiting, not only what the sync brought in, so it
+		// doesn't wait on the "as they arrive" switch, and it only spends what's left of today's cap
+		// (spec §8.6). Then the names, last, so a long names step can't hold up the sort.
+		await categorizePending(env, fetchImpl, {
+			rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
+		});
+		await nameMerchants(env);
+	}
 	await retryFeedback(env, fetchImpl);
 }
 
@@ -88,17 +115,26 @@ async function nameMerchants(env: ScheduledEnv) {
 }
 
 /**
- * The night's second run, 30 minutes after the first (decision 56): one run asks Jev about at most
- * `MAX_CALLS_PER_RUN`, so this one asks about what the first left, within what's left of the day's
+ * Production's 09:20 run, the first sort (decision 56): Jev asked about up to `MAX_CALLS_PER_RUN`, 300
+ * calls and about 900 queries, within what the day's 500 still allows. It never syncs or resets. It
+ * applies the merchant rules itself first, which also covers a sync at 09:00 whose own rules step failed.
+ */
+export async function runFirstSort(
+	env: ScheduledEnv,
+	fetchImpl?: typeof fetch,
+) {
+	await categorizePending(env, fetchImpl, { rulesApplied: false });
+}
+
+/**
+ * Production's 09:40 run, the names and the second sort (decision 56): one run asks Jev about at most
+ * `MAX_CALLS_PER_RUN`, so this one asks about what the first sort left, within what's left of the day's
  * cap, and a newly linked bank's backfill is still sorted in a night. It never syncs or resets.
  *
- * It also makes the night's names (spec §7), first, so a long names step can't starve the sort. Its own
- * Jev pass asks about at most `SECOND_SORT_MAX_CALLS`: 100 names and 200 calls are about 900 queries,
- * under D1's 1,000 for one invocation, and with the first run's 300 they still reach the day's 500.
+ * It makes the night's names (spec §7) first, so a long names step can't starve the sort. Its own Jev
+ * pass asks about at most `SECOND_SORT_MAX_CALLS`: 100 names and 200 calls are about 900 queries, under
+ * D1's 1,000 for one invocation, and with the first sort's 300 they still reach the day's 500.
  */
-const SECOND_SORT_CRON = "30 9 * * *";
-const SECOND_SORT_MAX_CALLS = 200;
-
 export async function runSecondSort(
 	env: ScheduledEnv,
 	fetchImpl?: typeof fetch,
@@ -186,7 +222,8 @@ app.route("/", webhooks);
 export default {
 	fetch: app.fetch,
 	async scheduled(controller, env) {
-		if (controller.cron === SECOND_SORT_CRON) await runSecondSort(env);
+		if (controller.cron === FIRST_SORT_CRON) await runFirstSort(env);
+		else if (controller.cron === SECOND_SORT_CRON) await runSecondSort(env);
 		else await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;
