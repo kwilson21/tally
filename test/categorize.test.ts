@@ -77,6 +77,14 @@ describe("askJev", () => {
 		}
 	});
 
+	it("keeps the no-history request byte-for-byte equal to the origin/main body", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(input, categories, "k", fetchImpl);
+		expect(String(calls[0]?.init.body)).toBe(
+			'{"model":"jev-latest","state":{"bank_description":"SQ *LOCAL BAKERY 4432","merchant":"Local Bakery","amount_cents":1200,"direction":"money out","account_type":"credit"},"questions":{"category":{"type":"choice","instructions":"Which of this household\'s budget categories does this bank transaction belong to?","criteria":{"Groceries":null,"Eating Out":null,"Gas":null,"None of these fit":"None of these categories fits this transaction, so a person should decide."}},"transfer":{"type":"noul","instructions":"Is this a transfer between the household\'s own accounts, rather than spending?"},"reimbursement":{"type":"noul","instructions":"Is this money paid back to the household for an earlier expense, such as a reimbursement?"},"income":{"type":"noul","instructions":"Is this income, such as pay, a salary, or interest?"}}}',
+		);
+	});
+
 	it("tells Jev only the name, merchant, amount, direction and account type, and a note when there is one", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(input, categories, "k", fetchImpl);

@@ -128,7 +128,9 @@ export async function categorizePending(
 
 	let failuresInARow = 0;
 	try {
-		const histories = await merchantCategoryHistoryForJev(env.DB, waiting);
+		const histories = start.categories
+			? await merchantCategoryHistoryForJev(env.DB, waiting)
+			: new Map<string, string[]>();
 		for (const tx of waiting.slice(0, granted)) {
 			// Past the household's midnight the calls belong to the next day, which this run didn't reserve.
 			if (todayIn(timeZone) !== day) return done;

@@ -990,6 +990,8 @@ export async function merchantCategoryHistoryForJev(
 				JOIN categories c ON c.id = t.category_id
 				LEFT JOIN transactions p ON p.id = t.parent_id
 				WHERE t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND c.archived = 0
+					AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = t.id AND bp.status = 'linked')
 					AND t.category_source IN ('user', 'merchant_rule')
 					AND t.is_split = 0 AND t.excluded = 0
 					AND COALESCE(p.excluded, 0) = 0 AND COALESCE(p.pending, t.pending) = 0
