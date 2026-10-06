@@ -84,7 +84,7 @@ export const ELECTRIC = bill(
 	HOUSEHOLD,
 );
 const DAYCARE = bill(2, "Daycare", 24000, "due", "2026-10-09", KIDS);
-const SWIM = bill(3, "Swim lessons", 6000, "due", "2026-10-10", KIDS);
+export const SWIM = bill(3, "Swim lessons", 6000, "due", "2026-10-10", KIDS);
 export const INTERNET = bill(
 	4,
 	"Internet",
@@ -101,7 +101,7 @@ export const CAR = bill(
 	"2026-10-20",
 	GAS,
 );
-const RENT = bill(6, "Rent", 120000, "paid", "2026-10-01", RENT_CAT);
+export const RENT = bill(6, "Rent", 120000, "paid", "2026-10-01", RENT_CAT);
 /** A yearly bill: paid in March, so Bills shows next March's as Upcoming. */
 const SOCCER = bill(7, "Youth soccer", 54000, "upcoming", "2027-03-15", KIDS);
 
@@ -153,7 +153,7 @@ type Group = {
 };
 
 /** Bills as the page draws it: title, sentence, Add a bill, then each group once under its heading. */
-function BillsScreen({
+export function BillsScreen({
 	sentence,
 	under,
 	groups,
