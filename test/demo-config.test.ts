@@ -93,8 +93,8 @@ describe("production environment config (#23)", () => {
 	});
 
 	// Three runs, each its own invocation with D1's 1,000 queries to itself (decision 56): the sync, the
-	// first Jev pass, and the names with the second Jev pass. src/index.tsx routes by these exact strings.
-	it("syncs every bank at 09:00 UTC, asks Jev at 09:20, and names then asks Jev again at 09:40 (decision 56)", () => {
+	// first Jev pass, and the second Jev pass with the names. src/index.tsx routes by these exact strings.
+	it("syncs every bank at 09:00 UTC, asks Jev at 09:20, and asks Jev again then names at 09:40 (decision 56)", () => {
 		expect(production.triggers).toEqual({
 			crons: ["0 9 * * *", "20 9 * * *", "40 9 * * *"],
 		});
