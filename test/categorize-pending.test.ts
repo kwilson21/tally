@@ -374,19 +374,34 @@ describe("categorizePending", () => {
 		expect(history.get("Named Shop")).toEqual([["Groceries"]]);
 	});
 
-	it("bounds history to twelve months and keeps the trip on the boundary", async () => {
+	it("keeps old history unless five newer eligible trips displace it", async () => {
 		await db.batch([
 			db.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', '-12 months'), 100, 'WINDOW EDGE', 'Window Shop', 1, 'user')",
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', '-2 years'), 100, 'WINDOW OLD', 'Rare Shop', 1, 'user')",
 			),
 			db.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', '-12 months', '-1 day'), 100, 'WINDOW OLD', 'Window Shop', 2, 'user')",
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', '-2 years'), 100, 'WINDOW OLD', 'Frequent Shop', 1, 'user')",
+			),
+			...Array.from({ length: 5 }, (_, index) =>
+				db
+					.prepare(
+						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', ? || ' days'), 100, 'WINDOW NEW', 'Frequent Shop', 2, 'user')",
+					)
+					.bind(String(-index - 1)),
 			),
 		]);
 		const history = await merchantCategoryHistoryForJev(db, [
-			{ id: 999999, merchantKey: "Window Shop" },
+			{ id: 999999, merchantKey: "Rare Shop" },
+			{ id: 999998, merchantKey: "Frequent Shop" },
 		]);
-		expect(history.get("Window Shop")).toEqual([["Groceries"]]);
+		expect(history.get("Rare Shop")).toEqual([["Groceries"]]);
+		expect(history.get("Frequent Shop")).toEqual([
+			["Eating Out"],
+			["Eating Out"],
+			["Eating Out"],
+			["Eating Out"],
+			["Eating Out"],
+		]);
 	});
 
 	it("includes excluded bill payments in history while excluding other excluded rows", async () => {

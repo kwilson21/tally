@@ -1044,30 +1044,36 @@ export async function merchantCategoryHistoryForJev(
 	if (requested.length === 0) return new Map();
 	const { results } = await db
 		.prepare(
-			// Bound ranking to one year and use the existing date index before deduping and ranking trips.
+			// Match requested merchant keys through the merchant-history index before ranking trips.
 			`WITH requested AS (
 				SELECT json_extract(value, '$.merchantKey') AS merchant_key,
 					json_extract(value, '$.rawName') AS raw_name FROM json_each(?)),
+			matched_transactions AS (
+				SELECT r.merchant_key, t.id, t.date, t.raw_name, t.parent_id, t.is_split,
+					t.category_id, t.category_source, t.pending, t.excluded
+				FROM requested r JOIN transactions t INDEXED BY transactions_merchant_history
+					ON r.merchant_key = ${merchantKeySql("t")}
+				UNION ALL
+				SELECT r.merchant_key, t.id, t.date, t.raw_name, t.parent_id, t.is_split,
+					t.category_id, t.category_source, t.pending, t.excluded
+				FROM requested r JOIN transactions t INDEXED BY transactions_raw_name
+					ON t.raw_name = r.raw_name AND NULLIF(t.merchant_name, '') IS NULL
+				WHERE r.raw_name IS NOT NULL AND r.raw_name != r.merchant_key),
 			 asked AS (SELECT value AS transaction_id FROM json_each(?)),
 			 category_rows AS (
-				SELECT r.merchant_key AS merchant_key, t.id AS trip_id, t.date AS trip_date,
+				SELECT t.merchant_key AS merchant_key, t.id AS trip_id, t.date AS trip_date,
 					t.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
-				FROM transactions t INDEXED BY transactions_date
-				JOIN requested r ON r.merchant_key = ${merchantKeySql("t")}
-					OR (NULLIF(t.merchant_name, '') IS NULL AND t.raw_name = r.raw_name)
+				FROM matched_transactions t
 				JOIN categories c ON c.id = t.category_id
 				WHERE t.parent_id IS NULL
 					AND t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
 					AND c.archived = 0
 					AND t.category_source IN ('user', 'merchant_rule')
 					AND t.is_split = 0 AND ${INCLUDED} AND t.pending = 0
-					AND t.date >= date('now', '-12 months')
 				UNION ALL
-				SELECT r.merchant_key AS merchant_key, p.id AS trip_id, p.date AS trip_date,
+				SELECT p.merchant_key AS merchant_key, p.id AS trip_id, p.date AS trip_date,
 					p.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
-				FROM transactions p INDEXED BY transactions_date
-				JOIN requested r ON r.merchant_key = ${merchantKeySql("p")}
-					OR (NULLIF(p.merchant_name, '') IS NULL AND p.raw_name = r.raw_name)
+				FROM matched_transactions p
 				JOIN transactions t ON t.parent_id = p.id AND t.is_split = 0
 				JOIN categories c ON c.id = t.category_id
 				WHERE p.is_split = 1 AND p.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
@@ -1075,7 +1081,6 @@ export async function merchantCategoryHistoryForJev(
 					AND c.archived = 0
 					AND t.category_source IN ('user', 'merchant_rule')
 					AND ${INCLUDED} AND t.pending = 0 AND ${includedSql("p")} AND p.pending = 0
-					AND p.date >= date('now', '-12 months')
 			),
 			 category_deduped AS (
 				SELECT merchant_key, trip_id, trip_date, trip_order_id, category_name, category_order_id,
@@ -1084,11 +1089,11 @@ export async function merchantCategoryHistoryForJev(
 					) AS category_position
 				FROM category_rows
 			),
-		 usable_trips AS (
+			usable_trips AS (
 				SELECT DISTINCT merchant_key, trip_id, trip_date, trip_order_id
 				FROM category_deduped WHERE category_position = 1
 			),
-		 ranked_trips AS (
+			ranked_trips AS (
 				SELECT merchant_key, trip_id,
 					ROW_NUMBER() OVER (PARTITION BY merchant_key ORDER BY trip_date DESC, trip_order_id DESC) AS position
 				FROM usable_trips
