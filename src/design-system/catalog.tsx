@@ -1936,7 +1936,7 @@ function Controls() {
 				title="MoneyInput"
 				tier="interactive"
 				components={["MoneyInput"]}
-				sentence="The owner's hero amount from the original app: ±$1 round buttons, ▲▼ cent arrows inside the field, Round-to and Last-month chips. Try the buttons, the chips and the ↑ ↓ keys."
+				sentence="The owner's hero amount from the original app: ±$1 round buttons, ▲▼ cent arrows inside the field, Round-to, Last-month and 3-month-average chips. The average appears with three finished months and positive spending. Try the buttons, the chips and the ↑ ↓ keys."
 			>
 				{MONEY_STATES.map((s) => (
 					<State label={s.label}>
