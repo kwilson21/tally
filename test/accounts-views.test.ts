@@ -213,7 +213,7 @@ describe("NetWorthChart", () => {
 	it("puts a Why? link after the sentence, separated by a dot, to the net-worth section of How Tally works (decision 65)", async () => {
 		const html = await render(NetWorthChart({ view: rising }));
 		expect(html).toMatch(
-			/Up \$3,600 since May\.<\/span><span aria-hidden="true">·<\/span><a href="\/how-it-works#net-worth" aria-label="Why\? net worth"/,
+			/Up \$3,600 since May\.<\/span><span class="[^"]*whitespace-nowrap[^"]*"><span aria-hidden="true">·<\/span><a href="\/how-it-works#net-worth" aria-label="Why\? net worth"/,
 		);
 		expect(html).toContain("min-h-11");
 		// Beside the sentence, in the early states too; with no sentence there is nothing to explain.
@@ -264,6 +264,27 @@ describe("NetWorthChart", () => {
 		const html = await render(NetWorthChart({ view: noDays }));
 		expect(html).not.toContain("font-serif");
 		expect(html).toContain("The chart starts with the next sync.");
+	});
+});
+
+describe("BankGroup, Manage", () => {
+	it("leads the Manage disclosure with a chevron that turns when it opens", async () => {
+		const html = await render(
+			BankGroup({
+				name: "First Harbor Bank",
+				accounts: [],
+				manageHref: "/accounts/1/disconnect",
+			}),
+		);
+		const details = html.match(
+			/<details[^>]*>\s*<summary[^>]*>[\s\S]*?<\/summary>/,
+		);
+		expect(details?.[0]).toMatch(/<details class="group /);
+		expect(details?.[0]).toContain("group-open:rotate-90");
+		expect(details?.[0]).toContain('data-icon="chevron-right"');
+		expect(details?.[0]).toContain("list-none");
+		expect(details?.[0]).toMatch(/Manage\s*<\/summary>/);
+		expect(html).toContain("Disconnect this bank");
 	});
 });
 
