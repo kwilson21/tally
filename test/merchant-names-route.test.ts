@@ -106,6 +106,7 @@ describe("namesToReview", () => {
 				bankText: BLUE,
 				tidied: "Blue bottle cof",
 				names: ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
+				source: "tally",
 				count: 3,
 			},
 			{
@@ -114,6 +115,7 @@ describe("namesToReview", () => {
 				bankText: LUPITA,
 				tidied: "Lupitas taq",
 				names: ["Lupita's Taqueria"],
+				source: "tally",
 				count: 1,
 			},
 		]);
@@ -136,12 +138,33 @@ describe("namesToReview", () => {
 		expect(await namesToReview(db)).toEqual([]);
 	});
 
-	it("with the names switch off lists none, and lists them again when it is back on", async () => {
+	it("with the names switch off keeps only the bank's own names, and lists the guesses again when it is back on (decision 80)", async () => {
 		await twoMerchants();
+		await charges(LUPITA, 1, "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
 		await saveAiSwitches(db, { names: false });
-		expect(await namesToReview(db)).toEqual([]);
+		expect(await namesToReview(db)).toMatchObject([
+			{
+				key: "Lupita's Taqueria",
+				names: ["Lupita's Taqueria"],
+				source: "bank",
+			},
+		]);
 		await saveAiSwitches(db, { names: true });
-		expect((await namesToReview(db)).length).toBe(2);
+		expect((await namesToReview(db)).map((r) => r.source)).toEqual([
+			"tally",
+			"bank",
+			"tally",
+		]);
+	});
+
+	it("says where each merchant's names came from: Tally's guess, or the bank", async () => {
+		await twoMerchants();
+		await charges("SQ *COMCAST 99", 1, "Comcast");
+		await suggest("Comcast", "Comcast");
+		const review = await namesToReview(db);
+		expect(review.find((r) => r.key === BLUE)?.source).toBe("tally");
+		expect(review.find((r) => r.key === "Comcast")?.source).toBe("bank");
 	});
 });
 
@@ -159,6 +182,8 @@ describe("namesToReview with several bank texts for one merchant", () => {
 				bankText: "TGT*0099 SF",
 				tidied: "Tgt 0099 sf",
 				names: ["Target"],
+				// Plaid's name is the merchant's key, so a suggestion equal to it is the bank's own.
+				source: "bank",
 				count: 4,
 			},
 		]);
@@ -298,6 +323,22 @@ describe("Settings", () => {
 		);
 	});
 
+	it("with the names switch off counts only the bank's own names", async () => {
+		await twoMerchants();
+		await charges("SQ *COMCAST 99", 1, "Comcast");
+		await suggest("Comcast", "Comcast");
+		expect(textOf((await get("/settings")).html)).toContain(
+			"3 merchant names to check",
+		);
+		await saveAiSwitches(db, { names: false });
+		const { html } = await get("/settings");
+		expect(textOf(html)).toContain("1 merchant name to check");
+		await db.prepare("DELETE FROM merchants WHERE raw_name = 'Comcast'").run();
+		expect((await get("/settings")).html).not.toContain(
+			'href="/settings/names"',
+		);
+	});
+
 	it("says '1 merchant name to check' for one, and shows no Band for none", async () => {
 		await charges(BLUE, 1);
 		await suggest(BLUE, "Blue Bottle Coffee");
@@ -355,6 +396,21 @@ describe("GET /settings/names", () => {
 		expect(html).not.toMatch(/name="name_pick"[^>]*\schecked/);
 		// A way back to Settings.
 		expect(html).toMatch(/<a[^>]*href="\/settings"[^>]*>\s*Settings\s*<\/a>/);
+	});
+
+	it("says a name from the bank is From your bank, with no icon and no Why?, and shows it with the switch off", async () => {
+		await charges("SQ *COMCAST 99", 2, "Comcast");
+		await suggest("Comcast", "Comcast");
+		for (const off of [false, true]) {
+			await saveAiSwitches(db, { names: !off });
+			const { html } = await get("/settings/names");
+			expect(html).toMatch(
+				/<p id="review-source" class="text-sm text-muted">From your bank<\/p>/,
+			);
+			expect(html).toContain('value="s:Comcast"');
+			expect(html).not.toContain("Tally&#39;s guess");
+			expect(html).not.toContain("/how-it-works#names");
+		}
 	});
 
 	it("moves to the next merchant when one is skipped, and skipping changes nothing", async () => {

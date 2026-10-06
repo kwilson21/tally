@@ -203,8 +203,9 @@ describe("POST /settings/ai", () => {
 		expect(trigger(res)).toEqual({
 			toast: { message: "Saved AI suggestions", type: "success" },
 			announce:
-				// The demo has four merchant names waiting, which the names switch hides, so the Band goes too.
-				"Saved AI suggestions. Suggest store names off, categories and exclusions off, income on, sorting new transactions as they arrive off. No merchant names to check.",
+				// The demo has four merchant names waiting. The names switch hides Tally's three guesses but not the
+				// bank's own CVS Pharmacy, so the Band stays, saying one.
+				"Saved AI suggestions. Suggest store names off, categories and exclusions off, income on, sorting new transactions as they arrive off. 1 merchant name to check.",
 		});
 	});
 
@@ -487,9 +488,11 @@ describe("the names Band after a save from the AI group", () => {
 		});
 		expect(on.html).toContain('<div id="names-band">');
 		expect(on.html).toContain('href="/settings/names"');
+		expect(textOf(on.html)).toContain("4 merchant names to check");
+		// With the names switch off Tally's three guesses are hidden; the bank's own CVS Pharmacy stays.
 		const off = await post("/settings/ai", { sortOnArrivalGreyed: "1" });
 		expect(off.html).toContain('<div id="names-band">');
-		expect(off.html).not.toContain('href="/settings/names"');
-		expect(trigger(off.res).announce).toContain("No merchant names to check.");
+		expect(textOf(off.html)).toContain("1 merchant name to check");
+		expect(trigger(off.res).announce).toContain("1 merchant name to check.");
 	});
 });
