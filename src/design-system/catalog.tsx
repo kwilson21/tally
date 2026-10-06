@@ -766,7 +766,7 @@ function HomeTopGroup() {
 					"PastNotBudgeted",
 					"ProgressRow",
 				]}
-				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, read-only category bars and any Not budgeted spending (P46 A, P91–P93, decision 82)."
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels, read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94)."
 			>
 				<State label="September ended under overall, with Eating Out over its own budget">
 					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">

@@ -15,33 +15,34 @@ const SHORT_NAMES: Record<string, string> = {
 	Gifts: "Gifts",
 	Pets: "Pets",
 };
-/** Short labels for a finished-month chart, disambiguated in their given order. */
+/** Short labels for a finished-month chart, disambiguated by the full category set. */
 export function monthEndLabels(names: string[]): string[] {
 	const words = names.map((name) => name.normalize("NFC").trim().split(/\s+/));
-	const extras = names.map(() => 0);
-	const labels = names.map((name, index) => {
-		if (Object.hasOwn(SHORT_NAMES, name)) return SHORT_NAMES[name] ?? name;
-		const first = Array.from(words[index]?.[0] ?? "");
-		return first.length > 6 ? `${first.slice(0, 6).join("")}.` : first.join("");
-	});
+	const extra = names.map(() => 0);
+	const fullSpecial = names.map(() => false);
 	const labelAt = (index: number) => {
 		const name = names[index] ?? "";
-		if (Object.hasOwn(SHORT_NAMES, name)) return SHORT_NAMES[name] ?? name;
 		const parts = words[index] ?? [name];
-		let remainder = extras[index] ?? 0;
-		const suffix = parts
-			.slice(1)
-			.map((part) => {
-				const chars = Array.from(part);
-				if (remainder <= 0) return "";
-				const shown = chars.slice(0, remainder);
-				remainder -= shown.length;
-				return `${shown.join("")}${shown.length < chars.length ? "." : ""}`;
-			})
-			.filter(Boolean);
-		return [labels[index] ?? name, ...suffix].join(" ") || name;
+		const first = Array.from(parts[0] ?? "");
+		const count = Math.min(
+			first.length,
+			6 + (parts.length === 1 ? (extra[index] ?? 0) : 0),
+		);
+		const base = `${first.slice(0, count).join("")}${count < first.length ? "." : ""}`;
+		if (fullSpecial[index]) return name;
+		if ((extra[index] ?? 0) === 0) return SHORT_NAMES[name] ?? base;
+		if (parts.length === 1) return base || name;
+		let remaining = extra[index] ?? 0;
+		const suffix = parts.slice(1).flatMap((part) => {
+			if (remaining <= 0) return [];
+			const chars = Array.from(part);
+			const shown = chars.slice(0, remaining);
+			remaining -= shown.length;
+			return [`${shown.join("")}${shown.length < chars.length ? "." : ""}`];
+		});
+		return [base, ...suffix].filter(Boolean).join(" ") || name;
 	};
-	for (let pass = 0; pass <= names.length; pass++) {
+	for (let pass = 0; pass <= names.length * 2; pass++) {
 		const groups = new Map<string, number[]>();
 		for (let index = 0; index < names.length; index++) {
 			const label = labelAt(index);
@@ -51,14 +52,14 @@ export function monthEndLabels(names: string[]): string[] {
 		if (!duplicates.length) return names.map((_, index) => labelAt(index));
 		for (const group of duplicates) {
 			for (const index of group) {
-				if (!Object.hasOwn(SHORT_NAMES, names[index] ?? ""))
-					extras[index] = (extras[index] ?? 0) + 1;
+				if (Object.hasOwn(SHORT_NAMES, names[index] ?? ""))
+					fullSpecial[index] = true;
+				else extra[index] = (extra[index] ?? 0) + 1;
 			}
 		}
 	}
-	const full = [...names];
-	return full.map((name, index) =>
-		full.indexOf(name) === index ? name : `${name} (${index + 1})`,
+	return names.map(
+		(name, index) => (names[index] ?? "").normalize("NFC").trim() || name,
 	);
 }
 
