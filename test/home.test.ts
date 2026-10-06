@@ -116,6 +116,20 @@ describe("GET / with the demo seed", () => {
 		expect(before.html).not.toContain("January 1900 ended");
 	});
 
+	it("shows only this month when the household has no counted history", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+		]);
+		const { res, html } = await home();
+		const currentMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const months = [...html.matchAll(/href="\/?\?month=(\d{4}-\d{2})"/g)];
+		expect(res.status).toBe(200);
+		expect(html).toContain("Safe to spend");
+		expect(html).toContain(`href="/?month=${currentMonth}"`);
+		expect(months.map((match) => match[1])).toEqual([currentMonth]);
+	});
+
 	it("fades the unavailable arrows on this month and the first month with transactions", async () => {
 		const currentMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const { html } = await homeAt(currentMonth);

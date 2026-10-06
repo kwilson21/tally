@@ -57,6 +57,8 @@
 	--duration-swipe: 1.2s; /* one small movement of a finished-month chart cue */
 	--ease-swipe: ease-in-out; /* the finished-month chart's sideways cue */
 	--distance-swipe: 12px; /* the finished-month chart's sideways cue */
+	--shadow-swipe-cue: 0 2px 8px
+		color-mix(in srgb, var(--color-ink) 18%, transparent);
 }
 
 @layer base {

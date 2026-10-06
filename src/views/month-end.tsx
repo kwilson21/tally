@@ -179,22 +179,25 @@ function EndBars({
 			<a
 				href={`#${chartId}-chart-end`}
 				aria-label="Show the rest of the categories"
-				class="month-end-chart-more inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-rule bg-paper text-lg text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+				class="month-end-chart-more inline-flex min-h-11 min-w-11 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 			>
-				<span class="month-end-swipe-arrow" aria-hidden="true">
+				<span
+					class="month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue"
+					aria-hidden="true"
+				>
 					→
 				</span>
 				<span class="sr-only">Show the rest of the categories</span>
 			</a>
 			<p class="mt-1 flex items-center justify-center gap-2 text-sm text-muted">
 				<span
-					class="month-end-swipe-arrow month-end-swipe-arrow-left"
+					class="month-end-swipe-arrow month-end-swipe-arrow-left text-accent"
 					aria-hidden="true"
 				>
 					←
 				</span>
 				swipe sideways for the rest
-				<span class="month-end-swipe-arrow" aria-hidden="true">
+				<span class="month-end-swipe-arrow text-accent" aria-hidden="true">
 					→
 				</span>
 			</p>

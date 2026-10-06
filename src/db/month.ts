@@ -83,23 +83,18 @@ export async function loadMonth(
 	};
 }
 
-/** First month with an included, whole transaction, using the same counted-month rule as Home. */
+/** First counted month, seeking the earliest qualifying row through the transaction date index. */
 export async function firstCountedMonth(
 	db: D1Database,
 ): Promise<string | null> {
 	const row = await db
 		.prepare(
-			`WITH first_date AS (
-				SELECT MIN(date) AS date FROM transactions
-			), first_month AS (
-				SELECT substr(date, 1, 7) AS month FROM first_date
-			)
-			SELECT COALESCE(MIN(${COUNTED_MONTH}), (SELECT month FROM first_month)) AS month
+			`SELECT ${COUNTED_MONTH} AS month
 			FROM transactions t
 			 ${COUNTED_JOINS}
-			 JOIN first_month fm ON t.date >= fm.month || '-01'
-				AND t.date < date(fm.month || '-01', '+1 month')
-			 WHERE ${INCLUDED} AND t.is_split = 0`,
+			 WHERE ${COUNTED_SPENDING}
+			 ORDER BY t.date
+			 LIMIT 1`,
 		)
 		.first<{ month: string | null }>();
 	return row?.month ?? null;

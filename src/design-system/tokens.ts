@@ -143,6 +143,14 @@ export const SWIPE_MOTION_TOKENS = [
 	{ name: "distance-swipe", value: "12px", use: "finished-month chart arrows" },
 ] as const;
 
+export const SHADOW_TOKENS = [
+	{
+		name: "shadow-swipe-cue",
+		value: "0 2px 8px ink at 18%",
+		use: "the dark finished-month chart arrow",
+	},
+] as const;
+
 export const CATEGORY_COLORS = COLOR_TOKENS.filter((t) =>
 	t.name.startsWith("cat-"),
 ).map((t) => t.name);

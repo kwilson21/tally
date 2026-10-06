@@ -86,13 +86,42 @@ describe("MonthEnd budget bars", () => {
 		);
 		expect(html).toContain('href="#twelve-chart-end"');
 		expect(html).toContain('aria-label="Show the rest of the categories"');
+		expect(html).toContain(
+			'class="month-end-chart-more inline-flex min-h-11 min-w-11 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"',
+		);
+		expect(html).toContain(
+			"month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue",
+		);
 		expect(html).toContain('id="twelve-chart-end"');
 		expect(html).toContain('class="month-end-chart-fade"');
 		expect(html).toContain("swipe sideways for the rest");
-		expect(html).toContain('class="month-end-swipe-arrow"');
 		expect(html).toContain(
-			'class="month-end-swipe-arrow month-end-swipe-arrow-left"',
+			'class="month-end-chart-more-icon month-end-swipe-arrow',
 		);
+		expect(html).toContain(
+			'class="month-end-swipe-arrow month-end-swipe-arrow-left text-accent"',
+		);
+		expect(html).toContain('class="month-end-swipe-arrow text-accent"');
+		const luminance = (hex: string) => {
+			const rgb = hex
+				.match(/[\da-f]{2}/gi)
+				?.map((value) => Number.parseInt(value, 16) / 255);
+			if (rgb?.length !== 3) throw new Error(`Invalid color: ${hex}`);
+			const channels = rgb.map((value) =>
+				value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
+			);
+			return (
+				0.2126 * (channels[0] ?? 0) +
+				0.7152 * (channels[1] ?? 0) +
+				0.0722 * (channels[2] ?? 0)
+			);
+		};
+		const contrast = (a: string, b: string) => {
+			const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+			return ((values[0] ?? 0) + 0.05) / ((values[1] ?? 0) + 0.05);
+		};
+		expect(contrast("#fbf8f2", "#0e0e0e")).toBeGreaterThanOrEqual(3);
+		expect(contrast("#ae5534", "#0e0e0e")).toBeGreaterThanOrEqual(3);
 		expect(chart).toBeDefined();
 		expect(chart).toContain('viewBox="0 0 772 142"');
 		expect(chart).toContain('width="42"');

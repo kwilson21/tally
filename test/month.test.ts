@@ -129,6 +129,66 @@ describe("firstCountedMonth query count", () => {
 		);
 	});
 
+	async function clearHistory() {
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM bills"),
+			db.prepare("DELETE FROM transactions"),
+		]);
+	}
+
+	it("starts at the earliest month with a counted transaction, skipping excluded history", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded) VALUES (301, 1, '2026-08-12', 1000, 'TRANSFER', 1)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (302, 1, '2026-09-02', 1000, 'GROCERIES')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-09");
+	});
+
+	it("uses an earlier linked bill occurrence month", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(93,'First rent',4000,1,'monthly',1,'RENT')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES(93,1,'2026-08-31',4000,'RENT',1)",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(93,'2026-07',93,'user','linked')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-07");
+	});
+
+	it("uses the purchase month for a linked refund dated earlier", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (304, 1, '2026-09-12', 1000, 'PURCHASE', 1)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, credit_reviewed, refund_of_id) VALUES (305, 1, '2026-08-12', -500, 'REFUND', 1, 1, 304)",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-09");
+	});
+
+	it("returns no month when history has no counted transaction", async () => {
+		await clearHistory();
+		await db
+			.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded) VALUES (306, 1, '2026-08-12', 1000, 'TRANSFER', 1)",
+			)
+			.run();
+		expect(await firstCountedMonth(db)).toBeNull();
+	});
+
 	it("moves the first month back for a first-month bill payment counted in its prior occurrence month", async () => {
 		await db
 			.prepare(

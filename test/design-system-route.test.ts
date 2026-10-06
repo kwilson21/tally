@@ -211,6 +211,11 @@ describe("GET /design-system in the demo", () => {
 		expect(ids).toHaveLength(2);
 		expect(new Set(ids).size).toBe(ids.length);
 		expect(links).toEqual(ids);
+		expect(html).toContain("bg-ink text-lg text-paper shadow-swipe-cue");
+		expect(html).toContain("month-end-swipe-arrow-left text-accent");
+		expect(html).toContain(
+			"The twelve-category ink arrow and terracotta cue under prefers-reduced-motion: arrows rest",
+		);
 	});
 
 	it("describes every Accounts action's states, and shows Sync now as the app does", async () => {

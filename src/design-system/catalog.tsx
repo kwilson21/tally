@@ -113,6 +113,7 @@ import {
 	CATEGORY_COLORS,
 	COLOR_TOKENS,
 	DURATION_TOKENS,
+	SHADOW_TOKENS,
 	SWIPE_MOTION_TOKENS,
 	TYPE_ROLES,
 } from "./tokens";
@@ -292,6 +293,18 @@ function Foundation() {
 									{t.name} <span class="text-muted">{t.value}</span>
 								</dt>
 								<dd class="mt-1 text-muted sm:mt-0">{t.use}</dd>
+							</div>
+						))}
+					</dl>
+				</State>
+				<State label="Elevation token (app.css @theme)">
+					<dl class="max-w-prose divide-y divide-rule border-y border-rule">
+						{SHADOW_TOKENS.map((t) => (
+							<div class="py-3 sm:grid sm:grid-cols-[14rem_1fr] sm:gap-4">
+								<dt class="font-medium">{t.name}</dt>
+								<dd class="mt-1 text-muted sm:mt-0">
+									{t.value} · {t.use}
+								</dd>
 							</div>
 						))}
 					</dl>
@@ -709,13 +722,13 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	purpose:
 		"Open a month to review how its budgets ended and return to this month.",
 	affordance:
-		"Previous and next are round 44px arrows beside the month. Each month dot is a 44px link; the selected month is filled and this month is ringed.",
+		"Previous and next are round 44px arrows beside the month. Each month dot is a 44px link; the selected month is filled and this month is ringed. When the finished chart scrolls, a 44px link holds a 34px ink circle with a paper arrow and soft elevation token; the line beside it has accent arrows.",
 	states:
 		"Available arrows and dots are links. At the first month and this month, the corresponding arrow is faded and hidden from assistive technology because it has no action. The current dot is ringed even while another month is selected. Each link is 44px wide with a 32px dot and a text-sm month label.",
 	feedback:
 		"A link loads that month's own Home URL. The browser announces the new page title and the selected month; no in-place swap or JavaScript is needed.",
 	input:
-		"Touch targets are 44px. Keyboard Tab reaches each available arrow and month link in order; Enter follows it. Screen readers hear Previous month, August; Next month, October; and a month name with this month where applicable. Unavailable arrows are hidden because they are not controls.",
+		"Touch targets are 44px. The arrow circle is 34px; its paper arrow and accent focus ring each contrast at least 3:1 against ink. Keyboard Tab reaches each available arrow and month link in order; Enter follows it. Screen readers hear Previous month, August; Next month, October; and a month name with this month where applicable. Unavailable arrows are hidden because they are not controls.",
 	motion:
 		"When more than five categories need a sideways cue, its arrows nudge three times at 1.2 seconds per nudge, then rest. Reduced motion leaves them still. The page uses the shell's browser page transition.",
 	edges:
@@ -890,7 +903,7 @@ function HomeTopGroup() {
 						/>
 					</div>
 				</State>
-				<State label="The twelve-category swipe cue under prefers-reduced-motion: arrows rest">
+				<State label="The twelve-category ink arrow and terracotta cue under prefers-reduced-motion: arrows rest">
 					<div class="w-[320px] max-w-full">
 						<MonthEnd
 							chartId="catalog-twelve-reduced-motion"
