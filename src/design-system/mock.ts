@@ -156,6 +156,42 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 	},
 ];
 
+/** P30 A's suggested-category card, using the same transaction shape as the app. */
+export const CATEGORY_SUGGESTION = {
+	id: 30,
+	name: "Pet Care",
+	rows: [
+		{
+			...row,
+			id: 31,
+			displayName: "Chewy",
+			rawName: "CHEWY",
+			amountCents: 6412,
+		},
+		{
+			...row,
+			id: 32,
+			displayName: "Banfield Pet Hospital",
+			rawName: "BANFIELD PET HOSPITAL",
+			amountCents: 18900,
+		},
+		{
+			...row,
+			id: 33,
+			displayName: "Petsmart",
+			rawName: "PETSMART",
+			amountCents: 2399,
+		},
+		{
+			...row,
+			id: 34,
+			displayName: "Amazon",
+			rawName: "AMAZON",
+			amountCents: 4520,
+		},
+	],
+};
+
 /**
  * Budget rows, on track and over. They're shown without links: in the app each row opens its
  * budget sheet, and a link here would go nowhere (DESIGN.md "No broken windows").
