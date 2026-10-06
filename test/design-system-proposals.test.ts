@@ -10,6 +10,14 @@ const get = async (path: string) => {
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
 describe("GET /design-system/proposals", () => {
+	it("draws P63's Accounts top with a net-worth line that ends on the headline above it", async () => {
+		const { html } = await get("/design-system/proposals");
+		const start = html.indexOf('id="p63-account-filter"');
+		expect(start).toBeGreaterThan(-1);
+		expect(html.slice(start)).toContain("$23,400");
+		expect(html.slice(start)).toContain("and is $23,400 today.");
+	});
+
 	it("shows P23–P72 with one recommended option each, marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);

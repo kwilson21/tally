@@ -4,6 +4,7 @@ import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
+import { accounts } from "../src/routes/accounts";
 import { destinations } from "../src/routes/destinations";
 import { home } from "../src/routes/home";
 import { howItWorks } from "../src/routes/how-it-works";
@@ -278,6 +279,93 @@ describe("links in the demo", () => {
 		expect((await get("/more")).html).toMatch(
 			/<a href="\/how-it-works"[^>]*>How Tally works<\/a>/,
 		);
+	});
+});
+
+describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
+	/** The Net worth section's markup, or "" if the page has none. */
+	const sectionOf = (html: string) =>
+		html.split('id="net-worth"')[1]?.split("</section>")[0] ?? "";
+	const family = async () =>
+		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+
+	it("is a section in the demo and the family app, with its rules in words", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			expect(html).toMatch(/<section[^>]*id="net-worth"/);
+			const text = decodeHtml(sectionOf(html));
+			expect(text).toMatch(/<h2[^>]*>Net worth<\/h2>/);
+			// What counts: debt subtracts; Cash and disconnected banks are left out.
+			expect(text).toContain("minus what you owe");
+			expect(text).toMatch(/credit card and loan balances are subtracted/);
+			expect(text).toContain("Cash account");
+			expect(text).toContain("disconnected bank");
+			// One balance a day, in the household's day.
+			expect(text).toContain("one balance per account for that day");
+			expect(text).toContain("time zone");
+			// Why the line starts when every account has a balance.
+			expect(text).toContain("first day every account has a balance");
+			expect(text).toContain(
+				"Until every account has a balance there is no line, only a note saying it is waiting.",
+			);
+			expect(text).toContain("another bank");
+			// The sentence under the number is written by code.
+			expect(text).toContain("Up $3,600 since May.");
+		}
+	});
+
+	it("works its example from the household's own balances, equal to Accounts' headline", async () => {
+		const { html } = await get("/how-it-works");
+		const section = decodeHtml(sectionOf(html));
+		expect(section).toContain(`In the demo for ${monthName()}: `);
+		// $4,210.55 + $12,400.00 in accounts, $842.17 owed.
+		expect(section).toContain(
+			"$16,610.55 in accounts − $842.17 owed = $15,768.38 net worth.",
+		);
+		expect(decodeHtml((await get("/accounts")).html)).toContain("$15,768");
+	});
+
+	it("says 'With your numbers' outside the demo, and leaves a disconnected bank out of the example", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE institution_name = 'Northline Card Services'",
+		).run();
+		const section = decodeHtml(sectionOf(await family()));
+		expect(section).toContain(`With your numbers for ${monthName()}: `);
+		expect(section).toContain(
+			"$16,610.55 in accounts and nothing owed, so net worth is $16,610.55.",
+		);
+	});
+
+	it("uses one plain sentence, with no example, when there are no accounts to add up", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM balance_history"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+		]);
+		const section = sectionOf(await family());
+		expect(section).toContain("There are no accounts to add up yet.");
+		expect(section).not.toContain("With your numbers");
+		expect(section).not.toContain("in accounts");
+	});
+
+	it("never names Jev, in the demo or the family app", async () => {
+		expect(sectionOf((await get("/how-it-works")).html)).not.toMatch(/jev/i);
+		expect(sectionOf(await family())).not.toMatch(/jev/i);
+	});
+
+	it("is where Accounts' Why? link goes, in the demo and the family app", async () => {
+		for (const [accountsHtml, howHtml] of [
+			[(await get("/accounts")).html, (await get("/how-it-works")).html],
+			[
+				await (await accounts.request("/accounts", {}, notDemo)).text(),
+				await family(),
+			],
+		] as const) {
+			const href = accountsHtml.match(/href="(\/how-it-works#[^"]+)"/)?.[1];
+			expect(href).toBe("/how-it-works#net-worth");
+			// The anchor is a real section id on the page it points to.
+			const id = (href ?? "").split("#")[1];
+			expect(howHtml).toMatch(new RegExp(`<section[^>]*id="${id}"`));
+		}
 	});
 });
 
