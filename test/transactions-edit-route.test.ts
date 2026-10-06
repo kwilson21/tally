@@ -336,7 +336,7 @@ describe("excluding a transaction (spec §6, #27)", () => {
 				"SELECT id FROM transactions WHERE raw_name = 'ONLINE TRANSFER TO SAV ...5678' ORDER BY date DESC",
 			).first<{ id: number }>()
 		)?.id as number;
-	// The edit form's box, not the list's Excluded filter chip, which shares the field name.
+	// The edit form's box, not anything in the list's filters.
 	const checkbox =
 		/<form method="post"[\s\S]*<input type="checkbox" name="excluded" value="1"([^>]*)>/;
 
