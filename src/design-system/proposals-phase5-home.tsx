@@ -23,7 +23,7 @@ import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { TransactionRow } from "../views/transaction-row";
-import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { Fixed, Options, Replaced, Sheet, Title } from "./proposal-parts";
 import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
@@ -1013,6 +1013,11 @@ export function Phase5HomeProposals() {
 					when it ended over; its rows don't open a budget sheet; and it goes
 					back to the first month with transactions.
 				</NeedsLine>
+				<Replaced by="P91 to P93">
+					Option A's sentence under the number (“Every category stayed under its
+					budget.”) and its check and “under budget” words. ‹ and › by the month
+					stay, and a strip of dots joins them.
+				</Replaced>
 				<Options
 					options={[
 						{
@@ -1061,6 +1066,10 @@ export function Phase5HomeProposals() {
 					the number reads “Over budget this month. Spending more takes it
 					further over.”
 				</NeedsLine>
+				<Replaced by="P94">
+					Option A's “$120” headline with “over” in brick under it: Safe to
+					spend now shows the negative number.
+				</Replaced>
 				<Options
 					options={[
 						{
@@ -1156,6 +1165,9 @@ export function Phase5HomeProposals() {
 					A category is nearly spent when 80% or more of its budget is used and
 					it is not over. Its row says “$X left”, with no new color.
 				</NeedsLine>
+				<Replaced by="P98">
+					Option A's “$14 left” under the bar: the bar turns amber instead.
+				</Replaced>
 				<Options
 					options={[
 						{
@@ -1199,6 +1211,10 @@ export function Phase5HomeProposals() {
 					included ({DAYS_LEFT} on Oct 5), in whole cents, never up; there's no
 					line when Safe to spend is $0 or less.
 				</NeedsLine>
+				<Replaced by="P95">
+					Option A's daily amount: it becomes a forecast of where the month
+					ends.
+				</Replaced>
 				<Options
 					options={[
 						{
@@ -1278,6 +1294,10 @@ export function Phase5HomeProposals() {
 					amount. Already settled (decision 74): older transactions needing a
 					category go on the Band's second line.
 				</NeedsLine>
+				<Replaced by="P97">
+					Option A's “and 6 more from earlier months” on the Band's second line:
+					a small “+1 older” chip.
+				</Replaced>
 				<Options
 					options={[
 						{
@@ -1321,6 +1341,10 @@ export function Phase5HomeProposals() {
 					excluded ones left out, a late bill payment in the month it counts
 					in), so it adds up to the row's amount.
 				</NeedsLine>
+				<Replaced by="P99">
+					Option A's “See the 9 transactions” link: a “12 transactions ›”
+					button, shown only when there are some.
+				</Replaced>
 				<Options
 					options={[
 						{
