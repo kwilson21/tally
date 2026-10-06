@@ -5,6 +5,7 @@ import {
 	buildTrends,
 	changeWords,
 	compareSentence,
+	firstMonthIsPart,
 	type MonthSpend,
 	miniBars,
 	monthBars,
@@ -36,6 +37,17 @@ describe("averageMonthlyCents", () => {
 		[[0, 0, 0], null],
 	])("averages three finished months %j in cents", (months, average) => {
 		expect(averageMonthlyCents(months)).toBe(average);
+	});
+});
+
+describe("firstMonthIsPart", () => {
+	it.each([
+		["2026-05-01", "2026-05", false],
+		["2026-05-02", "2026-05", true],
+		["2025-01-01", "2026-05", false],
+		[null, "2026-05", false],
+	] as const)("classifies %s", (date, month, partial) => {
+		expect(firstMonthIsPart(date, month)).toBe(partial);
 	});
 });
 

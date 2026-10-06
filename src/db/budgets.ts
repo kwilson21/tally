@@ -3,13 +3,30 @@ import { budgetForMonth } from "../budget";
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import { NUDGE_STEP_CENTS } from "../budgets/nudge";
 import { monthsBefore } from "../dates";
-import { averageMonthlyCents } from "../trends";
+import { averageMonthlyCents, firstMonthIsPart } from "../trends";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
 	countedCategorySql,
 	countedMonthSql,
 } from "./counted-month";
+
+export const THREE_MONTH_AVERAGE_SQL = `WITH monthly AS (
+				SELECT ${countedMonthSql()} AS month, SUM(t.amount_cents) AS cents
+				FROM (
+					SELECT * FROM transactions WHERE date >= ?4 AND date < ?5
+					UNION ALL
+					SELECT * FROM transactions WHERE +date < ?4 AND refund_of_id > 0
+				) t ${COUNTED_JOINS}
+				WHERE ${COUNTED_SPENDING} AND ${countedCategorySql()} = ?6
+					AND ${countedMonthSql()} BETWEEN ?1 AND ?3
+				GROUP BY ${countedMonthSql()}
+			)
+			SELECT (SELECT MIN(date) FROM transactions) AS firstDate,
+				COALESCE(MAX(CASE WHEN month = ?1 THEN cents END), 0) AS first,
+				COALESCE(MAX(CASE WHEN month = ?2 THEN cents END), 0) AS second,
+				COALESCE(MAX(CASE WHEN month = ?3 THEN cents END), 0) AS third
+			FROM monthly`;
 
 /** Sets a category's budget from `month` on, replacing one already set for that month. */
 export async function setBudget(
@@ -135,28 +152,18 @@ export async function threeMonthAverageSpentCents(
 	month: string,
 ): Promise<number | null> {
 	const months = [3, 2, 1].map((n) => monthsBefore(month, n));
+	const fromDate = `${monthsBefore(months[0] ?? month, 1)}-01`;
+	const throughDate = `${monthsBefore(months[2] ?? month, -2)}-01`;
 	const row = await db
-		.prepare(
-			`WITH monthly AS (
-				SELECT ${countedMonthSql()} AS month, SUM(t.amount_cents) AS cents
-				FROM transactions t ${COUNTED_JOINS}
-				WHERE ${COUNTED_SPENDING} AND ${countedCategorySql()} = ?4
-					AND ${countedMonthSql()} BETWEEN ?1 AND ?3
-				GROUP BY ${countedMonthSql()}
-			)
-			SELECT (SELECT MIN(date) FROM transactions) AS firstDate,
-				COALESCE(MAX(CASE WHEN month = ?1 THEN cents END), 0) AS first,
-				COALESCE(MAX(CASE WHEN month = ?2 THEN cents END), 0) AS second,
-				COALESCE(MAX(CASE WHEN month = ?3 THEN cents END), 0) AS third
-			FROM monthly`,
-		)
-		.bind(months[0], months[1], months[2], categoryId)
+		.prepare(THREE_MONTH_AVERAGE_SQL)
+		.bind(months[0], months[1], months[2], fromDate, throughDate, categoryId)
 		.first<{
 			firstDate: string | null;
 			first: number;
 			second: number;
 			third: number;
 		}>();
-	if (!row?.firstDate || row.firstDate > `${months[0]}-01`) return null;
+	if (!row?.firstDate || firstMonthIsPart(row.firstDate, months[0] ?? month))
+		return null;
 	return averageMonthlyCents([row.first, row.second, row.third]);
 }

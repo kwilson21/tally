@@ -25,6 +25,14 @@ export function averageMonthlyCents(months: number[]): number | null {
 	return average > 0 ? average : null;
 }
 
+/** Whether history starts after the 1st of `month`; no history has no partial first month. */
+export function firstMonthIsPart(
+	firstDate: string | null,
+	month: string,
+): boolean {
+	return firstDate !== null && firstDate > `${month}-01`;
+}
+
 export type TrendCategory = {
 	id: number;
 	name: string;
@@ -355,7 +363,7 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	const startMonth = firstDate.slice(0, 7);
 	// That month is a part month unless history starts on its 1st: Tally can't tell how much of it
 	// is there. A part month is drawn (striped) but never judged, compared or put in a run.
-	const startIsPart = firstDate.slice(8, 10) !== "01";
+	const startIsPart = firstMonthIsPart(firstDate, startMonth);
 	const months = shownMonths(input.today, startMonth);
 	const judged = months.filter(
 		(m) =>

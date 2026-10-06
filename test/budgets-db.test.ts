@@ -7,6 +7,7 @@ import {
 	lastMonthSpentCents,
 	nudgeBudget,
 	setBudget,
+	THREE_MONTH_AVERAGE_SQL,
 	threeMonthAverageSpentCents,
 } from "../src/db/budgets";
 import { settingsCategories } from "../src/db/categories";
@@ -49,6 +50,47 @@ describe("threeMonthAverageSpentCents", () => {
 			VALUES (804, 1, '2026-10-04', -10000, 'REFUND', 1, 'user', 1, 802)`)
 			.run();
 		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(66667);
+	});
+
+	it("counts a linked bill payment in its occurrence month when dated later", async () => {
+		await history("2026-07-01");
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(95,'Moved',1234,30,'monthly','MOVED')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 805,id,'2026-09-02',1234,'MOVED',1,'user' FROM accounts LIMIT 1",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(95,'2026-08',805,'user','linked')",
+			),
+		]);
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(70411);
+	});
+
+	it("does not let years of older spending change the three-month result", async () => {
+		await history("2020-01-01");
+		const before = await threeMonthAverageSpentCents(db, 1, "2026-11");
+		await db
+			.prepare(
+				"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,category_source) SELECT id,'2010-01-01',999999,'OLD HISTORY',1,'user' FROM accounts LIMIT 1",
+			)
+			.run();
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(before);
+	});
+
+	it("uses the transaction date and refund indexes", async () => {
+		const { results } = await db
+			.prepare(`EXPLAIN QUERY PLAN ${THREE_MONTH_AVERAGE_SQL}`)
+			.bind("2026-08", "2026-09", "2026-10", "2026-07-01", "2026-12-01", 1)
+			.all<{ detail: string }>();
+		const plan = results.map((row) => row.detail).join("\n");
+		expect(plan).toMatch(
+			/SEARCH transactions USING (COVERING )?INDEX transactions_date/,
+		);
+		expect(plan).toMatch(
+			/SEARCH transactions USING (COVERING )?INDEX transactions_refund_of_id_idx/,
+		);
 	});
 });
 
