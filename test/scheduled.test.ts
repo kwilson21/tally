@@ -1,9 +1,13 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { summarizeMonth } from "../src/budget";
 import { jevCallLimit } from "../src/categorize-pending";
+import { categoryCallLimit } from "../src/category-suggestions-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { monthOffset } from "../src/demo/seed";
 import handler, {
 	runFirstSort,
 	runScheduled,
@@ -57,6 +61,46 @@ const count = async () =>
 	)?.n ?? 0;
 
 describe("scheduled handler", () => {
+	it("seeds Pet Care through the real demo scheduled reset without changing Home totals", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		await resetDemo(env.DB, today);
+		const beforeData = await loadMonth(env.DB, month);
+		const before = summarizeMonth({
+			month,
+			...beforeData,
+			unpaidDueBillsCents: 0,
+		});
+		await scheduledWith.scheduled(
+			{ cron: "0 8 * * *" },
+			{
+				...env,
+				DEMO: "true",
+				PLAID_SECRET: undefined,
+				PLAID_CLIENT_ID: undefined,
+				JEV_API_KEY: undefined,
+				AI: undefined,
+			},
+		);
+		const suggestion = await env.DB.prepare(
+			"SELECT id FROM category_suggestions WHERE name='Pet Care' AND status='pending'",
+		).first<{ id: number }>();
+		const rows = await env.DB.prepare(
+			"SELECT COUNT(*) AS n, MIN(date) AS earliest FROM transactions WHERE category_suggestion_id=?",
+		)
+			.bind(suggestion?.id)
+			.first<{ n: number; earliest: string }>();
+		expect(rows?.n).toBeGreaterThanOrEqual(3);
+		expect(rows?.earliest.slice(0, 7)).toBe(monthOffset(today, 2).slice(0, 7));
+		const afterData = await loadMonth(env.DB, month);
+		const after = summarizeMonth({
+			month,
+			...afterData,
+			unpaidDueBillsCents: 0,
+		});
+		expect(after).toEqual(before);
+	});
+
 	it("restores the demo seed through the Worker entry point when the guard allows it", async () => {
 		await env.DB.prepare("DELETE FROM transactions").run();
 		expect(await count()).toBe(0);
@@ -850,11 +894,203 @@ describe("scheduled handler: merchant names", () => {
 	});
 });
 
-// D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one (a call to
-// Jev costs about three: the switches read before it and after it, and saving its answer; a name about
-// three too). Each of production's three runs and the demo's one is an invocation of its own, so each
-// has to fit, with its worst case in it: 09:00 the sync and the feedback retry, 09:20 100 names and 200
-// Jev calls, 09:40 300 Jev calls.
+// New category suggestions (spec §7, §8.6, #51): Workers AI proposes a name for three or more transactions
+// Jev was sure no category fit. In production it runs last in the 09:20 run, after that run's Jev pass and
+// its names, within the same 13-minute run budget; the demo's one run does it too, after its names. It
+// follows Guess categories, and nothing it makes is a category: a person creates or dismisses it.
+describe("scheduled handler: new category suggestions", () => {
+	/** `n` confident "none of these fit" transactions of one theme, and nothing else to sort or name. */
+	async function noneFitGroup(n = 3, theme = "ENTERTAINMENT") {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare("DELETE FROM category_suggestions"),
+		]);
+		await addNoneFit(n, theme);
+	}
+	const addNoneFit = (n: number, theme: string) =>
+		env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, plaid_category, category_confidence, jev_none_fit)
+			 SELECT 1, '2026-09-20', 1500, 'STREAM ' || i || ?, 'Stream ' || char(64 + i) || ?, ?, 0.95, 1 FROM n`,
+		)
+			.bind(n, theme, theme, theme)
+			.run();
+	const suggested = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT name, status FROM category_suggestions ORDER BY id",
+			).all<{ name: string; status: string }>()
+		).results;
+	/** A fake Workers AI that says which kind of question it heard, and answers a category question with `name`. */
+	const aiThatHears = (heard: string[], name = "Subscriptions") =>
+		({
+			run: vi.fn(async (_model: string, input: unknown) => {
+				const user = (
+					input as { messages: { role: string; content: string }[] }
+				).messages.find((m) => m.role === "user")?.content;
+				const kind = user?.startsWith("Places:") ? "categories" : "names";
+				heard.push(kind);
+				return { response: kind === "categories" ? name : "Some Place Name" };
+			}),
+		}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
+	it("makes them last in production's 09:20 run, after the Jev pass and the names, and creates no category", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await noneFitGroup();
+		await addUnsortedAndUnnamed();
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		const order: string[] = [];
+		const ai = aiThatHears(order);
+		const jev = vi.fn(async () => {
+			order.push("jev");
+			return jevAnswer();
+		});
+		const categoriesBefore = await categoryCount();
+
+		await runFirstSort(
+			{ ...env, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
+			jev as unknown as typeof fetch,
+		);
+
+		expect(order).toEqual(["jev", "names", "categories"]);
+		expect(await suggested()).toEqual([
+			{ name: "Subscriptions", status: "pending" },
+		]);
+		expect(await categoryCount()).toBe(categoriesBefore);
+		vi.restoreAllMocks();
+	});
+	const addUnsortedAndUnnamed = () =>
+		env.DB.prepare(
+			"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('plaid-1', 1, '2026-09-20', 650, 'SQ *BLUE BOTTLE COF 0412')",
+		).run();
+	const categoryCount = async () =>
+		(
+			await env.DB.prepare("SELECT COUNT(*) AS n FROM categories").first<{
+				n: number;
+			}>()
+		)?.n;
+
+	it("makes none in production's 09:00 or 09:40 run, which sync and sort", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await noneFitGroup();
+		const heard: string[] = [];
+		const ai = aiThatHears(heard);
+		await runScheduled({ ...env, DEMO: "false", AI: ai });
+		await runSecondSort({ ...env, DEMO: "false", AI: ai });
+		expect(heard).toEqual([]);
+		expect(await suggested()).toEqual([]);
+		vi.restoreAllMocks();
+	});
+
+	it("asks nothing in the 09:20 run for fewer than three, or with Guess categories off", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await noneFitGroup(2);
+		const heard: string[] = [];
+		const ai = aiThatHears(heard);
+		await runFirstSort({ ...env, DEMO: "false", AI: ai });
+		expect(heard).toEqual([]);
+
+		await noneFitGroup(3);
+		await saveAiSwitches(env.DB, { categories: false });
+		await runFirstSort({ ...env, DEMO: "false", AI: ai });
+		expect(heard).toEqual([]);
+		expect(await suggested()).toEqual([]);
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		vi.restoreAllMocks();
+	});
+
+	it("does nothing in the 09:20 run where there is no Workers AI binding", async () => {
+		await noneFitGroup();
+		await runFirstSort({ ...env, DEMO: "false" });
+		expect(await suggested()).toEqual([]);
+	});
+
+	it("starts no request after the run's 13 minutes, the names' deadline too, and keeps what it asked", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await noneFitGroup(3, "ONE");
+		for (const theme of ["TWO", "THREE", "FOUR"]) await addNoneFit(3, theme);
+		let t = 0;
+		const heard: string[] = [];
+		const ai = {
+			run: vi.fn(async (_model: string, input: unknown) => {
+				heard.push("categories");
+				// Each takes five minutes: it starts at 0, 5 and 10, and a fourth would start at 15.
+				t += 5 * 60_000;
+				const places = (input as { messages: { content: string }[] })
+					.messages[1]?.content;
+				// A name of its own for each theme, so none is mistaken for another's.
+				const theme = places?.match(/Stream A(\w+)/)?.[1] ?? "x";
+				return { response: `Group ${theme}` };
+			}),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
+		await runFirstSort({ ...env, DEMO: "false", AI: ai }, undefined, {
+			now: () => t,
+		});
+
+		expect(heard).toHaveLength(3);
+		expect(await suggested()).toHaveLength(3);
+		vi.restoreAllMocks();
+	});
+
+	it("is made in the demo's one run too, after its names, from what the sort found", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const order: string[] = [];
+		const ai = aiThatHears(order);
+		let found = false;
+		// The demo's run resets first, so Jev's answers are put in as it goes: three confident none-fits.
+		const jev = vi.fn(async () => {
+			order.push("jev");
+			if (!found) {
+				found = true;
+				await addNoneFit(3, "ENTERTAINMENT");
+			}
+			return jevAnswer();
+		});
+		await runScheduled(
+			{ ...env, AI: ai, JEV_API_KEY: "jev" },
+			jev as unknown as typeof fetch,
+		);
+		expect(order.at(-1)).toBe("categories");
+		expect(order.indexOf("names")).toBeGreaterThan(order.lastIndexOf("jev"));
+		expect(order.filter((o) => o === "categories")).toHaveLength(1);
+		expect((await suggested()).map((s) => s.name)).toContain("Subscriptions");
+		vi.restoreAllMocks();
+	});
+
+	it("keeps the run going when Workers AI fails for it, and logs only the error's name", async () => {
+		await noneFitGroup();
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const ai = {
+			run: vi.fn(async () => {
+				throw Object.assign(new Error("failed for Stream A"), {
+					name: "AiError",
+				});
+			}),
+		} as unknown as Ai;
+		await expect(
+			runFirstSort({ ...env, DEMO: "false", AI: ai }),
+		).resolves.toBeUndefined();
+		expect(await suggested()).toEqual([]);
+		const lines = logged.mock.calls
+			.map((call) => String(call.join(" ")))
+			.join("\n");
+		expect(lines).toContain("AiError");
+		expect(lines).not.toContain("Stream");
+		logged.mockRestore();
+		vi.restoreAllMocks();
+	});
+});
+
+// D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one. A Jev call
+// costs about three (the switches read before and after it, and saving its answer), plus one merchant-history
+// query per Jev run; a name costs about three too, and each new category suggestion about five. Each of
+// production's three runs and the demo's one is an invocation of its own, so each has to fit its worst case:
+// 09:00 the sync and feedback retry, 09:20 100 names, 200 Jev calls and 5 new category suggestions, and
+// 09:40 300 Jev calls.
 describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 	const D1_LIMIT = 1000;
 	const NEW_TRANSACTIONS = 100;
@@ -909,7 +1145,10 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			jevCallLimit({ DEMO: "true" }) -
 			jev.mock.calls.length +
 			(nameCallLimit - ai.run.mock.calls.length);
-		expect(counted.statements() + unused * 3).toBeLessThan(D1_LIMIT);
+		// The seed holds a suggestion already, so its night makes no new one: the five it could, at about five each.
+		expect(
+			counted.statements() + unused * 3 + categoryCallLimit * 5,
+		).toBeLessThan(D1_LIMIT);
 		vi.restoreAllMocks();
 	}, 60_000);
 
@@ -998,13 +1237,34 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		vi.restoreAllMocks();
 	}, 60_000);
 
-	it("production's 09:20 run, which asks Jev about up to 200 and then 100 names", async () => {
+	it("production's 09:20 run, which asks Jev about up to 200, then 100 names, then 5 new category suggestions", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
 		await addWaiting(400);
+		// Seven themes with three confident none-fits each: more than a night asks about, each its own name.
+		for (const theme of ["A", "B", "C", "D", "E", "F", "G"])
+			await env.DB.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_category, category_confidence, jev_none_fit)
+				 VALUES (1, '2026-09-20', 900, 'PLACE ' || ?1 || ' ONE', ?1, 0.95, 1),
+					(1, '2026-09-20', 900, 'PLACE ' || ?1 || ' TWO', ?1, 0.95, 1),
+					(1, '2026-09-20', 900, 'PLACE ' || ?1 || ' THREE', ?1, 0.95, 1)`,
+			)
+				.bind(theme)
+				.run();
 		const counted = countingDb();
-		const ai = aiThatSays("Some Place Name");
+		let named = 0;
+		const ai = {
+			run: vi.fn(async (_model: string, input: unknown) => {
+				const user = (
+					input as { messages: { role: string; content: string }[] }
+				).messages.find((m) => m.role === "user")?.content;
+				// A new name for each group, so each one is saved as a suggestion of its own.
+				return user?.startsWith("Places:")
+					? { response: `Group ${String.fromCharCode(65 + named++)}` }
+					: { response: "Some Place Name" };
+			}),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
 		const jev = vi.fn(async () => jevAnswer());
 
 		await runFirstSort(
@@ -1012,8 +1272,15 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			jev as unknown as typeof fetch,
 		);
 
-		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
+		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit + categoryCallLimit);
 		expect(jev).toHaveBeenCalledTimes(200);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM category_suggestions WHERE status = 'pending'",
+				).first<{ n: number }>()
+			)?.n,
+		).toBe(categoryCallLimit);
 		expect(counted.statements()).toBeLessThan(D1_LIMIT);
 		vi.restoreAllMocks();
 	}, 60_000);

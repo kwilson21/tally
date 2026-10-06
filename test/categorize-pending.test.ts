@@ -10,6 +10,7 @@ import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { loadMonth } from "../src/db/month";
 import {
+	merchantCategoryHistoryForJev,
 	monthCounts,
 	needsCategoryCount,
 	pendingForJev,
@@ -46,6 +47,7 @@ function fakeJev(...responses: (() => Response)[]) {
 }
 
 const withKey = { DB: db, JEV_API_KEY: "test-key" };
+type SentRequest = { state: Record<string, unknown> };
 
 const countWhere = async (where: string) =>
 	(
@@ -86,6 +88,687 @@ afterEach(() => {
 });
 
 describe("categorizePending", () => {
+	it("does not read or send history when category guessing is off, but does when it is on", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const target = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 1200, 'MARKET TODAY', 'Market') RETURNING id",
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 500, 'MARKET OLD', 'Market', 1, 'user')",
+			)
+			.bind(`${MONTH}-01`)
+			.run();
+		const run = async (categories: boolean) => {
+			await db
+				.prepare(
+					"UPDATE transactions SET category_confidence = NULL WHERE id = ?",
+				)
+				.bind(target?.id)
+				.run();
+			let historyReads = 0;
+			const counted = new Proxy(db, {
+				get(targetDb, property) {
+					const value = Reflect.get(targetDb, property);
+					if (property === "prepare")
+						return (sql: string) => {
+							if (sql.includes("ROW_NUMBER() OVER (PARTITION BY"))
+								historyReads += 1;
+							return targetDb.prepare(sql);
+						};
+					return typeof value === "function" ? value.bind(targetDb) : value;
+				},
+			});
+			let sent: SentRequest | undefined;
+			await saveAiSwitches(db, {
+				...AI_SWITCHES_ALL_ON,
+				categories,
+				income: true,
+			});
+			await categorizePending(
+				{ ...withKey, DB: counted as D1Database },
+				async (_url, init) => {
+					sent = JSON.parse(String(init?.body));
+					return reply(0.5);
+				},
+				{ rulesApplied: true, onlyIds: [target?.id as number] },
+			);
+			return { historyReads, sent };
+		};
+		const off = await run(false);
+		expect(off.historyReads).toBe(0);
+		expect(off.sent?.state).not.toHaveProperty("merchant_category_history");
+		const on = await run(true);
+		expect(on.historyReads).toBe(1);
+		expect(on.sent?.state.merchant_category_history).toEqual([["Groceries"]]);
+	});
+
+	it("omits history when category guessing is turned off between calls", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await switchTo({ categories: true, income: true });
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'HISTORY BEFORE', 'Switch Shop', 1, 'user')",
+				)
+				.bind(`${MONTH}-01`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 100, 'SWITCH TARGET A', 'Switch Shop')",
+				)
+				.bind(`${MONTH}-20`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 100, 'SWITCH TARGET B', 'Switch Shop')",
+				)
+				.bind(`${MONTH}-21`),
+		]);
+		const targets = (
+			await db
+				.prepare(
+					"SELECT id FROM transactions WHERE raw_name IN ('SWITCH TARGET A', 'SWITCH TARGET B') ORDER BY date",
+				)
+				.all<{ id: number }>()
+		).results;
+		const histories: unknown[] = [];
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				histories.push(
+					JSON.parse(String(init?.body)).state.merchant_category_history,
+				);
+				if (histories.length === 1)
+					await switchTo({ categories: false, income: true });
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: targets.map(({ id }) => id) },
+		);
+		expect(histories).toEqual([[["Groceries"]], undefined]);
+	});
+
+	it("returns five chosen category names newest first, using id to break date ties", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const categories = (
+			await db
+				.prepare(
+					"SELECT id, name FROM categories WHERE archived = 0 ORDER BY id LIMIT 5",
+				)
+				.all<{ id: number; name: string }>()
+		).results;
+		for (let i = 0; i < 6; i++) {
+			const category = categories[i % categories.length];
+			await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, ?, 'Tie Shop', ?, 'user')",
+				)
+				.bind(
+					i >= 4 ? `${MONTH}-10` : `${MONTH}-${String(i + 1).padStart(2, "0")}`,
+					`TIE ${i}`,
+					category?.id,
+				)
+				.run();
+		}
+		const target = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 200, 'TIE TARGET', 'Tie Shop') RETURNING id",
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		let sent: SentRequest | undefined;
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				sent = JSON.parse(String(init?.body));
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: [target?.id as number] },
+		);
+		expect(sent?.state.merchant_category_history).toEqual([
+			[categories[0]?.name],
+			[categories[4]?.name],
+			[categories[3]?.name],
+			[categories[2]?.name],
+			[categories[1]?.name],
+		]);
+	});
+
+	it("excludes archived categories and Jev-sourced categories from history", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const categories = (
+			await db
+				.prepare(
+					"SELECT id, name FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+				)
+				.all<{ id: number; name: string }>()
+		).results;
+		const archived = categories[1];
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(archived?.id)
+			.run();
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'OLD ACTIVE', 'Archive Shop', ?, 'user')",
+				)
+				.bind(`${MONTH}-02`, categories[0]?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'OLD ARCHIVED', 'Archive Shop', ?, 'user')",
+				)
+				.bind(`${MONTH}-03`, archived?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'OLD JEV', 'Archive Shop', ?, 'jev')",
+				)
+				.bind(`${MONTH}-04`, categories[0]?.id),
+		]);
+		const target = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 200, 'ARCHIVE TARGET', 'Archive Shop') RETURNING id",
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		let sent: SentRequest | undefined;
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				sent = JSON.parse(String(init?.body));
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: [target?.id as number] },
+		);
+		expect(sent?.state.merchant_category_history).toEqual([
+			[categories[0]?.name],
+		]);
+	});
+
+	it("excludes every transaction in the current page from each transaction's history", async () => {
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'OLD', 'Page Shop', 1, 'user')",
+				)
+				.bind(`${MONTH}-01`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'PAGE A', 'Page Shop', 2, 'user')",
+				)
+				.bind(`${MONTH}-02`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'PAGE B', 'Page Shop', 3, 'merchant_rule')",
+				)
+				.bind(`${MONTH}-03`),
+		]);
+		const ids = (
+			await db
+				.prepare(
+					"SELECT id FROM transactions WHERE raw_name IN ('PAGE A', 'PAGE B') ORDER BY id",
+				)
+				.all<{ id: number }>()
+		).results;
+		expect(
+			await merchantCategoryHistoryForJev(
+				db,
+				ids.map(({ id }) => ({ id, merchantKey: "Page Shop" })),
+			),
+		).toEqual(new Map([["Page Shop", [["Groceries"]]]]));
+	});
+
+	it("keeps a person-chosen category in history when its transaction pays a bill", async () => {
+		const transaction = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'LINKED HUMAN', 'Bill Shop', 2, 'user') RETURNING id",
+			)
+			.bind(`${MONTH}-01`)
+			.first<{ id: number }>();
+		const bill = await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, category_id, merchant_raw_name, active) VALUES ('Bill Shop bill', 100, 4, 'monthly', 1, 'Bill Shop', 1) RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, MONTH, transaction?.id)
+			.run();
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Bill Shop" },
+		]);
+		expect(history).toEqual(new Map([["Bill Shop", [["Eating Out"]]]]));
+	});
+
+	it("includes an older raw-name trip with the current Plaid merchant name only for that raw text", async () => {
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 100, 'LEGACY BANK TEXT', 1, 'user')",
+				)
+				.bind(`${MONTH}-01`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 100, 'SOMEONE ELSES BANK TEXT', 2, 'user')",
+				)
+				.bind(`${MONTH}-02`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 100, 'LEGACY BANK TEXT', 'Named Shop')",
+				)
+				.bind(`${MONTH}-20`),
+		]);
+		const target = await db
+			.prepare("SELECT id FROM transactions WHERE merchant_name = 'Named Shop'")
+			.first<{ id: number }>();
+		const history = await merchantCategoryHistoryForJev(db, [
+			{
+				id: target?.id as number,
+				merchantKey: "Named Shop",
+				rawName: "LEGACY BANK TEXT",
+			},
+		]);
+		expect(history.get("Named Shop")).toEqual([["Groceries"]]);
+	});
+
+	it("keeps old history unless five newer eligible trips displace it", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', '-2 years'), 100, 'WINDOW OLD', 'Rare Shop', 1, 'user')",
+			),
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', '-2 years'), 100, 'WINDOW OLD', 'Frequent Shop', 1, 'user')",
+			),
+			...Array.from({ length: 5 }, (_, index) =>
+				db
+					.prepare(
+						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, date('now', ? || ' days'), 100, 'WINDOW NEW', 'Frequent Shop', 2, 'user')",
+					)
+					.bind(String(-index - 1)),
+			),
+		]);
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Rare Shop" },
+			{ id: 999998, merchantKey: "Frequent Shop" },
+		]);
+		expect(history.get("Rare Shop")).toEqual([["Groceries"]]);
+		expect(history.get("Frequent Shop")).toEqual([
+			["Eating Out"],
+			["Eating Out"],
+			["Eating Out"],
+			["Eating Out"],
+			["Eating Out"],
+		]);
+	});
+
+	it("includes excluded bill payments in history while excluding other excluded rows", async () => {
+		const billTrip = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded) VALUES (1, ?, 100, 'EXCLUDED BILL', 'Bill History Shop', 2, 'user', 1) RETURNING id",
+			)
+			.bind(`${MONTH}-02`)
+			.first<{ id: number }>();
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded) VALUES (1, ?, 100, 'EXCLUDED TRANSFER', 'Bill History Shop', 1, 'user', 1)",
+				)
+				.bind(`${MONTH}-03`),
+			db.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, category_id, merchant_raw_name, active) VALUES ('History bill', 100, 4, 'monthly', 1, 'Bill History Shop', 1) RETURNING id",
+			),
+		]);
+		const bill = await db
+			.prepare("SELECT id FROM bills WHERE name = 'History bill'")
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, MONTH, billTrip?.id)
+			.run();
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Bill History Shop" },
+		]);
+		expect(history.get("Bill History Shop")).toEqual([["Eating Out"]]);
+	});
+
+	it("includes only user and merchant-rule categories in history", async () => {
+		await db.batch([
+			...[
+				["JEV SOURCE", 2, "jev"],
+				["NO SOURCE", 3, null],
+				["USER SOURCE", 1, "user"],
+				["RULE SOURCE", 2, "merchant_rule"],
+			].map(([name, categoryId, source], index) =>
+				db
+					.prepare(
+						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, ?, 'Source Shop', ?, ?)",
+					)
+					.bind(
+						`${MONTH}-${String(index + 1).padStart(2, "0")}`,
+						name,
+						categoryId,
+						source,
+					),
+			),
+		]);
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Source Shop" },
+		]);
+		expect(history.get("Source Shop")).toEqual([["Eating Out"], ["Groceries"]]);
+	});
+
+	it("counts each split purchase as one trip and uses its active part categories", async () => {
+		const addSingle = (date: string, name: string, categoryId: number) =>
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, ?, 'Trip Shop', ?, 'user')",
+				)
+				.bind(date, name, categoryId);
+		const split = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split) VALUES (1, ?, 500, 'SPLIT TRIP', 'Trip Shop', 3, 'user', 1) RETURNING id",
+			)
+			.bind(`${MONTH}-15`)
+			.first<{ id: number }>();
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 300, 'SPLIT GROCERIES', 1, 'user', ?)",
+				)
+				.bind(`${MONTH}-15`, split?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 200, 'SPLIT HOUSEHOLD', 2, 'merchant_rule', ?)",
+				)
+				.bind(`${MONTH}-15`, split?.id),
+			addSingle(`${MONTH}-14`, "TRIP 2", 1),
+			addSingle(`${MONTH}-13`, "TRIP 3", 2),
+			addSingle(`${MONTH}-12`, "TRIP 4", 1),
+			addSingle(`${MONTH}-11`, "TRIP 5", 2),
+		]);
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Trip Shop" },
+		]);
+		expect(history.get("Trip Shop")).toEqual([
+			["Groceries", "Eating Out"],
+			["Groceries"],
+			["Eating Out"],
+			["Groceries"],
+			["Eating Out"],
+		]);
+	});
+
+	it("orders a split trip by its parent date and keeps its parts in one entry", async () => {
+		const split = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split) VALUES (1, ?, 500, 'DATED SPLIT PARENT', 'Date Shop', 3, 'user', 1) RETURNING id",
+			)
+			.bind(`${MONTH}-15`)
+			.first<{ id: number }>();
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 300, 'DATED SPLIT GROCERIES', 1, 'user', ?)",
+				)
+				.bind(`${MONTH}-01`, split?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 200, 'DATED SPLIT HOUSEHOLD', 2, 'merchant_rule', ?)",
+				)
+				.bind(`${MONTH}-02`, split?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'DATED SINGLE', 'Date Shop', 3, 'user')",
+				)
+				.bind(`${MONTH}-10`),
+		]);
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Date Shop" },
+		]);
+		expect(history.get("Date Shop")).toEqual([
+			["Groceries", "Eating Out"],
+			["Gas"],
+		]);
+	});
+
+	it("takes the newest five split and single trips, skipping unusable split parts", async () => {
+		const addSplit = async (
+			date: string,
+			name: string,
+			parts: {
+				categoryId: number | null;
+				source: string | null;
+				excluded?: boolean;
+				pending?: boolean;
+			}[],
+		) => {
+			const parent = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split) VALUES (1, ?, 500, ?, 'Split Shop', 3, 'user', 1) RETURNING id",
+				)
+				.bind(date, name)
+				.first<{ id: number }>();
+			for (const [index, part] of parts.entries())
+				await db
+					.prepare(
+						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id, excluded, pending) VALUES (1, ?, 100, ?, ?, ?, ?, ?, ?)",
+					)
+					.bind(
+						date,
+						`${name} PART ${index}`,
+						part.categoryId,
+						part.source,
+						parent?.id,
+						part.excluded ? 1 : 0,
+						part.pending ? 1 : 0,
+					)
+					.run();
+		};
+		await addSplit(`${MONTH}-19`, "ARCHIVED ONLY SPLIT", [
+			{ categoryId: 4, source: "user" },
+		]);
+		await addSplit(`${MONTH}-18`, "EMPTY SPLIT", [
+			{ categoryId: null, source: null },
+		]);
+		await addSplit(`${MONTH}-17`, "ARCHIVED SPLIT", [
+			{ categoryId: 4, source: "user" },
+			{ categoryId: 2, source: "user" },
+		]);
+		await addSplit(`${MONTH}-16`, "SPLIT A", [
+			{ categoryId: 1, source: "user" },
+			{ categoryId: 2, source: "user" },
+			{ categoryId: 1, source: "merchant_rule" },
+			{ categoryId: 3, source: "user", excluded: true },
+			{ categoryId: 3, source: "user", pending: true },
+		]);
+		await db.batch(
+			[`${MONTH}-14`, `${MONTH}-13`, `${MONTH}-12`, `${MONTH}-11`].map(
+				(date, index) =>
+					db
+						.prepare(
+							"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, ?, 'Split Shop', ?, 'user')",
+						)
+						.bind(date, `SINGLE ${index}`, (index % 2) + 1),
+			),
+		);
+		await db.prepare("UPDATE categories SET archived = 1 WHERE id = 4").run();
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Split Shop" },
+		]);
+		expect(history.get("Split Shop")).toEqual([
+			["Eating Out"],
+			["Groceries", "Eating Out"],
+			["Groceries"],
+			["Eating Out"],
+			["Groceries"],
+		]);
+	});
+
+	it("uses raw-name fallback keys, shares short histories, and sends none for another merchant", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'BANK TEXT A', 'HAND SHOP A', 1, 'user')",
+				)
+				.bind(`${MONTH}-01`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'BANK TEXT B', 'HAND SHOP A', 2, 'merchant_rule')",
+				)
+				.bind(`${MONTH}-02`),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 100, 'OTHER HAND SHOP', 3, 'user')",
+				)
+				.bind(`${MONTH}-03`),
+		]);
+		const targets = [];
+		for (const rawName of ["HAND SHOP A", "HAND SHOP A", "NO HISTORY HERE"]) {
+			const row = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 200, ?) RETURNING id",
+				)
+				.bind(`${MONTH}-20`, rawName)
+				.first<{ id: number }>();
+			targets.push(row?.id as number);
+		}
+		const histories: unknown[] = [];
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				histories.push(
+					JSON.parse(String(init?.body)).state.merchant_category_history,
+				);
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: targets },
+		);
+		expect(histories).toEqual([
+			undefined,
+			[["Eating Out"], ["Groceries"]],
+			[["Eating Out"], ["Groceries"]],
+		]);
+	});
+	it("sends the five newest person-chosen merchant trips in one Jev request", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.batch(
+			Array.from({ length: 5 }, (_, index) =>
+				db
+					.prepare(
+						`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source)
+						 VALUES (1, ?, 500, ?, 'Costco', 1, ?)`,
+					)
+					.bind(
+						`${MONTH}-${String(index + 1).padStart(2, "0")}`,
+						`COSTCO ${index}`,
+						index === 0 ? "merchant_rule" : "user",
+					),
+			),
+		);
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('Costco', 'Costco')",
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source)
+				 VALUES (1, '2026-08-31', 500, 'COSTCO OLD', 'Costco', 2, 'user')`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source)
+				 VALUES (1, '2026-09-30', 500, 'COSTCO TALLY', 'Costco', 2, 'jev')`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded)
+				 VALUES (1, '2026-09-29', 500, 'COSTCO EXCLUDED', 'Costco', 2, 'user', 1)`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, pending)
+				 VALUES (1, '2026-09-28', 500, 'COSTCO PENDING', 'Costco', 2, 'user', 1)`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split)
+				 VALUES (1, '2026-09-27', 500, 'COSTCO SPLIT PARENT', 'Costco', 2, 'user', 1)`,
+			),
+		]);
+		const target = await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name)
+				 VALUES (1, ?, 1200, 'COSTCO CURRENT', 'Costco') RETURNING id`,
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		let calls = 0;
+		let sent: Record<string, unknown> | undefined;
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				calls += 1;
+				sent = JSON.parse(String(init?.body));
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: [target?.id as number] },
+		);
+		expect(calls).toBe(1);
+		expect(sent?.state).toMatchObject({
+			merchant: "Costco",
+			merchant_category_history: [
+				["Groceries"],
+				["Groceries"],
+				["Groceries"],
+				["Groceries"],
+				["Groceries"],
+			],
+		});
+		expect(sent?.state).not.toHaveProperty("date");
+		expect(sent?.state).not.toHaveProperty("account");
+		expect(sent?.state).not.toHaveProperty("note");
+		expect(sent?.state).not.toHaveProperty("history");
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, jev_category_id, category_confidence FROM transactions WHERE id = ?",
+				)
+				.bind(target?.id)
+				.first(),
+		).toEqual({
+			category_id: null,
+			jev_category_id: 2,
+			category_confidence: 0.5,
+		});
+	});
+
+	it("sends a transaction with no merchant history exactly as it did before", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const target = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1200, 'ONE-OFF SHOP') RETURNING id",
+			)
+			.bind(`${MONTH}-20`)
+			.first<{ id: number }>();
+		let sent: Record<string, unknown> | undefined;
+		await categorizePending(
+			withKey,
+			async (_url, init) => {
+				sent = JSON.parse(String(init?.body));
+				return reply(0.5);
+			},
+			{ rulesApplied: true, onlyIds: [target?.id as number] },
+		);
+		expect(sent?.state).toEqual({
+			bank_description: "ONE-OFF SHOP",
+			merchant: null,
+			amount_cents: 1200,
+			direction: "money out",
+			account_type: "depository",
+		});
+	});
+
 	it.each([
 		{ enabled: true, income: 1, source: "jev", reviewed: 1 },
 		{ enabled: false, income: 0, source: null, reviewed: 0 },
@@ -515,8 +1198,8 @@ describe("categorizePending", () => {
 			{ ...withKey, DB: counted as D1Database, DEMO: "false" },
 			fakeJev(() => reply(0.95)).fetchImpl,
 		);
-		// Three queries a call and a few for its setup, with room left for what the invocation did before.
-		expect(statements).toBeLessThanOrEqual(MAX_CALLS_PER_RUN * 3 + 15);
+		// Three queries per call, one history read per run, and a few for setup.
+		expect(statements).toBeLessThanOrEqual(MAX_CALLS_PER_RUN * 3 + 16);
 		expect(statements).toBeLessThan(1000 - 50);
 	}, 60_000);
 
@@ -667,9 +1350,10 @@ describe("categorizePending", () => {
 				fakeJev(() => reply(0.95)).fetchImpl,
 				{ rulesApplied: true, onlyIds: ids },
 			);
-			// Six more calls cost the switches read before and after each (two) and its save (one).
+			// Six more calls cost the switches read before and after each (two) and its save (one); history is one query per run.
 			const perCall = (many.statements() - few.statements()) / 6;
 			expect(perCall).toBeLessThanOrEqual(3);
+			expect(many.statements() - few.statements()).toBeLessThanOrEqual(19);
 		});
 
 		it("gives back what it reserved and didn't ask when the run stops early", async () => {

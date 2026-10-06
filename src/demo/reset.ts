@@ -21,6 +21,7 @@ const TABLES_CHILD_FIRST = [
 	"documents",
 	"balance_history",
 	"transactions",
+	"category_suggestions",
 	"bills",
 	"budget_amounts",
 	"merchants",
@@ -63,7 +64,11 @@ function balanceHistoryStatements(
 }
 
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
-export async function resetDemo(db: D1Database, today: string): Promise<void> {
+export async function resetDemo(
+	db: D1Database,
+	today: string,
+	options: { categoryExample?: boolean } = {},
+): Promise<void> {
 	const seed = buildSeed(today);
 	const todayDay = Number(today.slice(8, 10));
 	if (todayDay < 4) {
@@ -181,6 +186,50 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 				.bind(...bill),
 		),
 	]);
+	if (options.categoryExample) {
+		const petMonthNumber = Number(today.slice(5, 7)) - 2;
+		const petYearNumber =
+			Number(today.slice(0, 4)) + Math.floor((petMonthNumber - 1) / 12);
+		const petMonthNumberNormalized = ((petMonthNumber - 1 + 12) % 12) + 1;
+		const petYear = String(petYearNumber).padStart(4, "0");
+		const petMonth = `${petYear}-${String(petMonthNumberNormalized).padStart(2, "0")}`;
+		await db.batch([
+			...[
+				["Chewy", "Chewy"],
+				["Petsmart", "Petsmart"],
+				["Banfield Pet Hospital", "Banfield Pet Hospital"],
+			].map(([raw, display]) =>
+				db
+					.prepare(
+						"INSERT INTO merchants (raw_name, display_name, not_a_bill) VALUES (?, ?, 1)",
+					)
+					.bind(raw, display),
+			),
+		]);
+		const petSuggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db.batch([
+			...[
+				["CHEWY.COM", "Chewy", 6412, 8],
+				["PETSMART 0412", "Petsmart", 2399, 14],
+				["BANFIELD PET HOSPITAL", "Banfield Pet Hospital", 18900, 21],
+			].map(([raw, merchant, cents, day]) =>
+				db
+					.prepare(`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, plaid_category, category_confidence, jev_none_fit, category_suggestion_id, updated_by)
+			VALUES (1, ?, ?, ?, ?, 'GENERAL_MERCHANDISE', 0.95, 1, ?, 'demo')`)
+					.bind(
+						`${petMonth}-${String(day).padStart(2, "0")}`,
+						cents,
+						raw,
+						merchant,
+						petSuggestion?.id ?? null,
+					),
+			),
+		]);
+	}
 	await matchBillPayments(db, today);
 }
 

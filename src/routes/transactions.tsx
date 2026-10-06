@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
@@ -56,6 +57,7 @@ import { FormField } from "../views/form-field";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { SuggestedCategoryChip } from "../views/maybe-category";
 import {
 	KEEP_VALUE,
 	NameChoices,
@@ -1197,6 +1199,21 @@ function EditSheet({
 				>
 					<legend class="text-base text-ink">Category</legend>
 					<div class="flex flex-wrap gap-2">
+						{!purchase &&
+							tx.categorySource !== "jev" &&
+							tx.maybeCategoryName &&
+							!tx.maybeCategoryNew &&
+							tx.suggestedCategoryId !== null &&
+							tx.suggestedCategoryName &&
+							tx.categoryConfidence !== null &&
+							tx.categoryConfidence < JEV_THRESHOLD && (
+								<SuggestedCategoryChip
+									name={tx.suggestedCategoryName}
+									value={String(tx.suggestedCategoryId)}
+									sure={Math.round(tx.categoryConfidence * 100)}
+									transactionId={tx.id}
+								/>
+							)}
 						{categories.map((cat) => (
 							<Chip
 								type="radio"
@@ -1226,6 +1243,17 @@ function EditSheet({
 							<p class="text-sm text-muted">
 								Picked by Tally · {Math.round(tx.categoryConfidence * 100)}%
 								sure
+							</p>
+						)}
+					{!purchase &&
+						tx.categorySource !== "jev" &&
+						tx.maybeCategoryName &&
+						!tx.maybeCategoryNew &&
+						tx.suggestedCategoryName &&
+						tx.categoryConfidence !== null &&
+						tx.categoryConfidence < JEV_THRESHOLD && (
+							<p class="text-sm text-muted">
+								Tally's guess · {Math.round(tx.categoryConfidence * 100)}% sure
 							</p>
 						)}
 					{errors.category && (

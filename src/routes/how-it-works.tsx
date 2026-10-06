@@ -384,6 +384,10 @@ howItWorks.get("/how-it-works", async (c) => {
 								: `An AI model, which each night picks a category for what's left. Tally applies its pick only when it is at least ${threshold} sure, and never when it says none of the categories fit; anything else waits for a person.`}
 						</li>
 					</ol>
+					<p class="mt-3">
+						A suggested category is only an idea; nothing is created until a
+						person says so.
+					</p>
 					{hasTransactions ? (
 						<>
 							<Diagram>

@@ -20,6 +20,7 @@ import {
 	FOLLOWS_PURCHASE,
 	INCLUDED,
 	INCLUDED_ROW,
+	includedSql,
 	PAYS_A_BILL,
 	paysBillSql,
 } from "./counted-month";
@@ -75,6 +76,8 @@ export type ListRow = {
 	pending?: boolean;
 	/** The name is a suggestion nobody has chosen yet, so the row draws it dashed (P29 A, decision 64). */
 	nameSuggested?: boolean;
+	maybeCategoryName?: string | null;
+	maybeCategoryNew?: boolean;
 	/** The suggested name is the bank's own, so it has no sparkles icon (P87 B, decision 80). */
 	nameFromBank?: boolean;
 };
@@ -185,6 +188,8 @@ export async function listTransactions(
 	const from = `FROM transactions t
 			${COUNTED_JOINS}
 			LEFT JOIN categories c ON c.id = ${COUNTED_CATEGORY}
+			LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
+			LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending'
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
@@ -206,6 +211,8 @@ export async function listTransactions(
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
+				CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
 			ORDER BY t.date DESC, t.id DESC
@@ -368,6 +375,8 @@ export type TransactionDetail = ListRow & {
 	categorySource: "user" | "merchant_rule" | "jev" | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
+	suggestedCategoryId: number | null;
+	suggestedCategoryName: string | null;
 	/**
 	 * The names the panel offers while the merchant's suggestions wait (P29 A): the suggested names
 	 * (up to three), the bank's text as the list shows it without a choice, and how many transactions
@@ -437,12 +446,17 @@ export async function getTransaction(
 				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,
+				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
+				CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
+			LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending'
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${COUNTED_JOINS}
 			WHERE t.id = ?`,
@@ -899,7 +913,7 @@ export async function saveSplit(
 		),
 		db
 			.prepare(
-				"UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
+				"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
 			)
 			.bind(by, parentId, total),
 	]);
@@ -995,10 +1009,12 @@ export async function pendingForJev(
 	db: D1Database,
 	limit: number,
 	{ categories = true, ids }: { categories?: boolean; ids?: number[] } = {},
-): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
+): Promise<
+	(JevInput & { id: number; categoryOnly: boolean; merchantKey: string })[]
+> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
+			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note,
 				${CATEGORY_ONLY} AS categoryOnly
@@ -1013,11 +1029,112 @@ export async function pendingForJev(
 			LIMIT ?`,
 		)
 		.bind(categories ? 1 : 0, ...(ids ? [JSON.stringify(ids)] : []), limit)
-		.all<JevInput & { id: number; categoryOnly: number }>();
+		.all<
+			JevInput & { id: number; categoryOnly: number; merchantKey: string }
+		>();
 	return results.map((transaction) => ({
 		...transaction,
 		categoryOnly: transaction.categoryOnly === 1,
 	}));
+}
+
+/** The recent categories chosen by a person or merchant rule, fetched once for a Jev page. */
+export async function merchantCategoryHistoryForJev(
+	db: D1Database,
+	transactions: { id: number; merchantKey: string; rawName?: string }[],
+): Promise<Map<string, string[][]>> {
+	const requested = [
+		...new Map(
+			transactions.map((transaction) => [
+				`${transaction.merchantKey}\0${transaction.rawName ?? ""}`,
+				{
+					merchantKey: transaction.merchantKey,
+					rawName: transaction.rawName ?? null,
+				},
+			]),
+		).values(),
+	];
+	if (requested.length === 0) return new Map();
+	const { results } = await db
+		.prepare(
+			// Match requested merchant keys through the merchant-history index before ranking trips.
+			`WITH requested AS (
+				SELECT json_extract(value, '$.merchantKey') AS merchant_key,
+					json_extract(value, '$.rawName') AS raw_name FROM json_each(?)),
+			matched_transactions AS (
+				SELECT r.merchant_key, t.id, t.date, t.raw_name, t.parent_id, t.is_split,
+					t.category_id, t.category_source, t.pending, t.excluded
+				FROM requested r JOIN transactions t INDEXED BY transactions_merchant_history
+					ON r.merchant_key = ${merchantKeySql("t")}
+				UNION ALL
+				SELECT r.merchant_key, t.id, t.date, t.raw_name, t.parent_id, t.is_split,
+					t.category_id, t.category_source, t.pending, t.excluded
+				FROM requested r JOIN transactions t INDEXED BY transactions_raw_name
+					ON t.raw_name = r.raw_name AND NULLIF(t.merchant_name, '') IS NULL
+				WHERE r.raw_name IS NOT NULL AND r.raw_name != r.merchant_key),
+			 asked AS (SELECT value AS transaction_id FROM json_each(?)),
+			 category_rows AS (
+				SELECT t.merchant_key AS merchant_key, t.id AS trip_id, t.date AS trip_date,
+					t.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
+				FROM matched_transactions t
+				JOIN categories c ON c.id = t.category_id
+				WHERE t.parent_id IS NULL
+					AND t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND c.archived = 0
+					AND t.category_source IN ('user', 'merchant_rule')
+					AND t.is_split = 0 AND ${INCLUDED} AND t.pending = 0
+				UNION ALL
+				SELECT p.merchant_key AS merchant_key, p.id AS trip_id, p.date AS trip_date,
+					p.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
+				FROM matched_transactions p
+				JOIN transactions t ON t.parent_id = p.id AND t.is_split = 0
+				JOIN categories c ON c.id = t.category_id
+				WHERE p.is_split = 1 AND p.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND c.archived = 0
+					AND t.category_source IN ('user', 'merchant_rule')
+					AND ${INCLUDED} AND t.pending = 0 AND ${includedSql("p")} AND p.pending = 0
+			),
+			 category_deduped AS (
+				SELECT merchant_key, trip_id, trip_date, trip_order_id, category_name, category_order_id,
+					ROW_NUMBER() OVER (
+						PARTITION BY merchant_key, trip_id, category_name ORDER BY category_order_id
+					) AS category_position
+				FROM category_rows
+			),
+			usable_trips AS (
+				SELECT DISTINCT merchant_key, trip_id, trip_date, trip_order_id
+				FROM category_deduped WHERE category_position = 1
+			),
+			ranked_trips AS (
+				SELECT merchant_key, trip_id,
+					ROW_NUMBER() OVER (PARTITION BY merchant_key ORDER BY trip_date DESC, trip_order_id DESC) AS position
+				FROM usable_trips
+			)
+			SELECT d.merchant_key, r.position, d.category_name
+			FROM category_deduped d JOIN ranked_trips r ON r.merchant_key = d.merchant_key AND r.trip_id = d.trip_id
+			WHERE d.category_position = 1 AND r.position <= 5
+			ORDER BY d.merchant_key, r.position, d.category_order_id`,
+		)
+		.bind(
+			JSON.stringify(requested),
+			JSON.stringify(transactions.map((transaction) => transaction.id)),
+		)
+		.all<{ merchant_key: string; position: number; category_name: string }>();
+	const history = new Map<string, string[][]>();
+	let lastMerchantKey: string | undefined;
+	let lastPosition = 0;
+	for (const row of results) {
+		const trips = history.get(row.merchant_key) ?? [];
+		if (row.merchant_key !== lastMerchantKey || row.position !== lastPosition) {
+			trips.push([]);
+			lastMerchantKey = row.merchant_key;
+			lastPosition = row.position;
+		}
+		trips[trips.length - 1]?.push(row.category_name);
+		history.set(row.merchant_key, trips);
+	}
+	return history;
 }
 
 /** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */
@@ -1051,7 +1168,7 @@ export async function saveJevResult(
 		const category = await db
 			.prepare(
 				`UPDATE transactions SET
-					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?,
+					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
 					updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
@@ -1064,6 +1181,7 @@ export async function saveJevResult(
 				d.categoryId === null ? null : "jev",
 				d.confidence,
 				d.suggestedCategoryId,
+				d.noneFit ? 1 : 0,
 				id,
 			)
 			.run();
@@ -1082,7 +1200,7 @@ export async function saveJevResult(
 			category_confidence = ?,
 			-- A credit counts only after a confident category (non-income classification) or an income decision.
 			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ?) OR ? = 1) THEN 1 ELSE credit_reviewed END,
-				jev_category_id = ?,
+				jev_category_id = ?, jev_none_fit = ?,
 				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				-- Income is money coming in: Jev's income answer never marks money out (a positive amount).
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income WHEN amount_cents > 0 THEN 0 ELSE ? END,
@@ -1108,6 +1226,7 @@ export async function saveJevResult(
 			JEV_THRESHOLD,
 			income ? 1 : 0,
 			d.suggestedCategoryId,
+			d.noneFit ? 1 : 0,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
 			income ? 1 : 0,

@@ -462,6 +462,18 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("lists the shared Maybe parts in the Rows catalog (P32 A)", async () => {
+		const { html } = await get("/design-system");
+		const tag =
+			specimens(html).find((t) => t.includes('id="maybe-category"')) ?? "";
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain(
+			'data-ds-components="MaybeCategory SuggestedCategoryChip"',
+		);
+		expect(html).toContain("Maybe new: Pet Care");
+		expect(html).toContain("Tally&#39;s guess");
+	});
+
 	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {
 		const { html } = await get("/design-system");
 		const tag = specimens(html).find((t) => t.includes('id="time-zone-row"'));

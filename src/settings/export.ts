@@ -3,6 +3,7 @@ import { tidyName } from "../transactions/tidy-name";
 
 const EXPORT_COLUMNS = {
 	categories: "id, name, icon, color, sort_order, archived",
+	category_suggestions: "id, name, status, created_at, decided_at",
 	budget_amounts: "category_id, effective_month, amount_cents",
 	merchants:
 		"raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill",
@@ -12,7 +13,7 @@ const EXPORT_COLUMNS = {
 		(SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank_disconnected`,
 	balance_history: "account_id, date, balance_cents",
 	transactions:
-		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending",
+		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending, jev_none_fit, category_suggestion_id",
 	bills:
 		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, merchant_raw_text, active",
 	bill_payments:
