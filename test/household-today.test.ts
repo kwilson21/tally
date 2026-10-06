@@ -130,7 +130,7 @@ describe("a bill due Oct 5 at 22:00 Eastern on Oct 5", () => {
 
 	it("reads Due today on Bills", async () => {
 		const { html } = await get("/bills");
-		expect(html).toContain("Due Today, Oct 5");
+		expect(html).toContain("Due today, Oct 5");
 		expect(html).not.toContain("Was due");
 		expect(html).not.toContain("Overdue");
 	});
@@ -392,7 +392,7 @@ describe("a time zone other than Eastern", () => {
 			expect(pacific.today).toBe("2026-10-31");
 			expect(pacific.rows[0]).toMatchObject({ status: "due" });
 			const page = await get("/bills");
-			expect(page.html).toContain("Due Today, Oct 31");
+			expect(page.html).toContain("Due today, Oct 31");
 			expect(page.html).not.toContain("Overdue");
 			const bill = await get("/bills/1");
 			expect(bill.html).not.toContain("Overdue");

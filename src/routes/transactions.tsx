@@ -120,7 +120,7 @@ function FirstVisitList({ state }: { state: FirstVisit }) {
 		<EmptyState
 			kind="search"
 			sentence="Importing your transactions…"
-			hint="Your bank sends about 90 days. It usually takes a few minutes."
+			hint="Your bank sends about 90 days of them. It usually takes a few minutes."
 		/>
 	);
 }
@@ -221,7 +221,7 @@ async function renderList(
 		<a
 			href={pageHref(n)}
 			rel={rel}
-			class="inline-flex min-h-11 items-center px-2"
+			class="inline-flex min-h-11 items-center px-2 -mx-2"
 			hx-get={pageHref(n)}
 			hx-sync="#filters:replace"
 			hx-target="#results"
@@ -237,13 +237,15 @@ async function renderList(
 	const pageNav = pages > 1 && (
 		<nav
 			aria-label="Pages"
-			class="mt-4 flex items-center justify-between border-t border-rule pt-2"
+			class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center border-t border-rule pt-2"
 		>
 			<span>{page > 1 && pageLink(page - 1, "prev", "Newer")}</span>
 			<span class="text-sm text-muted">
 				Page {page} of {pages}
 			</span>
-			<span>{page < pages && pageLink(page + 1, "next", "Older")}</span>
+			<span class="justify-self-end">
+				{page < pages && pageLink(page + 1, "next", "Older")}
+			</span>
 		</nav>
 	);
 	const back = listHref(filters, today.slice(0, 7));
@@ -266,7 +268,7 @@ async function renderList(
 			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
-			<div class="flex items-center justify-between gap-3">
+			<div class="flex items-center justify-between gap-3 lg:max-w-3xl">
 				<h1
 					id="transactions-title"
 					tabindex={focusHeading ? -1 : undefined}
@@ -281,6 +283,7 @@ async function renderList(
 					<Button
 						id="select-toggle"
 						kind="text"
+						class="-mr-2"
 						href={selecting ? doneHref : selectHref}
 					>
 						{selecting ? "Done" : "Select"}
@@ -416,10 +419,15 @@ async function renderList(
 						{count}
 					</p>
 				)}
-				{firstVisit === null && filters.uncategorized && (
-					<Button kind="text" href="/transactions/organize">
-						Organize by merchant
-					</Button>
+				{/* Always drawn on a list, so a filter change can add or remove the link inside it (LIST_OOB). */}
+				{firstVisit === null && (
+					<div id="organize-link">
+						{filters.uncategorized && (
+							<Button kind="text" href="/transactions/organize" class="-ml-2">
+								Organize by merchant
+							</Button>
+						)}
+					</div>
 				)}
 				{selecting ? (
 					<form
@@ -569,6 +577,7 @@ transactions.get("/transactions", async (c) => {
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
 const LIST_OOB = [
 	"#result-count:innerHTML",
+	"#organize-link:innerHTML",
 	"#add-cash:outerHTML",
 	"#select-toggle:outerHTML",
 	"#selection-back:outerHTML",

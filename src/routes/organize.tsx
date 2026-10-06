@@ -131,7 +131,7 @@ async function renderOrganize(
 								id="organize-name"
 								name="name"
 								label="Name (optional)"
-								hint="Leave empty to keep it"
+								hint="Change it to rename every transaction from this merchant."
 								value={values ? values.name : group.name}
 								maxlength={80}
 								error={values?.nameError}

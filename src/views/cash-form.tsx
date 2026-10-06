@@ -84,7 +84,11 @@ export function CashForm({
 					))}
 				</div>
 				{errors.category && (
-					<p id="cash-category-error" role="alert" class="text-sm text-over">
+					<p
+						id="cash-category-error"
+						role="alert"
+						class="mt-2 text-sm text-over"
+					>
 						{errors.category}
 					</p>
 				)}
