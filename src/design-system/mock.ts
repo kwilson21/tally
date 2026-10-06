@@ -361,6 +361,7 @@ export const MONEY_STATES = [
 			label: "Budget",
 			value: "612.40",
 			lastMonthCents: 60000,
+			averageCents: 65000,
 		},
 	},
 	{
@@ -371,6 +372,7 @@ export const MONEY_STATES = [
 			label: "Budget",
 			value: "600.00",
 			lastMonthCents: 60000,
+			averageCents: 60000,
 		},
 	},
 	{

@@ -13,6 +13,8 @@ type Props = {
 	error?: string;
 	/** Last month's amount in cents, offered as a chip when it's above $0. */
 	lastMonthCents?: number;
+	/** Average spending in the last three finished months, offered above $0. */
+	averageCents?: number | null;
 	autofocus?: boolean;
 	inputAttributes?: Record<string, string>;
 };
@@ -58,6 +60,7 @@ export function MoneyInput({
 	value,
 	error,
 	lastMonthCents = 0,
+	averageCents = null,
 	autofocus,
 	inputAttributes,
 }: Props) {
@@ -159,6 +162,16 @@ export function MoneyInput({
 						class={moneyChip}
 					>
 						Last month: {formatCents(lastMonthCents)}
+					</button>
+				)}
+				{averageCents !== null && averageCents > 0 && (
+					<button
+						type="button"
+						data-set={String(averageCents)}
+						aria-pressed={String(cents === averageCents)}
+						class={moneyChip}
+					>
+						3-month average: {formatCents(averageCents)}
 					</button>
 				)}
 			</div>
