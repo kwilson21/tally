@@ -166,4 +166,17 @@ describe("suggestNames", () => {
 		expect(line).not.toContain("BLUE BOTTLE");
 		logged.mockRestore();
 	});
+
+	it("gives each request its own timeout, so one slow call can't hold up the night's names", async () => {
+		const ai = fakeAi(async () => ({ response: "Blue Bottle Coffee" }));
+		await suggestNames(ai, RAW);
+		await suggestNames(ai, RAW);
+		const signals = ai.run.mock.calls.map(
+			(call) => (call[2] as { signal?: AbortSignal } | undefined)?.signal,
+		);
+		expect(signals[0]).toBeInstanceOf(AbortSignal);
+		expect(signals[1]).toBeInstanceOf(AbortSignal);
+		// A fresh one each call, so a signal that ran out for one request isn't handed to the next.
+		expect(signals[1]).not.toBe(signals[0]);
+	});
 });

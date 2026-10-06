@@ -23,7 +23,11 @@ import { transactions } from "./routes/transactions";
 import { trends } from "./routes/trends";
 import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
-import { suggestMerchantNames } from "./suggest-names-pending";
+import {
+	nameCallLimit,
+	namesTimeBudgetMs,
+	suggestMerchantNames,
+} from "./suggest-names-pending";
 
 type AppEnv = Env & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
@@ -56,11 +60,16 @@ app.onError(serverErrorPage);
  * - 09:00, the sync run (`runScheduled`): syncs every bank, which applies the merchant rules, and retries
  *   feedback. It asks Jev and Workers AI nothing.
  * - 09:20, the first sort run (`runFirstSort`): asks Jev about up to `MAX_CALLS_PER_RUN`, 300.
- * - 09:40, the names and second sort run (`runSecondSort`): makes the night's names, then asks Jev about
- *   what is left, up to 200.
+ * - 09:40, the second sort and names run (`runSecondSort`): asks Jev about what is left, up to 200, then
+ *   makes the night's names.
+ *
+ * The names go last and have a time budget (`namesTimeBudgetMs`, 10 minutes from the start of the run): a
+ * request to Workers AI can be slow, a cron run is cut off at 15 minutes of wall-clock time (Cloudflare's
+ * Workers limits), and the sort must never wait on a name. Once the budget has passed no new request starts,
+ * and the names not asked wait for the next night.
  *
  * The demo has the one 09:00 run, which does all of it: resets, syncs (nothing, it has no Plaid), sorts
- * within 40 calls, names within 100 and retries feedback, far under the limit.
+ * within 40 calls, names within 100 and the same time budget, and retries feedback, far under the limit.
  *
  * The crons stay in this module, not exported: workerd refuses an entry module whose named exports
  * aren't functions (test/entry-exports.test.ts).
@@ -77,7 +86,9 @@ const SECOND_SORT_MAX_CALLS = 200;
 export async function runScheduled(
 	env: ScheduledEnv,
 	fetchImpl?: typeof fetch,
+	time?: RunClock,
 ) {
+	const startedAt = (time?.now ?? Date.now)();
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	}
@@ -90,23 +101,38 @@ export async function runScheduled(
 		// The demo has no banks, so this pass applies the merchant rules itself (and does when the sync's
 		// own step failed). It asks about everything still waiting, not only what the sync brought in, so it
 		// doesn't wait on the "as they arrive" switch, and it only spends what's left of today's cap
-		// (spec §8.6). Then the names, last, so a long names step can't hold up the sort.
+		// (spec §8.6). Then the names, last and within their time budget, so a slow names step can't hold up
+		// the sort.
 		await categorizePending(env, fetchImpl, {
 			rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
 		});
-		await nameMerchants(env);
+		await nameMerchants(env, startedAt, time);
 	}
 	await retryFeedback(env, fetchImpl);
 }
 
 /**
+ * Lets a test move the run's clock and shorten the names budget, so a slow Workers AI is a number, not a
+ * wait. Production passes nothing: `Date.now` and `namesTimeBudgetMs`.
+ */
+type RunClock = { now?: () => number; namesBudgetMs?: number };
+
+/**
  * Workers AI suggests names for the bank texts Plaid didn't name (spec §7, §9), while the names switch is
- * on: up to 100 texts at about three queries each. Nothing here changes a name, and a failure never stops
+ * on: up to 100 texts at about three queries each, and no new request after the run's names time budget,
+ * counted from `startedAt`, the start of the run. Nothing here changes a name, and a failure never stops
  * what the run does next.
  */
-async function nameMerchants(env: ScheduledEnv) {
+async function nameMerchants(
+	env: ScheduledEnv,
+	startedAt: number,
+	time?: RunClock,
+) {
 	try {
-		await suggestMerchantNames(env);
+		await suggestMerchantNames(env, nameCallLimit, {
+			deadline: startedAt + (time?.namesBudgetMs ?? namesTimeBudgetMs),
+			now: time?.now,
+		});
 	} catch (error) {
 		console.error(
 			`workers-ai: names step failed ${error instanceof Error ? error.name : "unknown"}`,
@@ -127,23 +153,26 @@ export async function runFirstSort(
 }
 
 /**
- * Production's 09:40 run, the names and the second sort (decision 56): one run asks Jev about at most
+ * Production's 09:40 run, the second sort and the names (decision 56): one run asks Jev about at most
  * `MAX_CALLS_PER_RUN`, so this one asks about what the first sort left, within what's left of the day's
  * cap, and a newly linked bank's backfill is still sorted in a night. It never syncs or resets.
  *
- * It makes the night's names (spec §7) first, so a long names step can't starve the sort. Its own Jev
- * pass asks about at most `SECOND_SORT_MAX_CALLS`: 100 names and 200 calls are about 900 queries, under
- * D1's 1,000 for one invocation, and with the first sort's 300 they still reach the day's 500.
+ * It asks Jev first, so a slow Workers AI can never delay the sort, then makes the night's names (spec §7)
+ * within their time budget, which counts from the start of the run. Its Jev pass asks about at most
+ * `SECOND_SORT_MAX_CALLS`: 200 calls and 100 names are about 900 queries, under D1's 1,000 for one
+ * invocation, and with the first sort's 300 they still reach the day's 500.
  */
 export async function runSecondSort(
 	env: ScheduledEnv,
 	fetchImpl?: typeof fetch,
+	time?: RunClock,
 ) {
-	await nameMerchants(env);
+	const startedAt = (time?.now ?? Date.now)();
 	await categorizePending(env, fetchImpl, {
 		rulesApplied: false,
 		maxCalls: SECOND_SORT_MAX_CALLS,
 	});
+	await nameMerchants(env, startedAt, time);
 }
 
 app.use("*", security);

@@ -287,4 +287,47 @@ describe("suggestMerchantNames", () => {
 		await suggestMerchantNames({ DB: db, AI: ai }, 2);
 		expect(callsFor(ai)).toEqual(["OFTEN SHOP", "SOMETIMES SHOP"]);
 	});
+
+	// Slow requests must not hold up the rest of a run (src/index.tsx runs this after Jev, within a budget):
+	// no new request starts once the deadline has passed, and what was answered by then is kept.
+	it("stops starting new requests once its deadline has passed, keeping the answers it has", async () => {
+		await addTransactions(
+			["ONE", "TWO", "THREE", "FOUR", "FIVE"].map((rawName) => ({ rawName })),
+		);
+		let now = 0;
+		const ai = fakeAi(() => {
+			now += 1_000;
+			return { response: "A Name" };
+		});
+
+		// Calls start at 0, 1,000 and 2,000; the next would start at 3,000, past the deadline.
+		expect(
+			await suggestMerchantNames({ DB: db, AI: ai }, nameCallLimit, {
+				deadline: 2_500,
+				now: () => now,
+			}),
+		).toEqual({ asked: 3, suggested: 3 });
+		expect(ai.run).toHaveBeenCalledTimes(3);
+		expect(await merchants()).toHaveLength(3);
+
+		// The two it didn't reach wait for the next night.
+		const next = fakeAi(() => ({ response: "A Name" }));
+		expect(await suggestMerchantNames({ DB: db, AI: next })).toEqual({
+			asked: 2,
+			suggested: 2,
+		});
+	});
+
+	it("makes no request at all when its deadline has already passed", async () => {
+		await addTransactions([{ rawName: RAW }]);
+		const ai = fakeAi(() => ({ response: "Blue Bottle Coffee" }));
+		expect(
+			await suggestMerchantNames({ DB: db, AI: ai }, nameCallLimit, {
+				deadline: 5_000,
+				now: () => 5_000,
+			}),
+		).toEqual({ asked: 0, suggested: 0 });
+		expect(ai.run).not.toHaveBeenCalled();
+		expect(await merchants()).toEqual([]);
+	});
 });
