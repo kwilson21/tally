@@ -65,8 +65,19 @@ export async function runScheduled(
 	await categorizePending(env, fetchImpl, {
 		rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
 	});
-	// Workers AI then suggests names for the bank texts Plaid didn't name (spec §9), while the names switch
-	// is on. Nothing here changes a name, and a failure never stops the retry below.
+	// The demo has one run, which resets, sorts within 40 calls and names within 100, far under D1's limit.
+	// Production names in its second run instead (below): this one has synced and asked Jev about up to 300
+	// transactions, about 900 of the 1,000 queries one invocation may make.
+	if (env.DEMO !== "false") await nameMerchants(env);
+	await retryFeedback(env, fetchImpl);
+}
+
+/**
+ * Workers AI suggests names for the bank texts Plaid didn't name (spec §7, §9), while the names switch is
+ * on: up to 100 texts at about three queries each. Nothing here changes a name, and a failure never stops
+ * what the run does next.
+ */
+async function nameMerchants(env: ScheduledEnv) {
 	try {
 		await suggestMerchantNames(env);
 	} catch (error) {
@@ -74,21 +85,29 @@ export async function runScheduled(
 			`workers-ai: names step failed ${error instanceof Error ? error.name : "unknown"}`,
 		);
 	}
-	await retryFeedback(env, fetchImpl);
 }
 
 /**
  * The night's second run, 30 minutes after the first (decision 56): one run asks Jev about at most
  * `MAX_CALLS_PER_RUN`, so this one asks about what the first left, within what's left of the day's
  * cap, and a newly linked bank's backfill is still sorted in a night. It never syncs or resets.
+ *
+ * It also makes the night's names (spec §7), first, so a long names step can't starve the sort. Its own
+ * Jev pass asks about at most `SECOND_SORT_MAX_CALLS`: 100 names and 200 calls are about 900 queries,
+ * under D1's 1,000 for one invocation, and with the first run's 300 they still reach the day's 500.
  */
 const SECOND_SORT_CRON = "30 9 * * *";
+const SECOND_SORT_MAX_CALLS = 200;
 
 export async function runSecondSort(
 	env: ScheduledEnv,
 	fetchImpl?: typeof fetch,
 ) {
-	await categorizePending(env, fetchImpl, { rulesApplied: false });
+	await nameMerchants(env);
+	await categorizePending(env, fetchImpl, {
+		rulesApplied: false,
+		maxCalls: SECOND_SORT_MAX_CALLS,
+	});
 }
 
 app.use("*", security);

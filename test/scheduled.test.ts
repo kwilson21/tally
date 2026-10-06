@@ -269,7 +269,9 @@ describe("scheduled handler", () => {
 	);
 });
 
-// The nightly names step (spec §9, #33): Workers AI suggests names after Jev, where there is a binding.
+// The nightly names step (spec §7, §9, #33): Workers AI suggests names where there is a binding. In
+// production it runs in the 09:30 run, before that run's Jev pass, so no one invocation nears D1's 1,000
+// queries (the 09:00 run syncs and asks Jev about up to 300); the demo has one run, which names after Jev.
 describe("scheduled handler: merchant names", () => {
 	const aiThatSays = (response: string) =>
 		({ run: vi.fn(async () => ({ response })) }) as unknown as Ai & {
@@ -291,11 +293,21 @@ describe("scheduled handler: merchant names", () => {
 			"SELECT raw_name, suggested_name, display_name, suggestion_status FROM merchants",
 		).all();
 
-	it("suggests names for a bank text Plaid didn't name, as pending suggestions", async () => {
+	it("asks no names in production's 09:00 run, which has synced and asked Jev already", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await oneUnnamedCharge();
+		const ai = aiThatSays("Blue Bottle Coffee");
+		await runScheduled({ ...env, DEMO: "false", AI: ai });
+		expect(ai.run).not.toHaveBeenCalled();
+		expect((await pending()).results).toEqual([]);
+		vi.restoreAllMocks();
+	});
+
+	it("suggests names for a bank text Plaid didn't name in the 09:30 run, as pending suggestions", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await oneUnnamedCharge();
 		const ai = aiThatSays("Blue Bottle Coffee\nBlue Bottle");
-		await runScheduled({ ...env, DEMO: "false", AI: ai });
+		await runSecondSort({ ...env, DEMO: "false", AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(1);
 		expect((await pending()).results).toEqual([
 			{
@@ -308,13 +320,75 @@ describe("scheduled handler: merchant names", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("does nothing where there is no Workers AI binding, as in the demo and local development", async () => {
+	it("does nothing where there is no Workers AI binding, as in local development", async () => {
 		await oneUnnamedCharge();
+		await runSecondSort({ ...env, DEMO: "false" });
 		await runScheduled({ ...env, DEMO: "false" });
 		expect((await pending()).results).toEqual([]);
 	});
 
-	it("asks about the demo's seeded bank texts too, since the demo has the binding (spec §4.1), within the nightly limit", async () => {
+	it("asks names first in the 09:30 run, then Jev, so a long names step can't starve the sort", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await oneUnnamedCharge();
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		const order: string[] = [];
+		const ai = {
+			run: vi.fn(async () => {
+				order.push("names");
+				return { response: "Blue Bottle Coffee" };
+			}),
+		} as unknown as Ai;
+		const fetchImpl = vi.fn(async () => {
+			order.push("jev");
+			return Response.json({
+				answers: {
+					category: { type: "choice", choice: "Eating Out", confidence: 0.5 },
+					transfer: { type: "noul", noul: 0.01 },
+					reimbursement: { type: "noul", noul: 0.01 },
+					income: { type: "noul", noul: 0.01 },
+				},
+			});
+		});
+		await runSecondSort(
+			{ ...env, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
+			fetchImpl as unknown as typeof fetch,
+		);
+		expect(order).toEqual(["names", "jev"]);
+		vi.restoreAllMocks();
+	});
+
+	it("caps the 09:30 run's Jev pass at 200 calls, so its names and sort stay under D1's query limit", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 250)
+				 INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name)
+				 SELECT 'plaid-' || i, 1, '2026-09-20', 500 + i, 'SHOP NUMBER ' || i FROM n`,
+			),
+		]);
+		const fetchImpl = vi.fn(async () =>
+			Response.json({
+				answers: {
+					category: { type: "choice", choice: "Eating Out", confidence: 0.5 },
+					transfer: { type: "noul", noul: 0.01 },
+					reimbursement: { type: "noul", noul: 0.01 },
+					income: { type: "noul", noul: 0.01 },
+				},
+			}),
+		);
+		await runSecondSort(
+			{ ...env, DEMO: "false", JEV_API_KEY: "jev" },
+			fetchImpl as unknown as typeof fetch,
+		);
+		expect(fetchImpl).toHaveBeenCalledTimes(200);
+		vi.restoreAllMocks();
+	});
+
+	it("asks about the demo's seeded bank texts in its one 09:00 run, since the demo has the binding (spec §4.1), within the nightly limit", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const ai = aiThatSays("Some Place Name");
 		await runScheduled({ ...env, AI: ai });
@@ -332,7 +406,7 @@ describe("scheduled handler: merchant names", () => {
 			}),
 		} as unknown as Ai;
 		await expect(
-			runScheduled({ ...env, DEMO: "false", AI: ai }),
+			runSecondSort({ ...env, DEMO: "false", AI: ai }),
 		).resolves.toBeUndefined();
 		expect((await pending()).results).toEqual([]);
 		logged.mockRestore();
