@@ -10,6 +10,7 @@ import {
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
+import { accountsByBank } from "../db/accounts";
 import { loadMonth } from "../db/month";
 import {
 	bankDatedCount,
@@ -21,6 +22,7 @@ import {
 	categorizationExample,
 	excludedTotal,
 	exclusionsExample,
+	netWorthExample,
 	transactionsExample,
 } from "../how-it-works/examples";
 import { formatCents } from "../money";
@@ -151,6 +153,9 @@ howItWorks.get("/how-it-works", async (c) => {
 		)
 		.reduce((sum, bill) => sum + bill.amountCents, 0);
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
+	const netWorthText = netWorthExample(
+		(await accountsByBank(c.env.DB)).flatMap((bank) => bank.accounts),
+	);
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 	const paidBill = billData.rows.find(
 		(bill) =>
@@ -430,6 +435,48 @@ howItWorks.get("/how-it-works", async (c) => {
 						</>
 					) : (
 						<p class="mt-3">No bill has been paid yet this month.</p>
+					)}
+				</Section>
+
+				<Section id="net-worth" title="Net worth">
+					<p class="mt-2">
+						Accounts shows what everything you've linked adds up to, and a line
+						of how it has moved over the last 6 months.
+					</p>
+					<ul class="mt-3 list-disc space-y-1 pl-5">
+						<li>
+							Net worth is what you have minus what you owe: every account's
+							balance, where credit card and loan balances are subtracted.
+						</li>
+						<li>
+							The Cash account and any disconnected bank are left out, so the
+							line ends on the number at the top of Accounts.
+						</li>
+						<li>
+							Each time a bank syncs, Tally saves one balance per account for
+							that day, in your household's time zone. A later sync the same day
+							replaces it, so a day has one.
+							{demo &&
+								" This demo has no bank connection, so its six months of balances come with the made-up data."}
+						</li>
+						<li>
+							The line has a point for each day with a balance, this month
+							included. It starts on the first day every account has a balance,
+							so linking another bank doesn't look like your net worth jumped.
+							Until every account has a balance there is no line, only a note
+							saying it is waiting.
+						</li>
+						<li>
+							Code writes the sentence under the number, like "Up $3,600 since
+							May.", from the line's first and last day. It isn't AI.
+						</li>
+					</ul>
+					{netWorthText ? (
+						<Example demo={demo} monthName={monthLabel}>
+							{netWorthText}
+						</Example>
+					) : (
+						<p class="mt-3">There are no accounts to add up yet.</p>
 					)}
 				</Section>
 
