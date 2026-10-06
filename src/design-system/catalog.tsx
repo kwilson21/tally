@@ -237,7 +237,7 @@ function Foundation() {
 				sentence="Two radii, drawn as squircles where the browser supports it, and pills. No shadows except toasts: hairline rules separate things instead."
 			>
 				<div class="flex flex-wrap gap-6">
-					<State label="rounded-control · inputs, buttons, the toast">
+					<State label="rounded-control · inputs, buttons, tags, cards, the toast">
 						<span class="block h-16 w-28 rounded-control border border-ink" />
 					</State>
 					<State label="rounded-sheet · the sheet's top corners, the panel's left corners">

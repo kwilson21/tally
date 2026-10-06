@@ -21,9 +21,9 @@
 // the app's rule in all three. The design-token test lists this file as the one place that may set
 // corner-shape besides that rule.
 //
-// Chips and the round ticks are `rounded-full` in the code, even though DESIGN.md lists chips under
-// rounded-control, so the rule as proposed ("every rounded-control and rounded-sheet") leaves them
-// as pills. The pictures show exactly what that rule does.
+// Chips and the round ticks are `rounded-full` in the code, so the rule as proposed ("every
+// rounded-control and rounded-sheet") leaves them as pills. The pictures show exactly what that rule
+// does.
 //
 // Option C (a larger squircle, so the softness reads on a phone) is not drawn. Drawn at the same
 // radius, a squircle looks a little squarer than a round corner (see the close-up), so a larger
@@ -274,7 +274,7 @@ export function P75() {
 				options={[
 					{
 						name: "Today · Round corners",
-						note: "The current look: ordinary round corners, 0.75rem on buttons and fields and 1.25rem on the sheet's top edge.",
+						note: "The look before squircles shipped (and what Safari and Firefox still show): ordinary round corners, 0.75rem on buttons and fields and 1.25rem on the sheet's top edge.",
 						screen: <EditPanel p="p75-today" look="today" />,
 					},
 					{
