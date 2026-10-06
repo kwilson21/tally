@@ -104,20 +104,71 @@ describe("loadMonth", () => {
 });
 
 describe("firstCountedMonth query count", () => {
-	it("stays under D1's 1,000 statement limit", async () => {
+	it("uses one indexed date lookup", async () => {
 		let statements = 0;
+		let lookup = "";
 		const counted = new Proxy(db, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+						lookup = sql;
 						return target.prepare(sql);
 					};
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
 		expect(await firstCountedMonth(counted as D1Database)).toBe("2026-08");
-		expect(statements).toBeLessThan(950);
+		expect(statements).toBe(1);
+		const plan = await db
+			.prepare(`EXPLAIN QUERY PLAN ${lookup}`)
+			.all<{ detail: string }>();
+		expect(plan.results.map((row) => row.detail).join(" ")).toContain(
+			"transactions_date",
+		);
+	});
+
+	it("moves the first month back for a first-month bill payment counted in its prior occurrence month", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(91,'First rent',4000,1,'monthly',1,'RENT')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES(91,1,'2026-08-31',4000,'RENT',1)",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(91,'2026-07',91,'user','linked')",
+			)
+			.run();
+		expect(await firstCountedMonth(db)).toBe("2026-07");
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments WHERE bill_id=91"),
+			db.prepare("DELETE FROM transactions WHERE id=91"),
+			db.prepare("DELETE FROM bills WHERE id=91"),
+		]);
+	});
+
+	it("keeps the bank month when a bill payment occurrence is later than its date month", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(92,'Later rent',4000,1,'monthly',1,'RENT')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES(92,1,'2026-08-30',4000,'RENT',1)",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(92,'2026-09',92,'user','linked')",
+			)
+			.run();
+		expect(await firstCountedMonth(db)).toBe("2026-08");
 	});
 });

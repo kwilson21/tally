@@ -18,7 +18,12 @@ const rows = (count: number): CategorySummary[] =>
 describe("MonthEnd budget bars", () => {
 	it("keeps five categories in one row without the scrolling cue", () => {
 		const html = renderToString(
-			<MonthEnd monthName="September" amountCents={0} rows={rows(5)} />,
+			<MonthEnd
+				chartId="five"
+				monthName="September"
+				amountCents={0}
+				rows={rows(5)}
+			/>,
 		);
 		expect(html).not.toContain('role="region"');
 		expect(html).not.toContain("swipe sideways for the rest");
@@ -29,11 +34,48 @@ describe("MonthEnd budget bars", () => {
 		expect(chart).toContain('viewBox="0 0 350 142"');
 		expect(chart).toContain('width="42"');
 		expect([...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)]).toHaveLength(5);
+		const xs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map((m) =>
+			Number(m[1]),
+		);
+		expect(xs).toEqual([4, 65.5, 127, 188.5, 250]);
+		expect(298 - ((xs[xs.length - 1] ?? 0) + 42)).toBeGreaterThanOrEqual(4);
+		expect(chart).toContain('<text x="298" y="45"');
+	});
+
+	it("centers one to three categories with a step no wider than 66px", () => {
+		for (const [count, expected] of [
+			[1, [127]],
+			[2, [94, 160]],
+			[3, [61, 127, 193]],
+		] as const) {
+			const html = renderToString(
+				<MonthEnd
+					chartId={`n-${count}`}
+					monthName="September"
+					amountCents={0}
+					rows={rows(count)}
+				/>,
+			);
+			const chart =
+				html.match(
+					/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
+				)?.[0] ?? "";
+			const xs = [...chart.matchAll(/<rect x="([\d.]+)"/g)].map((m) =>
+				Number(m[1]),
+			);
+			expect(xs).toEqual(expected);
+			expect(xs.slice(1).every((x, i) => x - (xs[i] ?? x) <= 66)).toBe(true);
+		}
 	});
 
 	it("scrolls twelve categories in one row without widening the page", () => {
 		const html = renderToString(
-			<MonthEnd monthName="September" amountCents={0} rows={rows(12)} />,
+			<MonthEnd
+				chartId="twelve"
+				monthName="September"
+				amountCents={0}
+				rows={rows(12)}
+			/>,
 		);
 		const chart = html.match(
 			/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
@@ -42,9 +84,9 @@ describe("MonthEnd budget bars", () => {
 		expect(html).toContain(
 			'aria-label="12 categories; scroll sideways to see them all"',
 		);
-		expect(html).toContain('href="#month-end-chart-end"');
+		expect(html).toContain('href="#twelve-chart-end"');
 		expect(html).toContain('aria-label="Show the rest of the categories"');
-		expect(html).toContain('id="month-end-chart-end"');
+		expect(html).toContain('id="twelve-chart-end"');
 		expect(html).toContain('class="month-end-chart-fade"');
 		expect(html).toContain("swipe sideways for the rest");
 		expect(html).toContain('class="month-end-swipe-arrow"');
@@ -83,6 +125,31 @@ describe("MonthEnd budget bars", () => {
 		).toBe(12);
 		expect(html).toContain("overflow-x-auto");
 		expect(html).toContain("max-w-full");
+	});
+
+	it("gives each chart its own deterministic scroll target", () => {
+		const html = renderToString(
+			<>
+				<MonthEnd
+					chartId="a"
+					monthName="September"
+					amountCents={0}
+					rows={rows(6)}
+				/>
+				<MonthEnd
+					chartId="b"
+					monthName="October"
+					amountCents={0}
+					rows={rows(6)}
+				/>
+			</>,
+		);
+		const ids = [...html.matchAll(/id="([^"]*-chart-end)"/g)].map((m) => m[1]);
+		const hrefs = [...html.matchAll(/href="#([^"]*-chart-end)"/g)].map(
+			(m) => m[1],
+		);
+		expect(new Set(ids).size).toBe(2);
+		expect(hrefs).toEqual(ids);
 	});
 
 	it("keeps the swipe cue still under reduced motion", () => {

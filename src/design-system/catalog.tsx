@@ -781,6 +781,7 @@ function HomeTopGroup() {
 								currentMonth="2026-10"
 							/>
 							<MonthEnd
+								chartId="catalog-september"
 								monthName="September"
 								amountCents={8600}
 								rows={[
@@ -858,6 +859,7 @@ function HomeTopGroup() {
 				<State label="Five budgeted categories: one row, no scrolling region or cue">
 					<div class="w-[320px] max-w-full">
 						<MonthEnd
+							chartId="catalog-five"
 							monthName="September"
 							amountCents={0}
 							rows={Array.from({ length: 5 }, (_, index) => ({
@@ -874,6 +876,7 @@ function HomeTopGroup() {
 				<State label="Twelve budgeted categories: one row, keyboard-scrollable with fade, arrow link and swipe cue">
 					<div class="w-[320px] max-w-full">
 						<MonthEnd
+							chartId="catalog-twelve"
 							monthName="September"
 							amountCents={0}
 							rows={Array.from({ length: 12 }, (_, index) => ({
@@ -890,6 +893,7 @@ function HomeTopGroup() {
 				<State label="The twelve-category swipe cue under prefers-reduced-motion: arrows rest">
 					<div class="w-[320px] max-w-full">
 						<MonthEnd
+							chartId="catalog-twelve-reduced-motion"
 							monthName="September"
 							amountCents={0}
 							rows={Array.from({ length: 12 }, (_, index) => ({

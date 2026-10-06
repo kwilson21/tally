@@ -63,13 +63,27 @@ export function monthEndLabels(names: string[]): string[] {
 	);
 }
 
-function EndBars({ rows }: { rows: CategorySummary[] }) {
+function EndBars({
+	rows,
+	chartId,
+}: {
+	rows: CategorySummary[];
+	chartId: string;
+}) {
 	const width = Math.max(350, 4 + Math.max(0, rows.length - 1) * 66 + 42);
 	const left = 4;
+	const areaRight = 292;
 	const unit = 72;
 	const barWidth = 42;
 	const labels = monthEndLabels(rows.map((row) => row.name));
 	const scrolls = rows.length > 5;
+	const step =
+		rows.length > 1 && !scrolls
+			? Math.min(66, (areaRight - left - barWidth) / (rows.length - 1))
+			: 66;
+	const x0 = !scrolls
+		? left + (areaRight - left - ((rows.length - 1) * step + barWidth)) / 2
+		: left;
 	const names = rows
 		.map(
 			(row) =>
@@ -86,7 +100,7 @@ function EndBars({ rows }: { rows: CategorySummary[] }) {
 		>
 			<line
 				x1={left}
-				x2={width}
+				x2={scrolls ? width : areaRight}
 				y1="40"
 				y2="40"
 				class="stroke-muted"
@@ -105,7 +119,7 @@ function EndBars({ rows }: { rows: CategorySummary[] }) {
 					3,
 					Math.round(endBarRatio(row.spentCents, row.budgetCents).ratio * unit),
 				);
-				const x = left + index * 66;
+				const x = x0 + index * step;
 				return (
 					<g>
 						<rect
@@ -152,7 +166,7 @@ function EndBars({ rows }: { rows: CategorySummary[] }) {
 				<div class="flex w-max">
 					{chart}
 					<span
-						id="month-end-chart-end"
+						id={`${chartId}-chart-end`}
 						class="w-px shrink-0"
 						aria-hidden="true"
 					/>
@@ -163,7 +177,7 @@ function EndBars({ rows }: { rows: CategorySummary[] }) {
 			</span>
 			<span class="month-end-chart-fade" aria-hidden="true" />
 			<a
-				href="#month-end-chart-end"
+				href={`#${chartId}-chart-end`}
 				aria-label="Show the rest of the categories"
 				class="month-end-chart-more inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-rule bg-paper text-lg text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 			>
@@ -190,10 +204,12 @@ function EndBars({ rows }: { rows: CategorySummary[] }) {
 
 /** A finished month's net budget result and its category bars. */
 export function MonthEnd({
+	chartId,
 	monthName,
 	amountCents,
 	rows,
 }: {
+	chartId: string;
 	monthName: string;
 	amountCents: number;
 	rows: CategorySummary[];
@@ -215,7 +231,7 @@ export function MonthEnd({
 					<span class="sr-only"> budget</span>
 				</span>
 			</div>
-			<EndBars rows={rows} />
+			<EndBars rows={rows} chartId={chartId} />
 		</section>
 	);
 }

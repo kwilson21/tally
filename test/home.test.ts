@@ -5,6 +5,7 @@ import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { setBudget } from "../src/db/budgets";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { home as homeRoute } from "../src/routes/home";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
@@ -19,6 +20,33 @@ async function homeAt(month: string) {
 describe("GET / with the demo seed", () => {
 	beforeEach(async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	});
+
+	it("uses a fixed number of database statements as transaction history grows", async () => {
+		const requestCount = async () => {
+			let statements = 0;
+			const db = new Proxy(env.DB, {
+				get(target, property) {
+					const value = Reflect.get(target, property);
+					if (property === "prepare")
+						return (sql: string) => {
+							statements += 1;
+							return target.prepare(sql);
+						};
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+			const response = await homeRoute.request("http://tally.test/", {}, {
+				...env,
+				DB: db,
+			} as Env);
+			expect(response.status).toBe(200);
+			return statements;
+		};
+		const before = await requestCount();
+		await env.DB.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name) VALUES
+			(1,'2024-01-01',100,'OLD 1'),(1,'2024-02-01',100,'OLD 2'),(1,'2024-03-01',100,'OLD 3')`).run();
+		expect(await requestCount()).toBe(before);
 	});
 
 	it("shows a finished month read-only, using that month's budget history", async () => {

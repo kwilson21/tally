@@ -205,6 +205,7 @@ async function renderHome(
 									currentMonth={currentMonth}
 								/>
 								<MonthEnd
+									chartId={month}
 									monthName={monthLabel(month, currentMonth)}
 									amountCents={
 										summary.totalBudgetCents - summary.totalSpentCents

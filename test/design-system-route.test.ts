@@ -200,6 +200,19 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('id="announcer"');
 	});
 
+	it("gives the two scrollable MonthEnd specimens unique targets across the catalog", async () => {
+		const { html } = await get("/design-system");
+		const ids = [...html.matchAll(/id="([^"]*-chart-end)"/g)].map(
+			(match) => match[1],
+		);
+		const links = [...html.matchAll(/href="#([^"]*-chart-end)"/g)].map(
+			(match) => match[1],
+		);
+		expect(ids).toHaveLength(2);
+		expect(new Set(ids).size).toBe(ids.length);
+		expect(links).toEqual(ids);
+	});
+
 	it("describes every Accounts action's states, and shows Sync now as the app does", async () => {
 		const { html } = await get("/design-system");
 		const section =

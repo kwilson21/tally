@@ -89,8 +89,16 @@ export async function firstCountedMonth(
 ): Promise<string | null> {
 	const row = await db
 		.prepare(
-			`SELECT MIN(${COUNTED_MONTH}) AS month FROM transactions t
+			`WITH first_date AS (
+				SELECT MIN(date) AS date FROM transactions
+			), first_month AS (
+				SELECT substr(date, 1, 7) AS month FROM first_date
+			)
+			SELECT COALESCE(MIN(${COUNTED_MONTH}), (SELECT month FROM first_month)) AS month
+			FROM transactions t
 			 ${COUNTED_JOINS}
+			 JOIN first_month fm ON t.date >= fm.month || '-01'
+				AND t.date < date(fm.month || '-01', '+1 month')
 			 WHERE ${INCLUDED} AND t.is_split = 0`,
 		)
 		.first<{ month: string | null }>();
