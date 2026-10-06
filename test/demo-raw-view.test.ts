@@ -128,6 +128,90 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(countOf(full.html)).toContain(`of ${realTotal?.n} transactions`);
 	});
 
+	it("applies raw filters to the split parent and normal filters to its parts", async () => {
+		const parent = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431' AND amount_cents = 18742",
+		).first<{ id: number }>();
+		expect(parent).toBeDefined();
+		const parts = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ?",
+		)
+			.bind(parent?.id)
+			.all<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = NULL WHERE id = ? OR parent_id = ?",
+		)
+			.bind(parent?.id, parent?.id)
+			.run();
+		const emptyParent = await env.DB.prepare(
+			"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
+		)
+			.bind(parent?.id)
+			.first<{ categoryId: number | null }>();
+		expect(emptyParent?.categoryId).toBeNull();
+		expect(parts.results).toHaveLength(2);
+		const query = `&month=${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}&q=COSTCO+WHSE+%230431`;
+		const assertRawParent = async (filter: string) => {
+			const { html } = await demo(`/transactions?raw=1${filter}${query}`);
+			const rows = rowsOf(html);
+			expect(rows.map((row) => row.id)).toEqual([parent?.id]);
+			expect(textOf(rows[0]?.html ?? "")).toContain("$187.42");
+			expect(countOf(html)).toMatch(/(?:^|\D)1 (?:spending )?transaction/);
+		};
+		const assertNormalParts = async (filter: string) => {
+			const { html } = await demo(`/transactions?${filter}${query}`);
+			const rows = rowsOf(html);
+			expect(rows.some((row) => row.id === parent?.id)).toBe(false);
+			expect(
+				parts.results.every((part) => rows.some((row) => row.id === part.id)),
+			).toBe(true);
+			expect(countOf(html)).toContain(
+				`${parts.results.length} spending transactions matching`,
+			);
+		};
+
+		await assertRawParent("&show=spending");
+		await assertNormalParts("show=spending");
+
+		// The parent is uncategorized in the bank row; make its parts uncategorized too so the normal
+		// Needs category view can verify that it continues to list the parts.
+		await assertRawParent("&uncategorized=1");
+		{
+			const { html } = await demo(`/transactions?uncategorized=1${query}`);
+			const rows = rowsOf(html);
+			expect(rows.some((row) => row.id === parent?.id)).toBe(false);
+			expect(
+				parts.results.every((part) => rows.some((row) => row.id === part.id)),
+			).toBe(true);
+			expect(countOf(html)).toContain(
+				`${parts.results.length} transactions needing a category matching`,
+			);
+		}
+
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = ? WHERE id = ? OR parent_id = ?",
+		)
+			.bind(category?.id, parent?.id, parent?.id)
+			.run();
+		await assertRawParent(`&category=${category?.id}`);
+		{
+			const { html } = await demo(
+				`/transactions?category=${category?.id}${query}`,
+			);
+			const rows = rowsOf(html);
+			expect(rows.some((row) => row.id === parent?.id)).toBe(false);
+			expect(
+				parts.results.every((part) => rows.some((row) => row.id === part.id)),
+			).toBe(true);
+			expect(countOf(html)).toContain(
+				`${parts.results.length} transactions matching`,
+			);
+		}
+	});
+
 	it("does not show a person's note", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET note = 'private note' WHERE id = 1",

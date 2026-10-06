@@ -87,6 +87,10 @@ export const PAGE_SIZE = 25;
 // "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
 // while held credits and income stay out of spending classification.
 const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+const bankRowSql = (sql: string) => sql.replaceAll(" AND t.is_split = 0", "");
+const RAW_NEEDS_CATEGORY = bankRowSql(
+	NEEDS_CATEGORY.replace(COUNTED_CATEGORY, "t.category_id"),
+);
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
 const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
 
@@ -114,6 +118,12 @@ const SHOW_SQL: Record<Show, string | null> = {
 		AND (${paysBillSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
 	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
 };
+const RAW_SHOW_SQL: Record<Show, string | null> = {
+	...SHOW_SQL,
+	spending: bankRowSql(SHOW_SQL.spending ?? ""),
+	refunds: bankRowSql(SHOW_SQL.refunds ?? ""),
+	excluded: bankRowSql(SHOW_SQL.excluded ?? ""),
+};
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -131,17 +141,17 @@ export async function listTransactions(
 	}
 	if (f.category !== null) {
 		where.push(`${rowCategory} = ?`);
-		where.push("t.is_split = 0");
+		if (!f.raw) where.push("t.is_split = 0");
 		args.push(f.category);
 	}
 	if (f.account !== null) {
 		where.push("t.account_id = ?");
 		args.push(f.account);
 	}
-	if (f.uncategorized) where.push(NEEDS_CATEGORY);
+	if (f.uncategorized) where.push(f.raw ? RAW_NEEDS_CATEGORY : NEEDS_CATEGORY);
 	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
 	if (f.raw) where.push("t.parent_id IS NULL");
-	const shown = SHOW_SQL[f.show];
+	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
 	if (f.q) {
 		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
