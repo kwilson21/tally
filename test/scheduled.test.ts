@@ -876,6 +876,43 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		return { db: counted as D1Database, statements: () => statements };
 	}
 
+	it("cleans old cash snapshots in a fixed number of statements and keeps today's", async () => {
+		const countFor = async (n: number) => {
+			await env.DB.prepare("DELETE FROM cash_delete_holds").run();
+			if (n > 0)
+				await env.DB.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+					INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows)
+					SELECT 'old-'||i, ?-86400001, 'old', '{}', '[]', '[]', '[]' FROM n`)
+					.bind(n, Date.now())
+					.run();
+			await env.DB.prepare(
+				"INSERT INTO cash_delete_holds VALUES (?, ?, ?, ?, ?, ?, ?)",
+			)
+				.bind("new", Date.now(), "new", "{}", "[]", "[]", "[]")
+				.run();
+			const counted = countingDb();
+			await runScheduled({ ...env, DB: counted.db, DEMO: "false" });
+			return counted.statements();
+		};
+		const few = await countFor(1);
+		const remaining = await env.DB.prepare(
+			"SELECT token FROM cash_delete_holds",
+		).all<{ token: string }>();
+		expect(remaining.results.map(({ token }) => token)).toEqual(["new"]);
+		const many = await countFor(500);
+		expect(
+			(
+				await env.DB.prepare("SELECT token FROM cash_delete_holds").all<{
+					token: string;
+				}>()
+			).results.map(({ token }) => token),
+		).toEqual(["new"]);
+		expect(many).toBeLessThan(100);
+		expect(many).toBe(few);
+		expect(few).toBe(1);
+		expect(many).toBe(1);
+	});
+
 	/** `n` charges nobody has sorted or named, each from a store of its own. */
 	const addWaiting = (n: number) =>
 		env.DB.batch([

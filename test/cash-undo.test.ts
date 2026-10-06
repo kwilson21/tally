@@ -1,0 +1,219 @@
+import { env, exports } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { resetDemo } from "../src/demo/reset";
+import {
+	holdCashDelete,
+	restoreCashDelete,
+} from "../src/transactions/cash-undo";
+
+const BASE = "http://tally.test";
+const request = async (path: string, init?: RequestInit) => {
+	const res = await exports.default.fetch(BASE + path, init);
+	return { res, html: await res.text() };
+};
+
+beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
+
+async function cashEntry() {
+	const row = await env.DB.prepare(
+		"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' LIMIT 1",
+	).first<{ id: number }>();
+	if (!row) throw new Error("cash seed missing");
+	return row.id;
+}
+
+function countingDb() {
+	let statements = 0;
+	const db = new Proxy(env.DB, {
+		get(target, property) {
+			const value = Reflect.get(target, property);
+			if (property === "prepare")
+				return (sql: string) => {
+					statements++;
+					return target.prepare(sql);
+				};
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+	return { db: db as D1Database, statements: () => statements };
+}
+
+describe("cash delete undo", () => {
+	it("restores every transaction and split field exactly as deleted", async () => {
+		const id = await cashEntry();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_source='user', note='parent note', excluded=1, flag_transfer=1, flag_reimbursement=1, flag_income=1 WHERE id=?",
+		)
+			.bind(id)
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_source='merchant_rule', note='part note', excluded=1, flag_transfer=1, flag_reimbursement=1, flag_income=1 WHERE parent_id=?",
+		)
+			.bind(id)
+			.run();
+		const before = {
+			parent: await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+			parts: (
+				await env.DB.prepare(
+					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
+				)
+					.bind(id)
+					.all()
+			).results,
+		};
+		const token = await holdCashDelete(env.DB, id, "Market");
+		expect(token).toBeTruthy();
+		expect(await restoreCashDelete(env.DB, token as string)).not.toBeNull();
+		expect(
+			await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual(before.parent);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
+				)
+					.bind(id)
+					.all()
+			).results,
+		).toEqual(before.parts);
+	});
+
+	it("restores a bill payment so the bill occurrence is paid again", async () => {
+		const id = await cashEntry();
+		const bill = await env.DB.prepare(
+			"SELECT id, name FROM bills WHERE active=1 AND id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
+		).first<{ id: number; name: string }>();
+		if (!bill) throw new Error("bill seed missing");
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+		)
+			.bind(bill.id, id)
+			.run();
+		const token = await holdCashDelete(env.DB, id, "Market");
+		await restoreCashDelete(env.DB, token as string);
+		const response = await request(`/bills/${bill.id}`);
+		expect(response.html).toContain(bill.name);
+		expect(response.html).toContain("Paid");
+		expect(
+			await env.DB.prepare(
+				"SELECT status FROM bill_payments WHERE bill_id=? AND period='2026-10'",
+			)
+				.bind(bill.id)
+				.first(),
+		).toEqual({ status: "linked" });
+	});
+
+	it("names an omitted refund link when its purchase row is gone", async () => {
+		const id = await cashEntry();
+		const bank = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE type!='cash') AND amount_cents>0 LIMIT 1",
+		).first<{ id: number }>();
+		if (!bank) throw new Error("bank transaction seed missing");
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-500, raw_name='Missing partner refund', refund_of_id=? WHERE id=?",
+		)
+			.bind(bank.id, id)
+			.run();
+		const deleted = await request(`/transactions/${id}/delete`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "back=%2Ftransactions&confirm=1",
+		});
+		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.undo as string;
+		await env.DB.prepare("DELETE FROM transactions WHERE id=?")
+			.bind(bank.id)
+			.run();
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back: "/transactions" }),
+		});
+		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.message as string;
+		expect(message).toContain("Missing partner refund");
+		expect(
+			(
+				await env.DB.prepare("SELECT refund_of_id FROM transactions WHERE id=?")
+					.bind(id)
+					.first<{ refund_of_id: number | null }>()
+			)?.refund_of_id,
+		).toBeNull();
+	});
+
+	it("uses a fixed number of statements for 30 split parts, 30 refund links and 3 payments", async () => {
+		const id = await cashEntry();
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash'",
+		).first<{ id: number }>();
+		const bankAccount = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account || !bankAccount) throw new Error("account seed missing");
+		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
+			.bind(id)
+			.run();
+		await env.DB.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30)
+			INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,category_id,updated_by)
+			SELECT ?, '2026-10-01', i*100, 'Part '||i, ?, 1, 'test' FROM n`)
+			.bind(account.id, id)
+			.run();
+		await env.DB.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30)
+			INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,updated_by)
+			SELECT ?, '2026-10-01', -100, 'Refund '||i, ?, 'test' FROM n`)
+			.bind(bankAccount.id, id)
+			.run();
+		const bill = await env.DB.prepare("SELECT id FROM bills LIMIT 1").first<{
+			id: number;
+		}>();
+		if (!bill) throw new Error("bill seed missing");
+		await env.DB.batch(
+			[0, 1, 2].map((i) =>
+				env.DB.prepare(
+					"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?,? ,?,'user','dismissed')",
+				).bind(bill.id, `2026-${String(i + 1).padStart(2, "0")}`, id),
+			),
+		);
+		const token = await holdCashDelete(env.DB, id, "Market");
+		const counted = countingDb();
+		await restoreCashDelete(counted.db, token as string);
+		expect(counted.statements()).toBeLessThanOrEqual(12);
+		expect(counted.statements()).toBe(8);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id=?",
+				)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(30);
+		const small = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT id,'2026-10-06',100,'Small undo' FROM accounts WHERE type='cash' LIMIT 1",
+		).run();
+		const smallToken = await holdCashDelete(
+			env.DB,
+			Number(small.meta.last_row_id),
+			"Small undo",
+		);
+		const smallCount = countingDb();
+		await restoreCashDelete(smallCount.db, smallToken as string);
+		expect(smallCount.statements()).toBe(7);
+		expect(counted.statements() - smallCount.statements()).toBeLessThanOrEqual(
+			1,
+		);
+	});
+});
