@@ -733,31 +733,40 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 		.run();
 }
 
+// A credit a person already decided about: Jev can only help with its category. The review columns
+// are NULL on older rows, which SQL won't compare, so a missing review counts as no review: COALESCE
+// makes this 0 rather than NULL, and `NOT` of it can't drop the row.
+const CATEGORY_ONLY =
+	"COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)";
+
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
  * unreviewed negative credits, even when a category was selected already. A user-reviewed
- * uncategorized credit is eligible for category help only. A stored confidence means Jev already
- * looked and wasn't sure (decision 27).
+ * uncategorized credit is eligible for category help only, so it's left out when the household's
+ * categories switch is off (spec §8.6): that answer would go unused. A stored confidence means Jev
+ * already looked and wasn't sure (decision 27).
  */
 export async function pendingForJev(
 	db: D1Database,
 	limit: number,
+	{ categories = true }: { categories?: boolean } = {},
 ): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory,
-				(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')) AS categoryOnly
+				${CATEGORY_ONLY} AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			${COUNTED_JOINS}
 			WHERE ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND NOT ${FOLLOWS_PURCHASE}
+				AND (? = 1 OR NOT ${CATEGORY_ONLY})
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
 			LIMIT ?`,
 		)
-		.bind(limit)
+		.bind(categories ? 1 : 0, limit)
 		.all<JevInput & { id: number; categoryOnly: number }>();
 	return results.map((transaction) => ({
 		...transaction,
