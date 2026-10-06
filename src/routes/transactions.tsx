@@ -736,11 +736,14 @@ function SelectCategorySheet({
 	back,
 	categories,
 	error,
+	still,
 }: {
 	ids: number[];
 	back: string;
 	categories: Category[];
 	error?: string;
+	/** Its Save was refused, so the open sheet is drawn again where it is. */
+	still?: boolean;
 }) {
 	const cancelHref = selectModeHref(back, ids);
 	const alert = error && (
@@ -749,7 +752,11 @@ function SelectCategorySheet({
 		</p>
 	);
 	return (
-		<BottomSheet labelledBy="select-category-title" closeHref={cancelHref}>
+		<BottomSheet
+			labelledBy="select-category-title"
+			closeHref={cancelHref}
+			still={still}
+		>
 			<h2
 				id="select-category-title"
 				tabindex={-1}
@@ -820,6 +827,8 @@ async function categorySheet(
 	back: string,
 	ids: number[],
 	error?: string,
+	/** Its Save was refused: the sheet is already open, so it isn't drawn arriving again. */
+	still = false,
 ) {
 	return renderList(c, today, filtersFrom(today, back), {
 		selecting: true,
@@ -832,6 +841,7 @@ async function categorySheet(
 				back={back}
 				categories={categories}
 				error={error}
+				still={still}
 			/>
 		),
 	});
@@ -865,7 +875,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	const { ids, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
-	if (error) return categorySheet(c, today, back, ids, error);
+	if (error) return categorySheet(c, today, back, ids, error, true);
 	const category = Number(form.get("category"));
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
@@ -875,7 +885,14 @@ transactions.post("/transactions/select/category/save", async (c) => {
 				.first<{ id: number; name: string }>()
 		: null;
 	if (!cat)
-		return categorySheet(c, today, back, ids, "Pick a category from the list.");
+		return categorySheet(
+			c,
+			today,
+			back,
+			ids,
+			"Pick a category from the list.",
+			true,
+		);
 	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
@@ -951,6 +968,11 @@ type SheetProps = {
 	 * through from the posted form, unchanged. Without it the panel is first drawn: the merchant's name now.
 	 */
 	nameWas?: string | null;
+	/**
+	 * The panel is already open and is drawn again where it is, so it isn't drawn arriving: Keep it,
+	 * after the delete question. A field's error and the question itself are known from the props.
+	 */
+	still?: boolean;
 };
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -965,6 +987,7 @@ function EditSheet({
 	today,
 	namePick = null,
 	nameWas = null,
+	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -989,6 +1012,8 @@ function EditSheet({
 			labelledBy="edit-title"
 			closeHref={back}
 			closeAttrs={closeAttrs}
+			// A field's error and the delete question draw the open panel again.
+			still={still || deleteConfirm || Object.keys(errors).length > 0}
 		>
 			{tx.rawName !== tx.displayName && (
 				<p class="text-sm text-muted">{tx.rawName}</p>
@@ -1396,7 +1421,12 @@ function CashSheet({
 	today: string;
 }) {
 	return (
-		<BottomSheet labelledBy="cash-title" closeHref={back}>
+		// A field's error draws the open sheet again.
+		<BottomSheet
+			labelledBy="cash-title"
+			closeHref={back}
+			still={errors !== undefined && Object.keys(errors).length > 0}
+		>
 			<h2
 				id="cash-title"
 				tabindex={-1}
@@ -1488,6 +1518,22 @@ transactions.post("/transactions/cash", async (c) => {
 	});
 });
 
+/**
+ * Whether this htmx request is made from the page that already shows this address, so the sheet it
+ * opens is open already: Keep it asks for the panel's own address while the panel is showing the
+ * delete question. A tap on a row asks from the list, and a link or a reload sends no such header.
+ * It only decides whether the panel is drawn arriving, so a made-up header changes nothing else.
+ */
+function asksFromThisPage(c: Context<App>) {
+	const from = c.req.header("HX-Current-URL");
+	if (!c.req.header("HX-Request") || !from) return false;
+	try {
+		return new URL(from).pathname === new URL(c.req.url).pathname;
+	} catch {
+		return false;
+	}
+}
+
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
@@ -1516,6 +1562,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				values={values}
 				refunds={refunds}
 				today={today}
+				still={asksFromThisPage(c)}
 			/>
 		),
 	});
@@ -1528,6 +1575,7 @@ function SplitSheet({
 	values,
 	error,
 	today,
+	still,
 }: {
 	tx: TransactionDetail;
 	back: string;
@@ -1535,10 +1583,12 @@ function SplitSheet({
 	values: SplitValue[];
 	error?: string;
 	today: string;
+	/** Add a part, or an error, draws the open sheet again, so it isn't drawn arriving. */
+	still?: boolean;
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
-		<BottomSheet labelledBy="split-title" closeHref={back}>
+		<BottomSheet labelledBy="split-title" closeHref={back} still={still}>
 			<p class="text-sm text-muted">{tx.rawName}</p>
 			<h2
 				id="split-title"
@@ -1648,6 +1698,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 						values={values}
 						error="The bank just changed this amount. Check the parts and save again."
 						today={today}
+						still
 					/>
 				),
 			});
@@ -1678,10 +1729,12 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					values={values}
 					error={parsed.ok ? undefined : parsed.error}
 					today={today}
+					still
 				/>
 			),
 		});
 	}
+	// Add a part: the open sheet again, with one more part.
 	return renderList(c, today, filtersFrom(today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
@@ -1690,6 +1743,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				categories={categories}
 				values={values}
 				today={today}
+				still
 			/>
 		),
 	});

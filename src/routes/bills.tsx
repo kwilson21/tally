@@ -341,7 +341,12 @@ function BillSheet({
 		? `${action}/${bill.active ? "deactivate" : `reactivate${errors.name ? "?rename=1" : ""}`}`
 		: "";
 	return (
-		<BottomSheet labelledBy="bill-sheet-title" closeHref="/bills">
+		// A field's error draws the open sheet again.
+		<BottomSheet
+			labelledBy="bill-sheet-title"
+			closeHref="/bills"
+			still={Object.keys(errors).length > 0}
+		>
 			<h2
 				id="bill-sheet-title"
 				class="font-serif text-4xl font-semibold tracking-tight"
