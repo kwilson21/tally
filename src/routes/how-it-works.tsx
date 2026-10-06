@@ -328,8 +328,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							A credit held for review isn't excluded: it waits until Tally
 							confidently sorts it as non-income or a person reviews it, and
-							once a person marks it as income it counts toward Income instead
-							(see Transactions).
+							once a person marks it as income it counts toward Income instead,
+							unless it's excluded too (see Transactions).
 						</li>
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>
