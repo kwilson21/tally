@@ -383,6 +383,18 @@ describe("several failures at once", () => {
 		expect(toasts.children).toHaveLength(0);
 	});
 
+	it("still says a later failure after the device clock moves back", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:response:error", status(500));
+		const first = toasts.children[0];
+		// The clock is corrected a minute back; two seconds later the retry fails too.
+		vi.setSystemTime(Date.now() - 60000);
+		vi.advanceTimersByTime(2000);
+		fire(document, "htmx:response:error", status(500));
+		expect(toasts.children).toHaveLength(1);
+		expect(toasts.children[0]).not.toBe(first);
+	});
+
 	it("still shows one toast for failures in the same moment, even when an earlier one is nearly gone", async () => {
 		const { document, toasts } = await page();
 		fire(document, "htmx:response:error", status(500));

@@ -83,26 +83,43 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(all).toEqual([]);
 	});
 
-	it("names no color that isn't a token: text-error and text-negative draw nothing (errors are text-over)", () => {
+	it("names no color that isn't a token: text-error, text-alert and from-danger draw nothing (errors are text-over)", () => {
 		const tokens = new Set(
 			[...css.matchAll(/--color-([\w-]+):/g)].map(([, name]) => name),
 		);
-		// Words other design systems use for colors Tally doesn't have; its brick one is "over".
-		const madeUp = ["error", "negative", "positive", "danger", "success"];
-		madeUp.push("warning", "info", "destructive");
-		for (const word of madeUp) expect(tokens.has(word)).toBe(false);
-		const MADE_UP = new RegExp(
-			`^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent)-(${madeUp.join("|")})$`,
+		/**
+		 * Words after a color prefix that aren't colors: sizes, alignment, wrapping, sides, line
+		 * styles, the transparent and current keywords, and CSS property or SVG attribute names
+		 * that share a prefix ("stroke-linecap", "border-color") but are never classes.
+		 */
+		const NOT_COLORS = new Set(
+			"transparent current inherit none xs sm base lg xl left center right justify start end wrap nowrap balance pretty ellipsis clip t r b l x y s e solid dashed dotted double wavy hidden collapse separate offset inset align color style width radius input linecap linejoin".split(
+				" ",
+			),
 		);
+		const NAMED =
+			/^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-([a-z][a-z-]*?)(\/\d+)?$/;
+		const offToken = (u: string) => {
+			const name = u.match(NAMED)?.[3];
+			return name !== undefined && !tokens.has(name) && !NOT_COLORS.has(name);
+		};
 		expect(
-			["text-error", "border-negative"].every((u) => MADE_UP.test(u)),
+			["text-error", "border-negative", "text-alert", "from-danger"].every(
+				offToken,
+			),
 		).toBe(true);
 		expect(
-			["text-over", "border-over", "text-sm"].some((u) => MADE_UP.test(u)),
+			[
+				"text-over",
+				"border-over",
+				"text-sm",
+				"bg-ink/30",
+				"text-cat-blue",
+			].some(offToken),
 		).toBe(false);
 		const found = Object.entries(SOURCES).flatMap(([file, text]) =>
 			utilities(text)
-				.filter((u) => MADE_UP.test(u))
+				.filter(offToken)
 				.map((u) => `${file}: ${u}`),
 		);
 		expect(found).toEqual([]);

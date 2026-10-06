@@ -82,7 +82,8 @@
 			String(ctx?.request?.method).toUpperCase() === "GET"
 				? COULDNT_LOAD
 				: COULDNT_SAVE;
-		const now = Date.now();
+		// The page's own clock, not the device's: a clock moved back must not silence later failures.
+		const now = performance.now();
 		if (now - (failedAt.get(message) ?? -Infinity) < BURST_MS) return;
 		failedAt.set(message, now);
 		const toasts = document.getElementById("toasts");
