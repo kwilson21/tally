@@ -18,6 +18,7 @@ import { Phase5PlansProposals } from "./proposals-phase5-plans";
 import { Phase5TransactionsProposals } from "./proposals-phase5-transactions";
 import { Phase35Proposals } from "./proposals-phase35";
 import { Phase35StatesProposals } from "./proposals-phase35-states";
+import { PolishProposals } from "./proposals-polish";
 import { RulesProposals } from "./proposals-rules";
 
 // What the owner decided from 2026-09-26 on (decisions 46 to 82), and the issue each ships in.
@@ -371,6 +372,30 @@ export const DECIDED: readonly {
 			"One household switch, “Bank sign-in emails”, on to start, to everyone who has signed in within the last 90 days, with each address listed under a plain disclosure with Remove for anyone in the family; sent at the nightly run, then every 3 days until fixed; the email shows the bank, its account endings as chips, the last synced date and one Open Accounts button (decision 82).",
 		issue: 203,
 	},
+	{
+		title: "P110 · Documents in the menu",
+		outcome:
+			"Option A: More and the sidebar leave Documents out until receipts are built, so no menu item leads to a page that isn't built (decision 84).",
+		issue: 246,
+	},
+	{
+		title: "P111 · Deleting a cash entry",
+		outcome:
+			"Option B combined with D: the question “Delete Farmers market, $20.00? This can't be undone.” replaces Cancel and Save, with Delete and Keep it, and once deleted the toast offers Undo for 10 seconds (decision 84). The question is built; only the Undo is still to build.",
+		issue: 244,
+	},
+	{
+		title: "P112 · Send feedback in the demo",
+		outcome:
+			"Option A: in the demo, the box saying feedback is off sits right under the title, before the privacy text (decision 84).",
+		issue: 246,
+	},
+	{
+		title: "P113 · A How this works link on Bills",
+		outcome:
+			"Option A: a How this works link under Bills' status sentence, to the Bills section of How Tally works (decision 84).",
+		issue: 246,
+	},
 ];
 
 /** The proposals page body. */
@@ -390,7 +415,18 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="details-title" class="mt-10">
+			<section aria-labelledby="polish-title" class="mt-10">
+				<h2 id="polish-title" class="font-serif text-3xl font-semibold">
+					Picked: the polish pass
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Four choices the polish pass turned up (questions 56 to 59), each
+					drawn on a phone. The owner's picks marked Picked are decision 84.
+				</p>
+				<PolishProposals />
+			</section>
+
+			<section aria-labelledby="details-title" class="mt-12">
 				<h2 id="details-title" class="font-serif text-3xl font-semibold">
 					Picked: details from the issues
 				</h2>

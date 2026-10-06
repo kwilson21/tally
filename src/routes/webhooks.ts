@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { type PlaidEnv, PlaidError } from "../plaid/client";
 import { loginStillBroken } from "../plaid/login-broken";
-import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../plaid/sync";
+import { syncItemAndSort } from "../plaid/sort-after-sync";
+import { TRANSIENT_ITEM_ERROR_CODES } from "../plaid/sync";
 import { verifyPlaidWebhook } from "../plaid/webhook-verify";
 import { enabled } from "./plaid";
 
@@ -60,8 +61,9 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		body.webhook_type === "TRANSACTIONS" &&
 		body.webhook_code === "SYNC_UPDATES_AVAILABLE"
 	) {
+		// Then Jev sorts what arrived, when the household's switch is on (spec §8.6, decision 68).
 		c.executionCtx.waitUntil(
-			syncItem(c.env, item.id).catch((error: unknown) => {
+			syncItemAndSort(c.env, item.id).catch((error: unknown) => {
 				const requestId =
 					error instanceof PlaidError ? error.request_id : undefined;
 				console.error(`plaid webhook sync error ${requestId ?? ""}`.trim());
