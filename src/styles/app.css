@@ -255,10 +255,8 @@ html:not(.js) [data-money-js] {
 
 /*
  * Reduced motion shows each move's end state. This block comes after the moves it stills: the rules
- * have the same weight, so the later one wins. The view transition rules are their own rules, because
- * a browser that doesn't know a selector drops the whole rule it is in. htmx's transitions setting is
- * off, so a swap fades the page only if it asks to (hx-swap "transition:true"), and then not for
- * this preference.
+ * have the same weight, so the later one wins. Pages need no rule here: the cross-fade is only
+ * opted into where motion is welcome (above), and htmx's transitions setting is off.
  */
 @media (prefers-reduced-motion: reduce) {
 	.fade-in,
@@ -272,15 +270,6 @@ html:not(.js) [data-money-js] {
 	.switch-track,
 	.switch-knob {
 		transition: none;
-	}
-	::view-transition-group(*) {
-		animation: none;
-	}
-	::view-transition-old(*) {
-		animation: none;
-	}
-	::view-transition-new(*) {
-		animation: none;
 	}
 }
 

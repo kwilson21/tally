@@ -221,17 +221,6 @@ describe("reduced motion", () => {
 		);
 		expect(desktop?.decls.get("animation-name")).toBe("sheet-slide");
 	});
-
-	it("stills a transition the page wraps for an htmx swap (it is off, but a swap may ask for it), one rule each so a browser that lacks a selector drops only that rule", () => {
-		for (const pseudo of [
-			"::view-transition-group(*)",
-			"::view-transition-old(*)",
-			"::view-transition-new(*)",
-		]) {
-			const still = rules.find((r) => inReduce(r) && r.selector === pseudo);
-			expect(still?.decls.get("animation"), pseudo).toBe("none");
-		}
-	});
 });
 
 describe("pages", () => {

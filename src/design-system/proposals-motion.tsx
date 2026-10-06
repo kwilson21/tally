@@ -325,17 +325,17 @@ export function P74() {
 			</Gives>
 			<NeedsLine>
 				Under reduced motion the page rule sits inside a{" "}
-				<code>prefers-reduced-motion: no-preference</code> query, and another
-				rule sets a transition's animations to none for the swaps htmx wraps.
-				htmx's <code>transitions</code> setting stays off, so a filter or one of
-				Adjust's taps never fades the whole page. A toast's fade-out is part of
-				its own 4-second animation, set in CSS on what <code>#toasts</code>{" "}
-				holds and matching toast.js's 4 seconds, so that script doesn't change.
-				Already settled (decisions 76 and 79): motion is CSS only, each in 150
-				to 200 ms, with durations as tokens in app.css that the older animations
-				move onto too; View Transitions are an enhancement, so a browser without
-				them just switches pages; under reduced motion everything shows its end
-				state; and every motion is written into its component's use spec.
+				<code>prefers-reduced-motion: no-preference</code> query, so pages
+				switch at once. htmx's <code>transitions</code> setting stays off, so a
+				filter or one of Adjust's taps never fades the whole page. A toast's
+				fade-out is part of its own 4-second animation, set in CSS on what{" "}
+				<code>#toasts</code> holds and matching toast.js's 4 seconds, so that
+				script doesn't change. Already settled (decisions 76 and 79): motion is
+				CSS only, each in 150 to 200 ms, with durations as tokens in app.css
+				that the older animations move onto too; View Transitions are an
+				enhancement, so a browser without them just switches pages; under
+				reduced motion everything shows its end state; and every motion is
+				written into its component's use spec.
 			</NeedsLine>
 			<Options
 				options={[
