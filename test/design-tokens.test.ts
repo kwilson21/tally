@@ -83,6 +83,31 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(all).toEqual([]);
 	});
 
+	it("names no color that isn't a token: text-error and text-negative draw nothing (errors are text-over)", () => {
+		const tokens = new Set(
+			[...css.matchAll(/--color-([\w-]+):/g)].map(([, name]) => name),
+		);
+		// Words other design systems use for colors Tally doesn't have; its brick one is "over".
+		const madeUp = ["error", "negative", "positive", "danger", "success"];
+		madeUp.push("warning", "info", "destructive");
+		for (const word of madeUp) expect(tokens.has(word)).toBe(false);
+		const MADE_UP = new RegExp(
+			`^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent)-(${madeUp.join("|")})$`,
+		);
+		expect(
+			["text-error", "border-negative"].every((u) => MADE_UP.test(u)),
+		).toBe(true);
+		expect(
+			["text-over", "border-over", "text-sm"].some((u) => MADE_UP.test(u)),
+		).toBe(false);
+		const found = Object.entries(SOURCES).flatMap(([file, text]) =>
+			utilities(text)
+				.filter((u) => MADE_UP.test(u))
+				.map((u) => `${file}: ${u}`),
+		);
+		expect(found).toEqual([]);
+	});
+
 	it("catches off-token classes, and leaves words alone", () => {
 		expect(
 			problems(

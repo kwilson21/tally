@@ -51,7 +51,7 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 	return (
 		<div id="accounts-summary">
 			{alert && (
-				<p role="alert" class="mb-4 text-negative">
+				<p role="alert" class="mb-4 text-over">
 					{alert}
 				</p>
 			)}

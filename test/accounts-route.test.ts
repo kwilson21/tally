@@ -394,6 +394,8 @@ describe("POST /accounts/sync feedback", () => {
 		expect(trigger).toBeNull();
 		expect(html.match(/role="alert"/g)).toHaveLength(1);
 		expect(html).toContain("Couldn&#39;t sync Chase. Try again later.");
+		// In the brick over token, like every other error; text-negative is not a token and draws nothing.
+		expect(html).toMatch(/<p role="alert" class="[^"]*\btext-over\b/);
 	});
 
 	it("says so in an alert when sorting what arrived fails after the banks synced", async () => {

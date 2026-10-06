@@ -154,8 +154,24 @@ describe("feedback form", () => {
 				postFields({ type: "Bug", feeling: "Confused", message, from: "/" }),
 			);
 			expect(response.status).toBe(422);
-			expect(await response.text()).toMatch(/role="alert"/);
+			const html = await response.text();
+			expect(html).toMatch(/role="alert"/);
+			// The error is drawn in the over token (text-error and border-error are not tokens).
+			expect(html).toMatch(
+				/<p role="alert" class="[^"]*\bborder-over\b[^"]*\btext-over\b/,
+			);
 		}
+	});
+
+	it("wraps the review of the cleaned message, so a long paragraph can't widen the form", async () => {
+		const response = await productionApp().fetch("/feedback");
+		const html = await response.text();
+		const review =
+			html.match(/<div id="feedback-redaction-review"[^>]*>/)?.[0] ?? "";
+		// feedback-privacy.js puts the cleaned text in a <pre>, which doesn't wrap by itself.
+		expect(review).toContain("[&amp;_pre]:whitespace-pre-wrap");
+		expect(review).toContain("[&amp;_pre]:wrap-anywhere");
+		expect(review).toContain("[&amp;_pre]:font-sans");
 	});
 
 	it("saves a valid message and redirects back with thanks", async () => {

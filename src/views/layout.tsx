@@ -74,7 +74,7 @@ export function Layout({
 						<Sidebar active={active} />
 					</aside>
 					<main id="main" class="min-w-0 flex-1 pb-40 pt-6 lg:pb-24 lg:pt-8">
-						<div class="mb-4 lg:hidden">
+						<div class="mb-2 lg:hidden">
 							<Wordmark />
 						</div>
 						{children}

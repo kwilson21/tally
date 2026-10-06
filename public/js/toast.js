@@ -73,15 +73,22 @@
 	// was being done: a GET (a filter, opening a sheet) couldn't load; anything else couldn't save.
 	// The events go to document, because htmx sends them there when their element has left the
 	// page. Several at once (queued taps on a dead connection) show each message once, not a stack.
-	const showing = new Set();
+	// "At once" is a second: a retry that fails again a couple of seconds later is a new failure, so
+	// it replaces the toast with a fresh alert (a screen reader hears it again) and a fresh 4 seconds.
+	const BURST_MS = 1000;
+	const failedAt = new Map();
 	function failed(ctx) {
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
 				? COULDNT_LOAD
 				: COULDNT_SAVE;
-		if (showing.has(message)) return;
-		showing.add(message);
-		setTimeout(() => showing.delete(message), DISPLAY_MS);
+		const now = Date.now();
+		if (now - (failedAt.get(message) ?? -Infinity) < BURST_MS) return;
+		failedAt.set(message, now);
+		const toasts = document.getElementById("toasts");
+		for (const toast of [...(toasts?.children ?? [])]) {
+			if (toast.textContent === message) toast.remove();
+		}
 		document.body.dispatchEvent(
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);

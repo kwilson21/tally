@@ -98,7 +98,7 @@ export function FeedbackForm({
 					{error && (
 						<p
 							role="alert"
-							class="rounded-control border border-error p-3 text-error"
+							class="rounded-control border border-over p-3 text-over"
 						>
 							{error}
 						</p>
@@ -153,7 +153,7 @@ export function FeedbackForm({
 						</p>
 						<div
 							id="feedback-redaction-review"
-							class="mt-3 rounded-control border border-rule bg-band p-3"
+							class="mt-3 rounded-control border border-rule bg-band p-3 [&_pre]:mt-1 [&_pre]:font-sans [&_pre]:whitespace-pre-wrap [&_pre]:wrap-anywhere"
 							role="status"
 							hidden
 						/>
