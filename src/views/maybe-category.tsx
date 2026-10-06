@@ -23,19 +23,30 @@ export function SuggestedCategoryChip({
 	name,
 	value,
 	sure,
+	transactionId,
 	checked = false,
 }: {
 	name: string;
 	value: string;
 	sure: number;
+	transactionId: number;
 	checked?: boolean;
 }) {
+	const confidenceId = `category-suggestion-confidence-${transactionId}-${value}`;
 	return (
 		<span class="relative inline-flex rounded-full border border-dashed border-ink">
-			<Chip type="radio" name="category" value={value} checked={checked}>
+			<Chip
+				type="radio"
+				name="category"
+				value={value}
+				checked={checked}
+				describedBy={confidenceId}
+			>
 				{name} <span class="text-muted">· Suggested</span>
 			</Chip>
-			<span class="sr-only">Tally's guess · {sure}% sure</span>
+			<span class="sr-only" id={confidenceId}>
+				Tally's guess · {sure}% sure
+			</span>
 		</span>
 	);
 }

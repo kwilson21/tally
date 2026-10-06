@@ -1152,6 +1152,7 @@ function EditSheet({
 									name={tx.suggestedCategoryName}
 									value={String(tx.suggestedCategoryId)}
 									sure={Math.round(tx.categoryConfidence * 100)}
+									transactionId={tx.id}
 								/>
 							)}
 						{categories.map((cat) => (

@@ -155,7 +155,12 @@ describe("shared Maybe parts", () => {
 		);
 		const { renderToString } = await import("hono/jsx/dom/server");
 		const html = renderToString(
-			SuggestedCategoryChip({ name: "Eating Out", value: "2", sure: 64 }),
+			SuggestedCategoryChip({
+				name: "Eating Out",
+				value: "2",
+				sure: 64,
+				transactionId: 1,
+			}),
 		);
 		expect(html).toContain("Suggested");
 		expect(html).toContain("Tally&#39;s guess · 64% sure");
@@ -173,5 +178,13 @@ describe("shared Maybe parts", () => {
 		expect(html).toContain(
 			'data-ds-components="MaybeCategory SuggestedCategoryChip"',
 		);
+		const confidenceIds = [
+			...html.matchAll(/<span class="sr-only" id="([^"]+)">Tally&#39;s guess/g),
+		].map((match) => match[1]);
+		expect(confidenceIds).toHaveLength(2);
+		expect(new Set(confidenceIds).size).toBe(2);
+		for (const id of confidenceIds) {
+			expect(html).toContain(`aria-describedby="${id}"`);
+		}
 	});
 });

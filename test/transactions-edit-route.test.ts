@@ -92,7 +92,15 @@ describe("GET /transactions/:id", () => {
 			/<span class="relative inline-flex rounded-full border border-dashed border-ink">[\s\S]*?<input type="radio" name="category" value="1"/,
 		);
 		expect(sheet.indexOf('value="1"')).toBeLessThan(sheet.indexOf('value="2"'));
-		expect(sheet).toContain("Tally&#39;s guess · 79% sure");
+		const describedBy = sheet.match(
+			/<input type="radio" name="category" value="1"[^>]*aria-describedby="([^"]+)"/,
+		)?.[1];
+		expect(describedBy).toBeTruthy();
+		expect(sheet).toMatch(
+			new RegExp(
+				`<span class="sr-only" id="${describedBy}">Tally&#39;s guess · 79% sure</span>`,
+			),
+		);
 	});
 
 	it("shows no existing-category chip behind a pending new-category suggestion", async () => {

@@ -730,7 +730,18 @@ function Rows() {
 				<div class="flex flex-wrap gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
 					<MaybeCategory name="Pet Care" kind="new" />
-					<SuggestedCategoryChip name="Eating Out" value="2" sure={64} />
+					<SuggestedCategoryChip
+						name="Eating Out"
+						value="2"
+						sure={64}
+						transactionId={1}
+					/>
+					<SuggestedCategoryChip
+						name="Pet Care"
+						value="3"
+						sure={72}
+						transactionId={2}
+					/>
 				</div>
 			</Specimen>
 			<Specimen
