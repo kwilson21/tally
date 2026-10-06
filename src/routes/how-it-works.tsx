@@ -257,7 +257,8 @@ howItWorks.get("/how-it-works", async (c) => {
 					{demo ||
 					summary.categories.length > 0 ||
 					summary.totalSpentCents !== 0 ||
-					unpaidDueBillsCents > 0 ? (
+					unpaidDueBillsCents > 0 ||
+					(summary.savingsGoalCents ?? 0) > 0 ? (
 						<>
 							<Diagram>
 								<BudgetDiagram {...summary} />

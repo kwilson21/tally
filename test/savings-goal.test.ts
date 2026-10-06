@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { savingsGoalForMonth, summarizeMonth } from "../src/budget";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { home as homeRoutes } from "../src/routes/home";
@@ -123,9 +123,14 @@ describe("savings goal routes", () => {
 		const sheetHtml = await sheet.text();
 		expect(sheetHtml).toContain('class="size-7"');
 		expect(sheetHtml).toContain('class="font-serif text-3xl font-semibold"');
-		expect(sheetHtml).toContain("Save each month, from ");
+		const currentMonthName = monthName(month);
+		expect(sheetHtml).toContain(`Save each month, from ${currentMonthName} on`);
+		expect(sheetHtml).not.toContain(`from ${month} on`);
 		expect(sheetHtml).toContain(
 			"Set aside from Safe to spend at the start of every month.",
+		);
+		expect(sheetHtml).toMatch(
+			/<a href="\/" hx-get="\/\?focus=savings-goal" hx-target="#page" hx-select="#page" hx-swap="outerHTML" hx-push-url="\/"[^>]*>Cancel<\/a>/,
 		);
 		const saved = await homeRoutes.fetch(
 			new Request("http://tally.test/savings-goal", {
@@ -216,6 +221,8 @@ describe("savings goal routes", () => {
 			expect(response.status).toBe(422);
 			expect(html).toMatch(/role="alert"/);
 			expect(html).toContain(`value="${typed}"`);
+			expect(html).toContain(`Save each month, from ${monthName(month)} on`);
+			expect(html).not.toContain(`from ${month} on`);
 			expect(html).toMatch(/<input[^>]*name="goal"[^>]*autofocus/);
 			expect(html).toMatch(/<input[^>]*name="goal"[^>]*aria-invalid="true"/);
 			expect(

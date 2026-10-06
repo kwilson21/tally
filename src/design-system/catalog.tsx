@@ -1102,11 +1102,21 @@ function Rows() {
 				title="SavingsGoalSheet"
 				tier="visual"
 				components={["SavingsGoalSheet"]}
-				sentence="The sheet for choosing how much to save each month, with one labeled amount field and Cancel and Save."
+				sentence="The sheet for choosing how much to save each month, with one labeled amount field; Cancel and the backdrop close it and return focus to the Savings row."
 			>
 				<State label="Goal set">
 					<div class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5">
-						<SavingsGoalSheet value="500.00" month="October" />
+						<SavingsGoalSheet
+							value="500.00"
+							month="October"
+							closeAttrs={{
+								"hx-get": "/?focus=savings-goal",
+								"hx-target": "#page",
+								"hx-select": "#page",
+								"hx-swap": "outerHTML",
+								"hx-push-url": "/",
+							}}
+						/>
 					</div>
 				</State>
 			</Specimen>

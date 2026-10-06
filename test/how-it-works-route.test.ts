@@ -194,6 +194,51 @@ describe("GET /how-it-works in the demo", () => {
 	});
 });
 
+describe("the budget guide with no activity", () => {
+	const budgetSection = (html: string) =>
+		html.match(/<section[^>]*id="budget"[\s\S]*?<\/section>/)?.[0] ?? "";
+
+	it("shows the worked example for a household whose only data is a savings goal", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES (?, 50000)",
+		)
+			.bind(month)
+			.run();
+
+		const html = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		const section = budgetSection(html);
+		expect(section).toContain("With your numbers");
+		expect(section).toContain("Savings goal");
+		expect(section).toContain("$500.00");
+	});
+
+	it("keeps the empty state when the household has no budget data or goal", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+		]);
+		const html = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		const section = budgetSection(html);
+		expect(section).toContain("No budgets have been set yet.");
+		expect(section).not.toContain("With your numbers");
+	});
+});
+
 describe("outside the demo", () => {
 	it("says both AI jobs are live and gives a household example when no names wait", async () => {
 		await env.DB.prepare(

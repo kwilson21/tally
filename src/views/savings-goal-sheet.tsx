@@ -6,10 +6,12 @@ export function SavingsGoalSheet({
 	value,
 	error,
 	month,
+	closeAttrs,
 }: {
 	value: string;
 	error?: string;
 	month: string;
+	closeAttrs: Record<string, string>;
 }) {
 	return (
 		<>
@@ -46,7 +48,7 @@ export function SavingsGoalSheet({
 					autofocus
 				/>
 				<div class="mt-2 grid grid-cols-2 gap-3">
-					<Button href="/" kind="secondary" class="w-full">
+					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
 						Cancel
 					</Button>
 					<Button

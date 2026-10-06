@@ -478,7 +478,8 @@ home.get("/savings-goal", async (c) => {
 							? centsToAmount(amountCents)
 							: ""
 					}
-					month={today.slice(0, 7)}
+					month={monthName(today.slice(0, 7))}
+					closeAttrs={closeSavingsGoalAttrs}
 				/>
 			</BottomSheet>
 		),
@@ -503,7 +504,12 @@ home.post("/savings-goal", async (c) => {
 					closeAttrs={closeSavingsGoalAttrs}
 					still
 				>
-					<SavingsGoalSheet value={typed} error={parsed.error} month={month} />
+					<SavingsGoalSheet
+						value={typed}
+						error={parsed.error}
+						month={monthName(month)}
+						closeAttrs={closeSavingsGoalAttrs}
+					/>
 				</BottomSheet>
 			),
 		});
