@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { loadMonth } from "../src/db/month";
+import { pendingForJev } from "../src/db/transactions";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -194,7 +195,7 @@ describe("a pending transaction", () => {
 				],
 			}),
 		);
-		expect(summary).toEqual({ added: 2, modified: 0, removed: 0 });
+		expect(summary).toMatchObject({ added: 2, modified: 0, removed: 0 });
 		expect((await row("pending-1"))?.pending).toBe(1);
 		expect((await row("posted-other"))?.pending).toBe(0);
 		const month = summarizeMonth({
@@ -278,7 +279,7 @@ describe("when the bank posts a pending transaction", () => {
 			.run();
 
 		// Posting is not a new transaction: the person already saw it as pending.
-		expect(await post(item, { amount: -42 })).toEqual({
+		expect(await post(item, { amount: -42 })).toMatchObject({
 			added: 0,
 			modified: 0,
 			removed: 1,
@@ -509,7 +510,7 @@ describe("when the bank posts a pending transaction", () => {
 		const item = await addItem();
 		expect(
 			await syncItem(opts, item, onePage({ added: [postedTx()] })),
-		).toEqual({ added: 1, modified: 0, removed: 0 });
+		).toMatchObject({ added: 1, modified: 0, removed: 0 });
 		expect(await row("posted-1")).toMatchObject({ pending: 0 });
 	});
 
@@ -522,7 +523,11 @@ describe("when the bank posts a pending transaction", () => {
 			.bind(id)
 			.run();
 		await post(item);
-		expect(await post(item)).toEqual({ added: 0, modified: 0, removed: 1 });
+		expect(await post(item)).toMatchObject({
+			added: 0,
+			modified: 0,
+			removed: 1,
+		});
 		expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
 		expect(await row("posted-1")).toMatchObject({
 			id,
@@ -564,7 +569,7 @@ describe("a pending transaction the bank drops", () => {
 					next_cursor: "cursor-2",
 				}),
 			),
-		).toEqual({ added: 0, modified: 0, removed: 1 });
+		).toMatchObject({ added: 0, modified: 0, removed: 1 });
 
 		expect(await row("pending-1")).toBeNull();
 		expect(await count("SELECT COUNT(*) AS n FROM bill_payments")).toBe(0);
@@ -772,7 +777,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			).bind(ids.posted),
 		]);
 
-		expect(await post(item, { amount: -42 })).toEqual({
+		expect(await post(item, { amount: -42 })).toMatchObject({
 			added: 0,
 			modified: 0,
 			removed: 1,
@@ -794,6 +799,148 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			credit_reviewed: 1,
 			credit_reviewed_by: "user",
 			updated_by: "person@example.com",
+		});
+	});
+
+	describe("Tally's own answer", () => {
+		/** What Tally's answer (decisions 27 and 79) leaves on a row. */
+		const answerOf = (plaidId: string) =>
+			env.DB.prepare(
+				`SELECT category_id, category_source, category_confidence, jev_category_id,
+					flag_transfer, flag_reimbursement, flag_income, income_source,
+					excluded, excluded_source, credit_reviewed, credit_reviewed_by
+				 FROM transactions WHERE plaid_transaction_id = ?`,
+			)
+				.bind(plaidId)
+				.first();
+
+		it("moves a category Jev picked from the pending row onto the posted one", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id = 2, category_source = 'jev', category_confidence = 0.93, jev_category_id = 2 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item);
+			expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
+			expect(await answerOf("posted-1")).toMatchObject({
+				category_id: 2,
+				category_source: "jev",
+				category_confidence: 0.93,
+				jev_category_id: 2,
+			});
+		});
+
+		it("moves an answer Jev wasn't sure of, so the posted row isn't asked again", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_confidence = 0.4, jev_category_id = 3 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item);
+			expect(await answerOf("posted-1")).toMatchObject({
+				category_id: null,
+				category_source: null,
+				category_confidence: 0.4,
+				jev_category_id: 3,
+			});
+			expect(await pendingForJev(env.DB, 10)).toEqual([]);
+		});
+
+		it("moves Jev's transfer and income answers with the exclusion and review they made", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				`UPDATE transactions SET category_confidence = 0.9, jev_category_id = 4,
+					flag_transfer = 1, excluded = 1, excluded_source = 'jev',
+					flag_income = 1, income_source = 'jev', credit_reviewed = 1
+				 WHERE id = ?`,
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				category_confidence: 0.9,
+				jev_category_id: 4,
+				flag_transfer: 1,
+				excluded: 1,
+				excluded_source: "jev",
+				flag_income: 1,
+				income_source: "jev",
+				credit_reviewed: 1,
+				credit_reviewed_by: null,
+			});
+		});
+
+		it("leaves an answer the posted row already has, from Jev or a rule or a person", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = 2, category_source = 'jev', category_confidence = 0.93, jev_category_id = 2 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = 4, category_source = 'merchant_rule' WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item);
+			expect(await answerOf("posted-1")).toMatchObject({
+				category_id: 4,
+				category_source: "merchant_rule",
+				category_confidence: null,
+			});
+		});
+
+		it("gives a person's own pick on the pending row precedence over Tally's, which doesn't move with it", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = 3, category_source = 'user', category_confidence = NULL, jev_category_id = 2 WHERE id = ?",
+				).bind(ids.pending),
+			]);
+			await post(item);
+			expect(await answerOf("posted-1")).toMatchObject({
+				category_id: 3,
+				category_source: "user",
+				category_confidence: null,
+			});
+		});
+
+		it("doesn't move an answer made for a different amount, so the posted row is asked again", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id = 2, category_source = 'jev', category_confidence = 0.93, jev_category_id = 2 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: 20 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				category_id: null,
+				category_source: null,
+				category_confidence: null,
+				jev_category_id: null,
+			});
+			expect(await pendingForJev(env.DB, 10)).toHaveLength(1);
+		});
+
+		it("doesn't move a merchant rule's pick, which the rule applies to the posted row itself", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id = 4, category_source = 'merchant_rule' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item);
+			expect(await answerOf("posted-1")).toMatchObject({
+				category_id: null,
+				category_source: null,
+			});
 		});
 	});
 

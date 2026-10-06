@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import {
 	type AiSwitches,
+	asksJev,
 	readAiSwitches,
 	saveAiSwitches,
 } from "../db/ai-switches";
@@ -110,11 +111,10 @@ type View = {
  * each posts, its words and its muted line, in the order the group shows them, and how each is read
  * aloud after a save. Screens say "Tally", never the name of the AI behind it.
  *
- * Two more are stored (`names` and `sortOnArrival` in db/ai-switches.ts) but have no row yet, so no
- * switch promises something that isn't built. Each gets its row here, with its words from the P41
- * drawing (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant
- * names" with Workers AI names (#33, #194) and "Sort new transactions as they arrive" with the
- * Jev run after a sync (#193). Saving this group never changes a switch it doesn't list.
+ * One more is stored (`names` in db/ai-switches.ts) but has no row yet, so no switch promises
+ * something that isn't built. It gets its row here, with its words from the P41 drawing
+ * (src/design-system/proposals-ai.tsx), when the feature that reads it ships: "Merchant names" with
+ * Workers AI names (#33, #194). Saving this group never changes a switch it doesn't list.
  */
 const AI_FEATURES: {
 	key: keyof AiSwitches;
@@ -137,7 +137,19 @@ const AI_FEATURES: {
 		line: "Spots paychecks and other money coming in.",
 		spoken: "income",
 	},
+	{
+		key: "sortOnArrival",
+		id: "ai-sort-on-arrival",
+		label: "Sort new transactions as they arrive",
+		line: "Sorts them right after each sync, not only overnight.",
+		spoken: "sorting new transactions as they arrive",
+	},
 ];
+
+/** What the greyed sorting switch says it needs, in the words of the rows above it. */
+const SORT_NEEDS = "Needs Categories and exclusions or Income on.";
+/** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
+const SORT_GREYED = "sortOnArrivalGreyed";
 
 /** The switches above and one Save. Without JavaScript the form posts and Settings reloads at this group. */
 function AiSuggestions({
@@ -148,6 +160,8 @@ function AiSuggestions({
 	saved: boolean;
 }) {
 	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
+	// With nothing for Jev to be asked, sorting right after a sync has nothing to sort (spec §8.6).
+	const nothingToSort = !asksJev(switches);
 	return (
 		<section
 			id="ai-suggestions"
@@ -181,10 +195,13 @@ function AiSuggestions({
 								label={f.label}
 								hint={f.line}
 								checked={switches[f.key]}
+								disabled={f.key === "sortOnArrival" && nothingToSort}
+								note={SORT_NEEDS}
 							/>
 						</li>
 					))}
 				</ul>
+				{nothingToSort && <input type="hidden" name={SORT_GREYED} value="1" />}
 				<div class="mt-4">
 					<Button
 						id="ai-save"
@@ -611,14 +628,21 @@ settings.get("/settings/export/tally.json", async (c) => {
 
 // A switch that's on posts "on" and one that's off posts nothing, so a field left out is off; the
 // form always carries the whole group, so a save is always every switch it shows, and only those.
+// The sorting switch is greyed out while Jev isn't asked at all (categories and income both off), and
+// a greyed switch posts nothing, so Save doesn't write it at all and it stays as it was saved (spec
+// §8.6, decision 79). Whether it was greyed comes from the form the person saw (a hidden field), not
+// from what's saved now, since another tab may have changed the switches since the page was drawn; and
+// as nothing is read and written back, a save from another tab in between is never undone.
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
+	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
 	await saveAiSwitches(c.env.DB, next);
+	const now = await readAiSwitches(c.env.DB);
 	const states = AI_FEATURES.map(
-		(f) => `${f.spoken} ${next[f.key] ? "on" : "off"}`,
+		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
 	).join(", ");
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
 	return done(c, "Saved AI suggestions", `Saved AI suggestions. ${spoken}.`, {

@@ -54,11 +54,28 @@ export async function runScheduled(
 	}
 	const synced = await syncAllItems(env, fetchImpl);
 	// The catch-up has already applied merchant rules unless Plaid is off (the demo) or that step
-	// failed; Jev then asks about what they left, so newly fetched transactions are sorted tonight.
+	// failed; Jev then asks about what they left, so newly fetched transactions are sorted tonight. This
+	// is the nightly run: it asks about everything still waiting, not only what the catch-up brought
+	// in, so it doesn't wait on the "as they arrive" switch, and it only spends what's left of today's
+	// cap after any runs at the syncs (spec §8.6).
 	await categorizePending(env, fetchImpl, {
 		rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
 	});
 	await retryFeedback(env, fetchImpl);
+}
+
+/**
+ * The night's second run, 30 minutes after the first (decision 56): one run asks Jev about at most
+ * `MAX_CALLS_PER_RUN`, so this one asks about what the first left, within what's left of the day's
+ * cap, and a newly linked bank's backfill is still sorted in a night. It never syncs or resets.
+ */
+const SECOND_SORT_CRON = "30 9 * * *";
+
+export async function runSecondSort(
+	env: ScheduledEnv,
+	fetchImpl?: typeof fetch,
+) {
+	await categorizePending(env, fetchImpl, { rulesApplied: false });
 }
 
 app.use("*", security);
@@ -135,7 +152,8 @@ app.route("/", webhooks);
 
 export default {
 	fetch: app.fetch,
-	async scheduled(_controller, env) {
-		await runScheduled(env);
+	async scheduled(controller, env) {
+		if (controller.cron === SECOND_SORT_CRON) await runSecondSort(env);
+		else await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;
