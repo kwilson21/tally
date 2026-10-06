@@ -287,6 +287,16 @@ describe("one date for the whole request", () => {
 			}),
 		],
 		["moving a category", "/settings/categories/3/move/up", form({})],
+		[
+			"saving the time zone",
+			"/settings/time-zone",
+			form({ time_zone: "America/Chicago" }),
+		],
+		[
+			"a time zone that isn't offered",
+			"/settings/time-zone",
+			form({ time_zone: "Not/AZone" }),
+		],
 	])("reads the date once for %s", async (_name, path, init) => {
 		const reads = watchSetting();
 		const res = await exports.default.fetch(`http://tally.test${path}`, init);
