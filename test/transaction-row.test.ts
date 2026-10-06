@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ListRow } from "../src/db/transactions";
 import { Chip } from "../src/views/chip";
 import { FormField } from "../src/views/form-field";
+import { MaybeCategory } from "../src/views/maybe-category";
 import { rowCaption, TransactionRow } from "../src/views/transaction-row";
 
 const base: ListRow = {
@@ -50,11 +51,78 @@ describe("rowCaption", () => {
 		};
 		expect(rowCaption(row)).toMatchObject({
 			caption: "Maybe income",
-			tag: true,
+			tag: false,
 		});
 		const html = await TransactionRow({ row }).toString();
 		expect(html).toContain("Maybe income");
 		expect(html).not.toContain("Review credit");
+	});
+	it.each([0.01, 0.2])("hides a confident NO at %s", async (confidence) => {
+		const row = {
+			...base,
+			amountCents: -2500,
+			creditReviewed: false,
+			incomeConfidence: confidence,
+		};
+		expect(rowCaption(row).caption).not.toBe("Maybe income");
+		expect(await TransactionRow({ row }).toString()).not.toContain(
+			"Maybe income",
+		);
+	});
+	it("shows the applied 0.8 answer as Income", async () => {
+		const row = {
+			...base,
+			amountCents: -2500,
+			income: true,
+			incomeConfidence: 0.8,
+		};
+		expect(rowCaption(row).caption).toBe("Income");
+		expect(await TransactionRow({ row }).toString()).not.toContain(
+			"Maybe income",
+		);
+	});
+	it.each([0.5, 0.71])(
+		"shows an unsure income answer at %s",
+		async (confidence) => {
+			const row = {
+				...base,
+				amountCents: -2500,
+				creditReviewed: false,
+				incomeConfidence: confidence,
+			};
+			expect(rowCaption(row).caption).toBe("Maybe income");
+			expect(await TransactionRow({ row }).toString()).toContain(
+				"Maybe income",
+			);
+		},
+	);
+	it("keeps an excluded transfer ahead of an income suggestion", async () => {
+		const row = {
+			...base,
+			amountCents: -2500,
+			excluded: true,
+			creditReviewed: false,
+			incomeConfidence: 0.5,
+		};
+		expect(rowCaption(row)).toMatchObject({
+			kind: "excluded",
+			caption: "Excluded",
+		});
+		expect(await TransactionRow({ row }).toString()).not.toContain(
+			"Maybe income",
+		);
+	});
+	it("does not add Needs category beside Maybe income for a none-fit category", async () => {
+		const row = {
+			...base,
+			amountCents: -2500,
+			creditReviewed: false,
+			incomeConfidence: 0.5,
+			jevNoneFit: true,
+		};
+		const html = await TransactionRow({ row }).toString();
+		expect(html).toContain("Maybe income");
+		expect(html).not.toContain("Needs category");
 	});
 	it("hides a reviewed non-income credit's income guess", async () => {
 		const row = {
@@ -220,6 +288,27 @@ describe("rowCaption", () => {
 });
 
 describe("TransactionRow", () => {
+	it("prioritizes Maybe income over an unsure category on the row", async () => {
+		const row = {
+			...base,
+			amountCents: -2500,
+			creditReviewed: false,
+			incomeConfidence: 0.5,
+			maybeCategoryName: "Groceries",
+			categoryConfidence: 0.5,
+		};
+		const html = await TransactionRow({ row }).toString();
+		expect(html).toContain("Maybe income");
+		expect(html).not.toContain("Maybe Groceries");
+	});
+	it("lets a long category guess shrink and truncate", async () => {
+		const html = await MaybeCategory({
+			name: "A category name long enough to reach the amount",
+			kind: "category",
+		}).toString();
+		expect(html).toContain("truncate");
+		expect(html).not.toContain("shrink-0");
+	});
 	it("leaves Counts in off a linked refund, whose caption already explains it", async () => {
 		const row = {
 			...base,

@@ -1198,6 +1198,44 @@ describe("syncItem", () => {
 		}
 	});
 
+	it("clears Jev flag confidences when either Plaid amount update path changes the amount", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: -30 })] })),
+			),
+		);
+		const tx = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number }>();
+		for (const path of ["added", "modified"] as const) {
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+			)
+				.bind(tx?.id)
+				.run();
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(
+						page({
+							[path]: [transaction({ amount: path === "added" ? -31 : -32 })],
+						}),
+					),
+				),
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT income_confidence, transfer_confidence FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first(),
+			).toEqual({ income_confidence: null, transfer_confidence: null });
+		}
+	});
+
 	it("keeps Jev ownership after a note-only save so a Plaid amount change reopens review", async () => {
 		const id = await addItem();
 		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };

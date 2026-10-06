@@ -767,7 +767,7 @@ function Rows() {
 					"Chip",
 					"WhyLink",
 				]}
-				sentence="The row uses dashed Maybe tags; the edit panel keeps its income guess dashed beside its confidence and Why?, like the suggested category chip."
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate."
 			>
 				<div class="flex flex-wrap gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />

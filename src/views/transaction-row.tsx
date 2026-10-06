@@ -22,7 +22,7 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.excluded && !row.paysBill)
 		return { kind: "excluded", caption: "Excluded", tag: false };
 	if (maybeIncomeVisible(row))
-		return { kind: "needs", caption: "Maybe income", tag: true };
+		return { kind: "needs", caption: "Maybe income", tag: false };
 	if (
 		!row.followsPurchase &&
 		!row.creditReviewed &&

@@ -50,6 +50,129 @@ describe("row links", () => {
 });
 
 describe("GET /transactions/:id", () => {
+	it("offers both unsure category and income answers in the edit panel", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, credit_reviewed=0, jev_category_id=1, category_confidence=0.5, income_confidence=0.5 WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toMatch(
+			/name="category" value="1"[^>]*aria-describedby="category-suggestion-confidence-\d+-1"[^>]*class="sr-only"\/>Groceries <span class="text-muted">· Suggested<\/span>/,
+		);
+		expect(sheet).toMatch(
+			new RegExp(
+				`<input type="checkbox" name="income" value="1"[^>]*aria-describedby="income-suggestion-confidence-${bakery}"`,
+			),
+		);
+		expect(sheet).toContain(
+			`id="income-suggestion-confidence-${bakery}" class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 50% sure`,
+		);
+	});
+
+	it("links the income guess text to its checkbox with a transaction-specific id", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, credit_reviewed=0, income_confidence=0.5 WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		const describedBy = html.match(
+			/<input type="checkbox" name="income" value="1"[^>]*aria-describedby="([^"]+)"/,
+		)?.[1];
+		expect(describedBy).toBe(`income-suggestion-confidence-${bakery}`);
+		expect(html).toMatch(
+			new RegExp(
+				`<p[^>]*id="${describedBy}"[^>]*>Tally&#39;s guess · 50% sure`,
+			),
+		);
+	});
+
+	it("keeps an excluded transfer ahead of the income suggestion in the edit panel", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, excluded=1, credit_reviewed=0, income_confidence=0.5 WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toContain("Exclude from budget");
+		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
+		expect(sheet).not.toContain('id="income-suggestion-confidence-');
+	});
+
+	it("drops the income guess style when the posted choice is checked on a validation error", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, credit_reviewed=0, income_confidence=0.5 WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			category: "invalid",
+			income: "1",
+			creditReviewedVisible: "1",
+			creditReviewed: "0",
+		});
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toMatch(
+			/<input type="checkbox" name="income" value="1" checked/,
+		);
+		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
+		const incomeLabel = sheet.match(
+			/<label class="([^"]+)"[^>]*><input type="checkbox" name="income"/,
+		);
+		expect(incomeLabel?.[1]).not.toContain("border-dashed");
+	});
+
+	it("drops the income guess treatment when the posted choice is unchecked on a validation error", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, credit_reviewed=0, income_confidence=0.5 WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			category: "invalid",
+			creditReviewedVisible: "1",
+			creditReviewed: "0",
+		});
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
+		expect(sheet).not.toContain('id="income-suggestion-confidence-');
+	});
+
+	it("renders a confident 0.8 income answer as applied, without Maybe income", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, credit_reviewed=1, flag_income=1, income_confidence=NULL, jev_category_id=NULL, category_confidence=NULL WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		expect(html).toContain("Count as income");
+		expect(html).not.toContain("Maybe income");
+		expect(html).not.toContain(`id="income-suggestion-confidence-${bakery}"`);
+	});
 	it("shows a below-threshold paycheck guess in the list and edit panel, held out of spending", async () => {
 		const id = Number(
 			(
@@ -99,7 +222,7 @@ describe("GET /transactions/:id", () => {
 		expect(sheet).toContain("Tally&#39;s guess · 71% sure");
 		expect(sheet).toContain('aria-label="Why? income"');
 		expect(sheet).toMatch(
-			/<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization" aria-label="Why\? income" class="inline-flex min-h-11 min-w-11/,
+			/<p id="income-suggestion-confidence-\d+" class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization" aria-label="Why\? income" class="inline-flex min-h-11 min-w-11/,
 		);
 		const savedAsRefund = await post(`/transactions/${id}`, {
 			merchant: "PAYROLL CREDIT",

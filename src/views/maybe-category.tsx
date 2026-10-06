@@ -8,18 +8,24 @@ export function maybeIncomeVisible({
 	income,
 	incomeConfidence,
 	creditReviewed,
+	excluded,
+	paysBill,
 }: {
 	amountCents: number;
 	income: boolean;
 	incomeConfidence?: number | null;
 	creditReviewed: boolean;
+	excluded?: boolean;
+	paysBill?: boolean;
 }) {
 	return (
 		amountCents < 0 &&
 		!income &&
 		!creditReviewed &&
+		!(excluded && !paysBill) &&
 		incomeConfidence != null &&
-		incomeConfidence < JEV_THRESHOLD
+		incomeConfidence < JEV_THRESHOLD &&
+		incomeConfidence + JEV_THRESHOLD > 1
 	);
 }
 
@@ -33,7 +39,7 @@ function MaybeTag({
 	icon?: boolean;
 }) {
 	return (
-		<span class="inline-flex min-h-11 shrink-0 items-center gap-1 truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
+		<span class="inline-flex min-h-11 items-center gap-1 truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
 			{icon && <Icon name="circle-dashed" class="size-4" />}
 			Maybe {word === "income" ? word : details}
 		</span>

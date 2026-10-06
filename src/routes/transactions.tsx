@@ -1068,6 +1068,10 @@ function EditSheet({
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
+	const showIncomeGuess =
+		Object.keys(errors).length === 0 &&
+		!values.income &&
+		maybeIncomeVisible(tx);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1344,13 +1348,21 @@ function EditSheet({
 							name="income"
 							value="1"
 							checked={values.income}
-							dashed={maybeIncomeVisible(tx)}
+							dashed={showIncomeGuess}
+							describedBy={
+								showIncomeGuess
+									? `income-suggestion-confidence-${tx.id}`
+									: undefined
+							}
 						>
 							Count as income
 						</Chip>
 					</div>
-					{maybeIncomeVisible(tx) && (
-						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+					{showIncomeGuess && (
+						<p
+							id={`income-suggestion-confidence-${tx.id}`}
+							class="flex flex-wrap items-center gap-x-2 text-sm text-muted"
+						>
 							Tally's guess · {Math.round((tx.incomeConfidence ?? 0) * 100)}%
 							sure
 							<WhyLink section="categorization" topic="income" />

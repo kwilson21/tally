@@ -807,7 +807,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const answerOf = (plaidId: string) =>
 			env.DB.prepare(
 				`SELECT category_id, category_source, category_confidence, jev_category_id,
-					flag_transfer, flag_reimbursement, flag_income, income_source,
+					flag_transfer, transfer_confidence, flag_reimbursement, flag_income, income_confidence, income_source,
 					excluded, excluded_source, credit_reviewed, credit_reviewed_by
 				 FROM transactions WHERE plaid_transaction_id = ?`,
 			)
@@ -848,6 +848,39 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				jev_category_id: 3,
 			});
 			expect(await pendingForJev(env.DB, 10)).toEqual([]);
+		});
+
+		it("moves unsure income and transfer confidence, while keeping confidence already on the posted row", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.4, transfer_confidence = 0.3 WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: 0.4,
+				transfer_confidence: 0.3,
+			});
+		});
+
+		it("moves both unsure confidences when the posted row has no answer", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: 0.5,
+				transfer_confidence: 0.6,
+			});
 		});
 
 		it("moves a none-fit answer with its confidence, so the posted row still counts toward a suggested category (#51)", async () => {
