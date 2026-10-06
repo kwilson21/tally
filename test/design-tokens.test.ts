@@ -94,7 +94,7 @@ describe("design tokens (DESIGN.md)", () => {
 		 * ("stroke-linecap", "border-color") but are never classes.
 		 */
 		const NOT_COLORS = new Set(
-			"transparent current inherit none auto xs sm md base lg xl left center right justify start end top bottom left-top left-bottom right-top right-bottom top-left top-right bottom-left bottom-right wrap nowrap balance pretty ellipsis clip t r b l x y s e solid dashed dotted double wavy hidden collapse separate offset inset cover contain fixed local scroll no-repeat clone slice from-font align color style width radius input linecap linejoin".split(
+			"transparent current inherit none auto xs sm base lg xl left center right justify start end top bottom left-top left-bottom right-top right-bottom top-left top-right bottom-left bottom-right wrap nowrap balance pretty ellipsis clip t r b l x y s e solid dashed dotted double wavy hidden collapse separate offset inset cover contain fixed local scroll no-repeat clone slice from-font align color style width radius input linecap linejoin".split(
 				" ",
 			),
 		);
@@ -113,6 +113,7 @@ describe("design tokens (DESIGN.md)", () => {
 			outline: "offset-",
 			text: "shadow-",
 		};
+		const SHADOW_SIZES = new Set(["xs", "sm", "md", "lg", "none"]);
 		const NAMED =
 			/^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-([a-z][a-z-]*?)(\/\d+)?$/;
 		const offToken = (u: string) => {
@@ -125,6 +126,9 @@ describe("design tokens (DESIGN.md)", () => {
 					? match[3].slice(inner.length)
 					: match[3];
 			if (NOT_COLOR_FAMILIES[prefix]?.test(name)) return false;
+			// A text shadow's size: "text-shadow-md" (only there; "bg-md" is no color).
+			if (inner === "shadow-" && name !== match[3] && SHADOW_SIZES.has(name))
+				return false;
 			return !tokens.has(name) && !NOT_COLORS.has(name);
 		};
 		expect(
@@ -138,6 +142,8 @@ describe("design tokens (DESIGN.md)", () => {
 				"border-repeat-x",
 				"text-shadow-error",
 				"ring-offset-error",
+				"bg-md",
+				"from-md",
 			].filter((u) => !offToken(u)),
 		).toEqual([]);
 		expect(
