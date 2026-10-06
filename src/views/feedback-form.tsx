@@ -28,7 +28,9 @@ export function FeedbackForm({
 }) {
 	return (
 		<div class="max-w-2xl">
-			<h1 class="font-serif text-4xl font-semibold">Send feedback</h1>
+			<h1 class="font-serif text-5xl font-semibold tracking-tight">
+				Send feedback
+			</h1>
 			<p class="mt-2 text-muted">
 				Before a new report is sent, Tally applies deterministic pattern
 				redaction to recognizable links, email addresses, phone numbers, labeled

@@ -63,6 +63,11 @@ describe("GET /transactions/organize", () => {
 			/<fieldset[^>]*>[\s\S]*<legend[^>]*>Category<\/legend>/,
 		);
 		expect(html).toMatch(/name="name"[^>]*value="Target"/);
+		// The name arrives filled in, so the hint says what changing it does, not "leave it empty".
+		expect(html).toContain(
+			"Change it to rename every transaction from this merchant.",
+		);
+		expect(html).not.toContain("Leave empty to keep it");
 		expect(html).toContain("Future Target transactions get this category too.");
 	});
 
@@ -297,4 +302,33 @@ it("links to Organize from Home and the Needs category filter", async () => {
 	expect((await get("/transactions?uncategorized=1")).html).toMatch(
 		/<a[^>]*href="\/transactions\/organize"[^>]*>Organize by merchant<\/a>/,
 	);
+});
+
+describe("the Organize by merchant link follows the Needs category filter", () => {
+	const htmxGet = async (path: string) => {
+		const res = await exports.default.fetch(BASE + path, {
+			headers: { "HX-Request": "true" },
+		});
+		return res.text();
+	};
+	/** What sits inside the link's always-present wrapper. */
+	const wrapper = (html: string) =>
+		html.match(/<div id="organize-link">([\s\S]*?)<\/div>/)?.[1];
+
+	it("keeps a wrapper on every list, filled only when Needs category is on", async () => {
+		const filtered = wrapper((await get("/transactions?uncategorized=1")).html);
+		expect(filtered).toMatch(
+			/<a[^>]*href="\/transactions\/organize"[^>]*>Organize by merchant<\/a>/,
+		);
+		expect(wrapper((await get("/transactions")).html)).toBe("");
+	});
+
+	it("is swapped in with the list, so ticking or unticking the filter adds or removes it", async () => {
+		const page = (await get("/transactions")).html;
+		expect(page).toMatch(/hx-select-oob="[^"]*#organize-link:innerHTML/);
+		expect(wrapper(await htmxGet("/transactions?uncategorized=1"))).toContain(
+			"Organize by merchant",
+		);
+		expect(wrapper(await htmxGet("/transactions"))).toBe("");
+	});
 });

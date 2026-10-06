@@ -115,7 +115,7 @@ describe("GET /transactions", () => {
 			/<p id="result-count" aria-live="polite"[^>]*>12 transactions needing a category in [A-Z][a-z]+<\/p>/,
 		);
 		expect(html).toContain(
-			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #add-cash:outerHTML, #select-toggle:outerHTML,',
+			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #organize-link:innerHTML, #add-cash:outerHTML, #select-toggle:outerHTML,',
 		);
 	});
 
@@ -182,6 +182,48 @@ describe("GET /transactions", () => {
 			/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
 		);
 		expect(second).not.toContain(">Older<");
+	});
+
+	it("centres the page label between two equal sides, so it stays put from page to page", async () => {
+		for (const path of [
+			"/transactions",
+			"/transactions?page=2",
+			"/transactions?month=all&page=3",
+		]) {
+			const { html } = await get(path);
+			// Three grid tracks, the middle one auto: an empty Newer or Older slot still holds its side.
+			expect(html).toContain(
+				'<nav aria-label="Pages" class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center border-t border-rule pt-2">',
+			);
+			expect(html).toMatch(
+				/<span class="text-sm text-muted">\s*Page \d+ of \d+\s*<\/span><span class="justify-self-end">/,
+			);
+		}
+		// The words meet the rule's ends: the page links cancel their own 8px inset, keeping the 44px target.
+		const { html } = await get("/transactions?month=all&page=2");
+		expect(html).toMatch(
+			/<a[^>]*rel="prev"[^>]*class="inline-flex min-h-11 items-center px-2 -mx-2"/,
+		);
+		expect(html).toMatch(
+			/<a[^>]*rel="next"[^>]*class="inline-flex min-h-11 items-center px-2 -mx-2"/,
+		);
+	});
+
+	it("holds the title row to the list's width on desktop, with Select flush to the amounts' edge", async () => {
+		const { html } = await get("/transactions");
+		expect(html).toMatch(
+			/<div class="flex items-center justify-between gap-3 lg:max-w-3xl"><h1 id="transactions-title"/,
+		);
+		const select = html.match(/<a[^>]*id="select-toggle"[^>]*>/)?.[0] ?? "";
+		// -mr-2 cancels the text button's 8px inset; px-2 and min-h-11 stay, so the target is still 44px.
+		expect(select).toMatch(/class="[^"]*\bmin-h-11\b[^"]*\bpx-2\b[^"]*-mr-2/);
+	});
+
+	it("lines Organize by merchant up with the count above it", async () => {
+		const { html } = await get("/transactions?uncategorized=1");
+		const organize =
+			html.match(/<a[^>]*href="\/transactions\/organize"[^>]*>/)?.[0] ?? "";
+		expect(organize).toMatch(/class="[^"]*\bmin-h-11\b[^"]*\bpx-2\b[^"]*-ml-2/);
 	});
 
 	it("keeps the filters in page links and hides the pager on a single page", async () => {

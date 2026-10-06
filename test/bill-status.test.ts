@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { billOccurrence } from "../src/bills/status";
+import { billStatusLine } from "../src/views/bill-row";
 
 describe("bill status", () => {
 	it("clamps month ends and includes the seventh day", () => {
@@ -121,5 +122,56 @@ describe("bill status", () => {
 				status: "due",
 			});
 		});
+	});
+});
+
+describe("billStatusLine", () => {
+	const bill = {
+		id: 1,
+		name: "Streaming",
+		amountCents: 1549,
+		icon: "household",
+		color: "cat-brown",
+	};
+	const today = "2026-10-05";
+
+	it("keeps today lower case in the middle of a sentence", () => {
+		expect(
+			billStatusLine(
+				{
+					...bill,
+					status: "paid",
+					dueDate: "2026-10-05",
+					paidDate: "2026-10-05",
+				},
+				today,
+			),
+		).toBe("Paid today, Oct 5");
+		expect(
+			billStatusLine(
+				{
+					...bill,
+					status: "paid",
+					dueDate: "2026-10-02",
+					paidDate: "2026-10-05",
+				},
+				today,
+			),
+		).toBe("Paid today, Oct 5, 3 days late");
+		expect(
+			billStatusLine({ ...bill, status: "due", dueDate: "2026-10-05" }, today),
+		).toBe("Due today, Oct 5");
+	});
+
+	it("leaves other days as they were", () => {
+		expect(
+			billStatusLine({ ...bill, status: "due", dueDate: "2026-10-08" }, today),
+		).toBe("Due Oct 8");
+		expect(
+			billStatusLine(
+				{ ...bill, status: "overdue", dueDate: "2026-10-02" },
+				today,
+			),
+		).toBe("Was due Oct 2");
 	});
 });
