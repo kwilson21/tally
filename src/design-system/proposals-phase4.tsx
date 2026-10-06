@@ -18,17 +18,8 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec didn't settle until the owner's picks (decision 64). */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Spec line added (decision 64): </span>
-			{children}
-		</p>
-	);
-}
 
 const dollars = (cents: number) => formatCents(cents, { wholeDollars: true });
 
@@ -37,7 +28,7 @@ const dollars = (cents: number) => formatCents(cents, { wholeDollars: true });
 
 const MONTHS = ["May", "Jun", "Jul", "Aug", "Sep", "Oct"];
 
-const CATS = {
+export const CATS = {
 	groceries: { name: "Groceries", icon: "groceries", color: "cat-blue" },
 	eatingOut: { name: "Eating Out", icon: "eating-out", color: "cat-plum" },
 	kids: { name: "Kids", icon: "kids", color: "cat-ochre" },
@@ -908,20 +899,30 @@ const deletePage = (
 // P29–P30: AI suggestions in Settings.
 
 /** A list row whose merchant has a suggested name: the suggestion shows with a dashed underline (not decided yet). */
-function SuggestedRow({
+export function SuggestedRow({
 	name,
 	cents,
 	cat,
 	maybe,
+	plain,
+	mark,
+	tag,
 }: {
 	name: string;
 	cents: number;
 	cat?: Cat;
 	/** P29 B: the tidied name stays and the caption line offers the suggestion. */
 	maybe?: string;
+	/** A name nobody is guessing at (P87): no dashed underline. */
+	plain?: boolean;
+	/** P87 B: before the name, where the sparkles icon goes. */
+	mark?: Child;
+	/** P87 A: after the name, where the "Tally's guess" tag goes. */
+	tag?: Child;
 }) {
+	const nameClass = `text-lg leading-6 ${maybe || plain ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`;
 	return (
-		<li class="flex h-16 items-center gap-4">
+		<li class="flex min-h-16 items-center gap-4 py-1">
 			{cat ? (
 				<CategoryIcon icon={cat.icon} color={cat.color} />
 			) : (
@@ -930,11 +931,15 @@ function SuggestedRow({
 				</span>
 			)}
 			<span class="min-w-0 flex-1">
-				<span
-					class={`block truncate text-lg leading-6 ${maybe ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`}
-				>
-					{name}
-				</span>
+				{mark || tag ? (
+					<span class="flex min-w-0 flex-wrap items-center gap-x-2">
+						{mark}
+						<span class={`max-w-full truncate ${nameClass}`}>{name}</span>
+						{tag}
+					</span>
+				) : (
+					<span class={`block truncate ${nameClass}`}>{name}</span>
+				)}
 				<span class="block truncate leading-6 text-muted">
 					{cat?.name ?? "Needs category"}
 					{maybe && ` · Maybe “${maybe}”`}
@@ -1004,50 +1009,92 @@ const namesMaybe = (
 	</>
 );
 
-/** Up to three suggested names as chips, the bank's tidied name, and a field for your own. */
-function NameChoices({ id }: { id: string }) {
+/**
+ * Up to three suggested names as chips, the bank's tidied name, and a field for your own. `names`
+ * and `keep` draw another merchant. With `source` (P87) the line that says where the suggestions
+ * came from goes under them, and the tidied name moves below that line.
+ */
+export function NameChoices({
+	id,
+	names = ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
+	keep = "Blue bottle cof",
+	count = 9,
+	source,
+}: {
+	id: string;
+	names?: string[];
+	keep?: string;
+	/** How many transactions the name applies to. */
+	count?: number;
+	source?: Child;
+}) {
+	const suggested = names.map((n, i) => (
+		<Chip type="radio" name={id} value={String(i + 1)} checked={i === 0}>
+			{n}
+		</Chip>
+	));
+	const tidied = (
+		<Chip type="radio" name={id} value="tidied" checked={names.length === 0}>
+			Keep “{keep}”
+		</Chip>
+	);
 	return (
 		<fieldset class="flex flex-col gap-2">
 			<legend class="text-base text-ink">Name</legend>
-			<div class="flex flex-wrap gap-2">
-				<Chip type="radio" name={id} value="1" checked>
-					Blue Bottle Coffee
-				</Chip>
-				<Chip type="radio" name={id} value="2">
-					Blue Bottle
-				</Chip>
-				<Chip type="radio" name={id} value="3">
-					Blue Bottle Cafe
-				</Chip>
-				<Chip type="radio" name={id} value="tidied">
-					Keep “Blue bottle cof”
-				</Chip>
-			</div>
+			{source ? (
+				<>
+					<div class="flex flex-col gap-1">
+						<div class="flex flex-wrap gap-2">{suggested}</div>
+						{source}
+					</div>
+					<div class="flex flex-wrap gap-2 pt-1">{tidied}</div>
+				</>
+			) : (
+				<div class="flex flex-wrap gap-2">
+					{suggested}
+					{tidied}
+				</div>
+			)}
 			<TextInput id={`${id}-own`} label="Or your own" surface="paper" />
 			<p class="text-sm text-muted">
-				For all 9 transactions from this merchant.
+				For all {count} transactions from this merchant.
 			</p>
 		</fieldset>
 	);
 }
 
+/** The edit panel over a list: the bank's text and the amount, the name's part as `children`, Cancel and Save. */
+export function NamesPanel({
+	behind,
+	children,
+}: {
+	behind: Child;
+	children?: Child;
+}) {
+	return (
+		<Sheet behind={behind}>
+			<div>
+				<p class="text-sm text-muted">SQ *BLUE BOTTLE COF 0412</p>
+				<p class="font-serif text-4xl font-semibold">−$6.50</p>
+			</div>
+			{children}
+			<div class="grid grid-cols-2 gap-3">
+				<Button kind="secondary" type="button" class="w-full">
+					Cancel
+				</Button>
+				<Button type="button" class="w-full">
+					Save
+				</Button>
+			</div>
+		</Sheet>
+	);
+}
+
 /** Both: the edit panel's name choice. */
 const namesPanel = (
-	<Sheet behind={namesInList}>
-		<div>
-			<p class="text-sm text-muted">SQ *BLUE BOTTLE COF 0412</p>
-			<p class="font-serif text-4xl font-semibold">−$6.50</p>
-		</div>
+	<NamesPanel behind={namesInList}>
 		<NameChoices id="p29-panel" />
-		<div class="grid grid-cols-2 gap-3">
-			<Button kind="secondary" type="button" class="w-full">
-				Cancel
-			</Button>
-			<Button type="button" class="w-full">
-				Save
-			</Button>
-		</div>
-	</Sheet>
+	</NamesPanel>
 );
 
 /** Both: when there's time, a Band on Settings leads to one merchant at a time, like Organize. */
@@ -1164,25 +1211,44 @@ const categoryInline = (
 // ---------------------------------------------------------------------------------------------
 // P32: category suggestions where people already are (the owner's ask on P29).
 
-/** A row needing a category, with Jev's best guess (below its threshold) or a new category on its caption line. */
-function MaybeRow({
+/**
+ * A row needing a category, with Jev's best guess (below its threshold) or a new category on its
+ * caption line. With a `line` (P89's "what it was", P90 B), the caption runs on after the guess
+ * and wraps instead of being cut off, so the row grows past 64px when it needs to.
+ */
+export function MaybeRow({
 	name,
 	cents,
 	maybe,
+	line,
 }: {
 	name: string;
 	cents: number;
 	maybe?: string;
+	line?: string;
 }) {
 	return (
-		<li class="flex h-16 items-center gap-4">
+		<li
+			class={
+				maybe && line
+					? "flex min-h-16 items-center gap-4 py-2"
+					: "flex h-16 items-center gap-4"
+			}
+		>
 			<span class="shrink-0 text-muted">
 				<Icon name="circle-dashed" class="size-7" />
 			</span>
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg leading-6">{name}</span>
 				<span class="flex min-w-0 items-center gap-2 leading-6">
-					{maybe ? (
+					{maybe && line ? (
+						<span class="min-w-0 text-sm leading-6">
+							<span class="rounded-control border border-dashed border-ink px-2 text-ink">
+								Maybe {maybe}
+							</span>
+							<span class="text-muted"> · {line}</span>
+						</span>
+					) : maybe ? (
 						<span class="truncate rounded-control border border-dashed border-ink px-2 text-sm text-ink">
 							Maybe {maybe}
 						</span>
@@ -1558,9 +1624,10 @@ export function Phase4Proposals() {
 					this one so far, dashed (the owner's pick); it isn't judged against
 					its budget until it's over.
 				</Fixed>
-				<NeedsLine>
-					the sentences in D and E are worked out by code, not AI: "under budget
-					N months running" (3 or more) and "up N months in a row" (3 or more).
+				<NeedsLine settled="decision 64">
+					“Going well” is categories under budget 3 or more months running, and
+					“Worth a look” is categories up 3 or more months running. Code writes
+					the sentences, not AI.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1614,9 +1681,10 @@ export function Phase4Proposals() {
 					isn't a status, so it stays ink (green and brick mean on track and
 					over budget).
 				</Fixed>
-				<NeedsLine>
-					what "last month" is while this one isn't over (drawn: the same days,
-					Oct 1–5 against Sep 1–5, so early in a month doesn't always look low).
+				<NeedsLine settled="decision 64">
+					While this month isn't over, it is compared with the same days last
+					month (as drawn, Oct 1–5 against Sep 1–5), in a sentence such as “$90
+					less than by this time in September”.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1650,8 +1718,10 @@ export function Phase4Proposals() {
 					Cash account and disconnected banks (decision 60, §8.1). It's drawn
 					from balance_history, one balance per account per day (§5).
 				</Fixed>
-				<NeedsLine>
-					how far back it goes (drawn: 6 months, like Trends).
+				<NeedsLine settled="decision 64">
+					It goes back 6 months: a line through the last 6 months of net worth,
+					the 6 including this one so far. Before two days of balances, the
+					space says when the chart starts.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1721,7 +1791,10 @@ export function Phase4Proposals() {
 					added it, when, and a note. Uploading is a plain form post, so it
 					needs no script.
 				</Fixed>
-				<NeedsLine>the largest file allowed (drawn: 10 MB).</NeedsLine>
+				<NeedsLine settled="decision 64">
+					PDFs go up to 10 MB. Documents isn't being built now: decision 66
+					moved it to the Later list with receipts.
+				</NeedsLine>
 				<Options
 					options={[
 						{
@@ -1785,10 +1858,11 @@ export function Phase4Proposals() {
 					merchant, and a person's own name always wins. Nothing is renamed
 					without a tap.
 				</Fixed>
-				<NeedsLine>
-					up to three suggested names per merchant (§5 has room for one), and a
-					suggestion showing in the list before anyone accepts it (§7 says
-					Settings only).
+				<NeedsLine settled="decision 64">
+					Tally suggests up to three names per merchant (§5). Until a person
+					chooses, the first one shows in the list in place of the tidied name
+					with a dashed underline; the person chooses one, keeps the tidied name
+					or types their own, from the edit panel or the Settings review (§7).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1838,12 +1912,11 @@ export function Phase4Proposals() {
 					nothing is created without a person (§7). A new category gets the tag
 					icon and the next color, and Jev offers it from then on.
 				</Fixed>
-				<NeedsLine>
-					each transaction is ticked to go in the new category (a person's
-					choice); an unticked one is asked about again right away, after the
-					page has answered, not overnight (§7 runs Jev only nightly), with its
-					note if one is added (Jev isn't told the note today). Product words
-					never name Jev; it's "Tally".
+				<NeedsLine settled="decision 64">
+					The suggested category lists its transactions, each ticked to go in as
+					a person's own pick. An unticked one can get a note and is asked about
+					again right away, after the page has answered rather than overnight,
+					and Jev is told the note. Screens never name Jev: it's “Tally”.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1877,9 +1950,10 @@ export function Phase4Proposals() {
 					threshold (§7, #49), so showing it needs no new AI call. Rows stay one
 					link to their panel, so the choice is made in the panel.
 				</Fixed>
-				<NeedsLine>
-					a guess below the threshold shows as a suggestion, never applied
-					without a tap.
+				<NeedsLine settled="decision 64">
+					A pick below the threshold shows as a dashed “Maybe …” tag on the row,
+					never applied without a tap. The edit panel puts that category first,
+					marked Suggested, with “Tally's guess · N% sure”.
 				</NeedsLine>
 				<Options
 					options={[

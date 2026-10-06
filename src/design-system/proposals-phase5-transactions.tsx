@@ -23,46 +23,60 @@ import { netWorthViewEnding } from "./mock";
 import { Fixed, Options } from "./proposal-parts";
 import { Specimen } from "./specimen";
 
-/** A rule the spec still needs before the feature is built. */
-function NeedsLine({ children }: { children?: Child }) {
+/**
+ * A rule the spec still needs before the feature is built, or, once the owner has answered it,
+ * the rule as settled and the decision that settled it (`settled`), so a picked drawing never
+ * shows an answered question as open.
+ */
+export function NeedsLine({
+	children,
+	settled,
+}: {
+	children?: Child;
+	settled?: string;
+}) {
 	return (
 		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
+			<span class="font-medium">
+				{settled
+					? `Rule settled (${settled}): `
+					: "Rule to write before building: "}
+			</span>
 			{children}
 		</p>
 	);
 }
 
-const TODAY = "2026-10-05";
-const CARD = "Chase Card ••9921";
+export const TODAY = "2026-10-05";
+export const CARD = "Chase Card ••9921";
 
 // ---------------------------------------------------------------------------------------------
 // Sample data, in the demo's style: October, five days in.
 
-type Cat = { name: string; icon: string; color: string };
-const GROCERIES: Cat = {
+export type Cat = { name: string; icon: string; color: string };
+export const GROCERIES: Cat = {
 	name: "Groceries",
 	icon: "groceries",
 	color: "cat-blue",
 };
-const EATING_OUT: Cat = {
+export const EATING_OUT: Cat = {
 	name: "Eating Out",
 	icon: "eating-out",
 	color: "cat-plum",
 };
-const KIDS: Cat = { name: "Kids", icon: "kids", color: "cat-ochre" };
-const GAS: Cat = { name: "Gas", icon: "gas", color: "cat-slate" };
-const HOUSEHOLD: Cat = {
+export const KIDS: Cat = { name: "Kids", icon: "kids", color: "cat-ochre" };
+export const GAS: Cat = { name: "Gas", icon: "gas", color: "cat-slate" };
+export const HOUSEHOLD: Cat = {
 	name: "Household",
 	icon: "household",
 	color: "cat-brown",
 };
-const FIVE = [GROCERIES, EATING_OUT, KIDS, GAS, HOUSEHOLD];
-const FOUR = [GROCERIES, EATING_OUT, KIDS, HOUSEHOLD];
-const THREE = [GROCERIES, EATING_OUT, HOUSEHOLD];
+export const FIVE = [GROCERIES, EATING_OUT, KIDS, GAS, HOUSEHOLD];
+export const FOUR = [GROCERIES, EATING_OUT, KIDS, HOUSEHOLD];
+export const THREE = [GROCERIES, EATING_OUT, HOUSEHOLD];
 
 /** A list row as the app loads it; amounts are Plaid's way round (positive is money out). */
-function tx(
+export function tx(
 	id: number,
 	date: string,
 	name: string,
@@ -88,12 +102,24 @@ function tx(
 	};
 }
 
-const BLUE_BOTTLE = tx(1, "2026-10-05", "Blue Bottle Coffee", 650, EATING_OUT);
-const TRADER_JOES = tx(2, "2026-10-04", "Trader Joe's", 8217, GROCERIES);
-const LUPITAS = tx(3, "2026-10-04", "Lupita's Taqueria", 4290, EATING_OUT);
-const COSTCO = tx(4, "2026-10-03", "Costco", 14260, GROCERIES);
-const AMAZON = tx(5, "2026-10-02", "Amazon", 4217, HOUSEHOLD);
-const SHELL = tx(6, "2026-10-02", "Shell", 4410, GAS);
+export const BLUE_BOTTLE = tx(
+	1,
+	"2026-10-05",
+	"Blue Bottle Coffee",
+	650,
+	EATING_OUT,
+);
+export const TRADER_JOES = tx(2, "2026-10-04", "Trader Joe's", 8217, GROCERIES);
+export const LUPITAS = tx(
+	3,
+	"2026-10-04",
+	"Lupita's Taqueria",
+	4290,
+	EATING_OUT,
+);
+export const COSTCO = tx(4, "2026-10-03", "Costco", 14260, GROCERIES);
+export const AMAZON = tx(5, "2026-10-02", "Amazon", 4217, HOUSEHOLD);
+export const SHELL = tx(6, "2026-10-02", "Shell", 4410, GAS);
 const PAYROLL = tx(7, "2026-10-01", "Acme Payroll", -245000, undefined, {
 	income: true,
 });
@@ -126,7 +152,7 @@ const withNote = (id: number, date: string, cents: number, note?: string) =>
 type DaysProps = { rows: ListRow[]; select?: boolean; checked?: number[] };
 
 /** Rows grouped under their day, as the list does; in Select mode each row has its round tick. */
-function Days({ rows, select, checked }: DaysProps) {
+export function Days({ rows, select, checked }: DaysProps) {
 	const days: [string, ListRow[]][] = [];
 	for (const row of rows) {
 		const last = days.at(-1);
@@ -156,9 +182,9 @@ function Days({ rows, select, checked }: DaysProps) {
 	);
 }
 
-const TITLE = "font-serif text-5xl font-semibold tracking-tight";
+export const TITLE = "font-serif text-5xl font-semibold tracking-tight";
 
-function TxHeader() {
+export function TxHeader() {
 	return (
 		<>
 			<div class="flex items-center justify-between gap-3">
@@ -176,12 +202,18 @@ function TxHeader() {
 	);
 }
 
-type SearchProps = { id: string; q: string; hint?: string };
+type SearchProps = {
+	id: string;
+	q: string;
+	hint?: string;
+	/** What it searches, in the words of its label and placeholder. */
+	what?: string;
+};
 
 /** The search box, as the page draws it; a hint, when given, sits under it. */
-function Search({ id, q, hint }: SearchProps) {
+export function Search({ id, q, hint, what = "transactions" }: SearchProps) {
 	return (
-		<FormField id={id} label="Search transactions" hideLabel hint={hint}>
+		<FormField id={id} label={`Search ${what}`} hideLabel hint={hint}>
 			{(a11y) => (
 				<div class="relative">
 					<span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
@@ -192,7 +224,7 @@ function Search({ id, q, hint }: SearchProps) {
 						name="q"
 						type="search"
 						value={q}
-						placeholder="Search transactions"
+						placeholder={`Search ${what}`}
 						autocomplete="off"
 						class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
 						{...a11y}
@@ -306,12 +338,28 @@ function Transactions(props: TxProps) {
 // The edit panel. The real BottomSheet grows to 90% of the screen, so this one is drawn as tall as
 // its content, with the list dimmed above it; the sheet scrolls, so a long panel is cropped here.
 
-function PanelSheet({ children }: { children?: Child }) {
+export function PanelSheet({
+	behind,
+	tall,
+	children,
+}: {
+	/** The page above the panel, when it isn't the list's top. */
+	behind?: Child;
+	/** For a panel that doesn't fit in 686px: draw it on a tall phone (the option's `tall`), 766px. */
+	tall?: boolean;
+	children?: Child;
+}) {
 	return (
-		<div class="relative -mx-5 h-[686px] overflow-hidden">
+		<div
+			class={`relative -mx-5 ${tall ? "h-[766px]" : "h-[686px]"} overflow-hidden`}
+		>
 			<div class="px-5">
-				<TxHeader />
-				<Days rows={[BLUE_BOTTLE, TRADER_JOES, COSTCO]} />
+				{behind ?? (
+					<>
+						<TxHeader />
+						<Days rows={[BLUE_BOTTLE, TRADER_JOES, COSTCO]} />
+					</>
+				)}
 			</div>
 			<div class="absolute inset-0 bg-ink/30" />
 			<div class="absolute inset-x-0 bottom-0 flex max-h-full flex-col gap-3 overflow-y-auto rounded-t-sheet bg-paper p-5">
@@ -321,10 +369,16 @@ function PanelSheet({ children }: { children?: Child }) {
 	);
 }
 
-type TopProps = { row: ListRow; raw?: string; account: string };
+type TopProps = {
+	row: ListRow;
+	raw?: string;
+	account: string;
+	/** After the account on the day line (P79 C's "Paid the Rent bill"). */
+	lineEnd?: Child;
+};
 
 /** The panel's top: the bank's text when it differs, the name, the amount, the day and account. */
-function PanelTop({ row, raw, account }: TopProps) {
+export function PanelTop({ row, raw, account, lineEnd }: TopProps) {
 	return (
 		<div>
 			{raw && <p class="text-sm text-muted">{raw}</p>}
@@ -336,13 +390,14 @@ function PanelTop({ row, raw, account }: TopProps) {
 			</p>
 			<p class="text-muted">
 				{dayLabel(row.date, TODAY)} · {account}
+				{lineEnd}
 			</p>
 		</div>
 	);
 }
 
 /** The panel's form part, under its rule. */
-function PanelForm({ children }: { children?: Child }) {
+export function PanelForm({ children }: { children?: Child }) {
 	return (
 		<div class="flex flex-col gap-4 border-t border-rule pt-4">{children}</div>
 	);
@@ -352,29 +407,77 @@ type CatsProps = {
 	p: string;
 	cats: Cat[];
 	selected?: string;
+	/** Tally's guess: the first chip, dashed and marked Suggested until a person picks (P32 A). */
+	maybe?: Cat;
 	/** Goes last in the chip row (P67's New category). */
 	end?: Child;
+	/** Beside the "Category" label (P79 E's Why?). */
+	labelEnd?: Child;
+	/** After the chosen chip's name, while it's chosen (P79 D's "from the bill"). */
+	selectedEnd?: Child;
 	/** Lines under the chips. */
 	children?: Child;
 };
 
 /** The category chips (the app shows every category; the pictures show a few). */
-function Categories({ p, cats, selected, end, children }: CatsProps) {
+export function Categories({
+	p,
+	cats,
+	selected,
+	maybe,
+	end,
+	labelEnd,
+	selectedEnd,
+	children,
+}: CatsProps) {
 	return (
-		<fieldset class="flex flex-col gap-2">
-			<legend class="text-base text-ink">Category</legend>
+		<fieldset
+			class="flex flex-col gap-2"
+			aria-labelledby={labelEnd ? `${p}-cat-label` : undefined}
+		>
+			{labelEnd ? (
+				<div class="flex items-center gap-2">
+					<p id={`${p}-cat-label`} class="text-base text-ink">
+						Category
+					</p>
+					{labelEnd}
+				</div>
+			) : (
+				<legend class="text-base text-ink">Category</legend>
+			)}
 			<div class="flex flex-wrap gap-2">
-				{cats.map((c) => (
-					<Chip
-						type="radio"
-						name={`${p}-cat`}
-						value={c.name}
-						checked={c.name === selected}
-						icon={<CategoryIcon icon={c.icon} color={c.color} />}
-					>
-						{c.name}
-					</Chip>
-				))}
+				{maybe && (
+					<span class="rounded-full border border-dashed border-ink">
+						<Chip
+							type="radio"
+							name={`${p}-cat`}
+							value={maybe.name}
+							icon={<CategoryIcon icon={maybe.icon} color={maybe.color} />}
+						>
+							{maybe.name} · Suggested
+						</Chip>
+					</span>
+				)}
+				{cats
+					.filter((c) => c.name !== maybe?.name)
+					.map((c) => (
+						<Chip
+							type="radio"
+							name={`${p}-cat`}
+							value={c.name}
+							checked={c.name === selected}
+							icon={<CategoryIcon icon={c.icon} color={c.color} />}
+						>
+							{selectedEnd && c.name === selected ? (
+								<span class="inline-flex items-center gap-1.5">
+									{c.name}
+									{selectedEnd}
+								</span>
+							) : (
+								c.name
+							)}
+						</Chip>
+					))}
 				{end}
 			</div>
 			{children}
@@ -385,7 +488,7 @@ function Categories({ p, cats, selected, end, children }: CatsProps) {
 type TogglesProps = { p: string; always?: boolean; dashed?: boolean };
 
 /** The two toggle chips; the merchant one can be dashed, P32's "not decided yet" look. */
-function Toggles({ p, always, dashed }: TogglesProps) {
+export function Toggles({ p, always, dashed }: TogglesProps) {
 	const chip = (
 		<Chip type="checkbox" name={`${p}-always`} value="1" checked={always}>
 			Always for this merchant
@@ -406,7 +509,7 @@ function Toggles({ p, always, dashed }: TogglesProps) {
 }
 
 /** Cancel and Save, as the panel ends. */
-const actions = (
+export const actions = (
 	<div class="grid grid-cols-2 gap-3">
 		<Button kind="secondary" type="button" class="w-full">
 			Cancel
@@ -477,30 +580,52 @@ const ruleDashed = (
 	/>
 );
 
-/** B: the third save keeps the panel open with one question. */
-const ruleQuestion = (
-	<PanelSheet>
-		<p role="status" class="flex items-center gap-2 text-muted">
-			<Icon name="check" class="size-5" />
-			Saved as Groceries
-		</p>
-		<h2 class="font-serif text-4xl font-semibold tracking-tight">
-			Always use Groceries for Costco?
-		</h2>
-		<p>
-			You've picked Groceries for Costco 3 times. Say yes and Tally sorts the
-			next one for you.
-		</p>
-		<div class="grid grid-cols-2 gap-3">
-			<Button kind="secondary" type="button" class="w-full">
-				Not now
-			</Button>
-			<Button type="button" class="w-full">
-				Yes
-			</Button>
-		</div>
-	</PanelSheet>
-);
+type RuleQuestionProps = {
+	/** What the save just did, in the quiet line at the top. */
+	saved?: string;
+	/** The one question, in the serif. */
+	question?: string;
+	/** What the question rests on, one plain line. */
+	evidence?: string;
+	/** The secondary answer and the primary one. */
+	no?: string;
+	yes?: string;
+};
+
+/**
+ * B: the third save keeps the panel open with one question. P90 C asks a different question in
+ * the same place, so its words are props; the defaults are P62 B's.
+ */
+export function RuleQuestion({
+	saved = "Saved as Groceries",
+	question = "Always use Groceries for Costco?",
+	evidence = "You've picked Groceries for Costco 3 times. Say yes and Tally sorts the next one for you.",
+	no = "Not now",
+	yes = "Yes",
+}: RuleQuestionProps) {
+	return (
+		<PanelSheet>
+			<p role="status" class="flex items-center gap-2 text-muted">
+				<Icon name="check" class="size-5" />
+				{saved}
+			</p>
+			<h2 class="font-serif text-4xl font-semibold tracking-tight">
+				{question}
+			</h2>
+			<p>{evidence}</p>
+			<div class="grid grid-cols-2 gap-3">
+				<Button kind="secondary" type="button" class="w-full">
+					{no}
+				</Button>
+				<Button type="button" class="w-full">
+					{yes}
+				</Button>
+			</div>
+		</PanelSheet>
+	);
+}
+
+const ruleQuestion = <RuleQuestion />;
 
 /** C: one item on the review screen, as P42 A asks it: the dashed "Maybe …" is the question. */
 const ruleReview = (
@@ -796,12 +921,47 @@ const renameNote = (
 // ---------------------------------------------------------------------------------------------
 // P69: see and remove merchant rules.
 
-const RULES: [string, Cat, number][] = [
+export const RULES: [string, Cat, number][] = [
 	["Costco", GROCERIES, 23],
 	["Shell", GAS, 31],
 	["Trader Joe's", GROCERIES, 18],
 	["Blue Bottle Coffee", EATING_OUT, 14],
 ];
+
+/** The merchant rules as rows, each ending in a terracotta Remove (P88 draws them beside its own). */
+export function RuleRows({
+	rules = RULES,
+}: {
+	rules?: [string, Cat, number][];
+}) {
+	return (
+		<ul class="mt-3 divide-y divide-rule border-y border-rule">
+			{rules.map(([merchant, cat, n]) => (
+				<li class="flex min-h-16 items-center gap-4 py-2">
+					<CategoryIcon icon={cat.icon} color={cat.color} />
+					<span class="min-w-0 flex-1">
+						{/* No truncation: it would cut off the category, the point of the row. The arrow and
+						    category stay together, so a long merchant name wraps before them. */}
+						<span class="block text-lg leading-6">
+							{merchant}{" "}
+							<span class="whitespace-nowrap">
+								<span aria-hidden="true">→ </span>
+								<span class="sr-only">is always </span>
+								{cat.name}
+							</span>
+						</span>
+						<span class="block leading-6 text-muted">
+							Always {cat.name} · {n} transactions
+						</span>
+					</span>
+					<Button kind="text" type="button">
+						Remove<span class="sr-only"> {merchant}</span>
+					</Button>
+				</li>
+			))}
+		</ul>
+	);
+}
 
 /**
  * A: the section, drawn first on Settings so it fits; each row ends in a terracotta Remove. It's
@@ -815,31 +975,7 @@ const rulesList = (
 				Always for these merchants
 			</h2>
 			<p class="mt-1 text-muted">Tally sorts these merchants for you.</p>
-			<ul class="mt-3 divide-y divide-rule border-y border-rule">
-				{RULES.map(([merchant, cat, n]) => (
-					<li class="flex min-h-16 items-center gap-4 py-2">
-						<CategoryIcon icon={cat.icon} color={cat.color} />
-						<span class="min-w-0 flex-1">
-							{/* No truncation: it would cut off the category, the point of the row. The arrow and
-						    category stay together, so a long merchant name wraps before them. */}
-							<span class="block text-lg leading-6">
-								{merchant}{" "}
-								<span class="whitespace-nowrap">
-									<span aria-hidden="true">→ </span>
-									<span class="sr-only">is always </span>
-									{cat.name}
-								</span>
-							</span>
-							<span class="block leading-6 text-muted">
-								Always {cat.name} · {n} transactions
-							</span>
-						</span>
-						<Button kind="text" type="button">
-							Remove<span class="sr-only"> {merchant}</span>
-						</Button>
-					</li>
-				))}
-			</ul>
+			<RuleRows />
 		</section>
 	</>
 );
@@ -863,10 +999,18 @@ type SelectProps = {
 	checked: number[];
 	aboveList?: Child;
 	bar: Child;
+	/** The result count above the list; P70's is September's. */
+	count?: string;
 };
 
 /** Select mode, scrolled past its filters: the title, the count, the rows, and the action bar. */
-function SelectScreen({ rows, checked, aboveList, bar }: SelectProps) {
+export function SelectScreen({
+	rows,
+	checked,
+	aboveList,
+	bar,
+	count = "Showing 1–25 of 112 transactions in September",
+}: SelectProps) {
 	return (
 		<div class="relative -mx-5 h-[684px] overflow-hidden">
 			<div class="px-5">
@@ -877,9 +1021,7 @@ function SelectScreen({ rows, checked, aboveList, bar }: SelectProps) {
 					</Button>
 				</div>
 				<p class="mt-2 text-sm text-muted">Tap rows to select them.</p>
-				<p class="mt-4 text-sm text-muted">
-					Showing 1–25 of 112 transactions in September
-				</p>
+				<p class="mt-4 text-sm text-muted">{count}</p>
 				{aboveList}
 				<div class="mt-2">
 					<Days rows={rows} select checked={checked} />
@@ -902,7 +1044,7 @@ const sept = (base: number) => [
 	tx(base + 6, "2026-09-28", "Chewy", 6412),
 ];
 
-const barButtons = (
+export const barButtons = (
 	<>
 		<Button kind="secondary" type="button" class="px-3">
 			Set category
@@ -914,7 +1056,13 @@ const barButtons = (
 );
 
 /** A: the bar's new line beside the count; it offers the page, then (once ticked) the whole month. */
-function SelectBar({ selected, link }: { selected: number; link: string }) {
+export function SelectBar({
+	selected,
+	link,
+}: {
+	selected: number;
+	link: string;
+}) {
 	return (
 		<div class="flex flex-col gap-1">
 			<div class="flex items-center justify-between gap-2">
@@ -1053,10 +1201,13 @@ export function Phase5TransactionsProposals() {
 					(§8.6); a rule offer isn't on that list, so whether it joins is part
 					of this pick.
 				</Fixed>
-				<NeedsLine>
-					when Tally asks and stops. Proposed: three picks of one category in a
-					row for one merchant; never for a merchant that has a rule; after Not
-					now, again only after 3 more.
+				<NeedsLine settled="decisions 74, 79 and 80">
+					The offer comes on the third save of one category for one merchant,
+					and on every matching save after, until the merchant has a rule; Not
+					now only skips that one. Only transactions a person put in that
+					category for that merchant count, from any screen, counted from the
+					transactions themselves, not “in a row”. A store whose trips a person
+					has put in two or more categories gets no offer.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1138,11 +1289,13 @@ export function Phase5TransactionsProposals() {
 					Excluded filter shows only excluded transactions (§8).
 				</Fixed>
 				<NeedsLine>
-					what each type holds. Proposed: Spending is counted and not income;
-					Income is flagged income; Refunds is money in linked to a purchase;
-					Excluded is left out of the budget, where transfers and card payments
-					go. Open: a refund nobody linked has no type of its own; it could stay
-					under Spending, or Refunds could hold every credit that isn't income.
+					what Spending, Income and Excluded each hold (proposed: Spending is
+					counted and not income; Income is flagged income; Excluded is left out
+					of the budget, where transfers and card payments go). Already settled
+					(decisions 74 and 79): the Show choice for type has all, spending,
+					income, refunds and excluded, and replaces the Excluded filter;
+					Refunds holds money in that isn't income or a transfer, so money in
+					that nothing explains lands there.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1177,9 +1330,12 @@ export function Phase5TransactionsProposals() {
 					integer cents (§5).
 				</Fixed>
 				<NeedsLine>
-					what a search matches. Proposed: a word also matches a category's
-					name; a number, with or without $, matches an amount: “42.17” only
-					$42.17, “$42” anything from $42.00 to $42.99.
+					whether a whole number typed without $ (“42”) also matches $42.00 to
+					$42.99 (proposed: yes, with or without $). Already settled (decisions
+					74 and 79): a word also matches a category's name; “$42” finds
+					anything from $42.00 to $42.99, and the count says what matched; and a
+					number matches an amount, money out and money in alike (“42.17” finds
+					a $42.17 purchase and a $42.17 refund).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1215,9 +1371,10 @@ export function Phase5TransactionsProposals() {
 					count).
 				</Fixed>
 				<NeedsLine>
-					what the month choice does while a search is typed. Proposed: it moves
-					to All months; picking a month, or Only October, narrows; clearing the
-					search returns to this month.
+					what picking a month does, and what clearing the search does, while a
+					search is typed (proposed: picking a month narrows it; clearing the
+					search returns to this month). Already settled (decision 74): a search
+					looks in every month, with an “Only October” link to narrow.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1292,9 +1449,11 @@ export function Phase5TransactionsProposals() {
 					own rename always wins over a suggested or tidied name.
 				</Fixed>
 				<NeedsLine>
-					a name kept on one transaction, winning over the merchant's, and which
-					choice starts ticked. Proposed: This one only (today's behavior is
-					All). Search matches both names; the bank's text stays.
+					which choice starts ticked (proposed: This one only; today's behavior
+					is All) and whether search matches both names. Already settled
+					(decisions 74 and 79): a name kept on one transaction is its own_name,
+					shown in place of its merchant's name and on its split's parts; the
+					merchant's name and the bank's text stay as they are.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1330,13 +1489,15 @@ export function Phase5TransactionsProposals() {
 					rule on an archived category is skipped until it's restored (§7).
 				</Fixed>
 				<NeedsLine>
-					what the toggle means once it tells the truth, and how the list
-					behaves. Proposed: ticked means the rule is the category chosen above;
-					unticked and saved removes it; removing a rule never changes a
-					transaction already sorted. For the list: with no rules an EmptyState
-					says so; a rule on an archived category says it is paused; and since
-					Organize makes a rule for every merchant it sorts (§8.1), a long list
-					needs a way to find one.
+					what saving the toggle unticked does (proposed: it removes the rule),
+					that removing a rule never changes a transaction already sorted, what
+					the EmptyState says when there are no rules and how the list marks a
+					rule on an archived category (proposed: paused). Already settled
+					(decisions 54, 79 and 80, and DESIGN.md's empty-list rule): an empty
+					list is an EmptyState; in the edit panel the toggle is ticked when the
+					chosen category is the rule's and unticked when it isn't, and ticking
+					it makes the new category the rule; the list is A to Z, with a search
+					box once there are more than 20.
 				</NeedsLine>
 				<Options
 					options={[
@@ -1373,9 +1534,12 @@ export function Phase5TransactionsProposals() {
 				</Fixed>
 				<NeedsLine>
 					how “all 112” is applied. Bulk actions take at most 100 rows today (D1
-					binds 100 values), so it would send the filters, not ids: the server
-					changes everything they match at that moment, skips split parents, and
-					says how many.
+					binds 100 values), so it would send the filters and the ids of any
+					rows the person unticked afterward, not every selected id: the server
+					changes everything the filters match at that moment except those
+					unticked rows, skips split parents, and says how many. Already settled
+					(decisions 79 and 80): unticking a row after Select all leaves the
+					rest selected (“111 selected”).
 				</NeedsLine>
 				<Options
 					options={[
@@ -1416,9 +1580,15 @@ export function Phase5TransactionsProposals() {
 					person (§8.4).
 				</Fixed>
 				<NeedsLine>
-					what a changed cash entry does to what's attached. Proposed: a new
-					amount removes its split, as a bank's change does (decision 62); a
-					date can't be in the future; it counts in its new date's month.
+					whether a date can be in the future (proposed: it can't be). Already
+					settled (decisions 58, 60 and 79, and §6): a changed entry counts in
+					its new date's month, or, while it is linked, in the month of the
+					earlier bill occurrence it pays or of the purchase it refunds; a split
+					cash entry's new date moves to its parts, and a new amount that no
+					longer matches its parts can't be saved until the parts are corrected,
+					so the split is never reset. Its links (a bill payment, a refund) are
+					kept: a new date keeps them, and a new amount is checked by the same
+					guards as linking and refused with a field error if it breaks one.
 				</NeedsLine>
 				<Options
 					options={[

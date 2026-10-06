@@ -25,7 +25,6 @@
 // (half its height is 1.375rem) is close to a pill. That is a different proposal, rounder
 // controls, and it would need a new token or a new use of one. It is not a choice of corner shape.
 
-import type { Child } from "hono/jsx";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { Button } from "../views/button";
@@ -34,17 +33,8 @@ import { Chip } from "../views/chip";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before the feature is built. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 type Look = "today" | "a" | "b";
 
@@ -255,11 +245,12 @@ export function P75() {
 				radii are the two tokens (rounded-control, rounded-sheet) and no shadows
 				(DESIGN.md); the CSP allows no inline styles.
 			</Fixed>
-			<NeedsLine>
-				it's Chrome and Edge only today: Safari (iPhones) and Firefox show
-				today's corners, so nothing breaks. If picked, it would be one rule in
-				app.css applying corner-shape to every rounded-control and
-				rounded-sheet, plus a DESIGN.md token note.
+			<NeedsLine settled="decisions 76 and 79">
+				It's Chrome and Edge only today: Safari (iPhones) and Firefox keep
+				today's round corners until they support it, so nothing breaks. One rule
+				in app.css sets corner-shape: squircle on the two radius tokens, so
+				buttons, fields and the sheet are squircles and chips stay pills. The
+				money input's corners join the rule when #80 settles them.
 			</NeedsLine>
 			<p class="max-w-prose text-sm text-muted">
 				To see the difference, open this page in Chrome or Edge. In Safari or

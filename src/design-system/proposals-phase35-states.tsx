@@ -16,17 +16,8 @@ import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
 import { TextInput } from "../views/text-input";
 import { Fixed, Options, Sheet } from "./proposal-parts";
+import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
-
-/** A rule the spec still needs before the feature is built: open, not fixed. */
-function NeedsLine({ children }: { children?: Child }) {
-	return (
-		<p class="max-w-prose text-sm">
-			<span class="font-medium">Rule to write before building: </span>
-			{children}
-		</p>
-	);
-}
 
 // ---------------------------------------------------------------------------------------------
 // P38: a failed save, drawn on the budget sheet over Home.
@@ -540,13 +531,14 @@ export function Phase35StatesProposals() {
 				<Fixed>
 					a failed htmx request shows “{COULDNT_SAVE}” in role="alert" (§8.5).
 				</Fixed>
-				<NeedsLine>
-					any failed request (a dropped connection or an error reply) raises the
-					existing toast event with type "error" and these words, and leaves the
-					page as it is, so an open sheet keeps what was typed and Save comes
-					back to rest. For A or C, toast.js also draws the alert icon, and the
-					toast region goes above an open sheet: today it has no z-index and the
-					sheet is z-50, so the toast would sit behind it.
+				<NeedsLine settled="decision 72">
+					A failed request (a dropped connection or a 500 reply) raises an error
+					toast with the alert icon, “Couldn't save. Check your connection and
+					try again.” (“Couldn't load. Check your connection and try again.” for
+					a GET), and leaves the page as it is, so an open sheet keeps what was
+					typed and Save comes back to rest. The toast region sits above the
+					sheet (z-60 over the sheet's z-50) and lets taps through, so Save can
+					be tapped again.
 				</NeedsLine>
 				<Options
 					options={[
@@ -584,10 +576,14 @@ export function Phase35StatesProposals() {
 				sentence="The page for a link that goes nowhere, and the page for a mistake on Tally's side. Pick their look."
 			>
 				<Fixed>the app has its own 404 and 500 pages (§8.5).</Fixed>
-				<NeedsLine>
-					both are drawn inside the Layout, so the navigation and the Feedback
-					button are there and you're never stuck; the 500 page shows nothing
-					technical; Try again loads the same address.
+				<NeedsLine settled="decision 72">
+					Both pages are drawn inside the Layout, so the navigation is there and
+					nobody is stuck, and the 500 page never shows what failed (no message,
+					code or request detail). Try again retries a failed GET on its own
+					address; a failed form post goes back to the page the form was on (the
+					Referer's path and query, only when it is this site's, never one that
+					starts with {"“//”"}), and with no such page there is no Try again and
+					“Go to Home” is the one secondary button.
 				</NeedsLine>
 				<Options
 					options={[
@@ -640,14 +636,15 @@ export function Phase35StatesProposals() {
 					“Link a bank to see transactions”, not “No transactions match” (§8.5).
 				</Fixed>
 				<NeedsLine>
-					“nothing at all” means no transaction in any month, so a search or
-					filter with no match still says “No transactions match these
-					filters.”; “Link a bank” shows while no bank is linked and
-					“Importing…” once one is. Link a bank is a secondary link to Accounts,
-					not decision 55's primary button, because Plaid Link loads only on
-					Accounts (§10). For “this page shows them when they're in” to be true,
-					the page has to refresh itself while importing; the “few minutes” is
-					to be checked against a real first sync.
+					For “this page shows them when they're in” to be true, the page has to
+					refresh itself while importing, and the “few minutes” is to be checked
+					against a real first sync. Already settled (decision 72): “nothing at
+					all” means no transaction in any month, and a month, search or filter
+					with no results still says “No transactions match these filters.”;
+					“Link a bank to see transactions.” shows while no connected bank is
+					linked, as a secondary link to Accounts, not decision 55's primary
+					button, because Plaid Link loads only on Accounts (§10); and
+					“Importing your transactions…” (no button) shows once one is.
 				</NeedsLine>
 				<Options
 					options={[
@@ -697,12 +694,14 @@ export function Phase35StatesProposals() {
 					share a name (§8.5); the form is in a bottom sheet (§8.2), and invalid
 					input comes back as a field error in role="alert" (§10).
 				</Fixed>
-				<NeedsLine>
-					“over” means more than $100,000.00, so exactly that saves without
-					asking, and editing a bill's amount asks too; the confirmation covers
-					that amount only, so changing it asks again; names match ignoring
-					case, as categories do (§7), and reactivating an inactive bill that
-					would duplicate an active one is refused the same way.
+				<NeedsLine settled="decisions 72 and 80">
+					“Over” means more than $100,000.00, so exactly that saves without
+					asking. Adding or editing an amount over it comes back unsaved until a
+					“Yes, $X is right” chip under the amount's alert is ticked, and the
+					tick covers that exact amount only, so changing the amount asks again.
+					Names are compared ignoring A to Z capitals and spaces around them,
+					and reactivating an inactive bill that would repeat an active one's
+					name is refused the same way.
 				</NeedsLine>
 				<Options
 					options={[
