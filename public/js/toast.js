@@ -82,7 +82,13 @@
 		}
 		document.getElementById("toasts")?.append(toast);
 		if (undo) window.htmx?.process(toast);
-		setTimeout(() => toast.remove(), undo ? 10_000 : DISPLAY_MS);
+		const undoDuration = getComputedStyle(toast).getPropertyValue(
+			"--duration-undo-toast",
+		);
+		setTimeout(
+			() => toast.remove(),
+			undo ? Number.parseFloat(undoDuration) * 1000 : DISPLAY_MS,
+		);
 	});
 
 	document.body.addEventListener("announce", (event) => {
