@@ -2,6 +2,7 @@
 // in, words and geometry out. Nothing here reads a database or draws markup. All money is integer
 // cents, formatted only into the sentences; code writes every sentence, never AI.
 import { type BudgetAmount, budgetForMonth } from "./budget";
+import { MAX_BUDGET_CENTS } from "./budgets/amount";
 import {
 	daysInMonth,
 	monthName,
@@ -22,7 +23,7 @@ export function averageMonthlyCents(months: number[]): number | null {
 	const average = Math.floor(
 		(months.reduce((sum, cents) => sum + cents, 0) * 2 + 3) / 6,
 	);
-	return average > 0 ? average : null;
+	return average > 0 && average <= MAX_BUDGET_CENTS ? average : null;
 }
 
 /** Whether history starts after the 1st of `month`; no history has no partial first month. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BudgetAmount } from "../src/budget";
+import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../src/budgets/amount";
 import {
 	averageMonthlyCents,
 	buildTrends,
@@ -37,6 +38,20 @@ describe("averageMonthlyCents", () => {
 		[[0, 0, 0], null],
 	])("averages three finished months %j in cents", (months, average) => {
 		expect(averageMonthlyCents(months)).toBe(average);
+	});
+
+	it("offers an average just under the budget limit that the field accepts", () => {
+		const average = averageMonthlyCents(Array(3).fill(MAX_BUDGET_CENTS - 1));
+
+		expect(average).toBe(MAX_BUDGET_CENTS - 1);
+		expect(parseBudgetAmount(((average ?? 0) / 100).toFixed(2))).toEqual({
+			ok: true,
+			cents: MAX_BUDGET_CENTS - 1,
+		});
+	});
+
+	it("does not offer an average above the budget limit", () => {
+		expect(averageMonthlyCents(Array(3).fill(MAX_BUDGET_CENTS + 1))).toBeNull();
 	});
 });
 
