@@ -188,6 +188,36 @@ describe("GET /design-system/proposals", () => {
 		expect(p113b).not.toContain("/how-it-works#bills");
 	});
 
+	it("says Resend sends the reconnect email first, with Cloudflare's own as the fallback and nothing to confirm (decision 86)", async () => {
+		const { html } = await get("/design-system/proposals");
+		const section = (id: string) => {
+			const start = html.indexOf(`<section id="${id}"`);
+			expect(start).toBeGreaterThan(-1);
+			const next = html.indexOf('<section id="p', start + 1);
+			return html.slice(start, next === -1 ? undefined : next);
+		};
+		// P107: the old rule, that each address must be verified in Cloudflare Email Routing, is gone.
+		const p107 = section("p107-email-settings");
+		expect(p107).not.toContain("Email Routing");
+		expect(p107).not.toContain("verified in Cloudflare");
+		expect(p107).toContain("nothing to confirm");
+		expect(p107).toContain("decision 86");
+		// P109: Resend is first, through plain fetch, with Cloudflare's email as the fallback.
+		const p109 = section("p109-email");
+		expect(p109).toContain("Resend");
+		expect(p109).toContain("plain fetch");
+		expect(p109).toContain("fallback");
+		expect(p109).toContain("decision 86");
+		// P56 (the older picture) no longer says Cloudflare's email is first.
+		const p56 = section("p56-reconnect-email");
+		expect(p56).not.toContain("with Resend as a fallback");
+		expect(p56).toContain("decision 86");
+		// The decided list says it too.
+		const decided = DECIDED.find((d) => d.title.startsWith("P107–P109"));
+		expect(decided?.outcome).toContain("Resend");
+		expect(decided?.outcome).toContain("decision 86");
+	});
+
 	it("is linked from the catalog", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain('href="/design-system/proposals"');

@@ -2298,11 +2298,11 @@ export function Phase5PicksProposals() {
 					“Bank sign-in emails” is on to start. It goes to everyone who has
 					signed in to Tally in the last 90 days: Tally notes each verified
 					sign-in address the first time it sees it and updates its last_seen_at
-					at each sign-in (household_members, §5). Each address must also be
-					verified in Cloudflare Email Routing. Anyone in the family can remove
-					an address, like the people list (decision 81), so a person who has
-					left stops getting the email; a removed address comes back only if
-					that person signs in again, which needs Cloudflare Access.
+					at each sign-in (household_members, §5). There's nothing to confirm
+					first (decision 86). Anyone in the family can remove an address, like
+					the people list (decision 81), so a person who has left stops getting
+					the email; a removed address comes back only if that person signs in
+					again, which needs Cloudflare Access.
 				</NeedsLine>
 				<Replaces>
 					P56's “Both · Settings” picture (a Reminders section with “Email me”
@@ -2357,7 +2357,9 @@ export function Phase5PicksProposals() {
 			>
 				<Fixed>
 					the email is a Hono JSX template with no new dependency (decision 79),
-					and it never carries amounts, balances or transaction details.
+					sent with Resend through plain fetch, with Cloudflare's own email as
+					the fallback (decision 86, which replaces decision 79's order), and it
+					never carries amounts, balances or transaction details.
 				</Fixed>
 				<NeedsLine settled={DECISION}>
 					The bank, its account endings as chips, the last synced date, one

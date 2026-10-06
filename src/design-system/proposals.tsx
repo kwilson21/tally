@@ -369,7 +369,7 @@ export const DECIDED: readonly {
 	{
 		title: "P107–P109 · The reconnect email",
 		outcome:
-			"One household switch, “Bank sign-in emails”, on to start, to everyone who has signed in within the last 90 days, with each address listed under a plain disclosure with Remove for anyone in the family; sent at the nightly run, then every 3 days until fixed; the email shows the bank, its account endings as chips, the last synced date and one Open Accounts button (decision 82).",
+			"One household switch, “Bank sign-in emails”, on to start, to everyone who has signed in within the last 90 days, with each address listed under a plain disclosure with Remove for anyone in the family; sent at the nightly run, then every 3 days until fixed; the email shows the bank, its account endings as chips, the last synced date and one Open Accounts button (decision 82); Resend sends it first, through plain fetch, with Cloudflare's own email as the fallback, and nothing has to be confirmed (decision 86).",
 		issue: 203,
 	},
 	{
