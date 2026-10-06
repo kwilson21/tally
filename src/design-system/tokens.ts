@@ -168,6 +168,6 @@ export const TYPE_ROLES = [
 	{
 		role: "Secondary",
 		classes: "text-muted",
-		sample: "Picked by Jev · 92% sure",
+		sample: "Picked by Tally · 92% sure",
 	},
 ] as const;

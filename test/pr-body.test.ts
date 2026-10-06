@@ -36,6 +36,10 @@ describe("PAGES", () => {
 		for (const item of SIDEBAR_ITEMS) expect(paths).toContain(item.href);
 		expect(paths).toContain("/more");
 	});
+
+	it("shows the demo's list straight from the bank (#197)", () => {
+		expect(PAGES.map((p) => p.path)).toContain("/transactions?raw=1");
+	});
 });
 
 describe("changedShots", () => {

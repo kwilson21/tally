@@ -378,20 +378,20 @@ describe("who picked the category", () => {
 			.bind(source, confidence, bakery)
 			.run();
 
-	it("says when Jev picked it, with how sure Jev was", async () => {
+	it("says when Tally picked it, with how sure Tally was", async () => {
 		await setSource("jev", 0.934);
 		const { html } = await get(`/transactions/${bakery}`);
-		expect(html).toContain("Picked by Jev · 93% sure");
+		expect(html).toContain("Picked by Tally · 93% sure");
 	});
 
 	it("says nothing for a person's choice or a merchant rule", async () => {
 		await setSource("user", null);
 		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
-			"Picked by Jev",
+			"Picked by Tally",
 		);
 		await setSource("merchant_rule", null);
 		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
-			"Picked by Jev",
+			"Picked by Tally",
 		);
 	});
 
@@ -405,7 +405,7 @@ describe("who picked the category", () => {
 		});
 		expect(res.status).toBe(200);
 		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
-			"Picked by Jev",
+			"Picked by Tally",
 		);
 	});
 });

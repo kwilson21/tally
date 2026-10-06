@@ -34,7 +34,7 @@ export function parseCategory(
 	else if (name.length > MAX_NAME)
 		errors.name = `Keep the name to ${MAX_NAME} characters.`;
 	else if (same(name, NONE_FIT))
-		errors.name = "That name is reserved for Jev. Pick another.";
+		errors.name = "That name is reserved for Tally. Pick another.";
 	else if (clash)
 		errors.name = clash.archived
 			? "An archived category has that name. Restore it instead."
