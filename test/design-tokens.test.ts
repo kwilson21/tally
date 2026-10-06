@@ -89,19 +89,28 @@ describe("design tokens (DESIGN.md)", () => {
 		);
 		/**
 		 * Words after a color prefix that aren't colors: sizes, alignment, wrapping, sides, line
-		 * styles, the transparent and current keywords, and CSS property or SVG attribute names
-		 * that share a prefix ("stroke-linecap", "border-color") but are never classes.
+		 * styles, background size, position, repeat and attachment, the transparent, current and
+		 * auto keywords, and CSS property or SVG attribute names that share a prefix
+		 * ("stroke-linecap", "border-color") but are never classes.
 		 */
 		const NOT_COLORS = new Set(
-			"transparent current inherit none xs sm base lg xl left center right justify start end wrap nowrap balance pretty ellipsis clip t r b l x y s e solid dashed dotted double wavy hidden collapse separate offset inset align color style width radius input linecap linejoin".split(
+			"transparent current inherit none auto xs sm base lg xl left center right justify start end top bottom left-top left-bottom right-top right-bottom top-left top-right bottom-left bottom-right wrap nowrap balance pretty ellipsis clip t r b l x y s e solid dashed dotted double wavy hidden collapse separate offset inset cover contain fixed local scroll no-repeat clone slice from-font align color style width radius input linecap linejoin".split(
 				" ",
 			),
 		);
+		/** Families of utilities after a color prefix that aren't colors: "bg-blend-multiply", "divide-x-reverse". */
+		const NOT_COLOR_STEMS =
+			/^(blend|clip|origin|linear|radial|conic|gradient|repeat|shadow|spacing|offset|x|y)(-|$)/;
 		const NAMED =
 			/^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-([a-z][a-z-]*?)(\/\d+)?$/;
 		const offToken = (u: string) => {
 			const name = u.match(NAMED)?.[3];
-			return name !== undefined && !tokens.has(name) && !NOT_COLORS.has(name);
+			return (
+				name !== undefined &&
+				!tokens.has(name) &&
+				!NOT_COLORS.has(name) &&
+				!NOT_COLOR_STEMS.test(name)
+			);
 		};
 		expect(
 			["text-error", "border-negative", "text-alert", "from-danger"].every(
@@ -115,8 +124,30 @@ describe("design tokens (DESIGN.md)", () => {
 				"text-sm",
 				"bg-ink/30",
 				"text-cat-blue",
-			].some(offToken),
-		).toBe(false);
+				// Tailwind's other background, border and decoration utilities aren't colours.
+				"bg-cover",
+				"bg-contain",
+				"bg-repeat",
+				"bg-no-repeat",
+				"bg-repeat-x",
+				"bg-center",
+				"bg-left-top",
+				"bg-fixed",
+				"bg-clip-text",
+				"bg-origin-border",
+				"bg-blend-multiply",
+				"bg-linear-to-r",
+				"bg-radial",
+				"text-shadow-sm",
+				"border-spacing-x-px",
+				"ring-inset",
+				"outline-hidden",
+				"divide-x-reverse",
+				"decoration-wavy",
+				"decoration-from-font",
+				"accent-auto",
+			].filter(offToken),
+		).toEqual([]);
 		const found = Object.entries(SOURCES).flatMap(([file, text]) =>
 			utilities(text)
 				.filter(offToken)
