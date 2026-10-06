@@ -371,7 +371,7 @@ describe("GET /design-system in the demo", () => {
 		expect(detail).toContain('data-ds-components="DetailRow"');
 		expect(detail).toContain("What it was");
 		expect(detail).toContain("Tally&#39;s guess");
-		expect(detail).toContain("border-dashed");
+		expect(detail).toContain("decoration-dashed");
 		expect(people).toContain('data-ds-components="HouseholdPeople"');
 		expect(html).toContain("Add a person");
 		expect(html).toContain("Everyone");

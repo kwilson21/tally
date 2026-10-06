@@ -504,11 +504,11 @@ const DETAIL_ROW_SPEC: UseSpecText = {
 	purpose:
 		"Let a person keep or change one of the four transaction details in the edit panel.",
 	affordance:
-		"A ruled disclosure row names the detail and its source at the left, with the current value at the right. An unkept guess is dashed; a guessed name also has the sparkles icon.",
+		"A ruled disclosure row names the detail and its source at the left, with the current value at the right. An unkept guess has a muted dashed underline; a guessed name also has the sparkles icon. After the four rows comes Looks right, then the muted category explainer and a WhyLink, then category choices.",
 	states:
 		"Closed: label, source and value are visible. Open: the row's plain field or choices appear below it. A saved guess stays dashed until kept; editing one row clears only that row's guess flag.",
 	feedback:
-		"The person edits one or more rows and presses the panel's one Save. Looks right keeps all four current details. The server announces the saved change and focuses the list row.",
+		"After the four rows, Looks right keeps all four current details; the muted category explainer and WhyLink come next, then category choices. The person edits one or more rows and presses the panel's one Save. The server announces the saved change and focuses the list row.",
 	input:
 		"Touch: the row and its choices are at least 44px tall. Keyboard: summary opens with Enter or Space; native fields and choices remain reachable. Screen reader: the label, source, value and disclosure state are read in order.",
 	motion:

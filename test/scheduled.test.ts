@@ -14,7 +14,10 @@ import handler, {
 	runSecondSort,
 } from "../src/index";
 import { encryptToken } from "../src/plaid/token-crypto";
-import { nameCallLimit } from "../src/suggest-names-pending";
+import {
+	nameCallLimit,
+	suggestMerchantNames,
+} from "../src/suggest-names-pending";
 
 const KEY = btoa("01234567890123456789012345678901");
 
@@ -1134,6 +1137,18 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 				 SELECT 'plaid-' || i, 1, '2026-09-20', 500 + i, 'SHOP NUMBER ' || i FROM n`,
 			).bind(n),
 		]);
+
+	it("the scheduled names pass stays within 110 statements for 100 names", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await addWaiting(100);
+		const counted = countingDb();
+		const ai = aiThatSays("Some Place Name");
+		await suggestMerchantNames({ DB: counted.db, AI: ai });
+		expect(ai.run).toHaveBeenCalledTimes(100);
+		// One candidate query, 100 writes and a fixed number of switch reads per 25-name batch.
+		expect(counted.statements()).toBeLessThanOrEqual(110);
+	});
 
 	it("the demo's one run, which resets, sorts and names", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});

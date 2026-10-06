@@ -148,7 +148,7 @@ describe("GET /transactions/:id", () => {
 		const { html } = await get(`/transactions/${id}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).not.toContain('type="radio" name="category" value="1"');
-		expect(sheet).not.toContain("Tally&#39;s guess");
+		expect(sheet).not.toContain("Tally&#39;s guess ·");
 	});
 
 	it("shows the list and the edit sheet, labeled and focused", async () => {
@@ -612,6 +612,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 	it("has one How this works link", async () => {
 		const html = (await get(`/transactions/${bakery}`)).html;
 		const sheet = html.slice(html.indexOf('id="edit-title"'));
-		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(1);
+		expect((sheet.match(/>How this works<\/a>/g) ?? []).length).toBe(1);
+		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(2);
 	});
 });

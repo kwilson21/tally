@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import { readAiSwitches, saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
@@ -51,6 +51,59 @@ beforeEach(async () => {
 });
 
 describe("transaction detail guesses", () => {
+	it("checks the detail switch once per batch of at most 25 notes", async () => {
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
+			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked)
+			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1 FROM n`,
+			)
+			.run();
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const ai = {
+			run: vi.fn(async () => ({ response: "Coffee purchase" })),
+		} as unknown as Ai;
+		await suggestTransactionNotes({ DB: counted as D1Database, AI: ai });
+		expect(statements).toBeLessThanOrEqual(12);
+	});
+
+	it("drops note answers when the detail switch turns off during a batch", async () => {
+		await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked)
+			 VALUES (1, '2026-09-20', 500, 'COFFEE SHOP A', 1),
+			        (1, '2026-09-20', 600, 'COFFEE SHOP B', 1)`,
+			)
+			.run();
+		const ai = {
+			run: vi.fn(async () => {
+				await saveAiSwitches(db, { details: false });
+				return { response: "Coffee purchase" };
+			}),
+		} as unknown as Ai;
+		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+			asked: 2,
+			suggested: 0,
+		});
+		const { results } = await db
+			.prepare(
+				"SELECT note FROM transactions WHERE raw_name LIKE 'COFFEE SHOP %'",
+			)
+			.all<{ note: string | null }>();
+		expect(results).toEqual([{ note: null }, { note: null }]);
+	});
+
 	it("stores the note, kind, and person as guesses without making them a person's choices", async () => {
 		const id = await charge();
 		const person = await db
@@ -113,6 +166,11 @@ describe("transaction detail guesses", () => {
 		for (const label of ["Name", "What it was", "Kind", "For", "Looks right"])
 			expect(words).toContain(label);
 		expect(guessed).toContain("Tally&#39;s guess");
+		expect(guessed).toContain("Tally uses these when it picks a category.");
+		expect(guessed).toContain('href="/how-it-works#categorization"');
+		expect(guessed.indexOf("Looks right")).toBeLessThan(
+			guessed.lastIndexOf("Groceries"),
+		);
 	});
 
 	it("shows a guessed note as the dashed caption beside Needs category", async () => {

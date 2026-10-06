@@ -1176,7 +1176,7 @@ function EditSheet({
 			<form
 				method="post"
 				action={`/transactions/${tx.id}`}
-				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
+				class="mt-4 flex flex-col gap-3 border-t border-rule pt-4"
 				hx-post={`/transactions/${tx.id}`}
 				hx-disable="findAll button[type=submit]"
 				hx-indicator="#edit-save"
@@ -1198,152 +1198,175 @@ function EditSheet({
 					name="merchant_was"
 					value={nameWas ?? tx.merchantName ?? ""}
 				/>
-				<DetailRow
-					id="detail-name"
-					label="Name"
-					value={tx.displayName}
-					source={
-						tx.nameFromBank ? "bank" : tx.nameSuggested ? "guess" : "person"
-					}
-					guessed={tx.nameSuggested || tx.nameFromBank}
-					open={Boolean(
-						errors.merchant ||
-							namePick ||
-							values.displayName !== tx.merchantName,
-					)}
-				>
-					{tx.nameChoices ? (
-						<NameChoices
-							id="name"
-							names={tx.nameChoices.names}
-							source={tx.nameChoices.source}
-							tidied={tx.nameChoices.tidied}
-							count={tx.nameChoices.count}
-							picked={namePick}
-							own={values.displayName ?? ""}
-							error={errors.merchant}
-						/>
-					) : (
-						<TextInput
-							id="merchant"
-							label="Name"
-							name="merchant"
-							value={values.displayName ?? ""}
-							placeholder={tx.rawName}
-							autocomplete="off"
-							surface="paper"
-							hint="Renames every transaction from this merchant."
-							error={errors.merchant}
-						/>
-					)}
-				</DetailRow>
-				<DetailRow
-					id="detail-note"
-					label="What it was"
-					value={values.note}
-					source={tx.noteGuessed ? "guess" : "person"}
-					guessed={tx.noteGuessed}
-					open={Boolean(errors.note)}
-				>
-					<FormField id="note" label="What it was" error={errors.note}>
-						{({ class: errorClass, ...a11y }) => (
-							<textarea
-								id="note"
-								name="note"
-								rows={2}
-								class={`w-full rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
-								{...a11y}
-							>
-								{values.note ?? ""}
-							</textarea>
+				<div class="border-t border-rule">
+					<DetailRow
+						id="detail-name"
+						label="Name"
+						value={tx.displayName}
+						source={
+							tx.nameFromBank ? "bank" : tx.nameSuggested ? "guess" : "person"
+						}
+						guessed={tx.nameSuggested || tx.nameFromBank}
+						open={Boolean(
+							errors.merchant ||
+								namePick ||
+								values.displayName !== tx.merchantName,
 						)}
-					</FormField>
-				</DetailRow>
-				<DetailRow
-					id="detail-kind"
-					label="Kind"
-					value={
-						values.kind
-							? (
-									{
-										subscription: "Subscription",
-										one_off: "One-off",
-										bill: "Bill",
-										transfer: "Transfer",
-									} as const
-								)[values.kind]
-							: null
-					}
-					source={tx.kindGuessed ? "guess" : "person"}
-					guessed={tx.kindGuessed}
-					open={Boolean(errors.kind)}
-				>
-					<fieldset
-						class="flex flex-wrap gap-2"
-						aria-describedby={errors.kind ? "kind-error" : undefined}
 					>
-						<legend class="sr-only">Kind</legend>
-						{(["subscription", "one_off", "bill", "transfer"] as const).map(
-							(kind) => (
+						{tx.nameChoices ? (
+							<NameChoices
+								id="name"
+								names={tx.nameChoices.names}
+								source={tx.nameChoices.source}
+								tidied={tx.nameChoices.tidied}
+								count={tx.nameChoices.count}
+								picked={namePick}
+								own={values.displayName ?? ""}
+								error={errors.merchant}
+							/>
+						) : (
+							<TextInput
+								id="merchant"
+								label="Name"
+								name="merchant"
+								value={values.displayName ?? ""}
+								placeholder={tx.rawName}
+								autocomplete="off"
+								surface="paper"
+								hint="Renames every transaction from this merchant."
+								error={errors.merchant}
+							/>
+						)}
+					</DetailRow>
+					<DetailRow
+						id="detail-note"
+						label="What it was"
+						value={values.note}
+						source={tx.noteGuessed ? "guess" : "person"}
+						guessed={tx.noteGuessed}
+						open={Boolean(errors.note)}
+					>
+						<FormField id="note" label="What it was" error={errors.note}>
+							{({ class: errorClass, ...a11y }) => (
+								<textarea
+									id="note"
+									name="note"
+									rows={2}
+									class={`w-full rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
+									{...a11y}
+								>
+									{values.note ?? ""}
+								</textarea>
+							)}
+						</FormField>
+					</DetailRow>
+					<DetailRow
+						id="detail-kind"
+						label="Kind"
+						value={
+							values.kind
+								? (
+										{
+											subscription: "Subscription",
+											one_off: "One-off",
+											bill: "Bill",
+											transfer: "Transfer",
+										} as const
+									)[values.kind]
+								: null
+						}
+						source={tx.kindGuessed ? "guess" : "person"}
+						guessed={tx.kindGuessed}
+						open={Boolean(errors.kind)}
+					>
+						<fieldset
+							class="flex flex-wrap gap-2"
+							aria-describedby={errors.kind ? "kind-error" : undefined}
+						>
+							<legend class="sr-only">Kind</legend>
+							{(["subscription", "one_off", "bill", "transfer"] as const).map(
+								(kind) => (
+									<Chip
+										type="radio"
+										name="kind"
+										value={kind}
+										checked={values.kind === kind}
+									>
+										{kind === "one_off"
+											? "One-off"
+											: kind[0]?.toUpperCase() + kind.slice(1)}
+									</Chip>
+								),
+							)}
+						</fieldset>
+						{errors.kind && (
+							<p id="kind-error" role="alert" class="text-sm text-over">
+								{errors.kind}
+							</p>
+						)}
+					</DetailRow>
+					<DetailRow
+						id="detail-for"
+						label="For"
+						value={
+							values.forPersonId == null
+								? people.length < 2
+									? "Add the people in your household"
+									: null
+								: (people.find((person) => person.id === values.forPersonId)
+										?.name ?? null)
+						}
+						source={tx.forPersonGuessed ? "guess" : "person"}
+						guessed={tx.forPersonGuessed}
+						open={Boolean(errors.forPerson)}
+					>
+						<fieldset
+							class="flex flex-wrap gap-2"
+							aria-describedby={
+								errors.forPerson ? "for-person-error" : undefined
+							}
+						>
+							<legend class="sr-only">For</legend>
+							{people.map((person) => (
 								<Chip
 									type="radio"
-									name="kind"
-									value={kind}
-									checked={values.kind === kind}
+									name="for_person_id"
+									value={String(person.id)}
+									checked={values.forPersonId === person.id}
 								>
-									{kind === "one_off"
-										? "One-off"
-										: kind[0]?.toUpperCase() + kind.slice(1)}
+									{person.name}
 								</Chip>
-							),
+							))}
+						</fieldset>
+						{people.length < 2 && (
+							<p class="text-sm text-muted">
+								Add the people in your household.
+							</p>
 						)}
-					</fieldset>
-					{errors.kind && (
-						<p id="kind-error" role="alert" class="text-sm text-over">
-							{errors.kind}
+						{errors.forPerson && (
+							<p id="for-person-error" role="alert" class="text-sm text-over">
+								{errors.forPerson}
+							</p>
+						)}
+					</DetailRow>
+				</div>
+				{!deleteConfirm && (
+					<div class="flex flex-col items-start">
+						<Button
+							name="details_action"
+							value="keep"
+							type="submit"
+							kind="secondary"
+						>
+							Looks right
+							<span class="sr-only">, keep these details</span>
+						</Button>
+						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+							Tally uses these when it picks a category.
+							<WhyLink section="categorization" topic="Tally's guess" />
 						</p>
-					)}
-				</DetailRow>
-				<DetailRow
-					id="detail-for"
-					label="For"
-					value={
-						values.forPersonId == null
-							? people.length < 2
-								? "Add the people in your household"
-								: null
-							: (people.find((person) => person.id === values.forPersonId)
-									?.name ?? null)
-					}
-					source={tx.forPersonGuessed ? "guess" : "person"}
-					guessed={tx.forPersonGuessed}
-					open={Boolean(errors.forPerson)}
-				>
-					<fieldset
-						class="flex flex-wrap gap-2"
-						aria-describedby={errors.forPerson ? "for-person-error" : undefined}
-					>
-						<legend class="sr-only">For</legend>
-						{people.map((person) => (
-							<Chip
-								type="radio"
-								name="for_person_id"
-								value={String(person.id)}
-								checked={values.forPersonId === person.id}
-							>
-								{person.name}
-							</Chip>
-						))}
-					</fieldset>
-					{people.length < 2 && (
-						<p class="text-sm text-muted">Add the people in your household.</p>
-					)}
-					{errors.forPerson && (
-						<p id="for-person-error" role="alert" class="text-sm text-over">
-							{errors.forPerson}
-						</p>
-					)}
-				</DetailRow>
+					</div>
+				)}
 				<fieldset
 					class="flex flex-col gap-2"
 					disabled={purchase !== undefined}
@@ -1522,15 +1545,6 @@ function EditSheet({
 					<div class="mt-2 grid grid-cols-2 gap-3">
 						<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
 							Cancel
-						</Button>
-						<Button
-							name="details_action"
-							value="keep"
-							type="submit"
-							kind="secondary"
-							class="w-full"
-						>
-							Looks right
 						</Button>
 						<Button
 							id="edit-save"

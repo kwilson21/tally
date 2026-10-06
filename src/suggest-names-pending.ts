@@ -18,6 +18,7 @@ import { type Deadline, pastDeadline } from "./run-budget";
  * its work and the rest wait for the next night.
  */
 export const nameCallLimit = 100;
+const SWITCH_CHECK_BATCH = 25;
 
 /** Failures in a row that point at every call (the service is down) rather than one bank text. */
 const MAX_FAILURES_IN_A_ROW = 3;
@@ -37,24 +38,29 @@ export async function suggestTransactionNotes(
 	const done = { asked: 0, suggested: 0 };
 	if (!env.AI || limit <= 0 || pastDeadline(time)) return done;
 	if (!(await readAiSwitches(env.DB)).details) return done;
-	const guesses: { id: number; note: string }[] = [];
+	const transactions = await transactionsNeedingNoteGuess(env.DB, limit);
 	let failuresInARow = 0;
-	for (const transaction of await transactionsNeedingNoteGuess(env.DB, limit)) {
-		if (pastDeadline(time)) break;
-		if (!(await readAiSwitches(env.DB)).details) break;
-		done.asked += 1;
-		const note = await suggestNote(env.AI, transaction.rawName);
-		if (note === null) {
-			failuresInARow += 1;
-			if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
-			continue;
-		}
-		failuresInARow = 0;
-		if ((await readAiSwitches(env.DB)).details)
+	for (let i = 0; i < transactions.length; i += SWITCH_CHECK_BATCH) {
+		const guesses: { id: number; note: string }[] = [];
+		for (const transaction of transactions.slice(i, i + SWITCH_CHECK_BATCH)) {
+			if (pastDeadline(time)) break;
+			done.asked += 1;
+			const note = await suggestNote(env.AI, transaction.rawName);
+			if (note === null) {
+				failuresInARow += 1;
+				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
+				continue;
+			}
+			failuresInARow = 0;
 			guesses.push({ id: transaction.id, note });
+		}
+		// This used to protect against a switch turned off during an AI call. Check once after each
+		// batch of at most 25 answers, then keep or discard the whole batch together.
+		if (!(await readAiSwitches(env.DB)).details) break;
+		await saveNoteGuesses(env.DB, guesses);
+		done.suggested += guesses.length;
+		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
-	await saveNoteGuesses(env.DB, guesses);
-	done.suggested = guesses.length;
 	console.log(
 		`workers-ai: notes asked ${done.asked}, suggested ${done.suggested}`,
 	);
@@ -63,8 +69,8 @@ export async function suggestTransactionNotes(
 
 /**
  * Asks Workers AI for each bank text that needs it, most charges first, while the household's names
- * switch is on (spec §8.6). The switch is read again before each call and before each answer is kept,
- * since it can be turned off while a run is going: an answer that comes back after that is thrown away.
+ * switch is on (spec §8.6). The switch is checked once after each batch of at most 25 calls: it can be
+ * turned off during a call, in which case the answers from that batch are thrown away.
  * A failed call leaves its merchant to be asked tomorrow; three in a row stop the run. With a `time`, no new
  * request starts once its deadline has passed, so slow requests can't hold up the rest of the run; what was
  * answered by then is kept and the rest wait for the next night.
@@ -81,25 +87,33 @@ export async function suggestMerchantNames(
 	if (!(await readAiSwitches(env.DB)).names) return done;
 
 	let failuresInARow = 0;
-	for (const rawName of await merchantsToAsk(env.DB, limit)) {
-		if (pastDeadline(time)) {
-			console.log("workers-ai: names stopped at the time budget");
-			break;
+	const rawNames = await merchantsToAsk(env.DB, limit);
+	for (let i = 0; i < rawNames.length; i += SWITCH_CHECK_BATCH) {
+		const answers: { rawName: string; names: string[] }[] = [];
+		for (const rawName of rawNames.slice(i, i + SWITCH_CHECK_BATCH)) {
+			if (pastDeadline(time)) {
+				console.log("workers-ai: names stopped at the time budget");
+				break;
+			}
+			done.asked += 1;
+			const result = await suggestNames(ai, rawName);
+			if (!result.ok) {
+				failuresInARow += 1;
+				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
+				continue;
+			}
+			failuresInARow = 0;
+			answers.push({ rawName, names: result.names });
 		}
+		// The old per-answer read protected against a switch turned off mid-run. One read per batch
+		// preserves that boundary without spending two D1 queries on every merchant.
 		if (!(await readAiSwitches(env.DB)).names) break;
-		done.asked += 1;
-		const result = await suggestNames(ai, rawName);
-		if (!result.ok) {
-			failuresInARow += 1;
-			if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
-			continue;
+		for (const answer of answers) {
+			if (await saveAskedNames(env.DB, answer.rawName, answer.names)) {
+				if (answer.names.length > 0) done.suggested += 1;
+			}
 		}
-		failuresInARow = 0;
-		// Read again, since the call took a while: an answer is kept only while the switch is still on.
-		if (!(await readAiSwitches(env.DB)).names) break;
-		if (await saveAskedNames(env.DB, rawName, result.names)) {
-			if (result.names.length > 0) done.suggested += 1;
-		}
+		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
 	console.log(`workers-ai: asked ${done.asked}, suggested ${done.suggested}`);
 	return done;

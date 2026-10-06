@@ -38,7 +38,7 @@ export function DetailRow({
 					</span>
 				</span>
 				<span
-					class={`ml-auto flex min-w-0 items-center gap-1 text-right ${guessed ? "border-b border-dashed border-ink" : ""}`}
+					class={`ml-auto flex min-w-0 items-center gap-1 text-right ${guessed ? "underline decoration-muted decoration-dashed underline-offset-4" : ""}`}
 				>
 					{label === "Name" && guessed && source === "guess" && (
 						<Icon name="sparkles" class="size-4 shrink-0" />

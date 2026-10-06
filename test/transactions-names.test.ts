@@ -251,7 +251,10 @@ describe("the Transactions list", () => {
 		expect(html).toMatch(
 			/<span class="sr-only">From your bank: <\/span><span class="[^"]*decoration-dashed[^"]*">Lupita&#39;s Taqueria<\/span>/,
 		);
-		expect(html).not.toContain("Tally&#39;s guess");
+		const nameRow =
+			html.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
+			"";
+		expect(nameRow).not.toContain("Tally&#39;s guess");
 		// No sparkles: the only svg before the name is the row's own category-less circle.
 		const row =
 			html.split("Lupita&#39;s Taqueria")[0]?.split("<li")?.pop() ?? "";
@@ -441,7 +444,10 @@ describe("the edit panel's name choices", () => {
 			/<p id="name-source" class="text-sm text-muted">From your bank<\/p>/,
 		);
 		expect(html).toContain('value="s:Lupita&#39;s Taqueria"');
-		expect(html).not.toContain("Tally&#39;s guess");
+		const nameRow =
+			html.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
+			"";
+		expect(nameRow).not.toContain("Tally&#39;s guess");
 		expect(html.match(/href="\/how-it-works#names"/g)).toHaveLength(1);
 		expect(html).not.toContain("M11.017 2.814");
 		expect(html.match(/aria-describedby="name-source"/g)).toHaveLength(1);
@@ -455,15 +461,18 @@ describe("the edit panel's name choices", () => {
 		await saveAiSwitches(db, { names: false });
 		const off = (await get(`/transactions/${guessed}`)).html;
 		expect(off).not.toContain('name="name_pick"');
-		expect(off).not.toContain("Tally&#39;s guess");
+		const nameRow =
+			off.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
+			"";
+		expect(nameRow).not.toContain("Tally&#39;s guess");
 		expect(off).toMatch(/<label[^>]*>Name<\/label>/);
 		const bank = (await get(`/transactions/${banked}`)).html;
 		expect(bank).toContain('value="s:Lupita&#39;s Taqueria"');
 		expect(bank).toContain("From your bank");
-		const nameRow =
+		const bankNameRow =
 			bank.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
 			"";
-		expect(nameRow).not.toContain("Tally&#39;s guess");
+		expect(bankNameRow).not.toContain("Tally&#39;s guess");
 	});
 
 	describe("saving", () => {
