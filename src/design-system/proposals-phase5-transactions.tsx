@@ -1016,7 +1016,7 @@ export function SelectScreen({
 			<div class="px-5">
 				<div class="flex items-center justify-between gap-3">
 					<h1 class={TITLE}>Transactions</h1>
-					<Button kind="text" type="button">
+					<Button kind="text" type="button" class="-mr-2">
 						Done
 					</Button>
 				</div>
