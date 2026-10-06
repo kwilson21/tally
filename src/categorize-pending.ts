@@ -15,8 +15,8 @@ import { type Deadline, pastDeadline } from "./run-budget";
 
 /**
  * How many transactions Jev is asked about in a day (decisions 56 and 68). The demo's reset needs few.
- * Production sorts a new bank's backfill in a day; each answer is saved as it arrives,
- * so a run cut short keeps its work, and the rest wait for the next run. The count is the household's
+ * Production's 500 lets a new bank's backfill be sorted in a day or two; each answer is saved as it
+ * arrives, so a run cut short keeps its work, and the rest wait for the next run. The count is the household's
  * whole day, midnight to midnight in its time zone, shared by the runs right after a sync and the
  * nightly runs (db/jev-calls.ts).
  */

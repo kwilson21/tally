@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { verifiedEmail } from "./access";
-import { categorizePending, MAX_CALLS_PER_RUN } from "./categorize-pending";
+import {
+	categorizePending,
+	MAX_CALLS_PER_RUN,
+	type PassOptions,
+} from "./categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "./dates";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
@@ -102,7 +106,7 @@ export async function runScheduled(
 		// own step failed). It asks about everything still waiting, not only what the sync brought in, so it
 		// doesn't wait on the "as they arrive" switch, and it only spends what's left of today's cap
 		// (spec §8.6), starting no call after the sort budget. Then the names, last, until the run budget.
-		await categorizePending(env, fetchImpl, {
+		await sortWithJev(env, fetchImpl, {
 			rulesApplied: plaidEnabled(env) && !synced.afterSyncFailed,
 			time: budgets.sort,
 		});
@@ -138,6 +142,25 @@ function budgetsFor(time?: RunClock): { sort: Deadline; run: Deadline } {
 }
 
 /**
+ * The merchant rules and Jev for what they leave (`categorizePending`), in a run that has more to do after
+ * it: should the sort throw (a D1 error, say), only the error's name is logged and the run goes on to the
+ * names, and in the demo to the feedback retry, as the names step does for itself.
+ */
+async function sortWithJev(
+	env: ScheduledEnv,
+	fetchImpl: typeof fetch | undefined,
+	options: PassOptions,
+) {
+	try {
+		await categorizePending(env, fetchImpl, options);
+	} catch (error) {
+		console.error(
+			`jev: sort step failed ${error instanceof Error ? error.name : "unknown"}`,
+		);
+	}
+}
+
+/**
  * Workers AI suggests names for the bank texts Plaid didn't name (spec §7, §9), while the names switch is
  * on: up to 100 texts at about three queries each, starting no request after `deadline`. Nothing here
  * changes a name, and a failure never stops what the run does next.
@@ -167,7 +190,7 @@ export async function runFirstSort(
 	time?: RunClock,
 ) {
 	const budgets = budgetsFor(time);
-	await categorizePending(env, fetchImpl, {
+	await sortWithJev(env, fetchImpl, {
 		rulesApplied: false,
 		maxCalls: FIRST_SORT_MAX_CALLS,
 		time: budgets.sort,
@@ -178,9 +201,11 @@ export async function runFirstSort(
 /**
  * Production's 09:40 run, the second sort (decision 56): only Jev, never names. One run asks about at most
  * `MAX_CALLS_PER_RUN`, 300, about 900 queries, so this one asks about what the first sort left, within
- * what's left of the day's cap, and a newly linked bank's backfill is still sorted in a night: the first
- * sort's 200 and this one's 300 reach the day's 500. It starts no call after the run budget (13 minutes),
- * and gives back what it didn't ask. It never syncs or resets.
+ * what's left of the day's cap. The first sort's 200 and this one's 300 can reach the day's 500, so a newly
+ * linked bank's backfill of up to 500 can be sorted in a night. When Jev answers slowly, the time budgets
+ * stop the passes sooner (this one starts no call after the run budget, 13 minutes, and gives back what it
+ * didn't ask), and what's left is asked the next night; the queue, #248, lifts these limits. It never syncs
+ * or resets.
  */
 export async function runSecondSort(
 	env: ScheduledEnv,
