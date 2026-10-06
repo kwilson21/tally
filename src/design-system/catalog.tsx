@@ -371,8 +371,10 @@ function Shell() {
 					here, because the catalog isn't one of the destinations.
 				</p>
 				<p class="max-w-prose">
-					On phones, keyboard scrolling leaves room below focused content for
-					the fixed tabs and Feedback pill; desktop has no bottom padding.
+					On phones, keyboard scrolling and the bottom of main use the same
+					room, calculated from the fixed tabs, Feedback pill, focus gap and
+					safe-area inset, so the last row or form can clear both controls.
+					Desktop keeps its existing main spacing.
 				</p>
 				<MotionSpec>
 					Pages cross-fade in 150 ms through the browser's own View Transitions,
