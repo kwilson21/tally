@@ -101,9 +101,6 @@ export const PAGE_SIZE = 25;
 // while held credits and income stay out of spending classification.
 const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 const bankRowSql = (sql: string) => sql.replaceAll(" AND t.is_split = 0", "");
-const RAW_NEEDS_CATEGORY = bankRowSql(
-	NEEDS_CATEGORY.replace(COUNTED_CATEGORY, "t.category_id"),
-);
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
 const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
 
@@ -161,22 +158,27 @@ export async function listTransactions(
 		where.push("t.account_id = ?");
 		args.push(f.account);
 	}
-	if (f.uncategorized) where.push(f.raw ? RAW_NEEDS_CATEGORY : NEEDS_CATEGORY);
+	if (f.uncategorized && !f.raw) where.push(NEEDS_CATEGORY);
 	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
 	if (f.raw) where.push("t.parent_id IS NULL");
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
 	if (f.q) {
-		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
-		// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
-		// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
-		// row says can be searched for.
-		where.push(
-			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)})`,
-		);
-		const pattern = likePattern(f.q);
-		args.push(pattern, pattern, pattern, pattern);
-		args.push(pattern);
+		if (f.raw) {
+			where.push("t.raw_name LIKE ? ESCAPE '\\'");
+			args.push(likePattern(f.q));
+		} else {
+			// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
+			// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
+			// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
+			// row says can be searched for.
+			where.push(
+				`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)})`,
+			);
+			const pattern = likePattern(f.q);
+			args.push(pattern, pattern, pattern, pattern);
+			args.push(pattern);
+		}
 	}
 
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
@@ -295,7 +297,19 @@ export async function listTransactions(
 export async function needsCategoryCount(
 	db: D1Database,
 	month: string,
+	raw = false,
 ): Promise<number> {
+	if (raw) {
+		const inMonth = month === "all" ? "" : "substr(t.date,1,7) = ? AND ";
+		const statement = db.prepare(
+			`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${inMonth}t.parent_id IS NULL`,
+		);
+		const row = await (month === "all"
+			? statement
+			: statement.bind(month)
+		).first<{ n: number }>();
+		return row?.n ?? 0;
+	}
 	const inMonth = month === "all" ? "" : `${COUNTED_MONTH} = ? AND `;
 	const statement = db.prepare(
 		`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${inMonth}${NEEDS_CATEGORY}`,

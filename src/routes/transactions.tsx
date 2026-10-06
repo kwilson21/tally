@@ -171,7 +171,7 @@ async function renderList(
 		await Promise.all([
 			listTransactions(c.env.DB, filters),
 			monthsWithTransactions(c.env.DB),
-			needsCategoryCount(c.env.DB, filters.month),
+			needsCategoryCount(c.env.DB, filters.month, filters.raw),
 			c.env.DB.prepare(
 				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 			).all<Category>(),
@@ -181,7 +181,7 @@ async function renderList(
 	// Only an empty list asks whether it is the first visit's (one cheap statement).
 	const firstVisit = rows.length === 0 ? await firstVisitFor(c) : null;
 	// With nothing at all to select, the page is the first visit's whatever the address says.
-	const selecting = selectRequested && firstVisit === null;
+	const selecting = selectRequested && firstVisit === null && !filters.raw;
 
 	// Keep the active month in the picker even when it has no transactions.
 	if (filters.month !== "all" && !months.includes(filters.month)) {
@@ -313,7 +313,7 @@ async function renderList(
 				</h1>
 				{/* Swapped out-of-band on filter and page changes, so it keeps the current filters. Select
 				    waits for the first transaction (P40 A). */}
-				{firstVisit === null && (
+				{firstVisit === null && !filters.raw && (
 					<Button
 						id="select-toggle"
 						kind="text"

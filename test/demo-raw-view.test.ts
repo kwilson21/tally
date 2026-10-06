@@ -400,6 +400,31 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		}
 	});
 
+	it("Needs category shows and counts every bank row, including Plaid-marked rows", async () => {
+		await addPlaidMarked();
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const rawTotal = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL AND substr(date,1,7) = ?",
+		)
+			.bind(month)
+			.first<{ n: number }>();
+		const { html } = await demo(
+			`/transactions?raw=1&uncategorized=1&month=${month}`,
+		);
+		const rows = rowsOf(html);
+		expect(countOf(html)).toContain(`of ${rawTotal?.n} transactions`);
+		expect(html.match(/id="needs-count">(\d+)</)?.[1]).toBe(
+			String(rawTotal?.n),
+		);
+		expect(rows.map((row) => row.id)).toContain(9001);
+		expect(rows.map((row) => row.id)).toContain(9002);
+		expect(
+			countOf(
+				(await demo(`/transactions?uncategorized=1&month=${month}`)).html,
+			),
+		).toContain("12 transactions needing a category");
+	});
+
 	it("shows a categorized transaction without its category", async () => {
 		const row = rowsOf(
 			(await demo("/transactions?raw=1&month=all&q=TRADER+JOE")).html,
@@ -408,6 +433,41 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(words).toContain("TRADER JOE'S #552");
 		expect(words).not.toContain("Groceries");
 		expect(words).toContain("Needs category");
+	});
+
+	it("searches only bank text in the raw view and keeps normal search behavior", async () => {
+		const row = await env.DB.prepare(
+			"SELECT id, raw_name AS rawName FROM transactions WHERE parent_id IS NULL AND raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).first<{ id: number; rawName: string }>();
+		expect(row).toBeDefined();
+		if (!row) throw new Error("Demo bakery transaction is missing");
+		await env.DB.prepare(
+			"UPDATE transactions SET note = 'onlyprivateword' WHERE id = ?",
+		)
+			.bind(row.id)
+			.run();
+		await env.DB.prepare(
+			"UPDATE merchants SET display_name = 'Only Cleannameword' WHERE raw_name = ?",
+		)
+			.bind(row.rawName)
+			.run();
+
+		for (const query of ["onlyprivateword", "Only Cleannameword"])
+			expect(
+				(
+					await demo(
+						`/transactions?raw=1&month=all&q=${encodeURIComponent(query)}`,
+					)
+				).html,
+			).not.toContain(`data-transaction="${row.id}"`);
+		expect(
+			(await demo("/transactions?raw=1&month=all&q=SQ+%2ALOCAL+BAKERY")).html,
+		).toContain(`data-transaction="${row.id}"`);
+		for (const query of ["onlyprivateword", "Only Cleannameword"])
+			expect(
+				(await demo(`/transactions?month=all&q=${encodeURIComponent(query)}`))
+					.html,
+			).toContain(`data-transaction="${row.id}"`);
 	});
 
 	it("without ?raw=1 the list is as today", async () => {
@@ -468,7 +528,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		);
 	});
 
-	it("keeps ?raw=1 across the list's own links: filters, paging, Select and each row", async () => {
+	it("keeps ?raw=1 across the list's own links: filters, paging and each row", async () => {
 		const { html } = await demo("/transactions?raw=1&month=all");
 		// The filter form sends it with every change, with or without htmx.
 		expect(html).toMatch(
@@ -487,13 +547,20 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			`of ${rawTotal?.n} transactions across all months`,
 		);
 		expect(rowsOf(pageTwo.html)).toHaveLength(25);
-		// Select, and a row's edit panel.
-		expect(html).toMatch(
-			/href="\/transactions\?month=all&amp;raw=1&amp;select=1" id="select-toggle"/,
-		);
+		// Raw rows are read only for selection.
+		expect(html).not.toContain('id="select-toggle"');
 		expect(rowsOf(html)[0]?.html).toMatch(
 			/href="\/transactions\/\d+\?[^"]*raw=1"/,
 		);
+		const requestedSelection = await demo(
+			"/transactions?raw=1&month=all&select=1",
+		);
+		expect(requestedSelection.html).not.toContain('id="selection-form"');
+		expect(requestedSelection.html).not.toContain('name="ids"');
+		expect(requestedSelection.html).not.toContain("Tap rows to select them.");
+		const normalSelection = await demo("/transactions?month=all&select=1");
+		expect(normalSelection.html).toContain('id="selection-form"');
+		expect(normalSelection.html).toContain('name="ids"');
 		// Without it, none of them carry it; only the link to the bank's view does.
 		const made = (await demo("/transactions?month=all")).html;
 		expect(made.replace(viewNav(made) ?? "", "")).not.toContain("raw=1");
