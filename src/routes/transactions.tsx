@@ -330,7 +330,7 @@ async function renderList(
 					id="transactions-title"
 					tabindex={focusHeading ? -1 : undefined}
 					autofocus={focusHeading}
-					class="font-serif text-5xl font-semibold tracking-tight outline-none"
+					class="min-w-0 max-w-full wrap-anywhere font-serif text-5xl font-semibold tracking-tight outline-none"
 				>
 					Transactions
 				</h1>

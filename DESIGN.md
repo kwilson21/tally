@@ -78,7 +78,7 @@ Radii: `rounded-control` (0.75rem) for inputs, buttons, tags, cards and the toas
 ## Type roles
 | Role | Style |
 |---|---|
-| Page title / month | font-serif, 5xl, semibold, tight tracking |
+| Page title / month | font-serif, 5xl, semibold, tight tracking. The Transactions page heading can wrap beside Select. |
 | Section title | font-serif, 3xl, semibold |
 | Headline amount | font-serif, 6xl–7xl, semibold, tabular |
 | Sheet title and amount | font-serif, 4xl, semibold (the edit panel's name and amount) |
@@ -93,6 +93,7 @@ Radii: `rounded-control` (0.75rem) for inputs, buttons, tags, cards and the toas
 | Icon | Lucide line icons, 1.75 stroke, currentColor, always aria-hidden. |
 | Sidebar / BottomTabs | The same destinations: a sidebar on desktop, four tabs plus More on phones. Documents is not one of them until receipts are built (decisions 66 and 82), so no menu item leads to a page that isn't built; its address still answers inside the shell. |
 | Layout | Every page's shell: banner, navigation, main, toast and announce regions. On phones, the document's scroll padding and main's bottom padding use the same room, calculated from the fixed tabs, Feedback pill, focus gap and safe-area inset, so keyboard-focused content at the end of a list or form can clear both controls; desktop keeps its existing main spacing. It loads app.css on every page, whose `@view-transition { navigation: auto; }` makes pages cross-fade in 150 ms through the browser's own View Transitions (Chrome and Edge 126 and later, Safari 18.2 and later; Firefox just switches pages), only where motion is welcome. htmx's `transitions` setting stays off, so a filter or one of Adjust's taps never fades the page. |
+| Toast | Long unbroken merchant names wrap inside the toast pill. |
 | CategoryIcon | A category's line icon, drawn in its color token. |
 | ProgressRow | One category: icon, name, "spent of budget," and a 4px bar with no limit marker (decision 46); over budget, the bar is full and brick, with an alert icon and how much it's over in words ("$36 over"). In Adjust mode (#94) it adds a round − before the row and a round + after it, each a form that moves the budget to the next round $10; on a phone − takes the icon's place, and its bar redraws without replaying the fill. When the name and amount don't fit on one line, the amount moves under the name, breaking at "of" if it must, never inside a number. |
 | AdjustLink | "Adjust" beside Home's Budget heading, a terracotta text link that shows − and + on every budgeted row; in Adjust mode it says "Done". |
@@ -109,7 +110,8 @@ Radii: `rounded-control` (0.75rem) for inputs, buttons, tags, cards and the toas
 | PendingNote | The muted line under a pending transaction's date in its edit panel: a clock icon and "Pending. The bank hasn't finished it, so its amount can still change." (P34 A, decision 72). |
 | SelectableTransactionRow | One transaction in select mode: a 44px-or-larger label with a keyboard-focusable round checkbox, name, status and signed amount. |
 | CategorySuggestionCard | P30 A (decision 64): an open dashed card with a tag, “Suggested: {name}” and the muted “Untick any that don't belong.” Each transaction reuses SelectableTransactionRow; an unticked row alone shows its labeled optional note and “Tally sorts it again right away, with your note.” A plain form creates the category or dismisses it without JavaScript, with the outline Create button, terracotta Dismiss and Why? after it; the page's own Save stays its primary action. |
-| BillStatusHeading | A bill group heading pairs its status icon with the status in words, never color alone. |
+| BillStatusHeading | A bill group heading pairs its status icon with the status in words, never color alone, and ends with the group's total (Upcoming says “this month”). |
+| BillMonthlyTotal | A quiet line under Bills' status sentence gives the monthly bill share and what's still to pay in the household's month. |
 | BillRow | One bill: category icon, name, due or paid status sentence, and amount from integer cents. When a payment from the same merchant came at another price (P36 B, decision 72), the status sentence is two caption lines instead, "Price changed?" in ink and "Paid $17.99 on Oct 3" in muted words; the row grows a line, keeps its status heading and its own amount, and still links to the bill's page. |
 | BillFindingBand | The Bills screen’s terracotta-ruled Band shows how many repeat-charge suggestions need review. |
 | BillFindingRow | One possible bill with its latest amount and timing, plus Add and permanent Not a bill actions. |
