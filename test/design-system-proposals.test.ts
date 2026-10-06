@@ -18,7 +18,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P90 and P110–P113 with one recommended option each, marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P90 and P110–P116 with one recommended option each, marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -27,10 +27,10 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P90, and P110 to P113, is drawn, and each id is used once. P91–P109
+		// Every proposal from P23 to P90, and P110 to P116, is drawn, and each id is used once. P91–P109
 		// are the build session's Phase 5 picks (decision 82), drawn in their own PR.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 113; n++)
+		for (let n = 23; n <= 116; n++)
 			if (n <= 90 || n >= 110) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. Every
@@ -45,7 +45,7 @@ describe("GET /design-system/proposals", () => {
 			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
 				recommended,
 			);
-			// P34 on mark the owner's pick (decisions 72–84); P60 and P111 took two options.
+			// P34 on mark the owner's pick (decisions 72–85); P60 and P111 took two options.
 			const n = Number(id.match(/^p(\d+)/)?.[1]);
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const expected =
@@ -67,7 +67,7 @@ describe("GET /design-system/proposals", () => {
 			options,
 		);
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(61);
+		expect(DECIDED.length).toBe(64);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -163,6 +163,69 @@ describe("GET /design-system/proposals", () => {
 		const p113b = option(p113, "Option B · ");
 		expect(picked(p113b)).toBe(false);
 		expect(p113b).not.toContain("/how-it-works#bills");
+	});
+
+	it("draws the owner's picks on Q60–Q62 (P114–P116, decision 85) as the app will have them", async () => {
+		const { html } = await get("/design-system/proposals");
+		const section = (id: string) => {
+			const start = html.indexOf(`<section id="${id}"`);
+			expect(start).toBeGreaterThan(-1);
+			const next = html.indexOf('<section id="p', start + 1);
+			return html.slice(start, next === -1 ? undefined : next);
+		};
+		const option = (sectionHtml: string, name: string) => {
+			const heads = [...sectionHtml.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+			const at = heads.find((i) =>
+				sectionHtml.slice(i, i + 400).includes(`>${name}`),
+			);
+			expect(at, name).toBeDefined();
+			const next = heads.find((i) => i > (at ?? 0));
+			return sectionHtml.slice(at, next);
+		};
+		const picked = (chunk: string) => chunk.includes(">Picked<");
+		const recommended = (chunk: string) => chunk.includes(">Recommended<");
+		const cant = "This can&#39;t be undone.";
+
+		// P114: once Undo ships, the sheet asks only the question; Delete and Keep it are its answers.
+		const p114 = section("p114-delete-wording");
+		const p114a = option(p114, "Option A · Just the question");
+		expect(picked(p114a) && recommended(p114a)).toBe(true);
+		expect(p114a).toContain("Delete Farmers market, $20.00?");
+		expect(p114a).not.toContain(cant);
+		expect(p114a).toContain(">Delete<");
+		expect(p114a).toContain(">Keep it<");
+		const p114b = option(p114, "Option B · ");
+		expect(picked(p114b)).toBe(false);
+		expect(p114b).toContain(`Delete Farmers market, $20.00? ${cant}`);
+		const p114c = option(p114, "Option C · ");
+		expect(picked(p114c)).toBe(false);
+		expect(p114c).toContain(
+			"Delete Farmers market, $20.00? You can undo it for 10 seconds.",
+		);
+		expect(p114).toContain("decision 85");
+
+		// P115: the money box in the 12px control corner (picked); B keeps the 8px it had.
+		const p115 = section("p115-money-corners");
+		const p115a = option(p115, "Option A · ");
+		expect(picked(p115a) && recommended(p115a)).toBe(true);
+		expect(p115a).toContain("rounded-control");
+		expect(p115a).not.toContain("rounded-lg");
+		const p115b = option(p115, "Option B · ");
+		expect(picked(p115b)).toBe(false);
+		expect(p115b).toContain("rounded-lg");
+		expect(p115).toContain("decision 85");
+
+		// P116: the budget sheet with a second chip, the 3-month average (picked), or Last month alone.
+		const p116 = section("p116-budget-average");
+		const p116a = option(p116, "Option A · ");
+		expect(picked(p116a)).toBe(false);
+		expect(p116a).toContain("Last month: $");
+		expect(p116a).not.toContain("3-month average");
+		const p116b = option(p116, "Option B · ");
+		expect(picked(p116b) && recommended(p116b)).toBe(true);
+		expect(p116b).toContain("Last month: $");
+		expect(p116b).toContain("3-month average: $650.00");
+		expect(p116).toContain("decision 85");
 	});
 
 	it("is linked from the catalog", async () => {

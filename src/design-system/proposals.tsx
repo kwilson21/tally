@@ -354,6 +354,23 @@ export const DECIDED: readonly {
 			"Option A: a How this works link under Bills' status sentence, to the Bills section of How Tally works (decision 84).",
 		issue: 246,
 	},
+	{
+		title: "P114 · Deleting a cash entry, once Undo ships",
+		outcome:
+			"Option A: the sheet asks just the question, “Delete Farmers market, $20.00?”, because “This can't be undone.” would no longer be true once the toast's Undo ships (decision 85).",
+		issue: 244,
+	},
+	{
+		title: "P115 · The money box's corners",
+		outcome:
+			"Option A: the money box and its cent arrows use the 12px corner token, rounded-control, like every input, and become squircles with them (decision 85).",
+	},
+	{
+		title: "P116 · A suggested amount in the budget sheet",
+		outcome:
+			"Option B: a second chip beside Last month, “3-month average”, with the average of what the category spent in the last three finished months, shown once there are three finished months and the average is above $0 (decision 85).",
+		issue: 250,
+	},
 ];
 
 /** The proposals page body. */
@@ -378,8 +395,8 @@ export function Proposals() {
 					Picked: the polish pass
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Four choices the polish pass turned up (questions 56 to 59), each
-					drawn on a phone. The owner's picks marked Picked are decision 84.
+					Choices the polish pass turned up (questions 56 to 62), each drawn on
+					a phone. The owner's picks marked Picked are decisions 84 and 85.
 				</p>
 				<PolishProposals />
 			</section>

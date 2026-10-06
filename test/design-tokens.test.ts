@@ -42,12 +42,11 @@ const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
 
 /**
  * Off-token classes that are allowed, each with its reason. Toasts are the one shadow (DESIGN.md).
- * The money input keeps the original app's corners until the owner reviews it in the catalog
- * (the next #76 PR).
+ * P115 B draws the 8px corners the owner turned down (decision 85), on the money box in a drawing.
  */
 const EXCEPTIONS: Record<string, string[]> = {
 	"../public/js/toast.js": ["shadow-sm"],
-	"../src/views/money-input.tsx": [
+	"../src/design-system/proposals-polish.tsx": [
 		"rounded-lg",
 		"rounded-tr-lg",
 		"rounded-br-lg",
