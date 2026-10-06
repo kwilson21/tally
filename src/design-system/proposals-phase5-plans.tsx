@@ -868,8 +868,8 @@ export function Phase5PlansProposals() {
 					an email when a bank needs signing in again, sent with Resend, with
 					Cloudflare's own email sending as the fallback (§8.4, decision 86,
 					which replaced decision 79's order). Fix connection lives on Accounts
-					(§8, §10), and Home flags a bank that needs attention or hasn't
-					synced for 3 days (§8.5).
+					(§8, §10), and Home flags a bank that needs attention or hasn't synced
+					for 3 days (§8.5).
 				</Fixed>
 				<NeedsLine settled="decision 74">
 					It goes to everyone in the family, once and then every 3 days until
