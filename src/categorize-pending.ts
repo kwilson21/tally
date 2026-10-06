@@ -1,4 +1,5 @@
-// The nightly categorization step (spec §7): merchant rules first, then Jev for the rest.
+// The nightly categorization step (spec §7): merchant rules first, then Jev for the rest. Production
+// makes it twice a morning, in two runs of their own (src/index.tsx); the demo makes it once.
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { decide } from "./ai/decide";
 import { householdTimeZone, todayIn } from "./dates";
@@ -16,7 +17,7 @@ import {
  * Production sorts a new bank's backfill in a day; each answer is saved as it arrives,
  * so a run cut short keeps its work, and the rest wait for the next run. The count is the household's
  * whole day, midnight to midnight in its time zone, shared by the runs right after a sync and the
- * nightly run (db/jev-calls.ts).
+ * nightly runs (db/jev-calls.ts).
  */
 export const jevCallLimit = (env: { DEMO?: string }) =>
 	env.DEMO === "false" ? 500 : 40;
@@ -24,16 +25,16 @@ export const jevCallLimit = (env: { DEMO?: string }) =>
 /**
  * The most calls one run makes, whatever the day's cap still allows; what's left waits for the next
  * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read
- * before it and after it, and saving its answer), plus a few for the run's setup. A nightly invocation
- * has also synced the banks before it asks anything, and that spends queries too, so a run stays well
- * under: 300 calls is about 900 queries, and the rest of the room is the sync's.
+ * before it and after it, and saving its answer), plus a few for the run's setup: 300 calls is about 900
+ * queries. So production's 09:20 run does nothing else, and the sync (09:00) and the names with the
+ * second pass (09:40) are runs of their own.
  */
 export const MAX_CALLS_PER_RUN = 300;
 
 /**
  * The most transactions the run right after a sync asks about, newest first among that sync's own.
  * A sync that imports a lot of rows has already spent most of its invocation's 1,000 queries saving
- * them, so this run stays small (50 calls is about 150 queries); the rest wait for the nightly run.
+ * them, so this run stays small (50 calls is about 150 queries); the rest wait for the nightly runs.
  */
 export const AFTER_SYNC_BATCH = 50;
 
@@ -42,15 +43,15 @@ const MAX_FAILURES_IN_A_ROW = 3;
 
 type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
 
-/** What a run is asked to do, beyond the default of the nightly run. */
+/** What a run is asked to do, beyond the default of a nightly run. */
 export type PassOptions = {
-	// The nightly catch-up has just applied merchant rules after its syncs; without banks (the demo)
-	// or when that step failed, this run applies them itself.
+	// The demo's one run may have just applied merchant rules after a sync; without banks (the demo)
+	// or when that step failed, this run applies them itself. Production's sorting runs always do.
 	rulesApplied?: boolean;
 	/**
 	 * Ask only about these transaction rows (their ids), and only the ones still unsorted once the
 	 * rules have run: what one sync just brought in, or the one transaction a person added a note to.
-	 * Everything else waits for the nightly run, which has no list.
+	 * Everything else waits for the nightly runs, which have no list.
 	 */
 	onlyIds?: number[];
 	/** The run was started by a sync, so it also stops when "sort as they arrive" is turned off. */
@@ -61,7 +62,7 @@ export type PassOptions = {
 
 /**
  * Merchant rules, then Jev for what they left, honoring the household's saved AI switches (spec
- * §8.6, decision 73), so the nightly run and a run after a sync agree: with categories and income
+ * §8.6, decision 73), so the nightly runs and a run after a sync agree: with categories and income
  * both off Jev isn't asked at all, with categories off its category and its transfer and
  * reimbursement flags are dropped, and with income off its income answer is. The switches can be
  * saved while a run is going, so each transaction reads them again before it's sent and before its

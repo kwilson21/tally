@@ -56,7 +56,7 @@ describe("demo environment config", () => {
 		expect(demo.preview_urls).toBe(false);
 	});
 
-	it("resets nightly at 09:00 UTC", () => {
+	it("resets, sorts and names in one run nightly at 09:00 UTC", () => {
 		expect(demo.triggers).toEqual({ crons: ["0 9 * * *"] });
 	});
 
@@ -92,8 +92,12 @@ describe("production environment config (#23)", () => {
 		expect(JSON.stringify(production)).not.toContain("finance.");
 	});
 
-	it("syncs every bank daily at 09:00 UTC, and sorts what's left at 09:30 (decision 56)", () => {
-		expect(production.triggers).toEqual({ crons: ["0 9 * * *", "30 9 * * *"] });
+	// Three runs, each its own invocation with D1's 1,000 queries to itself (decision 56): the sync, the
+	// first Jev pass, and the names with the second Jev pass. src/index.tsx routes by these exact strings.
+	it("syncs every bank at 09:00 UTC, asks Jev at 09:20, and names then asks Jev again at 09:40 (decision 56)", () => {
+		expect(production.triggers).toEqual({
+			crons: ["0 9 * * *", "20 9 * * *", "40 9 * * *"],
+		});
 	});
 
 	it("binds Workers AI for merchant names (#33) in production and the demo, not in local development", () => {
