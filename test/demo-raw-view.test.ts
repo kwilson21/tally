@@ -1,8 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { listTransactions, PAGE_SIZE } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { type Filters, SHOWS } from "../src/transactions/filters";
 
 // The demo's "See it without AI" (spec §8.6, decisions 68, 73, 79; P44 A): two links under the
 // Transactions title switch the list between what Tally made of it and the bank's raw data (?raw=1).
@@ -208,6 +210,101 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			).toBe(true);
 			expect(countOf(html)).toContain(
 				`${parts.results.length} transactions matching`,
+			);
+		}
+	});
+
+	it("matches a non-split twin across every raw filter combination and page", async () => {
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id AS accountId, date, amount_cents AS amountCents FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431' AND amount_cents = 18742",
+		).first<{
+			id: number;
+			accountId: number;
+			date: string;
+			amountCents: number;
+		}>();
+		expect(parent).toBeDefined();
+		if (!parent) throw new Error("Demo seed split Costco purchase is missing");
+
+		const parts = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ?",
+		)
+			.bind(parent.id)
+			.all<{ id: number }>();
+		const otherAccount = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE id != ? ORDER BY id LIMIT 1",
+		)
+			.bind(parent.accountId)
+			.first<{ id: number }>();
+		expect(otherAccount).toBeDefined();
+		if (!otherAccount) throw new Error("Demo seed needs a second account");
+
+		const twinId = 99001;
+		await env.DB.prepare(
+			`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source,
+				 excluded, excluded_source, flag_income, flag_transfer, is_split, parent_id)
+			 SELECT ?, account_id, date, amount_cents, raw_name, category_id, category_source,
+				 excluded, excluded_source, flag_income, flag_transfer, 0, NULL
+			 FROM transactions WHERE id = ?`,
+		)
+			.bind(twinId, parent.id)
+			.run();
+
+		const combinations: Filters[] = SHOWS.flatMap((show) =>
+			[false, true].flatMap((uncategorized) =>
+				[parent.accountId, otherAccount.id].flatMap((account) =>
+					[parent.date.slice(0, 7), "1999-01", "all"].flatMap((month) =>
+						["COSTCO WHSE #0431", "NO SUCH RAW TRANSACTION"].map((q) => ({
+							q,
+							month,
+							category: null,
+							account,
+							show,
+							uncategorized,
+							page: 1,
+							raw: true,
+						})),
+					),
+				),
+			),
+		);
+		expect(combinations).toHaveLength(120);
+
+		for (const filters of combinations) {
+			const firstPage = await listTransactions(env.DB, filters);
+			const pages = [firstPage];
+			for (let page = 2; page <= firstPage.pages; page += 1) {
+				pages.push(await listTransactions(env.DB, { ...filters, page }));
+			}
+			const rows = pages.flatMap((result) => result.rows);
+			const parentPageCount = pages.filter((result) =>
+				result.rows.some((row) => row.id === parent.id),
+			).length;
+			const twinPageCount = pages.filter((result) =>
+				result.rows.some((row) => row.id === twinId),
+			).length;
+
+			expect(parentPageCount, JSON.stringify(filters)).toBe(twinPageCount);
+			expect(parentPageCount, JSON.stringify(filters)).toBeLessThanOrEqual(1);
+			expect(
+				rows.some((row) => row.id === parent.id),
+				JSON.stringify(filters),
+			).toBe(parentPageCount === 1);
+			expect(
+				rows.some((row) => row.id === twinId),
+				JSON.stringify(filters),
+			).toBe(parentPageCount === 1);
+			expect(
+				parts.results.every((part) => rows.every((row) => row.id !== part.id)),
+				JSON.stringify(filters),
+			).toBe(true);
+			expect(rows).toHaveLength(firstPage.total);
+			expect(pages.every((result) => result.total === firstPage.total)).toBe(
+				true,
+			);
+			expect(firstPage.pages).toBe(
+				Math.max(1, Math.ceil(firstPage.total / PAGE_SIZE)),
 			);
 		}
 	});
