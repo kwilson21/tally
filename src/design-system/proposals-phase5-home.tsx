@@ -60,7 +60,7 @@ const row = (cat: Cat, spentCents: number, budgetCents: number): Row => ({
 });
 
 /** October's budgeted categories, in Settings' order: Eating Out is over, Gas nearly spent. */
-const OCTOBER: Row[] = [
+export const OCTOBER: Row[] = [
 	row(CATS.groceries, 31200, 70000),
 	row(CATS.eatingOut, 28600, 25000),
 	row(CATS.gas, 18600, 20000),
@@ -345,7 +345,7 @@ function Why({ topic }: { topic: string }) {
 // P46: browse past months.
 
 /** September, finished: under budget overall, with Eating Out over. Kids had no budget. */
-const SEPTEMBER: Row[] = [
+export const SEPTEMBER: Row[] = [
 	row(CATS.groceries, 63600, 70000),
 	row(CATS.eatingOut, 28600, 25000),
 	row(CATS.gas, 19200, 20000),
@@ -906,7 +906,7 @@ const EATING_OUT_ROWS: ListRow[] = (
 }));
 
 /** Home scrolled to the Budget list, behind the sheet. */
-const budgetBehind = <Budget>{progressRows(OCTOBER)}</Budget>;
+export const budgetBehind = <Budget>{progressRows(OCTOBER)}</Budget>;
 
 /** P53 A: the budget sheet as the route draws it, with a link to the transactions above the amount. */
 const sheetLink = (
