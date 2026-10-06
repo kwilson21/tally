@@ -51,6 +51,33 @@ describe("Bills", () => {
 		expect(html).toContain('href="/how-it-works#bills"');
 	});
 
+	// DESIGN.md Type roles: a page title is 5xl, so the title does not shrink on the Bills tab.
+	it.each([
+		["/bills", "Bills"],
+		["/bills/find", "Possible bills"],
+	])("draws %s's h1 as a 5xl page title", async (path, title) => {
+		const html = await (
+			await exports.default.fetch(`http://tally.test${path}`)
+		).text();
+		expect(html).toMatch(
+			new RegExp(
+				`<h1 class="font-serif text-5xl font-semibold tracking-tight">\\s*${title}\\s*</h1>`,
+			),
+		);
+	});
+
+	it("keeps the Add a bill sheet's title at the 4xl sheet role, a size below the page's", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/new")
+		).text();
+		expect(html).toContain(
+			'<h2 id="bill-sheet-title" class="font-serif text-4xl font-semibold tracking-tight"',
+		);
+		expect(html).toContain(
+			'<h1 class="font-serif text-5xl font-semibold tracking-tight">Bills</h1>',
+		);
+	});
+
 	it("adds a bill and returns htmx feedback", async () => {
 		const body = new URLSearchParams({
 			name: "Gym",

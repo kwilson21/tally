@@ -253,7 +253,9 @@ const offFirst = <FeedbackForm demo values={FEEDBACK_VALUES} />;
 /** B: as it was: the privacy text first, the box after it, where this edge cuts it off. */
 const offAfter = (
 	<div class="max-w-2xl">
-		<h1 class="font-serif text-4xl font-semibold">Send feedback</h1>
+		<h1 class="font-serif text-5xl font-semibold tracking-tight">
+			Send feedback
+		</h1>
 		<p class="mt-2 text-muted">{FEEDBACK_PRIVACY}</p>
 		<p class="mt-8 rounded-control border border-rule bg-band p-4">
 			{NOTHING_SENT}

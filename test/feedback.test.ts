@@ -147,6 +147,15 @@ beforeEach(async () => {
 });
 
 describe("feedback form", () => {
+	it("draws its title as a 5xl page title, like every other page", async () => {
+		const response = await productionApp().fetch("/feedback");
+		expect(response.status).toBe(200);
+		// DESIGN.md Type roles: "Page title | font-serif, 5xl, semibold, tight tracking".
+		expect(await response.text()).toContain(
+			'<h1 class="font-serif text-5xl font-semibold tracking-tight">Send feedback</h1>',
+		);
+	});
+
 	it("validates required and 2,000-character messages with an alert", async () => {
 		for (const message of ["", "x".repeat(2001)]) {
 			const response = await productionApp().fetch(

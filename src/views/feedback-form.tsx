@@ -32,7 +32,9 @@ export function FeedbackForm({
 }) {
 	return (
 		<div class="max-w-2xl">
-			<h1 class="font-serif text-4xl font-semibold">Send feedback</h1>
+			<h1 class="font-serif text-5xl font-semibold tracking-tight">
+				Send feedback
+			</h1>
 			{/* In the demo nothing can be sent, so that comes first, before the privacy text (decision 82). */}
 			{demo && (
 				<p class="mt-3 rounded-control border border-rule bg-band p-4">

@@ -208,7 +208,7 @@ async function page(
 			currentPath={c.req.path}
 		>
 			<div class="max-w-2xl">
-				<h1 class="font-serif text-4xl font-semibold tracking-tight">Bills</h1>
+				<h1 class="font-serif text-5xl font-semibold tracking-tight">Bills</h1>
 				<p class="mt-2 font-serif text-lg italic">
 					{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
 					{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
@@ -537,7 +537,7 @@ bills.get("/bills/find", async (c) => {
 				<a href="/bills" class="inline-flex min-h-11 items-center">
 					Bills
 				</a>
-				<h1 class="font-serif text-4xl font-semibold tracking-tight">
+				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Possible bills
 				</h1>
 				<p class="mt-2 text-muted">
