@@ -67,7 +67,10 @@ describe("Switch", () => {
 		expect(html().match(/<input[^>]*class="([^"]*)"/)?.[1]).toBe("sr-only");
 	});
 
-	it("stills the knob's slide for reduced motion", () => {
-		expect(html()).toContain("motion-reduce:transition-none");
+	it("slides the knob with the switch classes, whose 150 ms and reduced-motion version live in app.css (test/motion.test.tsx)", () => {
+		const out = html();
+		expect(out).toMatch(/class="switch-track /);
+		expect(out).toMatch(/class="switch-knob /);
+		expect(out).not.toMatch(/duration-|transition/);
 	});
 });

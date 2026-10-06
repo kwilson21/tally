@@ -109,7 +109,8 @@ function SuggestedSplit({ parts, kept }: { parts: Part[]; kept?: boolean }) {
 			</div>
 			{!kept && (
 				<p class="text-sm text-muted">
-					Tally's guess, from your last 5 Costco trips
+					Tally's guess: Household from this trip's details, Groceries from your
+					other Costco trips
 				</p>
 			)}
 			{parts.map((part, index) => (
@@ -156,7 +157,8 @@ function SuggestedSplit({ parts, kept }: { parts: Part[]; kept?: boolean }) {
 }
 
 /**
- * The split, as it opens: Groceries and Household, most used first, with no amounts. The split's
+ * The split, as it opens, with no amounts: Household first, from this trip's details (paper towels,
+ * detergent), then Groceries, Costco's most-used other category (decision 87). The split's
  * sheet is as tall as the phone allows, so nothing of the list shows above it, only the dimming.
  */
 const splitSuggested = (
@@ -164,8 +166,8 @@ const splitSuggested = (
 		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
 		<SuggestedSplit
 			parts={[
-				{ category: 1, amount: "" },
 				{ category: 5, amount: "" },
+				{ category: 1, amount: "" },
 			]}
 		/>
 	</PanelSheet>
@@ -181,8 +183,8 @@ const splitFilled = (
 		<SuggestedSplit
 			kept
 			parts={[
-				{ category: 1, amount: "165.00" },
 				{ category: 5, amount: "49.36" },
+				{ category: 1, amount: "165.00" },
 			]}
 		/>
 	</PanelSheet>
@@ -243,7 +245,7 @@ const askOnce = (
 	/>
 );
 
-/** P90 on the proposals page, picked (decision 80). */
+/** P90 on the proposals page, picked (decision 80), its rule settled (decision 87). */
 export function MixedStoreProposals() {
 	return (
 		<Specimen
@@ -267,18 +269,19 @@ export function MixedStoreProposals() {
 				can suggest which categories a split has, never the amounts. Amounts
 				need a person or a receipt, and receipts are on the Later list (§12).
 			</Fixed>
-			<NeedsLine>
-				how far back a store's categories are counted and whether a split's
-				parts count (proposed: the last 3 months, each part in its own
-				category), which categories the suggested parts start with (proposed:
-				the ones this store's trips were split into or put in before, most used
-				first, the top two; Add a part adds a blank one), and whether “Split
-				this one?” shows on every trip to a mixed store, as drawn, or only when
-				the trip's details point to more than one category (§7). Already settled
-				(decision 80): a store is mixed when a person has put its trips in two
-				or more categories, counted from the transactions a person categorized;
-				the amounts are always the person's, Tally never fills one in, and the
-				split saves only when it adds up exactly (§6.1).
+			<NeedsLine settled="decision 87">
+				a store is mixed when a person has put its trips in two or more
+				categories in the last 3 months, and a split trip counts through its
+				parts, not the category it had before it was split (Q64 A). “Split this
+				one?” shows on every trip to a mixed store, as drawn in Option A (Q66
+				A). The two parts start with the categories the trip's details point to;
+				when the details name only one, the store's most-used other category
+				fills the second part (Q65 A), and when they name none, the store's two
+				most-used categories fill both (Q67 A), all counted over the same 3
+				months and skipping archived categories, which a split can't use; a part
+				with nothing left to suggest starts blank. The amounts are always the
+				person's, Tally never fills one in, and the split saves only when it
+				adds up exactly (§6.1).
 			</NeedsLine>
 			<Options
 				options={[
@@ -294,7 +297,7 @@ export function MixedStoreProposals() {
 					},
 					{
 						name: "Option A, next · The parts, suggested",
-						note: "Split this one? opens P17 A's split with two parts already there, Groceries and Household, drawn dashed because they're Tally's guess, and labelled with where they came from. Their amounts are empty and the line says “$214.36 left to assign”. A part turns solid once its amount is typed or its category changed.",
+						note: "Split this one? opens P17 A's split with two parts already there, Household from this trip's details and Groceries, Costco's most-used other category (decision 87), drawn dashed because they're Tally's guess, and labelled with where they came from. Their amounts are empty and the line says “$214.36 left to assign”. A part turns solid once its amount is typed or its category changed.",
 						tall: true,
 						screen: splitSuggested,
 					},

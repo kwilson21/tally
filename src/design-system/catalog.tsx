@@ -91,6 +91,7 @@ import {
 	TRENDS_PART_INPUT,
 } from "./mock";
 import {
+	MotionSpec,
 	PhoneFrame,
 	Specimen,
 	State,
@@ -98,7 +99,12 @@ import {
 	UseSpec,
 	type UseSpecText,
 } from "./specimen";
-import { CATEGORY_COLORS, COLOR_TOKENS, TYPE_ROLES } from "./tokens";
+import {
+	CATEGORY_COLORS,
+	COLOR_TOKENS,
+	DURATION_TOKENS,
+	TYPE_ROLES,
+} from "./tokens";
 
 const SECTIONS = [
 	["foundation", "Foundation"],
@@ -235,16 +241,16 @@ function Foundation() {
 				id="radii"
 				title="Radii and depth"
 				tier="visual"
-				sentence="Two radii and pills. No shadows except toasts: hairline rules separate things instead."
+				sentence="Two radii, drawn as squircles where the browser supports it, and pills. No shadows except toasts: hairline rules separate things instead."
 			>
 				<div class="flex flex-wrap gap-6">
-					<State label="rounded-control · inputs, chips, buttons">
+					<State label="rounded-control · inputs, buttons, tags, cards, the toast">
 						<span class="block h-16 w-28 rounded-control border border-ink" />
 					</State>
-					<State label="rounded-sheet · the sheet's top corners">
+					<State label="rounded-sheet · the sheet's top corners, the panel's left corners">
 						<span class="block h-16 w-28 rounded-t-sheet border border-ink" />
 					</State>
-					<State label="rounded-full · pills, round buttons">
+					<State label="rounded-full · pills: chips, round ticks, round buttons">
 						<span class="block h-11 w-28 rounded-full border border-ink" />
 					</State>
 				</div>
@@ -253,13 +259,33 @@ function Foundation() {
 				id="motion"
 				title="Motion"
 				tier="visual"
-				sentence="Budget bars fill on load; with reduced motion they show their final state. Nothing counts up or bounces."
+				sentence="Quiet confirmations in CSS only (decision 76): a switch's knob slides, a sheet rises, a toast fades in, and pages cross-fade, each over in 150 to 200 ms; the budget bars fill on load. Nothing counts up or bounces, and reduced motion shows every end state with nothing moving. Each move is a class in app.css that names a duration token below, never a length, and is written into its component's use spec: the Switch, the Toast, the BottomSheet and the page shell, in the sections that follow."
 			>
-				<ul>
-					{PROGRESS_ROWS.slice(0, 1).map((s) => (
-						<ProgressRow {...s.props} />
-					))}
-				</ul>
+				<State label="Duration tokens (app.css @theme): a rule names one, never a length">
+					<dl class="max-w-prose divide-y divide-rule border-y border-rule">
+						{DURATION_TOKENS.map((t) => (
+							<div class="py-3 sm:grid sm:grid-cols-[14rem_1fr] sm:gap-4">
+								<dt class="font-medium">
+									duration-{t.name} <span class="text-muted">{t.value}</span>
+								</dt>
+								<dd class="mt-1 text-muted sm:mt-0">{t.use}</dd>
+							</div>
+						))}
+					</dl>
+				</State>
+				<State label="The budget bar fills on load (reload the page to see it again)">
+					<ul>
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow {...s.props} />
+						))}
+					</ul>
+				</State>
+				<State label="Where to see the rest: tap a Switch, press Show a saved toast, open the bottom sheet's page, and follow a link between catalog pages">
+					<p class="max-w-prose text-muted">
+						Each plays here as it does in the app. Set your device to reduce
+						motion and each one shows its end state at once.
+					</p>
+				</State>
 			</Specimen>
 		</Group>
 	);
@@ -343,6 +369,21 @@ function Shell() {
 					narrow the window to see the sidebar and the tabs. No item is current
 					here, because the catalog isn't one of the destinations.
 				</p>
+				<MotionSpec>
+					Pages cross-fade in 150 ms through the browser's own View Transitions,
+					with no script: every page opts in with{" "}
+					<code>
+						@view-transition {"{"} navigation: auto; {"}"}
+					</code>{" "}
+					in app.css, which Layout loads on every page, and the browser's 250 ms
+					is set to the confirmation token. Chrome and Edge 126 and later and
+					Safari 18.2 and later play it; Firefox doesn't yet and just switches
+					pages, as before. Reduced motion: the rule only applies where motion
+					is welcome, so pages switch at once. A swap inside a page (a filter,
+					one of Adjust's taps) never fades the page: htmx's transitions setting
+					stays off. To see it, follow a link from this page to the bottom
+					sheet's page and back.
+				</MotionSpec>
 			</Specimen>
 		</Group>
 	);
@@ -417,7 +458,7 @@ const SWITCH_SPEC: UseSpecText = {
 	input:
 		"Touch: the whole 44px row. Keyboard: Tab to it, Space turns it. Screen reader: “Income, switch, on”, then its muted line. The On and Off words and the track are hidden from it, because it already says its state.",
 	motion:
-		"The knob slides and the track changes tone in 150 ms. Reduced motion shows the end state at once.",
+		"The knob slides in 150 ms, ease-out, and the track and knob swap tones as it goes; the word changes from On to Off (or back) at the same moment. The classes are switch-track and switch-knob in app.css, on the confirmation token. Reduced motion shows the end state at once, with nothing moving.",
 	edges:
 		"A long name or line wraps beside the switch and never under it; the word and the track keep their width. With no muted line it is the name alone. No JavaScript: it's a plain checkbox that posts “on” when on and nothing when off, so the server reads a field left out as off, and the form always carries the whole group. At 320px the row still fits the name, word and track side by side.",
 	words:
@@ -441,6 +482,46 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. With one transaction the muted line says “For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
 	words:
 		"Name · Tally's guess · Why? · Keep “{Blue bottle cof}” · Or your own · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+};
+
+// The BottomSheet's use spec: every line answered, with its motion (decisions 76 and 80, P74 A, P85 A).
+const BOTTOM_SHEET_SPEC: UseSpecText = {
+	purpose:
+		"Make one change over the list it came from, without leaving it: a transaction's edit panel, a budget, adding cash.",
+	affordance:
+		"A dimmed backdrop (ink at 30%) over the page, and on it a paper sheet with curved top corners against a phone's bottom edge, or a panel against the right edge on desktop. The page behind stays in view, so it reads as over the list. Cancel, a secondary button, closes it, and so does the backdrop.",
+	states:
+		"Closed: not drawn. Opening: the motion below. Open: the sheet and backdrop at rest. Loading and error belong to the form inside (a Save that is pending, a field's error in role=alert); a failed request leaves the sheet as it is, with what was typed, and a toast says so. Hover, pressed and disabled: not applicable to the sheet itself.",
+	feedback:
+		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there. Cancel or the backdrop bring the list back with focus on the row that was open; a save does the same with a toast and an announcement.",
+	input:
+		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Tab goes through the sheet's controls; Escape isn't supported (it would need JavaScript), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a dialog named by the sheet's heading. It isn't a modal, so the page behind isn't hidden from it.",
+	motion:
+		"It arrives in 200 ms, ease-out. On a phone the sheet rises from the bottom edge while its backdrop fades in; at desktop width (1024px and up) the panel slides in from the right edge while its backdrop fades in. The classes are fade-in and sheet-panel in app.css, on the rising token. Closing is at once. It plays only when it opens: a swap that draws the open sheet again (a field's error, the delete question, Add a part, Keep it) leaves it still, so an error never looks like the sheet closing and opening, and the field's own shake is seen. Reduced motion shows the sheet and backdrop at once, with nothing moving.",
+	edges:
+		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without JavaScript the sheet is a page of its own, and Cancel and the backdrop are links.",
+	words:
+		"The backdrop's name for a screen reader is “Close”. The sheet is named by its title (the category, the transaction's name); every other word is its form's.",
+};
+
+// The Toast's use spec: every line answered, with its motion (decision 76, P74 A).
+const TOAST_SPEC: UseSpecText = {
+	purpose:
+		"Tell a person that what they just did worked, or didn't, in one sentence, without taking them anywhere.",
+	affordance:
+		"A small paper pill with a hairline rule and the only lift Tally allows, near the bottom of the screen (above the tab bar on a phone). It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
+	states:
+		"Success: the words. Error: the alert icon, then the words. Each stays for 4 seconds and goes; several at once stack with a gap. Hover, focus, pressed, disabled and loading: not applicable, because it can't be touched.",
+	feedback:
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, and taps pass through the toast, so a Save under it can be tapped again.",
+	input:
+		"Touch and keyboard: none, and nothing in it takes focus. Screen reader: a success is role=status and an error is role=alert; the announcer region says the HX-Trigger announce text.",
+	motion:
+		"It fades in and rises 8 px in 150 ms, ease-out, holds, then fades out in 150 ms. That is one animation as long as its stay, 4 seconds, the same as toast.js's DISPLAY_MS, and the fade-out is over 150 ms early, so the toast is invisible 150 ms before the script takes it out (the script's timer starts a frame before the animation does, so a fade-out timed to the very end would be cut off); the script doesn't change. The CSS is set on whatever #toasts holds, on the toast and confirmation tokens. Reduced motion shows it at once with nothing moving, and it is still taken out after 4 seconds.",
+	edges:
+		"Long words wrap inside the pill. It sits above an open sheet (z-60), so a failed save can be read over it. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
+	words:
+		"A success says what was saved (“Saved Groceries' budget.”). A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -1724,7 +1805,7 @@ function Feedback() {
 				id="toast"
 				title="Toast"
 				tier="interactive"
-				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds and the announcer reads it. An error toast speaks as an alert and leads with the alert icon in the over token, so it is never colour alone; the same toast appears, over an open sheet too, when a request fails (the connection drops or the server sends a 500). These buttons send the same events."
+				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds, fading in and out, and the announcer reads it. An error toast speaks as an alert and leads with the alert icon in the over token, so it is never colour alone; the same toast appears, over an open sheet too, when a request fails (the connection drops or the server sends a 500). These buttons send the same events."
 			>
 				<div class="flex flex-wrap gap-3">
 					<Button
@@ -1744,6 +1825,7 @@ function Feedback() {
 						Show an error toast
 					</Button>
 				</div>
+				<UseSpec spec={TOAST_SPEC} />
 			</Specimen>
 			<Specimen
 				id="error-pages"
@@ -1793,8 +1875,10 @@ function Feedback() {
 					>
 						see the bottom sheet
 					</a>
-					.
+					. Opening it plays its motion: it rises from the bottom on a phone and
+					slides in from the right at desktop width, its backdrop fading in.
 				</p>
+				<UseSpec spec={BOTTOM_SHEET_SPEC} />
 			</Specimen>
 		</Group>
 	);
@@ -2455,7 +2539,8 @@ export function SheetSpecimen() {
 			</h1>
 			<p class="mt-2 text-muted">
 				Visual: the sheet over sample rows. Cancel or the backdrop go back to
-				the catalog.
+				the catalog. Opening this page plays the sheet's motion: it rises on a
+				phone and slides in from the right on desktop.
 			</p>
 			<ul class="mt-6 max-w-xl">
 				{PROGRESS_ROWS.map((s) => (
