@@ -44,8 +44,11 @@ describe("GET / with the demo seed", () => {
 			return statements;
 		};
 		const before = await requestCount();
-		await env.DB.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name) VALUES
-			(1,'2024-01-01',100,'OLD 1'),(1,'2024-02-01',100,'OLD 2'),(1,'2024-03-01',100,'OLD 3')`).run();
+		await env.DB.prepare(`WITH digits(n) AS (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9))
+			INSERT INTO transactions (account_id,date,amount_cents,raw_name)
+			SELECT 1,'2024-01-01',100,'OLD ' || (a.n*1000+b.n*100+c.n*10+d.n+1)
+			FROM digits a, digits b, digits c, digits d
+			WHERE a.n*1000+b.n*100+c.n*10+d.n < 5000`).run();
 		expect(await requestCount()).toBe(before);
 	});
 

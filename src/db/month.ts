@@ -83,18 +83,29 @@ export async function loadMonth(
 	};
 }
 
-/** First counted month, seeking the earliest qualifying row through the transaction date index. */
+/** First counted month, checking the earliest counted date and its two-month bill-occurrence bound. */
 export async function firstCountedMonth(
 	db: D1Database,
 ): Promise<string | null> {
 	const row = await db
 		.prepare(
-			`SELECT ${COUNTED_MONTH} AS month
-			FROM transactions t
-			 ${COUNTED_JOINS}
-			 WHERE ${COUNTED_SPENDING}
-			 ORDER BY t.date
-			 LIMIT 1`,
+			`WITH first_date AS MATERIALIZED (
+				SELECT t.date, ${COUNTED_MONTH} AS month FROM transactions t
+				${COUNTED_JOINS}
+				WHERE ${COUNTED_SPENDING}
+				ORDER BY t.date
+				LIMIT 1
+			), nearby_month AS (
+				SELECT MIN(${COUNTED_MONTH}) AS month
+				FROM first_date f, transactions t INDEXED BY transactions_date
+				${COUNTED_JOINS}
+				WHERE ${COUNTED_SPENDING}
+					AND t.date >= f.date AND t.date <= date(f.date, '+2 months')
+			)
+			SELECT MIN(month) AS month FROM (
+				SELECT month FROM first_date
+				UNION ALL SELECT month FROM nearby_month
+			)`,
 		)
 		.first<{ month: string | null }>();
 	return row?.month ?? null;
