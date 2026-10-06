@@ -90,14 +90,19 @@ describe("GET /design-system/proposals", () => {
 			const end = heads.find((i) => i > (at ?? 0));
 			return p117.slice(at, end);
 		};
-		const oneThing = option("Option A · One thing");
+		const picture = (chunk: string) => {
+			const at = chunk.indexOf('data-screen="picture"');
+			expect(at).toBeGreaterThan(-1);
+			return chunk.slice(at);
+		};
+		const oneThing = picture(option("Option A · One thing"));
 		expect(oneThing).toContain("$82.17");
 		expect(oneThing).toContain("Maybe Groceries");
 		expect(oneThing).not.toContain("Split this one?");
-		const mixed = option("Option A, next · Mixed trip");
+		const mixed = picture(option("Option A, next · Mixed trip"));
 		expect(mixed).toContain("Costco trips go in Groceries and Household.");
 		expect(mixed).toContain("Split this one?");
-		const split = option("Option A, next · The split");
+		const split = picture(option("Option A, next · The split"));
 		expect(split).toContain("$214.36 left to assign");
 		expect(split).toContain(
 			"Tally&#39;s guess: Groceries and Household from this trip&#39;s details",
@@ -109,6 +114,25 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(p90Start, p90End)).toContain(
 			'href="#p117-when-split-this-one"',
 		);
+	});
+
+	it("uses unique IDs throughout the proposals page", async () => {
+		const { html } = await get("/design-system/proposals");
+		const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+		const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+		expect(duplicates).not.toContain("p117-split-line");
+		expect(duplicates).not.toContain("p117-part-category-0");
+		expect(duplicates).not.toContain("p117-part-amount-0");
+		expect(duplicates).not.toContain("p117-part-category-1");
+		expect(duplicates).not.toContain("p117-part-amount-1");
+		expect(duplicates).toEqual([
+			"p27-file",
+			"p27-file-hint",
+			"p27-note",
+			"select-1-name",
+			"select-2-name",
+			"select-3-name",
+		]);
 	});
 
 	it("draws a $0 budget and a far-over category without breaking the bars", async () => {

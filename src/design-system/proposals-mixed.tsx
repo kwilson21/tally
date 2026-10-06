@@ -97,16 +97,21 @@ type Part = { category: number; amount: string };
 function SuggestedSplit({
 	parts,
 	kept,
+	idPrefix = "p90",
 	note = "Tally's guess: Household from this trip's details, Groceries from your other Costco trips",
 }: {
 	parts: Part[];
 	kept?: boolean;
+	idPrefix?: string;
 	note?: string;
 }) {
 	return (
 		<div class="mt-4 flex flex-col gap-4 border-t border-rule pt-4">
 			<div class="flex items-center justify-between gap-3">
-				<div id={`p90-split-line${kept ? "-kept" : ""}`} aria-live="polite">
+				<div
+					id={`${idPrefix}-split-line${kept ? "-kept" : ""}`}
+					aria-live="polite"
+				>
 					<SplitLine
 						parentCents={TRIP.amountCents}
 						amounts={parts.map((p) => p.amount)}
@@ -122,13 +127,13 @@ function SuggestedSplit({
 					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
 				>
 					<label
-						for={`p90-part-category-${index}${kept ? "-kept" : ""}`}
+						for={`${idPrefix}-part-category-${index}${kept ? "-kept" : ""}`}
 						class="sr-only"
 					>
 						Part {index + 1} category
 					</label>
 					<select
-						id={`p90-part-category-${index}${kept ? "-kept" : ""}`}
+						id={`${idPrefix}-part-category-${index}${kept ? "-kept" : ""}`}
 						name="part_category"
 						class={`min-h-11 rounded-full border ${kept ? "border-rule" : "border-dashed border-ink"} bg-paper px-3`}
 					>
@@ -139,7 +144,7 @@ function SuggestedSplit({
 						))}
 					</select>
 					<LedgerField
-						id={`p90-part-amount-${index}${kept ? "-kept" : ""}`}
+						id={`${idPrefix}-part-amount-${index}${kept ? "-kept" : ""}`}
 						name="part_amount"
 						label={`Part ${index + 1} amount`}
 						value={part.amount}
@@ -268,6 +273,7 @@ const decision89Split = (
 	<PanelSheet tall behind="">
 		<PanelTop row={TRIP} raw={BANK_TEXT} account={CARD} />
 		<SuggestedSplit
+			idPrefix="p117"
 			note="Tally's guess: Groceries and Household from this trip's details"
 			parts={[
 				{ category: 1, amount: "" },
