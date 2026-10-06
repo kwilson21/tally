@@ -118,6 +118,22 @@ describe("bill payment matching", () => {
 		]);
 	});
 
+	it("gives an uncategorized matched payment its bill category", async () => {
+		await env.DB.batch([
+			env.DB.prepare("UPDATE bills SET category_id=5 WHERE id=1"),
+			env.DB.prepare("UPDATE transactions SET date='2026-04-10' WHERE id=6"),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(6,1,'2026-04-10',10000,'LANDLORD')",
+			),
+		]);
+		await matchBillPayments(env.DB, "2026-04-03");
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id,category_source FROM transactions WHERE id=6",
+			).first(),
+		).toEqual({ category_id: 5, category_source: "bill" });
+	});
+
 	it("keeps a long bill scan under D1's 1,000 query limit", async () => {
 		await env.DB.batch(
 			Array.from({ length: 40 }, (_, i) =>

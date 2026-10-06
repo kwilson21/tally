@@ -36,7 +36,7 @@ describe("migration 0026: bill categories", () => {
 		).toEqual([]);
 	});
 
-	it("backfills only linked payments that have no category, leaving a Jev pick alone", async () => {
+	it("backfills linked uncategorized payments only, preserving Jev and user choices and ignoring unlinked rows", async () => {
 		const backfill = migration.match(
 			/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
 		)?.[0];
@@ -57,23 +57,43 @@ describe("migration 0026: bill categories", () => {
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9920,'Backfill test',1000,10,'monthly',5,'BACKFILL TEST')",
 			),
 			env.DB.prepare(
-				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9920,id,'2026-09-10',1000,'BACKFILL TEST',3,'jev' FROM accounts LIMIT 1",
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9920,id,'2026-09-10',1000,'BACKFILL TEST',NULL,NULL FROM accounts LIMIT 1",
 			),
 			env.DB.prepare(
-				"INSERT INTO bill_payments(id,bill_id,period,transaction_id,matched_by,status) VALUES(9920,9920,'2026-09',9920,'user','linked')",
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9921,id,'2026-09-10',1000,'JEV TEST',3,'jev' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9922,id,'2026-09-10',1000,'USER TEST',4,'user' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9923,id,'2026-09-10',1000,'UNLINKED TEST' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(id,bill_id,period,transaction_id,matched_by,status) VALUES(9920,9920,'2026-09',9920,'user','linked'),(9921,9920,'2026-10',9921,'user','linked'),(9922,9920,'2026-11',9922,'user','linked'),(9923,9920,'2026-12',9923,'user','dismissed')",
 			),
 		]);
 		try {
 			await env.DB.prepare(backfill as string).run();
 			expect(
-				await env.DB.prepare(
-					"SELECT category_id,category_source FROM transactions WHERE id=9920",
-				).first(),
-			).toEqual({ category_id: 3, category_source: "jev" });
+				(
+					await env.DB.prepare(
+						"SELECT id,category_id AS categoryId,category_source AS categorySource FROM transactions WHERE id BETWEEN 9920 AND 9923 ORDER BY id",
+					).all()
+				).results,
+			).toEqual([
+				{ id: 9920, categoryId: 5, categorySource: "bill" },
+				{ id: 9921, categoryId: 3, categorySource: "jev" },
+				{ id: 9922, categoryId: 4, categorySource: "user" },
+				{ id: 9923, categoryId: null, categorySource: null },
+			]);
 		} finally {
 			await env.DB.batch([
-				env.DB.prepare("DELETE FROM bill_payments WHERE id=9920"),
-				env.DB.prepare("DELETE FROM transactions WHERE id=9920"),
+				env.DB.prepare(
+					"DELETE FROM bill_payments WHERE id BETWEEN 9920 AND 9923",
+				),
+				env.DB.prepare(
+					"DELETE FROM transactions WHERE id BETWEEN 9920 AND 9923",
+				),
 				env.DB.prepare("DELETE FROM bills WHERE id=9920"),
 				env.DB.prepare(triggers[0] as string),
 				env.DB.prepare(triggers[1] as string),
