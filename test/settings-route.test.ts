@@ -237,7 +237,9 @@ describe("archiving, restoring and moving", () => {
 			"Archived Eating Out. Its transactions keep their category.",
 		);
 		// The archived row is gone, so focus goes to where it went.
-		expect(archived.html).toMatch(/<summary[^>]*autofocus[^>]*>Archived \(1\)/);
+		expect(archived.html).toMatch(
+			/<summary[^>]*autofocus[^>]*><span class="min-w-0 flex-1">Archived \(1\)<\/span>/,
+		);
 
 		const restored = await post("/settings/categories/2/restore", {});
 		expect(rowNames(restored.html)).toContain("Eating Out");

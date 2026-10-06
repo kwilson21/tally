@@ -7,6 +7,7 @@ import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { entryKeyOf } from "../src/transactions/cash";
+import { CashForm } from "../src/views/cash-form";
 
 const BASE = "http://tally.test";
 
@@ -742,5 +743,44 @@ describe("entryKeyOf", () => {
 		5,
 	])("gives nothing for %j", (raw) => {
 		expect(entryKeyOf(raw)).toBeNull();
+	});
+});
+
+describe("the cash form's Category group", () => {
+	const form = async (category?: string) =>
+		String(
+			await CashForm({
+				values: {
+					amount: "5.00",
+					date: "2026-10-05",
+					merchant: "Bake sale",
+					category: "",
+					note: "",
+				},
+				errors: category ? { category } : {},
+				categories: [
+					{ id: 1, name: "Groceries", icon: "groceries", color: "cat-blue" },
+				],
+				today: "2026-10-05",
+			}),
+		);
+
+	it("spaces its error 8px under the chips, as the chips sit 8px under the legend", async () => {
+		const html = await form("Pick a category from the list.");
+		// A legend is not a flex item, so a flex gap would not space it from the chips: both use mt-2.
+		expect(html).toMatch(
+			/<fieldset aria-describedby="cash-category-error"><legend>Category<\/legend><div class="mt-2 flex flex-wrap gap-2">/,
+		);
+		expect(html).toContain(
+			'<p id="cash-category-error" role="alert" class="mt-2 text-sm text-over">Pick a category from the list.</p>',
+		);
+	});
+
+	it("draws no error line when there is no error", async () => {
+		const html = await form();
+		expect(html).toMatch(
+			/<fieldset><legend>Category<\/legend><div class="mt-2 flex flex-wrap gap-2">/,
+		);
+		expect(html).not.toContain("cash-category-error");
 	});
 });

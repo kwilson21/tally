@@ -9,8 +9,11 @@ function Sentence({ children }: { children: string }) {
 	return (
 		<p class="mt-1 flex flex-wrap items-center gap-x-2">
 			<span class="font-serif text-lg italic">{children}</span>
-			<span aria-hidden="true">·</span>
-			<WhyLink section="net-worth" topic="net worth" />
+			{/* The dot and the link wrap together, so a line never ends on a stray dot. */}
+			<span class="inline-flex items-center gap-x-2 whitespace-nowrap">
+				<span aria-hidden="true">·</span>
+				<WhyLink section="net-worth" topic="net worth" />
+			</span>
 		</p>
 	);
 }
