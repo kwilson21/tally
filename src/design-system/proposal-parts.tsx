@@ -13,12 +13,14 @@ export type Option = {
 	tradeoff?: string;
 	/** Why it's the recommended one, in one line. */
 	recommended?: string;
-	/** The owner picked this one (decisions 72–75). */
+	/** The owner picked this one (decisions 72–80). */
 	picked?: boolean;
 	/** Drawn at desktop width instead of on a phone. */
 	desktop?: boolean;
 	/** Drawn as the family app, without the demo banner. */
 	family?: boolean;
+	/** Drawn on a taller phone screen (880px, not 790px), for a group that doesn't fit in 790. */
+	tall?: boolean;
 	screen: Child;
 };
 
@@ -61,7 +63,11 @@ export function Options({ options }: { options: Option[] }) {
 							<div data-screen="picture">{o.screen}</div>
 						</DesktopFrame>
 					) : (
-						<PhoneFrame label={`${o.name}, on a phone`} demo={!o.family}>
+						<PhoneFrame
+							label={`${o.name}, on a phone`}
+							demo={!o.family}
+							tall={o.tall}
+						>
 							<div data-screen="picture">{o.screen}</div>
 						</PhoneFrame>
 					)}
