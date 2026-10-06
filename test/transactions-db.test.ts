@@ -89,7 +89,7 @@ describe("listTransactions", () => {
 	});
 
 	it("filters to excluded only", async () => {
-		const { rows } = await list("excluded=1");
+		const { rows } = await list("show=excluded");
 		expect(rows.map((r) => r.displayName).sort()).toEqual([
 			"Reimbursement, doctor's office",
 			"Transfer to Savings",

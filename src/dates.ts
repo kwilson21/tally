@@ -42,29 +42,35 @@ export function todayIn(timeZone: string, now: Date = new Date()): string {
 }
 
 /**
- * "Today" for the household: its date in the time zone saved in `household_settings`.
- * It decides the current month and every bill's status. A missing row, an unknown zone or a
- * table that doesn't exist yet all mean Eastern; any other database error is thrown, so a
- * request never runs on a different date than the household's.
- * A request calls this once and passes the date down, so all of it agrees near midnight.
+ * The household's time zone: the one saved in `household_settings`. A missing row, an unknown zone
+ * or a table that doesn't exist yet all mean Eastern; any other database error is thrown, so a
+ * request never runs on a different zone than the household's.
  */
-export async function householdToday(
-	db: D1Database,
-	now: Date = new Date(),
-): Promise<string> {
-	let timeZone = DEFAULT_TIME_ZONE;
+export async function householdTimeZone(db: D1Database): Promise<string> {
 	try {
 		const row = await db
 			.prepare("SELECT value FROM household_settings WHERE key = 'time_zone'")
 			.first<{ value: string }>();
-		if (row?.value) timeZone = row.value;
+		if (row?.value && dateIn(row.value, new Date()) !== null) return row.value;
 	} catch (error) {
 		// Only a database not yet migrated may use the default zone. Any other failure (a dropped
 		// connection, an overloaded D1) must fail the request, not quietly give it another date.
 		if (!(error instanceof Error && /no such table/i.test(error.message)))
 			throw error;
 	}
-	return todayIn(timeZone, now);
+	return DEFAULT_TIME_ZONE;
+}
+
+/**
+ * "Today" for the household: its date in its time zone (`householdTimeZone`). It decides the
+ * current month and every bill's status.
+ * A request calls this once and passes the date down, so all of it agrees near midnight.
+ */
+export async function householdToday(
+	db: D1Database,
+	now: Date = new Date(),
+): Promise<string> {
+	return todayIn(await householdTimeZone(db), now);
 }
 
 /** "2026-09" → "September". */

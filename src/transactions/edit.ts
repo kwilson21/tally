@@ -7,6 +7,13 @@ export type Edit = {
 	/** null falls back to the bank's raw name. */
 	displayName: string | null;
 	/**
+	 * The person gave this merchant a name in this form (picked a suggestion, typed one, or cleared it), so
+	 * `displayName` is written. False leaves the merchant's name and its suggestion alone, so a panel
+	 * opened before the name changed elsewhere can't put the old one back or erase the new one. Missing
+	 * means yes, for callers that build an edit without a form.
+	 */
+	nameChanged?: boolean;
+	/**
 	 * "Keep the bank's name" was chosen from the suggested names (P29 A): the merchant keeps its tidied
 	 * bank text, and its suggestions are turned down. Only with no name typed.
 	 */
@@ -54,6 +61,18 @@ export function parseEdit(
 	const pickedName = pick.startsWith("s:") ? pick.slice(2).trim() : "";
 	const displayName = typedName || pickedName;
 	const keepBankName = !typedName && pick === "keep";
+	// The panel says what the name field held when it was drawn (`merchant_was`). A field that still holds
+	// it is not a rename, and an emptied one is a person clearing the name; with no `merchant_was` the field
+	// is read as it always was.
+	const shown = form.get("merchant_was");
+	const fieldChanged = shown === null || typedName !== String(shown).trim();
+	const nameChanged = typedName
+		? fieldChanged
+		: pickedName
+			? true
+			: keepBankName
+				? false
+				: fieldChanged;
 	const note = text(form, "note");
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
@@ -78,6 +97,7 @@ export function parseEdit(
 			categoryId,
 			alwaysForMerchant,
 			displayName: displayName || null,
+			nameChanged,
 			keepBankName,
 			note: note || null,
 			excluded,

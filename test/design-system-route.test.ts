@@ -28,6 +28,7 @@ import { CategoryIcon } from "../src/views/category";
 import { Chip } from "../src/views/chip";
 import { EmptyState } from "../src/views/empty-state";
 import { ErrorPage } from "../src/views/error-page";
+import { FilterSelect } from "../src/views/filter-select";
 import {
 	BillsDiagram,
 	BudgetDiagram,
@@ -44,6 +45,7 @@ import { ProgressRow } from "../src/views/progress-row";
 import { Switch } from "../src/views/switch";
 import { SystemDiagram } from "../src/views/system-diagram";
 import { ThingsToTry } from "../src/views/things-to-try";
+import { TimeZoneRow } from "../src/views/time-zone-row";
 import { TransactionRow } from "../src/views/transaction-row";
 import { TrendsScreen } from "../src/views/trends";
 
@@ -125,12 +127,39 @@ describe("GET /design-system in the demo", () => {
 				value: "1",
 				children: "Exclude from budget",
 			}),
+			FilterSelect({
+				id: "ds-filter-account",
+				name: "ds-account",
+				label: "Account",
+				options: [
+					{ value: "", label: "All accounts" },
+					{ value: 3, label: "Chase Card ••9921" },
+					{ value: 5, label: "Old Savings ••3340 · Disconnected" },
+					{ value: 4, label: "Cash" },
+				],
+				selected: null,
+			}),
 			Switch({
 				id: "ds-switch-on",
 				name: "ds-switch-on",
 				label: "Categories and exclusions",
 				hint: "Picks categories, and leaves out transfers and reimbursements.",
 				checked: true,
+			}),
+			TimeZoneRow({
+				id: "ds-zone-closed",
+				zone: "America/New_York",
+				action: "#",
+				back: "#",
+				backSwap: "#",
+			}),
+			TimeZoneRow({
+				id: "ds-zone-error",
+				zone: "America/Chicago",
+				error: "Choose a time zone from the list.",
+				action: "#",
+				back: "#",
+				backSwap: "#",
 			}),
 			...MONEY_STATES.map((s) => MoneyInput(s.props)),
 			ThingsToTry(),
@@ -305,6 +334,75 @@ describe("GET /design-system in the demo", () => {
 		expect(section.match(/From your bank: /g)).toHaveLength(1);
 		expect(design).toMatch(
 			/\| TransactionRow \|[^\n]*sparkles icon[^\n]*dashed underline/,
+		);
+	});
+
+	it("shows the FilterSelect as Transactions' filter bar draws it, on a phone too, with its whole use spec", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="filter-select"'));
+		expect(tag).toContain('data-ds-tier="interactive"');
+		expect(tag).toContain('data-ds-components="FilterSelect"');
+		const section =
+			html.split('id="filter-select"')[1]?.split("</section>")[0] ?? "";
+		// The page's four choices, each a real select named by a label only a screen reader hears.
+		const ids = [...section.matchAll(/<select id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThanOrEqual(5);
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const id of ids) {
+			expect(section).toMatch(
+				new RegExp(`<label for="${id}" class="sr-only">[^<]+</label>`),
+			);
+		}
+		for (const label of ["Month", "Category", "Account", "Show"]) {
+			expect(section).toContain(`class="sr-only">${label}</label>`);
+		}
+		// A disconnected bank's account, and a long name on a 320px phone.
+		expect(section).toContain("· Disconnected");
+		expect(section).toContain("w-[320px]");
+		// Nothing posts from the catalog: the selects are the only controls.
+		expect(section).not.toContain("<form");
+		expect(section).not.toContain("<button");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		expect(section).not.toMatch(/jev/i);
+		// DESIGN.md says what it is and what it names.
+		expect(design).toMatch(
+			/\| FilterSelect \|[^\n]*pill[^\n]*Month, Category, Account and Show/,
+		);
+	});
+
+	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="time-zone-row"'));
+		// Visual: a form here posts nowhere, and the specimen is inert to htmx.
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain('data-ds-components="TimeZoneRow"');
+		expect(tag).toContain("hx-ignore");
+		const section =
+			html.split('id="time-zone-row"')[1]?.split("</section>")[0] ?? "";
+		// Four rows, each in an inert box so nothing in them can be tapped or can take focus.
+		expect(section.match(/<details/g)).toHaveLength(4);
+		expect(section.match(/<div inert/g)).toHaveLength(4);
+		// Closed, open (the chevron's turned state is the open attribute), and the error one open too.
+		expect(
+			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
+				/\sopen(\s|>|=)/.test(m[0]),
+			),
+		).toEqual([false, true, true, false]);
+		expect(section).toContain("Eastern");
+		expect(section).toContain("Puerto Rico");
+		expect(section).toMatch(
+			/role="alert"[^>]*>Choose a time zone from the list\./,
+		);
+		expect(section).toContain("Decides when a new month starts");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		expect(section).not.toMatch(/jev/i);
+		// DESIGN.md says what it is, and that it works without a script.
+		expect(design).toMatch(
+			/\| TimeZoneRow \|[^\n]*"Time zone"[^\n]*works without JavaScript/,
 		);
 	});
 
