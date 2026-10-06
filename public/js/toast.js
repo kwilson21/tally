@@ -40,7 +40,7 @@
 		if (!message) return;
 		const toast = document.createElement("p");
 		toast.className =
-			"rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm";
+			"min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm";
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
 		if (type === "error") {
 			toast.className += " flex items-start gap-2";

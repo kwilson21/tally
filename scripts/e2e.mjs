@@ -208,6 +208,31 @@ await page.getByRole("textbox", { name: "Amount" }).fill("1.00");
 await page.getByLabel("Where").fill(longCash);
 await page.locator("#sheet").getByText("Groceries", { exact: true }).click();
 await page.getByRole("button", { name: "Add", exact: true }).click();
+const toast = page.locator('#toasts [role="status"]', {
+	hasText: `Added ${longCash}`,
+});
+await toast.waitFor({ state: "visible" });
+const longToastWidths = await toast.evaluate((toast) => {
+	// Read both widths while the short-lived confirmation toast is still in the page.
+	return {
+		page: toast.ownerDocument.documentElement.scrollWidth,
+		viewport: toast.ownerDocument.documentElement.clientWidth,
+		toast: toast.scrollWidth,
+		toastWidth: toast.clientWidth,
+	};
+});
+assert(
+	longToastWidths,
+	"long-name confirmation toast was not visible for width check",
+);
+assert(
+	longToastWidths.page <= longToastWidths.viewport,
+	"long-name confirmation toast made the phone page wider than the viewport",
+);
+assert(
+	longToastWidths.toast <= longToastWidths.toastWidth,
+	"long-name confirmation toast content exceeds the toast width",
+);
 await page.locator("#results").getByText(longCash).waitFor();
 await page.locator("#results").getByText(longCash).click();
 await page.locator('[role="dialog"]').waitFor();
