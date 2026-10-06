@@ -13,6 +13,24 @@ async function get(path: string, headers: Record<string, string> = {}) {
 const rowCount = (html: string) =>
 	(html.match(/<li data-transaction=/g) ?? []).length;
 
+/** The aria-live result count's text. */
+const countOf = (html: string) =>
+	html.match(/<p id="result-count"[^>]*>([^<]+)<\/p>/)?.[1];
+
+/** The text of each option of the select with this id, as the page renders it (entities decoded). */
+function optionsOf(html: string, id: string) {
+	const select = html.match(
+		new RegExp(`<select id="${id}"[^>]*>([\\s\\S]*?)</select>`),
+	)?.[1];
+	return [...(select ?? "").matchAll(/<option([^>]*)>([^<]*)<\/option>/g)].map(
+		(m) => ({
+			text: (m[2] ?? "").replaceAll("&amp;", "&"),
+			value: /value="([^"]*)"/.exec(m[1] ?? "")?.[1],
+			selected: /\bselected\b/.test(m[1] ?? ""),
+		}),
+	);
+}
+
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
@@ -76,10 +94,20 @@ describe("GET /transactions", () => {
 	});
 
 	it("filters to excluded only, escaping names", async () => {
-		const { html } = await get("/transactions?excluded=1");
+		const { html } = await get("/transactions?show=excluded");
 		expect(rowCount(html)).toBe(2);
 		expect(html).toContain("Transfer to Savings");
 		expect(html).toContain("Reimbursement, doctor&#39;s office");
+	});
+
+	it("still shows the excluded ones for the old Excluded chip's link, with Show Excluded chosen", async () => {
+		const old = (await get("/transactions?excluded=1")).html;
+		const now = (await get("/transactions?show=excluded")).html;
+		expect(rowCount(old)).toBe(2);
+		expect(old).toContain("Transfer to Savings");
+		expect(old).toMatch(/<option value="excluded" selected[^>]*>Excluded<\/option>/);
+		expect(countOf(old)).toBe(countOf(now));
+		expect(countOf(old)).toMatch(/^2 excluded transactions in /);
 	});
 
 	it("shows the search empty state with a way back", async () => {
@@ -212,5 +240,180 @@ describe("GET /transactions", () => {
 		const href = home.match(/href="(\/transactions\?[^"]+)"/)?.[1];
 		expect(href).toBe("/transactions?uncategorized=1");
 		expect(rowCount((await get(href as string)).html)).toBe(12);
+	});
+});
+
+// The Account and Show choices (#210, spec §8.4; P63 A and P64 B).
+describe("GET /transactions: Account and Show", () => {
+	it("has a labeled Account choice beside Month and Category, one entry per account, Cash reading 'Cash'", async () => {
+		const { html } = await get("/transactions");
+		expect(html).toMatch(
+			/<label[^>]*for="account"[^>]*class="[^"]*sr-only[^"]*"[^>]*>Account<\/label>/,
+		);
+		expect(html).toMatch(/<select id="account" name="account"/);
+		expect(optionsOf(html, "account")).toEqual([
+			{ text: "All accounts", value: "", selected: false },
+			{ text: "Checking ••1234", value: "1", selected: false },
+			{ text: "Savings ••5678", value: "2", selected: false },
+			{ text: "Credit card ••9012", value: "3", selected: false },
+			{ text: "Cash", value: "4", selected: false },
+		]);
+		// Beside Month and Category, in the same row of choices.
+		const month = html.indexOf('<select id="month"');
+		const category = html.indexOf('<select id="category"');
+		const account = html.indexOf('<select id="account"');
+		const show = html.indexOf('<select id="show"');
+		expect(month).toBeLessThan(category);
+		expect(category).toBeLessThan(account);
+		expect(account).toBeLessThan(show);
+		expect(html.slice(month, show)).not.toContain("</div>");
+	});
+
+	it("marks a disconnected bank's accounts 'Disconnected' in the choice, and still filters by them", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 2",
+		).run();
+		const { html } = await get("/transactions?month=all&account=3");
+		const card = optionsOf(html, "account").find((o) => o.value === "3");
+		expect(card).toEqual({
+			text: "Credit card ••9012 · Disconnected",
+			value: "3",
+			selected: true,
+		});
+		// Only the disconnected bank's accounts are marked.
+		expect(
+			optionsOf(html, "account").filter((o) => o.text.includes("Disconnected")),
+		).toHaveLength(1);
+		expect(rowCount(html)).toBeGreaterThan(0);
+		// The count names the account itself, not its bank's state.
+		expect(countOf(html)).toMatch(/in Credit card ••9012, across all months$/);
+	});
+
+	it("lists only that account's rows and the count names it", async () => {
+		const { html } = await get("/transactions?month=all&account=4");
+		expect(rowCount(html)).toBe(1);
+		expect(html).toContain("Farmers market");
+		expect(countOf(html)).toBe("1 transaction in Cash, across all months");
+		expect(optionsOf(html, "account").find((o) => o.selected)?.value).toBe("4");
+
+		const card = (await get("/transactions?account=3")).html;
+		expect(countOf(card)).toMatch(
+			/^\d+ transactions in Credit card ••9012, [A-Z][a-z]+( \d{4})?$/,
+		);
+		expect(card).not.toContain("Farmers market");
+	});
+
+	it("names the category and the account together", async () => {
+		const { html } = await get("/transactions?month=all&account=4&category=1");
+		expect(countOf(html)).toBe(
+			"1 transaction in Groceries, Cash, across all months",
+		);
+	});
+
+	it("says so for an account that isn't there, still announcing it", async () => {
+		const { html } = await get("/transactions?account=999");
+		expect(countOf(html)).toMatch(/^0 transactions in account 999, /);
+		expect(html).toContain("No transactions match these filters.");
+	});
+
+	it("has a labeled Show choice with All, Spending, Income, Refunds and Excluded, replacing the Excluded chip", async () => {
+		const { html } = await get("/transactions");
+		expect(html).toMatch(
+			/<label[^>]*for="show"[^>]*class="[^"]*sr-only[^"]*"[^>]*>Show<\/label>/,
+		);
+		expect(html).toMatch(/<select id="show" name="show"/);
+		expect(optionsOf(html, "show")).toEqual([
+			{ text: "All", value: "all", selected: true },
+			{ text: "Spending", value: "spending", selected: false },
+			{ text: "Income", value: "income", selected: false },
+			{ text: "Refunds", value: "refunds", selected: false },
+			{ text: "Excluded", value: "excluded", selected: false },
+		]);
+		// "Needs category" is the only chip left in the filters.
+		const filters = html.match(/<form id="filters"[\s\S]*?<\/form>/)?.[0] ?? "";
+		expect(filters).not.toContain('name="excluded"');
+		expect(filters.match(/type="checkbox"/g)).toHaveLength(1);
+		expect(filters).toMatch(/name="uncategorized"/);
+	});
+
+	it("Show Income lists only rows flagged income, and the count names the type", async () => {
+		const { html } = await get("/transactions?month=all&show=income");
+		const n = rowCount(html);
+		expect(n).toBeGreaterThan(0);
+		expect(html).toContain("Paycheck, Acme Corp");
+		expect(countOf(html)).toMatch(
+			new RegExp(`^(Showing 1–25 of \\d+|${n}) income transactions across all months$`),
+		);
+		expect(optionsOf(html, "show").find((o) => o.selected)?.value).toBe("income");
+		const month = (await get("/transactions?show=income")).html;
+		expect(countOf(month)).toMatch(
+			/^\d+ income transactions in [A-Z][a-z]+( \d{4})?$/,
+		);
+	});
+
+	it("Show Refunds lists a credit nobody has identified and a refund nobody linked", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,credit_reviewed) SELECT 880,id,date('now','-1 day'),-1234,'MYSTERY CREDIT',NULL FROM accounts WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,credit_reviewed,credit_reviewed_by) SELECT 881,id,date('now','-1 day'),-4321,'UNLINKED REFUND',1,'user' FROM accounts WHERE id=1",
+			),
+		]);
+		const { html } = await get("/transactions?month=all&show=refunds");
+		expect(html).toContain("Mystery credit");
+		expect(html).toContain("Unlinked refund");
+		expect(html).not.toContain("Paycheck, Acme Corp");
+		expect(countOf(html)).toMatch(/refund transactions across all months$/);
+	});
+
+	it("Show Spending names the type and leaves out income", async () => {
+		const { html } = await get("/transactions?month=all&show=spending");
+		expect(html).not.toContain("Paycheck, Acme Corp");
+		expect(countOf(html)).toMatch(
+			/^(Showing 1–25 of \d+|\d+) spending transactions across all months$/,
+		);
+	});
+
+	it("announces a change of type or account even when the number stays the same", async () => {
+		const texts = new Set<string | undefined>();
+		for (const query of [
+			"month=all&account=4",
+			"month=all&account=4&show=spending",
+			"month=all&account=4&show=all&category=1",
+		]) {
+			texts.add(countOf((await get(`/transactions?${query}`)).html));
+		}
+		expect(texts.size).toBe(3);
+	});
+
+	it("keeps the account and type in page links, the row links and Select", async () => {
+		const html = (await get("/transactions?month=all&show=spending")).html;
+		expect(html).toMatch(
+			/href="\/transactions\?month=all&amp;show=spending&amp;page=2"/,
+		);
+		expect(html).toMatch(
+			/href="\/transactions\/\d+\?month=all&amp;show=spending"/,
+		);
+		expect(html).toMatch(
+			/href="\/transactions\?month=all&amp;show=spending&amp;select=1"/,
+		);
+		const byAccount = (await get("/transactions?month=all&account=3")).html;
+		expect(byAccount).toMatch(
+			/href="\/transactions\/\d+\?month=all&amp;account=3"/,
+		);
+	});
+
+	it("gets the empty state, not 'every transaction has a category', when Show or Account narrows a clear Needs category", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
+		).run();
+		const done = (await get("/transactions?uncategorized=1")).html;
+		expect(done).toContain("Every transaction has a category.");
+		for (const query of ["show=spending", "show=excluded", "account=3"]) {
+			const { html } = await get(`/transactions?uncategorized=1&${query}`);
+			expect(html, query).toContain("No transactions match these filters.");
+			expect(html, query).not.toContain("Every transaction has a category.");
+		}
 	});
 });

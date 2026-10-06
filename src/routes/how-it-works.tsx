@@ -318,7 +318,10 @@ howItWorks.get("/how-it-works", async (c) => {
 							An excluded transaction doesn't count toward spending,
 							uncategorized, or safe to spend.
 						</li>
-						<li>The Excluded filter shows only excluded transactions.</li>
+						<li>
+							Choose Excluded in the Show choice on Transactions to see only the
+							excluded ones.
+						</li>
 					</ul>
 					{hasTransactions ? (
 						<>

@@ -39,6 +39,49 @@ export type BankRow = {
 	is_liability: number | null;
 };
 
+/** An account's name as the lists name it: "Chase Card ••9921", or just the name when the bank gives no digits. The Cash account reads "Cash". */
+export function accountLabel(account: {
+	name: string;
+	mask: string | null;
+	type: string;
+}): string {
+	if (account.type === "cash") return "Cash";
+	return account.mask ? `${account.name} ••${account.mask}` : account.name;
+}
+
+/** One entry of Transactions' Account choice. */
+export type AccountChoice = {
+	id: number;
+	label: string;
+	/** Its bank was disconnected: the account and its transactions stay (spec §8.1). */
+	disconnected: boolean;
+};
+
+/**
+ * Every account, in the order its bank was linked and Cash last, for Transactions' Account choice. A
+ * disconnected bank's accounts are included and marked, since their transactions stay.
+ */
+export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT a.id, a.name, a.mask, a.type, p.disconnected_at
+			FROM accounts a LEFT JOIN plaid_items p ON p.id = a.plaid_item_id
+			ORDER BY a.type = 'cash', a.plaid_item_id, a.id`,
+		)
+		.all<{
+			id: number;
+			name: string;
+			mask: string | null;
+			type: string;
+			disconnected_at: string | null;
+		}>();
+	return results.map((a) => ({
+		id: a.id,
+		label: accountLabel(a),
+		disconnected: a.disconnected_at !== null,
+	}));
+}
+
 /** What you have minus what you owe, in cents. */
 export function netWorthCents(
 	accounts: (Pick<Account, "balanceCents" | "isLiability"> &
