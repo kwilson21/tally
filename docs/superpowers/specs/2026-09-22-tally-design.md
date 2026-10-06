@@ -59,7 +59,7 @@ Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggest
 | **Plaid (REST over `fetch`)** | Supplies accounts, transactions, and balances from the family's banks. |
 | **Jev (TypeSafe AI)** | Picks a category and flags for each transaction, with a confidence score. |
 | **Workers AI** | Suggests a clean merchant name, which a person accepts or rejects. |
-| **Cron Triggers** | Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting. Production runs three times each morning, 20 minutes apart, because one Worker invocation may make only 1,000 D1 queries (§4.1): the sync (09:00), then a first categorization pass (09:20), then name suggestions and a second pass (09:40). The demo has no bank sync: each night it resets to the seed data, then retries uncategorized transactions and makes name suggestions, all in one run. |
+| **Cron Triggers** | Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. The demo has no bank sync: each night it resets to the seed data, then retries uncategorized transactions. |
 | **Cloudflare Access** | A login wall with the family's emails in front of the family app; the app has no login code of its own. |
 | **Wrangler** | The command-line tool that deploys the Worker and stores secrets. |
 
