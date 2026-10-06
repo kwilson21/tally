@@ -11,7 +11,10 @@ assert.equal(reset.status, 200, "resetting the demo data failed");
 const browser = await chromium.launch({
 	executablePath: process.env.CHROMIUM_PATH || undefined,
 });
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+const page = await browser.newPage({
+	viewport: { width: 390, height: 844 },
+	reducedMotion: "reduce",
+});
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(e.message));
@@ -21,19 +24,25 @@ const rows = () => page.locator("#results li[data-transaction]").count();
 const assertPhoneFocusClearsFixedControls = async (path) => {
 	await goto(`${BASE}${path}`, { waitUntil: "networkidle" });
 	await page.evaluate(() => document.activeElement?.blur());
-	const tabStops = await page
-		.locator(
-			"a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), summary",
-		)
-		.count();
+	const maxTabPresses = 200;
 	const seen = new Set();
-	for (let i = 0; i < tabStops; i++) {
+	let focusLeftPage = false;
+	for (let i = 0; i < maxTabPresses; i++) {
 		await page.keyboard.press("Tab");
 		const focused = await page.evaluate(() => {
 			const el = document.activeElement;
+			if (!el || el === document.body || el === document.documentElement) {
+				return { focusLeftPage: true };
+			}
 			const rect = el?.getBoundingClientRect();
 			return {
-				key: el?.id || el?.getAttribute("href") || el?.textContent?.trim(),
+				focusLeftPage: false,
+				key:
+					el.getAttribute("aria-label")?.trim() ||
+					el.id ||
+					el.getAttribute("href") ||
+					el.textContent?.trim().slice(0, 40) ||
+					`unnamed <${el.tagName.toLowerCase()}>`,
 				bottom: rect?.bottom,
 				isTab: !!el?.closest('nav[aria-label="Tabs"]'),
 				isFeedback: el?.matches('a[href="/feedback"]'),
@@ -45,6 +54,10 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 					?.getBoundingClientRect().top,
 			};
 		});
+		if (focused.focusLeftPage) {
+			focusLeftPage = true;
+			break;
+		}
 		if (focused.key && !focused.isTab && !focused.isFeedback) {
 			assert(
 				focused.bottom <=
@@ -54,6 +67,7 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 			seen.add(focused.key);
 		}
 	}
+	assert(focusLeftPage, `${path}: focus never left the page`);
 	assert(seen.size > 0, `${path}: no page controls received focus`);
 };
 // A link opens its page with a 150 ms cross-fade (decision 76). A page.goto while it runs makes the
@@ -122,6 +136,23 @@ assert(shellInsets.feedback.bottom <= shellInsets.tabs.rect.top - 16);
 assert(shellInsets.feedback.right <= 390 - 44);
 step("phone shell controls stay clear of simulated safe areas");
 
+for (const width of [390, 1280]) {
+	await page.setViewportSize({ width, height: 844 });
+	await goto(`${BASE}/settings/names`, { waitUntil: "networkidle" });
+	await page.getByRole("button", { name: "Save and next" }).click();
+	await page.locator("#names-page [role=alert]").waitFor();
+	assert.equal(
+		await page.evaluate(() => document.activeElement?.name),
+		"name_pick",
+	);
+}
+step(
+	"a failed merchant-name review focuses the first choice on phone and desktop",
+);
+
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+
 await page
 	.getByRole("link", { name: /12 transactions need a category/ })
 	.click();
@@ -153,6 +184,29 @@ await page.getByRole("button", { name: "Add", exact: true }).click();
 await page.locator("#toasts").getByText("Added Corner stand").waitFor();
 await page.getByRole("link", { name: /Corner stand/ }).waitFor();
 step("adding $12 cash shows its toast and row");
+
+const longCash = "x".repeat(48);
+await page.getByRole("link", { name: "Add cash" }).click();
+await page.getByRole("textbox", { name: "Amount" }).fill("1.00");
+await page.getByLabel("Where").fill(longCash);
+await page.locator("#sheet").getByText("Groceries", { exact: true }).click();
+await page.getByRole("button", { name: "Add", exact: true }).click();
+await page.locator("#results").getByText(longCash).waitFor();
+await page.locator("#results").getByText(longCash).click();
+await page.locator('[role="dialog"]').waitFor();
+const longNameWidths = await page.evaluate(() => {
+	const dialog = document.querySelector('[role="dialog"]');
+	return {
+		page: document.documentElement.scrollWidth,
+		viewport: document.documentElement.clientWidth,
+		sheet: dialog.scrollWidth,
+		sheetWidth: dialog.clientWidth,
+	};
+});
+assert(longNameWidths.page <= longNameWidths.viewport);
+assert(longNameWidths.sheet <= longNameWidths.sheetWidth);
+step("an unbroken merchant name stays inside the phone edit sheet");
+
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });

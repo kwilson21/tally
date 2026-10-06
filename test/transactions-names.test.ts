@@ -121,6 +121,51 @@ beforeEach(async () => {
 });
 
 describe("the Transactions list", () => {
+	it("explains suggested names once above the list only while one is shown", async () => {
+		await charge("PLAIN SHOP 123");
+		const plain = (await get("/transactions?month=all")).html;
+		expect(plain).not.toContain("Dashed names are suggestions.");
+
+		await charge("CHECKCARD 0921 CVS", "CVS Pharmacy");
+		await suggest("CVS Pharmacy", "CVS Pharmacy");
+		const banked = (await get("/transactions?month=all")).html;
+		expect(banked).toContain("Dashed names are suggestions.");
+		expect(banked.match(/Dashed names are suggestions\./g)).toHaveLength(1);
+
+		await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+		const guessed = (await get("/transactions?month=all")).html;
+		expect(guessed).toContain("Dashed names are suggestions.");
+		expect(guessed).toContain('href="/how-it-works#names"');
+		expect(guessed).toMatch(/Dashed names are suggestions\.[\s\S]{0,300}Why\?/);
+		expect(guessed.match(/Dashed names are suggestions\./g)).toHaveLength(1);
+		const results =
+			guessed.match(/<section id="results"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(results.indexOf("Dashed names are suggestions.")).toBeLessThan(
+			results.indexOf("<ul"),
+		);
+	});
+
+	it("shows the dashed-name note only for names displayed in the selected view", async () => {
+		await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+
+		const normal = (await get("/transactions?month=all")).html;
+		const raw = (await get("/transactions?month=all&raw=1")).html;
+		expect(normal).toContain("Dashed names are suggestions.");
+		expect(raw).not.toContain("Dashed names are suggestions.");
+	});
+
+	it("keeps a long unbroken name inside the edit sheet and its chips", async () => {
+		const raw = `SQ *${"x".repeat(48)}`;
+		const id = await charge(raw);
+		await suggest(raw, `A long guessed store name ${"word ".repeat(5)}end`);
+		const { html } = await get(`/transactions/${id}?month=all`);
+		expect(html).toContain('id="edit-title"');
+		expect(html).toContain("wrap-anywhere");
+		expect(html).toContain(`Keep “${raw}”`);
+	});
+
 	it("shows the first pending suggestion in place of the tidied bank text, marked as only suggested", async () => {
 		const id = await charge();
 		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
@@ -341,6 +386,15 @@ describe("the edit panel's name choices", () => {
 		for (const radio of radios) expect(radio).not.toMatch(/\schecked/);
 		expect(html).toContain("Keep “Blue bottle cof”");
 		expect(html).toMatch(/<label[^>]*>Or your own<\/label>/);
+		expect(
+			html.match(/A name typed here is used instead of any name above\./g),
+		).toHaveLength(1);
+		const ownField = html.match(/<input[^>]*id="name-own"[^>]*>/)?.[0] ?? "";
+		const hintId = ownField.match(/aria-describedby="([^"]+)"/)?.[1];
+		expect(hintId).toBe("name-own-hint");
+		expect(html).toMatch(
+			/<label[^>]*>Or your own<\/label>[\s\S]*?A name typed here is used instead of any name above\. For all 2 transactions from this merchant\./,
+		);
 		expect(html).toContain("For all 2 transactions from this merchant.");
 		// The title is the first suggestion, dashed like the list, and the bank's text is above it.
 		expect(html).toMatch(
@@ -387,7 +441,7 @@ describe("the edit panel's name choices", () => {
 		);
 		expect(html).toContain('value="s:Lupita&#39;s Taqueria"');
 		expect(html).not.toContain("Tally&#39;s guess");
-		expect(html).not.toContain("/how-it-works#names");
+		expect(html.match(/href="\/how-it-works#names"/g)).toHaveLength(1);
 		expect(html).not.toContain("M11.017 2.814");
 		expect(html.match(/aria-describedby="name-source"/g)).toHaveLength(1);
 	});
