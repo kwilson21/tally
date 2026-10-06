@@ -30,7 +30,10 @@ export const paysBillSql = (alias: string) =>
  * part counts on its own link or its parent's (the parent itself never counts once split, so a bank
  * transaction is counted by its parts once). Alias `t`.
  */
-export const INCLUDED = `(t.excluded = 0 OR ${paysBillSql("t")})`;
+export const includedSql = (alias: string) =>
+	`(${alias}.excluded = 0 OR ${paysBillSql(alias)})`;
+
+export const INCLUDED = includedSql("t");
 
 /** True when the row pays a bill (see `paysBillSql`), for an UPDATE or subquery on `transactions` itself. */
 export const PAYS_A_BILL = paysBillSql("transactions");
