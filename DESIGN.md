@@ -25,7 +25,7 @@ The elements people don't consciously notice. Together they make Tally feel ligh
 | Category icons and colors | Recognition at a glance | Carry meaning about status (that's green/brick only) |
 | Bars | Show how much of a budget is used | Paint the page; a column of saturated bars is louder than the words it supports |
 | Voice | Plain, second person, calm; numbers first, then what they mean ("$120 left") | Shout (capitals, exclamation marks), blame ("you failed"), or use bank jargon (raw merchant strings, "debit", "posted"), except the small muted bank text under a name tidied from it (#93) |
-| Motion | Confirms that something happened (a bar fills, a switch's knob slides, a sheet rises, a toast fades in, a page cross-fades, or a field with an error shakes once), in 150 to 200 ms | Decorate, bounce, or delay; reduced motion always shows the end state and doesn't move an invalid field |
+| Motion | Confirms that something happened: a bar fills, a field with an error shakes once, and the quiet moves (a switch's knob slides, a sheet rises, a toast fades in, a page cross-fades), each in 150 to 200 ms | Decorate, bounce, or delay; reduced motion always shows the end state and doesn't move an invalid field |
 
 ### 2. Signage: what directs attention
 What a person should see first, second and third, and the one thing to do. Signs are few; each one is earned.

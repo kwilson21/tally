@@ -733,6 +733,10 @@ describe("the catalog and DESIGN.md", () => {
 		expect(design).toMatch(/\| Layout \|[^\n]*@view-transition/);
 		expect(design).toMatch(/\| Switch \|[^\n]*knob slides in 150 ms/);
 		expect(design).toMatch(/\| BottomSheet \|[^\n]*only when it opens/);
+		// "150 to 200 ms" is the quiet moves' length: the bar fill (600 ms) and the shake (300 ms) are not in it.
+		expect(design).toMatch(
+			/\| Motion \|[^|\n]*shakes once[^|\n]*each in 150 to 200 ms/,
+		);
 		expect(design).toMatch(/- Motion:[^\n]*decision 76[^\n]*[Dd]ecision 80/);
 		expect(design).toMatch(/- Motion:[^\n]*toast[^\n]*DISPLAY_MS/);
 	});
