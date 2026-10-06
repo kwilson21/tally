@@ -418,7 +418,8 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 								class={summaryClass}
 								autofocus={view.focus === "archived"}
 							>
-								Archived ({archived.length}){chevron}
+								<span class="min-w-0 flex-1">Archived ({archived.length})</span>
+								{chevron}
 							</summary>
 							{view.restoreError && (
 								<p role="alert" class="pb-2 text-sm text-over">

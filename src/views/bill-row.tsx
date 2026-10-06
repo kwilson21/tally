@@ -38,14 +38,17 @@ export function BillStatusHeading({ status }: { status: BillStatus }) {
 }
 
 export function billStatusLine(bill: BillRowData, today: string) {
+	// dayLabel starts a line ("Today, Oct 5"); here it follows "Paid" or "Due", so it reads "today".
+	const day = (date: string) =>
+		dayLabel(date, today).replace(/^Today/, "today");
 	if (bill.status === "paid" && bill.paidDate) {
 		const late = Math.max(
 			0,
 			calendarDay(bill.paidDate) - calendarDay(bill.dueDate),
 		);
-		return `Paid ${dayLabel(bill.paidDate, today)}${late ? `, ${late} ${late === 1 ? "day" : "days"} late` : ""}`;
+		return `Paid ${day(bill.paidDate)}${late ? `, ${late} ${late === 1 ? "day" : "days"} late` : ""}`;
 	}
-	return `${bill.status === "overdue" ? "Was due" : "Due"} ${dayLabel(bill.dueDate, today)}`;
+	return `${bill.status === "overdue" ? "Was due" : "Due"} ${day(bill.dueDate)}`;
 }
 
 function calendarDay(value: string) {

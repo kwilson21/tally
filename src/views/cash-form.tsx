@@ -67,10 +67,11 @@ export function CashForm({
 				/>
 			</div>
 			<fieldset
+				class="flex flex-col gap-2"
 				aria-describedby={errors.category ? "cash-category-error" : undefined}
 			>
-				<legend>Category</legend>
-				<div class="mt-2 flex flex-wrap gap-2">
+				<legend class="text-base text-ink">Category</legend>
+				<div class="flex flex-wrap gap-2">
 					{categories.map((cat) => (
 						<Chip
 							type="radio"

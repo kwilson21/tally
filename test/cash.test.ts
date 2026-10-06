@@ -7,6 +7,7 @@ import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { entryKeyOf } from "../src/transactions/cash";
+import { CashForm } from "../src/views/cash-form";
 
 const BASE = "http://tally.test";
 
@@ -628,5 +629,43 @@ describe("entryKeyOf", () => {
 		5,
 	])("gives nothing for %j", (raw) => {
 		expect(entryKeyOf(raw)).toBeNull();
+	});
+});
+
+describe("the cash form's Category group", () => {
+	const form = async (category?: string) =>
+		String(
+			await CashForm({
+				values: {
+					amount: "5.00",
+					date: "2026-10-05",
+					merchant: "Bake sale",
+					category: "",
+					note: "",
+				},
+				errors: category ? { category } : {},
+				categories: [
+					{ id: 1, name: "Groceries", icon: "groceries", color: "cat-blue" },
+				],
+				today: "2026-10-05",
+			}),
+		);
+
+	it("spaces its error under the chips, like the edit panel and Organize", async () => {
+		const html = await form("Pick a category from the list.");
+		expect(html).toMatch(
+			/<fieldset class="flex flex-col gap-2" aria-describedby="cash-category-error"><legend class="text-base text-ink">Category<\/legend><div class="flex flex-wrap gap-2">/,
+		);
+		expect(html).toContain(
+			'<p id="cash-category-error" role="alert" class="text-sm text-over">Pick a category from the list.</p>',
+		);
+	});
+
+	it("draws the same group when there is no error", async () => {
+		const html = await form();
+		expect(html).toMatch(
+			/<fieldset class="flex flex-col gap-2"><legend class="text-base text-ink">Category<\/legend><div class="flex flex-wrap gap-2">/,
+		);
+		expect(html).not.toContain("cash-category-error");
 	});
 });

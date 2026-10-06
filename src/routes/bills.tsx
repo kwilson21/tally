@@ -51,6 +51,7 @@ import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
+import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { TextInput } from "../views/text-input";
@@ -208,10 +209,12 @@ async function page(
 		>
 			<div class="max-w-2xl">
 				<h1 class="font-serif text-4xl font-semibold tracking-tight">Bills</h1>
-				<p class="mt-2 font-serif text-lg italic">
-					{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
-					{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
-				</p>
+				{rows.length > 0 && (
+					<p class="mt-2 font-serif text-lg italic">
+						{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
+						{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
+					</p>
+				)}
 				<div class="mt-3">
 					<Button
 						kind="secondary"
@@ -251,8 +254,11 @@ async function page(
 					)
 				)}
 				{inactive.length > 0 && (
-					<details class="mt-2 border-t border-rule">
-						<summary class="flex min-h-11 cursor-pointer items-center text-accent">
+					<details class="group mt-2 border-t border-rule">
+						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
+							<span class="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none">
+								<Icon name="chevron-right" class="size-5" />
+							</span>
 							Inactive ({inactive.length})
 						</summary>
 						<ul class="divide-y divide-rule">

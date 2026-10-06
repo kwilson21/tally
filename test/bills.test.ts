@@ -63,6 +63,19 @@ describe("Bills", () => {
 		expect(html).toContain('class="bill-month');
 	});
 
+	it("leads the Inactive disclosure with a chevron that turns when it opens", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		const details = html.match(
+			/<details[^>]*>\s*<summary[^>]*>[\s\S]*?<\/summary>/,
+		);
+		expect(details?.[0]).toMatch(/<details class="group /);
+		expect(details?.[0]).toContain("group-open:rotate-90");
+		expect(details?.[0]).toContain('data-icon="chevron-right"');
+		expect(details?.[0]).toMatch(/Inactive \(1\)\s*<\/summary>/);
+	});
+
 	it("does not call an inactive-only bill list empty", async () => {
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const html = await (
@@ -70,6 +83,20 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain("Inactive (7)");
 		expect(html).not.toContain("No bills yet.");
+		// With bills but none due, the count is accurate and stays.
+		expect(html).toContain("0 bills to pay soon, $0.00 in all");
+	});
+
+	it("says No bills yet. once on a first visit, without a count of zero above it", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+		]);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html).toContain("No bills yet.");
+		expect(html).not.toContain("to pay soon");
 	});
 
 	it("validates category and yearly month with alerts", async () => {

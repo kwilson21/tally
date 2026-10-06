@@ -266,7 +266,14 @@ howItWorks.get("/how-it-works", async (c) => {
 					<ul class="mt-3 list-disc space-y-1 pl-5">
 						<li>
 							A counted transaction is in the month, not excluded, and not a
-							split parent (its parts count instead).
+							split parent (its parts count instead) or a credit held for review
+							(below).
+						</li>
+						<li>
+							An unreviewed bank credit that isn't income is held out of
+							spending, uncategorized, and safe to spend until Tally confidently
+							categorizes it as non-income or a person marks it reviewed as a
+							refund or other non-income credit.
 						</li>
 						<li>
 							A refund linked to its purchase counts in that purchase's month
@@ -317,6 +324,10 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							An excluded transaction doesn't count toward spending,
 							uncategorized, or safe to spend.
+						</li>
+						<li>
+							A credit held for review isn't excluded: it waits, and counts once
+							it is reviewed (see Transactions).
 						</li>
 						<li>The Excluded filter shows only excluded transactions.</li>
 					</ul>
