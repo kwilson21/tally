@@ -1,0 +1,8 @@
+[2026-10-06T17:48:42.723Z] INFO  [SessionStartHook] No briefing or reminder generated (skipped or timed out)
+[2026-10-06T17:48:42.723Z] INFO  [Installer] Installing Jolli Memory repo hooks only (no integrations)
+[2026-10-06T17:48:42.723Z] INFO  [EnsureGlobalDaemon] spawned global daemon ensure helper (pid 49990)
+[2026-10-06T17:48:42.725Z] INFO  [DispatchScripts] Wrote resolve-dist-path, run-hook, and run-cli scripts to /Users/kazon/.jolli/jollimemory
+[2026-10-06T17:48:42.725Z] INFO  [DistPathWriter] Wrote dist-paths/claude-plugin (version=0.99.16, distDir=/Users/kazon/.claude/plugins/cache/jolli-marketplace/jolli/1.0.6/dist)
+[2026-10-06T17:48:42.730Z] INFO  [Installer] Skipping v5 migration in repo-hooks-only mode — runs on every session start
+[2026-10-06T17:48:42.730Z] INFO  [Installer] Installation complete
+[2026-10-06T17:48:43.305Z] INFO  [EnsureGlobalDaemon] spawned global daemon ensure helper (pid 50105)
