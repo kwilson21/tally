@@ -51,6 +51,7 @@ describe("schema", () => {
 			"budget_amounts",
 			"cash_delete_holds",
 			"categories",
+			"category_suggestions",
 			"documents",
 			"feedback",
 			"household_settings",
@@ -121,6 +122,26 @@ describe("schema", () => {
 				)
 				.run(),
 		).rejects.toThrow();
+	});
+
+	it("enforces one pending suggestion per name, ignoring case", async () => {
+		await db
+			.prepare(
+				"INSERT INTO category_suggestions (name,status) VALUES ('Pet Care','pending')",
+			)
+			.run();
+		await expect(
+			db
+				.prepare(
+					"INSERT INTO category_suggestions (name,status) VALUES ('pet care','pending')",
+				)
+				.run(),
+		).rejects.toThrow();
+		await db
+			.prepare(
+				"INSERT INTO category_suggestions (name,status) VALUES ('pet care','dismissed')",
+			)
+			.run();
 	});
 
 	it("lets a transaction pay only one bill occurrence, but allows dismissed rows", async () => {

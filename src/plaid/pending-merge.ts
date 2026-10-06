@@ -69,7 +69,8 @@ const STATEMENTS = [
 	// amount is a new question, as for any bank correction.
 	// Jev's category: a confident pick, or one below the threshold kept with its confidence (decision 27).
 	`UPDATE transactions SET category_id = p.category_id, category_source = p.category_source,
-		category_confidence = p.category_confidence, jev_category_id = p.jev_category_id
+		category_confidence = p.category_confidence, jev_category_id = p.jev_category_id,
+		jev_none_fit = p.jev_none_fit
 	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
 	 AND transactions.category_confidence IS NULL`,

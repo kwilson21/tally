@@ -112,6 +112,61 @@ describe("syncItem", () => {
 		expect((await itemState(failed))?.last_synced_at).toBeNull();
 	});
 
+	it.each(["added", "modified"] as const)(
+		"clears an attached none-fit suggestion after an amount correction in the %s sync path",
+		async (kind) => {
+			const item = await addItem();
+			const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+			await syncItem(
+				opts,
+				item,
+				plaidFetch(() =>
+					response(page({ added: [transaction({ amount: 12.34 })] })),
+				),
+			);
+			const tx = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE plaid_transaction_id='transaction-1'",
+			).first<{ id: number }>();
+			const suggestion = await env.DB.prepare(
+				"INSERT INTO category_suggestions(name,status) VALUES(?,'pending') RETURNING id",
+			)
+				.bind(`Pet Care ${kind}`)
+				.first<{ id: number }>();
+			await env.DB.prepare(
+				"UPDATE transactions SET category_confidence=.95,jev_none_fit=1,category_suggestion_id=? WHERE id=?",
+			)
+				.bind(suggestion?.id, tx?.id)
+				.run();
+			const corrected = transaction({
+				amount: kind === "added" ? 13.34 : 13.34,
+			});
+			await syncItem(
+				opts,
+				item,
+				plaidFetch(() =>
+					response(
+						page(
+							kind === "added"
+								? { added: [corrected] }
+								: { modified: [corrected] },
+						),
+					),
+				),
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT category_confidence,jev_none_fit,category_suggestion_id FROM transactions WHERE id=?",
+				)
+					.bind(tx?.id)
+					.first(),
+			).toEqual({
+				category_confidence: null,
+				jev_none_fit: 0,
+				category_suggestion_id: null,
+			});
+		},
+	);
+
 	it("gets and upserts accounts separately, stores raw names, and saves transactions", async () => {
 		const id = await addItem();
 		const fetchImpl = plaidFetch(() =>

@@ -67,6 +67,14 @@
 		--feedback-bottom: 6.5rem;
 		--feedback-height: 2.75rem;
 		--focus-scroll-gap: 0.5rem;
+		--focus-scroll-room: calc(
+			max(
+				var(--tabs-height),
+				calc(var(--feedback-bottom) + var(--feedback-height))
+			) +
+			var(--focus-scroll-gap) +
+			var(--safe-area-bottom)
+		);
 	}
 	html {
 		background: var(--color-paper);
@@ -77,14 +85,7 @@
 	}
 	@media (max-width: 63.999rem) {
 		html {
-			scroll-padding-bottom: calc(
-				max(
-					var(--tabs-height),
-					calc(var(--feedback-bottom) + var(--feedback-height))
-				) +
-				var(--focus-scroll-gap) +
-				var(--safe-area-bottom)
-			);
+			scroll-padding-bottom: var(--focus-scroll-room);
 		}
 	}
 	a {

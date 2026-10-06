@@ -1,5 +1,6 @@
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import css from "../src/styles/app.css?raw";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
@@ -7,6 +8,17 @@ async function home() {
 }
 
 describe("app shell", () => {
+	it("gives phone scrolling and the last row the same token-derived bottom room", async () => {
+		const html = await home();
+		const main = html.match(/<main id="main" class="([^"]*)"/)?.[1] ?? "";
+		expect(main).toContain("pb-[var(--focus-scroll-room)]");
+		expect(main).toContain("lg:pb-24");
+		expect(css).toMatch(
+			/--focus-scroll-room:\s*calc\([\s\S]*?var\(--tabs-height\)[\s\S]*?var\(--feedback-bottom\)[\s\S]*?var\(--feedback-height\)[\s\S]*?var\(--focus-scroll-gap\)[\s\S]*?var\(--safe-area-bottom\)[\s\S]*?\);/,
+		);
+		expect(css).toMatch(/scroll-padding-bottom:\s*var\(--focus-scroll-room\)/);
+	});
+
 	it("loads our CSS and htmx from our own origin", async () => {
 		const html = await home();
 		expect(html).toContain('href="/assets/app.css"');
