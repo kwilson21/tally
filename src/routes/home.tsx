@@ -313,7 +313,7 @@ function BudgetSheet({
 				<CategoryIcon icon={category.icon} color={category.color} />
 				<h2
 					id="budget-sheet-title"
-					class="font-serif text-4xl font-semibold tracking-tight"
+					class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight"
 					tabindex={-1}
 				>
 					{category.name}

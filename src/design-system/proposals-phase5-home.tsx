@@ -913,7 +913,7 @@ const sheetLink = (
 	<Sheet behind={budgetBehind}>
 		<div class="flex items-center gap-3">
 			<CategoryIcon icon={EATING_OUT.icon} color={EATING_OUT.color} />
-			<h2 class="font-serif text-4xl font-semibold tracking-tight">
+			<h2 class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight">
 				{EATING_OUT.name}
 			</h2>
 		</div>

@@ -88,7 +88,7 @@ function failedBudgetSheet(id: string, look: "toast" | "line" | "both") {
 				<div>
 					<div class="flex items-center gap-3">
 						<CategoryIcon icon="eating-out" color="cat-plum" />
-						<h2 class="font-serif text-4xl font-semibold tracking-tight">
+						<h2 class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight">
 							Eating Out
 						</h2>
 					</div>

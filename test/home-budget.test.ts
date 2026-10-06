@@ -90,7 +90,7 @@ describe("GET /budget/:id", () => {
 		expect(html.match(/id="budget-title"/g)).toHaveLength(1);
 		// DESIGN.md Type roles: a sheet's title is 4xl, a size above the Budget section title (3xl) behind it.
 		expect(html).toMatch(
-			/<h2 id="budget-sheet-title" class="font-serif text-4xl font-semibold tracking-tight"/,
+			/<h2 id="budget-sheet-title" class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight"/,
 		);
 		expect(html).toMatch(
 			/<h2 id="budget-title" class="font-serif text-3xl font-semibold"/,
