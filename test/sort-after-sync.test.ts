@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { categorizePending } from "../src/categorize-pending";
+import { AFTER_SYNC_BATCH, categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, householdToday, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
@@ -97,6 +97,39 @@ describe("sortAfterSync", () => {
 		await sortAfterSync(withKey, { changedIds: [] }, jev.fetchImpl);
 		expect(jev.asked).toEqual([]);
 		expect(await callsUsed()).toBe(0);
+	});
+
+	it("asks about at most 50 of a large sync's rows, newest first, and reserves only those", async () => {
+		quiet();
+		// 70 rows the sync brought in, each a day older than the next, after the seed's twelve.
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 70)
+				 INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+				 SELECT 1, date('2026-07-01', '+' || i || ' days'), 100, 'BATCH ' || i FROM n`,
+			)
+			.run();
+		const { results } = await db
+			.prepare("SELECT id FROM transactions WHERE raw_name LIKE 'BATCH %'")
+			.all<{ id: number }>();
+		const jev = fakeJev();
+		// Production, whose cap of 500 is more than the batch.
+		await sortAfterSync(
+			{ ...withKey, DEMO: "false" },
+			{ changedIds: results.map((r) => r.id) },
+			jev.fetchImpl,
+		);
+		expect(jev.asked).toHaveLength(AFTER_SYNC_BATCH);
+		expect(AFTER_SYNC_BATCH).toBe(50);
+		// The newest fifty: BATCH 21 to BATCH 70. The twenty oldest wait, and so do the seed's twelve.
+		const waiting = (await pendingForJev(db, 200)).map((t) => t.rawName);
+		expect(waiting.filter((name) => name.startsWith("BATCH "))).toHaveLength(
+			20,
+		);
+		expect(waiting).toContain("BATCH 1");
+		expect(waiting).toContain("BATCH 20");
+		expect(waiting).not.toContain("BATCH 21");
+		expect(await callsUsed()).toBe(50);
 	});
 
 	it("doesn't run when the sorting switch is off, and leaves everything waiting for the nightly run", async () => {
@@ -615,6 +648,21 @@ describe("syncItemAndSort", () => {
 		const night = fakeJev();
 		await categorizePending(plaidEnv, night.fetchImpl);
 		expect(night.asked).toHaveLength(3);
+	});
+
+	it("asks about 50 of 80 new rows and leaves 30 for the night, so a large import still has room in its invocation", async () => {
+		quiet();
+		const names = Array.from({ length: 80 }, (_, i) => `SHOP ${i + 1}`);
+		const { fetchImpl, asked } = fakes(names);
+		await syncItemAndSort(plaidEnv, itemId, fetchImpl);
+		expect(asked).toHaveLength(50);
+		expect(await pendingForJev(db, 100)).toHaveLength(30);
+		// Only the fifty it asked are spent from the day.
+		expect(await callsUsed()).toBe(50);
+		const night = fakeJev();
+		await categorizePending(plaidEnv, night.fetchImpl);
+		expect(night.asked).toHaveLength(30);
+		expect(await callsUsed()).toBe(80);
 	});
 
 	it("stops asking about the sync's rows when sorting right away is turned off partway", async () => {

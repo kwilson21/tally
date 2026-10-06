@@ -1,6 +1,10 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { categorizePending, jevCallLimit } from "../src/categorize-pending";
+import {
+	categorizePending,
+	jevCallLimit,
+	MAX_CALLS_PER_RUN,
+} from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
@@ -452,7 +456,7 @@ describe("categorizePending", () => {
 		expect(again.calls()).toBe(0);
 	});
 
-	it("stops production's run at 500, leaving the rest for the next night", async () => {
+	it("stops one run at what an invocation's queries allow, and the day at 500, leaving the rest for the next run", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		// 510 more transactions that need a category, in one statement.
 		await db
@@ -463,20 +467,58 @@ describe("categorizePending", () => {
 			)
 			.bind(`${MONTH}-01`)
 			.run();
+		const production = { ...withKey, DEMO: "false" };
 		const jev = fakeJev(() => reply(0.5));
-		await categorizePending({ ...withKey, DEMO: "false" }, jev.fetchImpl);
-		expect(jev.calls()).toBe(500);
-		// The cap is the day's: another run the same day gets nothing.
+		await categorizePending(production, jev.fetchImpl);
+		// One run asks about at most MAX_CALLS_PER_RUN (300): D1's 1,000 queries per invocation.
+		expect(jev.calls()).toBe(MAX_CALLS_PER_RUN);
+		expect(MAX_CALLS_PER_RUN).toBe(300);
+		expect(await callsUsed()).toBe(300);
+		// A second run the same day takes what's left of the day's 500, and then there is nothing more.
 		const sameDay = fakeJev(() => reply(0.5));
-		await categorizePending({ ...withKey, DEMO: "false" }, sameDay.fetchImpl);
-		expect(sameDay.calls()).toBe(0);
+		await categorizePending(production, sameDay.fetchImpl);
+		expect(sameDay.calls()).toBe(200);
+		const third = fakeJev(() => reply(0.5));
+		await categorizePending(production, third.fetchImpl);
+		expect(third.calls()).toBe(0);
 		// The next household day starts at zero.
 		await newDay();
 		const next = fakeJev(() => reply(0.5));
-		await categorizePending({ ...withKey, DEMO: "false" }, next.fetchImpl);
+		await categorizePending(production, next.fetchImpl);
 		expect(next.calls()).toBeGreaterThan(0);
-		// 500 Jev round trips take a few seconds on a busy CI runner.
-	}, 30_000);
+		// 800 Jev round trips take a few seconds on a busy CI runner.
+	}, 60_000);
+
+	it("keeps a night's queries under D1's 1,000 per invocation", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
+				 INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+				 SELECT 1, ?, 100, 'EXTRA ' || i FROM n`,
+			)
+			.bind(`${MONTH}-01`)
+			.run();
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		await categorizePending(
+			{ ...withKey, DB: counted as D1Database, DEMO: "false" },
+			fakeJev(() => reply(0.95)).fetchImpl,
+		);
+		// Three queries a call and a few for its setup, with room left for what the invocation did before.
+		expect(statements).toBeLessThanOrEqual(MAX_CALLS_PER_RUN * 3 + 15);
+		expect(statements).toBeLessThan(1000 - 50);
+	}, 60_000);
 
 	describe("the day's cap, shared with the runs right after a sync (spec §8.6)", () => {
 		/** 50 more transactions that need a category, so more are waiting than the demo's cap. */

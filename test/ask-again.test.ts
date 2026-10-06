@@ -257,6 +257,73 @@ describe("adding a note to a transaction that still needs a category", () => {
 	});
 });
 
+describe("a merchant rule comes before Jev (spec §7)", () => {
+	it("gives the rule's category, and doesn't ask Jev, when a rule matches the transaction", async () => {
+		await db
+			.prepare(
+				"UPDATE merchants SET default_category_id = 2 WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+			)
+			.run();
+		const jev = fakeJev();
+		await save(bakery, {
+			category: "",
+			merchant: "Local Bakery",
+			note: "Birthday cake for Sam",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: 2,
+			category_source: "merchant_rule",
+			category_confidence: null,
+			note: "Birthday cake for Sam",
+		});
+		expect(await callsUsed()).toBe(0);
+	});
+
+	it("gives the rule's category to one Jev wasn't sure of, without asking again", async () => {
+		await db.batch([
+			db.prepare(
+				"UPDATE merchants SET default_category_id = 2 WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+			),
+			db
+				.prepare(
+					"UPDATE transactions SET category_confidence = 0.4, jev_category_id = 1 WHERE id = ?",
+				)
+				.bind(bakery),
+		]);
+		const jev = fakeJev();
+		await save(bakery, {
+			category: "",
+			merchant: "Local Bakery",
+			note: "Cake",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: 2,
+			category_source: "merchant_rule",
+		});
+	});
+
+	it("asks Jev when the rule's category is archived, so the rule can't apply", async () => {
+		await db.batch([
+			db.prepare(
+				"UPDATE merchants SET default_category_id = 2 WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+			),
+			db.prepare("UPDATE categories SET archived = 1 WHERE id = 2"),
+		]);
+		const jev = fakeJev();
+		await save(bakery, {
+			category: "",
+			merchant: "Local Bakery",
+			note: "Cake",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+	});
+});
+
 describe("adding a clearer name to a transaction that still needs a category", () => {
 	it("asks Jev again right away, with the new name", async () => {
 		const jev = fakeJev();

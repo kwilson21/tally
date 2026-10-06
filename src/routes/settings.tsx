@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import {
 	type AiSwitches,
+	asksJev,
 	readAiSwitches,
 	saveAiSwitches,
 } from "../db/ai-switches";
@@ -145,6 +146,9 @@ const AI_FEATURES: {
 	},
 ];
 
+/** What the greyed sorting switch says it needs, in the words of the rows above it. */
+const SORT_NEEDS = "Needs Categories and exclusions or Income on.";
+
 /** The switches above and one Save. Without JavaScript the form posts and Settings reloads at this group. */
 function AiSuggestions({
 	switches,
@@ -154,6 +158,8 @@ function AiSuggestions({
 	saved: boolean;
 }) {
 	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
+	// With nothing for Jev to be asked, sorting right after a sync has nothing to sort (spec §8.6).
+	const nothingToSort = !asksJev(switches);
 	return (
 		<section
 			id="ai-suggestions"
@@ -187,6 +193,8 @@ function AiSuggestions({
 								label={f.label}
 								hint={f.line}
 								checked={switches[f.key]}
+								disabled={f.key === "sortOnArrival" && nothingToSort}
+								note={SORT_NEEDS}
 							/>
 						</li>
 					))}
@@ -616,11 +624,16 @@ settings.get("/settings/export/tally.json", async (c) => {
 
 // A switch that's on posts "on" and one that's off posts nothing, so a field left out is off; the
 // form always carries the whole group, so a save is always every switch it shows, and only those.
+// The sorting switch is greyed out while Jev isn't asked at all (categories and income both off), and
+// a greyed switch posts nothing, so it's left as it was saved (spec §8.6, decision 79). Whether it was
+// greyed is read from what is saved, which is what the page was drawn from.
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
+	const saved = await readAiSwitches(c.env.DB);
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
+	if (!asksJev(saved)) next.sortOnArrival = saved.sortOnArrival;
 	await saveAiSwitches(c.env.DB, next);
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${next[f.key] ? "on" : "off"}`,

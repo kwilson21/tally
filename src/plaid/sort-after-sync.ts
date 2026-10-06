@@ -1,4 +1,4 @@
-import { categorizePending } from "../categorize-pending";
+import { AFTER_SYNC_BATCH, categorizePending } from "../categorize-pending";
 import { type SyncResult, syncItem } from "./sync";
 
 type SortEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
@@ -7,8 +7,10 @@ type SortEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
  * Right after a sync that brought in or changed transactions, asks Jev about those transactions and
  * no others (spec §8.6, decision 68): the same pass as overnight, within the same day's cap, when
  * the household's "Sort new transactions as they arrive" switch is on and Jev is asked at all (the
- * pass checks both before each call, so turning either off stops it). What it doesn't ask about,
- * the older waiting ones included, waits for the nightly run.
+ * pass checks both before each call, so turning either off stops it). It asks about at most
+ * `AFTER_SYNC_BATCH` of them, newest first, since a big import has already spent most of its
+ * invocation's queries; what it doesn't ask about, the older waiting ones included, waits for the
+ * nightly run.
  *
  * It never fails the sync it follows: any failure is logged by its name alone (never a transaction or
  * a token) and left for the nightly run, which also picks up the rows of a sync that failed part-way.
@@ -28,6 +30,7 @@ export async function sortAfterSync(
 			rulesApplied,
 			onlyIds: synced.changedIds,
 			bySync: true,
+			maxCalls: AFTER_SYNC_BATCH,
 		});
 	} catch (error) {
 		console.error(
