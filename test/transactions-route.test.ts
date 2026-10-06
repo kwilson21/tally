@@ -432,6 +432,14 @@ describe("GET /transactions: Account and Show", () => {
 		const { html } = await get("/transactions?account=999");
 		expect(countOf(html)).toMatch(/^0 transactions in account 999, /);
 		expect(html).toContain("No transactions match these filters.");
+		// The choice shows the filter the list is using, not "All accounts".
+		const choice = html.slice(
+			html.indexOf('<select id="account"'),
+			html.indexOf("</select>", html.indexOf('<select id="account"')),
+		);
+		expect(choice).toMatch(
+			/<option value="999" selected[^>]*>account 999<\/option>/,
+		);
 	});
 
 	it("has a labeled Show choice with All, Spending, Income, Refunds and Excluded, replacing the Excluded chip", async () => {
