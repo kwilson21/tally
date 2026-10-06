@@ -21,6 +21,7 @@ export function TimeZoneRow({
 	action = "/settings/time-zone",
 	back = "/settings#household",
 	backSwap = "/settings?focus=zone",
+	month,
 }: {
 	/** The household's saved zone, as its IANA name. */
 	zone: string;
@@ -35,6 +36,8 @@ export function TimeZoneRow({
 	/** Cancel's address, and the one htmx fetches so focus returns to the row. */
 	back?: string;
 	backSwap?: string;
+	/** The month the page shows (YYYY-MM), posted with the zone so Save can tell whether it changed. */
+	month?: string;
 }) {
 	const option = ([value, label]: readonly [string, string]) => (
 		<option value={value} selected={value === zone}>
@@ -64,6 +67,7 @@ export function TimeZoneRow({
 				hx-select="#household"
 				hx-swap="outerHTML"
 			>
+				{month && <input type="hidden" name="month" value={month} />}
 				{/* The summary above already says "Time zone", so the label is for screen readers. */}
 				<FormField
 					id={id}

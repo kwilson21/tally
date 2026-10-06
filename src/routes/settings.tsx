@@ -512,6 +512,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						zone={timeZone}
 						error={view.zoneError}
 						focus={view.focus === "zone"}
+						month={thisMonth}
 					/>
 				</div>
 			</section>
@@ -654,7 +655,8 @@ settings.post("/settings/ai", async (c) => {
 // Only a zone the select offers is saved, and nothing else changes: "today" reads it from there
 // (src/dates.ts), and a transaction's own date is never converted (decision 67).
 settings.post("/settings/time-zone", async (c) => {
-	const parsed = parseTimeZone(await c.req.formData());
+	const form = await c.req.formData();
+	const parsed = parseTimeZone(form);
 	if (!parsed.ok)
 		return renderSettings(c, { zoneError: parsed.error, status: 422 });
 	// One instant for both zones, so "did the month change" can't be answered by two clocks.
@@ -664,7 +666,14 @@ settings.post("/settings/time-zone", async (c) => {
 	const today = todayIn(parsed.zone, now);
 	// The month is the one thing in Settings that follows the zone (each category's amount is the
 	// month's), and the swap below replaces only #household, so a new month sends those amounts along.
-	const newMonth = todayIn(before, now).slice(0, 7) !== today.slice(0, 7);
+	// "New" is against the month the page shows, which the form posts: a page left open past midnight
+	// shows last month even when both zones have moved on. Without it, the saved zone's month stands in.
+	const posted = form.get("month");
+	const shown =
+		typeof posted === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(posted)
+			? posted
+			: todayIn(before, now).slice(0, 7);
+	const newMonth = shown !== today.slice(0, 7);
 	return done(
 		c,
 		"Saved time zone",
