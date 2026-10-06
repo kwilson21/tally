@@ -326,6 +326,56 @@ describe("GET /design-system/proposals", () => {
 		expect(decided?.outcome).toContain("decision 86");
 	});
 
+	it("draws P75's Today pictures round, so the comparison still shows once the squircle rule ships", async () => {
+		const { html } = await get("/design-system/proposals");
+		const start = html.indexOf('<section id="p75-corners"');
+		expect(start).toBeGreaterThan(-1);
+		const next = html.indexOf('<section id="p', start + 1);
+		const p75 = html.slice(start, next === -1 ? undefined : next);
+		// corner-shape isn't inherited, so every part inside a Today picture is forced round, and the
+		// rule in app.css (which sits below Tailwind's utilities) can't turn any of them back on.
+		const round = "[&amp;_*]:[corner-shape:round]";
+		const squircle = "[corner-shape:squircle]";
+		// From a marker to the next one: an option's heading, or a close-up's label.
+		const between = (from: string, to: string | undefined) => {
+			const at = p75.indexOf(from);
+			expect(at, from).toBeGreaterThan(-1);
+			const end = to ? p75.indexOf(to, at + 1) : -1;
+			return p75.slice(at, end === -1 ? undefined : end);
+		};
+		const todayPicture = between("Today · Round corners", "Option A · ");
+		expect(todayPicture).toContain(round);
+		expect(todayPicture).not.toContain(squircle);
+		// A turns it on itself: squircles on everything with a token radius.
+		const aPicture = between("Option A · Squircles everywhere", "Option B · ");
+		expect(aPicture).toContain(squircle);
+		expect(aPicture).not.toContain("corner-shape:round");
+		// B keeps the field round while the buttons and the sheet are squircles.
+		const bPicture = between(
+			"Option B · Squircles on",
+			"Today and A, side by side",
+		);
+		expect(bPicture).toContain(round);
+		expect(bPicture).toContain(squircle);
+		// The close-up's Today is forced round too, and its A is not.
+		const todayCloseUp = between(
+			'aria-label="Today · Round corners, close up"',
+			'aria-label="Option A · Squircles everywhere, close up"',
+		);
+		expect(todayCloseUp).toContain(round);
+		expect(todayCloseUp).not.toContain(squircle);
+		const aCloseUp = between(
+			'aria-label="Option A · Squircles everywhere, close up"',
+			undefined,
+		);
+		expect(aCloseUp).toContain(squircle);
+		expect(aCloseUp).not.toContain("corner-shape:round");
+		// The picked line stays in the decided list, and the money box is no longer waiting for #80.
+		expect(DECIDED.some((d) => d.title.startsWith("P75 "))).toBe(true);
+		expect(p75).not.toContain("when #80 settles");
+		expect(p75).toContain("decision 85");
+	});
+
 	it("is linked from the catalog", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain('href="/design-system/proposals"');
