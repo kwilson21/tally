@@ -71,6 +71,89 @@
 	}
 }
 
+/*
+ * Squircle corners (decision 76, P75 A). Both radius tokens keep their radius; only the curve changes,
+ * from a round corner to a squircle, a little squarer at the same radius. A browser without
+ * corner-shape (Safari, Firefox) fails the @supports test and keeps round corners.
+ *
+ * Tailwind writes a variant such as lg:rounded-l-sheet as a class of that whole name, so a bare
+ * .rounded-l-sheet would miss it. Each class the tokens produce (all four corners, a side, a logical
+ * side or one corner, for control and sheet) is named twice: as a class, and as a class attribute
+ * that holds a variant's class (":" in front, so "not-rounded-control" doesn't match). Chips and the
+ * round ticks are rounded-full, which no line here names, so they stay pills. The test in
+ * test/design-tokens.test.ts reads this list and checks it against every use in src/.
+ *
+ * It sits in the components layer so a utility can still set corner-shape (the P75 drawing forces its
+ * Today pictures round); unlayered CSS would beat every utility. corner-shape isn't inherited, so it is
+ * set on the elements themselves. This is the only rule in the app that sets it.
+ */
+@layer components {
+	@supports (corner-shape: squircle) {
+		.rounded-control,
+		[class*=":rounded-control"],
+		.rounded-s-control,
+		[class*=":rounded-s-control"],
+		.rounded-e-control,
+		[class*=":rounded-e-control"],
+		.rounded-t-control,
+		[class*=":rounded-t-control"],
+		.rounded-r-control,
+		[class*=":rounded-r-control"],
+		.rounded-b-control,
+		[class*=":rounded-b-control"],
+		.rounded-l-control,
+		[class*=":rounded-l-control"],
+		.rounded-ss-control,
+		[class*=":rounded-ss-control"],
+		.rounded-se-control,
+		[class*=":rounded-se-control"],
+		.rounded-ee-control,
+		[class*=":rounded-ee-control"],
+		.rounded-es-control,
+		[class*=":rounded-es-control"],
+		.rounded-tl-control,
+		[class*=":rounded-tl-control"],
+		.rounded-tr-control,
+		[class*=":rounded-tr-control"],
+		.rounded-br-control,
+		[class*=":rounded-br-control"],
+		.rounded-bl-control,
+		[class*=":rounded-bl-control"],
+		.rounded-sheet,
+		[class*=":rounded-sheet"],
+		.rounded-s-sheet,
+		[class*=":rounded-s-sheet"],
+		.rounded-e-sheet,
+		[class*=":rounded-e-sheet"],
+		.rounded-t-sheet,
+		[class*=":rounded-t-sheet"],
+		.rounded-r-sheet,
+		[class*=":rounded-r-sheet"],
+		.rounded-b-sheet,
+		[class*=":rounded-b-sheet"],
+		.rounded-l-sheet,
+		[class*=":rounded-l-sheet"],
+		.rounded-ss-sheet,
+		[class*=":rounded-ss-sheet"],
+		.rounded-se-sheet,
+		[class*=":rounded-se-sheet"],
+		.rounded-ee-sheet,
+		[class*=":rounded-ee-sheet"],
+		.rounded-es-sheet,
+		[class*=":rounded-es-sheet"],
+		.rounded-tl-sheet,
+		[class*=":rounded-tl-sheet"],
+		.rounded-tr-sheet,
+		[class*=":rounded-tr-sheet"],
+		.rounded-br-sheet,
+		[class*=":rounded-br-sheet"],
+		.rounded-bl-sheet,
+		[class*=":rounded-bl-sheet"] {
+			corner-shape: squircle;
+		}
+	}
+}
+
 /* The money input's buttons and chips need money.js, which marks <html class="js">. */
 html:not(.js) [data-money-js] {
 	display: none;

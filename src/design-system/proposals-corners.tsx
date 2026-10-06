@@ -3,15 +3,23 @@
 // property `corner-shape: squircle` does it, working with border-radius: the radius stays the same
 // token and only the curve changes. It ships in Chrome and Edge 139+ and Opera, not in Safari or
 // Firefox, which keep ordinary rounded corners, so it is a progressive enhancement: the family's
-// iPhones would see today's corners until Safari adds it. Nothing here is decided until the owner
-// picks (decision 47).
+// iPhones would see today's corners until Safari adds it. The owner picked A (decision 76) and it
+// now ships: one rule in app.css sets the property on every rounded-control and rounded-sheet.
 //
 // How the pictures are drawn: each is the same screen, so the corners are the only difference. A
-// wrapper inside the phone frame turns on `corner-shape` for the parts an option names, found by
-// their token class (`.rounded-control`, `.rounded-t-sheet`) with a Tailwind arbitrary variant and
-// property. That keeps the real components untouched, uses no inline style (the CSP forbids it) and
-// adds nothing to app.css: the token test already tolerates the property. The phone frame itself
-// sits outside the wrapper, so it stays as it is.
+// wrapper inside the phone frame sets `corner-shape` for the parts an option names, found by their
+// token class (`.rounded-control`, `.rounded-t-sheet`) with a Tailwind arbitrary variant and
+// property. That keeps the real components untouched and uses no inline style (the CSP forbids it).
+// The property isn't inherited, so it has to be set on those parts, not on the wrapper.
+//
+// Because the app's rule now draws every part as a squircle in Chrome and Edge, Today has to say so
+// the other way: its wrapper forces every part inside it round (`[&_*]:[corner-shape:round]`). That
+// beats the rule because the rule sits in the components layer, below Tailwind's utilities. B forces
+// the same and then turns the buttons and the sheet back on, so its field keeps its round corners as
+// its note says. A needs nothing (the rule already draws it) but sets the property anyway, so the
+// picture doesn't depend on the rule. The phone frame itself sits outside the wrapper, so it follows
+// the app's rule in all three. The design-token test lists this file as the one place that may set
+// corner-shape besides that rule.
 //
 // Chips and the round ticks are `rounded-full` in the code, even though DESIGN.md lists chips under
 // rounded-control, so the rule as proposed ("every rounded-control and rounded-sheet") leaves them
@@ -39,14 +47,17 @@ import { Specimen } from "./specimen";
 type Look = "today" | "a" | "b";
 
 /**
- * What each look turns on, written out whole because Tailwind finds a class by its full text.
- * Today turns on nothing. A turns it on for everything drawn with a token radius: buttons, fields
- * and the sheet's top corners. B limits it to buttons and the sheet.
+ * What each look sets, written out whole because Tailwind finds a class by its full text. Today
+ * forces everything inside it round, which the app's squircle rule would otherwise undo in Chrome
+ * and Edge. A turns squircles on for everything drawn with a token radius: buttons, fields and the
+ * sheet's top corners. B forces everything round, then turns squircles on for the buttons and the
+ * sheet only.
  */
+const ROUND = "[&_*]:[corner-shape:round]";
 const LOOKS: Record<Look, string> = {
-	today: "",
+	today: ROUND,
 	a: "[&_.rounded-control]:[corner-shape:squircle] [&_.rounded-t-sheet]:[corner-shape:squircle]",
-	b: "[&_button.rounded-control]:[corner-shape:squircle] [&_a.rounded-control]:[corner-shape:squircle] [&_.rounded-t-sheet]:[corner-shape:squircle]",
+	b: `${ROUND} [&_button.rounded-control]:[corner-shape:squircle] [&_a.rounded-control]:[corner-shape:squircle] [&_.rounded-t-sheet]:[corner-shape:squircle]`,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -245,17 +256,19 @@ export function P75() {
 				radii are the two tokens (rounded-control, rounded-sheet) and no shadows
 				(DESIGN.md); the CSP allows no inline styles.
 			</Fixed>
-			<NeedsLine settled="decisions 76 and 79">
+			<NeedsLine settled="decisions 76, 79 and 85">
 				It's Chrome and Edge only today: Safari (iPhones) and Firefox keep
 				today's round corners until they support it, so nothing breaks. One rule
 				in app.css sets corner-shape: squircle on the two radius tokens, so
 				buttons, fields and the sheet are squircles and chips stay pills. The
-				money input's corners join the rule when #80 settles them.
+				money box and its cent arrows use the same token, so they are squircles
+				too (decision 85).
 			</NeedsLine>
 			<p class="max-w-prose text-sm text-muted">
 				To see the difference, open this page in Chrome or Edge. In Safari or
 				Firefox every picture below shows today's corners, which is what those
-				browsers would show in the app whatever is picked.
+				browsers would show in the app whatever is picked. The app now draws
+				Option A, so the Today pictures are forced round to keep the comparison.
 			</p>
 			<Options
 				options={[

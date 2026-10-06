@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COLOR_TOKENS } from "../src/design-system/tokens";
 import css from "../src/styles/app.css?raw";
+import { Chip } from "../src/views/chip";
 
 // Every file that writes class names: the views and routes, and the scripts that build elements.
 const SOURCES = import.meta.glob(
@@ -58,6 +59,129 @@ const EXCEPTIONS: Record<string, string[]> = {
 	],
 };
 
+/**
+ * Files that may name corner-shape, each with its reason. The one place that turns it on for the app is
+ * the squircle rule in app.css (decision 76); a file here draws corners itself, on a picture.
+ */
+const CORNER_SHAPE_EXCEPTIONS: Record<string, string> = {
+	"../src/design-system/proposals-corners.tsx":
+		"P75 draws round corners, squircles and a mix side by side, so it sets corner-shape on its own pictures",
+};
+
+/** Any spelling of the property: corner-shape, a per-corner longhand like corner-top-left-shape, or cornerShape. */
+const CORNER_SHAPE = /\bcorner-(?:[a-z]+-)*shape\b|\bcornerShape\b/;
+
+/** The files outside the list above that name corner-shape, with the word they use. */
+function cornerShapeProblems(file: string, text: string): string[] {
+	if (file in CORNER_SHAPE_EXCEPTIONS) return [];
+	const found = stripComments(text).match(CORNER_SHAPE)?.[0];
+	return found ? [`${found}: only the squircle rule in app.css sets it`] : [];
+}
+
+/** CSS without its comments, so a note about corner-shape isn't read as the property. */
+const stripCssComments = (text: string) =>
+	text.replace(/\/\*[\s\S]*?\*\//g, "");
+
+type CssRule = { selector: string; body: string; within: string[] };
+
+/** Each rule that holds declarations (not other rules), with the at-rules around it: "@supports (…)". */
+function cssRules(text: string): CssRule[] {
+	const rules: CssRule[] = [];
+	const open: { header: string; start: number; leaf: boolean }[] = [];
+	let boundary = 0;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (c === "{") {
+			const parent = open[open.length - 1];
+			if (parent) parent.leaf = false;
+			open.push({
+				header: text.slice(boundary, i).replace(/\s+/g, " ").trim(),
+				start: i + 1,
+				leaf: true,
+			});
+			boundary = i + 1;
+		} else if (c === "}") {
+			const block = open.pop();
+			if (block?.leaf)
+				rules.push({
+					selector: block.header,
+					body: text.slice(block.start, i).replace(/\s+/g, " ").trim(),
+					within: open.map((o) => o.header),
+				});
+			boundary = i + 1;
+		} else if (c === ";") boundary = i + 1;
+	}
+	return rules;
+}
+
+/** The rules in app.css that set corner-shape. */
+const cornerRules = cssRules(stripCssComments(css)).filter((r) =>
+	CORNER_SHAPE.test(r.body),
+);
+
+/**
+ * The squircle rule's selectors, read as the two forms it may use: a class (".rounded-t-sheet") and a
+ * class attribute that contains a variant's class (`[class*=":rounded-t-sheet"]`, which is how Tailwind
+ * writes "lg:rounded-t-sheet": its own class name). Anything else is returned as unreadable.
+ */
+function squircleSelectors(rule: CssRule | undefined) {
+	const classes: string[] = [];
+	const variants: string[] = [];
+	const unreadable: string[] = [];
+	for (const selector of (rule?.selector ?? "")
+		.split(",")
+		.map((x) => x.trim())) {
+		const asClass = selector.match(/^\.([a-z-]+)$/);
+		const asVariant = selector.match(/^\[class\*="(:[a-z-]+)"\]$/);
+		if (asClass?.[1]) classes.push(asClass[1]);
+		else if (asVariant?.[1]) variants.push(asVariant[1]);
+		else unreadable.push(selector);
+	}
+	return { classes, variants, unreadable };
+}
+
+/**
+ * Whether the rule's selector matches an element with this class attribute: a class selector needs the
+ * word as one of the classes, `[class*="x"]` needs "x" anywhere in the attribute (CSS's own meanings).
+ */
+function reaches(classAttr: string): boolean {
+	const { classes, variants } = squircleSelectors(cornerRules[0]);
+	return (
+		classes.some((c) => classAttr.split(/\s+/).includes(c)) ||
+		variants.some((v) => classAttr.includes(v))
+	);
+}
+
+/** The sides Tailwind writes a radius for: all four corners, a side, a logical side and one corner. */
+const SIDES = [
+	"",
+	"-s",
+	"-e",
+	"-t",
+	"-r",
+	"-b",
+	"-l",
+	"-ss",
+	"-se",
+	"-ee",
+	"-es",
+	"-tl",
+	"-tr",
+	"-br",
+	"-bl",
+];
+const TOKEN_NAMES = ["control", "sheet"];
+/** Variants as Tailwind writes them in front of a class, from none to a stack and arbitrary ones. */
+const VARIANTS = [
+	"",
+	"lg:",
+	"hover:",
+	"has-[:checked]:",
+	"[&_p]:",
+	"sm:max-lg:",
+	"group-has-[:checked]:",
+];
+
 function problems(file: string, text: string): string[] {
 	const allowed = EXCEPTIONS[file] ?? [];
 	const found: string[] = [];
@@ -88,6 +212,133 @@ describe("design tokens (DESIGN.md)", () => {
 			problems(file, text).map((p) => `${file}: ${p}`),
 		);
 		expect(all).toEqual([]);
+	});
+
+	describe("squircle corners (decision 76, P75 A)", () => {
+		const rule = cornerRules[0];
+
+		it("has one rule in app.css that sets corner-shape: squircle, inside @supports so older browsers keep round corners", () => {
+			expect(cornerRules).toHaveLength(1);
+			expect(rule?.body.replace(/;$/, "")).toBe("corner-shape: squircle");
+			expect(rule?.within).toContain("@supports (corner-shape: squircle)");
+			// Nothing else in app.css names the property: its one declaration and the @supports test that guards it.
+			const named = stripCssComments(css).match(/corner-(?:[a-z]+-)*shape/g);
+			expect(named).toHaveLength(2);
+		});
+
+		it("sits in the components layer, so a utility class (the P75 drawing's round Today pictures) can override it", () => {
+			// Unlayered CSS beats every layer, utilities included; components sits below utilities.
+			expect(rule?.within.join(" ")).toContain("@layer components");
+		});
+
+		it("names only the two radius tokens, as a class or as a variant's class", () => {
+			const { classes, variants, unreadable } = squircleSelectors(rule);
+			expect(unreadable).toEqual([]);
+			const token = /^:?rounded(-[a-z]{1,2})?-(control|sheet)$/;
+			expect([...classes, ...variants].filter((c) => !token.test(c))).toEqual(
+				[],
+			);
+			expect(classes.length).toBeGreaterThan(0);
+			expect(variants.length).toBeGreaterThan(0);
+		});
+
+		it("reaches every class the two tokens produce, with any variant in front", () => {
+			const missed: string[] = [];
+			for (const name of TOKEN_NAMES)
+				for (const side of SIDES)
+					for (const variant of VARIANTS) {
+						const cls = `${variant}rounded${side}-${name}`;
+						if (!reaches(cls)) missed.push(cls);
+						// Next to other classes, as in a real class attribute.
+						if (!reaches(`flex ${cls} px-4`)) missed.push(`flex ${cls} px-4`);
+					}
+			expect(missed).toEqual([]);
+		});
+
+		it("reaches every rounded-control and rounded-sheet class used in src/ and public/js/", () => {
+			const used = new Set<string>();
+			for (const text of Object.values(SOURCES))
+				for (const word of words(text))
+					if (/(^|:)!?rounded(-[a-z]{1,2})?-(control|sheet)!?$/.test(word))
+						used.add(word);
+			// The scan sees the plain, side and variant forms the app uses.
+			for (const name of [
+				"rounded-control",
+				"rounded-sheet",
+				"rounded-t-sheet",
+				"rounded-tr-control",
+				"rounded-br-control",
+				"rounded-l-sheet",
+				"lg:rounded-l-sheet",
+			])
+				expect([...used]).toContain(name);
+			expect([...used].filter((cls) => !reaches(cls))).toEqual([]);
+		});
+
+		it("leaves rounded-full and every other class alone, so chips and round ticks stay pills", () => {
+			for (const cls of [
+				"rounded-full",
+				"lg:rounded-full",
+				"rounded-lg",
+				"has-[:checked]:bg-band",
+				"not-rounded-control",
+				"rounded-controls",
+				"[&_.rounded-control]:[corner-shape:round]",
+				"[&_.rounded-t-sheet]:[corner-shape:squircle]",
+				"[&_[data-money]_.rounded-control]:rounded-lg",
+			])
+				expect([cls, reaches(cls)]).toEqual([cls, false]);
+			// Every rounded-full in the code, in any variant, is one the rule doesn't reach.
+			const full = new Set<string>();
+			for (const text of Object.values(SOURCES))
+				for (const word of words(text))
+					if (strip(word) === "rounded-full") full.add(word);
+			expect(full.size).toBeGreaterThan(0);
+			expect([...full].filter(reaches)).toEqual([]);
+		});
+
+		it("leaves Chip a pill: it still renders rounded-full and nothing the rule reaches", () => {
+			const html = String(
+				Chip({ type: "radio", name: "category", value: "1", children: "Gas" }),
+			);
+			const label = html.match(/<label class="([^"]*)"/)?.[1] ?? "";
+			expect(label.split(/\s+/)).toContain("rounded-full");
+			expect(reaches(label)).toBe(false);
+		});
+
+		it("fails if corner-shape is set anywhere in src/ or public/js/ but the P75 drawing", () => {
+			const all = Object.entries(SOURCES).flatMap(([file, text]) =>
+				cornerShapeProblems(file, text).map((p) => `${file}: ${p}`),
+			);
+			expect(all).toEqual([]);
+			// Each exception has a reason and still uses the property, so a stale one is removed.
+			for (const [file, reason] of Object.entries(CORNER_SHAPE_EXCEPTIONS)) {
+				expect(reason.length).toBeGreaterThan(20);
+				expect(stripComments(SOURCES[file] ?? "")).toMatch(CORNER_SHAPE);
+			}
+		});
+
+		it("catches corner-shape in any spelling, and leaves comments and the drawing alone", () => {
+			for (const text of [
+				'<p class="[corner-shape:squircle]">',
+				'<p class="hover:[corner-shape:round]">',
+				"el.style.cornerShape = 'squircle';",
+				'<p class="[corner-top-left-shape:squircle]">',
+			])
+				expect(cornerShapeProblems("x.tsx", text)).toHaveLength(1);
+			expect(
+				cornerShapeProblems(
+					"x.tsx",
+					"// corner-shape: squircle, in prose\n<p>",
+				),
+			).toEqual([]);
+			expect(
+				cornerShapeProblems(
+					"../src/design-system/proposals-corners.tsx",
+					'<p class="[corner-shape:round]">',
+				),
+			).toEqual([]);
+		});
 	});
 
 	it("names no color that isn't a token: text-error, text-alert and from-danger draw nothing (errors are text-over)", () => {
