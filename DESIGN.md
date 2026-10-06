@@ -71,7 +71,7 @@ A component isn't ready for sign-off until every line is answered or marked "not
 | over | #A93226 | over budget / overdue bar, icon, word | 6.3 |
 | cat-blue / plum / slate / ochre / brown | #3F6C9A / #7A4A7E / #4F6272 / #A87414 / #7A5230 | category icons only | 5.2 / 6.4 / 6.0 / 3.8 / 6.4 |
 
-Radii: `rounded-control` (0.75rem) for inputs, chips, buttons; `rounded-sheet` (1.25rem) for the bottom sheet top corners. From decision 76 both are drawn as squircles (`corner-shape: squircle`) where the browser supports it; elsewhere they stay round, and chips stay pills. The money box and its cent arrows use `rounded-control` too, like every input (decision 85), so they become squircles with the rest. No shadows except toasts.
+Radii: `rounded-control` (0.75rem) for inputs, buttons and the toast; `rounded-sheet` (1.25rem) for the bottom sheet's top corners and the desktop panel's left corners; `rounded-full` for pills (chips, round ticks). From decision 76 one rule in `app.css`, inside `@supports (corner-shape: squircle)`, draws `rounded-control` and `rounded-sheet` as squircles (`corner-shape: squircle`) in every form (`rounded-t-sheet`, `rounded-tr-control`, `lg:rounded-l-sheet` and the rest), the money box and its cent arrows included (decision 85); a browser without it keeps round corners. It leaves `rounded-full` alone, so chips and ticks stay pills. The radius stays the token and only the curve changes, a little squarer at the same radius. No shadows except toasts.
 
 ## Type roles
 | Role | Style |
