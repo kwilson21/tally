@@ -3,6 +3,7 @@ import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
+import { tidyName } from "../transactions/tidy-name";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
@@ -63,6 +64,20 @@ export type SyncResult = SyncSummary | { skipped: true };
 /** Plaid's cleaned merchant name, or null when it sent none or a blank one (spec §5, decision 67). */
 const merchantNameOf = (transaction: PlaidTransaction) =>
 	transaction.merchant_name?.trim() || null;
+
+/**
+ * Plaid's cleaned name when it is worth suggesting as the merchant's name (spec §8.6, issue #194): it
+ * is not blank, and it is not what the list already shows, which is the bank's own text or that text
+ * tidied by code (decision 46). Otherwise null.
+ */
+function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
+	const name = merchantNameOf(transaction);
+	if (!name) return null;
+	if (name === transaction.name || name === tidyName(transaction.name)) {
+		return null;
+	}
+	return name;
+}
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
@@ -545,6 +560,25 @@ export async function syncItem(
 						 SELECT ?, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill FROM merchants
 						 WHERE raw_name = ? AND NOT EXISTS (SELECT 1 FROM merchants WHERE raw_name = ?) AND ${OWNS_LOCK}`,
 					).bind(key, transaction.name, key, itemRowId, lockId),
+				);
+			}
+			// Plaid's cleaned name is the merchant's first suggested name, with no AI call (spec §8.6, decision 68). It
+			// is a fact the bank sent, so it doesn't depend on the AI switches. Only a merchant nobody has named or
+			// decided about takes it: a person's own name, and a suggestion they already accepted or turned down,
+			// are never touched, and a name still waiting is replaced, so the newest Plaid name is the one offered.
+			// It is only a suggestion: nothing is renamed until a person chooses it.
+			const suggested = new Set<string>();
+			for (const transaction of [...added, ...page.modified]) {
+				const name = plaidNameToSuggest(transaction);
+				if (!name || suggested.has(name)) continue;
+				suggested.add(name);
+				statements.push(
+					env.DB.prepare(
+						`INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
+						 SELECT ?, ?, 'pending' WHERE ${OWNS_LOCK}
+						 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = 'pending'
+						 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`,
+					).bind(name, name, itemRowId, lockId),
 				);
 			}
 			// A pending transaction the bank drops waits for the update's last page before it is deleted, because

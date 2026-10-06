@@ -553,8 +553,9 @@ describe("syncItem", () => {
 			env.DB.prepare(
 				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.9 WHERE plaid_transaction_id = 'by-jev'",
 			).bind(mine),
+			// Plaid's name "Shop" already has a row, holding its suggested name (issue #194).
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Shop', ?)",
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Shop', ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
 			).bind(rule),
 		]);
 
@@ -796,6 +797,8 @@ describe("syncItem", () => {
 			{ raw_name: "HAS ROW", display_name: "Old" },
 			{ raw_name: "Has Row Key", display_name: "Mine" },
 			{ raw_name: "SAME", display_name: "Same" },
+			// Nothing was copied to it, but Plaid's name is now a suggestion (issue #194), with no name chosen.
+			{ raw_name: "Unknown", display_name: null },
 		]);
 	});
 
