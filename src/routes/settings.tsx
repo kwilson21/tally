@@ -90,11 +90,13 @@ type View = {
 	today?: string;
 	timeZone?: string;
 	/**
-	 * The household just moved into another month, so the Categories section, whose budgets are the
-	 * month's, goes in the answer to be swapped out of band (htmx 4: `hx-swap-oob="true"` swaps an
-	 * element into the page by its id). A save that keeps the month swaps only its own group.
+	 * The household just moved into another month, so each active category row's amount and budget
+	 * line, which are the month's, go in the answer to be swapped out of band (htmx 4:
+	 * `hx-swap-oob="true"` swaps an element into the page by its id). Nothing else of Categories is
+	 * marked, so an open edit and what was typed in it stay. A save that keeps the month swaps only
+	 * its own group.
 	 */
-	categoriesOob?: boolean;
+	budgetsOob?: boolean;
 	/** Why the posted time zone wasn't saved, shown under its select. */
 	zoneError?: string;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
@@ -237,6 +239,9 @@ function CategoryRow({
 	const isOpen = view.open === c.id;
 	const url = `/settings/categories/${c.id}`;
 	const formId = `cat-${c.id}-form`;
+	// A month-crossing time zone save swaps just the two month-dependent parts of the row, out of
+	// band by their ids, so an edit someone has open, its draft and its focus are left alone.
+	const oob = view.budgetsOob ? "true" : undefined;
 	return (
 		<details class="group border-b border-rule" data-row={c.id} open={isOpen}>
 			<summary
@@ -246,7 +251,11 @@ function CategoryRow({
 			>
 				<CategoryIcon icon={c.icon} color={c.color} />
 				<span class="min-w-0 truncate text-lg font-medium">{c.name}</span>
-				<span class="ml-auto shrink-0 tabular-nums">
+				<span
+					id={`cat-${c.id}-amount`}
+					class="ml-auto shrink-0 tabular-nums"
+					hx-swap-oob={oob}
+				>
 					{c.budgetCents === null ? (
 						<span class="text-muted">No budget</span>
 					) : (
@@ -269,10 +278,15 @@ function CategoryRow({
 						name={isOpen && view.values ? view.values.name : c.name}
 						errors={isOpen ? view.errors : undefined}
 					/>
-					<p class="text-muted">
+					<p
+						id={`cat-${c.id}-budget-note`}
+						class="text-muted"
+						hx-swap-oob={oob}
+					>
 						{c.budgetCents === null ? "No budget yet. " : ""}
 						<a
 							href={`/budget/${c.id}`}
+							id={`cat-${c.id}-budget-link`}
 							class="inline-flex min-h-11 items-center"
 						>
 							{c.budgetCents === null
@@ -363,7 +377,6 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				id="categories"
 				aria-labelledby="categories-title"
 				class="mt-8 lg:max-w-3xl"
-				hx-swap-oob={view.categoriesOob ? "true" : undefined}
 			>
 				<h2 id="categories-title" class="font-serif text-3xl font-semibold">
 					Categories
@@ -624,8 +637,8 @@ settings.post("/settings/time-zone", async (c) => {
 	const before = await householdTimeZone(c.env.DB);
 	await saveTimeZone(c.env.DB, parsed.zone);
 	const today = todayIn(parsed.zone, now);
-	// The month is the one thing in Settings that follows the zone (Categories' budgets are the
-	// month's), and the swap below replaces only #household, so a new month sends Categories along.
+	// The month is the one thing in Settings that follows the zone (each category's amount is the
+	// month's), and the swap below replaces only #household, so a new month sends those amounts along.
 	const newMonth = todayIn(before, now).slice(0, 7) !== today.slice(0, 7);
 	return done(
 		c,
@@ -636,7 +649,7 @@ settings.post("/settings/time-zone", async (c) => {
 			hash: "household",
 			today,
 			timeZone: parsed.zone,
-			categoriesOob: newMonth,
+			budgetsOob: newMonth,
 		},
 	);
 });

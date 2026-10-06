@@ -393,7 +393,8 @@ describe("today follows the saved zone", () => {
 
 describe("a save that moves the household into another month", () => {
 	// 03:30 UTC on Nov 1 is 23:30 Eastern on Oct 31 (October), and already Nov 1 in London
-	// (November). Groceries' budget changes on Nov 1, so the two months show different budgets.
+	// (November). Groceries' budget changes on Nov 1, and Household, which has none in October,
+	// gets one, so the two months show different budgets and different notes under a row's name.
 	const LATE_OCTOBER = "2026-11-01T03:30:00Z";
 
 	/** The Categories section's markup, up to the next section. */
@@ -402,31 +403,68 @@ describe("a save that moves the household into another month", () => {
 	/** The tag that opens the Categories section. */
 	const categoriesTag = (html: string) =>
 		html.match(/<section[^>]*id="categories"[^>]*>/)?.[0] ?? "";
-	const groceries = (html: string) =>
-		textOf(categories(html)).match(/Groceries\s+(\$[\d,.]+)\s+a month/)?.[1];
+	/** What a row's closed summary says about its budget: "$700 a month" or "No budget". */
+	const amountOf = (html: string, id: number) =>
+		textOf(
+			`<span ${html.split(`id="cat-${id}-amount"`)[1]?.split("</summary>")[0] ?? ""}`,
+		).trim();
+	/** The line in an open row about its budget: "No budget yet. Add one on Home". */
+	const noteOf = (html: string, id: number) =>
+		textOf(
+			`<p ${html.split(`id="cat-${id}-budget-note"`)[1]?.split("</p>")[0] ?? ""}`,
+		).trim();
+	/** Every element the answer marks to be swapped out of band: its tag name and id. */
+	const oob = (html: string) =>
+		[...html.matchAll(/<(\w+)\s[^>]*\bhx-swap-oob="true"[^>]*>/g)].map((m) => ({
+			tag: m[1],
+			id: m[0].match(/\bid="([^"]*)"/)?.[1],
+		}));
+	const activeIds = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id",
+			).all<{ id: number }>()
+		).results.map((row) => row.id);
 
 	beforeEach(async () => {
 		at(LATE_OCTOBER);
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await env.DB.prepare(
-			"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-11', 90000)",
+			"DELETE FROM budget_amounts WHERE category_id = 5",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-11', 90000), (5, '2026-11', 30000)",
 		).run();
 	});
 
-	it("starts with October's budget on Settings", async () => {
+	it("starts with October's budgets on Settings", async () => {
 		const { html } = await get("/settings");
-		expect(groceries(html)).toBe("$700");
+		expect(amountOf(html, 1)).toBe("$700 a month");
+		expect(amountOf(html, 5)).toBe("No budget");
+		expect(noteOf(html, 5)).toBe("No budget yet. Add one on Home");
+		expect(html).not.toContain("hx-swap-oob");
 	});
 
-	it("sends the Categories section too, out of band, with the new month's budgets", async () => {
+	it("sends each row's amount and budget line out of band, with the new month's, and nothing else of Categories", async () => {
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "Europe/London",
 		});
 		expect(res.status).toBe(200);
-		// htmx 4 takes any element with hx-swap-oob from the response and swaps it into the page
-		// by its id, before the main swap picks #household out of what's left.
-		expect(categoriesTag(html)).toContain('hx-swap-oob="true"');
-		expect(groceries(html)).toBe("$900");
+		// htmx 4 takes each element with hx-swap-oob from the response and swaps it into the page by
+		// its id, before the main swap picks #household out of what's left.
+		const ids = await activeIds();
+		expect(ids.length).toBeGreaterThan(1);
+		expect(oob(html)).toEqual(
+			ids.flatMap((id) => [
+				{ tag: "span", id: `cat-${id}-amount` },
+				{ tag: "p", id: `cat-${id}-budget-note` },
+			]),
+		);
+		expect(amountOf(html, 1)).toBe("$900 a month");
+		expect(amountOf(html, 5)).toBe("$300 a month");
+		expect(noteOf(html, 5)).toBe("Change its budget on Home");
+		// A row's link has an id, so htmx can put focus back on it if it had it.
+		expect(html).toContain('id="cat-5-budget-link"');
 		// Still the Household group, with the toast, the announcement and focus as before.
 		expect(textOf(summary(html)).trim()).toBe("Time zone London");
 		expect(summary(html)).toContain("autofocus");
@@ -436,42 +474,58 @@ describe("a save that moves the household into another month", () => {
 		});
 	});
 
+	it("never marks a row, its edit form, a field or a button, so an open edit, its draft and focus stay", async () => {
+		const { html } = await post("/settings/time-zone", {
+			time_zone: "Europe/London",
+		});
+		// The Categories section, each row and its edit form are in the answer but not swapped.
+		expect(categoriesTag(html)).not.toContain("hx-swap-oob");
+		expect(categories(html)).toContain('<form id="cat-1-form"');
+		expect(categories(html)).toContain('id="c1-name"');
+		expect(html).not.toMatch(
+			/<(section|details|summary|form|input|select|button|a|label)\s[^>]*hx-swap-oob/,
+		);
+		// What is marked is only each row's amount span and budget-line paragraph.
+		expect(new Set(oob(html).map((o) => o.tag))).toEqual(
+			new Set(["span", "p"]),
+		);
+	});
+
 	it("does the same going back to the earlier month", async () => {
 		await post("/settings/time-zone", { time_zone: "Europe/London" });
 		const { html } = await post("/settings/time-zone", {
 			time_zone: "America/New_York",
 		});
-		expect(categoriesTag(html)).toContain('hx-swap-oob="true"');
-		expect(groceries(html)).toBe("$700");
+		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
+		expect(amountOf(html, 1)).toBe("$700 a month");
+		expect(amountOf(html, 5)).toBe("No budget");
+		expect(noteOf(html, 5)).toBe("No budget yet. Add one on Home");
 	});
 
-	it("leaves the Categories section out of the swap when the month stays the same", async () => {
+	it("sends nothing out of band when the month stays the same", async () => {
 		// Chicago is still October at this moment, as Eastern is.
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "America/Chicago",
 		});
 		expect(res.status).toBe(200);
 		expect(html).not.toContain("hx-swap-oob");
-		expect(groceries(html)).toBe("$700");
+		expect(amountOf(html, 1)).toBe("$700 a month");
 	});
 
-	it("keeps a plain page, a refusal and a fresh visit free of it", async () => {
+	it("keeps a refusal and a fresh visit free of it, and the page a plain browser lands on shows the new month", async () => {
 		const refused = await post("/settings/time-zone", {
 			time_zone: "Not/AZone",
 		});
 		expect(refused.res.status).toBe(422);
 		expect(refused.html).not.toContain("hx-swap-oob");
-		const plain = await get("/settings");
-		expect(plain.html).not.toContain("hx-swap-oob");
 		const noScript = await post(
 			"/settings/time-zone",
 			{ time_zone: "Europe/London" },
 			false,
 		);
 		expect(noScript.res.status).toBe(303);
-		// The page it lands on is drawn from the new zone, so its Categories are the new month's.
 		const landed = await get("/settings");
-		expect(groceries(landed.html)).toBe("$900");
+		expect(amountOf(landed.html, 1)).toBe("$900 a month");
 		expect(landed.html).not.toContain("hx-swap-oob");
 	});
 });
