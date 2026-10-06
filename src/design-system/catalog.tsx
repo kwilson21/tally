@@ -486,12 +486,12 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 	feedback:
 		"Choosing changes the pill at once. Saving swaps the panel back to the list with a toast that says what was done (“Renamed 9 transactions to Blue Bottle Coffee”, “Kept the bank's name for 9 transactions”), the announcer repeats it, and focus returns to the row. In Settings the next merchant comes up with the toast and the count left, and focus moves to the bank's text above it. Without JavaScript Save posts and redirects.",
 	input:
-		"Touch: every pill and the field are 44px tall. Keyboard: Tab to the group, the arrow keys move between the pills, Tab on to the field. Screen reader: “Name, group”; each suggestion reads “Blue Bottle Coffee, radio button, not checked, Tally's guess” (or “From your bank”); the Keep pill reads without it; then “Or your own, edit”, then the count.",
+		"Touch: every pill and the field are 44px tall. Keyboard: Tab to the group, the arrow keys move between the pills, Tab on to the field. Screen reader: “Name, group”; each suggestion reads “Blue Bottle Coffee, radio button, not checked, Tally's guess” (or “From your bank”); the Keep pill reads without it; then “Or your own, edit”, described by the muted line that says a typed name replaces any name above and how many transactions it is for.",
 	motion: "None added. Reduced motion changes nothing.",
 	edges:
-		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. With one transaction the muted line says “For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
+		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. The muted line under the field says “A name typed here is used instead of any name above.” followed by how many transactions the name is for. With one transaction it says “A name typed here is used instead of any name above. For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
 	words:
-		"Name · Tally's guess · From your bank · Why? · Keep “{Blue bottle cof}” · Or your own · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+		"Name · Tally's guess · From your bank · Why? · Keep “{Blue bottle cof}” · Or your own · A name typed here is used instead of any name above. · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
 };
 
 // The BottomSheet's use spec: every line answered, with its motion (decisions 76 and 80, P74 A, P85 A).
@@ -1086,6 +1086,21 @@ function Rows() {
 				components={["TransactionRow"]}
 				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A pending one adds “Pending” to the same caption line in muted words, with no new tag or color (P34 A, decision 72). A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it (P29 A, P87 B, decisions 64 and 80). Here the rows don't link anywhere."
 			>
+				<State label="Above the list, once only while a suggested name is shown">
+					<div class="max-w-xl">
+						<p class="flex flex-wrap items-center gap-x-1 text-sm text-muted">
+							Dashed names are suggestions.
+							<WhyLink section="names" topic="suggested name" />
+						</p>
+						<ul class="max-w-xl">
+							{TRANSACTION_ROWS.filter((state) => state.row.nameSuggested)
+								.slice(0, 1)
+								.map((state) => (
+									<TransactionRow row={state.row} />
+								))}
+						</ul>
+					</div>
+				</State>
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
@@ -1683,6 +1698,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-three"
+							radioName="ds-names-three"
 							names={["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"]}
 							source="tally"
 							tidied="Blue bottle cof"
@@ -1694,6 +1710,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-one"
+							radioName="ds-names-one"
 							names={["DoorDash"]}
 							source="tally"
 							tidied="Doordash taco"
@@ -1706,6 +1723,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-bank"
+							radioName="ds-names-bank"
 							names={["Blue Bottle Coffee"]}
 							source="bank"
 							tidied="Blue bottle cof"
@@ -1713,16 +1731,38 @@ function Controls() {
 						/>
 					</div>
 				</State>
-				<State label="With an error in the field">
+				<State label="Nothing chosen, field empty, and the choice error under it">
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-error"
+							radioName="ds-names-error"
 							names={["Craft Supply Co", "Craft Supply"]}
 							source="tally"
 							tidied="Craftsupply"
 							count={2}
-							own="A very long name"
-							error="Keep the name under 80 characters."
+							error="Pick a name, keep the bank's, or type your own."
+						/>
+					</div>
+				</State>
+				<State label="On a narrow phone (320px): long names wrap inside their chips">
+					<div class="w-[320px] max-w-full">
+						<NameChoices
+							id="ds-names-narrow"
+							radioName="ds-names-narrow"
+							names={[
+								"A very long guessed store name for the neighborhood market",
+							]}
+							source="tally"
+							tidied="A very long tidied name the bank sent for a neighborhood market"
+							count={9}
+						/>
+						<NameChoices
+							id="ds-names-unbroken"
+							radioName="ds-names-unbroken"
+							names={["The Store"]}
+							source="bank"
+							tidied="https://example.com/this-is-a-long-unbroken-name-for-the-bank"
+							count={1}
 						/>
 					</div>
 				</State>
