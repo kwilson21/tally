@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
+import { householdToday } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import {
 	getTransaction,
@@ -2586,5 +2587,119 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 			flag_income: 1,
 			income_source: "jev",
 		});
+	});
+});
+
+describe("balance snapshots at sync (spec §5, §8.3, decision 64)", () => {
+	const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+	const sync = (id: number, accounts = [account()]) =>
+		syncItem(
+			opts,
+			id,
+			plaidFetch(() => response(page()), accounts),
+		);
+	const snapshots = async () =>
+		(
+			await env.DB.prepare(
+				`SELECT a.plaid_account_id AS account, h.date, h.balance_cents AS cents
+				 FROM balance_history h JOIN accounts a ON a.id = h.account_id
+				 ORDER BY h.date, a.plaid_account_id`,
+			).all()
+		).results;
+	const setZone = (value: string) =>
+		env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('time_zone', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		)
+			.bind(value)
+			.run();
+
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM balance_history"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare("DELETE FROM household_settings"),
+		]);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("records each account's balance for the household's day", async () => {
+		const id = await addItem();
+		const today = await householdToday(env.DB);
+		await sync(id, [
+			account(12.34),
+			{ ...account(842.17), account_id: "card", type: "credit" },
+		]);
+		expect(await snapshots()).toEqual([
+			{ account: "account-1", date: today, cents: 1234 },
+			{ account: "card", date: today, cents: 84217 },
+		]);
+	});
+
+	it("overwrites that day's row when a later sync the same day brings a new balance, so a day has one", async () => {
+		const id = await addItem();
+		const today = await householdToday(env.DB);
+		await sync(id, [account(12.34)]);
+		await sync(id, [account(20.01)]);
+		expect(await snapshots()).toEqual([
+			{ account: "account-1", date: today, cents: 2001 },
+		]);
+	});
+
+	it("adds a row on the next day and keeps the earlier one", async () => {
+		const id = await addItem();
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-05T15:00:00Z"));
+		await sync(id, [account(100)]);
+		vi.setSystemTime(new Date("2026-10-06T15:00:00Z"));
+		await sync(id, [account(110.5)]);
+		expect(await snapshots()).toEqual([
+			{ account: "account-1", date: "2026-10-05", cents: 10000 },
+			{ account: "account-1", date: "2026-10-06", cents: 11050 },
+		]);
+	});
+
+	it("dates a snapshot in the household's time zone, not UTC's", async () => {
+		const id = await addItem();
+		// 23:30 Eastern on Oct 5 is 03:30 UTC on Oct 6.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-06T03:30:00Z"));
+		await sync(id);
+		expect((await snapshots())[0]).toMatchObject({ date: "2026-10-05" });
+
+		await env.DB.prepare("DELETE FROM balance_history").run();
+		await setZone("Pacific/Auckland");
+		await sync(id);
+		expect((await snapshots())[0]).toMatchObject({ date: "2026-10-06" });
+	});
+
+	it("records nothing for an account Plaid sent no balance for", async () => {
+		const id = await addItem();
+		await sync(id, [account(null)]);
+		expect(await snapshots()).toEqual([]);
+	});
+
+	it("writes no snapshot once another run has taken the Item's lock", async () => {
+		const id = await addItem();
+		await expect(
+			syncItem(
+				opts,
+				id,
+				plaidFetch(async () => {
+					await env.DB.prepare(
+						"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+					)
+						.bind(id)
+						.run();
+					return response(page());
+				}),
+			),
+		).rejects.toThrow();
+		expect(await snapshots()).toEqual([]);
 	});
 });

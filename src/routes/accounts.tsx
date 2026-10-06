@@ -1,5 +1,8 @@
 import { type Context, Hono } from "hono";
+import { householdToday } from "../dates";
 import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
+import { accountsWithHistory } from "../db/balance-history";
+import { netWorthView } from "../net-worth";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
 import { decryptToken } from "../plaid/token-crypto";
@@ -40,7 +43,10 @@ const SyncNow = () => (
 );
 
 async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
-	const banks = await accountsByBank(env.DB);
+	const today = await householdToday(env.DB);
+	// One read for the headline's accounts and the line's balances, so they agree.
+	const { banks, points, waiting } = await accountsWithHistory(env.DB, today);
+	const history = netWorthView(points, today, waiting);
 	const plaidEnabled = enabled(env);
 	return (
 		<div id="accounts-summary">
@@ -68,6 +74,7 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 				<>
 					<AccountsTop
 						netWorthCents={netWorthCents(banks.flatMap((b) => b.accounts))}
+						history={history}
 						action={plaidEnabled && <SyncNow />}
 					/>
 					<div id="accounts-banks">
