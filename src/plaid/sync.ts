@@ -7,6 +7,7 @@ import {
 } from "../db/plaid-transfers";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
+import { tidyName } from "../transactions/tidy-name";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { loginStillBroken } from "./login-broken";
@@ -77,6 +78,105 @@ export type SyncResult = SyncSummary | { skipped: true };
 /** Plaid's cleaned merchant name, or null when it sent none or a blank one (spec §5, decision 67). */
 const merchantNameOf = (transaction: PlaidTransaction) =>
 	transaction.merchant_name?.trim() || null;
+
+/**
+ * Plaid's cleaned name when it is worth suggesting as the merchant's name (spec §8.6, issue #194): it
+ * is not blank, and it is not what the list already shows, which is the bank's own text or that text
+ * tidied by code (decision 46). Otherwise null.
+ */
+function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
+	const name = merchantNameOf(transaction);
+	if (!name) return null;
+	if (name === transaction.name || name === tidyName(transaction.name)) {
+		return null;
+	}
+	return name;
+}
+
+// The names a page saves for its merchants are a few statements for the whole page, never one per charge
+// (D1 allows 1,000 queries in one invocation, and each charge already costs about six). Each reads its
+// charges from one JSON array through `json_each`, since D1 also allows only 100 bound values in a
+// statement, and ends with the Item's lock (`OWNS_LOCK`, which brings two `?`s of its own).
+
+/**
+ * Starts the merchant row of each Plaid name from a copy of the row saved under the bank text it came with,
+ * unless the name already has a row. One `?`: the pairs, a JSON array of `[Plaid name, bank text]` in
+ * the order the charges arrived. When several texts share one name, the first of them that has a row is
+ * the one copied.
+ */
+const copyMerchantRowSql = (ownsLock: string) =>
+	`WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?))
+	 INSERT INTO merchants (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill)
+	 SELECT p.k, m.suggested_name, m.display_name, m.default_category_id, m.suggestion_status, m.not_a_bill
+	 FROM pair p JOIN merchants m ON m.raw_name = p.t
+	 WHERE NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k)
+	   AND p.n = (SELECT MIN(q.n) FROM pair q JOIN merchants r ON r.raw_name = q.t WHERE q.k = p.k)
+	   AND ${ownsLock}`;
+
+/**
+ * Suggests each Plaid name for its merchant, `pending`. One `?`: the names, a JSON array. A merchant a
+ * person named, or whose suggestion they decided, is never touched; a guess still waiting gives way.
+ */
+const suggestPlaidNamesSql = (ownsLock: string) =>
+	`INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
+	 SELECT value, value, 'pending' FROM json_each(?) WHERE ${ownsLock}
+	 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = 'pending'
+	 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`;
+
+/**
+ * Withdraws the waiting suggestion of a Plaid name that is no longer the newest for a bank text (spec §8.6,
+ * decision 79). One `?`: the bank texts to look at, a JSON array of `[text, text tidied]` pairs. It
+ * includes every text using a Plaid name changed on this page, so a shared name stays while newest for any text. A row is
+ * the bank's own suggestion when its suggested name is its key (src/transactions/name-suggestions.ts), and
+ * it is withdrawn only when nobody has named it, it has a charge with one of these bank texts, and it is
+ * the newest Plaid name (latest date, then latest id) for none of its charges' bank texts.
+ */
+const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
+	`WITH pair(text, tidied) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
+	 UPDATE merchants SET suggested_name = NULL, suggestion_status = 'none'
+	 WHERE suggestion_status = 'pending' AND display_name IS NULL AND suggested_name = raw_name
+	   AND EXISTS (SELECT 1 FROM transactions t WHERE t.raw_name IN (SELECT text FROM pair)
+	     AND t.parent_id IS NULL AND t.merchant_name = merchants.raw_name)
+	   AND NOT EXISTS (
+	     SELECT 1 FROM transactions c JOIN pair p ON p.text = c.raw_name
+	     WHERE c.parent_id IS NULL AND c.merchant_name = merchants.raw_name
+	       AND c.merchant_name != p.tidied
+	       AND c.merchant_name = (SELECT n.merchant_name FROM transactions n
+	         WHERE n.raw_name = c.raw_name AND n.parent_id IS NULL AND NULLIF(n.merchant_name, '') IS NOT NULL
+	         ORDER BY n.date DESC, n.id DESC LIMIT 1))
+	   AND ${ownsLock}`;
+
+/**
+ * Suggests the Plaid name of each bank text's newest remaining charge (latest date, then latest id), as
+ * `suggestPlaidNamesSql` does, unless that name is only the text or the text tidied. One `?`: the same
+ * `[text, text tidied]` pairs. It runs once the page's writes are all in, so a text a charge has left
+ * offers the name of the charge that is newest now, even one withdrawn earlier.
+ */
+const suggestNewestPlaidNamesSql = (ownsLock: string) =>
+	`INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
+	 SELECT DISTINCT n.merchant_name, n.merchant_name, 'pending'
+	 FROM json_each(?) AS a
+	 JOIN transactions n ON n.id = (SELECT x.id FROM transactions x
+	   WHERE x.raw_name = json_extract(a.value, '$[0]') AND x.parent_id IS NULL AND NULLIF(x.merchant_name, '') IS NOT NULL
+	   ORDER BY x.date DESC, x.id DESC LIMIT 1)
+	 WHERE n.merchant_name != json_extract(a.value, '$[0]') AND n.merchant_name != json_extract(a.value, '$[1]') AND ${ownsLock}
+	 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = 'pending'
+	 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`;
+
+/**
+ * Clears a guess still waiting on the merchant of a Plaid name that needs no suggestion (the text, or the
+ * text tidied; decision 79). Workers AI is asked only about texts Plaid doesn't name (decision 68), so a guess
+ * made before Plaid named the text, and copied to the merchant with the rest of the row, is stale. A guess is
+ * a suggested name that isn't the key. A name a person chose, a suggestion they decided, the bank's own
+ * name, and a guess that charges with no Plaid name still read from this row are left alone. One `?`: the
+ * names, a JSON array.
+ */
+const clearStaleGuessesSql = (ownsLock: string) =>
+	`UPDATE merchants SET suggested_name = NULL, suggestion_status = 'none'
+	 WHERE raw_name IN (SELECT value FROM json_each(?))
+	   AND suggestion_status = 'pending' AND display_name IS NULL AND suggested_name IS NOT raw_name
+	   AND NOT EXISTS (SELECT 1 FROM transactions u WHERE u.raw_name = merchants.raw_name AND u.parent_id IS NULL AND NULLIF(u.merchant_name, '') IS NULL)
+	   AND ${ownsLock}`;
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
@@ -608,29 +708,45 @@ export async function syncItem(
 			}
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
 			// starts as a copy of the row saved under the bank text, if there is one: its name, rule and Not a
-			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one. The one
-			// thing it doesn't leave behind is a waiting suggestion (spec §7): when several bank texts get one Plaid
-			// name, the row that was copied first may hold none, while another text's row holds names Workers AI
-			// already made and a person could still choose. A merchant with nothing waiting, and nothing decided,
-			// takes the waiting names of the text it came from.
+			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one. The
+			// copy comes with whatever the old row suggests, and a guess Workers AI made for the bank text is
+			// cleared again below when Plaid's name is only that text (spec §7, decision 79). One statement for
+			// the page's charges.
+			const pairs = new Map<string, [string, string]>();
 			for (const transaction of [...added, ...page.modified]) {
 				const key = merchantNameOf(transaction);
 				if (!key || key === transaction.name) continue;
+				pairs.set(JSON.stringify([key, transaction.name]), [
+					key,
+					transaction.name,
+				]);
+			}
+			if (pairs.size > 0) {
 				statements.push(
-					env.DB.prepare(
-						`INSERT INTO merchants (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill)
-						 SELECT ?, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill FROM merchants
-						 WHERE raw_name = ? AND NOT EXISTS (SELECT 1 FROM merchants WHERE raw_name = ?) AND ${OWNS_LOCK}`,
-					).bind(key, transaction.name, key, itemRowId, lockId),
+					env.DB.prepare(copyMerchantRowSql(OWNS_LOCK)).bind(
+						JSON.stringify([...pairs.values()]),
+						itemRowId,
+						lockId,
+					),
 				);
+			}
+			// Plaid's cleaned name is the merchant's first suggested name, with no AI call (spec §8.6, decision 68). It
+			// is a fact the bank sent, so it doesn't depend on the AI switches. Only a merchant nobody has named or
+			// decided about takes it: a person's own name, and a suggestion they already accepted or turned down,
+			// are never touched, and a guess still waiting (Workers AI's, copied from the bank text's row) gives way
+			// to it. It is only a suggestion: nothing is renamed until a person chooses it.
+			const suggested = new Set<string>();
+			for (const transaction of [...added, ...page.modified]) {
+				const name = plaidNameToSuggest(transaction);
+				if (name) suggested.add(name);
+			}
+			if (suggested.size > 0) {
 				statements.push(
-					env.DB.prepare(
-						`UPDATE merchants SET suggested_name = (SELECT s.suggested_name FROM merchants s WHERE s.raw_name = ?),
-							suggestion_status = 'pending'
-						 WHERE raw_name = ? AND display_name IS NULL AND suggestion_status = 'none'
-						   AND EXISTS (SELECT 1 FROM merchants s WHERE s.raw_name = ? AND s.suggestion_status = 'pending' AND COALESCE(s.suggested_name, '') != '')
-						   AND ${OWNS_LOCK}`,
-					).bind(transaction.name, key, transaction.name, itemRowId, lockId),
+					env.DB.prepare(suggestPlaidNamesSql(OWNS_LOCK)).bind(
+						JSON.stringify([...suggested]),
+						itemRowId,
+						lockId,
+					),
 				);
 			}
 			// A pending transaction the bank drops waits for the update's last page before it is deleted, because
@@ -664,6 +780,94 @@ export async function syncItem(
 					env.DB.prepare(
 						`DELETE FROM transactions WHERE plaid_transaction_id = ? AND ${OWNS_LOCK}`,
 					).bind(id, itemRowId, lockId),
+				);
+			}
+			// One bank text can come with different Plaid names, since Plaid's names change over time. Only the newest
+			// charge's name is suggested for it (decision 79), and that is settled here, once the page's writes and
+			// deletes are in, for every bank text the page touched: the texts of the charges it added or modified
+			// with a Plaid name, and the texts the charges it changes or removes were saved under (a charge whose
+			// text changes leaves its old text, and a removed one leaves its text, with their remaining charges).
+			// A waiting name that is no charge's newest is withdrawn, so a person is never asked about both, and a
+			// name that is the newest for another bank text stays. Then each text's newest remaining charge
+			// suggests its name, which offers an older one again when the newer charge is gone, unless a person
+			// named or decided it. A pending drop waiting for a later page isn't in `drops`: it isn't deleted yet.
+			const textsOfCharges = new Set<string>();
+			for (const transaction of [...added, ...page.modified]) {
+				if (merchantNameOf(transaction)) textsOfCharges.add(transaction.name);
+			}
+			const changing = [
+				...drops,
+				...added.flatMap((transaction) =>
+					transaction.pending_transaction_id
+						? [transaction.transaction_id, transaction.pending_transaction_id]
+						: [transaction.transaction_id],
+				),
+				...page.modified.map((transaction) => transaction.transaction_id),
+			];
+			if (changing.length > 0) {
+				const { results } = await env.DB.prepare(
+					`SELECT DISTINCT raw_name FROM transactions
+					 WHERE parent_id IS NULL AND plaid_transaction_id IN (SELECT value FROM json_each(?))`,
+				)
+					.bind(JSON.stringify(changing))
+					.all<{ raw_name: string }>();
+				for (const row of results) textsOfCharges.add(row.raw_name);
+			}
+			if (textsOfCharges.size > 0) {
+				const names = new Set<string>();
+				const current = await env.DB.prepare(
+					`SELECT DISTINCT merchant_name FROM transactions
+					 WHERE parent_id IS NULL AND raw_name IN (SELECT value FROM json_each(?))
+					   AND NULLIF(merchant_name, '') IS NOT NULL`,
+				)
+					.bind(JSON.stringify([...textsOfCharges]))
+					.all<{ merchant_name: string }>();
+				for (const row of current.results) names.add(row.merchant_name);
+				for (const transaction of [...added, ...page.modified]) {
+					const name = merchantNameOf(transaction);
+					if (name) names.add(name);
+				}
+				if (names.size > 0) {
+					const related = await env.DB.prepare(
+						`SELECT DISTINCT raw_name FROM transactions
+						 WHERE parent_id IS NULL AND merchant_name IN (SELECT value FROM json_each(?))`,
+					)
+						.bind(JSON.stringify([...names]))
+						.all<{ raw_name: string }>();
+					for (const row of related.results) textsOfCharges.add(row.raw_name);
+				}
+			}
+			if (textsOfCharges.size > 0) {
+				const texts = JSON.stringify(
+					[...textsOfCharges].map((text) => [text, tidyName(text)]),
+				);
+				statements.push(
+					env.DB.prepare(withdrawOlderPlaidNamesSql(OWNS_LOCK)).bind(
+						texts,
+						itemRowId,
+						lockId,
+					),
+					env.DB.prepare(suggestNewestPlaidNamesSql(OWNS_LOCK)).bind(
+						texts,
+						itemRowId,
+						lockId,
+					),
+				);
+			}
+			// A Plaid name that needs no suggestion (it is the bank's text, or that text tidied) leaves no guess
+			// behind on its merchant (see `clearStaleGuessesSql`).
+			const plain = new Set<string>();
+			for (const transaction of [...added, ...page.modified]) {
+				const name = merchantNameOf(transaction);
+				if (name && !plaidNameToSuggest(transaction)) plain.add(name);
+			}
+			if (plain.size > 0) {
+				statements.push(
+					env.DB.prepare(clearStaleGuessesSql(OWNS_LOCK)).bind(
+						JSON.stringify([...plain]),
+						itemRowId,
+						lockId,
+					),
 				);
 			}
 			statements.push(

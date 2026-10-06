@@ -1,3 +1,4 @@
+import type { NameSource } from "../transactions/name-suggestions";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
 import { TextInput } from "./text-input";
@@ -32,11 +33,26 @@ export function GuessMark() {
 }
 
 /**
- * Under the suggested names in the edit panel and on the review screen (P87 B): the same icon with
- * "Tally's guess", then a Why? to the page that explains it. `id` names the words, so each chip can
- * say "Tally's guess" when it is read.
+ * In the list, for a name the bank sent (P87 B): no icon, only the words for a screen reader, since
+ * the dashed underline says "not decided yet" to the eye alone.
  */
-function GuessLine({ id }: { id: string }) {
+export function BankMark() {
+	return <span class="sr-only">From your bank: </span>;
+}
+
+/**
+ * Under the suggested names in the edit panel and on the review screen (P87 B). Tally's guess: the
+ * same icon with "Tally's guess", then a Why? to the page that explains it. The bank's own name: only
+ * "From your bank", in muted words, with nothing to explain. `id` names the words, so each chip says
+ * where its name came from when it is read.
+ */
+function SourceLine({ id, source }: { id: string; source: NameSource }) {
+	if (source === "bank")
+		return (
+			<p id={id} class="text-sm text-muted">
+				From your bank
+			</p>
+		);
 	return (
 		<div class="flex flex-wrap items-center gap-x-2 text-sm">
 			<span id={id} class="inline-flex items-center gap-1.5 text-ink">
@@ -50,7 +66,8 @@ function GuessLine({ id }: { id: string }) {
 
 /**
  * Choosing a merchant's name (P29 A, decision 64): up to three suggested names as chips with where
- * they came from under them (P87 B), keeping the bank's (tidied) name, or a name of your own. Nothing
+ * they came from under them (P87 B: "Tally's guess" or "From your bank"), keeping the bank's (tidied)
+ * name, or a name of your own. Nothing
  * is chosen to start with, so saving the form for another reason never renames the merchant; a name
  * typed in the field wins over a chip. It posts `name_pick` (a chip's value) and `merchant` (the typed
  * name); each suggestion is a plain radio, so it works without JavaScript.
@@ -58,6 +75,7 @@ function GuessLine({ id }: { id: string }) {
 export function NameChoices({
 	id,
 	names,
+	source,
 	tidied,
 	count,
 	picked,
@@ -68,6 +86,8 @@ export function NameChoices({
 	id: string;
 	/** The suggested names, at most three. */
 	names: string[];
+	/** Where they came from: Tally guessed them, or the bank sent Plaid's name. */
+	source: NameSource;
 	/** The bank's text as the list shows it without a choice. */
 	tidied: string;
 	/** How many transactions the name applies to. */
@@ -96,7 +116,7 @@ export function NameChoices({
 						</Chip>
 					))}
 				</div>
-				<GuessLine id={sourceId} />
+				<SourceLine id={sourceId} source={source} />
 			</div>
 			<div class="flex flex-wrap gap-2 pt-1">
 				<Chip

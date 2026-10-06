@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+	isBankName,
 	MAX_SUGGESTED_NAMES,
+	nameSource,
 	parseSuggestedNames,
 	shownName,
 	storeSuggestedNames,
@@ -20,7 +22,7 @@ describe("parseSuggestedNames and storeSuggestedNames", () => {
 		]);
 	});
 
-	it("reads a single plain name", () => {
+	it("reads a single plain name, which is how Plaid's name is stored", () => {
 		expect(parseSuggestedNames("Comcast")).toEqual(["Comcast"]);
 	});
 
@@ -38,10 +40,29 @@ describe("parseSuggestedNames and storeSuggestedNames", () => {
 	});
 });
 
+describe("where a name came from (P87 B)", () => {
+	it("is the bank's when it is the merchant's key, since Plaid's name is the key and Workers AI is never asked about a bank text Plaid named", () => {
+		expect(isBankName("Blue Bottle Coffee", "Blue Bottle Coffee")).toBe(true);
+		expect(isBankName("Blue Bottle Coffee", "SQ *BLUE BOTTLE COF 0412")).toBe(
+			false,
+		);
+	});
+
+	it("reads as the bank's only when every offered name is the key, and as Tally's guess otherwise", () => {
+		expect(nameSource(["Comcast"], "Comcast")).toBe("bank");
+		expect(nameSource(["Blue Bottle Coffee", "Blue Bottle"], "SQ *BLUE")).toBe(
+			"tally",
+		);
+		expect(nameSource([], "Comcast")).toBe("tally");
+	});
+});
+
 describe("usableSuggestedNames", () => {
+	const KEY = "SQ *BLUE BOTTLE COF 0412";
 	const base = {
 		stored: "Blue Bottle Coffee\nBlue Bottle",
 		status: "pending",
+		key: KEY,
 		namesOn: true,
 	};
 
@@ -59,8 +80,17 @@ describe("usableSuggestedNames", () => {
 		expect(usableSuggestedNames({ ...base, status: null })).toEqual([]);
 	});
 
-	it("with the names switch off, offers nothing, and offers the names again when it is back on", () => {
+	it("with the names switch off, hides Tally's guesses but still offers the bank's own name (decision 80)", () => {
 		expect(usableSuggestedNames({ ...base, namesOn: false })).toEqual([]);
+		expect(
+			usableSuggestedNames({
+				stored: "Blue Bottle Coffee",
+				status: "pending",
+				key: "Blue Bottle Coffee",
+				namesOn: false,
+			}),
+		).toEqual(["Blue Bottle Coffee"]);
+		// Switched back on, the guesses are offered again, since they were kept.
 		expect(usableSuggestedNames({ ...base, namesOn: true })).toEqual([
 			"Blue Bottle Coffee",
 			"Blue Bottle",
@@ -74,6 +104,7 @@ describe("shownName", () => {
 		chosen: null,
 		stored: "Blue Bottle Coffee\nBlue Bottle",
 		status: "pending",
+		key: raw,
 		rawName: raw,
 		namesOn: true,
 	};
@@ -82,6 +113,7 @@ describe("shownName", () => {
 		expect(shownName({ ...input, chosen: "The Bottle" })).toEqual({
 			name: "The Bottle",
 			suggested: false,
+			fromBank: false,
 		});
 	});
 
@@ -89,15 +121,38 @@ describe("shownName", () => {
 		expect(shownName(input)).toEqual({
 			name: "Blue Bottle Coffee",
 			suggested: true,
+			fromBank: false,
 		});
 	});
 
 	it("falls back to the tidied bank text with no suggestion, a decided one, or the switch off", () => {
-		const tidied = { name: "Blue bottle cof", suggested: false };
+		const tidied = {
+			name: "Blue bottle cof",
+			suggested: false,
+			fromBank: false,
+		};
 		expect(shownName({ ...input, stored: null })).toEqual(tidied);
 		expect(shownName({ ...input, status: "rejected" })).toEqual(tidied);
 		expect(shownName({ ...input, status: "accepted" })).toEqual(tidied);
 		expect(shownName({ ...input, namesOn: false })).toEqual(tidied);
+	});
+
+	it("marks the bank's name as the bank's, and shows it as a suggestion even with the switch off", () => {
+		const bank = {
+			...input,
+			key: "Blue Bottle Coffee",
+			stored: "Blue Bottle Coffee",
+		};
+		expect(shownName(bank)).toEqual({
+			name: "Blue Bottle Coffee",
+			suggested: true,
+			fromBank: true,
+		});
+		expect(shownName({ ...bank, namesOn: false })).toEqual({
+			name: "Blue Bottle Coffee",
+			suggested: true,
+			fromBank: true,
+		});
 	});
 
 	it("is not a suggestion when it says what the tidied text already says", () => {
@@ -105,15 +160,17 @@ describe("shownName", () => {
 			shownName({
 				...input,
 				rawName: "NETFLIX.COM",
+				key: "NETFLIX.COM",
 				stored: "Netflix.com\nNetflix",
 			}),
-		).toEqual({ name: "Netflix", suggested: true });
+		).toEqual({ name: "Netflix", suggested: true, fromBank: false });
 		expect(
 			shownName({
 				...input,
 				rawName: "NETFLIX",
+				key: "NETFLIX",
 				stored: "Netflix",
 			}),
-		).toEqual({ name: "Netflix", suggested: false });
+		).toEqual({ name: "Netflix", suggested: false, fromBank: false });
 	});
 });

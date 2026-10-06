@@ -2,6 +2,8 @@
 // its names are kept, and how a person's choice settles a suggestion. Which names to show is decided by
 // src/transactions/name-suggestions.ts.
 import {
+	type NameSource,
+	nameSource,
 	offeredNames,
 	storeSuggestedNames,
 } from "../transactions/name-suggestions";
@@ -87,6 +89,8 @@ export type NameReview = {
 	tidied: string;
 	/** The suggested names to choose from, never empty. */
 	names: string[];
+	/** Where they came from: the bank sent Plaid's name, or Tally guessed (P87 B). */
+	source: NameSource;
 	/** Its charges, a split counted once. */
 	count: number;
 };
@@ -97,7 +101,7 @@ const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /**
  * The merchants with names waiting for a person (P29 A): pending suggestions that say something the
  * tidied bank text doesn't, for a merchant that still has charges, most charges first. With the names
- * switch off there are none (src/transactions/name-suggestions.ts).
+ * switch off only the bank's own names are left, Tally's guesses being hidden (src/transactions/name-suggestions.ts).
  *
  * A merchant can have several bank texts ("TARGET 1234", "TGT*0099"), and a name that repeats one
  * text's tidied form still reads as a suggestion on the others, as the list shows it. So a merchant
@@ -138,7 +142,7 @@ export async function namesToReview(
 		);
 		for (const text of texts) {
 			const names = offeredNames(
-				{ stored: text.stored, status: "pending", namesOn },
+				{ stored: text.stored, status: "pending", key, namesOn },
 				text.bankText,
 			);
 			if (names.length === 0) continue;
@@ -148,6 +152,7 @@ export async function namesToReview(
 				bankText: text.bankText,
 				tidied: tidyName(text.bankText),
 				names,
+				source: nameSource(names, key),
 				count: total,
 			});
 			break;
