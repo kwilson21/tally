@@ -36,13 +36,13 @@ import { parseTimeZone, zoneLabel } from "../settings/time-zones";
 import { Band } from "../views/band";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { EmptyState } from "../views/empty-state";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
 import { TimeZoneRow } from "../views/time-zone-row";
-import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
 export const settings = new Hono<App>();
@@ -463,105 +463,24 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						/>
 					))}
 					{categorySuggestions.map((suggestion) => (
-						<details
-							class="group border-b border-dashed border-ink"
-							data-suggestion={suggestion.id}
-							open
-						>
-							<summary class={`${summaryClass} text-ink`}>
-								Suggested: {suggestion.name}
-								{chevron}
-							</summary>
-							<form
-								method="post"
-								action={`/settings/suggestions/${suggestion.id}/create`}
-								hx-post={`/settings/suggestions/${suggestion.id}/create`}
-								hx-target="#categories"
-								hx-select="#categories"
-								hx-swap="outerHTML"
-								class="pb-4"
-							>
-								{view.suggestionError &&
-									view.suggestionValues?.id === suggestion.id && (
-										<p role="alert" class="text-sm text-over">
-											{view.suggestionError}
-										</p>
-									)}
-								<p class="text-sm text-muted">Untick any that don't belong.</p>
-								<p class="text-sm text-muted">
-									Tally sorts it again right away, with your note.
-								</p>
-								<ul class="mt-2">
-									{suggestion.rows.map((row) => {
-										const ticked =
-											view.suggestionValues?.id === suggestion.id
-												? view.suggestionValues.ticked.includes(row.id)
-												: true;
-										const note =
-											view.suggestionValues?.id === suggestion.id
-												? (view.suggestionValues.notes[row.id] ?? "")
-												: "";
-										return (
-											<li class="group/tx border-t border-rule py-2">
-												<div class="flex min-h-11 items-center gap-3">
-													<label class="inline-flex min-h-11 items-center gap-3">
-														<input
-															aria-label={`Include ${row.displayName}`}
-															type="checkbox"
-															name="ids"
-															value={row.id}
-															checked={ticked}
-															class="size-5"
-														/>
-													</label>
-													<input type="hidden" name="shown" value={row.id} />
-													<span class="min-w-0 flex-1 truncate">
-														{row.displayName}
-													</span>
-													<span class="text-muted">
-														{formatCents(row.amountCents)}
-													</span>
-												</div>
-												<label
-													class="mt-1 hidden min-h-11 items-center text-sm text-muted group-has-[:not(:checked)]/tx:flex"
-													for={`note-${row.id}`}
-												>
-													A note for {row.displayName} (optional)
-												</label>
-												<input
-													id={`note-${row.id}`}
-													name={`note_${row.id}`}
-													value={note}
-													maxlength={500}
-													placeholder="Only used if you untick it"
-													class="hidden min-h-11 w-full rounded-control border border-rule px-3 group-has-[:not(:checked)]/tx:block"
-												/>
-											</li>
-										);
-									})}
-								</ul>
-								<div class="mt-3 flex flex-wrap items-center gap-2">
-									<Button type="submit" name="action" value="create">
-										Create {suggestion.name} with {suggestion.rows.length}
-									</Button>
-									<Button
-										kind="secondary"
-										type="submit"
-										formaction={`/settings/suggestions/${suggestion.id}/dismiss`}
-										hx-post={`/settings/suggestions/${suggestion.id}/dismiss`}
-										hx-target="#categories"
-										hx-select="#categories"
-										hx-swap="outerHTML"
-									>
-										Dismiss
-									</Button>
-									<WhyLink
-										section="categorization"
-										topic="suggested categories"
-									/>
-								</div>
-							</form>
-						</details>
+						<CategorySuggestionCard
+							suggestion={suggestion}
+							error={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionError
+									: undefined
+							}
+							ticked={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionValues.ticked
+									: undefined
+							}
+							notes={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionValues.notes
+									: undefined
+							}
+						/>
 					))}
 					{categorySuggestions.more > 0 && (
 						<p class="py-2 text-sm text-muted">

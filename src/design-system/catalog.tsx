@@ -27,6 +27,7 @@ import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
+import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
 import { ErrorPage } from "../views/error-page";
@@ -74,6 +75,7 @@ import {
 	BANKS,
 	BUDGET_EXAMPLE,
 	CATEGORIES_EXAMPLE,
+	CATEGORY_SUGGESTION,
 	CHECKING,
 	CREDIT_CARD,
 	EXCLUSIONS_EXAMPLE,
@@ -1104,6 +1106,28 @@ function Rows() {
 							<SelectableTransactionRow row={state.row} checked />
 						))}
 					</ul>
+				</State>
+			</Specimen>
+			<Specimen
+				id="category-suggestion-card"
+				title="CategorySuggestionCard"
+				tier="visual"
+				components={[
+					"CategorySuggestionCard",
+					"SelectableTransactionRow",
+					"Button",
+					"WhyLink",
+				]}
+				sentence="An open dashed card shows a suggested category and its transactions; each real round checkbox decides which transactions go in, and only unticked rows reveal a note."
+			>
+				<State label="P30 A: three selected, one unticked with a note">
+					<div class="max-w-xl" inert>
+						<CategorySuggestionCard
+							suggestion={CATEGORY_SUGGESTION}
+							ticked={[31, 32, 33]}
+							notes={{ 34: "Birthday present" }}
+						/>
+					</div>
 				</State>
 			</Specimen>
 			<Specimen

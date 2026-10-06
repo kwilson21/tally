@@ -202,7 +202,7 @@ beforeEach(async () => {
 });
 
 describe("GET /settings with a suggestion", () => {
-	it("shows a dashed row under the categories, open to its transactions, each ticked, with Create and Dismiss", async () => {
+	it("shows the picked dashed card with the tag, muted instruction, ticked rows, and actions", async () => {
 		const { id, ids } = await petCare();
 		const { res, html } = await get();
 		expect(res.status).toBe(200);
@@ -211,17 +211,34 @@ describe("GET /settings with a suggestion", () => {
 		const at = section.indexOf(`data-suggestion="${id}"`);
 		expect(at).toBeGreaterThan(section.indexOf('data-category="5"'));
 		expect(at).toBeLessThan(section.indexOf("Add category"));
-		expect(html).toMatch(
-			new RegExp(`<details[^>]*data-suggestion="${id}"[^>]*\\bopen`),
+		const cardStart = section.lastIndexOf("<details", at);
+		const card = section.slice(
+			cardStart,
+			section.indexOf('data-row="new"', at),
 		);
-		expect(html).toMatch(/border-dashed/);
+		expect(card).toMatch(
+			/<details[^>]*class="[^"]*rounded-control border border-dashed border-ink/,
+		);
+		expect(card).toMatch(/<svg[^>]*data-icon="tag"/);
+		expect(card).toMatch(
+			/<span class="block text-sm text-muted">Untick any that don&#39;t belong\.<\/span>/,
+		);
 		const text = textOf(html);
 		expect(text).toContain("Suggested: Pet Care");
 		expect(text).toContain("Untick any that don't belong.");
 		for (const n of ids) {
-			expect(html).toMatch(
-				new RegExp(`<input[^>]*name="ids"[^>]*value="${n}"[^>]*checked`),
+			const row = card.slice(card.indexOf(`data-transaction="${n}"`));
+			const item = row.slice(0, row.indexOf("</li>") + 5);
+			expect(item).toMatch(
+				/<input class="peer sr-only" type="checkbox" name="ids"/,
 			);
+			expect(item).toMatch(/<label[^>]*class="group relative flex min-h-16/);
+			expect(item).toMatch(/selection-mark[^"]*size-7[^"]*rounded-full/);
+			expect(item).toMatch(/peer-checked:border-ink peer-checked:bg-band/);
+			expect(item).toMatch(/aria-labelledby="select-[^"]+-name"/);
+			expect(item).toContain('data-icon="circle-dashed"');
+			expect(item).toContain("Needs category");
+			expect(item).toContain(`value="${n}"`);
 			expect(html).toContain(`name="shown" value="${n}"`);
 		}
 		expect(text).toContain("Chewy.com");
@@ -229,6 +246,16 @@ describe("GET /settings with a suggestion", () => {
 		expect(text).toContain("Create Pet Care with 4");
 		expect(text).toContain("Dismiss");
 		expect(html).toContain(`href="/how-it-works#categorization"`);
+		expect(card.indexOf("Create Pet Care with 4")).toBeLessThan(
+			card.indexOf("Dismiss"),
+		);
+		expect(card.indexOf("Dismiss")).toBeLessThan(card.indexOf("Why?</a>"));
+		expect(card).toMatch(
+			/<button type="submit" name="action" value="create" class="[^"]*border border-ink[^"]*">Create Pet Care with 4<\/button>/,
+		);
+		expect(card).toMatch(
+			/<button type="submit" formaction="[^"]+\/dismiss"[^>]*class="[^"]*text-accent[^"]*">Dismiss<\/button>/,
+		);
 	});
 
 	it("gives each transaction a note field that shows only while it is unticked, with no script", async () => {
@@ -240,7 +267,12 @@ describe("GET /settings with a suggestion", () => {
 			"Tally sorts it again right away, with your note.",
 		);
 		// The field is hidden until its row is unticked (CSS only), and the page adds no client script of its own.
-		expect(html).toMatch(/group-has-\[[^\]]*:not\(:checked\)\][^"]*:block/);
+		expect(html).toContain(
+			"group-has-[input[type=checkbox]:not(:checked)]/tx:block",
+		);
+		expect(html).toContain(
+			"supports-[selector(:has(*))]:group-has-[input[type=checkbox]:not(:checked)]/tx:block",
+		);
 	});
 
 	it("says Tally, never Jev, anywhere on the page", async () => {
