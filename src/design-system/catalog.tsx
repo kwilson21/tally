@@ -83,6 +83,7 @@ import {
 	TRENDS_EMPTY_INPUT,
 	TRENDS_FIRST_MONTH_INPUT,
 	TRENDS_INPUT,
+	TRENDS_PART_INPUT,
 } from "./mock";
 import {
 	PhoneFrame,
@@ -1681,6 +1682,13 @@ const rowOf = (
 		label: monthsLabel(months, "Spending"),
 	};
 };
+/** A row whose first month is a part month: history started on `from`, after the month's 1st. */
+const withPart = (row: TrendRowData, from: string): TrendRowData => {
+	const months = row.months.map((m, i) =>
+		i === 0 ? { ...m, part: { from } } : m,
+	);
+	return { ...row, months, label: monthsLabel(months, "Spending") };
+};
 const TREND_ROW_STATES = [
 	{
 		label: "Going well: under budget three or more months running",
@@ -1706,6 +1714,14 @@ const TREND_ROW_STATES = [
 	{
 		label: "A short history: three months in, the bars sit at the right",
 		row: rowOf("Groceries", [81000, 86000, 19600], "$860 in September"),
+	},
+	{
+		label:
+			"History started mid-July: July is a part month, so its small bar is striped and the text says from when",
+		row: withPart(
+			rowOf("Groceries", [43000, 79000, 86000, 19600], "$860 in September"),
+			"2026-07-12",
+		),
 	},
 	{
 		label:
@@ -1771,6 +1787,7 @@ const TRENDS_TOP_STATES = [
 ] as const;
 
 function TrendsGroup() {
+	const partPage = buildTrends(TRENDS_PART_INPUT);
 	const early = earlyPage(TRENDS_EARLY_INPUT);
 	const firstMonth = earlyPage(TRENDS_FIRST_MONTH_INPUT);
 	const empty = buildTrends(TRENDS_EMPTY_INPUT);
@@ -1817,7 +1834,7 @@ function TrendsGroup() {
 								tone="text-ok"
 								why="going well"
 							>
-								<TrendRow {...GOING_WELL_ROW} />
+								<TrendRow {...GOING_WELL_ROW} id="ds-group-good" />
 							</TrendGroup>
 						</Picture>
 					</div>
@@ -1832,7 +1849,7 @@ function TrendsGroup() {
 								tone="text-ink"
 								why="worth a look"
 							>
-								<TrendRow {...WORTH_A_LOOK_ROW} />
+								<TrendRow {...WORTH_A_LOOK_ROW} id="ds-group-watch" />
 							</TrendGroup>
 						</Picture>
 					</div>
@@ -1852,13 +1869,13 @@ function TrendsGroup() {
 				title="TrendRow"
 				tier="visual"
 				components={["TrendRow"]}
-				sentence="One category on Trends: its icon, name, a line of words (“4 months under budget”, “Up 3 months running”, “$150 in September”) and six small ink bars, scaled to the row's tallest month; the last, the month still going, is a dashed outline. The bars carry their amounts in words for a screen reader."
+				sentence="One category on Trends: its icon, name, a line of words (“4 months under budget”, “Up 3 months running”, “$150 in September”) and six small ink bars, scaled to the row's tallest month; the last, the month still going, is a dashed outline. The first month of history, when it may be only part of a month, is striped like MonthBars'. The bars carry their amounts in words for a screen reader, with from when for a part month."
 			>
-				{TREND_ROW_STATES.map((s) => (
+				{TREND_ROW_STATES.map((s, i) => (
 					<State label={s.label}>
 						<Picture label={`${s.row.name}, ${s.row.line}. ${s.row.label}`}>
 							<ul>
-								<TrendRow {...s.row} />
+								<TrendRow {...s.row} id={`ds-row-${i}`} />
 							</ul>
 						</Picture>
 					</State>
@@ -1962,6 +1979,11 @@ function TrendsGroup() {
 				<State label="Desktop: one column, wider">
 					<Picture label={`Trends on desktop: ${describeTrends(TRENDS_FULL)}`}>
 						<TrendsScreen page={TRENDS_FULL} />
+					</Picture>
+				</State>
+				<State label="History started May 12: May is a part month, so its small bars are striped, and it isn't judged">
+					<Picture label={`Trends: ${describeTrends(partPage)}`}>
+						<TrendsScreen id="ds-screen-part" page={partPage} />
 					</Picture>
 				</State>
 				<State label="One month in: all spending by month, and when Tally started">

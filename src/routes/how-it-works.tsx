@@ -468,8 +468,10 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>
 							The month still going is drawn dashed and isn't judged against its
-							budget until it's over. The month Tally started in may be only
-							partly there, so it's drawn striped but never judged or compared.
+							budget until it's over. When Tally's history starts after the 1st
+							of a month, that month is only partly there, so it's drawn striped
+							but never judged or compared; one that starts on the 1st counts
+							like any other.
 						</li>
 						<li>Code writes these sentences, not AI.</li>
 					</ul>

@@ -96,18 +96,46 @@ export function TrendGroup({
 }
 
 /**
+ * The part month's stripes: diagonal ink stripes on paper, one pattern named `${id}-part` for a
+ * chart's bars to fill with. Two charts on a page need two ids.
+ */
+function PartStripes({ id }: { id: string }) {
+	return (
+		<defs>
+			<pattern
+				id={`${id}-part`}
+				width="5"
+				height="5"
+				patternUnits="userSpaceOnUse"
+				patternTransform="rotate(45)"
+			>
+				<rect width="5" height="5" class="fill-paper" />
+				<rect width="2.5" height="5" class="fill-ink" />
+			</pattern>
+		</defs>
+	);
+}
+
+/**
  * Six small bars, one per month, ink on a ledger rule, scaled to the row's tallest month. The last
- * is the month still going: an outline with a dashed edge. A short history sits at the right.
+ * is the month still going: an outline with a dashed edge. A short history sits at the right. The
+ * first month of history, when it may be only part of a month, is striped like MonthBars'.
  */
 export function MiniBars({
+	id = "mini-bars",
 	months,
 	label,
 }: {
+	/** Names the stripe pattern; rows on one page need their own ids. */
+	id?: string;
 	months: MonthPoint[];
 	/** The six amounts in words: the chart's text alternative. */
 	label: string;
 }) {
-	const bars = miniBars(months.map((m) => m.cents));
+	const bars = miniBars(
+		months.map((m) => m.cents),
+		months.findIndex((m) => m.part !== undefined),
+	);
 	return (
 		<svg
 			viewBox="0 0 96 32"
@@ -115,6 +143,7 @@ export function MiniBars({
 			aria-label={label}
 			class="h-8 w-24 shrink-0"
 		>
+			{bars.some((b) => b.part) && <PartStripes id={id} />}
 			<line x1="0" x2="96" y1="31.5" y2="31.5" class="stroke-rule" />
 			{bars.map((b) => (
 				<rect
@@ -122,7 +151,14 @@ export function MiniBars({
 					y={b.y}
 					width={b.width}
 					height={b.height}
-					class={b.dashed ? "fill-paper stroke-ink" : "fill-ink"}
+					fill={b.part ? `url(#${id}-part)` : undefined}
+					class={
+						b.part
+							? "stroke-ink"
+							: b.dashed
+								? "fill-paper stroke-ink"
+								: "fill-ink"
+					}
 					stroke-dasharray={b.dashed ? "2 2" : undefined}
 				/>
 			))}
@@ -132,6 +168,7 @@ export function MiniBars({
 
 /** One category: its icon, name, a line of words ("4 months under budget") and its six small bars. */
 export function TrendRow({
+	id,
 	name,
 	icon,
 	color,
@@ -140,6 +177,8 @@ export function TrendRow({
 	months,
 	label,
 }: {
+	/** Names the bars' stripe pattern; rows on one page need their own ids. */
+	id?: string;
 	name: string;
 	icon: string;
 	color: string;
@@ -157,7 +196,7 @@ export function TrendRow({
 				<span class="block leading-6 text-muted">{line}</span>
 				{note && <span class="block leading-6 text-muted">{note}</span>}
 			</span>
-			<MiniBars months={months} label={label} />
+			<MiniBars id={id} months={months} label={label} />
 		</li>
 	);
 }
@@ -228,20 +267,7 @@ export function MonthBars({
 			aria-label={label}
 			class="w-full max-w-lg"
 		>
-			{bars.some((b) => b.part) && (
-				<defs>
-					<pattern
-						id={stripes}
-						width="5"
-						height="5"
-						patternUnits="userSpaceOnUse"
-						patternTransform="rotate(45)"
-					>
-						<rect width="5" height="5" class="fill-paper" />
-						<rect width="2.5" height="5" class="fill-ink" />
-					</pattern>
-				</defs>
-			)}
+			{bars.some((b) => b.part) && <PartStripes id={id} />}
 			{Array.from({ length: rules }, (_, i) => {
 				const y = Number((top + ((bottom - top) / (rules - 1)) * i).toFixed(1));
 				return <line x1="0" x2={width} y1={y} y2={y} class="stroke-rule" />;
@@ -365,6 +391,7 @@ export function TrendsScreen({
 						>
 							{page.goingWell.map((row) => (
 								<TrendRow
+									id={`${id}-row-${row.id}`}
 									name={row.name}
 									icon={row.icon}
 									color={row.color}
@@ -386,6 +413,7 @@ export function TrendsScreen({
 						>
 							{page.worthALook.map((row) => (
 								<TrendRow
+									id={`${id}-row-${row.id}`}
 									name={row.name}
 									icon={row.icon}
 									color={row.color}
@@ -404,6 +432,7 @@ export function TrendsScreen({
 						>
 							{page.others.map((row) => (
 								<TrendRow
+									id={`${id}-row-${row.id}`}
 									name={row.name}
 									icon={row.icon}
 									color={row.color}

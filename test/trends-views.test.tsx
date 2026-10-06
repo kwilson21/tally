@@ -88,4 +88,52 @@ describe("TrendRow", () => {
 		expect(html.match(/block leading-6 text-muted/g)).toHaveLength(1);
 		expect(String(<TrendRow {...props} />)).toBe(html);
 	});
+
+	describe("with a part month", () => {
+		const partMonths: MonthPoint[] = [
+			{
+				month: "2026-05",
+				cents: 82000,
+				partial: false,
+				part: { from: "2026-05-12" },
+			},
+			{ month: "2026-06", cents: 79000, partial: false },
+			{ month: "2026-07", cents: 20000, partial: true },
+		];
+		const partLabel =
+			"Spending by month: May (from May 12) $820, June $790, July so far $200.";
+		const html = String(
+			<TrendRow {...props} id="ds-row" months={partMonths} label={partLabel} />,
+		);
+
+		it("stripes the first month's small bar with the same pattern as MonthBars, and no other", () => {
+			expect(html).toContain('<pattern id="ds-row-part"');
+			expect(html).toContain('patternTransform="rotate(45)"');
+			const pattern = html.match(/<pattern[\s\S]*?<\/pattern>/)?.[0] ?? "";
+			expect(pattern).toContain("fill-paper");
+			expect(pattern).toContain("fill-ink");
+			expect(html.match(/fill="url\(#ds-row-part\)"/g)).toHaveLength(1);
+			// Three bars in all: one striped, one solid, the last dashed.
+			expect(html.match(/<rect/g)).toHaveLength(2 + 3);
+			expect(html.match(/stroke-dasharray/g)).toHaveLength(1);
+		});
+
+		it("says so in the text alternative", () => {
+			expect(html).toContain(`aria-label="${partLabel}"`);
+		});
+
+		it("draws no pattern when no month is a part month", () => {
+			const plain = String(<TrendRow {...props} />);
+			expect(plain).not.toContain("<pattern");
+			expect(plain).not.toContain("url(#");
+		});
+
+		it("names its pattern by its id so rows on one page don't share one", () => {
+			const other = String(
+				<TrendRow {...props} id="ds-row-2" months={partMonths} label="x" />,
+			);
+			expect(other).toContain('<pattern id="ds-row-2-part"');
+			expect(other).not.toContain("ds-row-part");
+		});
+	});
 });

@@ -15,6 +15,7 @@ import {
 	TRENDS_EARLY_INPUT,
 	TRENDS_EMPTY_INPUT,
 	TRENDS_INPUT,
+	TRENDS_PART_INPUT,
 } from "../src/design-system/mock";
 import { USE_SPEC_PARTS } from "../src/design-system/specimen";
 import { CATEGORY_COLORS } from "../src/design-system/tokens";
@@ -140,6 +141,10 @@ describe("GET /design-system in the demo", () => {
 			CategoriesDiagram(CATEGORIES_EXAMPLE),
 			// Trends' parts, drawn as the page draws them: full, one month in, and empty.
 			TrendsScreen({ page: buildTrends(TRENDS_INPUT) }),
+			TrendsScreen({
+				id: "ds-screen-part",
+				page: buildTrends(TRENDS_PART_INPUT),
+			}),
 			TrendsScreen({
 				id: "ds-screen-early",
 				page: buildTrends(TRENDS_EARLY_INPUT),

@@ -102,11 +102,11 @@ describe("GET /trends with the demo seed", () => {
 			);
 		expect(names("going-well")).toEqual(["Groceries", "Gas", "Household"]);
 		expect(text(section(html, "going-well"))).toContain(
-			"4 months under budget",
+			"5 months under budget",
 		);
 		expect(names("worth-a-look")).toEqual(["Eating Out"]);
 		expect(text(section(html, "worth-a-look"))).toContain(
-			"Up 3 months running",
+			"Up 4 months running",
 		);
 		expect(names("others")).toEqual(["Kids"]);
 		expect(text(section(html, "others"))).toMatch(/\$\d+ in /);
@@ -230,7 +230,7 @@ describe("early and empty states (P31)", () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		const last = monthsBefore(today.slice(0, 7), 1);
 		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
-			.bind(`${last}-01`)
+			.bind(`${last}-02`)
 			.run();
 		const { res, html } = await get("/trends");
 		expect(res.status).toBe(200);
@@ -252,7 +252,7 @@ describe("early and empty states (P31)", () => {
 		const month = today.slice(0, 7);
 		const last = monthsBefore(month, 1);
 		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
-			.bind(`${last}-01`)
+			.bind(`${last}-02`)
 			.run();
 		const { html } = await get("/trends");
 		// The headline is there, as the serif number...
@@ -278,6 +278,29 @@ describe("early and empty states (P31)", () => {
 		expect(html).toContain(`Spent so far in ${monthName(month)}`);
 		expect(text(html)).not.toMatch(/by this time in/);
 		expect(text(html)).toContain(`Tally started in ${monthName(month)}.`);
+		// History starts on the 1st, so this isn't a part month: nothing is striped.
+		expect(html).not.toContain("<pattern");
+	});
+
+	it("stripes the part month's small bar in each category row, and says from when", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const start = monthsBefore(today.slice(0, 7), 3);
+		await env.DB.prepare("DELETE FROM bill_payments").run();
+		// History starts on the 2nd of that month, after its 1st: a part month.
+		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
+			.bind(`${start}-02`)
+			.run();
+		const { html } = await get("/trends");
+		expect(html).toContain("<pattern");
+		expect(html).toMatch(/fill="url\(#[a-z0-9-]+-part\)"/);
+		expect(html).toMatch(
+			/aria-label="Spending by month: \w+ \(from \w{3} 2\) \$[\d,]+, /,
+		);
+		// It's drawn but not judged: only two full months before this one, so no run of three.
+		expect(html).not.toContain("Going well");
+		// Every pattern id on the page is its own.
+		const ids = [...html.matchAll(/<pattern id="([^"]+)"/g)].map((m) => m[1]);
+		expect(new Set(ids).size).toBe(ids.length);
 	});
 
 	it("says there's nothing to show, with a way to Accounts, with no transactions", async () => {

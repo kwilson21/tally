@@ -21,18 +21,32 @@ const COUNTED_CATEGORY = countedCategorySql();
 
 /**
  * Counted spending by the month it counts in and its category, for months ?1 to ?2, reading only
- * transactions dated on or after ?3 (the first day of ?1), which `transactions_date` can seek.
- * The month a transaction counts in is never later than its own date's month: a late bill's payment
- * counts in its occurrence's month (a payment is picked within 30 days of the due date), and a
- * refund in its purchase's month (the picker offers only purchases dated on or before the refund),
- * both earlier, never later. So a transaction that
- * counts in ?1 or later is dated on or after ?1's first day, and the bound needs no margin: rows it
- * lets in that count in an earlier month are left out by the month test, as before.
+ * what the indexes can seek, in two disjoint legs:
+ *
+ * 1. Transactions dated on or after ?3 (the first day of ?1), through `transactions_date`. A
+ *    transaction counts in a month no later than its own date's month: a late bill's payment counts
+ *    in its occurrence's month (a payment is picked within 30 days of the due date), earlier. So any
+ *    transaction that counts in ?1 or later, other than a refund that follows its purchase, is dated
+ *    on or after ?1's first day, and the bound needs no margin. Rows it lets in that count in an
+ *    earlier month are left out by the month test.
+ * 2. Refunds linked to a purchase and dated before ?3, through `transactions_refund_of_id_idx`. A
+ *    refund counts in its purchase's month, whatever its own date, so one dated before the window can
+ *    count in it (the bank corrected the purchase's date, or the refund is dated before its purchase).
+ *    There are few linked refunds; the month test decides which count. (`+t.date` keeps the planner
+ *    on the refund index here, not the date index, and `refund_of_id > 0` is a range that index can
+ *    seek where `IS NOT NULL` made it scan; ids start at 1.)
  */
-export const TREND_SPEND_SQL = `SELECT ${COUNTED_MONTH} AS month, ${COUNTED_CATEGORY} AS categoryId, SUM(t.amount_cents) AS cents
-	FROM transactions t
-	${COUNTED_JOINS}
-	WHERE t.date >= ?3 AND ${COUNTED_SPENDING} AND ${COUNTED_MONTH} BETWEEN ?1 AND ?2
+const TREND_SPEND_LEG = (
+	where: string,
+) => `SELECT ${COUNTED_MONTH} AS month, ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS cents
+		FROM transactions t
+		${COUNTED_JOINS}
+		WHERE ${where} AND ${COUNTED_SPENDING} AND ${COUNTED_MONTH} BETWEEN ?1 AND ?2`;
+export const TREND_SPEND_SQL = `SELECT month, categoryId, SUM(cents) AS cents FROM (
+		${TREND_SPEND_LEG("t.date >= ?3")}
+		UNION ALL
+		${TREND_SPEND_LEG("+t.date < ?3 AND t.refund_of_id > 0")}
+	)
 	GROUP BY month, categoryId`;
 
 /**

@@ -34,14 +34,14 @@ export type MonthSpend = {
 /**
  * One month of a series. The month still going is `partial`: it's drawn dashed and never judged.
  * The first month of history is a part month (`part`): Tally can't tell how much of it is there, so
- * it's drawn striped and never judged or compared. `from` is the date history starts, when it's
- * known to be in that month.
+ * it's drawn striped and never judged, compared or put in a run. It is a part month only when
+ * history starts after its 1st; `from` is the date history starts.
  */
 export type MonthPoint = {
 	month: string;
 	cents: number;
 	partial: boolean;
-	part?: { from: string | null };
+	part?: { from: string };
 };
 
 /** "$1,240", or "$0.30" under a dollar so a small amount never reads "$0" (as Home's Band does). */
@@ -152,7 +152,7 @@ export function shownMonths(today: string, startMonth: string): string[] {
 export function monthsLabel(points: MonthPoint[], subject: string): string {
 	const parts = points.map((p) => {
 		const started = p.part
-			? ` (${p.part.from ? `from ${shortDay(p.part.from, p.part.from)}` : "part month"})`
+			? ` (from ${shortDay(p.part.from, p.part.from)})`
 			: "";
 		return `${monthName(p.month)}${p.partial ? " so far" : ""}${started} ${trendsAmount(p.cents)}`;
 	});
@@ -168,14 +168,16 @@ export type MiniBar = {
 	height: number;
 	/** The last one, the month still going. */
 	dashed: boolean;
+	/** The part month (the first month of history): drawn striped. */
+	part: boolean;
 };
 
 /**
  * Six small bars on a 96 by 32 drawing, each month taller by its amount against the row's tallest.
  * A short history sits at the right, where the latest months are; a month with nothing (or less
- * than nothing, when refunds outweigh spending) stays a thin line.
+ * than nothing, when refunds outweigh spending) stays a thin line. `partIndex` is the part month.
  */
-export function miniBars(cents: number[]): MiniBar[] {
+export function miniBars(cents: number[], partIndex = -1): MiniBar[] {
 	const max = Math.max(0, ...cents);
 	const offset = Math.max(0, TREND_MONTHS - cents.length);
 	return cents.map((c, i) => {
@@ -189,6 +191,7 @@ export function miniBars(cents: number[]): MiniBar[] {
 			width: 10,
 			height,
 			dashed: i === cents.length - 1,
+			part: i === partIndex,
 		};
 	});
 }
@@ -326,9 +329,10 @@ export type TrendsPage =
 const NEEDS_A_CATEGORY = { name: "Needs a category", icon: "list", color: "" };
 
 /**
- * The Trends page from its rows. Tally can't tell whether the month its history starts in is
- * complete, so that month is drawn but never judged or compared; this month isn't over, so it
- * isn't either. A category up three months running is Worth a look, even when it's also under its
+ * The Trends page from its rows. History starts on the first transaction's own date. When that
+ * isn't the 1st, Tally can't tell how much of that month it has, so it's a part month: drawn
+ * (striped) but never judged, compared or put in a run. This month isn't over, so it isn't judged
+ * either. A category up three months running is Worth a look, even when it's also under its
  * budget; otherwise one under budget three months running is Going well. Archived categories are
  * never in either group.
  */
@@ -337,13 +341,17 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	if (firstDate === null) return { kind: "empty" };
 	const thisMonth = input.today.slice(0, 7);
 	const { lastMonth } = sameDays(input.today);
-	// The month history starts in: the first transaction's, or an earlier month a payment counts in.
-	const startMonth = input.spend.reduce(
-		(first, row) => (row.month < first ? row.month : first),
-		firstDate.slice(0, 7),
-	);
+	// History starts on the first transaction's own date: the first day Tally has data. A payment
+	// that counts in an earlier month (a late bill's) doesn't make that month part of the history.
+	const startMonth = firstDate.slice(0, 7);
+	// That month is a part month unless history starts on its 1st: Tally can't tell how much of it
+	// is there. A part month is drawn (striped) but never judged, compared or put in a run.
+	const startIsPart = firstDate.slice(8, 10) !== "01";
 	const months = shownMonths(input.today, startMonth);
-	const judged = months.filter((m) => m > startMonth && m < thisMonth);
+	const judged = months.filter(
+		(m) =>
+			m < thisMonth && (m > startMonth || (m === startMonth && !startIsPart)),
+	);
 
 	const spent = new Map<string, number>();
 	const totals = new Map<string, number>();
@@ -355,23 +363,16 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	const cents = (month: string, id: number | null) =>
 		spent.get(`${month}|${id ?? ""}`) ?? 0;
 	const total = (month: string) => totals.get(month) ?? 0;
-	const points = (id: number | null): MonthPoint[] =>
-		months.map((m) => ({
-			month: m,
-			cents: cents(m, id),
-			partial: m === thisMonth,
-		}));
-	// The first month of history may be only part of a month: say so, and from when if it's known.
-	const firstMonth = firstDate.slice(0, 7);
-	const allPoints = months.map((m): MonthPoint => {
-		const point = { month: m, cents: total(m), partial: m === thisMonth };
-		return m === startMonth
-			? {
-					...point,
-					part: { from: m === firstMonth ? firstDate : null },
-				}
-			: point;
+	// One month of a series; the part month says so, and from when.
+	const point = (m: string, monthCents: number): MonthPoint => ({
+		month: m,
+		cents: monthCents,
+		partial: m === thisMonth,
+		...(startIsPart && m === startMonth ? { part: { from: firstDate } } : {}),
 	});
+	const points = (id: number | null): MonthPoint[] =>
+		months.map((m) => point(m, cents(m, id)));
+	const allPoints = months.map((m) => point(m, total(m)));
 
 	if (judged.length === 0) {
 		return {

@@ -412,6 +412,12 @@ export const TRENDS_INPUT: TrendsInput = {
 	],
 };
 
+/** History started May 12: May is a part month, so it's drawn striped but not judged. */
+export const TRENDS_PART_INPUT: TrendsInput = {
+	...TRENDS_INPUT,
+	firstDate: "2026-05-12",
+};
+
 /** Only last month and this one: Tally started in September, so there's nothing to compare yet (P31). */
 export const TRENDS_EARLY_INPUT: TrendsInput = {
 	...TRENDS_INPUT,

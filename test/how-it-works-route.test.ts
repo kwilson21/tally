@@ -63,7 +63,7 @@ describe("GET /how-it-works in the demo", () => {
 		expect(trends).toMatch(/\(\w{3} 1(–\d+)? against \w{3} 1(–\d+)?\)/);
 		expect(trends).toContain("not AI");
 		expect(decodeHtml(trends)).toMatch(
-			/In the demo for \w+: <\/span>Groceries stayed under its budget in June, July, August and September, so it's going well\./,
+			/In the demo for \w+: <\/span>Groceries stayed under its budget in May, June, July, August and September, so it's going well\./,
 		);
 	});
 
@@ -152,7 +152,7 @@ describe("outside the demo", () => {
 		// With history that starts last month there is nothing to compare yet.
 		const last = monthsBefore(todayIn(DEFAULT_TIME_ZONE).slice(0, 7), 1);
 		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
-			.bind(`${last}-01`)
+			.bind(`${last}-02`)
 			.run();
 		const early = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)

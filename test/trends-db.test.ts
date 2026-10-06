@@ -172,7 +172,9 @@ describe("the six-month window's edge", () => {
 				(306, 1, '2026-04-28', 6000, 'OLD KIDS PURCHASE', ${KIDS}, 'user', NULL, NULL),
 				(307, 1, '2026-05-20', -2000, 'OLD KIDS REFUND', ${GROCERIES}, 'user', 1, 306),
 				(308, 1, '2026-09-01', 5000, 'HOUSEHOLD PURCHASE', ${HOUSEHOLD}, 'user', NULL, NULL),
-				(309, 1, '2026-09-20', -5000, 'HOUSEHOLD REFUND', ${GROCERIES}, 'user', 1, 308)`),
+				(309, 1, '2026-09-20', -5000, 'HOUSEHOLD REFUND', ${GROCERIES}, 'user', 1, 308),
+				(310, 1, '2026-05-01', 7000, 'CORRECTED PURCHASE', ${KIDS}, 'user', NULL, NULL),
+				(311, 1, '2026-04-30', -2500, 'CORRECTED REFUND', ${GROCERIES}, 'user', 1, 310)`),
 			// June's payment of May's bill counts in May, inside the window; June's payment of
 			// April's bill counts in April, outside it, though it's dated inside.
 			db.prepare(
@@ -189,8 +191,10 @@ describe("the six-month window's edge", () => {
 			[`2026-05|${GROCERIES}`]: 2000,
 			// The bill paid in June for May counts in May; the one paid for April doesn't count.
 			[`2026-05|${GAS}`]: 3000,
-			// A May purchase refunded in June: $50 less $15, counting in May.
-			[`2026-05|${KIDS}`]: 3500,
+			// A May purchase refunded in June: $50 less $15, counting in May. A purchase the bank
+			// corrected to May 1 whose refund is still dated Apr 30 (before the window): $70 less $25
+			// counts in May too, as Home counts it, though the refund's own date is outside the window.
+			[`2026-05|${KIDS}`]: 3500 + 4500,
 			// A purchase and its refund net to nothing for September.
 			[`2026-09|${HOUSEHOLD}`]: 0,
 		});
@@ -213,13 +217,31 @@ describe("the six-month window's edge", () => {
 		);
 	});
 
-	it("reads old transactions through the date index, not a scan", async () => {
+	it("counts a refund dated before the window whose purchase counts in it, as Home does", async () => {
+		const { spend } = await loadTrends(db, TODAY);
+		const may = spend.find(
+			(r) => r.month === "2026-05" && r.categoryId === KIDS,
+		);
+		expect(may?.cents).toBe(8000);
+		// Moving the refund's date further back changes nothing: it follows its purchase.
+		await db
+			.prepare("UPDATE transactions SET date = '2025-01-15' WHERE id = 311")
+			.run();
+		const again = await loadTrends(db, TODAY);
+		expect(byKey(again.spend)).toEqual(byKey(spend));
+		expect(byKey(again.spend)).toEqual(await homeSpending());
+	});
+
+	it("reads old transactions through indexes, not a scan: the date index, and the refund link", async () => {
 		const { results } = await db
 			.prepare(`EXPLAIN QUERY PLAN ${TREND_SPEND_SQL}`)
 			.bind("2026-05", "2026-10", "2026-05-01")
 			.all<{ detail: string }>();
 		const plan = results.map((r) => r.detail).join("\n");
 		expect(plan).toMatch(/SEARCH t USING (COVERING )?INDEX transactions_date/);
+		expect(plan).toMatch(
+			/SEARCH t USING (COVERING )?INDEX transactions_refund_of_id_idx/,
+		);
 		expect(plan).not.toMatch(/SCAN t(?! USING)/);
 	});
 });

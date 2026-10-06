@@ -255,20 +255,7 @@ describe("monthsLabel", () => {
 		).toBe("All spending by month: May (from May 12) $210, June $320.");
 	});
 
-	it("says part month when it can't say from when, and 'so far' for a part month still going", () => {
-		expect(
-			monthsLabel(
-				[
-					{
-						month: "2026-09",
-						cents: 1000,
-						partial: false,
-						part: { from: null },
-					},
-				],
-				"All spending",
-			),
-		).toBe("All spending by month: September (part month) $10.");
+	it("says 'so far' for a part month that is still going", () => {
 		expect(
 			monthsLabel(
 				[
@@ -309,6 +296,16 @@ describe("miniBars", () => {
 	});
 	it("is empty for no months", () => {
 		expect(miniBars([])).toEqual([]);
+	});
+	it("marks the part month, the first month of history, to be drawn striped", () => {
+		expect(miniBars([1, 2, 3, 4], 0).map((b) => b.part)).toEqual([
+			true,
+			false,
+			false,
+			false,
+		]);
+		// None unless one is named.
+		expect(miniBars([1, 2]).map((b) => b.part)).toEqual([false, false]);
 	});
 });
 
@@ -415,7 +412,8 @@ const BUDGETS: BudgetAmount[] = [
 function input(over: Partial<TrendsInput> = {}): TrendsInput {
 	return {
 		today: "2026-10-05",
-		firstDate: "2026-05-01",
+		// Mid-May: May is a part month (history starts after its 1st), so it's drawn, not judged.
+		firstDate: "2026-05-12",
 		categories: CATEGORIES,
 		amounts: BUDGETS,
 		spend: [
@@ -729,7 +727,13 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 	it("gives each row its six months, the last one the month so far", () => {
 		const [groceries] = full().goingWell;
 		expect(groceries?.months).toEqual([
-			{ month: "2026-05", cents: 82000, partial: false },
+			// History starts May 12, so May is a part month: striped, and said so.
+			{
+				month: "2026-05",
+				cents: 82000,
+				partial: false,
+				part: { from: "2026-05-12" },
+			},
 			{ month: "2026-06", cents: 79000, partial: false },
 			{ month: "2026-07", cents: 84500, partial: false },
 			{ month: "2026-08", cents: 81000, partial: false },
@@ -737,8 +741,35 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 			{ month: "2026-10", cents: 19600, partial: true },
 		]);
 		expect(groceries?.label).toBe(
-			"Spending by month: May $820, June $790, July $845, August $810, September $860, October so far $196.",
+			"Spending by month: May (from May 12) $820, June $790, July $845, August $810, September $860, October so far $196.",
 		);
+	});
+
+	it("counts the first month as a full month when history starts on its 1st: solid, judged and compared", () => {
+		const page = full({ firstDate: "2026-05-01" });
+		expect(page.goingWell[0]).toMatchObject({
+			name: "Groceries",
+			line: "5 months under budget",
+		});
+		expect(page.worthALook[0]).toMatchObject({
+			name: "Eating Out",
+			line: "Up 4 months running",
+		});
+		expect(page.goingWell[0]?.months[0]).toEqual({
+			month: "2026-05",
+			cents: 82000,
+			partial: false,
+		});
+		expect(page.goingWell[0]?.label).toContain("May $820, June");
+	});
+
+	it("never judges the part month when history starts after its 1st, even on the 2nd", () => {
+		const page = full({ firstDate: "2026-05-02" });
+		expect(page.goingWell[0]?.line).toBe("4 months under budget");
+		expect(page.worthALook[0]?.line).toBe("Up 3 months running");
+		expect(page.goingWell[0]?.months[0]?.part).toEqual({
+			from: "2026-05-02",
+		});
 	});
 
 	it("names the span of months the rows draw", () => {
@@ -789,7 +820,7 @@ describe("buildTrends: months before there's history", () => {
 		});
 	});
 
-	it("says part month when a payment counts in an earlier month than the first date", () => {
+	it("doesn't draw a month before history starts, whatever counts in it", () => {
 		const page = buildTrends(
 			input({
 				firstDate: "2026-10-02",
@@ -801,12 +832,7 @@ describe("buildTrends: months before there's history", () => {
 		);
 		expect(page).toMatchObject({
 			kind: "early",
-			months: [
-				{ month: "2026-09", cents: 9000, part: { from: null } },
-				{ month: "2026-10", cents: 3000, partial: true },
-			],
-			label:
-				"All spending by month: September (part month) $90, October so far $30.",
+			months: [{ month: "2026-10", cents: 3000, partial: true }],
 		});
 	});
 
@@ -853,7 +879,9 @@ describe("buildTrends: months before there's history", () => {
 		).toHaveLength(3);
 	});
 
-	it("starts at an earlier month when a payment counts there (a late bill's month)", () => {
+	it("starts history on the first transaction's own date, not an earlier month a late payment counts in", () => {
+		// A Sep 2 payment for August's bill counts in August, but Tally has no data before Sep 2: so
+		// September is the part month, there's no full month to compare with, and August isn't drawn.
 		const page = buildTrends(
 			input({
 				firstDate: "2026-09-02",
@@ -864,8 +892,65 @@ describe("buildTrends: months before there's history", () => {
 				],
 			}),
 		);
-		// August is the first month with anything, so September can be judged.
-		expect(page.kind).toBe("full");
+		expect(page).toMatchObject({
+			kind: "early",
+			startMonthName: "September",
+			months: [
+				{ month: "2026-09", cents: 20000, part: { from: "2026-09-02" } },
+				{ month: "2026-10", cents: 3000, partial: true },
+			],
+		});
+	});
+
+	it("compares with last month when history starts on its 1st, and not when it starts later in it", () => {
+		const rows = [
+			{ month: "2026-09", categoryId: GROCERIES, cents: 20000 },
+			{ month: "2026-10", categoryId: GROCERIES, cents: 3000 },
+		];
+		const onTheFirst = buildTrends(
+			input({ firstDate: "2026-09-01", spend: rows }),
+		);
+		expect(onTheFirst.kind).toBe("full");
+		expect(onTheFirst).toMatchObject({ lastMonthName: "September" });
+		const onThe12th = buildTrends(
+			input({ firstDate: "2026-09-12", spend: rows }),
+		);
+		expect(onThe12th.kind).toBe("early");
+		expect(onThe12th).not.toHaveProperty("sentence");
+	});
+
+	it("shows Tally's first month with no stripe when it started on the 1st: only the dashed 'so far'", () => {
+		const page = buildTrends(
+			input({
+				firstDate: "2026-10-01",
+				spend: [{ month: "2026-10", categoryId: GROCERIES, cents: 3000 }],
+			}),
+		);
+		expect(page).toMatchObject({
+			kind: "early",
+			startMonthName: "October",
+			months: [{ month: "2026-10", cents: 3000, partial: true }],
+			label: "All spending by month: October so far $30.",
+		});
+		if (page.kind !== "early") throw new Error("expected early");
+		expect(page.months[0]).not.toHaveProperty("part");
+	});
+
+	it("never counts the part month toward a run, a comparison or a headline", () => {
+		// Starts Sep 20: Aug's payment counting in August can't make August a judged month.
+		const page = buildTrends(
+			input({
+				firstDate: "2026-09-20",
+				spend: [
+					{ month: "2026-08", categoryId: GROCERIES, cents: 1000 },
+					{ month: "2026-09", categoryId: GROCERIES, cents: 2000 },
+					{ month: "2026-10", categoryId: GROCERIES, cents: 3000 },
+				],
+			}),
+		);
+		expect(page.kind).toBe("early");
+		expect(page).not.toHaveProperty("sentence");
+		expect(page).not.toHaveProperty("changes");
 	});
 
 	it("draws only six months, and judges all five before this one when history is longer", () => {
