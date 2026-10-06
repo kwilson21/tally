@@ -28,6 +28,7 @@ import { CategoryIcon } from "../src/views/category";
 import { Chip } from "../src/views/chip";
 import { EmptyState } from "../src/views/empty-state";
 import { ErrorPage } from "../src/views/error-page";
+import { FilterSelect } from "../src/views/filter-select";
 import {
 	BillsDiagram,
 	BudgetDiagram,
@@ -125,6 +126,18 @@ describe("GET /design-system in the demo", () => {
 				name: "ds-exclude",
 				value: "1",
 				children: "Exclude from budget",
+			}),
+			FilterSelect({
+				id: "ds-filter-account",
+				name: "ds-account",
+				label: "Account",
+				options: [
+					{ value: "", label: "All accounts" },
+					{ value: 3, label: "Chase Card ••9921" },
+					{ value: 5, label: "Old Savings ••3340 · Disconnected" },
+					{ value: 4, label: "Cash" },
+				],
+				selected: null,
 			}),
 			Switch({
 				id: "ds-switch-on",
@@ -275,6 +288,41 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(/Categories and exclusions; Income/);
 		expect(section).not.toContain("Merchant names");
 		expect(section).not.toContain("Sort new transactions as they arrive");
+	});
+
+	it("shows the FilterSelect as Transactions' filter bar draws it, on a phone too, with its whole use spec", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="filter-select"'));
+		expect(tag).toContain('data-ds-tier="interactive"');
+		expect(tag).toContain('data-ds-components="FilterSelect"');
+		const section =
+			html.split('id="filter-select"')[1]?.split("</section>")[0] ?? "";
+		// The page's four choices, each a real select named by a label only a screen reader hears.
+		const ids = [...section.matchAll(/<select id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThanOrEqual(5);
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const id of ids) {
+			expect(section).toMatch(
+				new RegExp(`<label for="${id}" class="sr-only">[^<]+</label>`),
+			);
+		}
+		for (const label of ["Month", "Category", "Account", "Show"]) {
+			expect(section).toContain(`class="sr-only">${label}</label>`);
+		}
+		// A disconnected bank's account, and a long name on a 320px phone.
+		expect(section).toContain("· Disconnected");
+		expect(section).toContain("w-[320px]");
+		// Nothing posts from the catalog: the selects are the only controls.
+		expect(section).not.toContain("<form");
+		expect(section).not.toContain("<button");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		expect(section).not.toMatch(/jev/i);
+		// DESIGN.md says what it is and what it names.
+		expect(design).toMatch(
+			/\| FilterSelect \|[^\n]*pill[^\n]*Month, Category, Account and Show/,
+		);
 	});
 
 	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {

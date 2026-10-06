@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -28,6 +29,34 @@ function expectLabelled(html: string) {
 }
 const desc = (html: string) =>
 	(html.match(/<desc[^>]*>([^<]+)</)?.[1] ?? "").replaceAll("&#39;", "'");
+
+describe("BillsDiagram", () => {
+	const props = {
+		amount: "$142.00",
+		due: "Sep 21",
+		paid: "Sep 24",
+		windowDays: 5,
+		tolerance: "10%",
+	};
+
+	it("draws its connector in ink, since terracotta means you can click it", async () => {
+		const html = await render(BillsDiagram(props));
+		expectLabelled(html);
+		expect(html).toContain('<path d="M120 50 H238" class="stroke-ink"');
+		expect(html).not.toContain("stroke-accent");
+	});
+
+	it("stacks the match words in the gap, so no line reaches either box", async () => {
+		const html = await render(BillsDiagram(props));
+		const label = (text: string) =>
+			html.match(new RegExp(`<text [^>]*>${text}</text>`))?.[0] ?? "";
+		// Each line stays short enough for the 118-unit gap at 11px, even with a long tolerance.
+		expect(label("same merchant")).toContain('text-anchor="middle"');
+		expect(label("±10%")).toContain('text-anchor="middle"');
+		expect(words(html)).toContain("same merchant ±10% within 5 days");
+		expect(html).not.toContain("same merchant ·");
+	});
+});
 
 describe("BudgetDiagram", () => {
 	const demo = {
