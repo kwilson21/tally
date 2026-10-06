@@ -359,6 +359,132 @@ describe("the edit panel's name choices", () => {
 				});
 		});
 
+		describe("a panel that is out of date never erases or restores a name (another tab named the merchant)", () => {
+			const category = () =>
+				db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>();
+			const categoryOf = async (id: number) =>
+				(
+					await db
+						.prepare("SELECT category_id FROM transactions WHERE id = ?")
+						.bind(id)
+						.first<{ category_id: number | null }>()
+				)?.category_id;
+
+			it("draws what the name field held, so a save can tell", async () => {
+				const id = await charge();
+				await suggest(RAW, "Blue Bottle Coffee");
+				const open = (await get(`/transactions/${id}?month=all`)).html;
+				expect(open).toMatch(
+					/<input type="hidden" name="merchant_was" value=""/,
+				);
+				await db
+					.prepare(
+						"UPDATE merchants SET display_name = 'The Bottle', suggestion_status = 'accepted'",
+					)
+					.run();
+				const named = (await get(`/transactions/${id}?month=all`)).html;
+				expect(named).toMatch(
+					/<input type="hidden" name="merchant_was" value="The Bottle"/,
+				);
+			});
+
+			it("a name chosen in another tab survives saving the old panel with a category change", async () => {
+				const id = await charge();
+				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+				// Tab B chooses a name.
+				await save(id, { name_pick: "s:Blue Bottle", merchant_was: "" });
+				expect(await merchant(RAW)).toMatchObject({
+					display_name: "Blue Bottle",
+					suggestion_status: "accepted",
+				});
+				// Tab A's panel, drawn before that: nothing chosen, the field empty, and a category picked.
+				const picked = (await category())?.id;
+				const { res } = await save(id, {
+					merchant_was: "",
+					merchant: "",
+					category: String(picked),
+				});
+				expect(res.status).toBe(303);
+				expect(await merchant(RAW)).toMatchObject({
+					display_name: "Blue Bottle",
+					suggestion_status: "accepted",
+				});
+				expect(await categoryOf(id)).toBe(picked);
+			});
+
+			it("a rename made in another tab survives the old panel's plain rename field too", async () => {
+				const id = await charge();
+				await db
+					.prepare(
+						"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Old Name')",
+					)
+					.bind(RAW)
+					.run();
+				// The panel was drawn with "Old Name"; another tab renamed the merchant; this save still holds "Old Name".
+				await db
+					.prepare("UPDATE merchants SET display_name = 'New Name'")
+					.run();
+				await save(id, {
+					merchant_was: "Old Name",
+					merchant: "Old Name",
+					note: "x",
+				});
+				expect(await merchant(RAW)).toMatchObject({ display_name: "New Name" });
+			});
+
+			it("a name changed in this form is still written, and emptying a name still clears it", async () => {
+				const id = await charge();
+				await db
+					.prepare(
+						"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Old Name')",
+					)
+					.bind(RAW)
+					.run();
+				await save(id, { merchant_was: "Old Name", merchant: "Renamed" });
+				expect(await merchant(RAW)).toMatchObject({ display_name: "Renamed" });
+				await save(id, { merchant_was: "Renamed", merchant: "" });
+				expect(await merchant(RAW)).toMatchObject({ display_name: null });
+			});
+
+			it("keeping the bank's name turns the suggestions down and leaves a name chosen elsewhere alone", async () => {
+				const id = await charge();
+				await suggest(RAW, "Blue Bottle Coffee");
+				await save(id, { merchant_was: "", name_pick: "keep" });
+				expect(await merchant(RAW)).toMatchObject({
+					display_name: null,
+					suggestion_status: "rejected",
+				});
+			});
+
+			it("a form with no merchant_was is read as before: what the field holds is the name", async () => {
+				const id = await charge();
+				await save(id, { merchant: "Typed Name" });
+				expect(await merchant(RAW)).toMatchObject({
+					display_name: "Typed Name",
+				});
+			});
+
+			it("still makes the merchant's row for 'Always for this merchant' when no name was given", async () => {
+				const id = await charge("NO ROW YET 9");
+				const picked = (await category())?.id;
+				await save(id, {
+					merchant_was: "",
+					category: String(picked),
+					always: "1",
+				});
+				const rule = await db
+					.prepare(
+						"SELECT default_category_id AS c FROM merchants WHERE raw_name = 'NO ROW YET 9'",
+					)
+					.first<{ c: number }>();
+				expect(rule?.c).toBe(picked);
+			});
+		});
+
 		describe("a chip that is no longer offered is ignored (the panel was open while things changed)", () => {
 			const stillPending = {
 				display_name: null,

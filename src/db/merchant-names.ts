@@ -124,8 +124,11 @@ export async function namesToReview(
 			count: number;
 		}>();
 	const byKey = new Map<string, typeof results>();
-	for (const row of results)
-		byKey.set(row.key, [...(byKey.get(row.key) ?? []), row]);
+	for (const row of results) {
+		const texts = byKey.get(row.key);
+		if (texts) texts.push(row);
+		else byKey.set(row.key, [row]);
+	}
 	const reviews: NameReview[] = [];
 	for (const [key, texts] of byKey) {
 		const total = texts.reduce((sum, text) => sum + text.count, 0);

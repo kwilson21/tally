@@ -596,13 +596,22 @@ export async function saveEdit(
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[edit.note, ...excludeArgs, ...reviewArgs],
 				),
-		// A name a person gives settles the merchant's pending suggestion: accepted when it is one of the
-		// suggested names, rejected when it is their own (spec §7).
-		gated(
-			"INSERT INTO merchants (raw_name, display_name) SELECT ?, ? WHERE 1",
-			[current.merchantKey, edit.displayName],
-			` ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name, ${SETTLE_SUGGESTION_SQL}`,
-		),
+	);
+	// A name a person gives settles the merchant's pending suggestion: accepted when it is one of the
+	// suggested names, rejected when it is their own (spec §7). A form that gave no name leaves the
+	// merchant's name and suggestion alone; its row is still made, which a rule needs.
+	statements.push(
+		edit.nameChanged === false
+			? gated(
+					"INSERT INTO merchants (raw_name) SELECT ? WHERE 1",
+					[current.merchantKey],
+					" ON CONFLICT(raw_name) DO NOTHING",
+				)
+			: gated(
+					"INSERT INTO merchants (raw_name, display_name) SELECT ?, ? WHERE 1",
+					[current.merchantKey, edit.displayName],
+					` ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name, ${SETTLE_SUGGESTION_SQL}`,
+				),
 	);
 	// "Keep the bank's name": the tidied text stays and the suggestions are turned down, never offered again.
 	if (edit.keepBankName && edit.displayName === null)

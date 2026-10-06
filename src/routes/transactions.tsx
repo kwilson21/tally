@@ -1014,6 +1014,13 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				{/* What the name field held when this panel was drawn, so a save can tell a rename from a panel that
+				    is only out of date: another tab may have named the merchant since (src/transactions/edit.ts). */}
+				<input
+					type="hidden"
+					name="merchant_was"
+					value={tx.merchantName ?? ""}
+				/>
 				{/* A merchant with suggested names waiting (P29 A): choose one, keep the bank's, or type your own.
 				    Nothing is chosen to start with, so saving for another reason never renames the merchant. */}
 				{tx.nameChoices && (
