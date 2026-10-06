@@ -64,6 +64,20 @@ export async function runScheduled(
 	await retryFeedback(env, fetchImpl);
 }
 
+/**
+ * The night's second run, 30 minutes after the first (decision 56): one run asks Jev about at most
+ * `MAX_CALLS_PER_RUN`, so this one asks about what the first left, within what's left of the day's
+ * cap, and a newly linked bank's backfill is still sorted in a night. It never syncs or resets.
+ */
+export const SECOND_SORT_CRON = "30 9 * * *";
+
+export async function runSecondSort(
+	env: ScheduledEnv,
+	fetchImpl?: typeof fetch,
+) {
+	await categorizePending(env, fetchImpl, { rulesApplied: false });
+}
+
 app.use("*", security);
 app.use("*", sameOrigin);
 app.use("*", async (c, next) => {
@@ -138,7 +152,8 @@ app.route("/", webhooks);
 
 export default {
 	fetch: app.fetch,
-	async scheduled(_controller, env) {
-		await runScheduled(env);
+	async scheduled(controller, env) {
+		if (controller.cron === SECOND_SORT_CRON) await runSecondSort(env);
+		else await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;
