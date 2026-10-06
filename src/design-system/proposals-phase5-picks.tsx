@@ -643,14 +643,16 @@ type Pace = {
 	/** Counted spending so far (refunds already taken off), and the part of it that paid a bill. */
 	soFarCents: number;
 	paysBillsCents: number;
+	/** The part of it that paid a planned expense: a one-off, like a bill, so it isn't projected either. */
+	paysPlansCents: number;
 	/** Refunds received so far: they lower the spending so far but are never projected forward. */
 	refundsCents: number;
 	/** Bills due this month that aren't paid. */
 	billsDueCents: number;
 };
-/** Money out so far that doesn't pay a bill, with refunds added back, so the pace never projects them. */
+/** Money out so far that doesn't pay a bill or a plan, with refunds added back, so the pace never projects them. */
 const everydayOut = (p: Pace) =>
-	p.soFarCents - p.paysBillsCents + p.refundsCents;
+	p.soFarCents - p.paysBillsCents - p.paysPlansCents + p.refundsCents;
 /** The rule: spending so far, plus the bills still due, plus the everyday pace times the days left. */
 const forecastEnd = (p: Pace) =>
 	p.soFarCents +
@@ -681,6 +683,7 @@ const UNDER_PACE: Pace = {
 	daysInMonth: 31,
 	soFarCents: spentOf(UNDER_MONTH),
 	paysBillsCents: 13000, // Swim lessons $60 and Internet $70
+	paysPlansCents: 0,
 	refundsCents: 0,
 	billsDueCents: UNDER_MONTH.billsDueCents,
 };
@@ -1888,11 +1891,11 @@ export function Phase5PicksProposals() {
 					The forecast is where the month ends if everyday spending keeps its
 					pace, counting the bills still due: the spending so far, plus the
 					bills still due, plus the everyday pace times the days left. The pace
-					counts only money out that doesn't pay a bill, per day so far: refunds
-					already received count in the spending so far but are never projected
-					forward. The line is dashed from today to the month's end against the
-					dashed budget line, and the end point is green when under and brick
-					when over.
+					counts only money out that doesn't pay a bill or a plan, per day so
+					far: those and refunds already received count in the spending so far
+					but are never projected forward. The line is dashed from today to the
+					month's end against the dashed budget line, and the end point is green
+					when under and brick when over.
 				</NeedsLine>
 				<Replaces>
 					P50 A's daily amount (“About $15.03 a day for the 27 days left.”).
