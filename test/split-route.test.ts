@@ -109,6 +109,9 @@ describe("transaction splits", () => {
 		// The amount request is nested inside a form that selects #page. Override that inherited
 		// selector so its partial response can update the live total.
 		expect(html).toMatch(/hx-select="#split-line (>|&gt;) \*"/);
+		// Both parts' requests share one queue, and only the newest waiting one is sent after the one
+		// in flight, so a late answer about older amounts can't be the last word on the line.
+		expect(html.match(/hx-sync="#split-line:queue last"/g)).toHaveLength(2);
 	});
 
 	it("does not offer or allow splitting income", async () => {
