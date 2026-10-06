@@ -368,10 +368,10 @@ describe("pendingSuggestions: what Settings shows", () => {
 		expect(await pendingSuggestions(db)).toEqual([]);
 	});
 
-	it("shows a suggestion only while Guess categories is on, and shows it again when it is switched back on", async () => {
+	it("keeps a created suggestion visible for its transactions even when Guess categories is off", async () => {
 		await made("Subscriptions", 3);
 		await saveAiSwitches(db, { categories: false });
-		expect(await pendingSuggestions(db)).toEqual([]);
+		expect(await pendingSuggestions(db)).toHaveLength(1);
 		await saveAiSwitches(db, { categories: true });
 		expect(await pendingSuggestions(db)).toHaveLength(1);
 	});

@@ -238,10 +238,10 @@ describe("GET /settings with a suggestion", () => {
 		expect(textOf((await get()).html)).not.toContain("Suggested:");
 	});
 
-	it("hides suggestions while Guess categories is off, and shows them again when it is back on", async () => {
+	it("keeps pending suggestions visible when Guess categories is off", async () => {
 		await petCare();
 		await saveAiSwitches(db, { categories: false });
-		expect(textOf((await get()).html)).not.toContain("Suggested:");
+		expect(textOf((await get()).html)).toContain("Suggested: Pet Care");
 		await saveAiSwitches(db, { categories: true });
 		expect(textOf((await get()).html)).toContain("Suggested: Pet Care");
 	});
@@ -431,7 +431,7 @@ describe("creating the category", () => {
 			.run();
 		const { res, html } = await create(id, ids, ids);
 		expect(res.status).toBe(422);
-		expect(textOf(html)).toContain("That name is taken.");
+		expect(textOf(html)).toContain("That name is reserved for Jev.");
 		expect(await status(id)).toBe("pending");
 	});
 

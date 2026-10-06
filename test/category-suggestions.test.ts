@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
 import {
 	groupNoneFit,
@@ -5,6 +7,10 @@ import {
 	MIN_GROUP,
 	type NoneFit,
 } from "../src/category-suggestions";
+import { listTransactions } from "../src/db/transactions";
+import { resetDemo } from "../src/demo/reset";
+import { designSystem } from "../src/routes/design-system";
+import { TransactionRow } from "../src/views/transaction-row";
 
 // New category suggestions (spec §7, #51): code groups the transactions Jev was sure no category fit,
 // and only a group of several asks Workers AI for a name. A single Venmo payment never does.
@@ -16,6 +22,26 @@ const row = (theme: string, merchant: string, key = merchant): NoneFit => {
 };
 
 describe("groupNoneFit", () => {
+	it("resets the demo fixture before checking its real transaction row", async () => {
+		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+		await env.DB.prepare(
+			"UPDATE transactions SET date = '2026-08-08' WHERE category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Pet Care')",
+		).run();
+		const result = await listTransactions(env.DB, {
+			month: "all",
+			category: null,
+			account: null,
+			uncategorized: false,
+			show: "all",
+			q: "Chewy",
+			page: 1,
+		});
+		const row = result.rows.find((item) => item.maybeCategoryNew);
+		if (!row) throw new Error("Pet Care demo row is missing");
+		expect(renderToString(TransactionRow({ row }))).toContain(
+			"Maybe new: Pet Care",
+		);
+	});
 	it("asks about a theme only once three transactions share it", () => {
 		expect(MIN_GROUP).toBe(3);
 		const groups = groupNoneFit([
@@ -110,5 +136,42 @@ describe("groupNoneFit", () => {
 
 	it("gives nothing for nothing", () => {
 		expect(groupNoneFit([])).toEqual([]);
+	});
+});
+describe("shared Maybe parts", () => {
+	it("renders both new-category and below-threshold category row tags", async () => {
+		const { MaybeCategory } = await import("../src/views/maybe-category");
+		const { renderToString } = await import("hono/jsx/dom/server");
+		expect(
+			renderToString(MaybeCategory({ name: "Pet Care", kind: "new" })),
+		).toContain("Maybe new: Pet Care");
+		expect(
+			renderToString(MaybeCategory({ name: "Eating Out", kind: "category" })),
+		).toContain("Maybe Eating Out");
+	});
+	it("renders the first dashed category chip as Suggested with Tally's confidence", async () => {
+		const { SuggestedCategoryChip } = await import(
+			"../src/views/maybe-category"
+		);
+		const { renderToString } = await import("hono/jsx/dom/server");
+		const html = renderToString(
+			SuggestedCategoryChip({ name: "Eating Out", value: "2", sure: 64 }),
+		);
+		expect(html).toContain("Suggested");
+		expect(html).toContain("Tally&#39;s guess · 64% sure");
+		expect(html).toContain("border-dashed");
+		expect(html).toContain("Tally&#39;s guess · 64% sure");
+	});
+	it("lists the shared Maybe parts in the design catalog", async () => {
+		const res = await designSystem.request(
+			"/design-system",
+			{},
+			{ ...env, DEMO: "true" },
+		);
+		const html = await res.text();
+		expect(res.status).toBe(200);
+		expect(html).toContain(
+			'data-ds-components="MaybeCategory SuggestedCategoryChip"',
+		);
 	});
 });

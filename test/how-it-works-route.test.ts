@@ -65,6 +65,16 @@ describe("GET /how-it-works in the demo", () => {
 		expect(names).not.toMatch(/jev|workers ai/i);
 	});
 
+	it("explains suggested categories in the Categories section", async () => {
+		const { html } = await get("/how-it-works");
+		const categories =
+			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
+			"";
+		expect(categories).toContain("suggested category");
+		expect(categories).toContain("nothing is created until a person says so");
+		expect(html).not.toContain('href="/how-it-works#categorization"');
+	});
+
 	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
 		const { html } = await get("/how-it-works");
 		const trends =
@@ -491,18 +501,13 @@ describe("new category suggestions in the Categories section (spec §7, #51)", (
 		).replace(/\s+/g, " ");
 	const family = async () =>
 		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
-	const RULE =
-		"When Tally is sure that none of your categories fit, it keeps that answer, and once three or more of those transactions share a theme it may suggest a new category in Settings.";
+	const NOTHING =
+		"A suggested category is only an idea; nothing is created until a person says so.";
 
-	it("is stated in the spec, and the Categories section says it in the spec's words", async () => {
-		expect(spec).toContain(RULE);
+	it("explains the suggestion and says nothing is created until a person decides", async () => {
 		for (const html of [(await get("/how-it-works")).html, await family()]) {
 			const text = decodeHtml(sectionOf(html));
-			expect(text).toContain(RULE);
-			// A person decides, and what they dismiss stays dismissed.
-			expect(text).toContain("You create it or dismiss it");
-			expect(text).toContain("a dismissed one isn't suggested again");
-			expect(text).toContain("Guess categories");
+			expect(text).toContain(NOTHING);
 		}
 	});
 

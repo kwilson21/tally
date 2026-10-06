@@ -471,6 +471,8 @@ describe("suggestNewCategories", () => {
 	});
 
 	it("logs counts only, never a merchant, a category name or a transaction", async () => {
+		const logged = vi.spyOn(console, "log").mockImplementation(() => {});
+		const failed = vi.spyOn(console, "error").mockImplementation(() => {});
 		await add({ rawName: "NETFLIX.COM" });
 		await add({ rawName: "HULU" });
 		await add({ rawName: "SPOTIFY" });
@@ -478,10 +480,12 @@ describe("suggestNewCategories", () => {
 			DB: db,
 			AI: fakeAi(() => ({ response: "Subscriptions" })),
 		});
-		const lines = [
-			...vi.mocked(console.log).mock.calls,
-			...vi.mocked(console.error).mock.calls,
-		]
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await suggestNewCategories({
+			DB: db,
+			AI: fakeAi(() => ({ response: "Subscriptions" })),
+		});
+		const lines = [...logged.mock.calls, ...failed.mock.calls]
 			.flat()
 			.join("\n");
 		expect(lines).toContain("workers-ai");

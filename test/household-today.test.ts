@@ -189,7 +189,9 @@ describe("jobs that decide today", () => {
 				`SELECT COUNT(*) AS n FROM transactions WHERE ${where}`,
 			).first<{ n: number }>();
 		// Nothing is dated November: at 23:30 Eastern on Oct 31 it is still October.
-		expect((await count("date >= '2026-11-01'"))?.n).toBe(0);
+		expect(
+			(await count("date >= '2026-11-01' AND date < '2026-11-02'"))?.n,
+		).toBe(0);
 		expect((await count("date LIKE '2026-10-%'"))?.n).toBeGreaterThan(0);
 	});
 

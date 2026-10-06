@@ -44,6 +44,7 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
+import { MaybeCategory, SuggestedCategoryChip } from "../views/maybe-category";
 import { MoneyInput } from "../views/money-input";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
@@ -719,6 +720,19 @@ function HomeTopGroup() {
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
+			<Specimen
+				id="maybe-category"
+				title="MaybeCategory and SuggestedCategoryChip"
+				tier="visual"
+				components={["MaybeCategory", "SuggestedCategoryChip"]}
+				sentence="The dashed Maybe row and first Suggested category chip carry Tally's guess where people already choose a category."
+			>
+				<div class="flex flex-wrap gap-3">
+					<MaybeCategory name="Eating Out" kind="category" />
+					<MaybeCategory name="Pet Care" kind="new" />
+					<SuggestedCategoryChip name="Eating Out" value="2" sure={64} />
+				</div>
+			</Specimen>
 			<Specimen
 				id="bill-occurrence"
 				title="Bill occurrence and payment picker"

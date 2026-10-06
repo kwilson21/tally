@@ -1,4 +1,6 @@
 import { type Context, Hono } from "hono";
+import { actor } from "../actor";
+import { askAgain } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import {
 	type AiSwitches,
@@ -15,6 +17,11 @@ import {
 	setArchived,
 	settingsCategories,
 } from "../db/categories";
+import {
+	createFromSuggestion,
+	dismissSuggestion,
+	pendingSuggestions,
+} from "../db/category-suggestions";
 import { namesToReview } from "../db/merchant-names";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
@@ -35,6 +42,7 @@ import { Layout } from "../views/layout";
 import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
 import { TimeZoneRow } from "../views/time-zone-row";
+import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
 export const settings = new Hono<App>();
@@ -88,6 +96,12 @@ type View = {
 	restoreError?: string;
 	/** Why the change didn't happen, shown above the list. */
 	listError?: string;
+	suggestionError?: string;
+	suggestionValues?: {
+		id: number;
+		ticked: number[];
+		notes: Record<number, string>;
+	};
 	status?: 200 | 404 | 422;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
@@ -392,6 +406,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
+	const categorySuggestions = await pendingSuggestions(c.env.DB);
 	const adding = view.open === "new";
 
 	return c.html(
@@ -446,6 +461,107 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							first={i === 0}
 							last={i === active.length - 1}
 						/>
+					))}
+					{categorySuggestions.map((suggestion) => (
+						<details
+							class="group border-b border-dashed border-ink"
+							data-suggestion={suggestion.id}
+							open
+						>
+							<summary class={`${summaryClass} text-ink`}>
+								Suggested: {suggestion.name}
+								{chevron}
+							</summary>
+							<form
+								method="post"
+								action={`/settings/suggestions/${suggestion.id}/create`}
+								hx-post={`/settings/suggestions/${suggestion.id}/create`}
+								hx-target="#categories"
+								hx-select="#categories"
+								hx-swap="outerHTML"
+								class="pb-4"
+							>
+								{view.suggestionError &&
+									view.suggestionValues?.id === suggestion.id && (
+										<p role="alert" class="text-sm text-over">
+											{view.suggestionError}
+										</p>
+									)}
+								<p class="text-sm text-muted">Untick any that don't belong.</p>
+								<p class="text-sm text-muted">
+									Tally sorts it again right away, with your note.
+								</p>
+								<ul class="mt-2">
+									{suggestion.rows.map((row) => {
+										const ticked =
+											view.suggestionValues?.id === suggestion.id
+												? view.suggestionValues.ticked.includes(row.id)
+												: true;
+										const note =
+											view.suggestionValues?.id === suggestion.id
+												? (view.suggestionValues.notes[row.id] ?? "")
+												: "";
+										return (
+											<li class="group/tx border-t border-rule py-2">
+												<div class="flex min-h-11 items-center gap-3">
+													<label class="inline-flex min-h-11 items-center gap-3">
+														<input
+															aria-label={`Include ${row.displayName}`}
+															type="checkbox"
+															name="ids"
+															value={row.id}
+															checked={ticked}
+															class="size-5"
+														/>
+													</label>
+													<input type="hidden" name="shown" value={row.id} />
+													<span class="min-w-0 flex-1 truncate">
+														{row.displayName}
+													</span>
+													<span class="text-muted">
+														{formatCents(row.amountCents)}
+													</span>
+												</div>
+												<label
+													class="mt-1 hidden min-h-11 items-center text-sm text-muted group-has-[:not(:checked)]/tx:flex"
+													for={`note-${row.id}`}
+												>
+													A note for {row.displayName} (optional)
+												</label>
+												<input
+													id={`note-${row.id}`}
+													name={`note_${row.id}`}
+													value={note}
+													maxlength={500}
+													placeholder="Only used if you untick it"
+													class="hidden min-h-11 w-full rounded-control border border-rule px-3 group-has-[:not(:checked)]/tx:block"
+												/>
+											</li>
+										);
+									})}
+								</ul>
+								<div class="mt-3 flex flex-wrap items-center gap-2">
+									<Button type="submit" name="action" value="create">
+										Create {suggestion.name} with {suggestion.rows.length}
+									</Button>
+									<Button
+										kind="secondary"
+										type="submit"
+										formaction={`/settings/suggestions/${suggestion.id}/dismiss`}
+										hx-post={`/settings/suggestions/${suggestion.id}/dismiss`}
+										hx-target="#categories"
+										hx-select="#categories"
+										hx-swap="outerHTML"
+									>
+										Dismiss
+									</Button>
+									<WhyLink
+										section="categorization"
+										topic="suggested categories"
+									/>
+								</div>
+							</form>
+						</details>
 					))}
 					<details
 						class="group border-b border-rule"
@@ -564,6 +680,79 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		view.status ?? 200,
 	);
 }
+
+settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
+	const id = Number(c.req.param("id"));
+	const form = await c.req.formData();
+	const ids = form
+		.getAll("ids")
+		.map(Number)
+		.filter((n) => Number.isInteger(n) && n > 0);
+	const shown = form
+		.getAll("shown")
+		.map(Number)
+		.filter((n) => Number.isInteger(n) && n > 0);
+	const notes = Object.fromEntries(
+		shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
+	);
+	const result = await createFromSuggestion(
+		c.env.DB,
+		id,
+		{ ticked: ids, shown, notes },
+		actor(c as Context<App> & { env: Env & { DEMO: string } }),
+	);
+	if (!result.ok) {
+		const current = await renderSettings(
+			c,
+			result.reason === "gone"
+				? {
+						listError:
+							"That suggestion was changed somewhere else. Here's the current list.",
+						status: 404,
+					}
+				: {
+						suggestionError: result.error,
+						suggestionValues: { id, ticked: ids, notes },
+						status: 422,
+					},
+		);
+		return current;
+	}
+	const env = c.env as Env & { JEV_API_KEY?: string };
+	if (
+		result.leftOut.length &&
+		env.JEV_API_KEY &&
+		(await readAiSwitches(c.env.DB)).categories
+	)
+		c.executionCtx.waitUntil(
+			Promise.all(result.leftOut.map((tx) => askAgain(env, tx))),
+		);
+	const out = result.leftOut.length;
+	const count = result.moved;
+	const message = `Created ${result.name} with ${count} transaction${count === 1 ? "" : "s"}`;
+	return done(
+		c,
+		message,
+		`${message}.${out ? ` The ${out} you left out ${out === 1 ? "goes" : "go"} back to Tally to sort again.` : ""}`,
+		{ hash: "categories" },
+	);
+});
+
+settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
+	const result = await dismissSuggestion(c.env.DB, Number(c.req.param("id")));
+	if (!result)
+		return renderSettings(c, {
+			listError:
+				"That suggestion was changed somewhere else. Here's the current list.",
+			status: 404,
+		});
+	return done(
+		c,
+		`Dismissed ${result.name}`,
+		`Dismissed ${result.name}. Tally won't suggest it again.`,
+		{ hash: "categories" },
+	);
+});
 
 /** After a change: htmx gets the updated section with a toast and announcement; plain browsers go back to Settings. */
 function done(

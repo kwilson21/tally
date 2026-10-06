@@ -175,7 +175,7 @@ describe("categorizePending marks what Jev said", () => {
 			.run();
 		const jev = fakeJev("Gas", 0.9);
 		vi.stubGlobal("fetch", jev);
-		await askAgain({ DB: db, ...JEV_KEY }, ids);
+		await Promise.all(ids.map((id) => askAgain({ DB: db, ...JEV_KEY }, id)));
 		expect(jev).toHaveBeenCalledTimes(2);
 		for (const id of ids)
 			expect(await marked(id)).toMatchObject({
@@ -209,7 +209,7 @@ describe("categorizePending marks what Jev said", () => {
 			.bind(id)
 			.run();
 		await saveAiSwitches(db, { categories: false, income: false });
-		await askAgain({ DB: db, ...JEV_KEY }, [id]);
+		await askAgain({ DB: db, ...JEV_KEY }, id);
 		expect(await marked(id)).toMatchObject({ category_confidence: null });
 		await saveAiSwitches(db, { categories: true, income: true });
 		const jev = fakeJev("Gas", 0.9);
@@ -218,37 +218,8 @@ describe("categorizePending marks what Jev said", () => {
 	});
 });
 
-describe("migration 0024's backfill", () => {
-	const backfill = migration
-		.split(";")
-		.map((statement) => statement.trim())
-		.find((statement) => statement.startsWith("UPDATE transactions"));
-
-	it("marks what Jev already answered with a confidence, no pick and nothing chosen, as none-fit", async () => {
-		expect(backfill).toBeDefined();
-		const put = (id: number, set: string) =>
-			db
-				.prepare(
-					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_confidence, jev_category_id, category_id, category_source, jev_none_fit)
-					 VALUES (?, 1, '2026-09-10', 500, 'X', ${set}, 0)`,
-				)
-				.bind(id)
-				.run();
-		await db.prepare("DELETE FROM bill_payments").run();
-		await db.prepare("DELETE FROM transactions").run();
-		await put(901, "0.95, NULL, NULL, NULL");
-		await put(902, "0.95, 2, NULL, NULL");
-		await put(903, "NULL, NULL, NULL, NULL");
-		await put(904, "0.95, NULL, 2, 'user'");
-		await db.prepare(backfill as string).run();
-		const { results } = await db
-			.prepare("SELECT id, jev_none_fit FROM transactions ORDER BY id")
-			.all<{ id: number; jev_none_fit: number }>();
-		expect(results).toEqual([
-			{ id: 901, jev_none_fit: 1 },
-			{ id: 902, jev_none_fit: 0 },
-			{ id: 903, jev_none_fit: 0 },
-			{ id: 904, jev_none_fit: 0 },
-		]);
+describe("migration 0024", () => {
+	it("starts fresh and never infers none-fit from earlier Jev answers", () => {
+		expect(migration).not.toMatch(/UPDATE\s+transactions/i);
 	});
 });

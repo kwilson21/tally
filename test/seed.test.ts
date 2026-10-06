@@ -259,8 +259,8 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 describe("resetDemo", () => {
 	it("stores the seed's balance history, and running it twice gives the same rows", async () => {
 		const history = buildSeed("2026-10-05").balanceHistory;
-		await resetDemo(env.DB, "2026-10-05");
-		await resetDemo(env.DB, "2026-10-05");
+		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
 		const { results } = await env.DB.prepare(
 			"SELECT account_id AS accountId, date, balance_cents AS balanceCents FROM balance_history ORDER BY date, account_id",
 		).all();
@@ -292,6 +292,42 @@ describe("resetDemo", () => {
 			raw_name: "TRADER JOE'S #552",
 			category_source: "jev",
 		});
+	});
+
+	it("reset adds the repeatable Pet Care suggestion from old posted none-fit charges without shifting this month's numbers", async () => {
+		await resetDemo(env.DB, "2026-10-05");
+		const before = await loadMonth(env.DB, "2026-10");
+		const totalsBefore = summarizeMonth({
+			month: "2026-10",
+			...before,
+			unpaidDueBillsCents: 0,
+		});
+		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+		const suggestion = await env.DB.prepare(
+			"SELECT name, status FROM category_suggestions WHERE name = 'Pet Care'",
+		).first<{ name: string; status: string }>();
+		expect(suggestion).toEqual({ name: "Pet Care", status: "pending" });
+		const rows = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Pet Care') AND amount_cents > 0 AND pending = 0 AND category_id IS NULL AND jev_none_fit = 1 AND category_confidence >= 0.8",
+		).first<{ n: number }>();
+		expect(rows?.n).toBeGreaterThanOrEqual(3);
+		const dates = await env.DB.prepare(
+			"SELECT MIN(date) AS earliest FROM transactions WHERE category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Pet Care')",
+		).first<{ earliest: string }>();
+		expect(dates?.earliest?.slice(0, 7)).toBe("2026-08");
+		const data = await loadMonth(env.DB, "2026-10");
+		const summary = summarizeMonth({
+			month: "2026-10",
+			...data,
+			unpaidDueBillsCents: 0,
+		});
+		expect(summary.uncategorized).toEqual(totalsBefore.uncategorized);
+		expect(summary.totalSpentCents).toBe(totalsBefore.totalSpentCents);
+		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+		const repeated = await env.DB.prepare(
+			"SELECT name, status FROM category_suggestions WHERE name = 'Pet Care'",
+		).first<{ name: string; status: string }>();
+		expect(repeated).toEqual(suggestion);
 	});
 
 	it("stores the seed's merchant names, and every bill's key is its linked payment's merchant key", async () => {
