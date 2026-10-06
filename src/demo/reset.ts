@@ -1,6 +1,12 @@
 import { matchBillPayments } from "../bills/match";
 import { DEFAULT_TIME_ZONE, daysBefore } from "../dates";
-import { buildSeed, monthOffset, NETFLIX, seedMerchantKey } from "./seed";
+import {
+	buildSeed,
+	monthOffset,
+	NETFLIX,
+	type SeedBalance,
+	seedMerchantKey,
+} from "./seed";
 
 // Electric and Internet are unpaid on purpose (they are what Safe to spend sets aside), so their
 // merchants have no charges at all: a bill whose merchant has other charges nearby would be offered
@@ -34,6 +40,26 @@ export function canResetDemo(env: {
 	PLAID_CLIENT_ID?: string;
 }): boolean {
 	return env.DEMO === "true" && !env.PLAID_SECRET && !env.PLAID_CLIENT_ID;
+}
+
+const BALANCES_PER_STATEMENT = 33; // 3 bound values each, under D1's limit of 100 per statement
+
+function balanceHistoryStatements(
+	db: D1Database,
+	balances: SeedBalance[],
+): D1PreparedStatement[] {
+	const statements: D1PreparedStatement[] = [];
+	for (let i = 0; i < balances.length; i += BALANCES_PER_STATEMENT) {
+		const chunk = balances.slice(i, i + BALANCES_PER_STATEMENT);
+		statements.push(
+			db
+				.prepare(
+					`INSERT INTO balance_history (account_id, date, balance_cents) VALUES ${chunk.map(() => "(?, ?, ?)").join(", ")}`,
+				)
+				.bind(...chunk.flatMap((b) => [b.accountId, b.date, b.balanceCents])),
+		);
+	}
+	return statements;
 }
 
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
@@ -89,6 +115,8 @@ export async function resetDemo(db: D1Database, today: string): Promise<void> {
 					a.balanceCents,
 				),
 		),
+		// The net-worth chart's six months, a few dozen rows per statement: D1 allows 100 bound values in one.
+		...balanceHistoryStatements(db, seed.balanceHistory),
 		...seed.merchants.map((m) =>
 			db
 				.prepare(

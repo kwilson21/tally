@@ -1,8 +1,10 @@
 // Typed fake data for the catalog. It never touches the database; TypeScript checks each value
 // against the component's props, so a changed component fails `npm run typecheck` here first.
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
+import { daysBefore } from "../dates";
 import type { ListRow } from "../db/transactions";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
+import { type NetWorthPoint, netWorthView } from "../net-worth";
 import { type BankSync, flaggedBanks, staleBankWords } from "../stale-bank";
 import { tidyName } from "../transactions/tidy-name";
 
@@ -331,3 +333,57 @@ export const NET_WORTH_CENTS = BANKS.flatMap((b) => b.accounts).reduce(
 	(sum, a) => sum + (a.isLiability ? -a.balanceCents : a.balanceCents),
 	0,
 );
+
+/** The net-worth chart's fake "today", so its words don't change with the calendar. */
+export const NET_WORTH_TODAY = "2026-10-05";
+// Weekly from May 1, climbing $3,600 to today's net worth with a small wobble in between.
+const WOBBLE = [
+	0, 9000, -6000, 14000, 3000, -12000, 8000, 16000, -4000, 5000, -9000,
+];
+/** The climbing weeks, ending on `endCents` today (a headline the picture sits under). */
+const climbing = (endCents: number): NetWorthPoint[] => [
+	...Array.from({ length: 22 }, (_, week) => ({
+		date: daysBefore("2026-05-01", -7 * week),
+		cents:
+			endCents -
+			360000 +
+			Math.floor((360000 * week) / 22) +
+			(week === 0 ? 0 : (WOBBLE[week % WOBBLE.length] ?? 0)),
+	})),
+	{ date: NET_WORTH_TODAY, cents: endCents },
+];
+const CLIMBING = climbing(NET_WORTH_CENTS);
+
+/** The climbing line ending on `endCents`, for a mock whose headline isn't NET_WORTH_CENTS. */
+export const netWorthViewEnding = (endCents: number) =>
+	netWorthView(climbing(endCents), NET_WORTH_TODAY);
+
+/** The chart space in each state it can show (P25 A, P31), built by the same function the app uses. */
+export const NET_WORTH_VIEWS = {
+	rising: netWorthView(CLIMBING, NET_WORTH_TODAY),
+	// The same weeks mirrored about today's net worth: the line starts $3,600 higher and falls to
+	// NET_WORTH_CENTS, so it ends on the same headline as the others.
+	falling: netWorthView(
+		CLIMBING.map((p) => ({
+			date: p.date,
+			cents: 2 * NET_WORTH_CENTS - p.cents,
+		})),
+		NET_WORTH_TODAY,
+	),
+	// Linked this month: the line starts on a day, not a month.
+	startedThisMonth: netWorthView(
+		[
+			{ date: "2026-10-01", cents: NET_WORTH_CENTS - 12000 },
+			{ date: "2026-10-03", cents: NET_WORTH_CENTS - 4000 },
+			{ date: NET_WORTH_TODAY, cents: NET_WORTH_CENTS },
+		],
+		NET_WORTH_TODAY,
+	),
+	firstDay: netWorthView(
+		[{ date: NET_WORTH_TODAY, cents: NET_WORTH_CENTS }],
+		NET_WORTH_TODAY,
+	),
+	none: netWorthView([], NET_WORTH_TODAY),
+	// A connected account has no balance recorded yet, so there is no line until it has one.
+	waiting: netWorthView([], NET_WORTH_TODAY, 1),
+};

@@ -23,7 +23,8 @@ export type Bank = {
 	accounts: Account[];
 };
 
-type Row = {
+/** One row of `banksStatement`. */
+export type BankRow = {
 	bank_id: number;
 	bank_name: string;
 	status: string;
@@ -83,14 +84,26 @@ export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
  * linked but not yet synced has no accounts and still appears, so it can be fixed if it needs attention.
  */
 export async function accountsByBank(db: D1Database): Promise<Bank[]> {
-	const { results } = await db
-		.prepare(
-			`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status, p.last_synced_at, p.disconnected_at,
-				a.id, a.name, a.mask, a.type, a.balance_cents, a.is_liability
-			FROM plaid_items p LEFT JOIN accounts a ON a.plaid_item_id = p.id
-			ORDER BY p.id, a.id`,
-		)
-		.all<Row>();
+	const { results } = await banksStatement(db).all<BankRow>();
+	return banksFromRows(results);
+}
+
+/**
+ * The query behind `accountsByBank`, unrun, so a page can read it in the same `db.batch` as other
+ * reads that must agree with it (Accounts' headline and its net-worth line); batch results go to
+ * `banksFromRows`.
+ */
+export function banksStatement(db: D1Database): D1PreparedStatement {
+	return db.prepare(
+		`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status, p.last_synced_at, p.disconnected_at,
+			a.id, a.name, a.mask, a.type, a.balance_cents, a.is_liability
+		FROM plaid_items p LEFT JOIN accounts a ON a.plaid_item_id = p.id
+		ORDER BY p.id, a.id`,
+	);
+}
+
+/** The banks `banksStatement` read, with their accounts. */
+export function banksFromRows(results: BankRow[]): Bank[] {
 	const banks: Bank[] = [];
 	for (const row of results) {
 		let bank = banks.at(-1);
