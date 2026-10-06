@@ -77,7 +77,7 @@ describe("askJev", () => {
 		}
 	});
 
-	it("tells Jev only the name, merchant, amount, direction and account type", async () => {
+	it("tells Jev only the name, merchant, amount, direction and account type, and a note when there is one", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(input, categories, "k", fetchImpl);
 		const body = JSON.parse(String(calls[0]?.init.body));
@@ -99,6 +99,24 @@ describe("askJev", () => {
 		expect(second.state.merchant).toBeNull();
 		expect(second.state.amount_cents).toBe(5000);
 		expect(second.state.direction).toBe("money in");
+	});
+
+	it("adds the note a person wrote, so it can help the transaction sort (decision 64), and nothing when there is none", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(
+			{ ...input, note: "Birthday cake for Sam" },
+			categories,
+			"k",
+			fetchImpl,
+		);
+		await askJev({ ...input, note: "" }, categories, "k", fetchImpl);
+		await askJev({ ...input, note: null }, categories, "k", fetchImpl);
+		const states = calls.map(
+			(call) => JSON.parse(String(call.init.body)).state,
+		);
+		expect(states[0].note).toBe("Birthday cake for Sam");
+		expect(states[1]).not.toHaveProperty("note");
+		expect(states[2]).not.toHaveProperty("note");
 	});
 
 	it("includes Plaid's category hint when present", async () => {

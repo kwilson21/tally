@@ -128,7 +128,7 @@ describe("syncItem", () => {
 
 		expect(
 			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-		).toEqual({ added: 3, modified: 0, removed: 0 });
+		).toMatchObject({ added: 3, modified: 0, removed: 0 });
 		expect(fetchImpl.mock.calls[0]?.[0].toString()).toContain("/accounts/get");
 		expect(fetchImpl.mock.calls[1]?.[0].toString()).toContain(
 			"/transactions/sync",
@@ -881,7 +881,7 @@ describe("syncItem", () => {
 		try {
 			expect(
 				await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-			).toEqual({ added: 0, modified: 0, removed: 0 });
+			).toMatchObject({ added: 0, modified: 0, removed: 0 });
 			expect(log).not.toHaveBeenCalled();
 		} finally {
 			log.mockRestore();
@@ -943,7 +943,7 @@ describe("syncItem", () => {
 
 		expect(
 			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
-		).toEqual({ added: 1, modified: 0, removed: 0 });
+		).toMatchObject({ added: 1, modified: 0, removed: 0 });
 		expect(cursors).toEqual(["saved", "middle", "saved"]);
 		expect(
 			await env.DB.prepare(
@@ -2015,7 +2015,7 @@ describe("syncItem", () => {
 		const resumed = run();
 		expect(
 			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, resumed),
-		).toEqual({ added: 1, modified: 0, removed: 0 });
+		).toMatchObject({ added: 1, modified: 0, removed: 0 });
 		expect(JSON.parse(String(resumed.mock.calls[1]?.[1]?.body)).cursor).toBe(
 			"cursor-1",
 		);
@@ -2058,7 +2058,7 @@ describe("syncItem", () => {
 					),
 				),
 			),
-		).toEqual({ added: 0, modified: 0, removed: 1 });
+		).toMatchObject({ added: 0, modified: 0, removed: 1 });
 		expect(
 			(await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions").first())
 				?.n,
@@ -2701,5 +2701,162 @@ describe("balance snapshots at sync (spec §5, §8.3, decision 64)", () => {
 			),
 		).rejects.toThrow();
 		expect(await snapshots()).toEqual([]);
+	});
+});
+
+// The rows a sync added or modified are reported by id, so the run right after it (spec §8.6) asks Jev
+// about those and not about everything still waiting.
+describe("syncItem reports which rows it changed", () => {
+	const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchants"),
+		]);
+	});
+
+	const rowId = async (plaidId: string) =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE plaid_transaction_id = ?",
+			)
+				.bind(plaidId)
+				.first<{ id: number }>()
+		)?.id as number;
+	const idsOf = (synced: Awaited<ReturnType<typeof syncItem>>) =>
+		"changedIds" in synced ? [...synced.changedIds].sort((a, b) => a - b) : [];
+
+	it("lists the ids of the rows it added", async () => {
+		const id = await addItem();
+		const synced = await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({ transaction_id: "a" }),
+							transaction({ transaction_id: "b" }),
+						],
+					}),
+				),
+			),
+		);
+		expect(idsOf(synced)).toEqual([await rowId("a"), await rowId("b")]);
+	});
+
+	it("lists a modified row, and only the rows this sync touched", async () => {
+		const id = await addItem();
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({ transaction_id: "a" }),
+							transaction({ transaction_id: "b" }),
+						],
+					}),
+				),
+			),
+		);
+		const synced = await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [transaction({ transaction_id: "c" })],
+						modified: [transaction({ transaction_id: "a", amount: 20 })],
+						next_cursor: "cursor-2",
+					}),
+				),
+			),
+		);
+		expect(idsOf(synced)).toEqual(
+			[await rowId("a"), await rowId("c")].sort((x, y) => x - y),
+		);
+		expect(synced).toMatchObject({ added: 1, modified: 1 });
+	});
+
+	it("lists a row the bank posted under a new id, which is the pending row, so a changed amount is asked again", async () => {
+		const id = await addItem();
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({ transaction_id: "pending-1", pending: true }),
+						],
+					}),
+				),
+			),
+		);
+		const pendingRow = await rowId("pending-1");
+		const synced = await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								transaction_id: "posted-1",
+								pending_transaction_id: "pending-1",
+								amount: 15,
+							}),
+						],
+						removed: [{ transaction_id: "pending-1" }],
+						next_cursor: "cursor-2",
+					}),
+				),
+			),
+		);
+		expect(idsOf(synced)).toEqual([pendingRow]);
+	});
+
+	it("lists the rows of every page of one sync", async () => {
+		const id = await addItem();
+		let calls = 0;
+		const synced = await syncItem(
+			opts,
+			id,
+			plaidFetch(() => {
+				calls += 1;
+				return response(
+					calls === 1
+						? page({
+								added: [transaction({ transaction_id: "a" })],
+								next_cursor: "cursor-1",
+								has_more: true,
+							})
+						: page({
+								added: [transaction({ transaction_id: "b" })],
+								modified: [],
+								next_cursor: "cursor-2",
+							}),
+				);
+			}),
+		);
+		expect(idsOf(synced)).toEqual([await rowId("a"), await rowId("b")]);
+	});
+
+	it("lists none when the bank brought nothing, or only removed rows", async () => {
+		const id = await addItem();
+		expect(
+			idsOf(
+				await syncItem(
+					opts,
+					id,
+					plaidFetch(() => response(page())),
+				),
+			),
+		).toEqual([]);
 	});
 });
