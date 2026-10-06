@@ -233,6 +233,45 @@ describe("bill writes", () => {
 			).toBe(true);
 		});
 
+		it.each([
+			["plaid", "plaid_category", "'TRANSFER_OUT'"],
+			["jev", "flag_transfer", "1"],
+		] as const)(
+			"leaves a %s exclusion as it was when a changed schedule drops the payment's link",
+			async (source, column, value) => {
+				// Linking never wrote the exclusion, so dropping the link has nothing to give back.
+				await env.DB.batch([
+					env.DB.prepare(
+						"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9200,'Mortgage',150000,1,'monthly',5,'LANDLORD LLC')",
+					),
+					env.DB.prepare(
+						`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,${column},excluded,excluded_source) SELECT 9201,id,'2026-09-01',150000,'LANDLORD LLC',${value},1,'${source}' FROM accounts LIMIT 1`,
+					),
+					env.DB.prepare(
+						"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9200,'2026-09',9201,'auto','linked')",
+					),
+				]);
+				expect(
+					await updateBill(
+						env.DB,
+						9200,
+						fields({ name: "Mortgage", frequency: "yearly", anchorMonth: 3 }),
+						true,
+					),
+				).toBe(true);
+				expect(
+					await env.DB.prepare(
+						"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=9200",
+					).first("n"),
+				).toBe(0);
+				expect(
+					await env.DB.prepare(
+						"SELECT excluded, excluded_source FROM transactions WHERE id=9201",
+					).first(),
+				).toEqual({ excluded: 1, excluded_source: source });
+			},
+		);
+
 		it("keeps the old dismissals when a changed schedule's rename is refused", async () => {
 			const transaction = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",

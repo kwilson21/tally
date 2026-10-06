@@ -1,7 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
+import { matchBillPayments } from "../src/bills/match";
+import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
 import { loadBillRows } from "../src/routes/bills";
@@ -344,6 +347,172 @@ describe("Bills", () => {
 			},
 		);
 		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
+	});
+
+	// A payment Plaid or Jev excluded can still pay a bill. Once linked it counts in Spent whatever its
+	// exclusion, and linking or unlinking never writes the exclusion (spec §6.1 rule 4, §8.5).
+	describe("a payment Plaid or Jev excluded that pays a bill", () => {
+		const MONTH = "2026-07";
+		type Machine = "plaid" | "jev";
+		const BILL =
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9300,'Mortgage',150000,5,'monthly',5,'LANDLORD LLC')";
+		/** A 1500.00 payment: a loan payment for Plaid, a transfer Jev flagged for Jev. */
+		const setUp = async (source: Machine) => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare(BILL),
+				env.DB.prepare(
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,plaid_category,flag_transfer)
+					 SELECT 9301,id,'${MONTH}-04',150000,'LANDLORD LLC',1,?1,
+						CASE WHEN ?1 = 'plaid' THEN 'LOAN_PAYMENTS' END, CASE WHEN ?1 = 'jev' THEN 1 ELSE 0 END FROM accounts LIMIT 1`,
+				).bind(source),
+			]);
+		};
+		/** A split bank transaction of 2000.00 whose 1500.00 part is the bill's payment, excluded whole. */
+		const setUpSplit = async (source: Machine) => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare(BILL),
+				env.DB.prepare(
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,is_split,plaid_category,flag_transfer)
+					 SELECT 9310,id,'${MONTH}-04',200000,'LANDLORD LLC',1,?1,1,
+						CASE WHEN ?1 = 'plaid' THEN 'TRANSFER_OUT' END, CASE WHEN ?1 = 'jev' THEN 1 ELSE 0 END FROM accounts LIMIT 1`,
+				).bind(source),
+				env.DB.prepare(
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,parent_id)
+					 SELECT 9311,id,'${MONTH}-04',150000,'LANDLORD LLC',1,?,9310 FROM accounts LIMIT 1`,
+				).bind(source),
+				env.DB.prepare(
+					`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded,excluded_source,parent_id)
+					 SELECT 9312,id,'${MONTH}-04',50000,'ELSEWHERE',1,?,9310 FROM accounts LIMIT 1`,
+				).bind(source),
+			]);
+		};
+		const state = async (...ids: number[]) =>
+			(
+				await env.DB.prepare(
+					`SELECT id, excluded, excluded_source FROM transactions WHERE id IN (${ids.join(",")}) ORDER BY id`,
+				).all()
+			).results;
+		const spent = async () =>
+			summarizeMonth({
+				month: MONTH,
+				...(await loadMonth(env.DB, MONTH)),
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		const post = (path: string, body?: Record<string, string>) =>
+			exports.default.fetch(`http://tally.test${path}`, {
+				method: "POST",
+				redirect: "manual",
+				headers: {
+					Origin: "http://tally.test",
+					"HX-Request": "true",
+					...(body
+						? { "content-type": "application/x-www-form-urlencoded" }
+						: {}),
+				},
+				...(body ? { body: new URLSearchParams(body) } : {}),
+			});
+		const link = (transaction: number) =>
+			post("/bills/9300/link", {
+				transaction_id: String(transaction),
+				period: MONTH,
+				opened_period: MONTH,
+			});
+		const unlink = () => post(`/bills/9300/occurrences/${MONTH}/unlink`);
+		const linkedBy = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT matched_by FROM bill_payments WHERE bill_id=9300 AND status='linked'",
+				).first<{ matched_by: string }>()
+			)?.matched_by;
+
+		it.each(["plaid", "jev"] as const)(
+			"counts a %s-excluded payment while the matcher's link stands, and not after Not this one, leaving its exclusion as it was",
+			async (source) => {
+				await setUp(source);
+				const base = await spent();
+				const exclusion = [{ id: 9301, excluded: 1, excluded_source: source }];
+				expect(await state(9301)).toEqual(exclusion);
+
+				await matchBillPayments(env.DB, "2026-07-12");
+				expect(await linkedBy()).toBe("auto");
+				// It counts because it pays the bill; nothing was written to its exclusion.
+				expect(await state(9301)).toEqual(exclusion);
+				expect(await spent()).toBe(base + 150000);
+
+				await unlink();
+				expect(await state(9301)).toEqual(exclusion);
+				expect(await spent()).toBe(base);
+			},
+		);
+
+		it.each(["plaid", "jev"] as const)(
+			"counts only the part that pays the bill when the matcher links one part of a %s-excluded split, and leaves the split as it was",
+			async (source) => {
+				await setUpSplit(source);
+				const base = await spent();
+				const whole = [9310, 9311, 9312].map((id) => ({
+					id,
+					excluded: 1,
+					excluded_source: source,
+				}));
+
+				await matchBillPayments(env.DB, "2026-07-12");
+				expect(await linkedBy()).toBe("auto");
+				expect(await state(9310, 9311, 9312)).toEqual(whole);
+				// The 1500.00 part counts; its 500.00 sibling and the split's parent don't.
+				expect(await spent()).toBe(base + 150000);
+
+				await unlink();
+				expect(await state(9310, 9311, 9312)).toEqual(whole);
+				expect(await spent()).toBe(base);
+			},
+		);
+
+		it.each(["plaid", "jev"] as const)(
+			"counts a person's hand link of a %s-excluded payment while it stands, and writes nothing to its exclusion",
+			async (source) => {
+				await setUp(source);
+				const base = await spent();
+				const exclusion = [{ id: 9301, excluded: 1, excluded_source: source }];
+
+				await link(9301);
+				expect(await linkedBy()).toBe("user");
+				expect(await state(9301)).toEqual(exclusion);
+				expect(await spent()).toBe(base + 150000);
+
+				await unlink();
+				expect(await state(9301)).toEqual(exclusion);
+				expect(await spent()).toBe(base);
+			},
+		);
+
+		it("leaves a payment a person excluded to the matcher, counts it once they link it by hand, and keeps it excluded after", async () => {
+			await setUp("plaid");
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded_source='user' WHERE id=9301",
+			).run();
+			const base = await spent();
+			const exclusion = [{ id: 9301, excluded: 1, excluded_source: "user" }];
+			await matchBillPayments(env.DB, "2026-07-12");
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=9300 AND status='linked'",
+				).first("n"),
+			).toBe(0);
+			expect(await spent()).toBe(base);
+
+			await link(9301);
+			expect(await linkedBy()).toBe("user");
+			// A person's hand link counts it because it's linked; their exclusion is as they left it.
+			expect(await state(9301)).toEqual(exclusion);
+			expect(await spent()).toBe(base + 150000);
+
+			await unlink();
+			expect(await state(9301)).toEqual(exclusion);
+			expect(await spent()).toBe(base);
+		});
 	});
 
 	it("shows a bill page and lets a person unlink and hand-link a chosen month", async () => {

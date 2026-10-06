@@ -5,6 +5,7 @@ import {
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
+	INCLUDED,
 } from "./counted-month";
 
 const COUNTED_MONTH = countedMonthSql();
@@ -26,7 +27,8 @@ export type MonthData = {
 };
 
 /**
- * Loads what summarizeMonth needs for a month ('YYYY-MM'). Counted = in month, not excluded, not a split parent.
+ * Loads what summarizeMonth needs for a month ('YYYY-MM'). Counted = in month, not excluded (or paying a
+ * bill), not a split parent.
  * Categories are the active ones plus any archived one with counted spending that month (spec §7).
  */
 export async function loadMonth(
@@ -57,7 +59,7 @@ export async function loadMonth(
 				   ${FOLLOWS_PURCHASE} AS linked
 				 FROM transactions t
 				 ${COUNTED_JOINS}
-				 WHERE ${COUNTED_MONTH} = ?1 AND t.excluded = 0 AND t.is_split = 0
+				 WHERE ${COUNTED_MONTH} = ?1 AND ${INCLUDED} AND t.is_split = 0
 					AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE})`,
 			)
 			.bind(month),
