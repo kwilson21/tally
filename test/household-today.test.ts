@@ -288,11 +288,6 @@ describe("one date for the whole request", () => {
 		],
 		["moving a category", "/settings/categories/3/move/up", form({})],
 		[
-			"saving the time zone",
-			"/settings/time-zone",
-			form({ time_zone: "America/Chicago" }),
-		],
-		[
 			"a time zone that isn't offered",
 			"/settings/time-zone",
 			form({ time_zone: "Not/AZone" }),
@@ -303,6 +298,17 @@ describe("one date for the whole request", () => {
 		await res.text();
 		expect(res.status).toBeLessThan(500);
 		expect(reads()).toBe(1);
+	});
+
+	it("reads no saved zone when saving the time zone: the new one comes from the form", async () => {
+		const reads = watchSetting();
+		const res = await exports.default.fetch(
+			"http://tally.test/settings/time-zone",
+			form({ time_zone: "America/Chicago" }),
+		);
+		await res.text();
+		expect(res.status).toBeLessThan(500);
+		expect(reads()).toBe(0);
 	});
 
 	it("keeps the budget month the same all through a save", async () => {

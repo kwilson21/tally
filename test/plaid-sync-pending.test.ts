@@ -994,6 +994,36 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		]);
 	});
 
+	it("counts a card payment Plaid excluded in Spent once the pending one's bill link moves onto it", async () => {
+		const item = await addItem();
+		const loan = { personal_finance_category: { primary: "LOAN_PAYMENTS" } };
+		const ids = await bothStored(item, loan);
+		await addBillLinkedTo(ids.pending);
+		const spent = async () =>
+			summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(env.DB, "2026-09")),
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		await post(item, loan);
+
+		// The bill is paid by the posted row, which Plaid excluded as a card payment; the link counts it,
+		// so the bill's payment is in Spent once, and the exclusion is as Plaid made it.
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			excluded: 1,
+			excluded_source: "plaid",
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, status FROM bill_payments",
+				).all()
+			).results,
+		).toEqual([{ transaction_id: ids.posted, status: "linked" }]);
+		expect(await spent()).toBe(1234);
+	});
+
 	it("leaves a bill payment the posted one already has, and drops the pending one's", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
@@ -1389,5 +1419,222 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			(await env.DB.prepare("SELECT transaction_id FROM bill_payments").first())
 				?.transaction_id,
 		).toBe(ids.posted);
+	});
+});
+
+// Spec §8.5: Plaid's transfer categories exclude a transaction at sync, and a pending transaction's
+// attachments move onto its posted twin. The two must not undo each other in either order the bank can
+// send them: the link with the posted row, or the posted row first and the link after.
+describe("Plaid's transfer exclusion and a pending transaction's posting", () => {
+	const TRANSFER = { personal_finance_category: { primary: "TRANSFER_OUT" } };
+	const TRANSFER_IN = { personal_finance_category: { primary: "TRANSFER_IN" } };
+	const SHOP = {
+		personal_finance_category: { primary: "GENERAL_MERCHANDISE" },
+	};
+
+	const spent = async () =>
+		summarizeMonth({
+			month: "2026-09",
+			...(await loadMonth(env.DB, "2026-09")),
+			unpaidDueBillsCents: 0,
+		}).totalSpentCents;
+
+	/** The bank sends the posted row first, without its link; the pending row is already stored. */
+	async function postedFirst(item: number, pending = SHOP, posted = TRANSFER) {
+		const id = await syncPending(item, pending);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				added: [postedTx({ pending_transaction_id: null, ...posted })],
+			}),
+		);
+		return id;
+	}
+
+	/** Tally's transfer or reimbursement answer, which excluded the pending row (Jev only asks about counted ones). */
+	const jevExcluded = (id: number, flag: string) =>
+		env.DB.prepare(
+			`UPDATE transactions SET ${flag} = 1, excluded = 1, excluded_source = 'jev',
+				category_confidence = 0.9, jev_category_id = 4
+			 WHERE id = ?`,
+		)
+			.bind(id)
+			.run();
+
+	/** Plaid stops calling the posted row a transfer. */
+	const notATransferAnymore = (item: number) =>
+		syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [postedTx({ pending_transaction_id: null, ...SHOP })],
+				next_cursor: "cursor-3",
+			}),
+		);
+
+	it.each(["flag_transfer", "flag_reimbursement"])(
+		"keeps Tally's %s answer from the pending row when Plaid already excluded the posted one",
+		async (flag) => {
+			const item = await addItem();
+			const pending = await postedFirst(item);
+			await jevExcluded(pending, flag);
+			expect(await row("posted-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "plaid",
+			});
+
+			await post(item, TRANSFER);
+
+			// Tally's own answer moves with the rest, and keeps the source over Plaid's (§8.5), as it does
+			// when the bank sends the link with the posted row.
+			expect(await row("posted-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "jev",
+				[flag]: 1,
+			});
+			expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
+
+			// So when Plaid stops calling it a transfer, Tally's answer still keeps it out of Spent.
+			await notATransferAnymore(item);
+			expect(await row("posted-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "jev",
+			});
+			expect(await spent()).toBe(0);
+		},
+	);
+
+	it("gives a split's parts Tally's answer too, when the pending row was split and Plaid excluded the posted one", async () => {
+		const item = await addItem();
+		const pending = await postedFirst(item);
+		await splitInto(pending, 1000, 234);
+		await jevExcluded(pending, "flag_transfer");
+		await env.DB.prepare(
+			"UPDATE transactions SET excluded = 1, excluded_source = 'jev' WHERE parent_id = ?",
+		)
+			.bind(pending)
+			.run();
+
+		await post(item, TRANSFER);
+
+		expect(await row("posted-1")).toMatchObject({
+			is_split: 1,
+			excluded: 1,
+			excluded_source: "jev",
+		});
+		await notATransferAnymore(item);
+		const parts = await env.DB.prepare(
+			"SELECT excluded, excluded_source FROM transactions WHERE parent_id IS NOT NULL",
+		).all();
+		expect(parts.results).toEqual([
+			{ excluded: 1, excluded_source: "jev" },
+			{ excluded: 1, excluded_source: "jev" },
+		]);
+		expect(await spent()).toBe(0);
+	});
+
+	it("keeps Tally's answer when the link comes with the posted row, which is the same row", async () => {
+		const item = await addItem();
+		const pending = await syncPending(item, SHOP);
+		await jevExcluded(pending, "flag_transfer");
+
+		await post(item, TRANSFER);
+
+		expect(await row("posted-1")).toMatchObject({
+			id: pending,
+			excluded: 1,
+			excluded_source: "jev",
+			flag_transfer: 1,
+		});
+		await notATransferAnymore(item);
+		expect(await spent()).toBe(0);
+	});
+
+	it("leaves a person's include of the pending transfer in place, in both orders", async () => {
+		for (const late of [false, true]) {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM transactions"),
+				env.DB.prepare("DELETE FROM accounts"),
+				env.DB.prepare("DELETE FROM plaid_items"),
+			]);
+			const item = await addItem();
+			const pending = late
+				? await postedFirst(item, TRANSFER, TRANSFER)
+				: await syncPending(item, TRANSFER);
+			expect(await row("pending-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "plaid",
+			});
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = ?",
+			)
+				.bind(pending)
+				.run();
+
+			await post(item, TRANSFER);
+
+			expect(await row("posted-1")).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+			});
+			expect(await spent()).toBe(1234);
+		}
+	});
+
+	it("keeps a credit a person reviewed counted when the posted row is a transfer stored first (decision 70)", async () => {
+		const item = await addItem();
+		const credit = { ...TRANSFER_IN, amount: -42 };
+		const pending = await postedFirst(item, credit as typeof SHOP, credit);
+		expect(await row("posted-1")).toMatchObject({
+			excluded: 1,
+			excluded_source: "plaid",
+		});
+		await env.DB.prepare(
+			"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+		)
+			.bind(pending)
+			.run();
+
+		await post(item, credit);
+
+		expect(await row("posted-1")).toMatchObject({
+			excluded: 0,
+			excluded_source: null,
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+		});
+		expect(await spent()).toBe(-4200);
+	});
+
+	it("keeps Plaid's exclusion on a posted transfer stored before its pending row, which the bank then drops", async () => {
+		const item = await addItem();
+		// The posted row comes first, naming a pending one nothing has stored yet.
+		await syncItem(opts, item, onePage({ added: [postedTx(TRANSFER)] }));
+		expect(await row("posted-1")).toMatchObject({
+			excluded: 1,
+			excluded_source: "plaid",
+		});
+		// The pending row turns up after it, as a row of its own, and is then removed.
+		await syncItem(
+			opts,
+			item,
+			onePage({ added: [pendingTx(SHOP)], next_cursor: "cursor-2" }),
+		);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				removed: [{ transaction_id: "pending-1" }],
+				next_cursor: "cursor-3",
+			}),
+		);
+
+		expect(await row("pending-1")).toBeNull();
+		expect(await row("posted-1")).toMatchObject({
+			excluded: 1,
+			excluded_source: "plaid",
+		});
+		expect(await spent()).toBe(0);
 	});
 });

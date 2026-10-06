@@ -10,7 +10,10 @@
  * - Tally's own answer (Jev's category pick and how sure it was, its transfer, reimbursement and income
  *   answers, decision 79) moves too, when the amount is unchanged and the posted row has no answer or
  *   choice of its own, so the posted row isn't asked again for nothing. A merchant rule's pick doesn't
- *   move: rules run on the posted row as on any new one.
+ *   move: rules run on the posted row as on any new one. An exclusion Plaid put on the posted row is
+ *   not an answer of its own (spec section 8.5): Jev's exclusion of the pending row moves over it and
+ *   keeps its source, as it does when the pending row simply takes the posted id, so it still holds
+ *   if Plaid later stops calling the posted row a transfer.
  * - A bill payment is re-pointed to the posted row unless that row already pays a bill (one bill per
  *   transaction); a refund of the pending row now refunds the posted one, and the pending row's own
  *   refund link moves unless the posted row has one.
@@ -71,10 +74,13 @@ const STATEMENTS = [
 	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
 	 AND transactions.category_confidence IS NULL`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
+	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
+	// row), where it takes over the source: Jev's exclusion stands if Plaid drops the category later.
 	`UPDATE transactions SET excluded = p.excluded, excluded_source = 'jev',
 		flag_transfer = p.flag_transfer, flag_reimbursement = p.flag_reimbursement
 	 ${FROM_PENDING} AND p.excluded_source = 'jev' AND p.amount_cents = ?3
-	 AND transactions.excluded = 0 AND transactions.excluded_source IS NULL`,
+	 AND (transactions.excluded_source = 'plaid'
+		OR (transactions.excluded = 0 AND transactions.excluded_source IS NULL))`,
 	// Its income answer, and the credit review a confident answer gives a credit.
 	`UPDATE transactions SET flag_income = p.flag_income, income_source = 'jev'
 	 ${FROM_PENDING} AND p.income_source = 'jev' AND p.amount_cents = ?3
