@@ -19,7 +19,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P116 with one recommended option each (P91–P109 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P117 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -28,9 +28,9 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P116 is drawn, and each id is used once.
+		// Every proposal from P23 to P117 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 116; n++) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 117; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
 		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
@@ -38,7 +38,7 @@ describe("GET /design-system/proposals", () => {
 		// Recommended, with its reason.
 		for (const id of ids) {
 			const n = Number(id.match(/^p(\d+)/)?.[1]);
-			const asDrawn = id === "p31-empty" || (n >= 91 && n <= 109);
+			const asDrawn = id === "p31-empty" || (n >= 91 && n <= 109) || n === 117;
 			const start = html.indexOf(`<section id="${id}"`);
 			// Up to the next proposal (a picture can hold sections of its own).
 			const next = html.indexOf('<section id="p', start + 1);
@@ -69,12 +69,46 @@ describe("GET /design-system/proposals", () => {
 			options,
 		);
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(71);
+		expect(DECIDED.length).toBe(72);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
 			if (d.issue) expect(html).toContain(`/issues/${d.issue}"`);
 		}
+	});
+
+	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
+		const { html } = await get("/design-system/proposals");
+		const start = html.indexOf('<section id="p117-');
+		expect(start).toBeGreaterThan(-1);
+		const next = html.indexOf('<section id="p', start + 1);
+		const p117 = html.slice(start, next === -1 ? undefined : next);
+		const option = (name: string) => {
+			const heads = [...p117.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+			const at = heads.find((i) => p117.slice(i, i + 400).includes(`>${name}`));
+			expect(at, name).toBeDefined();
+			const end = heads.find((i) => i > (at ?? 0));
+			return p117.slice(at, end);
+		};
+		const oneThing = option("Option A · One thing");
+		expect(oneThing).toContain("$82.17");
+		expect(oneThing).toContain("Maybe Groceries");
+		expect(oneThing).not.toContain("Split this one?");
+		const mixed = option("Option A, next · Mixed trip");
+		expect(mixed).toContain("Costco trips go in Groceries and Household.");
+		expect(mixed).toContain("Split this one?");
+		const split = option("Option A, next · The split");
+		expect(split).toContain("$214.36 left to assign");
+		expect(split).toContain(
+			"Tally&#39;s guess: Groceries and Household from this trip&#39;s details",
+		);
+		expect(split).toContain("border-dashed border-ink");
+		expect(split).toContain('name="part_amount" type="text" value=""');
+		const p90Start = html.indexOf('<section id="p90-');
+		const p90End = html.indexOf('<section id="p', p90Start + 1);
+		expect(html.slice(p90Start, p90End)).toContain(
+			'href="#p117-when-split-this-one"',
+		);
 	});
 
 	it("draws a $0 budget and a far-over category without breaking the bars", async () => {

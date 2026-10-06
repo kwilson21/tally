@@ -9,7 +9,7 @@ import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
-import { MixedStoreProposals } from "./proposals-mixed";
+import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
@@ -415,6 +415,11 @@ export const DECIDED: readonly {
 			"Option B: a second chip beside Last month, “3-month average”, with the average of what the category spent in the last three finished months, shown once there are three finished months and the average is above $0; a part first month isn't one of them (decision 85).",
 		issue: 250,
 	},
+	{
+		title: "P117 · When Split this one? shows",
+		outcome:
+			"Option A: Jev says when a trip looks mixed, using this household's categories and transaction details; “Split this one?” appears only for that trip, and suggested category parts start dashed with empty amounts (decision 89, pictures 14–16).",
+	},
 ];
 
 /** The proposals page body. */
@@ -458,6 +463,7 @@ export function Proposals() {
 				<RulesProposals />
 				<AutofillProposals />
 				<MixedStoreProposals />
+				<SplitThisOneProposal />
 			</section>
 
 			<section aria-labelledby="followups-title" class="mt-12">
