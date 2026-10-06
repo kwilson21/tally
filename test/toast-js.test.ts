@@ -22,8 +22,16 @@ class FakeNode {
 	parent: FakeNode | null = null;
 	attrs = new Map<string, string>();
 	className = "";
-	textContent = "";
+	/** A node's own text. */
+	own = "";
 	constructor(readonly tag: string) {}
+	/** As in a real page: this node's own text, then its children's, in order. */
+	get textContent(): string {
+		return this.own + this.children.map((child) => child.textContent).join("");
+	}
+	set textContent(text: string) {
+		this.own = text;
+	}
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, value);
 	}
@@ -43,9 +51,7 @@ class FakeNode {
 	}
 	/** The words a reader would hear: this node's own text and its children's, in order. */
 	words(): string {
-		return (
-			this.textContent + this.children.map((child) => child.words()).join("")
-		);
+		return this.textContent;
 	}
 }
 
@@ -355,6 +361,50 @@ describe("several failures at once", () => {
 		vi.advanceTimersByTime(4000);
 		expect(toasts.children).toHaveLength(0);
 		fire(document, "htmx:response:error", status(500));
+		expect(toasts.children).toHaveLength(1);
+	});
+
+	it("says a retry that fails again a couple of seconds later, with a fresh alert and a fresh 4 seconds", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:response:error", status(500));
+		const first = toasts.children[0];
+		vi.advanceTimersByTime(2000);
+		// Save tapped again while the first toast is still up, and it fails too.
+		fire(document, "htmx:response:error", status(500));
+		// Still one copy on screen, but a new element: a screen reader hears the alert again.
+		expect(toasts.children).toHaveLength(1);
+		expect(toasts.children[0]).not.toBe(first);
+		expect((toasts.children[0] as FakeNode).attrs.get("role")).toBe("alert");
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_SAVE);
+		// The first failure's 4 seconds end at t=4000; the retry's run to t=6000.
+		vi.advanceTimersByTime(3000);
+		expect(toasts.children).toHaveLength(1);
+		vi.advanceTimersByTime(1000);
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("still says a later failure after the device clock moves back", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:response:error", status(500));
+		const first = toasts.children[0];
+		// The clock is corrected a minute back; two seconds later the retry fails too.
+		vi.setSystemTime(Date.now() - 60000);
+		vi.advanceTimersByTime(2000);
+		fire(document, "htmx:response:error", status(500));
+		expect(toasts.children).toHaveLength(1);
+		expect(toasts.children[0]).not.toBe(first);
+	});
+
+	it("still shows one toast for failures in the same moment, even when an earlier one is nearly gone", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:response:error", status(500));
+		vi.advanceTimersByTime(3500);
+		for (let i = 0; i < 3; i++) {
+			fire(document, "htmx:response:error", status(500));
+		}
+		expect(toasts.children).toHaveLength(1);
+		// The first toast's timer fires at t=4000; the burst's one toast has its own 4 seconds.
+		vi.advanceTimersByTime(500);
 		expect(toasts.children).toHaveLength(1);
 	});
 });
