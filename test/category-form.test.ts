@@ -35,8 +35,8 @@ describe("parseCategory", () => {
 		["x".repeat(41), "Keep the name to 40 characters."],
 		["GAS", "That name is taken."],
 		["pets", "An archived category has that name. Restore it instead."],
-		["None of these fit", "That name is reserved for Jev. Pick another."],
-		["none of these FIT", "That name is reserved for Jev. Pick another."],
+		["None of these fit", "That name is reserved for Tally. Pick another."],
+		["none of these FIT", "That name is reserved for Tally. Pick another."],
 	])("rejects the name %j", (name, message) => {
 		expect(parseCategory(form({ name }), existing, null)).toEqual({
 			ok: false,

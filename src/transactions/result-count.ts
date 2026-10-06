@@ -36,7 +36,7 @@ export function resultCount(
 			: f.month === "all"
 				? month
 				: `in ${month}`;
-	return [
+	const text = [
 		lead,
 		f.uncategorized && "needing a category",
 		f.q && `matching "${f.q}"`,
@@ -44,4 +44,6 @@ export function resultCount(
 	]
 		.filter(Boolean)
 		.join(" ");
+	// The demo's raw view says so at the end, so switching views changes the text and is announced.
+	return f.raw ? `${text}, as the bank sends them` : text;
 }

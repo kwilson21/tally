@@ -100,6 +100,7 @@ export const PAGE_SIZE = 25;
 // "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
 // while held credits and income stay out of spending classification.
 const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+const bankRowSql = (sql: string) => sql.replaceAll(" AND t.is_split = 0", "");
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
 const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
 
@@ -127,6 +128,12 @@ const SHOW_SQL: Record<Show, string | null> = {
 		AND (${paysBillSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
 	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
 };
+const RAW_SHOW_SQL: Record<Show, string | null> = {
+	...SHOW_SQL,
+	spending: bankRowSql(SHOW_SQL.spending ?? ""),
+	refunds: bankRowSql(SHOW_SQL.refunds ?? ""),
+	excluded: bankRowSql(SHOW_SQL.excluded ?? ""),
+};
 
 /** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
 export async function listTransactions(
@@ -136,33 +143,42 @@ export async function listTransactions(
 	const where: string[] = [];
 	const args: (string | number)[] = [];
 	const { names: namesOn } = await readAiSwitches(db);
+	const rowMonth = f.raw ? "substr(t.date,1,7)" : COUNTED_MONTH;
+	const rowCategory = f.raw ? "t.category_id" : COUNTED_CATEGORY;
 	if (f.month !== "all") {
-		where.push(`${COUNTED_MONTH} = ?`);
+		where.push(`${rowMonth} = ?`);
 		args.push(f.month);
 	}
 	if (f.category !== null) {
-		where.push(`${COUNTED_CATEGORY} = ?`);
-		where.push("t.is_split = 0");
+		where.push(`${rowCategory} = ?`);
+		if (!f.raw) where.push("t.is_split = 0");
 		args.push(f.category);
 	}
 	if (f.account !== null) {
 		where.push("t.account_id = ?");
 		args.push(f.account);
 	}
-	if (f.uncategorized) where.push(NEEDS_CATEGORY);
-	const shown = SHOW_SQL[f.show];
+	if (f.uncategorized && !f.raw) where.push(NEEDS_CATEGORY);
+	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
+	if (f.raw) where.push("t.parent_id IS NULL");
+	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
 	if (f.q) {
-		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
-		// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
-		// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
-		// row says can be searched for.
-		where.push(
-			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)})`,
-		);
-		const pattern = likePattern(f.q);
-		args.push(pattern, pattern, pattern, pattern);
-		args.push(pattern);
+		if (f.raw) {
+			where.push("t.raw_name LIKE ? ESCAPE '\\'");
+			args.push(likePattern(f.q));
+		} else {
+			// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
+			// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
+			// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
+			// row says can be searched for.
+			where.push(
+				`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)})`,
+			);
+			const pattern = likePattern(f.q);
+			args.push(pattern, pattern, pattern, pattern);
+			args.push(pattern);
+		}
 	}
 
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
@@ -281,7 +297,19 @@ export async function listTransactions(
 export async function needsCategoryCount(
 	db: D1Database,
 	month: string,
+	raw = false,
 ): Promise<number> {
+	if (raw) {
+		const inMonth = month === "all" ? "" : "substr(t.date,1,7) = ? AND ";
+		const statement = db.prepare(
+			`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${inMonth}t.parent_id IS NULL`,
+		);
+		const row = await (month === "all"
+			? statement
+			: statement.bind(month)
+		).first<{ n: number }>();
+		return row?.n ?? 0;
+	}
 	const inMonth = month === "all" ? "" : `${COUNTED_MONTH} = ? AND `;
 	const statement = db.prepare(
 		`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${inMonth}${NEEDS_CATEGORY}`,
