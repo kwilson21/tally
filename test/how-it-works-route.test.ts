@@ -55,6 +55,10 @@ describe("GET /how-it-works in the demo", () => {
 
 	it('explains Store names, where the Why? after "Tally\'s guess" lands, without naming the AI', async () => {
 		const { html } = await get("/how-it-works");
+		expect(decodeHtml(html)).not.toMatch(/merchant names later/i);
+		expect(decodeHtml(html)).toContain(
+			"AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today.",
+		);
 		const names =
 			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
 		expect(decodeHtml(names)).toContain("sparkles icon and a dashed underline");
@@ -65,6 +69,9 @@ describe("GET /how-it-works in the demo", () => {
 		expect(decodeHtml(names)).toContain('says "From your bank"');
 		expect(decodeHtml(names)).toContain("the bank's own names still show");
 		expect(names).not.toMatch(/jev|workers ai/i);
+		expect(decodeHtml(names)).toMatch(
+			/In the demo for \w+: <\/span>(?:No merchant names are waiting for a choice|\d+ merchant names? (?:are|is) waiting for a choice)\./,
+		);
 	});
 
 	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
@@ -151,6 +158,23 @@ describe("GET /how-it-works in the demo", () => {
 });
 
 describe("outside the demo", () => {
+	it("says both AI jobs are live and gives a household example when no names wait", async () => {
+		await env.DB.prepare(
+			"DELETE FROM merchants WHERE suggestion_status = 'pending'",
+		).run();
+		const html = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		expect(html).toContain(
+			"AI helps with categories and store names, and a person can always change them.",
+		);
+		const names =
+			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(names).toContain("With your numbers for");
+		expect(names).toContain("No merchant names are waiting for a choice.");
+		expect(names).not.toMatch(/jev|workers ai/i);
+	});
+
 	it("has How Tally works with household numbers and no architecture", async () => {
 		const res = await howItWorks.request("/how-it-works", {}, notDemo);
 		const html = await res.text();

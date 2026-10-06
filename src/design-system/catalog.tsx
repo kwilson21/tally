@@ -1033,6 +1033,21 @@ function Rows() {
 				components={["TransactionRow"]}
 				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A pending one adds “Pending” to the same caption line in muted words, with no new tag or color (P34 A, decision 72). A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it (P29 A, P87 B, decisions 64 and 80). Here the rows don't link anywhere."
 			>
+				<State label="Above the list, once only while a suggested name is shown">
+					<div class="max-w-xl">
+						<p class="flex flex-wrap items-center gap-x-1 text-sm text-muted">
+							Dashed names are suggestions.
+							<WhyLink section="names" topic="suggested name" />
+						</p>
+						<ul class="max-w-xl">
+							{TRANSACTION_ROWS.filter((state) => state.row.nameSuggested)
+								.slice(0, 1)
+								.map((state) => (
+									<TransactionRow row={state.row} />
+								))}
+						</ul>
+					</div>
+				</State>
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
@@ -1573,6 +1588,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-three"
+							radioName="ds-names-three"
 							names={["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"]}
 							source="tally"
 							tidied="Blue bottle cof"
@@ -1584,6 +1600,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-one"
+							radioName="ds-names-one"
 							names={["DoorDash"]}
 							source="tally"
 							tidied="Doordash taco"
@@ -1596,6 +1613,7 @@ function Controls() {
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-bank"
+							radioName="ds-names-bank"
 							names={["Blue Bottle Coffee"]}
 							source="bank"
 							tidied="Blue bottle cof"
@@ -1603,16 +1621,38 @@ function Controls() {
 						/>
 					</div>
 				</State>
-				<State label="With an error in the field">
+				<State label="Nothing chosen, field empty, and the choice error under it">
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-error"
+							radioName="ds-names-error"
 							names={["Craft Supply Co", "Craft Supply"]}
 							source="tally"
 							tidied="Craftsupply"
 							count={2}
-							own="A very long name"
-							error="Keep the name under 80 characters."
+							error="Pick a name, keep the bank's, or type your own."
+						/>
+					</div>
+				</State>
+				<State label="On a narrow phone (320px): long names wrap inside their chips">
+					<div class="w-[320px] max-w-full">
+						<NameChoices
+							id="ds-names-narrow"
+							radioName="ds-names-narrow"
+							names={[
+								"A very long guessed store name for the neighborhood market",
+							]}
+							source="tally"
+							tidied="A very long tidied name the bank sent for a neighborhood market"
+							count={9}
+						/>
+						<NameChoices
+							id="ds-names-unbroken"
+							radioName="ds-names-unbroken"
+							names={["The Store"]}
+							source="bank"
+							tidied="https://example.com/this-is-a-long-unbroken-name-for-the-bank"
+							count={1}
 						/>
 					</div>
 				</State>

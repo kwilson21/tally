@@ -75,6 +75,23 @@ assert(shellInsets.feedback.bottom <= shellInsets.tabs.rect.top - 16);
 assert(shellInsets.feedback.right <= 390 - 44);
 step("phone shell controls stay clear of simulated safe areas");
 
+for (const width of [390, 1280]) {
+	await page.setViewportSize({ width, height: 844 });
+	await goto(`${BASE}/settings/names`, { waitUntil: "networkidle" });
+	await page.getByRole("button", { name: "Save and next" }).click();
+	await page.locator("#names-page [role=alert]").waitFor();
+	assert.equal(
+		await page.evaluate(() => document.activeElement?.name),
+		"name_pick",
+	);
+}
+step(
+	"a failed merchant-name review focuses the first choice on phone and desktop",
+);
+
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+
 await page
 	.getByRole("link", { name: /12 transactions need a category/ })
 	.click();
@@ -106,6 +123,29 @@ await page.getByRole("button", { name: "Add", exact: true }).click();
 await page.locator("#toasts").getByText("Added Corner stand").waitFor();
 await page.getByRole("link", { name: /Corner stand/ }).waitFor();
 step("adding $12 cash shows its toast and row");
+
+const longCash = "x".repeat(48);
+await page.getByRole("link", { name: "Add cash" }).click();
+await page.getByRole("textbox", { name: "Amount" }).fill("1.00");
+await page.getByLabel("Where").fill(longCash);
+await page.locator("#sheet").getByText("Groceries", { exact: true }).click();
+await page.getByRole("button", { name: "Add", exact: true }).click();
+await page.locator("#results").getByText(longCash).waitFor();
+await page.locator("#results").getByText(longCash).click();
+await page.locator('[role="dialog"]').waitFor();
+const longNameWidths = await page.evaluate(() => {
+	const dialog = document.querySelector('[role="dialog"]');
+	return {
+		page: document.documentElement.scrollWidth,
+		viewport: document.documentElement.clientWidth,
+		sheet: dialog.scrollWidth,
+		sheetWidth: dialog.clientWidth,
+	};
+});
+assert(longNameWidths.page <= longNameWidths.viewport);
+assert(longNameWidths.sheet <= longNameWidths.sheetWidth);
+step("an unbroken merchant name stays inside the phone edit sheet");
+
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });

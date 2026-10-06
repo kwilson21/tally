@@ -90,9 +90,9 @@ async function renderReview(
 							{skipped.length + 1} of {all.length} · {review.count}{" "}
 							{transactions(review.count)}
 						</p>
-						<p class="mt-4 text-sm text-muted">The bank says</p>
+						<p class="mt-4 text-sm text-muted wrap-anywhere">The bank says</p>
 						<h2
-							class="mb-4 text-lg font-normal outline-none"
+							class="mb-4 min-w-0 max-w-full wrap-anywhere text-lg font-normal outline-none"
 							tabindex={focus ? -1 : undefined}
 							autofocus={focus}
 						>
@@ -118,6 +118,7 @@ async function renderReview(
 								picked={values?.key === review.key ? values.picked : null}
 								own={values?.key === review.key ? values.own : ""}
 								error={error}
+								focusFirst={Boolean(error)}
 							/>
 							<div class="mt-2 grid grid-cols-2 gap-3">
 								<Button

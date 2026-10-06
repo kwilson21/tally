@@ -366,6 +366,15 @@ describe("Settings", () => {
 });
 
 describe("GET /settings/names", () => {
+	it("wraps a long bank text inside the review column", async () => {
+		const raw = `SQ *${"x".repeat(48)}`;
+		await charges(raw, 2);
+		await suggest(raw, "Long Store Name");
+		const { html } = await get("/settings/names");
+		expect(html).toContain(raw);
+		expect(html).toMatch(/<h2[^>]*wrap-anywhere[^>]*>/);
+	});
+
 	it("shows the first merchant: what the bank says, the suggested names, keeping the bank's, and your own", async () => {
 		await twoMerchants();
 		const { res, html } = await get("/settings/names");
@@ -523,6 +532,8 @@ describe("POST /settings/names", () => {
 		expect(textOf(html)).toContain(
 			"Pick a name, keep the bank's, or type your own.",
 		);
+		expect(html).toMatch(/<fieldset[^>]*aria-describedby="review-own-error"/);
+		expect(html).toMatch(/name="name_pick"[^>]*autofocus/);
 		expect(await merchant(BLUE)).toMatchObject({
 			suggestion_status: "pending",
 		});
