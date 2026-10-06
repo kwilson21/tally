@@ -8,17 +8,39 @@ type Props = {
 	/** One muted line saying what it does. */
 	hint?: string;
 	checked?: boolean;
+	/**
+	 * Greyed out (P86 A, decision 79): it can't be changed, still shows its saved setting, On or Off, in
+	 * muted tones, and posts nothing, so the form's Save has to leave its saved setting as it was.
+	 */
+	disabled?: boolean;
+	/** With `disabled`, what it needs, in words, so the greying never rests on color alone. */
+	note?: string;
 };
 
 /**
  * A real checkbox drawn as a switch (P41 B, decision 73): the label, an optional muted line, "On"
  * or "Off" in words, then the track with its knob. The state comes from the checkbox alone, so it
  * works without a script, and the whole 44px row is the target. A screen reader hears a switch
- * named by the label and described by the line; the words and the track are for the eye.
+ * named by the label and described by the line; the words and the track are for the eye. Disabled,
+ * the label and the word go muted, the track keeps only a rule-coloured edge and a muted knob, and
+ * `note` says what the switch needs; the row is no longer a pointer target.
  */
-export function Switch({ id, name, label, hint, checked }: Props) {
+export function Switch({
+	id,
+	name,
+	label,
+	hint,
+	checked,
+	disabled,
+	note,
+}: Props) {
+	const describedBy = [hint && `${id}-hint`, disabled && note && `${id}-note`]
+		.filter(Boolean)
+		.join(" ");
 	return (
-		<label class="group flex min-h-11 cursor-pointer items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
+		<label
+			class={`group flex min-h-11 items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+		>
 			<input
 				type="checkbox"
 				// A native checkbox with role="switch" reads its on/off state from `checked`; an
@@ -29,12 +51,16 @@ export function Switch({ id, name, label, hint, checked }: Props) {
 				name={name}
 				value="on"
 				checked={checked}
+				disabled={disabled}
 				aria-labelledby={`${id}-label`}
-				aria-describedby={hint ? `${id}-hint` : undefined}
+				aria-describedby={describedBy || undefined}
 				class="sr-only"
 			/>
 			<span class="min-w-0 flex-1">
-				<span id={`${id}-label`} class="block text-lg">
+				<span
+					id={`${id}-label`}
+					class={`block text-lg ${disabled ? "text-muted" : ""}`}
+				>
 					{label}
 				</span>
 				{hint && (
@@ -42,16 +68,29 @@ export function Switch({ id, name, label, hint, checked }: Props) {
 						{hint}
 					</span>
 				)}
+				{disabled && note && (
+					<span
+						id={`${id}-note`}
+						class="mt-1 block text-pretty text-sm font-medium text-muted"
+					>
+						{note}
+					</span>
+				)}
 			</span>
-			<span aria-hidden="true" class="w-8 shrink-0 text-right font-medium">
+			<span
+				aria-hidden="true"
+				class={`w-8 shrink-0 text-right font-medium ${disabled ? "text-muted" : ""}`}
+			>
 				<span class="hidden group-has-[:checked]:inline">On</span>
 				<span class="group-has-[:checked]:hidden">Off</span>
 			</span>
 			<span
 				aria-hidden="true"
-				class="flex h-7 w-12 shrink-0 items-center rounded-full border border-ink bg-rule px-0.5 transition-colors duration-150 group-has-[:checked]:bg-ink motion-reduce:transition-none"
+				class={`flex h-7 w-12 shrink-0 items-center rounded-full border bg-rule px-0.5 transition-colors duration-150 motion-reduce:transition-none ${disabled ? "border-rule" : "border-ink group-has-[:checked]:bg-ink"}`}
 			>
-				<span class="size-5 rounded-full bg-ink transition-transform duration-150 group-has-[:checked]:translate-x-[1.375rem] group-has-[:checked]:bg-paper motion-reduce:transition-none" />
+				<span
+					class={`size-5 rounded-full transition-transform duration-150 group-has-[:checked]:translate-x-[1.375rem] motion-reduce:transition-none ${disabled ? "bg-muted" : "bg-ink group-has-[:checked]:bg-paper"}`}
+				/>
 			</span>
 		</label>
 	);

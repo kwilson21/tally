@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import {
@@ -1739,6 +1740,19 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 	if (!result.saved)
 		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
+	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
+	// a transaction that already has a category, or gets one in this save, asks nothing.
+	const addedName =
+		parsed.value.displayName !== null &&
+		parsed.value.displayName !== tx.merchantName;
+	const addedNote = parsed.value.note !== null && parsed.value.note !== tx.note;
+	if (
+		(addedName || addedNote) &&
+		tx.categoryId === null &&
+		parsed.value.categoryId === null
+	)
+		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93).

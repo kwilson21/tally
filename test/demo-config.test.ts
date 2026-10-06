@@ -92,8 +92,8 @@ describe("production environment config (#23)", () => {
 		expect(JSON.stringify(production)).not.toContain("finance.");
 	});
 
-	it("syncs every bank daily at 09:00 UTC", () => {
-		expect(production.triggers).toEqual({ crons: ["0 9 * * *"] });
+	it("syncs every bank daily at 09:00 UTC, and sorts what's left at 09:30 (decision 56)", () => {
+		expect(production.triggers).toEqual({ crons: ["0 9 * * *", "30 9 * * *"] });
 	});
 
 	it("holds no secrets or Plaid settings; those go in with wrangler secret put", () => {

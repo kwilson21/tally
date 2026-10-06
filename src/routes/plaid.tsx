@@ -9,7 +9,7 @@ import {
 	PlaidError,
 	removeItem,
 } from "../plaid/client";
-import { syncItem } from "../plaid/sync";
+import { syncItemAndSort } from "../plaid/sort-after-sync";
 import { decryptToken, encryptToken, isValidKey } from "../plaid/token-crypto";
 
 type PlaidBindings = PlaidEnv & { DEMO?: string };
@@ -134,7 +134,7 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 			.run();
 		if (repaired.meta.changes === 0) return c.notFound();
 		c.executionCtx.waitUntil(
-			syncItem(c.env, item.id).catch((error: unknown) => {
+			syncItemAndSort(c.env, item.id).catch((error: unknown) => {
 				logPlaidRequestId(error);
 			}),
 		);
