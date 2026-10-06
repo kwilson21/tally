@@ -66,7 +66,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Net-worth chart (P25 A, P26 A) | [#31](https://github.com/kwilson21/tally/issues/31) | Merged ([#230](https://github.com/kwilson21/tally/pull/230)) |
 | Documents (P27 A, P28 A) | [#32](https://github.com/kwilson21/tally/issues/32) | Moved to the Later list with receipts (decision 66); not built |
 | Merchant name suggestions (P29 A) | [#33](https://github.com/kwilson21/tally/issues/33) | In review ([#245](https://github.com/kwilson21/tally/pull/245)) |
-| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 88) |
+| New-category and category suggestions, "Tally" not "Jev" on screens (P30 A, P32 A, decision 89) | [#51](https://github.com/kwilson21/tally/issues/51) | To build after #33 (both use `src/ai/suggest-name.ts`; decision 88) |
 
 ## AI that earns its place (decisions 68, 73; spec §8.6)
 
@@ -80,8 +80,9 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Plaid's merchant name as the first name suggestion | [#194](https://github.com/kwilson21/tally/issues/194) | #175, #33 (built, stacked on #245) |
 | One review screen for every "Maybe …" (P42 A) | [#195](https://github.com/kwilson21/tally/issues/195) | #33, #51, #192 |
 | What AI did this month (P43 A) | [#196](https://github.com/kwilson21/tally/issues/196) | #191 |
-| The demo's See it without AI (P44 A, "Tidied by Tally · Straight from the bank") | [#197](https://github.com/kwilson21/tally/issues/197) | — |
+| The demo's See it without AI (P44 A, "Tidied by Tally · Straight from the bank", decision 89) | [#197](https://github.com/kwilson21/tally/issues/197) | — |
 | Tally fills in a transaction's details (P89 A) | [#232](https://github.com/kwilson21/tally/issues/232) | #191, #194 |
+| Jev told each merchant's recent categories, so every guess improves (decision 90, Q69 A); built before #233 | [#265](https://github.com/kwilson21/tally/issues/265) | — |
 
 ## Phase 5 (decisions 66, 74, 76, 82; spec §8.4)
 
@@ -108,7 +109,7 @@ The owner picked each open question's answer from a picture (decision 82, P91–
 | "Always for these merchants" in Settings (P69 A) | [#214](https://github.com/kwilson21/tally/issues/214) |
 | Select all in the action bar (P70 A) | [#215](https://github.com/kwilson21/tally/issues/215) |
 | Edit a cash entry's date and amount (P71 A) | [#216](https://github.com/kwilson21/tally/issues/216) |
-| A store that sells many kinds of things (P90) | [#233](https://github.com/kwilson21/tally/issues/233) |
+| A store that sells many kinds of things (P90, decision 89) | [#233](https://github.com/kwilson21/tally/issues/233) |
 
 ## Design system: what's next (decisions 75, 76; the design session builds these)
 
