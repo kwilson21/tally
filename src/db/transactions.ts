@@ -13,6 +13,7 @@ import {
 	INCLUDED,
 	INCLUDED_ROW,
 	PAYS_A_BILL,
+	paysBillSql,
 } from "./counted-month";
 import { plaidSetIncomeSql } from "./income";
 import {
@@ -91,7 +92,7 @@ export async function listTransactions(
 	}
 	if (f.uncategorized) where.push(NEEDS_CATEGORY);
 	// A payment linked to a bill counts, so the Excluded filter doesn't show it (spec §8.5).
-	if (f.excluded) where.push("t.excluded = 1 AND bp.id IS NULL");
+	if (f.excluded) where.push(`t.excluded = 1 AND NOT ${paysBillSql("t")}`);
 	if (f.q) {
 		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
 		// "google youtube" finds "GOOGLE *YOUTUBE".
@@ -125,7 +126,7 @@ export async function listTransactions(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, bp.id IS NOT NULL AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
+				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
@@ -295,7 +296,7 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
-				t.excluded, bp.id IS NOT NULL AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				t.excluded, ${paysBillSql("t")} AS paysBill, ${PENDING_SQL} AS pending, t.flag_income AS income, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
@@ -764,7 +765,7 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 // something a person left out: Jev may suggest its category, and its flags are never written, since they
 // could only change what it is excluded as or take it out of Spent (income).
 const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)
-	OR (t.excluded = 1 AND bp.id IS NOT NULL))`;
+	OR (t.excluded = 1 AND ${paysBillSql("t")}))`;
 
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
@@ -922,7 +923,7 @@ export async function excludedBreakdown(
 			FROM (SELECT *, COALESCE(excluded_source = 'user', 0) AS person,
 				flag_transfer = 1 OR COALESCE(excluded_source = 'plaid', 0) AS moved FROM transactions) AS tx
 			WHERE substr(date, 1, 7) = ? AND excluded = 1 AND is_split = 0
-				AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = tx.id AND bp.status = 'linked')`,
+				AND NOT ${paysBillSql("tx")}`,
 		)
 		.bind(month)
 		.first<ExcludedBreakdown>();

@@ -15,16 +15,25 @@ export const FOLLOWS_PURCHASE =
 	"(rp.id IS NOT NULL AND rp.excluded = 0 AND t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(t.credit_reviewed, 0) = 1)";
 
 /**
- * True when a transaction isn't left out of the budget, once the joins are added (spec §6.1 rule 4,
- * §8.5): it is not excluded, or it pays a bill. A payment linked to a bill counts in Spent whatever its
- * exclusion, so the bill counts once; its exclusion is never written over by the link, so it is as it was
- * when the link goes. (A split part counts on its own link, not its parent's.)
+ * True when a bill's payment is linked to the transaction `alias` names, or, for a split part, to its
+ * parent: the bank transaction that paid the bill was split afterwards, so the whole of it, every part,
+ * is that payment. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). A part with
+ * a link of its own is the same row, so it is read as paying a bill once, never twice.
  */
-export const INCLUDED = "(t.excluded = 0 OR bp.id IS NOT NULL)";
+export const paysBillSql = (alias: string) =>
+	`EXISTS (SELECT 1 FROM bill_payments linked_bill WHERE linked_bill.status = 'linked' AND linked_bill.transaction_id IN (${alias}.id, ${alias}.parent_id))`;
 
-/** True when a bill's payment is linked to the row, for an UPDATE or subquery on `transactions` itself (no joins, no alias). */
-export const PAYS_A_BILL =
-	"EXISTS (SELECT 1 FROM bill_payments WHERE bill_payments.transaction_id = transactions.id AND bill_payments.status = 'linked')";
+/**
+ * True when a transaction isn't left out of the budget (spec §6.1 rule 4, §8.5): it is not excluded, or
+ * it pays a bill. A payment linked to a bill counts in Spent whatever its exclusion, so the bill counts
+ * once; its exclusion is never written over by the link, so it is as it was when the link goes. A split
+ * part counts on its own link or its parent's (the parent itself never counts once split, so a bank
+ * transaction is counted by its parts once). Alias `t`.
+ */
+export const INCLUDED = `(t.excluded = 0 OR ${paysBillSql("t")})`;
+
+/** True when the row pays a bill (see `paysBillSql`), for an UPDATE or subquery on `transactions` itself. */
+export const PAYS_A_BILL = paysBillSql("transactions");
 
 /** `INCLUDED` for an UPDATE or subquery on `transactions` itself. */
 export const INCLUDED_ROW = `(excluded = 0 OR ${PAYS_A_BILL})`;

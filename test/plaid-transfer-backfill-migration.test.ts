@@ -192,6 +192,37 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 		expect(await spent()).toBe(before - 5000);
 	});
 
+	// A transfer linked to a bill and split afterwards: the parent doesn't count once split, and the parts
+	// have no link of their own, so they count on the parent's. The backfill excludes all three, and the
+	// bill's payment stays in Spent whole.
+	it("keeps a split's parts counting on their parent's bill link when the backfill excludes them", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9100, 'Mortgage', 5000, 10, 'monthly', 'SYNTHETIC')",
+			),
+			add(9041, "TRANSFER_OUT", { split: true }),
+			add(9042, null, { parent: 9041 }),
+			add(9043, null, { parent: 9041 }),
+			pay(9100, "2026-09", 9041),
+		]);
+		const spent = async () =>
+			summarizeMonth({
+				month: "2026-09",
+				...(await loadMonth(db, "2026-09")),
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		const before = await spent();
+		// The two parts are 50.00 each in this test's rows, and they count while the parent is included.
+		expect(before).toBeGreaterThan(0);
+
+		await run();
+		expect(await stateOf()).toEqual({ 9041: PLAID, 9042: PLAID, 9043: PLAID });
+		expect(await spent()).toBe(before);
+
+		await db.prepare("DELETE FROM bill_payments WHERE bill_id = 9100").run();
+		expect(await spent()).toBe(before - 10000);
+	});
+
 	it("changes nothing the second time", async () => {
 		await db.batch([
 			add(9001, "TRANSFER_OUT"),

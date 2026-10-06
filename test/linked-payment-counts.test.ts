@@ -195,6 +195,80 @@ describe("a payment linked to a bill", () => {
 	});
 });
 
+describe("a split whose bank transaction pays a bill", () => {
+	/** A 2000.00 payment, split into 1500.00 and 500.00 after it was linked, as Plaid excluded it. */
+	const addSplit = () =>
+		db.batch([
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, is_split, plaid_category)
+				 SELECT 9530, id, '2026-09-04', 200000, 'LANDLORD LLC', 1, 'plaid', 1, 'LOAN_PAYMENTS' FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id)
+				 SELECT 9531, id, '2026-09-04', 150000, 'LANDLORD LLC', 1, 'plaid', 9530 FROM accounts LIMIT 1`,
+			),
+			db.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, excluded_source, parent_id)
+				 SELECT 9532, id, '2026-09-04', 50000, 'LANDLORD LLC', 1, 'plaid', 9530 FROM accounts LIMIT 1`,
+			),
+		]);
+
+	it("counts every part on the parent's link, once, in everything that reads what counts", async () => {
+		await addSplit();
+		const before = await readings();
+
+		await link(9530).run();
+		const linked = await readings();
+		expect(linked).toEqual({
+			// The parent never counts once split; its two parts do, and together they are the payment.
+			home: before.home + 200000,
+			trends: before.trends + 200000,
+			counted: before.counted + 2,
+			needsCategory: before.needsCategory + 2,
+			breakdownExcluded: before.breakdownExcluded - 2,
+			// The parent and its parts are all read as paying the bill.
+			filterExcluded: before.filterExcluded - 3,
+		});
+		expect(await stored(9530, 9531, 9532)).toEqual(
+			[9530, 9531, 9532].map((id) => ({
+				id,
+				excluded: 1,
+				excluded_source: "plaid",
+			})),
+		);
+		expect(await rowOf(9531)).toMatchObject({ excluded: true, paysBill: true });
+
+		await unlink().run();
+		expect(await readings()).toEqual(before);
+	});
+
+	it("counts a part once when both the parent and the part are linked", async () => {
+		await addSplit();
+		await db
+			.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9501, 'Insurance', 150000, 5, 'monthly', 5, 'LANDLORD LLC')",
+			)
+			.run();
+		const before = await readings();
+
+		await link(9530).run();
+		const parentOnly = await readings();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9501, ?, 9531, 'user', 'linked')",
+			)
+			.bind(MONTH)
+			.run();
+		// The part's own link adds nothing: it already counted through its parent.
+		expect(await readings()).toEqual(parentOnly);
+		expect(parentOnly.home).toBe(before.home + 200000);
+
+		// Without the parent's link the part still counts on its own link, and its sibling no longer does.
+		await unlink().run();
+		expect((await readings()).home).toBe(before.home + 150000);
+	});
+});
+
 describe("Jev and a payment that pays a bill", () => {
 	const answer = (flags: {
 		transfer?: boolean;
