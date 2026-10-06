@@ -235,16 +235,16 @@ function Foundation() {
 				id="radii"
 				title="Radii and depth"
 				tier="visual"
-				sentence="Two radii and pills. No shadows except toasts: hairline rules separate things instead."
+				sentence="Two radii, drawn as squircles where the browser supports it, and pills. No shadows except toasts: hairline rules separate things instead."
 			>
 				<div class="flex flex-wrap gap-6">
-					<State label="rounded-control · inputs, chips, buttons">
+					<State label="rounded-control · inputs, buttons, tags, cards, the toast">
 						<span class="block h-16 w-28 rounded-control border border-ink" />
 					</State>
-					<State label="rounded-sheet · the sheet's top corners">
+					<State label="rounded-sheet · the sheet's top corners, the panel's left corners">
 						<span class="block h-16 w-28 rounded-t-sheet border border-ink" />
 					</State>
-					<State label="rounded-full · pills, round buttons">
+					<State label="rounded-full · pills: chips, round ticks, round buttons">
 						<span class="block h-11 w-28 rounded-full border border-ink" />
 					</State>
 				</div>
