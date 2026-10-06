@@ -171,16 +171,101 @@ const SIDES = [
 	"-bl",
 ];
 const TOKEN_NAMES = ["control", "sheet"];
-/** Variants as Tailwind writes them in front of a class, from none to a stack and arbitrary ones. */
+/**
+ * Variants as Tailwind writes them in front of a class, from none to a stack and arbitrary ones. Only
+ * variants that keep the radius on the element carrying the class: the selector sets corner-shape on
+ * that element, so a variant that rounds a descendant or a pseudo-element is not here (see
+ * movesRadiusElsewhere below).
+ */
 const VARIANTS = [
 	"",
 	"lg:",
 	"hover:",
 	"has-[:checked]:",
-	"[&_p]:",
 	"sm:max-lg:",
 	"group-has-[:checked]:",
 ];
+
+/**
+ * The variants that put a class's radius on something other than the element carrying it: its children
+ * (`*:`, `**:`), one of its pseudo-elements, or whatever an arbitrary variant picks with `&`
+ * (`[&_p]:`). corner-shape isn't inherited, so the rule sets it on the element with the class and the
+ * child or pseudo-element that gets the radius would stay round.
+ */
+const PSEUDO_ELEMENT_VARIANTS = new Set([
+	"before",
+	"after",
+	"first-letter",
+	"first-line",
+	"marker",
+	"selection",
+	"file",
+	"placeholder",
+	"backdrop",
+	"details-content",
+]);
+
+/** A word's variants, split at the colons outside brackets: "lg:has-[:checked]:bg-band" → ["lg", "has-[:checked]"]. */
+function variantsOf(word: string): string[] {
+	const parts: string[] = [];
+	let depth = 0;
+	let start = 0;
+	for (let i = 0; i < word.length; i++) {
+		if (word[i] === "[") depth++;
+		else if (word[i] === "]") depth--;
+		else if (word[i] === ":" && depth === 0) {
+			parts.push(word.slice(start, i));
+			start = i + 1;
+		}
+	}
+	return parts;
+}
+
+/** The variants in front of this word that move its radius off the element carrying the class. */
+function movesRadiusElsewhere(word: string): string[] {
+	return variantsOf(word).filter(
+		(v) =>
+			v === "*" ||
+			v === "**" ||
+			PSEUDO_ELEMENT_VARIANTS.has(v) ||
+			v.includes("&"),
+	);
+}
+
+/** A radius on one of the two tokens, in any side and with no variants: "rounded-tr-control". */
+const TOKEN_RADIUS = /^!?rounded(-[a-z]{1,2})?-(control|sheet)!?$/;
+
+/**
+ * Each class with a token radius at its end, variants and all, read from words split only at whitespace
+ * and quotes: words() also splits at ">", so "[&>*]:rounded-control" would reach it as "*]:rounded-control"
+ * and lose its variant.
+ */
+const usedTokenClasses = (text: string): string[] =>
+	stripComments(text)
+		.split(/[\s"'`]+/)
+		.filter((word) =>
+			/(^|:)!?rounded(-[a-z]{1,2})?-(control|sheet)!?$/.test(word),
+		);
+
+/**
+ * The quoted strings in the source (a class attribute, a template literal) that hold a pill and a
+ * token radius with a variant on either: "rounded-full lg:rounded-l-sheet" is a pill on a phone, but
+ * the rule matches the element at every width, so it would be a squircle there.
+ */
+function pillsMadeSquircle(text: string): string[] {
+	return (
+		stripComments(text).match(/"[^"\n]*"|'[^'\n]*'|`[^`]*`/g) ?? []
+	).filter((literal) => {
+		const ws = literal.slice(1, -1).split(/\s+/);
+		const pills = ws.filter((w) => strip(w) === "rounded-full");
+		const tokens = ws.filter((w) => TOKEN_RADIUS.test(strip(w)));
+		return (
+			pills.length > 0 &&
+			tokens.length > 0 &&
+			[...pills, ...tokens].some((w) => variantsOf(w).length > 0)
+		);
+	});
+}
 
 function problems(file: string, text: string): string[] {
 	const allowed = EXCEPTIONS[file] ?? [];
@@ -242,7 +327,7 @@ describe("design tokens (DESIGN.md)", () => {
 			expect(variants.length).toBeGreaterThan(0);
 		});
 
-		it("reaches every class the two tokens produce, with any variant in front", () => {
+		it("reaches every class the two tokens produce, with any variant in front that keeps the radius on the element", () => {
 			const missed: string[] = [];
 			for (const name of TOKEN_NAMES)
 				for (const side of SIDES)
@@ -273,6 +358,98 @@ describe("design tokens (DESIGN.md)", () => {
 			])
 				expect([...used]).toContain(name);
 			expect([...used].filter((cls) => !reaches(cls))).toEqual([]);
+		});
+
+		it("has every rounded-control and rounded-sheet class used in src/ on the element that gets the radius", () => {
+			// The rule sets corner-shape on the element with the class, not on its children or
+			// pseudo-elements; put the radius class on the element itself.
+			const used = new Set(Object.values(SOURCES).flatMap(usedTokenClasses));
+			expect(used.size).toBeGreaterThan(0);
+			expect([...used]).toContain("lg:rounded-l-sheet");
+			expect(
+				[...used]
+					.filter((cls) => movesRadiusElsewhere(cls).length > 0)
+					.map(
+						(cls) =>
+							`${cls}: the squircle rule sets corner-shape on the element with the class, not on descendants or pseudo-elements; put the radius class on the element itself`,
+					),
+			).toEqual([]);
+		});
+
+		it("catches a variant that moves the radius off the element, and leaves the ones that don't", () => {
+			for (const cls of [
+				"[&_input]:rounded-control",
+				"[&_p]:rounded-control",
+				"[&>*]:rounded-t-sheet",
+				"*:rounded-control",
+				"**:rounded-t-sheet",
+				"before:rounded-control",
+				"after:rounded-control",
+				"file:rounded-control",
+				"placeholder:rounded-control",
+				"marker:rounded-control",
+				"selection:rounded-control",
+				"backdrop:rounded-t-sheet",
+				"details-content:rounded-control",
+				"lg:before:rounded-control",
+				"hover:*:rounded-control",
+			])
+				expect([cls, movesRadiusElsewhere(cls).length > 0]).toEqual([
+					cls,
+					true,
+				]);
+			for (const cls of [
+				"rounded-control",
+				"lg:rounded-l-sheet",
+				"hover:rounded-control",
+				"has-[:checked]:rounded-control",
+				"has-[input:focus-visible]:rounded-control",
+				"group-has-[:checked]:rounded-control",
+				"sm:max-lg:rounded-control",
+				// A different variant that only looks like a pseudo-element one.
+				"placeholder-shown:rounded-control",
+			])
+				expect([cls, movesRadiusElsewhere(cls)]).toEqual([cls, []]);
+			// Read from source, where an arbitrary variant keeps its ">" and its brackets.
+			const found = usedTokenClasses(
+				'<div class="flex [&>*]:rounded-control px-2"><p class={`flex [&_p]:rounded-t-sheet`}>',
+			);
+			expect(found).toEqual(["[&>*]:rounded-control", "[&_p]:rounded-t-sheet"]);
+			expect(found.every((cls) => movesRadiusElsewhere(cls).length > 0)).toBe(
+				true,
+			);
+		});
+
+		it("never pairs rounded-full with a token radius at another width or state, which would make a pill a squircle", () => {
+			// The selector matches the element whatever the width: "rounded-full lg:rounded-l-sheet" would
+			// be a squircle on a phone, and "rounded-control lg:rounded-full" no longer a pill on desktop.
+			const found = Object.entries(SOURCES).flatMap(([file, text]) =>
+				pillsMadeSquircle(text).map(
+					(literal) =>
+						`${file}: ${literal}: the squircle rule matches at every width and state, so a pill paired with a token radius in a variant is a squircle; use one or the other`,
+				),
+			);
+			expect(found).toEqual([]);
+		});
+
+		it("catches a pill paired with a variant of a token radius, and leaves other strings alone", () => {
+			for (const text of [
+				'<span class="rounded-full lg:rounded-l-sheet px-2">',
+				'<span class="rounded-full hover:rounded-control">',
+				'<span class="rounded-control lg:rounded-full">',
+				"<span class={`flex rounded-full sm:rounded-t-sheet px-2`}>",
+			])
+				expect(pillsMadeSquircle(text)).toHaveLength(1);
+			for (const text of [
+				'<span class="rounded-full px-2">',
+				'<span class="lg:rounded-l-sheet bg-band">',
+				'<span class="rounded-control hover:bg-band">',
+				// A pill and a token radius in separate strings are two elements.
+				'<span class="rounded-full"><b class="lg:rounded-control">',
+				// Prose that names both is no class attribute: it has no variant on either.
+				'"rounded-control for boxes, rounded-full for pills"',
+			])
+				expect(pillsMadeSquircle(text)).toEqual([]);
 		});
 
 		it("leaves rounded-full and every other class alone, so chips and round ticks stay pills", () => {

@@ -86,6 +86,12 @@
  * It sits in the components layer so a utility can still set corner-shape (the P75 drawing forces its
  * Today pictures round); unlayered CSS would beat every utility. corner-shape isn't inherited, so it is
  * set on the elements themselves. This is the only rule in the app that sets it.
+ *
+ * Its limits: it covers a variant that rounds the element carrying the class (lg:, hover:, has-[...]:).
+ * A form that puts the radius on a descendant or a pseudo-element ([&_p]:, *:, before:, file:) would
+ * make the element with the class a squircle and leave the one that is rounded round, and a pill that
+ * takes a token radius at one width (rounded-full lg:rounded-l-sheet) would be a squircle at every
+ * width. Neither is used, and the test fails on both; one that is wanted needs its own line here.
  */
 @layer components {
 	@supports (corner-shape: squircle) {
