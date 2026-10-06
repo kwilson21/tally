@@ -694,7 +694,7 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	affordance:
 		"Previous and next are round 44px arrows beside the month. Each month dot is a 44px link; the selected month is filled and this month is ringed.",
 	states:
-		"Available arrows and dots are links. At the first month and this month, the corresponding arrow is faded and hidden from assistive technology because it has no action. The current dot is ringed even while another month is selected.",
+		"Available arrows and dots are links. At the first month and this month, the corresponding arrow is faded and hidden from assistive technology because it has no action. The current dot is ringed even while another month is selected. Each link is 44px wide with a 32px dot and a text-sm month label.",
 	feedback:
 		"A link loads that month's own Home URL. The browser announces the new page title and the selected month; no in-place swap or JavaScript is needed.",
 	input:
@@ -702,7 +702,7 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	motion:
 		"No custom motion. The page uses the shell's browser page transition; reduced-motion preferences are honored by the shell.",
 	edges:
-		"The strip starts at the first month with a counted transaction and ends at the household's current month. At either end the unavailable arrow has no link. The strip scrolls horizontally when the household has more months than fit. A future or pre-history month address opens this month's Home.",
+		"The strip starts at the first month with a counted transaction and ends at the household's current month. At either end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A future or pre-history month address opens this month's Home.",
 	words:
 		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget}.",
 };
@@ -828,6 +828,31 @@ function HomeTopGroup() {
 							/>
 						</div>
 					</Picture>
+				</State>
+				<State label="At 320px wide, month links wrap instead of overflowing">
+					<div class="w-[320px] max-w-full">
+						<MonthNavigation
+							month="2026-10"
+							firstMonth="2025-11"
+							currentMonth="2026-10"
+						/>
+					</div>
+				</State>
+				<State label="Twelve budgeted categories: five bars per chart row">
+					<div class="w-[320px] max-w-full">
+						<MonthEnd
+							monthName="September"
+							amountCents={0}
+							rows={Array.from({ length: 12 }, (_, index) => ({
+								id: index + 1,
+								name: `Category ${index + 1}`,
+								budgetCents: 10000,
+								spentCents: index % 3 === 0 ? 12000 : 8000,
+								leftCents: index % 3 === 0 ? -2000 : 2000,
+								over: index % 3 === 0,
+							}))}
+						/>
+					</div>
 				</State>
 				<UseSpec spec={MONTH_HISTORY_SPEC} />
 			</Specimen>

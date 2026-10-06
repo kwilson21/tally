@@ -68,8 +68,8 @@ export function MonthNavigation({
 				</h1>
 				<Arrow direction="next" target={next} currentMonth={currentMonth} />
 			</div>
-			<nav aria-label="Months" class="mt-2 overflow-x-auto">
-				<ol class="flex w-max">
+			<nav aria-label="Months" class="mt-2">
+				<ol class="flex flex-wrap">
 					{months.map((item) => {
 						const current = item === currentMonth;
 						const selected = item === month;
@@ -79,11 +79,11 @@ export function MonthNavigation({
 								<a
 									href={`/?month=${item}`}
 									aria-current={selected ? "page" : undefined}
-									class="flex min-h-11 w-11 flex-col items-center justify-center gap-1 text-xs text-muted no-underline"
+									class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm text-muted no-underline"
 								>
 									<span
 										aria-hidden="true"
-										class={`size-3 rounded-full ${selected ? "bg-ink" : "bg-muted/45"} ${current ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""}`}
+										class={`size-8 rounded-full ${selected ? "bg-ink" : "bg-muted/45"} ${current ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""}`}
 									/>
 									<span aria-hidden="true">{monthName(item).slice(0, 3)}</span>
 									<span class="sr-only">{`${label}${current ? ", this month" : ""}`}</span>

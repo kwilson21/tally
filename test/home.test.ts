@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { budgetForMonth } from "../src/budget";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { setBudget } from "../src/db/budgets";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
@@ -99,6 +99,56 @@ describe("GET / with the demo seed", () => {
 				/aria-label="Previous month,[^"]+"[^>]*href=/,
 			);
 		}
+	});
+
+	it("links every month dot to its own month and exposes the full accessible name", async () => {
+		const currentMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const viewedMonth = monthsBefore(currentMonth, 1);
+		const first = await firstCountedMonth(env.DB);
+		if (!first) throw new Error("Demo has no counted transaction month");
+		const { html } = await homeAt(viewedMonth);
+		const nav = html.match(
+			/<nav aria-label="Months"[^>]*>([\s\S]*?)<\/nav>/,
+		)?.[1];
+		if (!nav) throw new Error("Home has no month strip");
+		expect(nav).toContain('<ol class="flex flex-wrap">');
+		const links = [
+			...nav.matchAll(
+				/<a href="\/\?month=(\d{4}-\d{2})"([^>]*)>([\s\S]*?)<\/a>/g,
+			),
+		];
+		const expected: string[] = [];
+		for (
+			let date = new Date(`${first}-01T00:00:00Z`);
+			date <= new Date(`${currentMonth}-01T00:00:00Z`);
+			date.setUTCMonth(date.getUTCMonth() + 1)
+		) {
+			expected.push(
+				`${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`,
+			);
+		}
+		expect(links.map((link) => link[1])).toEqual(expected);
+		for (const link of links) {
+			const [, target, attributes, body] = link;
+			const monthName = new Date(`${target}-01T00:00:00Z`).toLocaleString(
+				"en-US",
+				{ month: "long", timeZone: "UTC" },
+			);
+			expect(body).toContain(`<span class="sr-only">${monthName}`);
+			expect(attributes).toContain(
+				'class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm',
+			);
+			expect(body).toContain("size-8 rounded-full");
+		}
+		const selected = links.find((link) => link[1] === viewedMonth);
+		expect(selected?.[2]).toContain('aria-current="page"');
+		expect(selected?.[3]).toContain("bg-ink");
+		const current = links.find((link) => link[1] === currentMonth);
+		expect(current?.[3]).toContain(
+			"ring-2 ring-accent ring-offset-2 ring-offset-paper",
+		);
+		expect(current?.[3]).toContain("bg-muted/45");
+		expect(current?.[3]).toContain(", this month");
 	});
 
 	it("renders an HTML page titled Tally", async () => {
