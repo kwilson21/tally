@@ -69,7 +69,7 @@ export async function runScheduled(
  * `MAX_CALLS_PER_RUN`, so this one asks about what the first left, within what's left of the day's
  * cap, and a newly linked bank's backfill is still sorted in a night. It never syncs or resets.
  */
-export const SECOND_SORT_CRON = "30 9 * * *";
+const SECOND_SORT_CRON = "30 9 * * *";
 
 export async function runSecondSort(
 	env: ScheduledEnv,
