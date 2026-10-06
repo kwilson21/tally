@@ -1213,7 +1213,8 @@ function EditSheet({
 						tx.categorySource === "jev" &&
 						tx.categoryConfidence !== null && (
 							<p class="text-sm text-muted">
-								Picked by Jev · {Math.round(tx.categoryConfidence * 100)}% sure
+								Picked by Tally · {Math.round(tx.categoryConfidence * 100)}%
+								sure
 							</p>
 						)}
 					{errors.category && (
