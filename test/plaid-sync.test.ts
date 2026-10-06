@@ -2897,6 +2897,80 @@ describe("syncItem", () => {
 				]);
 			});
 
+			it("reviews a split part a person once marked income and then turned income off", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				const { results: categories } = await env.DB.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+				).all<{ id: number }>();
+				await saveSplit(
+					env.DB,
+					await rowId(),
+					[
+						{ amountCents: -2000, categoryId: categories[0]?.id as number },
+						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+					],
+					"synthetic-person",
+				);
+				const { results } = await env.DB.prepare(
+					"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(await rowId())
+					.all<{ id: number }>();
+				// Marked income, then income turned off: still unreviewed, with a person's income choice.
+				await env.DB.prepare(
+					"UPDATE transactions SET flag_income = 0, income_source = 'user' WHERE id = ?",
+				)
+					.bind(results[0]?.id)
+					.run();
+				await decide("refund", true);
+				const first = await env.DB.prepare(
+					"SELECT excluded, excluded_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+				)
+					.bind(results[0]?.id)
+					.first();
+				expect(first).toEqual({
+					excluded: 0,
+					excluded_source: null,
+					credit_reviewed: 1,
+					credit_reviewed_by: "user",
+				});
+			});
+
+			it("leaves a split part a person marked income as income when they review the split", async () => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				const { results: categories } = await env.DB.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+				).all<{ id: number }>();
+				await saveSplit(
+					env.DB,
+					await rowId(),
+					[
+						{ amountCents: -2000, categoryId: categories[0]?.id as number },
+						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+					],
+					"synthetic-person",
+				);
+				const { results } = await env.DB.prepare(
+					"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(await rowId())
+					.all<{ id: number }>();
+				await env.DB.prepare(
+					"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+				)
+					.bind(results[0]?.id)
+					.run();
+				await decide("refund", true);
+				const first = await env.DB.prepare(
+					"SELECT flag_income, credit_reviewed FROM transactions WHERE id = ?",
+				)
+					.bind(results[0]?.id)
+					.first();
+				expect(first).toEqual({ flag_income: 1, credit_reviewed: 0 });
+			});
+
 			it("leaves a split part's own exclusion alone when a person reviews the split", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));

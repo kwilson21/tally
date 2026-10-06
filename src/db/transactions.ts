@@ -566,8 +566,8 @@ export async function saveEdit(
 			),
 		);
 	// A split credit is one bank transaction and only its parts count, so a person reviewing it from
-	// the split's own panel reviews its parts too, and Plaid's exclusion comes off them. A part someone
-	// marked as income, or excluded themselves (or Jev did), keeps that.
+	// the split's own panel reviews its parts too, and Plaid's exclusion comes off them. A part that is
+	// income keeps that, and so does one a person or Jev excluded.
 	if (creditReviewByUser && current.isSplit === 1)
 		statements.push(
 			gated(
@@ -575,7 +575,7 @@ export async function saveEdit(
 					excluded = CASE WHEN excluded_source = 'plaid' THEN 0 ELSE excluded END,
 					excluded_source = CASE WHEN excluded_source = 'plaid' THEN NULL ELSE excluded_source END,
 					updated_by = ?, updated_at = datetime('now')
-				WHERE parent_id = ? AND amount_cents < 0 AND flag_income = 0 AND COALESCE(income_source, '') != 'user'`,
+				WHERE parent_id = ? AND amount_cents < 0 AND flag_income = 0`,
 				[actor, id],
 			),
 		);
