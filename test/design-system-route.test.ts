@@ -219,17 +219,17 @@ describe("GET /design-system in the demo", () => {
 
 	it("shows the stale-bank line in each of its states, with its whole use spec, as the family app draws it", async () => {
 		const { html } = await get("/design-system");
-		const tag = specimens(html).find((t) => t.includes('id="bank-line"'));
+		const tag = specimens(html).find((t) => t.includes('id="bank-behind"'));
 		expect(tag).toContain('data-ds-tier="visual"');
-		expect(tag).toContain('data-ds-components="BankLine"');
+		expect(tag).toContain('data-ds-components="BankBehind"');
 		const section =
-			html.split('id="bank-line"')[1]?.split("</section>")[0] ?? "";
+			html.split('id="bank-behind"')[1]?.split("</section>")[0] ?? "";
 		// Its words come from the real function, so the catalog can't drift from Home.
 		expect(Object.values(BANK_LINES)).toHaveLength(3);
 		for (const words of Object.values(BANK_LINES))
 			expect(section).toContain(words.replaceAll("'", "&#39;"));
-		expect(BANK_LINES.stale).toContain("hasn't synced since");
-		expect(BANK_LINES.signIn).toContain("needs you to sign in again");
+		expect(BANK_LINES.stale).toContain("stopped updating");
+		expect(BANK_LINES.signIn).toContain("needs signing in");
 		expect(BANK_LINES.several).toContain("1 other bank needs a look");
 		// Each picture is described in words, the bank's words and its link included.
 		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
@@ -243,10 +243,10 @@ describe("GET /design-system in the demo", () => {
 		].entries()) {
 			expect(labels[i]).toContain("Safe to spend $283");
 			expect(labels[i]).toContain(words.replaceAll("'", "&#39;"));
-			expect(labels[i]).toContain("Check Accounts");
+			expect(labels[i]).toContain("Fix");
 		}
 		// The 44px link, drawn in a family app's phone (no demo banner) beside Home's real top.
-		expect(section).toContain("Check Accounts");
+		expect(section).toContain("Fix");
 		expect(section).toContain("min-h-11");
 		expect(section).toContain("Safe to spend");
 		expect(section).not.toContain("Demo data. Nothing here is real.");
@@ -256,7 +256,7 @@ describe("GET /design-system in the demo", () => {
 		}
 		// DESIGN.md says where it sits.
 		expect(design).toMatch(
-			/\| BankLine \|[^\n]*Check Accounts[^\n]*between the status sentence and the Band/,
+			/\| BankBehind \|[^\n]*Fix link to Accounts[^\n]*before the forecast/,
 		);
 	});
 

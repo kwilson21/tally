@@ -147,36 +147,34 @@ describe("netWorthExample", () => {
 });
 
 describe("budgetExample", () => {
-	it("shows budget − spent = safe to spend in exact cents, so the sum always adds up", () => {
+	it("explains why safe to spend is below the budgets, with parts that add up", () => {
 		expect(
 			budgetExample({
-				totalBudgetCents: 245000,
-				totalSpentCents: 116612,
-				safeToSpendCents: 128388,
-			}),
-		).toBe("$2,450.00 budget − $1,166.12 spent = $1,283.88 safe to spend.");
-	});
-
-	it("includes bills set aside, so the sum still adds up once bills exist", () => {
-		expect(
-			budgetExample({
-				totalBudgetCents: 245000,
-				totalSpentCents: 116612,
-				safeToSpendCents: 114188,
+				totalBudgetCents: 165000,
+				totalSpentCents: 110200,
+				safeToSpendCents: 40600,
+				uncategorized: { spentCents: 22800, count: 12 },
+				unbudgetedCents: 14000,
+				billsDueCents: 14200,
 			}),
 		).toBe(
-			"$2,450.00 budget − $1,166.12 spent − $142.00 for bills due = $1,141.88 safe to spend.",
+			"Your budgets have $916 left. Safe to spend is $510 less: $228 has no category yet, $140 went to categories with no budget, and $142 is set aside for bills due.",
 		);
 	});
 
-	it("shows a negative result plainly when spending is over the budget", () => {
+	it("shows cents when the explanation parts include them", () => {
 		expect(
 			budgetExample({
 				totalBudgetCents: 100000,
-				totalSpentCents: 125000,
-				safeToSpendCents: -25000,
+				totalSpentCents: 12000,
+				safeToSpendCents: 78000,
+				uncategorized: { spentCents: 3000, count: 1 },
+				unbudgetedCents: 2000,
+				billsDueCents: 10000,
 			}),
-		).toBe("$1,000.00 budget − $1,250.00 spent = -$250.00 safe to spend.");
+		).toBe(
+			"Your budgets have $930 left. Safe to spend is $150 less: $30 has no category yet, $20 went to categories with no budget, and $100 is set aside for bills due.",
+		);
 	});
 });
 

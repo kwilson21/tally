@@ -1,8 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { loadBillRows } from "../src/routes/bills";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
@@ -25,7 +27,9 @@ describe("GET / with the demo seed", () => {
 	it("leads with safe to spend and the status sentence", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
-		expect(html).toMatch(/Safe to spend<\/p><p[^>]*>\$[\d,]+/);
+		expect(html).toMatch(/Safe to spend[\s\S]*?<\/p><p[^>]*>\$[\d,]+/);
+		expect(html).toContain('href="/how-it-works#budget"');
+		expect(html).toContain('aria-label="Why? safe to spend"');
 		expect(html).toContain(
 			"Eating Out is $36 over. Everything else is on track.",
 		);
@@ -60,7 +64,7 @@ describe("GET / with the demo seed", () => {
 		const dollars = (html: string) =>
 			Number(
 				html
-					.match(/Safe to spend<\/p><p[^>]*>\$([\d,]+)/)?.[1]
+					.match(/class="font-serif text-6xl[^"]*">(?:−)?\$([\d,]+)/)?.[1]
 					?.replaceAll(",", "") ?? Number.NaN,
 			);
 		const withBills = dollars((await home()).html);
@@ -108,9 +112,99 @@ describe("GET / with the demo seed", () => {
 	it("says needs a category once: the Band carries the amount, and there's no Uncategorized row (decision 50)", async () => {
 		const { html } = await home();
 		expect(html).toMatch(
-			/12 transactions need a category<\/span><span[^>]*>\$228 of this month&#39;s spending/,
+			/12 transactions need a category[\s\S]*?\$228 of this month&#39;s spending/,
 		);
 		expect(html).not.toContain("Uncategorized");
+	});
+
+	it("shows the picked negative amount and sentence, and keeps the label at exactly zero", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		const data = await loadMonth(env.DB, month);
+		const billData = await loadBillRows(env.DB, today);
+		const dueBills = billData.rows
+			.filter(
+				(bill) =>
+					bill.active && (bill.status === "due" || bill.status === "overdue"),
+			)
+			.reduce((sum, bill) => sum + bill.amountCents, 0);
+		const safe = summarizeMonth({
+			month,
+			...data,
+			unpaidDueBillsCents: dueBills,
+		}).safeToSpendCents;
+		const budget = await env.DB.prepare(
+			"SELECT category_id AS categoryId, amount_cents AS amountCents FROM budget_amounts ORDER BY category_id LIMIT 1",
+		).first<{ categoryId: number; amountCents: number }>();
+		if (!budget) throw new Error("Demo budget is missing");
+		await env.DB.prepare(
+			"UPDATE budget_amounts SET amount_cents = amount_cents - ? WHERE category_id = ?",
+		)
+			.bind(safe + 12000, budget.categoryId)
+			.run();
+		const negative = (await home()).html;
+		expect(negative).toContain("−$120");
+		expect(negative).toContain(
+			"Over budget this month. Spending more takes it further over.",
+		);
+		expect(negative).not.toContain("Everything is on track.");
+		expect(negative).not.toContain("cut back");
+		expect(negative).toContain("Safe to spend");
+		await env.DB.prepare(
+			"UPDATE budget_amounts SET amount_cents = amount_cents + 12000 WHERE category_id = ?",
+		)
+			.bind(budget.categoryId)
+			.run();
+		const zero = (await home()).html;
+		expect(zero).toContain("Safe to spend");
+		expect(zero).toContain(">$0</p>");
+	});
+
+	it("shows older uncategorized transactions in the Band chip", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const olderMonth =
+			month === "2026-01"
+				? "2025-12"
+				: `${month.slice(0, 5)}${String(Number(month.slice(5)) - 1).padStart(2, "0")}`;
+		await env.DB.prepare(
+			`UPDATE transactions SET date = ? WHERE id IN (
+				SELECT id FROM transactions WHERE category_id IS NULL AND date LIKE ? AND excluded = 0 AND flag_income = 0 LIMIT 6
+			)`,
+		)
+			.bind(`${olderMonth}-01`, `${month}%`)
+			.run();
+		const html = (await home()).html;
+		expect(html).toContain("+6 older");
+		expect(html).toMatch(/of this month&#39;s spending/);
+	});
+
+	it("keeps the Band for older-only uncategorized transactions and hides it when none remain", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const olderMonth =
+			month === "2026-01"
+				? "2025-12"
+				: `${month.slice(0, 5)}${String(Number(month.slice(5)) - 1).padStart(2, "0")}`;
+		await env.DB.prepare(
+			`UPDATE transactions SET date = ? WHERE id IN (
+				SELECT id FROM transactions WHERE category_id IS NULL AND date LIKE ? AND excluded = 0 AND flag_income = 0 LIMIT 6
+			)`,
+		)
+			.bind(`${olderMonth}-01`, `${month}%`)
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL AND date LIKE ? AND excluded = 0 AND flag_income = 0",
+		)
+			.bind(`${month}%`)
+			.run();
+		const olderOnly = (await home()).html;
+		expect(olderOnly).toMatch(
+			/6 transactions from earlier months need a category/,
+		);
+		expect(olderOnly).not.toContain("of this month's spending");
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
+		).run();
+		expect((await home()).html).not.toContain("need a category");
 	});
 
 	it("says the uncategorized amount even when refunds are more than the spending", async () => {

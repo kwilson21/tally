@@ -647,6 +647,12 @@ function HowBudget({
 						totalBudgetCents: BUDGET_CENTS,
 						totalSpentCents: SPENT_CENTS,
 						safeToSpendCents: SAFE_CENTS,
+						uncategorized: {
+							spentCents: UNCATEGORIZED.cents,
+							count: UNCATEGORIZED.count,
+						},
+						unbudgetedCents: NO_BUDGET_CENTS,
+						billsDueCents: BILLS_DUE_CENTS,
 					})}
 				</p>
 				{children}

@@ -171,6 +171,15 @@ howItWorks.get("/how-it-works", async (c) => {
 		)
 		.reduce((sum, bill) => sum + bill.amountCents, 0);
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
+	const budgeted = new Set(summary.categories.map((category) => category.id));
+	const unbudgetedCents = data.transactions
+		.filter(
+			(transaction) =>
+				!transaction.income &&
+				transaction.categoryId !== null &&
+				!budgeted.has(transaction.categoryId),
+		)
+		.reduce((sum, transaction) => sum + transaction.amountCents, 0);
 	const netWorthText = netWorthExample(
 		(await accountsByBank(c.env.DB)).flatMap((bank) => bank.accounts),
 	);
@@ -262,9 +271,11 @@ howItWorks.get("/how-it-works", async (c) => {
 								<BudgetDiagram {...summary} />
 							</Diagram>
 							<Example demo={demo} monthName={monthLabel}>
-								{budgetExample(summary)} This includes{" "}
-								{demo ? "the demo's " : ""}
-								due and overdue, unpaid bills.
+								{budgetExample({
+									...summary,
+									unbudgetedCents,
+									billsDueCents: unpaidDueBillsCents,
+								})}
 							</Example>
 						</>
 					) : null}

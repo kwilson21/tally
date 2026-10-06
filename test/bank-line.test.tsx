@@ -1,39 +1,26 @@
 /** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
-import { BankLine } from "../src/views/bank-line";
+import { BankBehind } from "../src/views/bank-line";
 import { HomeTop } from "../src/views/home-top";
 
-const WORDS =
-	"Chase hasn't synced since Oct 1, so Safe to spend may be too high.";
+describe("BankBehind", () => {
+	const html = String(BankBehind({ words: "Chase stopped updating Oct 2" }));
 
-// P37 A (decision 72): the alert icon and ink words, then a 44px terracotta link to Accounts.
-describe("BankLine", () => {
-	const html = String(BankLine({ words: WORDS }));
-
-	it("says the words, with an alert icon so it isn't color alone", () => {
-		expect(html).toContain("hasn&#39;t synced since Oct 1");
-		expect(html).toContain("Safe to spend may be too high.");
-		expect(html).toContain("<svg");
+	it("uses an alert icon and the picked plain words", () => {
+		expect(html).toContain("Chase stopped updating Oct 2");
+		expect(html).toContain('data-icon="bank"');
 		expect(html).toContain('aria-hidden="true"');
+		expect(html).toContain("bg-over/10");
 	});
 
-	it("keeps the words in ink, not brick", () => {
-		expect(html).not.toContain("text-over");
-		expect(html).not.toContain("text-muted");
-	});
-
-	it("links to Accounts with a 44px target", () => {
+	it("links to Accounts with a 44px Fix button", () => {
 		expect(html).toMatch(
-			/<a href="\/accounts" class="[^"]*min-h-11[^"]*">\s*Check Accounts\s*<\/a>/,
+			/<a href="\/accounts" class="[^"]*min-h-11[^"]*">Fix<span class="sr-only"> the bank in Accounts<\/span><\/a>/,
 		);
-	});
-
-	it("is not an alert: it's a standing line, not an error to announce", () => {
-		expect(html).not.toContain("role=");
 	});
 });
 
-describe("HomeTop with a bank line", () => {
+describe("HomeTop with a bank behind", () => {
 	const top = (props: Partial<Parameters<typeof HomeTop>[0]> = {}) =>
 		String(
 			HomeTop({
@@ -41,35 +28,26 @@ describe("HomeTop with a bank line", () => {
 				safeToSpendCents: 93400,
 				status: "Everything is on track.",
 				band: { href: "/transactions/organize", text: "4 need a category" },
+				forecast: "forecast",
 				...props,
 			}),
 		);
 
-	it("puts the line after the status sentence and How this works, before the Band", () => {
-		const html = top({ bankLine: WORDS });
-		const at = (s: string) => html.indexOf(s);
-		expect(at("Everything is on track.")).toBeLessThan(at("How this works"));
-		expect(at("How this works")).toBeLessThan(at("Safe to spend may be too"));
-		expect(at("Safe to spend may be too")).toBeLessThan(
-			at("4 need a category"),
-		);
-		expect(at("Check Accounts")).toBeLessThan(at("4 need a category"));
+	it("puts the as-of tag on the amount, then the bank line before the forecast", () => {
+		const html = top({
+			bankDate: "Oct 2",
+			bankLine: "Chase stopped updating Oct 2",
+		});
+		const at = (text: string) => html.indexOf(text);
+		expect(at("as of Oct 2")).toBeLessThan(at("Chase stopped updating Oct 2"));
+		expect(at("Chase stopped updating Oct 2")).toBeLessThan(at("forecast"));
+		expect(at("forecast")).toBeLessThan(at("How this works"));
+		expect(at("How this works")).toBeLessThan(at("4 need a category"));
 	});
 
-	it("leaves the Band its job: it is still the only tinted row", () => {
-		const html = top({ bankLine: WORDS });
-		expect(html.match(/bg-band/g)).toHaveLength(1);
-	});
-
-	it("shows the line without a Band too", () => {
-		const html = top({ bankLine: WORDS, band: undefined });
-		expect(html).toContain("Check Accounts");
+	it("keeps Fix when there is no Band", () => {
+		const html = top({ bankLine: "Chase needs signing in", band: undefined });
+		expect(html).toContain("Fix");
 		expect(html).not.toContain("bg-band");
-	});
-
-	it("draws nothing extra without one", () => {
-		const html = top();
-		expect(html).not.toContain("Check Accounts");
-		expect(html).not.toContain("Safe to spend may be too high");
 	});
 });

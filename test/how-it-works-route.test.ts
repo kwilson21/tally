@@ -48,7 +48,7 @@ describe("GET /how-it-works in the demo", () => {
 		}
 		expect(html).toContain('role="img"');
 		expect(html).toContain("Income counts only toward Income, not spending.");
-		expect(html).toContain("due and overdue");
+		expect(html).toContain("due or overdue and not yet paid");
 		expect(html).toMatch(/including uncategorized and\s+unbudgeted/);
 		expect(html).not.toMatch(/small AI/);
 	});
@@ -127,13 +127,15 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("keeps its budget example equal to Home", async () => {
 		const page = (await get("/how-it-works")).html;
-		const match = page.match(/= (-?\$[\d,]+\.\d\d) safe to spend\./);
-		expect(match).not.toBeNull();
-		const cents = Math.round(
-			Number((match?.[1] ?? "").replace(/[$,]/g, "")) * 100,
+		const match = page.match(
+			/Your budgets have (\$[\d,]+(?:\.\d\d)?) left\. Safe to spend is (\$[\d,]+(?:\.\d\d)?) less:/,
 		);
+		expect(match).not.toBeNull();
+		const cents = (value: string) =>
+			Math.round(Number(value.replace(/[$,]/g, "")) * 100);
+		const safeCents = cents(match?.[1] ?? "$0") - cents(match?.[2] ?? "$0");
 		const homeHtml = (await get("/")).html;
-		expect(homeHtml).toContain(formatCents(cents, { wholeDollars: true }));
+		expect(homeHtml).toContain(formatCents(safeCents, { wholeDollars: true }));
 	});
 
 	it("explains exclusions with this month's excluded count", async () => {
@@ -157,7 +159,14 @@ describe("GET /how-it-works in the demo", () => {
 			page.match(new RegExp(`<desc id="${id}-desc">([^<]+)<`))?.[1] ?? "";
 		const example = (re: RegExp) => page.match(re)?.slice(1) ?? [];
 
-		const [safe] = example(/= (-?\$[\d,]+\.\d\d) safe to spend\./);
+		const [budgetsLeft, less] = example(
+			/Your budgets have (\$[\d,]+(?:\.\d\d)?) left\. Safe to spend is (\$[\d,]+(?:\.\d\d)?) less:/,
+		);
+		const amountCents = (value: string) =>
+			Math.round(Number(value.replace(/[$,]/g, "")) * 100);
+		const safe = formatCents(
+			amountCents(budgetsLeft ?? "$0") - amountCents(less ?? "$0"),
+		);
 		expect(descOf("budget-diagram")).toContain(`leaves ${safe} safe to spend.`);
 
 		const [counted, needs] = example(

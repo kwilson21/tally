@@ -11,15 +11,23 @@ const plural = (n: number, one: string, many: string) =>
 export function budgetExample(
 	s: Pick<
 		MonthSummary,
-		"totalBudgetCents" | "totalSpentCents" | "safeToSpendCents"
-	>,
+		| "totalBudgetCents"
+		| "totalSpentCents"
+		| "safeToSpendCents"
+		| "uncategorized"
+	> & { unbudgetedCents: number; billsDueCents: number },
 ): string {
-	// What was set aside for bills is whatever makes the sum add up (spec §6); 0 until bills ship.
-	const billsCents =
-		s.totalBudgetCents - s.totalSpentCents - s.safeToSpendCents;
-	const bills =
-		billsCents > 0 ? ` − ${formatCents(billsCents)} for bills due` : "";
-	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent${bills} = ${formatCents(s.safeToSpendCents)} safe to spend.`;
+	const uncategorizedCents = s.uncategorized.spentCents;
+	const budgetsLeftCents =
+		s.totalBudgetCents -
+		s.totalSpentCents +
+		uncategorizedCents +
+		s.unbudgetedCents;
+	const differenceCents =
+		uncategorizedCents + s.unbudgetedCents + s.billsDueCents;
+	const amount = (cents: number) =>
+		formatCents(cents, { wholeDollars: cents % 100 === 0 });
+	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${amount(differenceCents)} less: ${amount(uncategorizedCents)} has no category yet, ${amount(s.unbudgetedCents)} went to categories with no budget, and ${amount(s.billsDueCents)} is set aside for bills due.`;
 }
 
 /**

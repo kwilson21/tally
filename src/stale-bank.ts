@@ -20,6 +20,30 @@ export type FlaggedBank =
 	| { name: string; reason: "sign-in" }
 	| { name: string; reason: "stale"; since: string };
 
+/** Home's selected wording and the date attached to the Safe to spend amount. */
+export function homeBankNotice(
+	flagged: FlaggedBank[],
+	today: string,
+): { words: string; otherBanks: string; asOf?: string } | null {
+	const [first, ...rest] = flagged;
+	if (!first) return null;
+	const words =
+		first.reason === "sign-in"
+			? `${first.name} needs signing in`
+			: `${first.name} stopped updating ${shortDay(first.since, today)}`;
+	const others =
+		rest.length === 0
+			? ""
+			: `, and ${rest.length} other ${rest.length === 1 ? "bank needs" : "banks need"} a look`;
+	return {
+		words: `${words}${others}`,
+		otherBanks: others,
+		...(first.reason === "stale" && {
+			asOf: shortDay(first.since, today),
+		}),
+	};
+}
+
 /**
  * The connected banks Home flags, in the order given. A bank that needs signing in says so, even
  * if it also hasn't synced. One with no readable sync time has nothing true to say, so only a bank
@@ -50,15 +74,12 @@ export function staleBankWords(
 	flagged: FlaggedBank[],
 	today: string,
 ): string | null {
-	const [first, ...rest] = flagged;
+	const first = flagged[0];
 	if (!first) return null;
+	const notice = homeBankNotice(flagged, today);
 	const lead =
 		first.reason === "sign-in"
 			? `${first.name} needs you to sign in again`
 			: `${first.name} hasn't synced since ${shortDay(first.since, today)}`;
-	const others =
-		rest.length === 0
-			? ""
-			: `, and ${rest.length} other ${rest.length === 1 ? "bank needs" : "banks need"} a look`;
-	return `${lead}${others}, so Safe to spend may be too high.`;
+	return `${lead}${notice?.otherBanks ?? ""}, so Safe to spend may be too high.`;
 }
