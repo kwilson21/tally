@@ -334,6 +334,7 @@ export const DECIDED: readonly {
 		title: "P91 · Documents in the menu",
 		outcome:
 			"Option A: More and the sidebar leave Documents out until receipts are built, so no menu item leads to a page that isn't built (decision 82).",
+		issue: 246,
 	},
 	{
 		title: "P92 · Deleting a cash entry",
@@ -345,11 +346,13 @@ export const DECIDED: readonly {
 		title: "P93 · Send feedback in the demo",
 		outcome:
 			"Option A: in the demo, the box saying feedback is off sits right under the title, before the privacy text (decision 82).",
+		issue: 246,
 	},
 	{
 		title: "P94 · A How this works link on Bills",
 		outcome:
 			"Option A: a How this works link under Bills' status sentence, to the Bills section of How Tally works (decision 82).",
+		issue: 246,
 	},
 ];
 

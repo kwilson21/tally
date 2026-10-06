@@ -117,4 +117,16 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 
 The owner answered the 53 open questions on these issues by seeing a picture of each answer (decisions 79–81, [docs/reviews/open-questions-2026-10-05.md](docs/reviews/open-questions-2026-10-05.md)), and the picked drawings now say which rules are settled. Some issues still list smaller points under "Open (ask the owner)"; each goes to the owner, with a picture, before that issue is briefed. #74's pace line is covered by #199 and closed.
 
+## Polish after Phase 3.5 (Oct 6; the design session)
+
+A pass over every page Phase 3.5 touched, at 1280×800 and 390×844, on the demo and the family app, against DESIGN.md.
+
+| Part | PR or issue |
+|---|---|
+| 44px targets and token colours only | [#240](https://github.com/kwilson21/tally/pull/240) |
+| Headings at their type roles, Transactions lined up | [#241](https://github.com/kwilson21/tally/pull/241) |
+| Copy, disclosure chevrons, How Tally works | [#242](https://github.com/kwilson21/tally/pull/242) |
+| The owner's picks Q56–Q59: Documents out of the menu, the cash delete question, the demo's feedback page, Bills' How link (decision 82, P91–P94) | [#246](https://github.com/kwilson21/tally/pull/246) |
+| Undo after deleting a cash entry (decision 82, Q57 D); for the build session | [#244](https://github.com/kwilson21/tally/issues/244) |
+
 Later list (not scheduled): see spec §12.
