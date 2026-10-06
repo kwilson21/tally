@@ -20,6 +20,7 @@ import {
 	FOLLOWS_PURCHASE,
 	INCLUDED,
 	INCLUDED_ROW,
+	includedSql,
 	PAYS_A_BILL,
 	paysBillSql,
 } from "./counted-month";
@@ -1008,10 +1009,12 @@ export async function pendingForJev(
 	db: D1Database,
 	limit: number,
 	{ categories = true, ids }: { categories?: boolean; ids?: number[] } = {},
-): Promise<(JevInput & { id: number; categoryOnly: boolean })[]> {
+): Promise<
+	(JevInput & { id: number; categoryOnly: boolean; merchantKey: string })[]
+> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
+			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note,
 				${CATEGORY_ONLY} AS categoryOnly
@@ -1026,11 +1029,112 @@ export async function pendingForJev(
 			LIMIT ?`,
 		)
 		.bind(categories ? 1 : 0, ...(ids ? [JSON.stringify(ids)] : []), limit)
-		.all<JevInput & { id: number; categoryOnly: number }>();
+		.all<
+			JevInput & { id: number; categoryOnly: number; merchantKey: string }
+		>();
 	return results.map((transaction) => ({
 		...transaction,
 		categoryOnly: transaction.categoryOnly === 1,
 	}));
+}
+
+/** The recent categories chosen by a person or merchant rule, fetched once for a Jev page. */
+export async function merchantCategoryHistoryForJev(
+	db: D1Database,
+	transactions: { id: number; merchantKey: string; rawName?: string }[],
+): Promise<Map<string, string[][]>> {
+	const requested = [
+		...new Map(
+			transactions.map((transaction) => [
+				`${transaction.merchantKey}\0${transaction.rawName ?? ""}`,
+				{
+					merchantKey: transaction.merchantKey,
+					rawName: transaction.rawName ?? null,
+				},
+			]),
+		).values(),
+	];
+	if (requested.length === 0) return new Map();
+	const { results } = await db
+		.prepare(
+			// Match requested merchant keys through the merchant-history index before ranking trips.
+			`WITH requested AS (
+				SELECT json_extract(value, '$.merchantKey') AS merchant_key,
+					json_extract(value, '$.rawName') AS raw_name FROM json_each(?)),
+			matched_transactions AS (
+				SELECT r.merchant_key, t.id, t.date, t.raw_name, t.parent_id, t.is_split,
+					t.category_id, t.category_source, t.pending, t.excluded
+				FROM requested r JOIN transactions t INDEXED BY transactions_merchant_history
+					ON r.merchant_key = ${merchantKeySql("t")}
+				UNION ALL
+				SELECT r.merchant_key, t.id, t.date, t.raw_name, t.parent_id, t.is_split,
+					t.category_id, t.category_source, t.pending, t.excluded
+				FROM requested r JOIN transactions t INDEXED BY transactions_raw_name
+					ON t.raw_name = r.raw_name AND NULLIF(t.merchant_name, '') IS NULL
+				WHERE r.raw_name IS NOT NULL AND r.raw_name != r.merchant_key),
+			 asked AS (SELECT value AS transaction_id FROM json_each(?)),
+			 category_rows AS (
+				SELECT t.merchant_key AS merchant_key, t.id AS trip_id, t.date AS trip_date,
+					t.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
+				FROM matched_transactions t
+				JOIN categories c ON c.id = t.category_id
+				WHERE t.parent_id IS NULL
+					AND t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND c.archived = 0
+					AND t.category_source IN ('user', 'merchant_rule')
+					AND t.is_split = 0 AND ${INCLUDED} AND t.pending = 0
+				UNION ALL
+				SELECT p.merchant_key AS merchant_key, p.id AS trip_id, p.date AS trip_date,
+					p.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
+				FROM matched_transactions p
+				JOIN transactions t ON t.parent_id = p.id AND t.is_split = 0
+				JOIN categories c ON c.id = t.category_id
+				WHERE p.is_split = 1 AND p.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND c.archived = 0
+					AND t.category_source IN ('user', 'merchant_rule')
+					AND ${INCLUDED} AND t.pending = 0 AND ${includedSql("p")} AND p.pending = 0
+			),
+			 category_deduped AS (
+				SELECT merchant_key, trip_id, trip_date, trip_order_id, category_name, category_order_id,
+					ROW_NUMBER() OVER (
+						PARTITION BY merchant_key, trip_id, category_name ORDER BY category_order_id
+					) AS category_position
+				FROM category_rows
+			),
+			usable_trips AS (
+				SELECT DISTINCT merchant_key, trip_id, trip_date, trip_order_id
+				FROM category_deduped WHERE category_position = 1
+			),
+			ranked_trips AS (
+				SELECT merchant_key, trip_id,
+					ROW_NUMBER() OVER (PARTITION BY merchant_key ORDER BY trip_date DESC, trip_order_id DESC) AS position
+				FROM usable_trips
+			)
+			SELECT d.merchant_key, r.position, d.category_name
+			FROM category_deduped d JOIN ranked_trips r ON r.merchant_key = d.merchant_key AND r.trip_id = d.trip_id
+			WHERE d.category_position = 1 AND r.position <= 5
+			ORDER BY d.merchant_key, r.position, d.category_order_id`,
+		)
+		.bind(
+			JSON.stringify(requested),
+			JSON.stringify(transactions.map((transaction) => transaction.id)),
+		)
+		.all<{ merchant_key: string; position: number; category_name: string }>();
+	const history = new Map<string, string[][]>();
+	let lastMerchantKey: string | undefined;
+	let lastPosition = 0;
+	for (const row of results) {
+		const trips = history.get(row.merchant_key) ?? [];
+		if (row.merchant_key !== lastMerchantKey || row.position !== lastPosition) {
+			trips.push([]);
+			lastMerchantKey = row.merchant_key;
+			lastPosition = row.position;
+		}
+		trips[trips.length - 1]?.push(row.category_name);
+		history.set(row.merchant_key, trips);
+	}
+	return history;
 }
 
 /** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */

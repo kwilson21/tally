@@ -1085,11 +1085,12 @@ describe("scheduled handler: new category suggestions", () => {
 	});
 });
 
-// D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one (a call to
-// Jev costs about three: the switches read before it and after it, and saving its answer; a name about
-// three too, and a new category suggestion about five). Each of production's three runs and the demo's one is
-// an invocation of its own, so each has to fit, with its worst case in it: 09:00 the sync and the feedback
-// retry, 09:20 100 names, 200 Jev calls and 5 new category suggestions, 09:40 300 Jev calls.
+// D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one. A Jev call
+// costs about three (the switches read before and after it, and saving its answer), plus one merchant-history
+// query per Jev run; a name costs about three too, and each new category suggestion about five. Each of
+// production's three runs and the demo's one is an invocation of its own, so each has to fit its worst case:
+// 09:00 the sync and feedback retry, 09:20 100 names, 200 Jev calls and 5 new category suggestions, and
+// 09:40 300 Jev calls.
 describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 	const D1_LIMIT = 1000;
 	const NEW_TRANSACTIONS = 100;

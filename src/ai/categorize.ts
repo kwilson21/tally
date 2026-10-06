@@ -21,6 +21,8 @@ export type JevInput = {
 	accountType: string;
 	plaidCategory?: string | null;
 	note?: string | null;
+	/** The merchant's five most recent trips, each with distinct chosen categories in split-part order. */
+	merchantCategoryHistory?: string[][];
 };
 
 export type JevResult =
@@ -42,6 +44,14 @@ export async function askJev(
 	apiKey: string,
 	fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = fetch,
 ): Promise<JevResult> {
+	const categoryInstructions = [
+		"Which of this household's budget categories does this bank transaction belong to?",
+		...(input.merchantCategoryHistory?.length
+			? [
+					"The state includes this merchant's recent categories chosen by a person or a merchant rule; use them as context for this category guess.",
+				]
+			: []),
+	].join(" ");
 	const body = {
 		model: "jev-latest",
 		state: {
@@ -52,12 +62,14 @@ export async function askJev(
 			account_type: input.accountType,
 			...(input.plaidCategory ? { plaid_category: input.plaidCategory } : {}),
 			...(input.note ? { note: input.note } : {}),
+			...(input.merchantCategoryHistory?.length
+				? { merchant_category_history: input.merchantCategoryHistory }
+				: {}),
 		},
 		questions: {
 			category: {
 				type: "choice",
-				instructions:
-					"Which of this household's budget categories does this bank transaction belong to?",
+				instructions: categoryInstructions,
 				criteria: {
 					...Object.fromEntries(categories.map((name) => [name, null])),
 					[NONE_FIT]:
