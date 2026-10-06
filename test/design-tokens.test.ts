@@ -68,8 +68,12 @@ const CORNER_SHAPE_EXCEPTIONS: Record<string, string> = {
 		"P75 draws round corners, squircles and a mix side by side, so it sets corner-shape on its own pictures",
 };
 
-/** Any spelling of the property: corner-shape, a per-corner longhand like corner-top-left-shape, or cornerShape. */
-const CORNER_SHAPE = /\bcorner-(?:[a-z]+-)*shape\b|\bcornerShape\b/;
+/**
+ * Any spelling of the property: corner-shape or a per-corner longhand like corner-top-left-shape, in
+ * any case (CSS property names ignore it), or a script name like cornerShape or cornerTopLeftShape.
+ */
+const CORNER_SHAPE =
+	/\bcorner-(?:[a-z]+-)*shape\b|\bcorner(?:[A-Z][a-z]+)*Shape\b/i;
 
 /** The files outside the list above that name corner-shape, with the word they use. */
 function cornerShapeProblems(file: string, text: string): string[] {
@@ -501,8 +505,16 @@ describe("design tokens (DESIGN.md)", () => {
 				'<p class="hover:[corner-shape:round]">',
 				"el.style.cornerShape = 'squircle';",
 				'<p class="[corner-top-left-shape:squircle]">',
+				// A per-corner name in script, and CSS, whose property names ignore case.
+				"el.style.cornerTopLeftShape = 'squircle';",
+				"el.style.cornerStartEndShape = 'squircle';",
+				'el.style.setProperty("CORNER-SHAPE", "squircle");',
+				'<p class="[Corner-Bottom-Right-Shape:squircle]">',
 			])
-				expect(cornerShapeProblems("x.tsx", text)).toHaveLength(1);
+				expect([text, cornerShapeProblems("x.tsx", text)]).toEqual([
+					text,
+					[expect.any(String)],
+				]);
 			expect(
 				cornerShapeProblems(
 					"x.tsx",
