@@ -100,7 +100,7 @@ export function MoneyInput({
 						autofocus={autofocus}
 						aria-invalid={error ? "true" : undefined}
 						aria-describedby={error ? `${id}-error` : undefined}
-						class={`min-w-0 flex-1 bg-transparent text-[1.75rem] font-bold tabular-nums focus-visible:outline-none ${error ? "field-shake" : ""}`}
+						class={`-my-3 min-w-0 flex-1 self-stretch bg-transparent text-[1.75rem] font-bold tabular-nums focus-visible:outline-none ${error ? "field-shake" : ""}`}
 					/>
 					<div
 						data-money-js

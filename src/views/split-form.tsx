@@ -94,6 +94,10 @@ export function SplitForm({
 					<div
 						hx-post={`/transactions/${id}/split/line`}
 						hx-trigger="input delay:300ms"
+						// Every part shares one queue: a request waits for the one in flight, and only the newest
+						// waiting one is sent, so the last answer is always about the newest amounts. Nothing is
+						// cancelled, so htmx logs no error.
+						hx-sync="#split-line:queue last"
 						hx-target="#split-line"
 						hx-select="#split-line > *"
 						hx-swap="innerHTML"

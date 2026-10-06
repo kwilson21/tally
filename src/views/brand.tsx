@@ -25,7 +25,7 @@ export function Wordmark() {
 	return (
 		<a
 			href="/"
-			class="flex items-center gap-2 text-ink no-underline"
+			class="flex min-h-11 w-fit items-center gap-2 text-ink no-underline"
 			aria-label="Tally home"
 		>
 			<TallyMark />
