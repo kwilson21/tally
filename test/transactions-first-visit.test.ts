@@ -45,7 +45,7 @@ const NO_BANK = "Link a bank to see transactions.";
 const NO_BANK_HINT = "Tally can only read them; it can&#39;t move money.";
 const IMPORTING = "Importing your transactions…";
 const IMPORTING_HINT =
-	"Your bank sends about 90 days. It usually takes a few minutes.";
+	"Your bank sends about 90 days of them. It usually takes a few minutes.";
 const NO_MATCH = "No transactions match these filters.";
 
 // EmptyState's accent marks: the add sign's circle, and the magnifier's.
@@ -278,12 +278,15 @@ describe("the empty-list check", () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const full = recorded();
 		await get("/transactions", full.bindings);
-		expect(full.sql.some((s) => s.includes("plaid_items"))).toBe(false);
+		// The Account choice reads plaid_items too (to mark a disconnected bank), so this finds the
+		// first-visit statement by its answer.
+		const firstVisitCheck = (s: string) => s.includes("'importing'");
+		expect(full.sql.some(firstVisitCheck)).toBe(false);
 
 		await emptyHousehold();
 		const empty = recorded();
 		await get("/transactions", empty.bindings);
-		expect(empty.sql.filter((s) => s.includes("plaid_items"))).toHaveLength(1);
+		expect(empty.sql.filter(firstVisitCheck)).toHaveLength(1);
 	});
 });
 

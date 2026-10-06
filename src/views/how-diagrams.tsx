@@ -44,15 +44,25 @@ export function BillsDiagram({
 			>
 				due {due}
 			</text>
-			<path d="M120 50 H238" class="stroke-accent" />
+			<path d="M120 50 H238" class="stroke-ink" />
+			{/* Two short lines: "same merchant · ±10%" in one is wider than the gap and touches both boxes. */}
 			<text
 				x="179"
-				y="39"
+				y="28"
 				text-anchor="middle"
 				class="fill-muted"
 				font-size="11"
 			>
-				same merchant · ±{tolerance}
+				same merchant
+			</text>
+			<text
+				x="179"
+				y="41"
+				text-anchor="middle"
+				class="fill-muted"
+				font-size="11"
+			>
+				±{tolerance}
 			</text>
 			<text
 				x="179"
