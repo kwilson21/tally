@@ -14,7 +14,7 @@ export type MerchantRuleRow = {
 	transactions: number;
 };
 
-/** All active rules and the matching subset, with indexed per-merchant all-time counts. */
+/** All active rules and the matching subset, with one grouped all-time transaction count. */
 export async function merchantRules(
 	db: D1Database,
 	search = "",
@@ -29,9 +29,13 @@ export async function merchantRules(
 			.prepare(
 				`SELECT m.raw_name AS merchantKey, COALESCE(NULLIF(m.display_name, ''), m.raw_name) AS merchant,
 					c.id AS categoryId, c.name AS category, c.icon, c.color, c.archived,
-					(SELECT COUNT(*) FROM transactions t
-						WHERE t.parent_id IS NULL AND ${merchantKeySql("t")} = m.raw_name) AS transactions
+					COALESCE(transaction_counts.transactions, 0) AS transactions
 				FROM merchants m JOIN categories c ON c.id = m.default_category_id
+				LEFT JOIN (
+					SELECT ${merchantKeySql("t")} AS merchantKey, COUNT(*) AS transactions
+					FROM transactions t WHERE t.parent_id IS NULL
+					GROUP BY ${merchantKeySql("t")}
+				) transaction_counts ON transaction_counts.merchantKey = m.raw_name
 				WHERE m.default_category_id IS NOT NULL
 					AND (? = '' OR instr(lower(COALESCE(NULLIF(m.display_name, ''), m.raw_name)), lower(?)) > 0)
 				ORDER BY merchant COLLATE NOCASE, merchantKey`,

@@ -21,23 +21,39 @@ export function MerchantRules({
 	rules,
 	total,
 	search = "",
+	focusRuleIndex,
+	focusHeading,
+	error,
 }: {
 	id?: string;
 	rules: MerchantRule[];
 	total: number;
 	search?: string;
+	focusRuleIndex?: number;
+	focusHeading?: boolean;
+	error?: string;
 }) {
 	const count = search
 		? `${rules.length} merchants matching “${search}”`
 		: `${total} merchants, A to Z`;
 	return (
 		<section id={id} aria-labelledby={`${id}-title`} class="mt-8 lg:max-w-3xl">
-			<h2 id={`${id}-title`} class="font-serif text-3xl font-semibold">
+			<h2
+				id={`${id}-title`}
+				tabindex={focusHeading ? -1 : undefined}
+				autofocus={focusHeading || undefined}
+				class="font-serif text-3xl font-semibold"
+			>
 				Tally's rules
 			</h2>
 			<p class="mt-1 text-muted">
 				What Tally does on its own, and what it won't suggest.
 			</p>
+			{error && (
+				<p role="alert" class="mt-3 text-sm text-over">
+					{error}
+				</p>
+			)}
 			<div class="mt-5">
 				<h3 class="text-xl font-semibold">Always for these merchants</h3>
 				{total > MERCHANT_RULE_SEARCH_THRESHOLD && (
@@ -90,7 +106,7 @@ export function MerchantRules({
 						/>
 					) : (
 						<ul class="mt-2 divide-y divide-rule border-y border-rule">
-							{rules.map((rule) => (
+							{rules.map((rule, index) => (
 								<li class="flex min-h-16 items-center gap-4 py-2">
 									<CategoryIcon icon={rule.icon} color={rule.color} />
 									<span class="min-w-0 flex-1">
@@ -128,7 +144,11 @@ export function MerchantRules({
 										{search && (
 											<input type="hidden" name="rules_search" value={search} />
 										)}
-										<Button type="submit" kind="text">
+										<Button
+											type="submit"
+											kind="text"
+											autofocus={focusRuleIndex === index || undefined}
+										>
 											Remove<span class="sr-only"> {rule.merchant}</span>
 										</Button>
 									</form>

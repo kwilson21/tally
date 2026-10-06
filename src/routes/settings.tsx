@@ -94,6 +94,10 @@ type View = {
 	open?: number | "new";
 	/** Move focus here after a swap: a row's summary, the Archived summary, or the Time zone row. */
 	focus?: number | "archived" | "zone";
+	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
+	focusRuleIndex?: number;
+	focusMerchantHeading?: boolean;
+	merchantRuleError?: string;
 	/** What was typed, shown again with the errors. */
 	values?: { name: string };
 	errors?: CategoryErrors;
@@ -107,7 +111,7 @@ type View = {
 		ticked: number[];
 		notes: Record<number, string>;
 	};
-	status?: 200 | 404 | 422;
+	status?: 200 | 400 | 404 | 422;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
 	timeZone?: string;
@@ -585,6 +589,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					archived: rule.archived === 1,
 				}))}
 				total={ruleData.total}
+				focusRuleIndex={view.focusRuleIndex}
+				focusHeading={view.focusMerchantHeading}
+				error={view.merchantRuleError}
 				search={
 					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
 				}
@@ -634,9 +641,19 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 settings.post("/settings/merchant-rules/remove", async (c) => {
 	const form = await c.req.formData();
 	const merchantKey = String(form.get("merchant") ?? "");
-	if (!merchantKey) return c.text("Invalid merchant.", 400);
-	const removed = await removeMerchantRule(c.env.DB, merchantKey);
 	const search = String(form.get("rules_search") ?? "");
+	if (!merchantKey) {
+		const message = "Choose a merchant to remove.";
+		if (c.req.header("HX-Request"))
+			c.header("HX-Trigger", JSON.stringify({ announce: message }));
+		return renderSettings(c, {
+			rulesSearch: search,
+			merchantRuleError: message,
+			status: 400,
+		});
+	}
+	const before = await merchantRules(c.env.DB, search);
+	const removed = await removeMerchantRule(c.env.DB, merchantKey);
 	const view = { rulesSearch: search };
 	if (!removed) {
 		if (c.req.header("HX-Request"))
@@ -655,7 +672,17 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 				announce: `${message}.`,
 			}),
 		);
-		return renderSettings(c, view);
+		const index = before.rules.findIndex(
+			(rule) => rule.merchantKey === merchantKey,
+		);
+		return renderSettings(c, {
+			...view,
+			focusRuleIndex:
+				before.rules.length > 1
+					? Math.max(0, Math.min(index, before.rules.length - 2))
+					: undefined,
+			focusMerchantHeading: before.rules.length <= 1,
+		});
 	}
 	return c.redirect(
 		`/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`,
