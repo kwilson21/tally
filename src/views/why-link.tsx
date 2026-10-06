@@ -5,6 +5,7 @@ export type WhySection =
 	| "exclusions"
 	| "categorization"
 	| "bills"
+	| "trends"
 	| "net-worth";
 
 /** A small link beside a rule's result to the exact section that explains it. */

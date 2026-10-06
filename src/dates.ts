@@ -78,6 +78,19 @@ export function monthName(month: string): string {
 	return MONTHS[Number(month.slice(5, 7)) - 1] ?? month;
 }
 
+/** The month `n` months before 'YYYY-MM' ("2026-01", 1 → "2025-12"); a negative `n` goes forward. */
+export function monthsBefore(month: string, n: number): string {
+	const [year = 0, m = 1] = month.split("-").map(Number);
+	const index = year * 12 + (m - 1) - n;
+	return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;
+}
+
+/** How many days 'YYYY-MM' has (28 to 31; leap years counted). */
+export function daysInMonth(month: string): number {
+	const [year = 0, m = 1] = month.split("-").map(Number);
+	return new Date(Date.UTC(year, m, 0)).getUTCDate();
+}
+
 const SHORT = [
 	"Jan",
 	"Feb",
@@ -92,6 +105,11 @@ const SHORT = [
 	"Nov",
 	"Dec",
 ];
+
+/** "2026-05" → "May", "2026-09" → "Sep". */
+export function shortMonthName(month: string): string {
+	return SHORT[Number(month.slice(5, 7)) - 1] ?? month;
+}
 
 /** "Sep 5", or "Dec 31, 2025" when its year isn't the year of `beside` (both YYYY-MM-DD). */
 export function shortDay(date: string, beside: string): string {

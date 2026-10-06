@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	DEFAULT_TIME_ZONE,
 	daysBefore,
+	daysInMonth,
 	householdToday,
 	monthName,
+	monthsBefore,
 	shortDay,
+	shortMonthName,
 	todayIn,
 } from "../src/dates";
 
@@ -131,4 +134,37 @@ describe("daysBefore", () => {
 	])("%s minus %i days is %s", (date, days, result) =>
 		expect(daysBefore(date, days)).toBe(result),
 	);
+});
+
+describe("monthsBefore", () => {
+	it.each([
+		["2026-10", 0, "2026-10"],
+		["2026-10", 1, "2026-09"],
+		["2026-10", 5, "2026-05"],
+		["2026-01", 1, "2025-12"],
+		["2026-03", 5, "2025-10"],
+		["2026-01", 13, "2024-12"],
+		["2026-12", -1, "2027-01"],
+	])("%s minus %i months is %s", (month, n, expected) =>
+		expect(monthsBefore(month, n)).toBe(expected),
+	);
+});
+
+describe("daysInMonth", () => {
+	it.each([
+		["2026-01", 31],
+		["2026-02", 28],
+		["2028-02", 29],
+		["2100-02", 28],
+		["2026-04", 30],
+		["2026-12", 31],
+	])("%s has %i days", (month, days) => expect(daysInMonth(month)).toBe(days));
+});
+
+describe("shortMonthName", () => {
+	it.each([
+		["2026-05", "May"],
+		["2026-09", "Sep"],
+		["2027-01", "Jan"],
+	])("%s is %s", (month, name) => expect(shortMonthName(month)).toBe(name));
 });

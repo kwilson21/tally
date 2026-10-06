@@ -123,7 +123,26 @@ export function TransactionRow({
 	/** Leave out the list item when another interactive row owns the wrapper. */
 	bare?: boolean;
 }) {
-	const { kind, caption, tag } = rowCaption(row);
+	const { kind, caption: said, tag } = rowCaption(row);
+	// "Counts in …" shows when a bill moved the month, except where a refund's caption already names it.
+	const countsIn =
+		row.countsInMonth &&
+		row.countsInMonth !== row.refundPurchaseDate?.slice(0, 7)
+			? row.countsInMonth
+			: null;
+	// Pending (P34 A, decision 72) joins the one caption line in muted words, never cut off. On a row that
+	// needs a category it takes the bank text's place; after a lone category or Income it reads
+	// "Groceries · Pending"; when the caption already says more (Excluded, Split from…, Refund for…,
+	// Counts in…) it goes first, so it is always the first thing read.
+	const pending = row.pending === true;
+	const caption =
+		pending && kind === "needs" && tag && said === row.rawName ? null : said;
+	const pendingLast =
+		pending &&
+		!countsIn &&
+		(kind === "income" ||
+			(kind === "category" && caption === row.categoryName));
+	const pendingFirst = pending && !pendingLast;
 	const Row = href ? "a" : "div";
 	const content = (
 		<>
@@ -142,18 +161,23 @@ export function TransactionRow({
 						{row.displayName}
 					</span>
 					<span class="flex min-w-0 items-center gap-2 leading-6">
+						{pendingFirst && (
+							<span class="shrink-0 text-muted">
+								Pending{(caption || countsIn) && " ·"}
+							</span>
+						)}
 						{caption && <span class="truncate text-muted">{caption}</span>}
 						{/* A linked refund's caption names its purchase; the month shows only when a bill moved it. */}
-						{row.countsInMonth &&
-							row.countsInMonth !== row.refundPurchaseDate?.slice(0, 7) && (
-								<span class="shrink-0 text-muted">
-									{caption && "· "}Counts in{" "}
-									{new Intl.DateTimeFormat("en-US", {
-										month: "long",
-										timeZone: "UTC",
-									}).format(new Date(`${row.countsInMonth}-01T00:00:00Z`))}
-								</span>
-							)}
+						{countsIn && (
+							<span class="shrink-0 text-muted">
+								{caption && "· "}Counts in{" "}
+								{new Intl.DateTimeFormat("en-US", {
+									month: "long",
+									timeZone: "UTC",
+								}).format(new Date(`${countsIn}-01T00:00:00Z`))}
+							</span>
+						)}
+						{pendingLast && <span class="shrink-0 text-muted">· Pending</span>}
 						{tag && (
 							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
 								Needs category
