@@ -3,7 +3,7 @@ import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
-import { GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
+import { BankMark, GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
 
 type Caption = {
 	kind: "category" | "income" | "excluded" | "needs";
@@ -158,12 +158,12 @@ export function TransactionRow({
 				<RowIcon row={row} kind={kind} />
 				<span class="min-w-0 flex-1">
 					{row.nameSuggested ? (
-						// A name Tally guessed: the sparkles icon before it, and the dashed underline that says
-						// "not decided yet" (P29 A, P87 B, decisions 64 and 80). Both are for the eye; the words are for a screen reader.
+						// A name Tally guessed has the sparkles icon before it; a name the bank sent has none. Both have the dashed
+						// underline that says "not decided yet" (P29 A, P87 B, decisions 64 and 80). The marks are for the eye; the words are for a screen reader.
 						<span
 							class={`flex min-w-0 items-center gap-2 text-lg leading-6 ${kind === "excluded" ? "text-muted" : ""}`}
 						>
-							<GuessMark />
+							{row.nameFromBank ? <BankMark /> : <GuessMark />}
 							<span class={`truncate ${SUGGESTED_NAME_CLASS}`}>
 								{row.displayName}
 							</span>
