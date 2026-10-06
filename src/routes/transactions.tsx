@@ -1125,6 +1125,7 @@ function EditSheet({
 					<NameChoices
 						id="name"
 						names={tx.nameChoices.names}
+						source={tx.nameChoices.source}
 						tidied={tx.nameChoices.tidied}
 						count={tx.nameChoices.count}
 						picked={namePick}

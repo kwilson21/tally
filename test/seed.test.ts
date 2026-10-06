@@ -283,6 +283,25 @@ describe("resetDemo", () => {
 		expect(row?.raw_name).toBe("SP * CRAFTSUPPLY");
 	});
 
+	it("gives the CVS Pharmacy merchant row number 24, which the review's Skip screenshot uses", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const row = await env.DB.prepare(
+			"SELECT raw_name FROM merchants WHERE rowid = 24",
+		).first<{ raw_name: string }>();
+		expect(row?.raw_name).toBe("CVS Pharmacy");
+	});
+
+	it("gives the CVS charge id 118, whose merchant has the bank's own name suggested, which the bank-name edit-sheet screenshot uses", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const row = await env.DB.prepare(
+			"SELECT raw_name, merchant_name FROM transactions WHERE id = 118",
+		).first<{ raw_name: string; merchant_name: string }>();
+		expect(row).toEqual({
+			raw_name: "CHECKCARD 0921 CVS",
+			merchant_name: "CVS Pharmacy",
+		});
+	});
+
 	it("gives a Jev-picked Trader Joe's id 94, which the Jev edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		const row = await env.DB.prepare(
@@ -365,7 +384,8 @@ describe("resetDemo", () => {
 			display_name: string | null;
 		}>();
 		expect(results.map((m) => m.raw_name)).toEqual([
-			"CHECKCARD 0921 CVS",
+			// Plaid names the CVS charge, so its merchant is keyed by that name and its suggestion is the bank's (#194).
+			"CVS Pharmacy",
 			"POS 4417 CITY PARKING",
 			"SP * CRAFTSUPPLY",
 			"TST* CORNER DELI",
@@ -375,6 +395,9 @@ describe("resetDemo", () => {
 			expect(m.display_name).toBeNull();
 			expect(m.suggested_name.split("\n").length).toBeLessThanOrEqual(3);
 		}
+		expect(results.find((m) => m.raw_name === "CVS Pharmacy")).toMatchObject({
+			suggested_name: "CVS Pharmacy",
+		});
 		expect(
 			results.find((m) => m.raw_name === "SP * CRAFTSUPPLY"),
 		).toMatchObject({ suggested_name: "Craft Supply Co\nCraft Supply" });

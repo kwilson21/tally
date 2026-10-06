@@ -3,7 +3,12 @@ import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
 import { type Filters, likePattern, type Show } from "../transactions/filters";
-import { offeredNames, shownName } from "../transactions/name-suggestions";
+import {
+	type NameSource,
+	nameSource,
+	offeredNames,
+	shownName,
+} from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { readAiSwitches } from "./ai-switches";
@@ -72,17 +77,25 @@ export type ListRow = {
 	nameSuggested?: boolean;
 	maybeCategoryName?: string | null;
 	maybeCategoryNew?: boolean;
+	/** The suggested name is the bank's own, so it has no sparkles icon (P87 B, decision 80). */
+	nameFromBank?: boolean;
 };
 
 /** What a row needs from its merchant to decide the name it shows (src/transactions/name-suggestions.ts). */
-const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus`;
+const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus, ${merchantKeySql("t")} AS merchantKey`;
 type NameSuggestionColumns = {
 	suggestedNames: string | null;
 	suggestionStatus: string | null;
+	merchantKey: string;
 };
 
-/** True when a merchant's pending, unchosen suggested names (one per line) hold the search text; one `?`. */
-const SUGGESTED_NAME_MATCH = `EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL AND m.suggested_name LIKE ? ESCAPE '\\')`;
+/**
+ * True when a merchant's pending, unchosen suggested names (one per line) hold the search text; one `?`.
+ * With the names switch off only the bank's own name is offered (a suggestion equal to the merchant's
+ * key, src/transactions/name-suggestions.ts), so only that one can match.
+ */
+const suggestedNameMatch = (namesOn: boolean) =>
+	`EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL${namesOn ? "" : " AND m.suggested_name = m.raw_name"} AND m.suggested_name LIKE ? ESCAPE '\\')`;
 
 export const PAGE_SIZE = 25;
 
@@ -144,14 +157,14 @@ export async function listTransactions(
 	if (f.q) {
 		// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
 		// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
-		// while it is offered (the names switch is on), so what a row says can be searched for.
-		const suggested = namesOn ? SUGGESTED_NAME_MATCH : "0";
+		// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
+		// row says can be searched for.
 		where.push(
-			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggested})`,
+			`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)})`,
 		);
 		const pattern = likePattern(f.q);
 		args.push(pattern, pattern, pattern, pattern);
-		if (namesOn) args.push(pattern);
+		args.push(pattern);
 	}
 
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
@@ -175,7 +188,7 @@ export async function listTransactions(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
-				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, p.raw_name AS parentRawName,
+				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
@@ -206,6 +219,7 @@ export async function listTransactions(
 					parentMerchantName: string | null;
 					parentSuggestedNames: string | null;
 					parentSuggestionStatus: string | null;
+					parentMerchantKey: string | null;
 					parentRawName: string | null;
 					excluded: number;
 					paysBill: number;
@@ -226,15 +240,18 @@ export async function listTransactions(
 			parentMerchantName,
 			parentSuggestedNames,
 			parentSuggestionStatus,
+			parentMerchantKey,
 			parentRawName,
 			suggestedNames,
 			suggestionStatus,
+			merchantKey,
 			...r
 		}) => {
 			const shown = shownName({
 				chosen: merchantName,
 				stored: suggestedNames,
 				status: suggestionStatus,
+				key: merchantKey,
 				rawName: r.rawName,
 				namesOn,
 			});
@@ -245,6 +262,7 @@ export async function listTransactions(
 							chosen: parentMerchantName,
 							stored: parentSuggestedNames,
 							status: parentSuggestionStatus,
+							key: parentMerchantKey ?? parentRawName,
 							rawName: parentRawName,
 							namesOn,
 						}).name
@@ -258,6 +276,7 @@ export async function listTransactions(
 				pending: r.pending === 1,
 				displayName: shown.name,
 				nameSuggested: shown.suggested,
+				nameFromBank: shown.fromBank,
 			};
 		},
 	);
@@ -334,7 +353,13 @@ export type TransactionDetail = ListRow & {
 	 * (up to three), the bank's text as the list shows it without a choice, and how many transactions
 	 * a name applies to. Null when there is nothing to choose.
 	 */
-	nameChoices?: { names: string[]; tidied: string; count: number } | null;
+	nameChoices?: {
+		names: string[];
+		/** Where the names came from: the bank sent them, or Tally guessed (P87 B). */
+		source: NameSource;
+		tidied: string;
+		count: number;
+	} | null;
 };
 
 export type RefundPurchase = {
@@ -384,7 +409,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${merchantKeySql("t")} AS merchantKey, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -421,7 +446,6 @@ export async function getTransaction(
 				| "pending"
 			> &
 				NameSuggestionColumns & {
-					merchantKey: string;
 					excluded: number;
 					paysBill: number;
 					income: number;
@@ -439,6 +463,7 @@ export async function getTransaction(
 	const merchant = {
 		stored: suggestedNames,
 		status: suggestionStatus,
+		key: merchantKey,
 		namesOn,
 	};
 	const shown = shownName({
@@ -458,10 +483,12 @@ export async function getTransaction(
 		pending: r.pending === 1,
 		displayName: shown.name,
 		nameSuggested: shown.suggested,
+		nameFromBank: shown.fromBank,
 		nameChoices:
 			offered.length > 0
 				? {
 						names: offered,
+						source: nameSource(offered, merchantKey),
 						tidied: tidyName(r.rawName),
 						count: await merchantTransactionCount(db, merchantKey),
 					}

@@ -318,6 +318,10 @@ describe("GET /design-system in the demo", () => {
 		// Where the guesses came from, under them: the icon, "Tally's guess" and a Why?.
 		expect(section).toContain("Tally&#39;s guess");
 		expect(section).toContain('href="/how-it-works#names"');
+		// A name the bank sent says so quietly: muted words, no icon, no Why? (P87 B).
+		expect(section).toMatch(
+			/<p id="ds-names-bank-source" class="text-sm text-muted">From your bank<\/p>/,
+		);
 		expect(section).toContain('role="alert"');
 		for (const [, label] of USE_SPEC_PARTS) {
 			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
@@ -334,7 +338,10 @@ describe("GET /design-system in the demo", () => {
 		const section =
 			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
 		expect(section).toContain("Tally&#39;s guess: ");
-		expect(section.match(/decoration-dashed/g)).toHaveLength(2);
+		// Two guessed names and one the bank sent: all dashed, only the guesses with the icon.
+		expect(section.match(/decoration-dashed/g)).toHaveLength(3);
+		expect(section.match(/Tally&#39;s guess: /g)).toHaveLength(2);
+		expect(section.match(/From your bank: /g)).toHaveLength(1);
 		expect(design).toMatch(
 			/\| TransactionRow \|[^\n]*sparkles icon[^\n]*dashed underline/,
 		);

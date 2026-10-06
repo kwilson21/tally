@@ -82,6 +82,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | What AI did this month (P43 A) | [#196](https://github.com/kwilson21/tally/issues/196) | #191 |
 | The demo's See it without AI (P44 A, "Tidied by Tally · Straight from the bank", decision 89) | [#197](https://github.com/kwilson21/tally/issues/197) | — |
 | Tally fills in a transaction's details (P89 A) | [#232](https://github.com/kwilson21/tally/issues/232) | #191, #194 |
+| Jev told each merchant's recent categories, so every guess improves (decision 90, Q69 A); built before #233 | [#265](https://github.com/kwilson21/tally/issues/265) | — |
 
 ## Phase 5 (decisions 66, 74, 76, 82; spec §8.4)
 
