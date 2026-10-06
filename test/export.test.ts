@@ -159,7 +159,7 @@ describe("data exports", () => {
 		).run();
 		await env.DB.batch([
 			env.DB.prepare(
-				"INSERT INTO balance_history (account_id, date, balance_cents) VALUES (1, '2026-09-01', 12345)",
+				"INSERT INTO balance_history (account_id, date, balance_cents) VALUES (1, '2020-01-01', 12345)",
 			),
 			env.DB.prepare(
 				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (1, 'Internet', 5000, 1, 'monthly', 'ISP')",

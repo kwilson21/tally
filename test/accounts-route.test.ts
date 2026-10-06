@@ -1,9 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
+import { chartStart } from "../src/net-worth";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { accounts } from "../src/routes/accounts";
 
@@ -98,6 +99,76 @@ describe("GET /accounts", () => {
 		expect(text).toContain("-$842.17");
 		expect(html).toContain('<span class="sr-only">ending in </span>');
 		expect(text).not.toContain("isn't built yet");
+	});
+
+	it("draws the last six months of net worth as a line under the headline, with the change in words (P25 A)", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const since = monthName(chartStart(today).slice(0, 7));
+		const { html } = await get("/accounts");
+		const text = textOf(html);
+		expect(text).toMatch(new RegExp(`Up \\$[\\d,]+ since ${since}\\.`));
+		// The picture has a text alternative with the same sentence.
+		expect(html).toMatch(
+			new RegExp(
+				`<svg[^>]*role="img"[^>]*aria-label="Net worth over time\\. Up \\$[\\d,]+ since ${since}\\.`,
+			),
+		);
+		expect(text).toContain(`${since}Today`);
+		// Under the headline, above the banks, and nothing else drawn: account rows keep today's balance (P26 A).
+		expect(html.indexOf("$15,768")).toBeLessThan(html.indexOf("<polyline"));
+		expect(html.indexOf("<polyline")).toBeLessThan(
+			html.indexOf("First Harbor Bank"),
+		);
+		expect(html.match(/<polyline/g)).toHaveLength(1);
+		expect(html).not.toContain("arrives later");
+	});
+
+	it("redraws the chart with the rest of Accounts, since it sits inside the summary a sync swaps", async () => {
+		const response = await accounts.request("/accounts", {}, plaidEnabled);
+		const summary =
+			(await response.text()).split('id="accounts-summary"')[1] ?? "";
+		expect(summary).toContain('data-chart="line"');
+	});
+
+	it("before two days of balances, says when the chart starts instead of drawing it (P31)", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		await env.DB.prepare("DELETE FROM balance_history WHERE date != ?")
+			.bind(today)
+			.run();
+		const { html } = await get("/accounts");
+		const text = textOf(html);
+		expect(text).toContain("Tally started following your balances today.");
+		expect(text).toContain(
+			"The chart starts tomorrow, with a second day of balances.",
+		);
+		expect(html).not.toContain("<polyline");
+		// The headline is still there.
+		expect(text).toContain("$15,768");
+	});
+
+	it("withholds the line while a connected account has no balance recorded, and says what it waits for", async () => {
+		// The headline counts this account's balance already; a line without it would disagree.
+		await env.DB.prepare(
+			"INSERT INTO accounts (plaid_item_id, name, mask, type, subtype, is_liability, balance_cents) VALUES (2, 'Store card', '3333', 'credit', 'credit card', 1, 25000)",
+		).run();
+		const { html } = await get("/accounts");
+		const text = textOf(html);
+		expect(html).not.toContain("<polyline");
+		expect(html).not.toContain('data-chart="line"');
+		expect(text).toContain(
+			"The chart starts once every account has a balance.",
+		);
+		// $4,210.55 + $12,400.00 − $842.17 − $250.00
+		expect(text).toContain("$15,518");
+		expect(text).toContain("Store card");
+	});
+
+	it("with no balance recorded yet, says the chart starts with the next sync", async () => {
+		await env.DB.prepare("DELETE FROM balance_history").run();
+		const { html } = await get("/accounts");
+		expect(textOf(html)).toContain("The chart starts with the next sync.");
+		expect(html).not.toContain("<polyline");
+		expect(textOf(html)).not.toContain("Tally started following");
 	});
 
 	it("says in words when a bank's login needs fixing", async () => {

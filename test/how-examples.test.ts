@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { netWorthCents } from "../src/db/accounts";
 import {
 	budgetExample,
 	categorizationExample,
 	exclusionsExample,
+	netWorthExample,
 	transactionsExample,
 	trendsExample,
 } from "../src/how-it-works/examples";
@@ -96,6 +98,51 @@ describe("trendsExample", () => {
 				label: "",
 			}),
 		).toBeNull();
+	});
+});
+
+describe("netWorthExample", () => {
+	const checking = { balanceCents: 421055, isLiability: false };
+	const savings = { balanceCents: 1240000, isLiability: false };
+	const card = { balanceCents: 84217, isLiability: true };
+
+	it("adds what the accounts hold and subtracts what is owed, in exact cents", () => {
+		expect(netWorthExample([checking, savings, card])).toBe(
+			"$16,610.55 in accounts − $842.17 owed = $15,768.38 net worth.",
+		);
+	});
+
+	it("says nothing is owed instead of subtracting $0.00", () => {
+		expect(netWorthExample([checking, savings])).toBe(
+			"$16,610.55 in accounts and nothing owed, so net worth is $16,610.55.",
+		);
+	});
+
+	it("leaves out a disconnected bank's accounts, as the headline does", () => {
+		expect(
+			netWorthExample([checking, { ...card, connected: false }, savings]),
+		).toBe(
+			"$16,610.55 in accounts and nothing owed, so net worth is $16,610.55.",
+		);
+	});
+
+	it("shows a net worth below zero with a minus sign", () => {
+		expect(netWorthExample([{ ...checking, balanceCents: 10000 }, card])).toBe(
+			"$100.00 in accounts − $842.17 owed = -$742.17 net worth.",
+		);
+	});
+
+	it("says the same net worth as Accounts' headline", () => {
+		const accounts = [checking, savings, card, { ...card, connected: false }];
+		const net = netWorthCents(accounts);
+		expect(netWorthExample(accounts)).toContain(
+			`= ${(net / 100).toLocaleString("en-US", { style: "currency", currency: "USD" })} net worth.`,
+		);
+	});
+
+	it("is null when no account counts, so the page can say so in a sentence", () => {
+		expect(netWorthExample([])).toBeNull();
+		expect(netWorthExample([{ ...card, connected: false }])).toBeNull();
 	});
 });
 

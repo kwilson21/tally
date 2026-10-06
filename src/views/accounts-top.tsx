@@ -1,15 +1,19 @@
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
+import type { NetWorthView } from "../net-worth";
+import { NetWorthChart } from "./net-worth-chart";
 
 /**
- * The Accounts screen's top (round 5 study): the title, Net worth in whole dollars as the serif headline,
- * and a ruled space where the net-worth chart goes in Phase 4.
+ * The Accounts screen's top (round 5 study, P25 A): the title, Net worth in whole dollars as the
+ * serif headline, and the net-worth chart in the ruled space under it.
  */
 export function AccountsTop({
 	netWorthCents,
+	history,
 	action,
 }: {
 	netWorthCents: number;
+	history: NetWorthView;
 	action?: Child;
 }) {
 	return (
@@ -20,19 +24,7 @@ export function AccountsTop({
 			<p class="font-serif text-6xl font-semibold tracking-tight lg:text-7xl">
 				{formatCents(netWorthCents, { wholeDollars: true })}
 			</p>
-			{/* Paper's own rules, like a ledger page waiting for the chart; decorative until Phase 4. */}
-			<div
-				data-chart-space
-				aria-hidden="true"
-				class="mt-6 flex h-20 flex-col justify-between lg:h-32"
-			>
-				<div class="border-t border-rule" />
-				<div class="border-t border-rule" />
-				<div class="border-t border-rule" />
-				<div class="border-t border-rule" />
-				<div class="border-t border-rule" />
-			</div>
-			<p class="mt-2 text-sm text-muted">Net worth over time arrives later</p>
+			<NetWorthChart view={history} />
 		</>
 	);
 }
