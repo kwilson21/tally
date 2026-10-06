@@ -25,15 +25,55 @@ const STATUS_HEADING = {
 } as const;
 
 /** A bill group names status with both an icon and words, never color alone. */
-export function BillStatusHeading({ status }: { status: BillStatus }) {
+export function BillStatusHeading({
+	status,
+	totalCents,
+}: {
+	status: BillStatus;
+	totalCents?: number;
+}) {
 	const look = STATUS_HEADING[status];
 	return (
 		<h2 class="flex items-center gap-2 text-sm text-muted">
-			<span class={look.tone}>
-				<Icon name={look.icon} class="size-4" />
+			<span class="flex min-w-0 items-center gap-2">
+				<span class={look.tone}>
+					<Icon name={look.icon} class="size-4" />
+				</span>
+				{look.text}
 			</span>
-			{look.text}
+			{totalCents !== undefined && (
+				<span class="ml-auto shrink-0">
+					{formatCents(totalCents)}
+					{status === "upcoming" ? " this month" : ""}
+				</span>
+			)}
 		</h2>
+	);
+}
+
+export function BillMonthlyTotal({
+	monthlyCents,
+	stillToPayCents,
+	month,
+}: {
+	monthlyCents: number;
+	stillToPayCents: number;
+	month: string;
+}) {
+	const monthName = new Intl.DateTimeFormat("en-US", {
+		month: "long",
+		timeZone: "UTC",
+	}).format(
+		new Date(
+			Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1),
+		),
+	);
+	return (
+		<p class="text-sm text-muted">
+			{formatCents(monthlyCents, { wholeDollars: true })} a month in bills,{" "}
+			{formatCents(stillToPayCents, { wholeDollars: true })} still to pay in{" "}
+			{monthName}
+		</p>
 	);
 }
 
