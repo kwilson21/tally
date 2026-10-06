@@ -13,6 +13,7 @@ import { MixedStoreProposals } from "./proposals-mixed";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
+import { Phase5PicksProposals } from "./proposals-phase5-picks";
 import { Phase5PlansProposals } from "./proposals-phase5-plans";
 import { Phase5TransactionsProposals } from "./proposals-phase5-transactions";
 import { Phase35Proposals } from "./proposals-phase35";
@@ -20,8 +21,7 @@ import { Phase35StatesProposals } from "./proposals-phase35-states";
 import { PolishProposals } from "./proposals-polish";
 import { RulesProposals } from "./proposals-rules";
 
-// What the owner decided on 2026-09-26, 2026-09-28 and 2026-09-29 (decisions 46, 48, 50, 54, 55, 59
-// and 60), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 82), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -331,6 +331,48 @@ export const DECIDED: readonly {
 			"Option A, combined with B: Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80).",
 	},
 	{
+		title: "P91–P93 · Browse past months",
+		outcome:
+			"A finished month's number is its budgets minus its spending, with a tilted Under or Over stamp and one small bar per budgeted category against a dashed budget line; ‹ and › by the month name and a strip of month dots; its rows read “spent / budget” and open nothing, and its Not budgeted categories are listed with what each spent (decision 82).",
+		issue: 198,
+	},
+	{
+		title: "P94–P97 · Home's top",
+		outcome:
+			"Safe to spend shows a negative number in brick (“−$40”) with Why? beside the label; the daily amount becomes a forecast chart (“$120 under by Oct 31, at this pace”); a bank that's behind gets an “as of Oct 2” tag and a soft line with a Fix button; the Band reads “12 need a category” with a “+1 older” chip (decision 82).",
+		issue: 199,
+	},
+	{
+		title: "P98–P99 · Budget rows and the sheet's link",
+		outcome:
+			"Refunds that outweigh spending read “+$20” in green with an empty bar; a bar turns amber at 80% or more; a $0 budget with nothing spent shows no warning; the sheet's link is a “12 transactions ›” button, shown only when there are some (decision 82).",
+		issue: 200,
+	},
+	{
+		title: "P100 · Taking the savings goal away",
+		outcome:
+			"Setting the goal to $0 removes it, and it goes back under Not budgeted as “Set a goal”; Adjust's − and + don't change it (decision 82).",
+		issue: 201,
+	},
+	{
+		title: "P101–P105 · Planned expenses",
+		outcome:
+			"A plan has no category; its link picker lists money out from its month and the next, closest amount first; its sheet changes it, deletes it and unlinks a payment; once paid it shows with the paid bills; the Planned group has its own total, outside the monthly total; an unpaid one is asked about one at a time, Move to Nov or Drop (decision 82).",
+		issue: 202,
+	},
+	{
+		title: "P106 · Part paid, in a group's total",
+		outcome:
+			"Each group's heading total counts what's left of a part-paid bill, and the monthly total still counts it in full (decision 82).",
+		issue: 207,
+	},
+	{
+		title: "P107–P109 · The reconnect email",
+		outcome:
+			"One household switch, “Bank sign-in emails”, on to start, to everyone who has signed in within the last 90 days, with each address listed under a plain disclosure with Remove for anyone in the family; sent at the nightly run, then every 3 days until fixed; the email shows the bank, its account endings as chips, the last synced date and one Open Accounts button (decision 82); Resend sends it first, through plain fetch, with Cloudflare's own email as the fallback, and nothing has to be confirmed (decision 86).",
+		issue: 203,
+	},
+	{
 		title: "P110 · Documents in the menu",
 		outcome:
 			"Option A: More and the sidebar leave Documents out until receipts are built, so no menu item leads to a page that isn't built (decision 84).",
@@ -459,6 +501,19 @@ export function Proposals() {
 				<Phase5PlansProposals />
 				<Phase5BillsProposals />
 				<Phase5TransactionsProposals />
+			</section>
+
+			<section aria-labelledby="picks-title" class="mt-12">
+				<h2 id="picks-title" class="font-serif text-3xl font-semibold">
+					Picked: Phase 5's open questions
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					The owner's picks on the open questions of #198–#203 and #207, decided
+					by seeing a picture of each (spec §8.4, decision 82). Each drawing is
+					the pick as it will be built; a pick that replaces an earlier drawing
+					says so there.
+				</p>
+				<Phase5PicksProposals />
 			</section>
 
 			<section aria-labelledby="open-title" class="mt-12">

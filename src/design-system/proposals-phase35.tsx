@@ -21,7 +21,7 @@ import { Icon } from "../views/icons";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
 import { rowCaption, TransactionRow } from "../views/transaction-row";
-import { Fixed, Options, Sheet, Title } from "./proposal-parts";
+import { Fixed, Options, Replaced, Sheet, Title } from "./proposal-parts";
 import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
@@ -1028,6 +1028,10 @@ export function Phase35Proposals() {
 					names the first and counts the rest (“…, and 1 other bank needs a
 					look, so …”), and it goes once the bank is fixed or syncs again.
 				</NeedsLine>
+				<Replaced by="P96">
+					Option A's look: the plain alert-icon line and its Check Accounts
+					link. The line's job stays.
+				</Replaced>
 				<Options
 					options={[
 						{

@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
+import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
 
 const get = async (path: string) => {
@@ -18,7 +19,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P90 and P110–P113 with one recommended option each, marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P113 with one recommended option each (P91–P109 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -27,26 +28,27 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P90, and P110 to P113, is drawn, and each id is used once. P91–P109
-		// are the build session's Phase 5 picks (decision 82), drawn in their own PR.
+		// Every proposal from P23 to P113 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 113; n++)
-			if (n <= 90 || n >= 110) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 113; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
-		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. Every
-		// other proposal marks exactly one Recommended, with its reason.
+		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
+		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
+		// draws the pick and nothing to choose between. Every other proposal marks exactly one
+		// Recommended, with its reason.
 		for (const id of ids) {
+			const n = Number(id.match(/^p(\d+)/)?.[1]);
+			const asDrawn = id === "p31-empty" || (n >= 91 && n <= 109);
 			const start = html.indexOf(`<section id="${id}"`);
 			// Up to the next proposal (a picture can hold sections of its own).
 			const next = html.indexOf('<section id="p', start + 1);
 			const section = html.slice(start, next === -1 ? undefined : next);
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
-			expect([id, recommended]).toEqual([id, id === "p31-empty" ? 0 : 1]);
+			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
 			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
 				recommended,
 			);
 			// P34 on mark the owner's pick (decisions 72–84); P60 and P111 took two options.
-			const n = Number(id.match(/^p(\d+)/)?.[1]);
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const expected =
 				n < 34
@@ -67,12 +69,33 @@ describe("GET /design-system/proposals", () => {
 			options,
 		);
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(61);
+		expect(DECIDED.length).toBe(68);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
 			if (d.issue) expect(html).toContain(`/issues/${d.issue}"`);
 		}
+	});
+
+	it("draws a $0 budget and a far-over category without breaking the bars", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(html).not.toMatch(/NaN|Infinity/);
+		// The $0-budget category is in the chart's text alternative, and its bar is drawn as over.
+		expect(html).toContain("Gifts $45 of $0");
+		expect(html).toContain("+$45");
+		expect(html).toContain("+$650");
+	});
+
+	it("keeps a finished month's bar height finite and capped", () => {
+		const cap = 1.25;
+		expect(endBarRatio(4500, 0)).toEqual({ ratio: cap, capped: true });
+		expect(endBarRatio(0, 0)).toEqual({ ratio: 0, capped: false });
+		expect(endBarRatio(-2000, 25000)).toEqual({ ratio: 0, capped: false });
+		expect(endBarRatio(90000, 25000)).toEqual({ ratio: cap, capped: true });
+		const over = endBarRatio(28600, 25000);
+		expect(over.capped).toBe(false);
+		expect(over.ratio).toBeCloseTo(1.144, 6);
+		expect(endBarRatio(19200, 20000).ratio).toBeCloseTo(0.96, 6);
 	});
 
 	it("draws the owner's four polish picks (P110–P113, decision 84) as the app now words them", async () => {
@@ -163,6 +186,36 @@ describe("GET /design-system/proposals", () => {
 		const p113b = option(p113, "Option B · ");
 		expect(picked(p113b)).toBe(false);
 		expect(p113b).not.toContain("/how-it-works#bills");
+	});
+
+	it("says Resend sends the reconnect email first, with Cloudflare's own as the fallback and nothing to confirm (decision 86)", async () => {
+		const { html } = await get("/design-system/proposals");
+		const section = (id: string) => {
+			const start = html.indexOf(`<section id="${id}"`);
+			expect(start).toBeGreaterThan(-1);
+			const next = html.indexOf('<section id="p', start + 1);
+			return html.slice(start, next === -1 ? undefined : next);
+		};
+		// P107: the old rule, that each address must be verified in Cloudflare Email Routing, is gone.
+		const p107 = section("p107-email-settings");
+		expect(p107).not.toContain("Email Routing");
+		expect(p107).not.toContain("verified in Cloudflare");
+		expect(p107).toContain("nothing to confirm");
+		expect(p107).toContain("decision 86");
+		// P109: Resend is first, through plain fetch, with Cloudflare's email as the fallback.
+		const p109 = section("p109-email");
+		expect(p109).toContain("Resend");
+		expect(p109).toContain("plain fetch");
+		expect(p109).toContain("fallback");
+		expect(p109).toContain("decision 86");
+		// P56 (the older picture) no longer says Cloudflare's email is first.
+		const p56 = section("p56-reconnect-email");
+		expect(p56).not.toContain("with Resend as a fallback");
+		expect(p56).toContain("decision 86");
+		// The decided list says it too.
+		const decided = DECIDED.find((d) => d.title.startsWith("P107–P109"));
+		expect(decided?.outcome).toContain("Resend");
+		expect(decided?.outcome).toContain("decision 86");
 	});
 
 	it("is linked from the catalog", async () => {
