@@ -572,7 +572,7 @@ describe("GET /design-system in the demo", () => {
 		);
 		expect(
 			html.match(
-				/fixed bottom-\[calc\(6\.5rem\+var\(--safe-area-bottom\)\)\] right-\[calc\(1rem\+var\(--safe-area-right\)\)\]/g,
+				/fixed bottom-\[calc\(var\(--feedback-bottom\)\+var\(--safe-area-bottom\)\)\] right-\[calc\(1rem\+var\(--safe-area-right\)\)\]/g,
 			),
 		).toHaveLength(1);
 		const formSpecimen = specimens(html).find((tag) =>

@@ -62,10 +62,11 @@ export function Sidebar({ active }: { active?: NavKey }) {
 }
 
 /**
- * Sits a fixed bar directly on the phone tab bar: the tabs' 3.5rem links (min-h-14), their 1px
- * top rule and the bottom safe area. Change it with BottomTabs.
+ * Sits a fixed bar directly on the phone tabs: --tabs-height plus the bottom safe area. Change it
+ * with BottomTabs.
  */
-export const ABOVE_TABS = "bottom-[calc(3.5rem+1px+var(--safe-area-bottom))]";
+export const ABOVE_TABS =
+	"bottom-[calc(var(--tabs-height)+var(--safe-area-bottom))]";
 
 export function BottomTabs({ active }: { active?: NavKey }) {
 	return (
@@ -79,7 +80,7 @@ export function BottomTabs({ active }: { active?: NavKey }) {
 						<a
 							href={item.href}
 							aria-current={isCurrent(item, active) ? "page" : undefined}
-							class="flex min-h-14 flex-col items-center justify-center gap-1 text-xs text-muted no-underline aria-[current=page]:text-accent"
+							class="flex min-h-[calc(var(--tabs-height)-1px)] flex-col items-center justify-center gap-1 text-xs text-muted no-underline aria-[current=page]:text-accent"
 						>
 							<Icon name={item.icon} />
 							{item.label}
