@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BudgetAmount } from "../src/budget";
 import {
+	averageMonthlyCents,
 	buildTrends,
 	changeWords,
 	compareSentence,
@@ -24,6 +25,17 @@ describe("the rules' numbers", () => {
 	it("draws six months and needs a run of three", () => {
 		expect(TREND_MONTHS).toBe(6);
 		expect(RUN_MONTHS).toBe(3);
+	});
+});
+
+describe("averageMonthlyCents", () => {
+	it.each([
+		[[60000, 65000, 70000], 65000],
+		[[100, 100, 101], 100],
+		[[1, 1, 2], 1],
+		[[0, 0, 0], null],
+	])("averages three finished months %j in cents", (months, average) => {
+		expect(averageMonthlyCents(months)).toBe(average);
 	});
 });
 

@@ -16,6 +16,15 @@ export const TREND_MONTHS = 6;
 /** Months in a row a category must be under budget, or up, to be Going well or Worth a look. */
 export const RUN_MONTHS = 3;
 
+/** The positive, whole-cent average of exactly three finished months; halves round up. */
+export function averageMonthlyCents(months: number[]): number | null {
+	if (months.length !== 3) return null;
+	const average = Math.floor(
+		(months.reduce((sum, cents) => sum + cents, 0) * 2 + 3) / 6,
+	);
+	return average > 0 ? average : null;
+}
+
 export type TrendCategory = {
 	id: number;
 	name: string;

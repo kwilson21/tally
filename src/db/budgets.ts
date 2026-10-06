@@ -2,6 +2,8 @@
 import { budgetForMonth } from "../budget";
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import { NUDGE_STEP_CENTS } from "../budgets/nudge";
+import { monthsBefore } from "../dates";
+import { averageMonthlyCents } from "../trends";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
@@ -124,4 +126,37 @@ export async function lastMonthSpentCents(
 		.bind(categoryId, previousMonth(month))
 		.first<{ cents: number }>();
 	return row?.cents ?? 0;
+}
+
+/** Average counted spending in the last three finished months, only after three whole months exist. */
+export async function threeMonthAverageSpentCents(
+	db: D1Database,
+	categoryId: number,
+	month: string,
+): Promise<number | null> {
+	const months = [3, 2, 1].map((n) => monthsBefore(month, n));
+	const row = await db
+		.prepare(
+			`WITH monthly AS (
+				SELECT ${countedMonthSql()} AS month, SUM(t.amount_cents) AS cents
+				FROM transactions t ${COUNTED_JOINS}
+				WHERE ${COUNTED_SPENDING} AND ${countedCategorySql()} = ?4
+					AND ${countedMonthSql()} BETWEEN ?1 AND ?3
+				GROUP BY ${countedMonthSql()}
+			)
+			SELECT (SELECT MIN(date) FROM transactions) AS firstDate,
+				COALESCE(MAX(CASE WHEN month = ?1 THEN cents END), 0) AS first,
+				COALESCE(MAX(CASE WHEN month = ?2 THEN cents END), 0) AS second,
+				COALESCE(MAX(CASE WHEN month = ?3 THEN cents END), 0) AS third
+			FROM monthly`,
+		)
+		.bind(months[0], months[1], months[2], categoryId)
+		.first<{
+			firstDate: string | null;
+			first: number;
+			second: number;
+			third: number;
+		}>();
+	if (!row?.firstDate || row.firstDate > `${months[0]}-01`) return null;
+	return averageMonthlyCents([row.first, row.second, row.third]);
 }

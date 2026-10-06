@@ -7,6 +7,7 @@ import {
 	lastMonthSpentCents,
 	nudgeBudget,
 	setBudget,
+	threeMonthAverageSpentCents,
 } from "../src/db/budgets";
 import { settingsCategories } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
@@ -16,6 +17,39 @@ const MONTH = "2026-09";
 
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
+});
+
+describe("threeMonthAverageSpentCents", () => {
+	async function history(firstDate: string) {
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM transactions"),
+			db
+				.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, credit_reviewed, refund_of_id) VALUES
+				(800, 1, ?, 60000, 'FIRST', 1, 'user', NULL, NULL),
+				(801, 1, ?, 65000, 'SECOND', 1, 'user', NULL, NULL),
+				(802, 1, ?, 70000, 'THIRD', 1, 'user', NULL, NULL),
+				(803, 1, '2026-10-01', 75000, 'FOURTH', 1, 'user', NULL, NULL)`)
+				.bind(firstDate, "2026-08-01", "2026-09-01"),
+		]);
+	}
+
+	it("requires three whole months and then includes a part first month only after it leaves the window", async () => {
+		await history("2026-07-12");
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-10")).toBeNull();
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(70000);
+	});
+
+	it("counts a refund in its purchase month", async () => {
+		await history("2026-07-01");
+		await db
+			.prepare(`INSERT INTO transactions
+			(id, account_id, date, amount_cents, raw_name, category_id, category_source, credit_reviewed, refund_of_id)
+			VALUES (804, 1, '2026-10-04', -10000, 'REFUND', 1, 'user', 1, 802)`)
+			.run();
+		expect(await threeMonthAverageSpentCents(db, 1, "2026-11")).toBe(66667);
+	});
 });
 
 describe("setBudget", () => {
