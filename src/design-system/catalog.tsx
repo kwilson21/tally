@@ -2025,6 +2025,7 @@ function Feedback() {
 				id="toast"
 				title="Toast"
 				tier="interactive"
+				components={["Toast"]}
 				sentence="After an HTMX change the server sends HX-Trigger with toast and announce; toast.js shows the message for four seconds, fading in and out, and the announcer reads it. An error toast speaks as an alert and leads with the alert icon in the over token, so it is never colour alone; the same toast appears, over an open sheet too, when a request fails (the connection drops or the server sends a 500). These buttons send the same events."
 			>
 				<div class="flex flex-wrap gap-3">
@@ -2035,6 +2036,14 @@ function Feedback() {
 						data-ds-message="Saved Groceries' budget."
 					>
 						Show a saved toast
+					</Button>
+					<Button
+						type="button"
+						kind="secondary"
+						data-ds-toast="success"
+						data-ds-message="ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+					>
+						Show a 48-character name
 					</Button>
 					<Button
 						type="button"
