@@ -70,8 +70,35 @@ describe("GET /how-it-works in the demo", () => {
 		expect(decodeHtml(names)).toContain("the bank's own names still show");
 		expect(names).not.toMatch(/jev|workers ai/i);
 		expect(decodeHtml(names)).toMatch(
-			/In the demo for \w+: <\/span>(?:No merchant names are waiting for a choice|\d+ merchant names? (?:are|is) waiting for a choice)\./,
+			/In the demo, <\/span>(?:No merchant names are waiting for a choice|\d+ merchant names? (?:are|is) waiting for a choice)\./,
 		);
+	});
+
+	it("counts older pending merchant names without assigning them to this month", async () => {
+		await env.DB.prepare(
+			"DELETE FROM merchants WHERE suggestion_status = 'pending'",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('OLD SHOP 123', 'Old Shop', 'pending')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('old-shop-review', 1, '2025-01-10', 650, 'OLD SHOP 123')",
+		).run();
+
+		const demo = decodeHtml((await get("/how-it-works")).html);
+		const family = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		const names = (html: string) =>
+			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(names(demo)).toContain(
+			"In the demo, </span>1 merchant name is waiting for a choice.",
+		);
+		expect(names(family)).toContain(
+			"With your numbers, </span>1 merchant name is waiting for a choice.",
+		);
+		expect(names(demo)).not.toMatch(/for \w+:/);
+		expect(names(family)).not.toMatch(/for \w+:/);
 	});
 
 	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
@@ -170,7 +197,7 @@ describe("outside the demo", () => {
 		);
 		const names =
 			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
-		expect(names).toContain("With your numbers for");
+		expect(names).toContain("With your numbers,");
 		expect(names).toContain("No merchant names are waiting for a choice.");
 		expect(names).not.toMatch(/jev|workers ai/i);
 	});

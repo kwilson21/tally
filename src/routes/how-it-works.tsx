@@ -115,17 +115,20 @@ function Example({
 	children,
 	demo,
 	monthName,
+	label,
 }: {
 	children?: Child;
 	demo: boolean;
 	monthName: string;
+	label?: string;
 }) {
 	return (
 		<p class="mt-3 bg-band px-4 py-3">
 			<span class="font-semibold">
-				{demo
-					? `In the demo for ${monthName}: `
-					: `With your numbers for ${monthName}: `}
+				{label ??
+					(demo
+						? `In the demo for ${monthName}: `
+						: `With your numbers for ${monthName}: `)}
 			</span>
 			{children}
 		</p>
@@ -429,7 +432,11 @@ howItWorks.get("/how-it-works", async (c) => {
 							turn it back on, and the bank's own names still show.
 						</li>
 					</ul>
-					<Example demo={demo} monthName={monthLabel}>
+					<Example
+						demo={demo}
+						monthName={monthLabel}
+						label={demo ? "In the demo, " : "With your numbers, "}
+					>
 						{waitingNames.length === 0
 							? "No merchant names are waiting for a choice."
 							: `${waitingNames.length} merchant name${waitingNames.length === 1 ? " is" : "s are"} waiting for a choice.`}

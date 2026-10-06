@@ -146,6 +146,16 @@ describe("the Transactions list", () => {
 		);
 	});
 
+	it("shows the dashed-name note only for names displayed in the selected view", async () => {
+		await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+
+		const normal = (await get("/transactions?month=all")).html;
+		const raw = (await get("/transactions?month=all&raw=1")).html;
+		expect(normal).toContain("Dashed names are suggestions.");
+		expect(raw).not.toContain("Dashed names are suggestions.");
+	});
+
 	it("keeps a long unbroken name inside the edit sheet and its chips", async () => {
 		const raw = `SQ *${"x".repeat(48)}`;
 		const id = await charge(raw);

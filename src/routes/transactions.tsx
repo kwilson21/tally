@@ -298,7 +298,9 @@ async function renderList(
 	// Select and Done keep every filter and the page; Done drops only select mode.
 	const doneHref = `/transactions${listQuery ? `?${listQuery}` : ""}`;
 	const selectHref = `/transactions?${listQuery ? `${listQuery}&` : ""}select=1`;
-	const suggestedNameNote = rows.some((row) => row.nameSuggested) ? (
+	// The demo's raw view draws each row as the bank sends it; which rows are listed, and what a tap does, don't change.
+	const shown = (row: ListRow) => (filters.raw ? bankRow(row) : row);
+	const suggestedNameNote = rows.some((row) => shown(row).nameSuggested) ? (
 		<p class="mb-2 flex flex-wrap items-center gap-x-1 text-sm text-muted">
 			Dashed names are suggestions.
 			<WhyLink section="names" topic="suggested name" />
@@ -308,8 +310,6 @@ async function renderList(
 	// shows the no-JS hint, and htmx re-counts on load.
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
 	const htmx = c.req.header("HX-Request") === "true";
-	// The demo's raw view draws each row as the bank sends it; which rows are listed, and what a tap does, don't change.
-	const shown = (row: ListRow) => (filters.raw ? bankRow(row) : row);
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
 	return c.html(
