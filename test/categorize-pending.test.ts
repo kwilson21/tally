@@ -300,6 +300,32 @@ describe("categorizePending", () => {
 		expect(history).toEqual(new Map([["Bill Shop", [["Eating Out"]]]]));
 	});
 
+	it("includes only user and merchant-rule categories in history", async () => {
+		await db.batch([
+			...[
+				["JEV SOURCE", 2, "jev"],
+				["NO SOURCE", 3, null],
+				["USER SOURCE", 1, "user"],
+				["RULE SOURCE", 2, "merchant_rule"],
+			].map(([name, categoryId, source], index) =>
+				db
+					.prepare(
+						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, ?, 'Source Shop', ?, ?)",
+					)
+					.bind(
+						`${MONTH}-${String(index + 1).padStart(2, "0")}`,
+						name,
+						categoryId,
+						source,
+					),
+			),
+		]);
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Source Shop" },
+		]);
+		expect(history.get("Source Shop")).toEqual([["Eating Out"], ["Groceries"]]);
+	});
+
 	it("counts each split purchase as one trip and uses its active part categories", async () => {
 		const addSingle = (date: string, name: string, categoryId: number) =>
 			db
@@ -338,6 +364,39 @@ describe("categorizePending", () => {
 			["Eating Out"],
 			["Groceries"],
 			["Eating Out"],
+		]);
+	});
+
+	it("orders a split trip by its parent date and keeps its parts in one entry", async () => {
+		const split = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split) VALUES (1, ?, 500, 'DATED SPLIT PARENT', 'Date Shop', 3, 'user', 1) RETURNING id",
+			)
+			.bind(`${MONTH}-15`)
+			.first<{ id: number }>();
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 300, 'DATED SPLIT GROCERIES', 1, 'user', ?)",
+				)
+				.bind(`${MONTH}-01`, split?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 200, 'DATED SPLIT HOUSEHOLD', 2, 'merchant_rule', ?)",
+				)
+				.bind(`${MONTH}-02`, split?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'DATED SINGLE', 'Date Shop', 3, 'user')",
+				)
+				.bind(`${MONTH}-10`),
+		]);
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Date Shop" },
+		]);
+		expect(history.get("Date Shop")).toEqual([
+			["Groceries", "Eating Out"],
+			["Gas"],
 		]);
 	});
 
