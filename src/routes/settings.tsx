@@ -89,6 +89,12 @@ type View = {
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
 	timeZone?: string;
+	/**
+	 * The household just moved into another month, so the Categories section, whose budgets are the
+	 * month's, goes in the answer to be swapped out of band (htmx 4: `hx-swap-oob="true"` swaps an
+	 * element into the page by its id). A save that keeps the month swaps only its own group.
+	 */
+	categoriesOob?: boolean;
 	/** Why the posted time zone wasn't saved, shown under its select. */
 	zoneError?: string;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
@@ -357,6 +363,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				id="categories"
 				aria-labelledby="categories-title"
 				class="mt-8 lg:max-w-3xl"
+				hx-swap-oob={view.categoriesOob ? "true" : undefined}
 			>
 				<h2 id="categories-title" class="font-serif text-3xl font-semibold">
 					Categories
@@ -612,12 +619,25 @@ settings.post("/settings/time-zone", async (c) => {
 	const parsed = parseTimeZone(await c.req.formData());
 	if (!parsed.ok)
 		return renderSettings(c, { zoneError: parsed.error, status: 422 });
+	// One instant for both zones, so "did the month change" can't be answered by two clocks.
+	const now = new Date();
+	const before = await householdTimeZone(c.env.DB);
 	await saveTimeZone(c.env.DB, parsed.zone);
+	const today = todayIn(parsed.zone, now);
+	// The month is the one thing in Settings that follows the zone (Categories' budgets are the
+	// month's), and the swap below replaces only #household, so a new month sends Categories along.
+	const newMonth = todayIn(before, now).slice(0, 7) !== today.slice(0, 7);
 	return done(
 		c,
 		"Saved time zone",
 		`Saved time zone. Months and bills now follow ${zoneLabel(parsed.zone)} time.`,
-		{ focus: "zone", hash: "household" },
+		{
+			focus: "zone",
+			hash: "household",
+			today,
+			timeZone: parsed.zone,
+			categoriesOob: newMonth,
+		},
 	);
 });
 

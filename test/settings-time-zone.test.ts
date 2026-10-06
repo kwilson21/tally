@@ -390,3 +390,88 @@ describe("today follows the saved zone", () => {
 		expect(back.html).not.toContain("November");
 	});
 });
+
+describe("a save that moves the household into another month", () => {
+	// 03:30 UTC on Nov 1 is 23:30 Eastern on Oct 31 (October), and already Nov 1 in London
+	// (November). Groceries' budget changes on Nov 1, so the two months show different budgets.
+	const LATE_OCTOBER = "2026-11-01T03:30:00Z";
+
+	/** The Categories section's markup, up to the next section. */
+	const categories = (html: string) =>
+		html.split('id="categories"')[1]?.split("</section>")[0] ?? "";
+	/** The tag that opens the Categories section. */
+	const categoriesTag = (html: string) =>
+		html.match(/<section[^>]*id="categories"[^>]*>/)?.[0] ?? "";
+	const groceries = (html: string) =>
+		textOf(categories(html)).match(/Groceries\s+(\$[\d,.]+)\s+a month/)?.[1];
+
+	beforeEach(async () => {
+		at(LATE_OCTOBER);
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await env.DB.prepare(
+			"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-11', 90000)",
+		).run();
+	});
+
+	it("starts with October's budget on Settings", async () => {
+		const { html } = await get("/settings");
+		expect(groceries(html)).toBe("$700");
+	});
+
+	it("sends the Categories section too, out of band, with the new month's budgets", async () => {
+		const { res, html } = await post("/settings/time-zone", {
+			time_zone: "Europe/London",
+		});
+		expect(res.status).toBe(200);
+		// htmx 4 takes any element with hx-swap-oob from the response and swaps it into the page
+		// by its id, before the main swap picks #household out of what's left.
+		expect(categoriesTag(html)).toContain('hx-swap-oob="true"');
+		expect(groceries(html)).toBe("$900");
+		// Still the Household group, with the toast, the announcement and focus as before.
+		expect(textOf(summary(html)).trim()).toBe("Time zone London");
+		expect(summary(html)).toContain("autofocus");
+		expect(trigger(res)).toEqual({
+			toast: { message: "Saved time zone", type: "success" },
+			announce: "Saved time zone. Months and bills now follow London time.",
+		});
+	});
+
+	it("does the same going back to the earlier month", async () => {
+		await post("/settings/time-zone", { time_zone: "Europe/London" });
+		const { html } = await post("/settings/time-zone", {
+			time_zone: "America/New_York",
+		});
+		expect(categoriesTag(html)).toContain('hx-swap-oob="true"');
+		expect(groceries(html)).toBe("$700");
+	});
+
+	it("leaves the Categories section out of the swap when the month stays the same", async () => {
+		// Chicago is still October at this moment, as Eastern is.
+		const { res, html } = await post("/settings/time-zone", {
+			time_zone: "America/Chicago",
+		});
+		expect(res.status).toBe(200);
+		expect(html).not.toContain("hx-swap-oob");
+		expect(groceries(html)).toBe("$700");
+	});
+
+	it("keeps a plain page, a refusal and a fresh visit free of it", async () => {
+		const refused = await post("/settings/time-zone", {
+			time_zone: "Not/AZone",
+		});
+		expect(refused.res.status).toBe(422);
+		expect(refused.html).not.toContain("hx-swap-oob");
+		const plain = await get("/settings");
+		expect(plain.html).not.toContain("hx-swap-oob");
+		const noScript = await post(
+			"/settings/time-zone",
+			{ time_zone: "Europe/London" },
+			false,
+		);
+		expect(noScript.res.status).toBe(303);
+		// The page it lands on is drawn from the new zone, so its Categories are the new month's.
+		const landed = await get("/settings");
+		expect(groceries(landed.html)).toBe("$900");
+		expect(landed.html).not.toContain("hx-swap-oob");
+	});
+});
