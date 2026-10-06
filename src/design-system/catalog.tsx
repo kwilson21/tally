@@ -1242,7 +1242,7 @@ function Controls() {
 				components={["FilterSelect"]}
 				sentence="A pill-shaped choice that narrows a list: Transactions' Month, Category, Account and Show (P63 A, P64 B). A real select with a label only a screen reader hears."
 			>
-				<State label="Transactions' filter bar at rest: Month, Category, Account and Show (change one: it works here as on the page)">
+				<State label="Transactions' filter bar at rest: Month, Category, Account and Show (the selects open here; only Transactions filters a list)">
 					<div class="flex max-w-3xl flex-wrap gap-2">
 						<FilterSelect
 							id="ds-filter-month"
