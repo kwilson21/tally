@@ -1,4 +1,4 @@
-// P91–P94 (spec §8, §8.1, §8.2 and §9, decision 82): the owner's picks on four choices the polish
+// P110–P113 (spec §8, §8.1, §8.2 and §9, decision 84): the owner's picks on four choices the polish
 // pass turned up (questions 56 to 59), drawn the way the earlier picks were, so the page keeps what
 // each pick looked like next to what it was chosen over. Each option is drawn on a phone from the
 // real components with demo-style data (today is Mon Oct 5); a piece that no longer exists, like
@@ -41,7 +41,7 @@ import {
 import { Specimen } from "./specimen";
 
 // ---------------------------------------------------------------------------------------------
-// P91: Documents in the menu (question 56).
+// P110: Documents in the menu (question 56).
 
 /** The More page, as the route draws it: a title over a ruled list of plain links. */
 function More({ items }: { items: string[] }) {
@@ -52,7 +52,7 @@ function More({ items }: { items: string[] }) {
 				{items.map((label) => (
 					<li>
 						<a
-							href="#p91-documents-menu"
+							href="#p110-documents-menu"
 							class="flex min-h-11 items-center py-3 text-lg text-ink no-underline"
 						>
 							{label}
@@ -83,7 +83,7 @@ const documentsPage = (
 );
 
 // ---------------------------------------------------------------------------------------------
-// P92: deleting a cash entry (question 57). Farmers market, $20.00, entered yesterday in cash.
+// P111: deleting a cash entry (question 57). Farmers market, $20.00, entered yesterday in cash.
 
 const FARMERS = tx(10, "2026-10-04", "Farmers market", 2000, GROCERIES);
 const NAME_AND_AMOUNT = `${FARMERS.displayName}, ${formatCents(FARMERS.amountCents)}`;
@@ -160,14 +160,14 @@ const deleteOrKeep = (
 );
 
 const today = (
-	<EntrySheet p="p92-today">
+	<EntrySheet p="p111-today">
 		{actions}
 		{asksAsButton()}
 	</EntrySheet>
 );
 
 const saveOutlinedSheet = (
-	<EntrySheet p="p92-a">
+	<EntrySheet p="p111-a">
 		{saveOutlined}
 		{asksAsButton()}
 	</EntrySheet>
@@ -175,7 +175,7 @@ const saveOutlinedSheet = (
 
 /** B: the question replaces Cancel and Save, in the words the app uses. */
 const questionSheet = (
-	<EntrySheet p="p92-b">
+	<EntrySheet p="p111-b">
 		<div class="flex flex-col gap-3">
 			<p class="text-lg">{`Delete ${NAME_AND_AMOUNT}? This can't be undone.`}</p>
 			{deleteOrKeep}
@@ -186,7 +186,7 @@ const questionSheet = (
 /** C: the sheet as it is, with a small sheet over it asking, and a second dimming between. */
 const confirmSheet = (
 	<div class="relative">
-		<EntrySheet p="p92-c">
+		<EntrySheet p="p111-c">
 			{actions}
 			<Button kind="text" type="button" class="self-start">
 				Delete cash transaction
@@ -229,14 +229,14 @@ const deletedWithUndo = (
 
 /** E: today's layout, the asking button in brick. */
 const brickSheet = (
-	<EntrySheet p="p92-e">
+	<EntrySheet p="p111-e">
 		{actions}
 		{asksAsButton(true)}
 	</EntrySheet>
 );
 
 // ---------------------------------------------------------------------------------------------
-// P93: Send feedback in the demo (question 58).
+// P112: Send feedback in the demo (question 58).
 
 const NOTHING_SENT =
 	"Feedback is off in the demo. Sign in to your Tally to send it.";
@@ -264,7 +264,7 @@ const offAfter = (
 );
 
 // ---------------------------------------------------------------------------------------------
-// P94: a How this works link on Bills (question 59).
+// P113: a How this works link on Bills (question 59).
 
 const SOON = [ELECTRIC, SWIM];
 
@@ -292,13 +292,13 @@ function Bills({ link }: { link?: boolean }) {
 	);
 }
 
-/** P91–P94 on the proposals page, picked (decision 82). */
+/** P110–P113 on the proposals page, picked (decision 84). */
 export function PolishProposals() {
 	return (
 		<>
 			<Specimen
-				id="p91-documents-menu"
-				title="P91 · Documents in the menu"
+				id="p110-documents-menu"
+				title="P110 · Documents in the menu"
 				tier="visual"
 				sentence="Documents isn't built, but More has listed it, and tapping it opens a page that says so. Pick whether it stays in the menu. Each is More on a phone."
 			>
@@ -306,7 +306,7 @@ export function PolishProposals() {
 					Documents is not built; it moved to the Later list with receipts
 					(decision 66, §8's screens table), and its address keeps answering
 					inside the shell. The owner's pick follows the rule that no menu item
-					leads to a page that isn't built (decision 82): Documents is not in
+					leads to a page that isn't built (decision 84): Documents is not in
 					More or the sidebar until receipts are.
 				</Fixed>
 				<Options
@@ -338,8 +338,8 @@ export function PolishProposals() {
 			</Specimen>
 
 			<Specimen
-				id="p92-delete-cash"
-				title="P92 · Deleting a cash entry"
+				id="p111-delete-cash"
+				title="P111 · Deleting a cash entry"
 				tier="visual"
 				sentence="Delete cash transaction is the last thing on a cash entry's sheet, and it asks before it deletes. Pick how it asks. Each is Farmers market, $20.00, entered yesterday in cash, with the sheet scrolled to its end."
 			>
@@ -347,7 +347,7 @@ export function PolishProposals() {
 					Only a cash entry can be deleted, from the end of its own edit sheet
 					(§8.2, P21). One primary action per sheet (DESIGN.md), and a step that
 					can't be undone names what is lost, as Disconnect a bank does
-					(decision 59). The owner chose B combined with D (decision 82): the
+					(decision 59). The owner chose B combined with D (decision 84): the
 					question comes first, and once deleted the toast offers Undo for 10
 					seconds, which puts the entry back as it was, its split parts and
 					links included. Undo is a safety net under the question, not a
@@ -406,8 +406,8 @@ export function PolishProposals() {
 			</Specimen>
 
 			<Specimen
-				id="p93-demo-feedback"
-				title="P93 · Send feedback in the demo"
+				id="p112-demo-feedback"
+				title="P112 · Send feedback in the demo"
 				tier="visual"
 				sentence="In the demo, nothing sent from the feedback page goes anywhere, and the page says so. Pick where. Each is the page on a phone, in the demo."
 			>
@@ -415,7 +415,7 @@ export function PolishProposals() {
 					In the demo sending is off, and the family app shows the form instead
 					(§8.1, decision 58). The privacy text stays whole and unchanged. The
 					owner's pick follows the rule that a screen says what it can't do
-					before it asks anything of the reader (decision 82): the off line
+					before it asks anything of the reader (decision 84): the off line
 					comes first, right under the title.
 				</Fixed>
 				<Options
@@ -442,15 +442,15 @@ export function PolishProposals() {
 			</Specimen>
 
 			<Specimen
-				id="p94-bills-how-link"
-				title="P94 · A How this works link on Bills"
+				id="p113-bills-how-link"
+				title="P113 · A How this works link on Bills"
 				tier="visual"
 				sentence="Every main screen explains itself with a small link to its part of How Tally works, and Bills was the one without. Pick whether it gets one. Each is Bills on Oct 5."
 			>
 				<Fixed>
 					Every screen has a small “How this works” link to its feature's
 					section of How Tally works (§9), and Bills has its own section. The
-					owner's pick (decision 82) follows that rule: Bills gets the same
+					owner's pick (decision 84) follows that rule: Bills gets the same
 					HowLink, under its status sentence as on Home, with its own name for a
 					screen reader.
 				</Fixed>

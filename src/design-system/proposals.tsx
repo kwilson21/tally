@@ -331,27 +331,27 @@ export const DECIDED: readonly {
 			"Option A, combined with B: Tally guesses one category from the trip's details, or suggests a split with the categories filled in and the amounts left to the person (decision 80).",
 	},
 	{
-		title: "P91 · Documents in the menu",
+		title: "P110 · Documents in the menu",
 		outcome:
-			"Option A: More and the sidebar leave Documents out until receipts are built, so no menu item leads to a page that isn't built (decision 82).",
+			"Option A: More and the sidebar leave Documents out until receipts are built, so no menu item leads to a page that isn't built (decision 84).",
 		issue: 246,
 	},
 	{
-		title: "P92 · Deleting a cash entry",
+		title: "P111 · Deleting a cash entry",
 		outcome:
-			"Option B combined with D: the question “Delete Farmers market, $20.00? This can't be undone.” replaces Cancel and Save, with Delete and Keep it, and once deleted the toast offers Undo for 10 seconds (decision 82). The question is built; only the Undo is still to build.",
+			"Option B combined with D: the question “Delete Farmers market, $20.00? This can't be undone.” replaces Cancel and Save, with Delete and Keep it, and once deleted the toast offers Undo for 10 seconds (decision 84). The question is built; only the Undo is still to build.",
 		issue: 244,
 	},
 	{
-		title: "P93 · Send feedback in the demo",
+		title: "P112 · Send feedback in the demo",
 		outcome:
-			"Option A: in the demo, the box saying feedback is off sits right under the title, before the privacy text (decision 82).",
+			"Option A: in the demo, the box saying feedback is off sits right under the title, before the privacy text (decision 84).",
 		issue: 246,
 	},
 	{
-		title: "P94 · A How this works link on Bills",
+		title: "P113 · A How this works link on Bills",
 		outcome:
-			"Option A: a How this works link under Bills' status sentence, to the Bills section of How Tally works (decision 82).",
+			"Option A: a How this works link under Bills' status sentence, to the Bills section of How Tally works (decision 84).",
 		issue: 246,
 	},
 ];
@@ -379,7 +379,7 @@ export function Proposals() {
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
 					Four choices the polish pass turned up (questions 56 to 59), each
-					drawn on a phone. The owner's picks marked Picked are decision 82.
+					drawn on a phone. The owner's picks marked Picked are decision 84.
 				</p>
 				<PolishProposals />
 			</section>

@@ -24,7 +24,7 @@ describe("Bills", () => {
 		expect(html).toContain("bills to pay soon");
 	});
 
-	it("has a How this works link to the Bills section, under the status sentence (decision 82)", async () => {
+	it("has a How this works link to the Bills section, under the status sentence (decision 84)", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();

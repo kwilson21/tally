@@ -629,7 +629,7 @@ it("retries unfiled feedback in the nightly job", async () => {
 });
 
 describe("demo", () => {
-	it("puts the feedback-is-off box right under the title, before the privacy paragraph (decision 82)", async () => {
+	it("puts the feedback-is-off box right under the title, before the privacy paragraph (decision 84)", async () => {
 		const html = await (
 			await productionApp(undefined, { demo: true }).fetch("/feedback")
 		).text();

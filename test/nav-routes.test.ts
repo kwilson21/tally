@@ -27,7 +27,7 @@ describe("navigation destinations", () => {
 		},
 	);
 
-	it("/more links to Accounts and Settings, and not to Documents (decision 82)", async () => {
+	it("/more links to Accounts and Settings, and not to Documents (decision 84)", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/more")
 		).text();
@@ -39,7 +39,7 @@ describe("navigation destinations", () => {
 		expect(html).not.toContain(">Documents<");
 	});
 
-	it("the sidebar and the phone tabs on every page have no Documents item (decision 82)", async () => {
+	it("the sidebar and the phone tabs on every page have no Documents item (decision 84)", async () => {
 		for (const path of ["/", "/transactions", "/bills", "/accounts", "/more"]) {
 			const html = await (
 				await exports.default.fetch(`http://tally.test${path}`)
