@@ -143,7 +143,7 @@ describe("categorizePending", () => {
 		expect(off.sent?.state).not.toHaveProperty("merchant_category_history");
 		const on = await run(true);
 		expect(on.historyReads).toBe(1);
-		expect(on.sent?.state.merchant_category_history).toEqual(["Groceries"]);
+		expect(on.sent?.state.merchant_category_history).toEqual([["Groceries"]]);
 	});
 
 	it("returns five chosen category names newest first, using id to break date ties", async () => {
@@ -184,15 +184,15 @@ describe("categorizePending", () => {
 			{ rulesApplied: true, onlyIds: [target?.id as number] },
 		);
 		expect(sent?.state.merchant_category_history).toEqual([
-			categories[0]?.name,
-			categories[4]?.name,
-			categories[3]?.name,
-			categories[2]?.name,
-			categories[1]?.name,
+			[categories[0]?.name],
+			[categories[4]?.name],
+			[categories[3]?.name],
+			[categories[2]?.name],
+			[categories[1]?.name],
 		]);
 	});
 
-	it("excludes archived categories and bill-sourced categories from history", async () => {
+	it("excludes archived categories and Jev-sourced categories from history", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const categories = (
 			await db
@@ -219,25 +219,10 @@ describe("categorizePending", () => {
 				.bind(`${MONTH}-03`, archived?.id),
 			db
 				.prepare(
-					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'OLD BILL', 'Archive Shop', ?, 'merchant_rule')",
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'OLD JEV', 'Archive Shop', ?, 'jev')",
 				)
 				.bind(`${MONTH}-04`, categories[0]?.id),
 		]);
-		const bill = await db
-			.prepare(
-				"INSERT INTO bills (name, amount_cents, due_day, frequency, category_id, merchant_raw_name, active) VALUES ('Archive Shop bill', 100, 4, 'monthly', ?, 'Archive Shop', 1) RETURNING id",
-			)
-			.bind(categories[0]?.id)
-			.first<{ id: number }>();
-		const billTransaction = await db
-			.prepare("SELECT id FROM transactions WHERE raw_name = 'OLD BILL'")
-			.first<{ id: number }>();
-		await db
-			.prepare(
-				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'user', 'linked')",
-			)
-			.bind(bill?.id, MONTH, billTransaction?.id)
-			.run();
 		const target = await db
 			.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 200, 'ARCHIVE TARGET', 'Archive Shop') RETURNING id",
@@ -254,7 +239,7 @@ describe("categorizePending", () => {
 			{ rulesApplied: true, onlyIds: [target?.id as number] },
 		);
 		expect(sent?.state.merchant_category_history).toEqual([
-			categories[0]?.name,
+			[categories[0]?.name],
 		]);
 	});
 
@@ -288,7 +273,145 @@ describe("categorizePending", () => {
 				db,
 				ids.map(({ id }) => ({ id, merchantKey: "Page Shop" })),
 			),
-		).toEqual(new Map([["Page Shop", ["Groceries"]]]));
+		).toEqual(new Map([["Page Shop", [["Groceries"]]]]));
+	});
+
+	it("keeps a person-chosen category in history when its transaction pays a bill", async () => {
+		const transaction = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, 'LINKED HUMAN', 'Bill Shop', 2, 'user') RETURNING id",
+			)
+			.bind(`${MONTH}-01`)
+			.first<{ id: number }>();
+		const bill = await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, category_id, merchant_raw_name, active) VALUES ('Bill Shop bill', 100, 4, 'monthly', 1, 'Bill Shop', 1) RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, MONTH, transaction?.id)
+			.run();
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Bill Shop" },
+		]);
+		expect(history).toEqual(new Map([["Bill Shop", [["Eating Out"]]]]));
+	});
+
+	it("counts each split purchase as one trip and uses its active part categories", async () => {
+		const addSingle = (date: string, name: string, categoryId: number) =>
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, ?, 'Trip Shop', ?, 'user')",
+				)
+				.bind(date, name, categoryId);
+		const split = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split) VALUES (1, ?, 500, 'SPLIT TRIP', 'Trip Shop', 3, 'user', 1) RETURNING id",
+			)
+			.bind(`${MONTH}-15`)
+			.first<{ id: number }>();
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 300, 'SPLIT GROCERIES', 1, 'user', ?)",
+				)
+				.bind(`${MONTH}-15`, split?.id),
+			db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (1, ?, 200, 'SPLIT HOUSEHOLD', 2, 'merchant_rule', ?)",
+				)
+				.bind(`${MONTH}-15`, split?.id),
+			addSingle(`${MONTH}-14`, "TRIP 2", 1),
+			addSingle(`${MONTH}-13`, "TRIP 3", 2),
+			addSingle(`${MONTH}-12`, "TRIP 4", 1),
+			addSingle(`${MONTH}-11`, "TRIP 5", 2),
+		]);
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Trip Shop" },
+		]);
+		expect(history.get("Trip Shop")).toEqual([
+			["Groceries", "Eating Out"],
+			["Groceries"],
+			["Eating Out"],
+			["Groceries"],
+			["Eating Out"],
+		]);
+	});
+
+	it("takes the newest five split and single trips, skipping unusable split parts", async () => {
+		const addSplit = async (
+			date: string,
+			name: string,
+			parts: {
+				categoryId: number | null;
+				source: string | null;
+				excluded?: boolean;
+				pending?: boolean;
+			}[],
+		) => {
+			const parent = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, is_split) VALUES (1, ?, 500, ?, 'Split Shop', 3, 'user', 1) RETURNING id",
+				)
+				.bind(date, name)
+				.first<{ id: number }>();
+			for (const [index, part] of parts.entries())
+				await db
+					.prepare(
+						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, parent_id, excluded, pending) VALUES (1, ?, 100, ?, ?, ?, ?, ?, ?)",
+					)
+					.bind(
+						date,
+						`${name} PART ${index}`,
+						part.categoryId,
+						part.source,
+						parent?.id,
+						part.excluded ? 1 : 0,
+						part.pending ? 1 : 0,
+					)
+					.run();
+		};
+		await addSplit(`${MONTH}-19`, "ARCHIVED ONLY SPLIT", [
+			{ categoryId: 4, source: "user" },
+		]);
+		await addSplit(`${MONTH}-18`, "EMPTY SPLIT", [
+			{ categoryId: null, source: null },
+		]);
+		await addSplit(`${MONTH}-17`, "ARCHIVED SPLIT", [
+			{ categoryId: 4, source: "user" },
+			{ categoryId: 2, source: "user" },
+		]);
+		await addSplit(`${MONTH}-16`, "SPLIT A", [
+			{ categoryId: 1, source: "user" },
+			{ categoryId: 2, source: "user" },
+			{ categoryId: 1, source: "merchant_rule" },
+			{ categoryId: 3, source: "user", excluded: true },
+			{ categoryId: 3, source: "user", pending: true },
+		]);
+		await db.batch(
+			[`${MONTH}-14`, `${MONTH}-13`, `${MONTH}-12`, `${MONTH}-11`].map(
+				(date, index) =>
+					db
+						.prepare(
+							"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, ?, 100, ?, 'Split Shop', ?, 'user')",
+						)
+						.bind(date, `SINGLE ${index}`, (index % 2) + 1),
+			),
+		);
+		await db.prepare("UPDATE categories SET archived = 1 WHERE id = 4").run();
+		const history = await merchantCategoryHistoryForJev(db, [
+			{ id: 999999, merchantKey: "Split Shop" },
+		]);
+		expect(history.get("Split Shop")).toEqual([
+			["Eating Out"],
+			["Groceries", "Eating Out"],
+			["Groceries"],
+			["Eating Out"],
+			["Groceries"],
+		]);
 	});
 
 	it("uses raw-name fallback keys, shares short histories, and sends none for another merchant", async () => {
@@ -333,11 +456,11 @@ describe("categorizePending", () => {
 		);
 		expect(histories).toEqual([
 			undefined,
-			["Eating Out", "Groceries"],
-			["Eating Out", "Groceries"],
+			[["Eating Out"], ["Groceries"]],
+			[["Eating Out"], ["Groceries"]],
 		]);
 	});
-	it("sends the five newest person-chosen merchant categories in one Jev request", async () => {
+	it("sends the five newest person-chosen merchant trips in one Jev request", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await db.batch(
 			Array.from({ length: 5 }, (_, index) =>
@@ -400,11 +523,11 @@ describe("categorizePending", () => {
 		expect(sent?.state).toMatchObject({
 			merchant: "Costco",
 			merchant_category_history: [
-				"Groceries",
-				"Groceries",
-				"Groceries",
-				"Groceries",
-				"Groceries",
+				["Groceries"],
+				["Groceries"],
+				["Groceries"],
+				["Groceries"],
+				["Groceries"],
 			],
 		});
 		expect(sent?.state).not.toHaveProperty("date");

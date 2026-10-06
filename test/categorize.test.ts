@@ -112,7 +112,7 @@ describe("askJev", () => {
 	it("sends merchant history as category names in state, without the earlier transaction details", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(
-			{ ...input, merchantCategoryHistory: ["Groceries", "Groceries"] },
+			{ ...input, merchantCategoryHistory: [["Groceries"], ["Groceries"]] },
 			categories,
 			"k",
 			fetchImpl,
@@ -124,7 +124,7 @@ describe("askJev", () => {
 			amount_cents: 1200,
 			direction: "money out",
 			account_type: "credit",
-			merchant_category_history: ["Groceries", "Groceries"],
+			merchant_category_history: [["Groceries"], ["Groceries"]],
 		});
 		expect(body.questions.category.instructions).toContain(
 			"use them as context for this category guess",

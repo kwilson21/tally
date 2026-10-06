@@ -973,7 +973,7 @@ export async function pendingForJev(
 export async function merchantCategoryHistoryForJev(
 	db: D1Database,
 	transactions: { id: number; merchantKey: string }[],
-): Promise<Map<string, string[]>> {
+): Promise<Map<string, string[][]>> {
 	const keys = [
 		...new Set(transactions.map((transaction) => transaction.merchantKey)),
 	];
@@ -982,33 +982,68 @@ export async function merchantCategoryHistoryForJev(
 		.prepare(
 			`WITH requested AS (SELECT value AS merchant_key FROM json_each(?)),
 			 asked AS (SELECT value AS transaction_id FROM json_each(?)),
-			 ranked AS (
-				SELECT ${merchantKeySql("t")} AS merchant_key, c.name AS category_name,
-					ROW_NUMBER() OVER (PARTITION BY ${merchantKeySql("t")} ORDER BY t.date DESC, t.id DESC) AS position
+			 category_rows AS (
+				SELECT ${merchantKeySql("t")} AS merchant_key, t.id AS trip_id, t.date AS trip_date,
+					t.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
 				FROM transactions t
 				JOIN requested r ON r.merchant_key = ${merchantKeySql("t")}
 				JOIN categories c ON c.id = t.category_id
-				LEFT JOIN transactions p ON p.id = t.parent_id
-				WHERE t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+				WHERE t.parent_id IS NULL
+					AND t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
 					AND c.archived = 0
-					AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = t.id AND bp.status = 'linked')
 					AND t.category_source IN ('user', 'merchant_rule')
-					AND t.is_split = 0 AND t.excluded = 0
-					AND COALESCE(p.excluded, 0) = 0 AND COALESCE(p.pending, t.pending) = 0
+					AND t.is_split = 0 AND t.excluded = 0 AND t.pending = 0
+				UNION ALL
+				SELECT ${merchantKeySql("p")} AS merchant_key, p.id AS trip_id, p.date AS trip_date,
+					p.id AS trip_order_id, c.name AS category_name, t.id AS category_order_id
+				FROM transactions p
+				JOIN requested r ON r.merchant_key = ${merchantKeySql("p")}
+				JOIN transactions t ON t.parent_id = p.id AND t.is_split = 0
+				JOIN categories c ON c.id = t.category_id
+				WHERE p.is_split = 1 AND p.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND t.id NOT IN (SELECT CAST(transaction_id AS INTEGER) FROM asked)
+					AND c.archived = 0
+					AND t.category_source IN ('user', 'merchant_rule')
+					AND t.excluded = 0 AND t.pending = 0 AND p.excluded = 0 AND p.pending = 0
+			),
+			 category_deduped AS (
+				SELECT merchant_key, trip_id, trip_date, trip_order_id, category_name, category_order_id,
+					ROW_NUMBER() OVER (
+						PARTITION BY merchant_key, trip_id, category_name ORDER BY category_order_id
+					) AS category_position
+				FROM category_rows
+			),
+		 usable_trips AS (
+				SELECT DISTINCT merchant_key, trip_id, trip_date, trip_order_id
+				FROM category_deduped WHERE category_position = 1
+			),
+		 ranked_trips AS (
+				SELECT merchant_key, trip_id,
+					ROW_NUMBER() OVER (PARTITION BY merchant_key ORDER BY trip_date DESC, trip_order_id DESC) AS position
+				FROM usable_trips
 			)
-			SELECT merchant_key, category_name FROM ranked WHERE position <= 5
-			ORDER BY merchant_key, position`,
+			SELECT d.merchant_key, r.position, d.category_name
+			FROM category_deduped d JOIN ranked_trips r ON r.merchant_key = d.merchant_key AND r.trip_id = d.trip_id
+			WHERE d.category_position = 1 AND r.position <= 5
+			ORDER BY d.merchant_key, r.position, d.category_order_id`,
 		)
 		.bind(
 			JSON.stringify(keys),
 			JSON.stringify(transactions.map((transaction) => transaction.id)),
 		)
-		.all<{ merchant_key: string; category_name: string }>();
-	const history = new Map<string, string[]>();
+		.all<{ merchant_key: string; position: number; category_name: string }>();
+	const history = new Map<string, string[][]>();
+	let lastMerchantKey: string | undefined;
+	let lastPosition = 0;
 	for (const row of results) {
-		const categories = history.get(row.merchant_key) ?? [];
-		categories.push(row.category_name);
-		history.set(row.merchant_key, categories);
+		const trips = history.get(row.merchant_key) ?? [];
+		if (row.merchant_key !== lastMerchantKey || row.position !== lastPosition) {
+			trips.push([]);
+			lastMerchantKey = row.merchant_key;
+			lastPosition = row.position;
+		}
+		trips[trips.length - 1]?.push(row.category_name);
+		history.set(row.merchant_key, trips);
 	}
 	return history;
 }

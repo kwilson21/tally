@@ -21,8 +21,8 @@ export type JevInput = {
 	accountType: string;
 	plaidCategory?: string | null;
 	note?: string | null;
-	/** The merchant's five most recent person-chosen or rule-applied category names, newest first. */
-	merchantCategoryHistory?: string[];
+	/** The merchant's five most recent trips, each with distinct chosen categories in split-part order. */
+	merchantCategoryHistory?: string[][];
 };
 
 export type JevResult =
