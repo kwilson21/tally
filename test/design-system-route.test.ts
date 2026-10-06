@@ -635,8 +635,11 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toMatch(/data-ds-toast="error"/);
 	});
 
-	it("renders the long unbroken merchant name in the Toast specimen", async () => {
+	it("shows the Transactions heading wrapping beside Select and the long name in the Toast specimen", async () => {
 		const { html } = await get("/design-system");
+		expect(design).toMatch(
+			/\| Page title \/ month \|[^\n]*Transactions page heading can wrap beside Select\./,
+		);
 		const toast = html.split('id="toast"')[1]?.split("</section>")[0] ?? "";
 		expect(toast).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV");
 	});

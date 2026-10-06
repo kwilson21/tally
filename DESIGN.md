@@ -78,7 +78,7 @@ Radii: `rounded-control` (0.75rem) for inputs, buttons, tags, cards and the toas
 ## Type roles
 | Role | Style |
 |---|---|
-| Page title / month | font-serif, 5xl, semibold, tight tracking. A long unbroken merchant name wraps within the Transactions page heading. |
+| Page title / month | font-serif, 5xl, semibold, tight tracking. The Transactions page heading can wrap beside Select. |
 | Section title | font-serif, 3xl, semibold |
 | Headline amount | font-serif, 6xl–7xl, semibold, tabular |
 | Sheet title and amount | font-serif, 4xl, semibold (the edit panel's name and amount) |
