@@ -15,22 +15,26 @@ const stripComments = (text: string) =>
 		.replace(/(^|[\s{])\/\*[\s\S]*?\*\/\}?/gm, "$1")
 		.replace(/(^|\s)\/\/.*$/gm, "$1");
 
-/** Each class-like word with its variants removed: "has-[:checked]:bg-band" → "bg-band". */
-function utilities(text: string): string[] {
-	return stripComments(text)
+/** Each class-like word in the source, as written: "has-[:checked]:bg-band". */
+const words = (text: string) =>
+	stripComments(text)
 		.split(/[\s"'`{}()<>,;]+/)
-		.map((word) => {
-			let depth = 0;
-			let start = 0;
-			for (let i = 0; i < word.length; i++) {
-				if (word[i] === "[") depth++;
-				else if (word[i] === "]") depth--;
-				else if (word[i] === ":" && depth === 0) start = i + 1;
-			}
-			return word.slice(start).replace(/^!/, "");
-		})
 		.filter(Boolean);
+
+/** A word with its variants removed: "has-[:checked]:bg-band" → "bg-band". */
+function strip(word: string): string {
+	let depth = 0;
+	let start = 0;
+	for (let i = 0; i < word.length; i++) {
+		if (word[i] === "[") depth++;
+		else if (word[i] === "]") depth--;
+		else if (word[i] === ":" && depth === 0) start = i + 1;
+	}
+	return word.slice(start).replace(/^!/, "");
 }
+
+/** Each class-like word with its variants removed. */
+const utilities = (text: string) => words(text).map(strip).filter(Boolean);
 
 const PALETTE =
 	"white|black|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
@@ -42,22 +46,26 @@ const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
 
 /**
  * Off-token classes that are allowed, each with its reason. Toasts are the one shadow (DESIGN.md).
- * P115 B draws the 8px corners the owner turned down (decision 85), on the money box in a drawing.
+ * P115 B draws the 8px corners the owner turned down (decision 85), with three overrides on the money
+ * box in its drawing; only those exact classes are allowed.
  */
 const EXCEPTIONS: Record<string, string[]> = {
 	"../public/js/toast.js": ["shadow-sm"],
 	"../src/design-system/proposals-polish.tsx": [
-		"rounded-lg",
-		"rounded-tr-lg",
-		"rounded-br-lg",
+		"[&_[data-money]_.rounded-control]:rounded-lg",
+		"[&_[data-money]_.rounded-tr-control]:rounded-tr-lg",
+		"[&_[data-money]_.rounded-br-control]:rounded-br-lg",
 	],
 };
 
 function problems(file: string, text: string): string[] {
 	const allowed = EXCEPTIONS[file] ?? [];
 	const found: string[] = [];
-	for (const u of utilities(text)) {
-		if (allowed.includes(u)) continue;
+	for (const word of words(text)) {
+		// An exception names the exact class, variant and all, so the same corner elsewhere still fails.
+		if (allowed.includes(word)) continue;
+		const u = strip(word);
+		if (!u) continue;
 		if (COLOR_UTILITY.test(u)) found.push(`${u}: colors come from tokens`);
 		const radius = u.match(RADIUS);
 		// "rounded" alone must also be a class here, not part of a word like "roundedUp".
@@ -199,6 +207,19 @@ describe("design tokens (DESIGN.md)", () => {
 				'// rounded down\nconst a = roundedUp(x);\n<p class="rounded-control lg:rounded-l-sheet has-[:checked]:bg-band bg-ink/30 text-cat-blue text-[1.75rem]">',
 			),
 		).toEqual([]);
+	});
+
+	it("allows an exception only as the exact class it names, variant and all", () => {
+		const file = "../src/design-system/proposals-polish.tsx";
+		// P115 B's override is allowed; the same corner anywhere else in the file is not.
+		expect(
+			problems(
+				file,
+				'<div class="[&_[data-money]_.rounded-control]:rounded-lg">',
+			),
+		).toEqual([]);
+		expect(problems(file, '<div class="rounded-lg">')).toHaveLength(1);
+		expect(problems(file, '<div class="sm:rounded-lg">')).toHaveLength(1);
 	});
 
 	it("doesn't read a /* inside a string as the start of a comment", () => {

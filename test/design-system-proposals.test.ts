@@ -266,6 +266,10 @@ describe("GET /design-system/proposals", () => {
 		const p116bPicture = picture(p116b);
 		expect(p116bPicture).toContain("Last month: $");
 		expect(p116bPicture).toContain("3-month average: $650.00");
+		// Like the real chips, the average hides without JavaScript (money.js runs the chips).
+		expect(p116bPicture).toMatch(
+			/<div data-money-js[^>]*>\s*<button[^>]*>3-month average: \$650\.00/,
+		);
 		expect(p116).toContain("decision 85");
 	});
 

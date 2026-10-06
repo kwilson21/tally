@@ -398,7 +398,7 @@ function BudgetSheet({ average }: { average?: boolean }) {
 						lastMonthCents={LAST_MONTH_CENTS}
 					/>
 					{average && (
-						<div class="mt-2 flex flex-wrap justify-center gap-2">
+						<div data-money-js class="mt-2 flex flex-wrap justify-center gap-2">
 							<button type="button" class={moneyChip}>
 								3-month average: {formatCents(AVERAGE_CENTS)}
 							</button>
