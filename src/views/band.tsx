@@ -8,10 +8,12 @@ import { Icon } from "./icons";
 export function Band({
 	href,
 	detail,
+	older,
 	children,
 }: {
 	href: string;
 	detail?: string;
+	older?: number;
 	children?: Child;
 }) {
 	return (
@@ -21,11 +23,25 @@ export function Band({
 		>
 			{detail ? (
 				<span class="min-w-0">
-					<span class="block">{children}</span>
+					<span class="flex flex-wrap items-center gap-x-2">
+						<span>{children}</span>
+						{older !== undefined && older > 0 && (
+							<span class="rounded-full bg-rule px-2.5 py-0.5 text-sm text-ink">
+								+{older} older<span class="sr-only"> from earlier months</span>
+							</span>
+						)}
+					</span>
 					<span class="block text-base text-muted">{detail}</span>
 				</span>
 			) : (
-				<span>{children}</span>
+				<span class="flex flex-wrap items-center gap-x-2">
+					<span>{children}</span>
+					{older !== undefined && older > 0 && (
+						<span class="rounded-full bg-rule px-2.5 py-0.5 text-sm text-ink">
+							+{older} older<span class="sr-only"> from earlier months</span>
+						</span>
+					)}
+				</span>
 			)}
 			<Icon name="chevron-right" />
 		</a>
