@@ -56,25 +56,6 @@ export const settings = new Hono<App>();
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
-const foldRuleSearch = (value: string) =>
-	value
-		.normalize("NFC")
-		.toLocaleLowerCase()
-		.normalize("NFD")
-		.replace(/\p{M}/gu, "");
-const filterRuleSearch = <T extends { merchant: string; merchantKey: string }>(
-	rules: T[],
-	search: string,
-) => {
-	const query = foldRuleSearch(search.trim());
-	return rules.filter(
-		(rule) =>
-			!query ||
-			foldRuleSearch(rule.merchant).includes(query) ||
-			foldRuleSearch(rule.merchantKey).includes(query),
-	);
-};
-
 /** Every form on the page swaps the Categories section in place; without JavaScript it posts normally. */
 const swap = (url: string, indicator: string) => ({
 	method: "post" as const,
@@ -459,11 +440,8 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		view.rulesSearch ??
 		new URL(c.req.url).searchParams.get("rules_search") ??
 		"";
-	const ruleData = await merchantRules(c.env.DB, aiSwitches.names);
-	const visibleRules =
-		ruleData.total <= MERCHANT_RULE_SEARCH_THRESHOLD || !rulesSearch
-			? ruleData.rules
-			: filterRuleSearch(ruleData.rules, rulesSearch);
+	const ruleData = await merchantRules(c.env.DB, aiSwitches.names, rulesSearch);
+	const visibleRules = ruleData.rules;
 	const adding = view.open === "new";
 
 	return c.html(
@@ -690,11 +668,9 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 			status: 400,
 		});
 	}
-	const before = await merchantRules(c.env.DB);
-	const focusRules =
-		before.total - 1 > 20 && search
-			? { ...before, rules: filterRuleSearch(before.rules, search) }
-			: before;
+	const switches = await readAiSwitches(c.env.DB);
+	const before = await merchantRules(c.env.DB, switches.names, search, true);
+	const focusRules = before;
 	const removed = await removeMerchantRule(c.env.DB, merchantKey);
 	const view = { rulesSearch: search };
 	if (!removed) {

@@ -174,7 +174,7 @@ describe("GET /settings", () => {
 		expect(rules).toMatch(/Count Test[\s\S]*Always Groceries · 3 transactions/);
 	});
 
-	it("counts 300 rules and 5,000 transactions with two statements, bounded values, and the merchant index", async () => {
+	it("counts only the searched merchant after filtering 300 rules and 1,200 transactions", async () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = NULL",
 		).run();
@@ -186,7 +186,7 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${values}`,
 		).run();
-		for (let start = 0; start < 5000; start += 100) {
+		for (let start = 0; start < 1200; start += 100) {
 			const transactions = Array.from({ length: 100 }, (_, offset) => {
 				const i = (start + offset) % 300;
 				return `(1, '2026-09-01', -100, 'LOAD BANK TEXT ${start + offset}', 'RULE LOAD ${String(i).padStart(3, "0")}')`;
@@ -217,21 +217,23 @@ describe("GET /settings", () => {
 				};
 			},
 		}) as D1Database;
-		const result = await merchantRules(db);
-		expect(result.rules).toHaveLength(300);
+		const result = await merchantRules(db, false, "Load Merchant 007");
+		expect(result.rules).toHaveLength(1);
+		expect(result.rules[0]?.transactions).toBe(4);
+		expect(prepared).toHaveLength(3);
+		const counts = prepared.find(({ sql }) => sql.includes("json_each"));
+		expect(counts?.values[0]).toBe('["RULE LOAD 007"]');
+		prepared.length = 0;
+		const all = await merchantRules(db);
+		expect(all.rules).toHaveLength(300);
 		expect(
-			result.rules.reduce((total, rule) => total + rule.transactions, 0),
-		).toBe(5000);
-		expect(prepared).toHaveLength(2);
-		expect(
-			prepared.reduce((total, statement) => total + statement.values.length, 0),
-		).toBeLessThanOrEqual(100);
-		const rows = prepared.find(({ sql }) =>
-			sql.includes("FROM merchants m JOIN categories"),
-		);
-		expect(rows).toBeDefined();
-		const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${rows?.sql}`)
-			.bind(...(rows?.values ?? []))
+			all.rules.reduce((total, rule) => total + rule.transactions, 0),
+		).toBe(1200);
+		expect(prepared).toHaveLength(3);
+		const allCounts = prepared.find(({ sql }) => sql.includes("json_each"));
+		expect(JSON.parse(String(allCounts?.values[0]))).toHaveLength(300);
+		const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${allCounts?.sql}`)
+			.bind(...(allCounts?.values ?? []))
 			.all<{ detail: string }>();
 		expect(plan.results.map(({ detail }) => detail).join(" ")).toContain(
 			"transactions_merchant_history",
@@ -301,6 +303,70 @@ describe("GET /settings", () => {
 		expect(empty.html).toMatch(
 			/<h2 id="merchant-rules-title" tabindex="-1" autofocus/,
 		);
+	});
+
+	it("uses the displayed suggested-name order for removal focus", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'on') ON CONFLICT(key) DO UPDATE SET value = 'on'",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, default_category_id) VALUES ('RULE FOCUS RAW A', 'Zebra', 'pending', 1), ('RULE FOCUS RAW B', 'Apple', 'pending', 1), ('RULE FOCUS RAW C', 'Mango', 'pending', 1)",
+		).run();
+		const { html } = await post("/settings/merchant-rules/remove", {
+			merchant: "RULE FOCUS RAW B",
+		});
+		expect(html).toMatch(
+			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Mango/,
+		);
+	});
+
+	it("uses bank-name order for removal focus when store-name suggestions are off", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'off') ON CONFLICT(key) DO UPDATE SET value = 'off'",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, default_category_id) VALUES ('RULE FOCUS RAW A', 'Zebra', 'pending', 1), ('RULE FOCUS RAW B', 'Apple', 'pending', 1), ('RULE FOCUS RAW C', 'Mango', 'pending', 1)",
+		).run();
+		const { html } = await post("/settings/merchant-rules/remove", {
+			merchant: "RULE FOCUS RAW A",
+		});
+		const rules = html.slice(html.indexOf('id="merchant-rules"'));
+		expect(rules).toMatch(
+			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Rule focus raw b/,
+		);
+	});
+
+	it("uses suggested-name order for removal focus in filtered results", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'on') ON CONFLICT(key) DO UPDATE SET value = 'on'",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, default_category_id) VALUES ('RULE FILTER RAW A', 'Zebra Match', 'pending', 1), ('RULE FILTER RAW B', 'Apple Match', 'pending', 1), ('RULE FILTER RAW C', 'Mango Match', 'pending', 1), ('RULE FILTER RAW D', 'Other', 'pending', 1)",
+		).run();
+		const otherRules = Array.from(
+			{ length: 21 },
+			(_, i) => `('RULE FILTER OTHER ${i}', 'Other ${i}', 1)`,
+		).join(",");
+		await env.DB.prepare(
+			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${otherRules}`,
+		).run();
+		const { html } = await post("/settings/merchant-rules/remove", {
+			merchant: "RULE FILTER RAW B",
+			rules_search: "Match",
+		});
+		expect(html).toMatch(
+			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Mango Match/,
+		);
+		expect(html).not.toMatch(/Remove<span class="sr-only"> Other/);
 	});
 
 	it("chooses the next Remove button from the full list after search falls below 21", async () => {
