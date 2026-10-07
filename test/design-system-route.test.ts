@@ -192,6 +192,8 @@ describe("GET /design-system in the demo", () => {
 		for (const output of outputs) {
 			expect(html).toContain(await String(output ?? ""));
 		}
+		expect(html).toContain('data-ds-components="MerchantRules"');
+		expect(html).toContain("Always Groceries · 23 transactions");
 		// FormField: its label points at the control, and its error is announced.
 		expect(html).toContain('for="ds-name"');
 		expect(html).toMatch(/<p id="ds-name-error-error" role="alert"/);

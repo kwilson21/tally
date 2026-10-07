@@ -1070,6 +1070,9 @@ function EditSheet({
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
+	const ruleCategory = categories.find(
+		(cat) => cat.id === tx.merchantRuleCategoryId,
+	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1172,6 +1175,20 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				{!purchase && (
+					<>
+						<input
+							type="hidden"
+							name="always_was"
+							value={values.alwaysWas ? "1" : "0"}
+						/>
+						<input
+							type="hidden"
+							name="rule_category_was"
+							value={values.merchantRuleWas ?? ""}
+						/>
+					</>
+				)}
 				{/* While the delete question is open there's no Save, so Enter in the name field would save the
 				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
 				{deleteConfirm && <button type="submit" disabled hidden />}
@@ -1327,7 +1344,7 @@ function EditSheet({
 				{/* The two things people change most after the category, one tap each (owner's pick C). */}
 				<div class="flex flex-wrap gap-2">
 					{/* A linked refund has no category of its own to make a rule from. */}
-					{!purchase && (
+					{tx.refundOfId == null && (
 						<Chip
 							type="checkbox"
 							name="always"
@@ -1346,6 +1363,24 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
+				{tx.refundOfId == null && (
+					<p class="text-sm text-muted">
+						Ticking this for a transaction that doesn't match the rule changes
+						it for this merchant. To change a rule this transaction already
+						matches, remove it in Settings first.
+					</p>
+				)}
+				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null ? (
+					<p class="text-sm text-muted">
+						Remove it in Settings, under{" "}
+						<a href="/settings#merchant-rules">Tally's rules</a>.
+					</p>
+				) : ruleCategory && values.alwaysForMerchant ? (
+					<p class="text-sm text-muted">
+						{tx.displayName} is always {ruleCategory.name}. Untick it and save
+						to remove the rule.
+					</p>
+				) : null}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">
@@ -1652,7 +1687,13 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
-		alwaysForMerchant: false,
+		alwaysForMerchant:
+			tx.merchantRuleCategoryId !== null &&
+			tx.merchantRuleCategoryId === tx.categoryId,
+		alwaysWas:
+			tx.merchantRuleCategoryId !== null &&
+			tx.merchantRuleCategoryId === tx.categoryId,
+		merchantRuleWas: tx.merchantRuleCategoryId,
 		displayName: tx.merchantName,
 		note: tx.note,
 		excluded: tx.excluded,
@@ -1939,6 +1980,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
+			alwaysWas: form.get("always_was") === "1",
+			merchantRuleWas: Number(form.get("rule_category_was")) || null,
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
@@ -2051,7 +2094,10 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			categoryId: tx.categoryId,
 			income: tx.income,
 			creditReviewed: tx.creditReviewed,
-			alwaysForMerchant: false,
+			alwaysForMerchant:
+				tx.merchantRuleCategoryId !== null &&
+				tx.merchantRuleCategoryId === tx.categoryId,
+			merchantRuleWas: tx.merchantRuleCategoryId,
 			displayName: tx.merchantName,
 			note: tx.note,
 			excluded: tx.excluded,
