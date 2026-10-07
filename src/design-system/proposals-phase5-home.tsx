@@ -78,6 +78,7 @@ const NOT_BUDGETED = [
 /** The Band's numbers: this month's transactions needing a category, and older ones (P52). */
 const UNCATEGORIZED = { count: 12, cents: 22800, older: 6 };
 const BILLS_DUE_CENTS = 14200;
+const SAVINGS_GOAL_CENTS = 0;
 const DAYS_LEFT = 27; // Oct 5 to Oct 31, today included
 
 const sum = (cents: number[]) => cents.reduce((s, c) => s + c, 0);
@@ -85,8 +86,9 @@ const BUDGET_CENTS = sum(OCTOBER.map((r) => r.budgetCents));
 const IN_BUDGETS_CENTS = sum(OCTOBER.map((r) => r.spentCents));
 const NO_BUDGET_CENTS = sum(NOT_BUDGETED.map((c) => c.spentCents));
 const SPENT_CENTS = IN_BUDGETS_CENTS + NO_BUDGET_CENTS + UNCATEGORIZED.cents;
-// Spec §6: the whole budget, minus all counted spending, minus bills due and unpaid ($406).
-const SAFE_CENTS = BUDGET_CENTS - SPENT_CENTS - BILLS_DUE_CENTS;
+// Spec §6: the whole budget, minus all counted spending, bills due and unpaid, and the savings goal.
+const SAFE_CENTS =
+	BUDGET_CENTS - SPENT_CENTS - BILLS_DUE_CENTS - SAVINGS_GOAL_CENTS;
 /** What the budget rows have left between them ($916): more than Safe to spend (gap B2). */
 const LEFT_IN_BUDGETS_CENTS = BUDGET_CENTS - IN_BUDGETS_CENTS;
 /** P50: Safe to spend over the days left, rounded down to the cent. */
@@ -658,6 +660,7 @@ function HowBudget({
 						},
 						unbudgetedCents: NO_BUDGET_CENTS,
 						billsDueCents: BILLS_DUE_CENTS,
+						savingsGoalCents: SAVINGS_GOAL_CENTS,
 					})}
 				</p>
 				{children}
@@ -674,7 +677,8 @@ const whyLeads = (
 			{dollars(LEFT_IN_BUDGETS_CENTS - SAFE_CENTS)} less:{" "}
 			{dollars(UNCATEGORIZED.cents)} has no category yet,{" "}
 			{dollars(NO_BUDGET_CENTS)} went to categories with no budget, and{" "}
-			{dollars(BILLS_DUE_CENTS)} is set aside for bills due.
+			{dollars(BILLS_DUE_CENTS)} is set aside for bills due, and{" "}
+			{dollars(SAVINGS_GOAL_CENTS)} is set aside for the savings goal.
 		</p>
 	</HowBudget>
 );
