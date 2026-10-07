@@ -58,6 +58,7 @@ describe("readAiSwitches", () => {
 		expect(await readAiSwitches(db)).toEqual(AI_SWITCHES_ALL_ON);
 		expect(AI_SWITCHES_ALL_ON).toEqual({
 			names: true,
+			details: true,
 			categories: true,
 			income: true,
 			sortOnArrival: true,
@@ -67,11 +68,12 @@ describe("readAiSwitches", () => {
 	it("reads each switch from its own row, and only off turns one off", async () => {
 		await db.batch([
 			db.prepare(
-				"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'off'), ('ai_categories', 'on'), ('ai_income', 'anything else'), ('ai_sort_on_arrival', 'off')",
+				"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'off'), ('ai_details', 'off'), ('ai_categories', 'on'), ('ai_income', 'anything else'), ('ai_sort_on_arrival', 'off')",
 			),
 		]);
 		expect(await readAiSwitches(db)).toEqual({
 			names: false,
+			details: false,
 			categories: true,
 			income: true,
 			sortOnArrival: false,
@@ -92,18 +94,21 @@ describe("saveAiSwitches", () => {
 	it("stores each switch as on or off, and reads it back", async () => {
 		await saveAiSwitches(db, {
 			names: false,
+			details: false,
 			categories: true,
 			income: false,
 			sortOnArrival: true,
 		});
 		expect(await stored()).toEqual([
 			{ key: "ai_categories", value: "on" },
+			{ key: "ai_details", value: "off" },
 			{ key: "ai_income", value: "off" },
 			{ key: "ai_names", value: "off" },
 			{ key: "ai_sort_on_arrival", value: "on" },
 		]);
 		expect(await readAiSwitches(db)).toEqual({
 			names: false,
+			details: false,
 			categories: true,
 			income: false,
 			sortOnArrival: true,
@@ -115,6 +120,7 @@ describe("saveAiSwitches", () => {
 		await saveAiSwitches(db, { income: false });
 		expect(await readAiSwitches(db)).toEqual({
 			names: false,
+			details: true,
 			categories: true,
 			income: false,
 			sortOnArrival: false,
@@ -132,6 +138,7 @@ describe("saveAiSwitches", () => {
 			"on",
 			"on",
 			"on",
+			"on",
 		]);
 		expect(
 			await db
@@ -143,6 +150,7 @@ describe("saveAiSwitches", () => {
 	it("is put back to all on by the demo's nightly reset", async () => {
 		await saveAiSwitches(db, {
 			names: false,
+			details: false,
 			categories: false,
 			income: false,
 			sortOnArrival: false,
@@ -159,13 +167,14 @@ describe("asksJev", () => {
 		{ categories: false, income: true, asked: true },
 		{ categories: false, income: false, asked: false },
 	])(
-		"is $asked with categories $categories and income $income, whatever names and sorting say",
+		"is $asked with categories $categories and income $income, with details on by default",
 		({ categories, income, asked }) => {
 			for (const names of [true, false])
 				for (const sortOnArrival of [true, false])
-					expect(asksJev({ names, categories, income, sortOnArrival })).toBe(
-						asked,
-					);
+					for (const details of [true, false])
+						expect(
+							asksJev({ names, details, categories, income, sortOnArrival }),
+						).toBe(asked || details);
 		},
 	);
 });

@@ -36,7 +36,8 @@ const trigger = (res: Response) =>
 
 /** The Household section's markup. */
 const group = (html: string) =>
-	html.split('id="household"')[1]?.split("</section>")[0] ?? "";
+	html.split('id="household"')[1]?.split('<section id="household-people"')[0] ??
+	"";
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")

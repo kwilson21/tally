@@ -4,7 +4,6 @@ import { AFTER_SYNC_BATCH, askAgainMany } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import {
 	type AiSwitches,
-	asksJev,
 	readAiSwitches,
 	saveAiSwitches,
 } from "../db/ai-switches";
@@ -39,6 +38,7 @@ import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { EmptyState } from "../views/empty-state";
+import { HouseholdPeople } from "../views/household-people";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import {
@@ -144,6 +144,12 @@ type View = {
 	budgetsOob?: boolean;
 	/** Why the posted time zone wasn't saved, shown under its select. */
 	zoneError?: string;
+	peopleOpen?: number;
+	peopleAddOpen?: boolean;
+	peopleError?: string;
+	peopleErrorPersonId?: number;
+	peopleValue?: string;
+	peopleFocus?: boolean;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
 	aiSaved?: boolean;
 	rulesSearch?: string;
@@ -176,6 +182,13 @@ const AI_FEATURES: {
 		spoken: "suggest store names",
 	},
 	{
+		key: "details",
+		id: "ai-details",
+		label: "Fill in details",
+		line: "Adds a note, the kind of spending and who it was for.",
+		spoken: "filling in transaction details",
+	},
+	{
 		key: "categories",
 		id: "ai-categories",
 		label: "Categories and exclusions",
@@ -199,7 +212,8 @@ const AI_FEATURES: {
 ];
 
 /** What the greyed sorting switch says it needs, in the words of the rows above it. */
-const SORT_NEEDS = "Needs Categories and exclusions or Income on.";
+const SORT_NEEDS =
+	"Needs Fill in details, Categories and exclusions, or Income on.";
 /** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
 const SORT_GREYED = "sortOnArrivalGreyed";
 
@@ -212,8 +226,9 @@ function AiSuggestions({
 	saved: boolean;
 }) {
 	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
-	// With nothing for Jev to be asked, sorting right after a sync has nothing to sort (spec §8.6).
-	const nothingToSort = !asksJev(switches);
+	// A sync has useful Jev work when any of the three answer groups is enabled.
+	const nothingToSort =
+		!switches.categories && !switches.income && !switches.details;
 	return (
 		<section
 			id="ai-suggestions"
@@ -434,6 +449,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
+	const people = await c.env.DB.prepare(
+		"SELECT id, name FROM household_people ORDER BY id",
+	).all<{ id: number; name: string }>();
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
 	const rulesSearch =
@@ -627,6 +645,18 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						focus={view.focus === "zone"}
 					/>
 				</div>
+				<HouseholdPeople
+					people={people.results}
+					openId={view.peopleOpen}
+					addOpen={view.peopleAddOpen}
+					error={view.peopleError}
+					errorPersonId={view.peopleErrorPersonId}
+					value={view.peopleValue}
+					focus={
+						view.peopleFocus ||
+						new URL(c.req.url).searchParams.get("peopleFocus") === "1"
+					}
+				/>
 			</section>
 			<AiSuggestions switches={aiSwitches} saved={Boolean(view.aiSaved)} />
 			<section
@@ -744,8 +774,11 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		env.JEV_API_KEY &&
 		(await readAiSwitches(c.env.DB)).categories
 	)
+		// waitUntil starts a promise at once; yield this turn so the page can answer first.
 		c.executionCtx.waitUntil(
-			askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
+			new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
+				askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
+			),
 		);
 	const out = result.leftOut.length;
 	const count = result.moved;
@@ -893,6 +926,94 @@ settings.post("/settings/ai", async (c) => {
 		`Saved AI suggestions. ${spoken}.${band}`,
 		{ aiSaved: true, hash: "ai-suggestions" },
 	);
+});
+
+settings.post("/settings/people", async (c) => {
+	const form = await c.req.formData();
+	const action = form.has("remove")
+		? "remove"
+		: String(form.get("action") ?? "");
+	const nameValue = String(form.get("name") ?? "");
+	const name = nameValue.trim();
+	const id = Number(form.get("person_id"));
+	if (action === "remove") {
+		if (!Number.isInteger(id) || id <= 1) return c.text("Not found", 404);
+		const person = await c.env.DB.prepare(
+			"SELECT name FROM household_people WHERE id = ?",
+		)
+			.bind(id)
+			.first<{ name: string }>();
+		if (!person) return c.notFound();
+		const [cleared] = await c.env.DB.batch([
+			c.env.DB.prepare(
+				"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0, updated_by = ?, updated_at = datetime('now') WHERE for_person_id = ?",
+			).bind(actor(c), id),
+			c.env.DB.prepare("DELETE FROM household_people WHERE id = ?").bind(id),
+		]);
+		const count = cleared?.meta.changes ?? 0;
+		return done(
+			c,
+			`Removed ${person.name}`,
+			`Removed ${person.name}. ${count} ${count === 1 ? "purchase" : "purchases"} for ${person.name} now say no one.`,
+			{ hash: "household", peopleAddOpen: true, peopleFocus: true },
+		);
+	}
+	if (!name || name.length > 40)
+		return renderSettings(c, {
+			peopleOpen: action === "rename" ? id : undefined,
+			peopleErrorPersonId: action === "rename" ? id : undefined,
+			peopleAddOpen: action !== "rename",
+			peopleError: "Enter a name up to 40 characters.",
+			peopleValue: nameValue,
+			status: 422,
+		});
+	if (action === "add") {
+		try {
+			await c.env.DB.prepare("INSERT INTO household_people (name) VALUES (?)")
+				.bind(name)
+				.run();
+		} catch (error) {
+			if (nameTaken(error))
+				return renderSettings(c, {
+					peopleAddOpen: true,
+					peopleError: "That name is already in your household.",
+					peopleValue: nameValue,
+					status: 422,
+				});
+			throw error;
+		}
+		return done(c, `Added ${name}`, `Added ${name} to your household.`, {
+			hash: "household",
+			peopleAddOpen: true,
+			peopleFocus: true,
+		});
+	}
+	if (action === "rename" && Number.isInteger(id) && id > 1) {
+		try {
+			const result = await c.env.DB.prepare(
+				"UPDATE household_people SET name = ? WHERE id = ?",
+			)
+				.bind(name, id)
+				.run();
+			if (!result.meta.changes) return c.notFound();
+		} catch (error) {
+			if (nameTaken(error))
+				return renderSettings(c, {
+					peopleOpen: id,
+					peopleErrorPersonId: id,
+					peopleError: "That name is already in your household.",
+					peopleValue: nameValue,
+					status: 422,
+				});
+			throw error;
+		}
+		return done(c, `Renamed to ${name}`, `Renamed this person to ${name}.`, {
+			hash: "household",
+			peopleOpen: id,
+			peopleFocus: true,
+		});
+	}
+	return c.text("Choose add, rename or remove.", 400);
 });
 
 // Only a zone the select offers is saved, and nothing else changes: "today" reads it from there

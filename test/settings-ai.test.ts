@@ -60,6 +60,7 @@ const textOf = (html: string) =>
 
 const allOff = {
 	names: false,
+	details: false,
 	categories: false,
 	income: false,
 	sortOnArrival: false,
@@ -85,10 +86,11 @@ describe("GET /settings: the AI suggestions group", () => {
 		expect(at('id="ai-suggestions"')).toBeLessThan(at('id="your-data-title"'));
 	});
 
-	it("has four switches, on to start, each with its words and its muted line", async () => {
+	it("has five switches, on to start, each with its words and its muted line", async () => {
 		const { html } = await get("/settings");
 		expect(inputs(html)).toEqual([
 			{ name: "names", on: true },
+			{ name: "details", on: true },
 			{ name: "categories", on: true },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: true },
@@ -98,6 +100,8 @@ describe("GET /settings: the AI suggestions group", () => {
 			// P86 A's words and example (decision 80).
 			"Suggest store names",
 			"Turns bank text like SQ *BLUE BOTTLE COF into Blue Bottle Coffee. You pick the name.",
+			"Fill in details",
+			"Adds a note, the kind of spending and who it was for.",
 			"Categories and exclusions",
 			"Picks categories, and leaves out transfers and reimbursements.",
 			"Income",
@@ -107,14 +111,16 @@ describe("GET /settings: the AI suggestions group", () => {
 		])
 			expect(words).toContain(sentence);
 		// On and Off are both in the markup; the checkbox's state decides which one shows.
-		expect(group(html).match(/>On</g)).toHaveLength(4);
-		expect(group(html).match(/>Off</g)).toHaveLength(4);
+		expect(group(html).match(/>On</g)).toHaveLength(5);
+		expect(group(html).match(/>Off</g)).toHaveLength(5);
 	});
 
 	it("shows the names switch first and the sorting switch last, as the P41 drawing does", async () => {
 		const { html } = await get("/settings");
 		const at = (name: string) => group(html).indexOf(`name="${name}"`);
 		expect(at("names")).toBeLessThan(at("categories"));
+		expect(at("names")).toBeLessThan(at("details"));
+		expect(at("details")).toBeLessThan(at("categories"));
 		expect(at("categories")).toBeLessThan(at("income"));
 		expect(at("income")).toBeLessThan(at("sortOnArrival"));
 	});
@@ -140,6 +146,7 @@ describe("GET /settings: the AI suggestions group", () => {
 		const { html } = await get("/settings");
 		expect(inputs(html)).toEqual([
 			{ name: "names", on: false },
+			{ name: "details", on: true },
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: false },
@@ -189,6 +196,7 @@ describe("POST /settings/ai", () => {
 		expect(res.status).toBe(200);
 		expect(await readAiSwitches(env.DB)).toMatchObject({
 			names: false,
+			details: false,
 			categories: false,
 			income: true,
 			sortOnArrival: false,
@@ -196,6 +204,7 @@ describe("POST /settings/ai", () => {
 		// The section comes back as saved, for htmx to swap in.
 		expect(inputs(html)).toEqual([
 			{ name: "names", on: false },
+			{ name: "details", on: false },
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: false },
@@ -205,7 +214,7 @@ describe("POST /settings/ai", () => {
 			announce:
 				// The demo has four merchant names waiting. The names switch hides Tally's three guesses but not the
 				// bank's own CVS Pharmacy, so the Band stays, saying one.
-				"Saved AI suggestions. Suggest store names off, categories and exclusions off, income on, sorting new transactions as they arrive off. 1 merchant name to check.",
+				"Saved AI suggestions. Suggest store names off, filling in transaction details off, categories and exclusions off, income on, sorting new transactions as they arrive off. 1 merchant name to check.",
 		});
 	});
 
@@ -224,7 +233,7 @@ describe("POST /settings/ai", () => {
 		});
 		// The names switch was left out, so it is off, as it was.
 		expect(trigger(res).announce).toBe(
-			"Saved AI suggestions. Suggest store names off, categories and exclusions on, income on, sorting new transactions as they arrive off.",
+			"Saved AI suggestions. Suggest store names off, filling in transaction details off, categories and exclusions on, income on, sorting new transactions as they arrive off.",
 		);
 	});
 
@@ -236,6 +245,7 @@ describe("POST /settings/ai", () => {
 		});
 		const { res } = await post("/settings/ai", {
 			names: "on",
+			details: "on",
 			categories: "on",
 			income: "on",
 			sortOnArrival: "on",
@@ -243,15 +253,21 @@ describe("POST /settings/ai", () => {
 		expect(await readAiSwitches(env.DB)).toEqual(AI_SWITCHES_ALL_ON);
 		// Four merchant names come back with the switch, and the Band says so.
 		expect(trigger(res).announce).toBe(
-			"Saved AI suggestions. Suggest store names on, categories and exclusions on, income on, sorting new transactions as they arrive on. 4 merchant names to check.",
+			"Saved AI suggestions. Suggest store names on, filling in transaction details on, categories and exclusions on, income on, sorting new transactions as they arrive on. 4 merchant names to check.",
 		);
 	});
 
 	it("saves the sorting switch with the rest, and a save that leaves it out turns it off", async () => {
-		await post("/settings/ai", { names: "on", categories: "on", income: "on" });
+		await post("/settings/ai", {
+			names: "on",
+			details: "on",
+			categories: "on",
+			income: "on",
+		});
 		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(false);
 		await post("/settings/ai", {
 			names: "on",
+			details: "on",
 			categories: "on",
 			income: "on",
 			sortOnArrival: "on",
@@ -264,6 +280,7 @@ describe("POST /settings/ai", () => {
 		expect((await readAiSwitches(env.DB)).names).toBe(false);
 		await post("/settings/ai", {
 			names: "on",
+			details: "on",
 			categories: "on",
 			income: "on",
 			sortOnArrival: "on",
@@ -322,8 +339,8 @@ describe("POST /settings/ai", () => {
 // Sorting right after a sync needs Jev to be asked at all, which takes categories or income on (spec
 // §8.6, decision 79). With both off the switch is greyed out: disabled, still showing its saved setting,
 // and Save leaves that setting as it was, so sorting right away comes back with the switch it needs.
-describe("the sorting switch with categories and income both off", () => {
-	const greyed = { categories: false, income: false };
+describe("the sorting switch with categories, income and details all off", () => {
+	const greyed = { categories: false, income: false, details: false };
 
 	it("is greyed out, and says what it needs, in the words the rows use today", async () => {
 		await saveAiSwitches(env.DB, greyed);
@@ -333,14 +350,27 @@ describe("the sorting switch with categories and income both off", () => {
 		expect(disabled(html, "income")).toBe(false);
 		const words = textOf(group(html));
 		expect(words).toContain("Sort new transactions as they arrive");
-		expect(words).toContain("Needs Categories and exclusions or Income on.");
+		expect(words).toContain(
+			"Needs Fill in details, Categories and exclusions, or Income on.",
+		);
 		expect(group(html)).not.toMatch(/jev/i);
+	});
+
+	it("stays enabled when details are on, and sync sorting can call Jev for details", async () => {
+		await saveAiSwitches(env.DB, {
+			categories: false,
+			income: false,
+			details: true,
+		});
+		const { html } = await get("/settings");
+		expect(disabled(html, "sortOnArrival")).toBe(false);
 	});
 
 	it("keeps showing its saved setting, On or Off", async () => {
 		await saveAiSwitches(env.DB, { ...greyed, sortOnArrival: true });
 		expect(inputs((await get("/settings")).html)).toEqual([
 			{ name: "names", on: true },
+			{ name: "details", on: false },
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: true },
@@ -348,6 +378,7 @@ describe("the sorting switch with categories and income both off", () => {
 		await saveAiSwitches(env.DB, { sortOnArrival: false });
 		expect(inputs((await get("/settings")).html)).toEqual([
 			{ name: "names", on: true },
+			{ name: "details", on: false },
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: false },
@@ -380,7 +411,7 @@ describe("the sorting switch with categories and income both off", () => {
 			sortOnArrival: true,
 		});
 		expect(trigger(res).announce).toBe(
-			"Saved AI suggestions. Suggest store names on, categories and exclusions off, income off, sorting new transactions as they arrive on.",
+			"Saved AI suggestions. Suggest store names on, filling in transaction details off, categories and exclusions off, income off, sorting new transactions as they arrive on.",
 		);
 	});
 

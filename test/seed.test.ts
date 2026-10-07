@@ -269,6 +269,17 @@ describe("resetDemo", () => {
 		expect(row).toEqual({ archived: 0, archived_on: null });
 	});
 
+	it("removes custom household people and restores the seeded Everyone row", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_people (name) VALUES ('Kids')",
+		).run();
+		await resetDemo(env.DB, "2026-10-05");
+		const { results } = await env.DB.prepare(
+			"SELECT name FROM household_people ORDER BY id",
+		).all<{ name: string }>();
+		expect(results).toEqual([{ name: "Everyone" }]);
+	});
+
 	it("stores the seed's balance history, and running it twice gives the same rows", async () => {
 		const history = buildSeed("2026-10-05").balanceHistory;
 		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });

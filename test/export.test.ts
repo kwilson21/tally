@@ -36,6 +36,7 @@ describe("data exports", () => {
 			category_suggestion_id: suggestion?.id,
 		});
 	});
+
 	it("includes income and credit review decisions in the JSON transaction export", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET income_source = 'jev', credit_reviewed = 0, credit_reviewed_by = NULL, income_confidence = 0.71, transfer_confidence = 0.62 WHERE id = 1",
@@ -244,6 +245,7 @@ describe("data exports", () => {
 			"plaid_items",
 			"documents",
 			"household_settings",
+			"household_people",
 		]) {
 			expect(data[table], table).toBeInstanceOf(Array);
 		}
@@ -296,6 +298,7 @@ describe("data exports", () => {
 				"category_id",
 				"category_source",
 				"category_suggestion_id",
+				"details_asked",
 				"credit_reviewed",
 				"credit_reviewed_by",
 				"date",
@@ -313,6 +316,13 @@ describe("data exports", () => {
 				"jev_none_fit",
 				"merchant_name",
 				"note",
+				"note_guessed",
+				"note_tried_at",
+				"note_dismissed",
+				"kind",
+				"kind_guessed",
+				"for_person_id",
+				"for_person_guessed",
 				"parent_id",
 				"pending",
 				"plaid_category",
@@ -348,6 +358,7 @@ describe("data exports", () => {
 			plaid_items: ["institution_name", "status"],
 			documents: ["filename", "uploaded_at"],
 			household_settings: ["key", "value"],
+			household_people: ["id", "name"],
 		} as const;
 		for (const [table, columns] of Object.entries(exportedColumns)) {
 			expect(
@@ -381,38 +392,83 @@ describe("data exports", () => {
 			/<a href="\/settings\/export\/tally\.json"[^>]*>Download everything \(JSON\)<\/a>/,
 		);
 	});
-});
 
-it("exports a disconnected bank's status as disconnected", async () => {
-	await env.DB.prepare(
-		"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
-	).run();
-	const response = await exports.default.fetch(
-		`${BASE}/settings/export/tally.json`,
-	);
-	const data = (await response.json()) as {
-		plaid_items: { status: string }[];
-	};
-	expect(data.plaid_items[0]?.status).toBe("disconnected");
-});
+	it("exports transaction details and named people in JSON and CSV, including removed people as no one", async () => {
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people (name) VALUES ('Kids') RETURNING id",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET note = 'Soccer shoes', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1, details_asked = 1, note_tried_at = '2026-10-06 09:00:00' WHERE id = 1",
+		)
+			.bind(person?.id)
+			.run();
+		const json = (await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).json()) as {
+			transactions: Record<string, unknown>[];
+			household_people: { id: number; name: string }[];
+		};
+		expect(json.household_people).toContainEqual({
+			id: person?.id,
+			name: "Kids",
+		});
+		expect(json.transactions.find((row) => row.id === 1)).toMatchObject({
+			note: "Soccer shoes",
+			note_guessed: 1,
+			details_asked: 1,
+			note_tried_at: "2026-10-06 09:00:00",
+			note_dismissed: 0,
+			kind: "one_off",
+			kind_guessed: 1,
+			for_person_id: person?.id,
+			for_person_guessed: 1,
+		});
+		const csv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+		expect(csv).toContain("kind,for,note");
+		expect(csv).toContain("One-off,Kids,Soccer shoes");
 
-it("marks the accounts of a disconnected bank, so kept balances can be told apart", async () => {
-	await env.DB.prepare(
-		"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
-	).run();
-	const response = await exports.default.fetch(
-		`${BASE}/settings/export/tally.json`,
-	);
-	const data = (await response.json()) as {
-		accounts: {
-			plaid_item_id: number;
-			bank: string;
-			bank_disconnected: number;
-		}[];
-	};
-	const first = data.accounts.find((a) => a.plaid_item_id === 1);
-	const other = data.accounts.find((a) => a.plaid_item_id !== 1);
-	expect(first?.bank_disconnected).toBe(1);
-	expect(typeof first?.bank).toBe("string");
-	if (other) expect(other.bank_disconnected).toBe(0);
+		await env.DB.prepare("DELETE FROM household_people WHERE id = ?")
+			.bind(person?.id)
+			.run();
+		const removedCsv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+		expect(removedCsv).toContain("One-off,no one,Soccer shoes");
+	});
+
+	it("exports a disconnected bank's status as disconnected", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
+		).run();
+		const response = await exports.default.fetch(
+			`${BASE}/settings/export/tally.json`,
+		);
+		const data = (await response.json()) as {
+			plaid_items: { status: string }[];
+		};
+		expect(data.plaid_items[0]?.status).toBe("disconnected");
+	});
+
+	it("marks the accounts of a disconnected bank, so kept balances can be told apart", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
+		).run();
+		const response = await exports.default.fetch(
+			`${BASE}/settings/export/tally.json`,
+		);
+		const data = (await response.json()) as {
+			accounts: {
+				plaid_item_id: number;
+				bank: string;
+				bank_disconnected: number;
+			}[];
+		};
+		const first = data.accounts.find((a) => a.plaid_item_id === 1);
+		const other = data.accounts.find((a) => a.plaid_item_id !== 1);
+		expect(first?.bank_disconnected).toBe(1);
+		expect(typeof first?.bank).toBe("string");
+		if (other) expect(other.bank_disconnected).toBe(0);
+	});
 });
