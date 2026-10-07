@@ -16,7 +16,10 @@ export const fullMessage = (action: "add" | "restore") =>
 export type CategoryValue = { name: string };
 export type CategoryErrors = Partial<Record<"name", string>>;
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const normalizeName = (name: string) =>
+	name.normalize("NFC").trim().replace(/\s+/g, " ");
+const same = (a: string, b: string) =>
+	normalizeName(a).toLowerCase() === normalizeName(b).toLowerCase();
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
 
@@ -26,7 +29,7 @@ export function parseCategory(
 	existing: Existing,
 	id: number | null,
 ): { ok: true; value: CategoryValue } | { ok: false; errors: CategoryErrors } {
-	const name = String(form.get("name") ?? "").trim();
+	const name = normalizeName(String(form.get("name") ?? ""));
 	const errors: CategoryErrors = {};
 
 	const clash = existing.find((c) => c.id !== id && same(c.name, name));

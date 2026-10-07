@@ -30,6 +30,43 @@ describe("parseCategory", () => {
 		});
 	});
 
+	it("normalizes saved names and rejects NFC/NFD duplicates after whitespace folding", () => {
+		const cafe = "Caf\u00e9";
+		const decomposedCafe = "Cafe\u0301";
+		expect(
+			parseCategory(
+				form({ name: `  New   ${decomposedCafe}  ` }),
+				existing,
+				null,
+			),
+		).toMatchObject({
+			ok: true,
+			value: { name: `New ${cafe}` },
+		});
+		expect(
+			parseCategory(
+				form({ name: decomposedCafe }),
+				[{ id: 8, name: cafe, archived: false }],
+				null,
+			),
+		).toEqual({
+			ok: false,
+			errors: { name: "That name is taken." },
+		});
+		expect(
+			parseCategory(
+				form({ name: cafe }),
+				[{ id: 8, name: decomposedCafe, archived: true }],
+				null,
+			),
+		).toEqual({
+			ok: false,
+			errors: {
+				name: "An archived category has that name. Restore it instead.",
+			},
+		});
+	});
+
 	it.each([
 		["", "Give the category a name."],
 		["x".repeat(41), "Keep the name to 40 characters."],

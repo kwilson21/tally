@@ -8,6 +8,15 @@
 	font-style: normal;
 	font-display: swap;
 }
+
+:root {
+	--month-end-chart-fade-width: 4rem;
+	--month-end-chart-cue-size: 2.75rem;
+	--month-end-chart-tail-width: calc(
+		var(--month-end-chart-fade-width) +
+		var(--month-end-chart-cue-size)
+	);
+}
 @font-face {
 	font-family: "Newsreader";
 	src: url("/fonts/newsreader-latin-wght-normal.woff2") format("woff2");
@@ -250,9 +259,13 @@ html:not(.js) [data-money-js] {
 	right: 0;
 	top: 0;
 	bottom: 0;
-	width: 4rem;
+	width: var(--month-end-chart-fade-width);
 	background: linear-gradient(to right, transparent, var(--color-paper) 85%);
 	pointer-events: none;
+}
+.month-end-chart-tail {
+	width: var(--month-end-chart-tail-width);
+	flex: 0 0 var(--month-end-chart-tail-width);
 }
 .month-end-budget-label {
 	position: absolute;
@@ -270,6 +283,8 @@ html:not(.js) [data-money-js] {
 	top: 50%;
 	right: 0.25rem;
 	z-index: 2;
+	min-width: var(--month-end-chart-cue-size);
+	min-height: var(--month-end-chart-cue-size);
 	transform: translateY(-50%);
 }
 @media (prefers-reduced-motion: reduce) {

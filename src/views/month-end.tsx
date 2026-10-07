@@ -17,11 +17,14 @@ const SHORT_NAMES: Record<string, string> = {
 };
 /** Short labels for a finished-month chart, disambiguated by the full category set. */
 export function monthEndLabels(names: string[]): string[] {
-	const words = names.map((name) => name.normalize("NFC").trim().split(/\s+/));
+	const normalized = names.map((name) =>
+		name.normalize("NFC").trim().replace(/\s+/g, " "),
+	);
+	const words = normalized.map((name) => name.split(/\s+/));
 	const extra = names.map(() => 0);
 	const fullSpecial = names.map(() => false);
 	const labelAt = (index: number) => {
-		const name = names[index] ?? "";
+		const name = normalized[index] ?? "";
 		const parts = words[index] ?? [name];
 		const first = Array.from(parts[0] ?? "");
 		const count = Math.min(
@@ -49,19 +52,33 @@ export function monthEndLabels(names: string[]): string[] {
 			groups.set(label, [...(groups.get(label) ?? []), index]);
 		}
 		const duplicates = [...groups.values()].filter((group) => group.length > 1);
-		if (!duplicates.length) return names.map((_, index) => labelAt(index));
+		if (!duplicates.length)
+			return uniqueLabels(names.map((_, index) => labelAt(index)));
 		for (const group of duplicates) {
 			for (const index of group) {
-				if (Object.hasOwn(SHORT_NAMES, names[index] ?? ""))
+				if (Object.hasOwn(SHORT_NAMES, normalized[index] ?? ""))
 					fullSpecial[index] = true;
 				else extra[index] = (extra[index] ?? 0) + 1;
 			}
 		}
 	}
-	return names.map(
-		(name, index) => (names[index] ?? "").normalize("NFC").trim() || name,
-	);
+	return uniqueLabels(names.map((name, index) => normalized[index] || name));
 }
+
+function uniqueLabels(labels: string[]): string[] {
+	const used = new Set<string>();
+	return labels.map((label) => {
+		const base = label.normalize("NFC").trim();
+		let result = base;
+		for (let suffix = 2; used.has(result); suffix++)
+			result = `${base} ${suffix}`;
+		used.add(result);
+		return result;
+	});
+}
+
+// At text-sm, 8 SVG units per Unicode code point is a conservative width estimate.
+const labelNeedsCap = (text: string) => Array.from(text).length * 8 > 62;
 
 function EndBars({
 	rows,
@@ -70,13 +87,13 @@ function EndBars({
 	rows: CategorySummary[];
 	chartId: string;
 }) {
-	const width = Math.max(350, 4 + Math.max(0, rows.length - 1) * 66 + 42);
-	const left = 4;
+	const scrolls = rows.length > 5;
+	const left = scrolls ? 31 : 4;
+	const width = Math.max(350, left + Math.max(0, rows.length - 1) * 66 + 42);
 	const areaRight = 292;
 	const unit = 72;
 	const barWidth = 42;
 	const labels = monthEndLabels(rows.map((row) => row.name));
-	const scrolls = rows.length > 5;
 	const step =
 		rows.length > 1 && !scrolls
 			? Math.min(66, (areaRight - left - barWidth) / (rows.length - 1))
@@ -136,8 +153,15 @@ function EndBars({
 								y={base - height - 6}
 								text-anchor="middle"
 								class="fill-over text-sm font-semibold"
+								aria-label={`Over budget by ${whole(row.spentCents - row.budgetCents)}`}
+								{...(labelNeedsCap(
+									`+${whole(row.spentCents - row.budgetCents)}`,
+								)
+									? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
+									: {})}
 							>
-								+{whole(row.spentCents - row.budgetCents)}
+								<title>+{whole(row.spentCents - row.budgetCents)}</title>+
+								{whole(row.spentCents - row.budgetCents)}
 							</text>
 						)}
 						<text
@@ -145,7 +169,12 @@ function EndBars({
 							y={base + 20}
 							text-anchor="middle"
 							class="fill-muted text-sm"
+							aria-label={row.name}
+							{...(labelNeedsCap(labels[index] ?? "")
+								? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
+								: {})}
 						>
+							<title>{row.name}</title>
 							{labels[index]}
 						</text>
 					</g>
@@ -165,6 +194,7 @@ function EndBars({
 			>
 				<div class="flex w-max">
 					{chart}
+					<span class="month-end-chart-tail" aria-hidden="true" />
 					<span
 						id={`${chartId}-chart-end`}
 						class="w-px shrink-0"
@@ -179,7 +209,7 @@ function EndBars({
 			<a
 				href={`#${chartId}-chart-end`}
 				aria-label="Show the rest of the categories"
-				class="month-end-chart-more inline-flex min-h-11 min-w-11 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+				class="month-end-chart-more inline-flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 			>
 				<span
 					class="month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue"
@@ -254,8 +284,10 @@ export function PastNotBudgeted({
 					<li class="flex min-h-11 items-center gap-4 py-2">
 						<CategoryIcon icon={item.icon} color={item.color} />
 						<span class="min-w-0 flex-1 truncate text-lg">{item.name}</span>
-						<span class="text-lg">
-							{formatCents(item.spentCents, { wholeDollars: true })}
+						<span class={`text-lg ${item.spentCents < 0 ? "text-ok" : ""}`}>
+							{item.spentCents < 0
+								? `+${formatCents(-item.spentCents, { wholeDollars: true })}`
+								: formatCents(item.spentCents, { wholeDollars: true })}
 						</span>
 					</li>
 				))}

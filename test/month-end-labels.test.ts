@@ -153,4 +153,10 @@ describe("month-end chart labels", () => {
 			"Groc.",
 		]);
 	});
+
+	it("compares normalized labels and suffixes identical stored names", () => {
+		const labels = monthEndLabels(["Caf\u00e9", "Cafe\u0301", "Cafe\u0301"]);
+		expect(labels).toEqual(["Café", "Café 2", "Café 3"]);
+		expect(new Set(labels).size).toBe(3);
+	});
 });

@@ -21,8 +21,13 @@ export function parseCash(
 		new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
 			.toISOString()
 			.slice(0, 10) === values.date;
+	const earliest = new Date(`${today}T00:00:00Z`);
+	earliest.setUTCFullYear(earliest.getUTCFullYear() - 10);
+	const earliestDate = earliest.toISOString().slice(0, 10);
 	if (!realDate || values.date > today)
 		errors.date = "Choose today or an earlier date.";
+	else if (values.date < earliestDate)
+		errors.date = "Choose a date within the last 10 years.";
 	let cents = 0;
 	try {
 		cents = toCents(values.amount);

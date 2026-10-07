@@ -3,7 +3,7 @@ import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
 import type { CategorySummary } from "../src/budget";
 import appCss from "../src/styles/app.css?raw";
-import { MonthEnd } from "../src/views/month-end";
+import { MonthEnd, PastNotBudgeted } from "../src/views/month-end";
 
 const rows = (count: number): CategorySummary[] =>
 	Array.from({ length: count }, (_, index) => ({
@@ -87,7 +87,7 @@ describe("MonthEnd budget bars", () => {
 		expect(html).toContain('href="#twelve-chart-end"');
 		expect(html).toContain('aria-label="Show the rest of the categories"');
 		expect(html).toContain(
-			'class="month-end-chart-more inline-flex min-h-11 min-w-11 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"',
+			'class="month-end-chart-more inline-flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"',
 		);
 		expect(html).toContain(
 			"month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue",
@@ -123,9 +123,9 @@ describe("MonthEnd budget bars", () => {
 		expect(contrast("#fbf8f2", "#0e0e0e")).toBeGreaterThanOrEqual(3);
 		expect(contrast("#ae5534", "#0e0e0e")).toBeGreaterThanOrEqual(3);
 		expect(chart).toBeDefined();
-		expect(chart).toContain('viewBox="0 0 772 142"');
+		expect(chart).toContain('viewBox="0 0 799 142"');
 		expect(chart).toContain('width="42"');
-		expect(chart).toContain('<line x1="4" x2="772" y1="40" y2="40"');
+		expect(chart).toContain('<line x1="31" x2="799" y1="40" y2="40"');
 		expect(chart).toContain('y="132"');
 		const xs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map((match) =>
 			Number(match[1]),
@@ -154,6 +154,48 @@ describe("MonthEnd budget bars", () => {
 		).toBe(12);
 		expect(html).toContain("overflow-x-auto");
 		expect(html).toContain("max-w-full");
+		expect(chart).toContain('viewBox="0 0 799 142"');
+		expect(chart).toContain('width="799"');
+		const rectXs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
+			(match) => Number(match[1]),
+		);
+		const lastBarEnd = Math.max(...rectXs) + 42;
+		expect(799 - lastBarEnd).toBe(0);
+		expect(html).toContain('id="twelve-chart-end"');
+		expect(html.indexOf('id="twelve-chart-end"')).toBeGreaterThan(
+			html.indexOf("</svg>"),
+		);
+		expect(html.indexOf('id="twelve-chart-end"')).toBeGreaterThan(
+			html.indexOf('class="month-end-chart-tail"'),
+		);
+		expect(appCss).toContain("--month-end-chart-tail-width: calc(");
+		expect(appCss).toMatch(
+			/var\(--month-end-chart-fade-width\)\s*\+\s*var\(--month-end-chart-cue-size\)/,
+		);
+	});
+
+	it("keeps short category labels at their natural width", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="short"
+				monthName="September"
+				amountCents={0}
+				rows={[
+					{
+						id: 1,
+						name: "Short",
+						budgetCents: 100,
+						spentCents: 50,
+						leftCents: 50,
+						over: false,
+					},
+				]}
+			/>,
+		);
+		const svg = html.match(/<svg[\s\S]*?<\/svg>/)?.[0] ?? "";
+		const category =
+			svg.match(/<text[^>]*y="132"[^>]*>[\s\S]*?<\/text>/)?.[0] ?? "";
+		expect(category).not.toContain("textLength=");
 	});
 
 	it("gives each chart its own deterministic scroll target", () => {
@@ -188,5 +230,53 @@ describe("MonthEnd budget bars", () => {
 		expect(appCss).toContain(
 			"animation: month-end-nudge var(--duration-swipe) var(--ease-swipe) 3;",
 		);
+	});
+
+	it("caps long category and overage labels while preserving full accessible names", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="long"
+				monthName="September"
+				amountCents={0}
+				rows={[
+					{
+						id: 1,
+						name: "Supercalifragilisticexpialidocious",
+						budgetCents: 100,
+						spentCents: 1000100,
+						leftCents: -1000000,
+						over: true,
+					},
+					{
+						id: 2,
+						name: "Supercalifragilisticexpialidocious",
+						budgetCents: 100,
+						spentCents: 10000000,
+						leftCents: -9999900,
+						over: true,
+					},
+				]}
+			/>,
+		);
+		const svg = html.match(/<svg[\s\S]*?<\/svg>/)?.[0] ?? "";
+		expect(svg).toContain('textLength="62" lengthAdjust="spacingAndGlyphs"');
+		expect(svg).toContain("Supercalifragilisticexpialidocious");
+		expect(svg).toContain("+$10,000");
+		expect(svg).toContain("+$99,999");
+		expect(svg).toContain("<title>Supercalifragilisticexpialidocious</title>");
+		expect(svg).toContain("<title>+$99,999</title>");
+		expect(svg).not.toContain(">Short</text>");
+	});
+
+	it("shows net refunds as positive in Not budgeted", () => {
+		const html = renderToString(
+			<PastNotBudgeted
+				items={[
+					{ name: "Café", icon: "list", color: "cat-blue", spentCents: -2000 },
+				]}
+			/>,
+		);
+		expect(html).toContain('class="text-lg text-ok"');
+		expect(html).toContain("+$20");
 	});
 });

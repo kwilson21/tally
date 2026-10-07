@@ -732,7 +732,7 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	motion:
 		"When more than five categories need a sideways cue, its arrows nudge three times at 1.2 seconds per nudge, then rest. Reduced motion leaves them still. The page uses the shell's browser page transition.",
 	edges:
-		"The strip starts at the first month with a counted transaction and ends at the household's current month. At either end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month chart with more than five categories is one 42px-bar row inside its own keyboard-scrollable region; its dashed budget line continues across the row and its budget word stays at the visible right edge. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls. A future or pre-history month address opens this month's Home.",
+		"The strip shows at most the latest 36 months; when older history exists, an Earlier link opens the month before the strip. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month chart with more than five categories is one 42px-bar row inside its own keyboard-scrollable region; its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. A future or pre-history month address opens this month's Home.",
 	words:
 		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
 };
@@ -783,7 +783,7 @@ function HomeTopGroup() {
 					"PastNotBudgeted",
 					"ProgressRow",
 				]}
-				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels, read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94)."
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94)."
 			>
 				<State label="September ended under overall, with Eating Out over its own budget">
 					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">

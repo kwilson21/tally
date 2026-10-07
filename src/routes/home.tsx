@@ -102,7 +102,7 @@ async function renderHome(
 ) {
 	const currentMonth = today.slice(0, 7);
 	const month = viewMonth ?? currentMonth;
-	const data = await loadMonth(c.env.DB, month);
+	const data = await loadMonth(c.env.DB, month, month !== currentMonth);
 	const billData =
 		month === currentMonth ? await loadBillRows(c.env.DB, today) : null;
 	const dueBills =

@@ -157,6 +157,22 @@ describe("firstCountedMonth query count", () => {
 		expect(await firstCountedMonth(db)).toBe("2026-09");
 	});
 
+	it("starts at income before spending, while still skipping an excluded earlier month", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, flag_income) VALUES (313, 1, '2026-07-12', 1000, 'EXCLUDED', 1, 0)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, flag_income) VALUES (314, 1, '2026-08-12', -100000, 'PAYCHECK', 1)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (315, 1, '2026-09-02', 1000, 'GROCERIES')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-08");
+	});
+
 	it("uses an earlier linked bill occurrence month", async () => {
 		await clearHistory();
 		await db.batch([

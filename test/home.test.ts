@@ -78,6 +78,29 @@ describe("GET / with the demo seed", () => {
 		);
 	});
 
+	it("keeps a finished month's stamp and budget when an unspent category is archived", async () => {
+		await env.DB.prepare(
+			"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (900, 'Unspent', 'list', 'cat-blue', 90)",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (900, '2026-09', 23000)",
+		).run();
+		const before = (await homeAt("2026-09")).html;
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 900",
+		).run();
+		const after = (await homeAt("2026-09")).html;
+		const endedAmount = (html: string) =>
+			html.match(/<p class="whitespace-nowrap[^>]*>([^<]+)<\/p>/)?.[1];
+		expect(after).toContain("$230");
+		expect(after).toContain('aria-label="September ended"');
+		expect(endedAmount(after)).toBe(endedAmount(before));
+		expect(
+			before.includes("border-ok text-ok") ===
+				after.includes("border-ok text-ok"),
+		).toBe(true);
+	});
+
 	it("stamps $86 under, then $42 over when unbudgeted spending grows", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
@@ -131,6 +154,22 @@ describe("GET / with the demo seed", () => {
 		expect(html).toContain("Safe to spend");
 		expect(html).toContain(`href="/?month=${currentMonth}"`);
 		expect(months.map((match) => match[1])).toEqual([currentMonth]);
+	});
+
+	it("keeps the month strip bounded for very old cash history and keeps old month URLs valid", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, excluded, is_split, flag_income) SELECT id, '0100-01-01', 100, 'Ancient cash', 0, 0, 0 FROM accounts ORDER BY id LIMIT 1",
+		).run();
+		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const { html } = await home();
+		const nav =
+			html.match(/<nav aria-label="Months"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+		const links = [...nav.matchAll(/href="\/?\?month=(\d{4}-\d{2})"/g)];
+		expect(links).toHaveLength(36);
+		expect(html).toContain("Earlier");
+		expect((await homeAt("0100-01")).html).toContain("January 0100 ended");
+		expect((await home()).html.length).toBeLessThan(100000);
+		expect(current).toBe(todayIn(DEFAULT_TIME_ZONE).slice(0, 7));
 	});
 
 	it("fades the unavailable arrows on this month and the first month with transactions", async () => {
