@@ -76,16 +76,16 @@ describe("listTransactions", () => {
 
 	it("filters to what needs a category, matching Home's count", async () => {
 		const { rows } = await list("uncategorized=1");
-		expect(rows).toHaveLength(12);
+		expect(rows).toHaveLength(10);
 		expect(rows.every((r) => r.categoryId === null && !r.income)).toBe(true);
-		expect(await needsCategoryCount(env.DB, "2026-09")).toBe(12);
+		expect(await needsCategoryCount(env.DB, "2026-09")).toBe(10);
 		const data = await loadMonth(env.DB, "2026-09");
 		const home = summarizeMonth({
 			month: "2026-09",
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		expect(home.uncategorized.count).toBe(12);
+		expect(home.uncategorized.count).toBe(10);
 	});
 
 	it("filters to excluded only", async () => {

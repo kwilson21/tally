@@ -149,6 +149,30 @@ describe("rowCaption", () => {
 		).toBeNull();
 	});
 
+	it("uses bank text on an uncategorized refund only when no refund pair supplies a caption", async () => {
+		expect(
+			rowCaption({
+				...base,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			}).caption,
+		).toBe("Refund for Sep 5");
+		expect(rowCaption({ ...base, displayName: "Bakery" }).caption).toBe(
+			"SQ *LOCAL BAKERY 4432",
+		);
+		const pending = await TransactionRow({
+			row: {
+				...base,
+				pending: true,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			},
+		}).toString();
+		expect(pending).toContain("Pending ·");
+		expect(pending).toContain("Refund for Sep 5");
+		expect(pending).not.toContain("SQ *LOCAL BAKERY 4432");
+	});
+
 	it("explains when a bank amount change removed a saved split", () => {
 		expect(rowCaption({ ...base, splitRemovedFromCents: 1234 })).toEqual({
 			kind: "needs",
@@ -168,6 +192,81 @@ describe("rowCaption", () => {
 		).toBe("Groceries · Split from Costco");
 	});
 
+	it("names the bill on split payment parts and parent, leaving other splits alone", () => {
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				parentBillName: "Rent",
+				paysBill: true,
+				categoryName: "Groceries",
+			}).caption,
+		).toBe("Groceries · Split from Costco · paid Rent bill");
+		expect(
+			rowCaption({
+				...base,
+				isSplit: true,
+				paysBill: true,
+				billName: "Rent",
+			}).caption,
+		).toBe("Split transaction · paid Rent bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				billName: "Internet",
+			}).caption,
+		).toBe("Split from Costco · paid Internet bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				parentBillName: "Rent",
+			}).caption,
+		).toBe("Split from Costco · paid Rent bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				billName: "Internet",
+				parentBillName: "Rent",
+			}).caption,
+		).toBe("Split from Costco · paid Internet bill");
+		expect(
+			rowCaption({ ...base, parentId: 9, parentName: "Costco" }).caption,
+		).toBe("Split from Costco");
+	});
+
+	it("names the bill a payment paid after its category", () => {
+		expect(
+			rowCaption({
+				...base,
+				categoryName: "Rent",
+				paysBill: true,
+				billName: "Rent",
+			}),
+		).toMatchObject({ kind: "category", caption: "Rent · paid Rent bill" });
+		expect(
+			rowCaption({
+				...base,
+				categoryName: "Utilities",
+				paysBill: true,
+				billName: "Internet",
+				categoryId: 3,
+			}),
+		).toMatchObject({
+			kind: "category",
+			caption: "Utilities · paid Internet bill",
+		});
+	});
+
 	it("drops the bank-change note once the purchase has a category again", () => {
 		expect(
 			rowCaption({ ...base, splitRemovedFromCents: 1234, categoryId: 1 })
@@ -177,6 +276,66 @@ describe("rowCaption", () => {
 });
 
 describe("TransactionRow", () => {
+	it.each([
+		{
+			name: "a bill caption before a guessed note",
+			row: {
+				note: "Dinner",
+				noteGuessed: true,
+				paysBill: true,
+				billName: "Rent",
+			},
+			caption: "paid Rent bill",
+			showsGuessedNote: false,
+		},
+		{
+			name: "a refund caption before a guessed note",
+			row: {
+				note: "Dinner",
+				noteGuessed: true,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			},
+			caption: "Refund for Sep 5",
+			showsGuessedNote: false,
+		},
+		{
+			name: "a split part followed by its bill",
+			row: {
+				parentId: 9,
+				parentName: "Costco",
+				parentBillName: "Rent",
+				paysBill: true,
+			},
+			caption: "Split from Costco · paid Rent bill",
+			showsGuessedNote: false,
+		},
+		{
+			name: "Excluded before a guessed note",
+			row: { excluded: true, note: "Dinner", noteGuessed: true },
+			caption: "Excluded",
+			showsGuessedNote: false,
+		},
+		{
+			name: "Pending before bank text",
+			row: { pending: true },
+			caption: "SQ *LOCAL BAKERY 4432",
+			showsGuessedNote: false,
+		},
+	])(
+		"keeps $name in the caption order",
+		async ({ row, caption, showsGuessedNote }) => {
+			const transaction = { ...base, ...row };
+			expect(rowCaption(transaction).caption).toBe(caption);
+			const html = await TransactionRow({ row: transaction }).toString();
+			expect(html.includes("Tally&#39;s guess:")).toBe(showsGuessedNote);
+			if (transaction.pending) {
+				expect(html).toContain("Pending");
+				expect(html).not.toContain("SQ *LOCAL BAKERY 4432");
+			}
+		},
+	);
+
 	it("marks only a caption that shows the guessed note", async () => {
 		const category = await TransactionRow({
 			row: {

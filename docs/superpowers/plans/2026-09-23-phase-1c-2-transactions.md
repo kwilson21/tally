@@ -43,7 +43,7 @@ The pure parts are tested first: filter parsing, day labels, search escaping, an
 
 ## Owner review: choices this plan makes
 
-1. **"Needs category" means exactly what Home counts:** in the month, not excluded, not a split parent, not income, and category null. The chip's count always matches Home's band ("12").
+1. **"Needs category" means exactly what Home counts:** in the month, not excluded, not a split parent, not income, and category null. The chip's count always matches Home's band ("10" after bill matching).
 2. **Filters:**
    - Month defaults to the current month and also offers "All months".
    - The "Excluded" chip shows *only* excluded transactions. By default, excluded rows still appear in the list, muted, as in the study.
@@ -239,8 +239,8 @@ export function monthLabel(month: string, today: string): string {
 ### Task A2: The list query (route-runtime tests on the seed)
 
 - [ ] **Step 1: Failing test** `test/transactions-db.test.ts`. `beforeEach` runs `resetDemo(env.DB, "2026-09-22")`.
-  - This month, with no filters: 35 rows (19 categorized, 12 uncategorized, 2 paychecks, 1 transfer, 1 reimbursement), newest first.
-  - `uncategorized`: 12 rows, and `needsCategoryCount(db, "2026-09")` is 12, the same as Home.
+  - This month, with no filters: 35 rows (21 categorized, 10 uncategorized, 2 paychecks, 1 transfer, 1 reimbursement), newest first.
+  - `uncategorized`: 10 rows, and `needsCategoryCount(db, "2026-09")` is 10, the same as Home.
   - `excluded`: 2 rows (the transfer and the reimbursement).
   - `category` = Groceries (1): 4 rows.
   - `q = "bakery"`: 1 row, found by its display name "Local Bakery". `q = "SQ *LOCAL"` finds the same row by raw name. `q = "%"` finds 0 rows, which checks the escaping.
@@ -345,12 +345,12 @@ export function Chip({ type, name, value, checked, children, icon }: …) {
 ### Task A4: The route (route test first)
 
 - [ ] **Step 1: Failing test** `test/transactions-route.test.ts`. It resets the seed to `todayUtc()`, then checks:
-  - `GET /transactions` returns 200. It has the heading "Transactions", a labeled search (`<label …>Search transactions</label>`), labeled month and category `<select>`s, and chips reading "Needs category (12)" and "Excluded". Rows are grouped under day headings that start with "Today, ".
-  - `GET /transactions?uncategorized=1` shows 12 rows, each with "Needs category", and the chip is checked.
+  - `GET /transactions` returns 200. It has the heading "Transactions", a labeled search (`<label …>Search transactions</label>`), labeled month and category `<select>`s, and chips reading "Needs category (10)" and "Excluded". Rows are grouped under day headings that start with "Today, ".
+  - `GET /transactions?uncategorized=1` shows 10 rows, each with "Needs category", and the chip is checked.
   - `GET /transactions?excluded=1` shows "Transfer to Savings" and "Reimbursement, doctor&#39;s office" (check the escaping), and nothing else.
   - `GET /transactions?q=zzz` shows the empty state "No transactions match." with a "Clear filters" link to `/transactions`.
-  - With `HX-Request: true`, the response carries `HX-Trigger` with `announce` set to "12 transactions" (for `?uncategorized=1`).
-  - Home's band link resolves: fetch Home, take the `href` of the band, fetch it, and expect the 12 rows.
+  - With `HX-Request: true`, the response carries `HX-Trigger` with `announce` set to "10 transactions" (for `?uncategorized=1`).
+  - Home's band link resolves: fetch Home, take the `href` of the band, fetch it, and expect the 10 rows.
   - The `/transactions` nav item is still marked current (the `nav-routes.test.ts` case keeps passing).
 
 - [ ] **Step 2: Implement** `src/routes/transactions.tsx`. Its main pieces are:
@@ -424,18 +424,18 @@ Start after Part A is merged.
 
 - [ ] **Test** `test/transactions-edit-route.test.ts`, with the seed reset and the Local Bakery id looked up by raw name:
   1. **The edit page:** `GET /transactions/{id}?uncategorized=1` returns 200.
-     - The page shows the list (12 rows) **and** a sheet: `role="dialog"`, `aria-labelledby` pointing at a heading "Local Bakery" that carries `autofocus`, the raw name, "$12.00", and "Sep … · Credit card ••9012" (the seed puts uncategorized spending on the card).
+     - The page shows the list (10 rows) **and** a sheet: `role="dialog"`, `aria-labelledby` pointing at a heading "Local Bakery" that carries `autofocus`, the raw name, "$12.00", and "Sep … · Credit card ••9012" (the seed puts uncategorized spending on the card).
      - The Category `<fieldset>` has a `<legend>Category</legend>` and 5 radio chips.
      - There's the "Always use this category for this merchant" checkbox, a "Merchant name" input with the value "Local Bakery", a "Note" textarea, a Cancel link to `/transactions?uncategorized=1`, and a Save button.
   2. **Unknown id:** `GET /transactions/999999` → 404, rendered inside the layout.
   3. **Save with htmx:** `POST /transactions/{id}` (htmx) with `category=2&merchant=Local Bakery&note=&back=/transactions?uncategorized=1` returns 200.
-     - The body shows 11 rows and no sheet contents.
+     - The body shows 9 rows and no sheet contents.
      - The `HX-Trigger` JSON has `toast.message` = "Saved Local Bakery" and `announce` = "Saved. Local Bakery is now Eating Out."
      - `HX-Push-Url` is `/transactions?uncategorized=1`.
      - The saved row's link carries `autofocus`, so focus returns to it. With the uncategorized filter it has left the list, so focus goes to the results heading instead.
   4. **Save without JavaScript:** the same POST without `HX-Request` → 303, `Location: /transactions?uncategorized=1`.
   5. **Invalid input:** a POST with `category=99` → 422. The sheet is re-rendered with `role="alert"` "Pick a category from the list.", and the typed-in values are kept.
-  6. **Home follows the edit:** after the save, Home's band reads "11 transactions need a category".
+  6. **Home follows the edit:** after the save, Home's band reads "9 transactions need a category".
 - [ ] **`BottomSheet`** (`src/views/bottom-sheet.tsx`):
 ```tsx
 // A page region that slides over the list: bottom sheet on phones, right-hand panel on desktop.
@@ -471,11 +471,11 @@ export function BottomSheet({ labelledBy, closeHref, children }: …) {
 ### Task B4: E2E recategorize (spec §11)
 
 - [ ] **Write `scripts/e2e.mjs`:** Playwright plus `node:assert`, run against the running app like `screenshots.mjs`, honoring `BASE_URL` and `CHROMIUM_PATH`. The flow:
-  1. Open `/`, then click the band "12 transactions need a category". The URL is `/transactions?uncategorized=1`.
+  1. Open `/`, then click the band "10 transactions need a category". The URL is `/transactions?uncategorized=1`.
   2. Click "Local Bakery". The sheet opens, and focus is on its heading.
   3. Choose "Eating Out" and click Save.
-  4. A toast "Saved Local Bakery" appears, the list shows 11 rows, and the URL is still `/transactions?uncategorized=1`.
-  5. Go to `/`. The band reads "11 transactions need a category".
+  4. A toast "Saved Local Bakery" appears, the list shows 9 rows, and the URL is still `/transactions?uncategorized=1`.
+  5. Go to `/`. The band reads "9 transactions need a category".
   6. Fail on any console error.
 - [ ] **Wire it up:** add `"e2e": "node scripts/e2e.mjs"` to `package.json`. In `.github/workflows/screenshots.yml`, add `- run: npm run e2e` **after** the screenshots step. The app is already running and seeded there, and the E2E changes the data, so it has to run after the screenshots.
 - [ ] **Screenshot page:** add `{ name: "transaction-edit", path: "/transactions/110?uncategorized=1" }` to `PAGES`. 110 is Local Bakery's id after a reset (90 history rows, then 19 categorized, then the first uncategorized row). Add a `test/seed.test.ts` assertion that id 110 is `SQ *LOCAL BAKERY 4432`, so the screenshot can't silently drift.

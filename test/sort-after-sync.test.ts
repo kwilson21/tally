@@ -85,13 +85,13 @@ describe("sortAfterSync", () => {
 			{ changedIds: [a as number, b as number, c as number] },
 			jev.fetchImpl,
 		);
-		// Three of the seed's twelve unsorted transactions, each asked about once.
+		// Three of the seed's ten unsorted transactions, each asked about once.
 		expect(jev.asked).toHaveLength(3);
 		expect(new Set(jev.asked).size).toBe(3);
-		expect(await pendingForJev(db, 100)).toHaveLength(9);
-		// The nightly run takes the nine that waited.
+		expect(await pendingForJev(db, 100)).toHaveLength(7);
+		// The nightly run takes the seven that waited.
 		await categorizePending(withKey, jev.fetchImpl);
-		expect(jev.asked).toHaveLength(12);
+		expect(jev.asked).toHaveLength(10);
 		expect(await pendingForJev(db, 100)).toHaveLength(0);
 	});
 
@@ -186,10 +186,10 @@ describe("sortAfterSync", () => {
 			jev.fetchImpl,
 		);
 		expect(jev.asked).toEqual([]);
-		expect(await pendingForJev(db, 100)).toHaveLength(12);
+		expect(await pendingForJev(db, 100)).toHaveLength(10);
 		// The nightly run isn't held back by that switch.
 		await categorizePending(withKey, jev.fetchImpl);
-		expect(jev.asked).toHaveLength(12);
+		expect(jev.asked).toHaveLength(10);
 	});
 
 	it("doesn't run when Jev isn't asked at all, with categories and income both off", async () => {
@@ -226,7 +226,7 @@ describe("sortAfterSync", () => {
 				{ changedIds: await waitingIds() },
 				jev.fetchImpl,
 			);
-			expect(jev.asked).toHaveLength(12);
+			expect(jev.asked).toHaveLength(10);
 		},
 	);
 
@@ -314,7 +314,7 @@ describe("sortAfterSync", () => {
 });
 
 describe("the day's cap across a sync's run and the nightly run", () => {
-	/** More unsorted transactions than the demo's cap of 40, added after the seed's 12. */
+	/** More unsorted transactions than the demo's cap of 40, added after the seed's 10. */
 	async function addPending(n: number) {
 		await db
 			.prepare(
@@ -328,14 +328,14 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 
 	it("gives the nightly run only what the syncs left of the day", async () => {
 		quiet();
-		// The demo's cap is 40. A run after a sync sorts the seed's 12 ...
+		// The demo's cap is 40. A run after a sync sorts the seed's 10 ...
 		const atSync = fakeJev();
 		await sortAfterSync(
 			withKey,
 			{ changedIds: await waitingIds() },
 			atSync.fetchImpl,
 		);
-		expect(atSync.asked).toHaveLength(12);
+		expect(atSync.asked).toHaveLength(10);
 		// ... another sync brings 50 more, and its run takes 28 before the cap is reached ...
 		await addPending(50);
 		const second = fakeJev();
@@ -344,13 +344,13 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 			{ changedIds: await waitingIds() },
 			second.fetchImpl,
 		);
-		expect(second.asked).toHaveLength(28);
+		expect(second.asked).toHaveLength(30);
 		// ... so the nightly run the same day has nothing left to spend.
 		const nightly = fakeJev();
 		await categorizePending(withKey, nightly.fetchImpl);
 		expect(nightly.asked).toEqual([]);
 		expect(await callsUsed()).toBe(40);
-		expect(await pendingForJev(db, 100)).toHaveLength(22);
+		expect(await pendingForJev(db, 100)).toHaveLength(20);
 	});
 
 	it("lets the nightly run spend what a sync's run left", async () => {
@@ -415,7 +415,7 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		await newDay();
 		const day2 = fakeJev();
 		await categorizePending(withKey, day2.fetchImpl);
-		expect(day2.asked).toHaveLength(22);
+		expect(day2.asked).toHaveLength(20);
 	});
 });
 

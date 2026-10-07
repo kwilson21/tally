@@ -127,13 +127,13 @@ describe("scheduled handler", () => {
 		fetchSpy.mockRestore();
 	});
 
-	it("leaves Jev out when there is no key, so the seed's 12 stay uncategorized", async () => {
+	it("leaves Jev out when there is no key, so the uncategorized seed rows stay uncategorized", async () => {
 		await worker.scheduled({ cron: "0 9 * * *" });
 
 		const untouched = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL AND flag_income = 0 AND excluded = 0",
 		).first<{ n: number }>();
-		expect(untouched?.n).toBeGreaterThanOrEqual(12);
+		expect(untouched?.n).toBeGreaterThanOrEqual(10);
 	});
 
 	it("syncs and applies merchant rules at the sync, so a new transaction gets its rule's category", async () => {
@@ -305,15 +305,15 @@ describe("scheduled handler", () => {
 			fetchImpl as unknown as typeof fetch,
 		);
 
-		expect(fetchImpl).toHaveBeenCalledTimes(12);
+		expect(fetchImpl).toHaveBeenCalledTimes(10);
 		vi.restoreAllMocks();
 	});
 
 	// Spec §8.6: the first sort reads the household's AI switches too.
 	it.each([
 		{ categories: false, income: false, calls: 0 },
-		{ categories: true, income: false, calls: 12 },
-		{ categories: false, income: true, calls: 12 },
+		{ categories: true, income: false, calls: 10 },
+		{ categories: false, income: true, calls: 10 },
 	])(
 		"asks Jev $calls times in the 09:20 run with categories $categories and income $income",
 		async ({ categories, income, calls }) => {
@@ -413,7 +413,7 @@ describe("scheduled handler: which run a cron starts", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await seedWaiting();
 		const { jev, names } = await fire("20 9 * * *");
-		expect(jev).toBe(12);
+		expect(jev).toBe(10);
 		expect(names).toBeGreaterThan(0);
 		vi.restoreAllMocks();
 	});
@@ -421,7 +421,7 @@ describe("scheduled handler: which run a cron starts", () => {
 	it("asks Jev, and no names, at 09:40", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await seedWaiting();
-		expect(await fire("40 9 * * *")).toEqual({ jev: 12, names: 0 });
+		expect(await fire("40 9 * * *")).toEqual({ jev: 10, names: 0 });
 		vi.restoreAllMocks();
 	});
 });
@@ -1126,6 +1126,43 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		});
 		return { db: counted as D1Database, statements: () => statements };
 	}
+
+	it("cleans old cash snapshots in a fixed number of statements and keeps today's", async () => {
+		const countFor = async (n: number) => {
+			await env.DB.prepare("DELETE FROM cash_delete_holds").run();
+			if (n > 0)
+				await env.DB.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+					INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows)
+					SELECT 'old-'||i, ?-86400001, 'old', '{}', '[]', '[]', '[]' FROM n`)
+					.bind(n, Date.now())
+					.run();
+			await env.DB.prepare(
+				"INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			)
+				.bind("new", Date.now(), "new", "{}", "[]", "[]", "[]")
+				.run();
+			const counted = countingDb();
+			await runScheduled({ ...env, DB: counted.db, DEMO: "false" });
+			return counted.statements();
+		};
+		const few = await countFor(1);
+		const remaining = await env.DB.prepare(
+			"SELECT token FROM cash_delete_holds",
+		).all<{ token: string }>();
+		expect(remaining.results.map(({ token }) => token)).toEqual(["new"]);
+		const many = await countFor(500);
+		expect(
+			(
+				await env.DB.prepare("SELECT token FROM cash_delete_holds").all<{
+					token: string;
+				}>()
+			).results.map(({ token }) => token),
+		).toEqual(["new"]);
+		expect(many).toBeLessThan(100);
+		expect(many).toBe(few);
+		expect(few).toBe(1);
+		expect(many).toBe(1);
+	});
 
 	/** `n` charges nobody has sorted or named, each from a store of its own. */
 	const addWaiting = (n: number) =>

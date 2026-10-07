@@ -30,6 +30,11 @@ import {
 	saveCash,
 } from "../transactions/cash";
 import {
+	cashDeleteUndoExpiresInMs,
+	holdCashDelete,
+	restoreCashDelete,
+} from "../transactions/cash-undo";
+import {
 	type Edit,
 	type EditErrors,
 	parseEdit,
@@ -1388,7 +1393,15 @@ function EditSheet({
 					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
-					<legend class="text-base text-ink">Category</legend>
+					<legend class="flex items-center gap-1 text-base text-ink">
+						Category
+						{tx.categorySource === "bill" && (
+							<>
+								<span aria-hidden="true">·</span>
+								<WhyLink section="categorization" topic="this category" />
+							</>
+						)}
+					</legend>
 					<div class="flex flex-wrap gap-2">
 						{!purchase &&
 							tx.categorySource !== "jev" &&
@@ -1595,7 +1608,7 @@ function EditSheet({
 								// The bottom scroll margin brings Delete and Keep it into view with it on a phone.
 								class="scroll-mb-24 text-lg outline-none"
 							>
-								{`Delete ${tx.displayName}, ${formatCents(tx.amountCents)}? This can't be undone.`}
+								{`Delete ${tx.displayName}, ${formatCents(tx.amountCents)}?`}
 							</p>
 							<div class="mt-3 grid grid-cols-2 gap-3">
 								<Button type="submit" class="w-full">
@@ -2240,17 +2253,20 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			),
 		});
 	}
-	await c.env.DB.prepare(
-		"DELETE FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
-	)
-		.bind(tx.id)
-		.run();
+	const undoToken = await holdCashDelete(c.env.DB, tx.id, tx.displayName);
+	if (!undoToken) return c.notFound();
+	const undoExpiresInMs = await cashDeleteUndoExpiresInMs(c.env.DB, undoToken);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
-			toast: { message: `Deleted ${tx.displayName}`, type: "success" },
-			announce: `Deleted cash transaction for ${tx.displayName}.`,
+			toast: {
+				message: `Deleted ${tx.displayName}, ${formatCents(tx.amountCents)}.`,
+				type: "success",
+				undo: undoToken,
+				undoExpiresInMs,
+			},
+			announce: `Deleted ${tx.displayName}.`,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -2258,5 +2274,56 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	if (nowFirstVisit) swapWholePage(c);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		focusHeading: nowFirstVisit,
+	});
+});
+
+transactions.post("/transactions/undo-cash-delete", async (c) => {
+	const form = await c.req.formData();
+	const token = form.get("token");
+	const back = safeBack(form.get("back")?.toString());
+	const wasFirstVisit = (await firstVisitFor(c)) !== null;
+	const restored =
+		typeof token === "string" && /^[0-9a-f-]{36}$/i.test(token)
+			? await restoreCashDelete(c.env.DB, token)
+			: null;
+	const today = await householdToday(c.env.DB);
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify(
+			restored && !restored.alreadyRestored
+				? {
+						toast: {
+							message:
+								restored.lostLinks.length > 0
+									? `Restored ${restored.name}. ${restored.lostLinks.join(", ")} no longer fits and was left off.`
+									: `Restored ${restored.name}.`,
+							type: "success",
+						},
+						announce: `${restored.name} is back.`,
+					}
+				: restored?.alreadyRestored
+					? {
+							toast: {
+								message: "That cash entry is already back.",
+								type: "success",
+							},
+							announce: `${restored.name} is already back.`,
+						}
+					: {
+							toast: {
+								message: "Undo expired. The cash entry stays deleted.",
+								type: "error",
+							},
+							announce: "Undo expired. The cash entry stays deleted.",
+						},
+		),
+	);
+	c.header("HX-Push-Url", back);
+	const restoreEndsFirstVisit =
+		wasFirstVisit && restored !== null && !restored.alreadyRestored;
+	if (restoreEndsFirstVisit) swapWholePage(c);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusHeading: restoreEndsFirstVisit,
 	});
 });

@@ -210,6 +210,7 @@ describe("categorizationExample", () => {
 	const none = {
 		user: 0,
 		merchantRule: 0,
+		bill: 0,
 		jev: 0,
 		unsure: 0,
 		noneFit: 0,
@@ -223,6 +224,7 @@ describe("categorizationExample", () => {
 				{
 					user: 1,
 					merchantRule: 2,
+					bill: 3,
 					jev: 8,
 					unsure: 3,
 					noneFit: 1,
@@ -232,7 +234,7 @@ describe("categorizationExample", () => {
 				"Jev",
 			),
 		).toBe(
-			"This month, Jev categorized 8 transactions. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 4 are waiting for tonight's run. 2 came from merchant rules. 1 was chosen by a person. 2 are income, which needs no category.",
+			"This month, Jev categorized 8 transactions. It left 3 it wasn't sure about and 1 that fit none of the categories for a person. 4 are waiting for tonight's run. 2 came from merchant rules. 3 took its category from a bill they pay. 1 was chosen by a person. 2 are income, which needs no category.",
 		);
 	});
 
