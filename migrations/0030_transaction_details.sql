@@ -1,6 +1,6 @@
 -- Tally's guessed transaction details and the household names they can refer to (spec §5, decision 81).
 CREATE TABLE household_people (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE
 );
 

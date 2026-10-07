@@ -2,9 +2,10 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import { readAiSwitches, saveAiSwitches } from "../src/db/ai-switches";
-import { pendingForJev } from "../src/db/transactions";
+import { listTransactions, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestTransactionNotes } from "../src/suggest-names-pending";
+import { parseFilters } from "../src/transactions/filters";
 
 const db = env.DB;
 const BASE = "http://tally.test";
@@ -365,6 +366,9 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people(name) VALUES('Morgan')")
 			.run();
+		const person = await db
+			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
+			.first<{ id: number }>();
 		await saveAiSwitches(db, { details: false });
 		let calls = 0;
 		let secondQuestions: Record<string, unknown> | undefined;
@@ -384,7 +388,10 @@ describe("transaction detail guesses", () => {
 							? {}
 							: {
 									kind: { choice: "one_off", confidence: 0.99 },
-									for_person: { choice: "person:2", confidence: 0.99 },
+									for_person: {
+										choice: `person:${person?.id}`,
+										confidence: 0.99,
+									},
 								}),
 					},
 				});
@@ -394,7 +401,7 @@ describe("transaction detail guesses", () => {
 		if (!secondQuestions) throw new Error("second request was not sent");
 		expect(
 			(secondQuestions.for_person as { criteria: Record<string, unknown> })
-				.criteria["person:2"],
+				.criteria[`person:${person?.id}`],
 		).toBe("Morgan");
 		expect(
 			await db
@@ -557,6 +564,72 @@ describe("transaction detail guesses", () => {
 		});
 	});
 
+	it("keeps hidden guesses when saving an unrelated category", async () => {
+		const id = await charge();
+		await db
+			.prepare("INSERT INTO household_people (name) VALUES ('Morgan')")
+			.run();
+		const person = await db
+			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"UPDATE transactions SET note='Dinner',note_guessed=1,kind='one_off',kind_guessed=1,for_person_id=?,for_person_guessed=1 WHERE id=?",
+			)
+			.bind(person?.id, id)
+			.run();
+		await saveAiSwitches(db, { details: false });
+		const saved = await post(`/transactions/${id}`, {
+			back: "/transactions",
+			merchant_was: "",
+			note: "",
+			category: "2",
+			kind: "",
+			for_person_id: "",
+			details_visible: "0",
+		});
+		expect(saved.res.status).toBe(200);
+		await saveAiSwitches(db, { details: true });
+		expect(
+			await db
+				.prepare(
+					"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed,note_dismissed FROM transactions WHERE id=?",
+				)
+				.bind(id)
+				.first(),
+		).toMatchObject({
+			note: "Dinner",
+			note_guessed: 1,
+			kind: "one_off",
+			kind_guessed: 1,
+			for_person_id: person?.id,
+			for_person_guessed: 1,
+			note_dismissed: 0,
+		});
+	});
+
+	it("lists written notes and hides only unkept guesses when details are off", async () => {
+		const written = await charge();
+		const guessed = await charge();
+		await db
+			.prepare(
+				"UPDATE transactions SET note='Written',note_guessed=0 WHERE id=?",
+			)
+			.bind(written)
+			.run();
+		await db
+			.prepare("UPDATE transactions SET note='Guess',note_guessed=1 WHERE id=?")
+			.bind(guessed)
+			.run();
+		await saveAiSwitches(db, { details: false });
+		const rows = await listTransactions(
+			db,
+			parseFilters(new URLSearchParams(), "2026-10"),
+		);
+		expect(rows.rows.find((row) => row.id === written)?.note).toBe("Written");
+		expect(rows.rows.find((row) => row.id === guessed)?.note).toBeNull();
+	});
+
 	it("Looks right keeps all four details, and turning details off preserves them", async () => {
 		const id = await charge();
 		await db
@@ -698,6 +771,50 @@ describe("transaction detail guesses", () => {
 			kind_guessed: 0,
 			for_person_guessed: 0,
 		});
+	});
+
+	it("Looks right accepts the displayed name suggestion when no name is posted", async () => {
+		const id = await charge();
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name,suggested_name,suggestion_status) VALUES ('COFFEE SHOP','Coffee Shop','pending')",
+			)
+			.run();
+		const saved = await post(`/transactions/${id}`, {
+			back: "/transactions",
+			merchant_was: "",
+			displayed_name_guess: "Coffee Shop",
+			note: "",
+			details_action: "keep",
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await db
+				.prepare(
+					"SELECT display_name,suggestion_status FROM merchants WHERE raw_name='COFFEE SHOP'",
+				)
+				.first(),
+		).toEqual({ display_name: "Coffee Shop", suggestion_status: "accepted" });
+	});
+
+	it("does not reuse a removed highest household person id", async () => {
+		await db
+			.prepare("INSERT INTO household_people (name) VALUES ('Last person')")
+			.run();
+		const old = await db
+			.prepare("SELECT id FROM household_people WHERE name='Last person'")
+			.first<{ id: number }>();
+		await db
+			.prepare("DELETE FROM household_people WHERE id=?")
+			.bind(old?.id)
+			.run();
+		await db
+			.prepare("INSERT INTO household_people (name) VALUES ('New person')")
+			.run();
+		const next = await db
+			.prepare("SELECT id FROM household_people WHERE name='New person'")
+			.first<{ id: number }>();
+		expect(next?.id).not.toBe(old?.id);
 	});
 
 	it("Looks right preserves a name a person had already chosen", async () => {

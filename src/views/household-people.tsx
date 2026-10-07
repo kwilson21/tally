@@ -10,6 +10,7 @@ export function HouseholdPeople({
 	openId,
 	addOpen = false,
 	error,
+	errorPersonId,
 	focus = false,
 	value = "",
 	action = "/settings/people",
@@ -18,6 +19,7 @@ export function HouseholdPeople({
 	openId?: number;
 	addOpen?: boolean;
 	error?: string;
+	errorPersonId?: number;
 	focus?: boolean;
 	value?: string;
 	action?: string;
@@ -70,7 +72,7 @@ export function HouseholdPeople({
 										label="Name"
 										value={person.id === openId && error ? value : person.name}
 										autocomplete="off"
-										error={error}
+										error={person.id === errorPersonId ? error : undefined}
 									/>
 									<div class="flex flex-wrap items-center gap-3">
 										<Button type="submit">Save</Button>
@@ -112,14 +114,14 @@ export function HouseholdPeople({
 								label="Name"
 								value={value}
 								autocomplete="off"
-								error={error}
+								error={openId === undefined ? error : undefined}
 							/>
 							<div class="flex flex-wrap items-center gap-3">
 								<Button type="submit">Add</Button>
 								<Button
 									kind="secondary"
 									href="/settings#household"
-									hx-get="/settings"
+									hx-get="/settings?peopleFocus=1"
 									hx-target="#household-people"
 									hx-select="#household-people"
 									hx-swap="outerHTML"

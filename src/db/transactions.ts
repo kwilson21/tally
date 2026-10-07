@@ -212,7 +212,7 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw || !detailsOn ? "NULL" : "t.note"} AS note, ${f.raw || !detailsOn ? "0" : "t.note_guessed"} AS noteGuessed, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : `CASE WHEN ${detailsOn ? "1" : "0"} = 0 AND t.note_guessed = 1 THEN NULL ELSE t.note END`} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -381,6 +381,7 @@ export async function firstVisitState(
 }
 
 export type TransactionDetail = ListRow & {
+	detailsVisible: boolean;
 	noteGuessed: boolean;
 	kind: "subscription" | "one_off" | "bill" | "transfer" | null;
 	kindGuessed: boolean;
@@ -534,6 +535,7 @@ export async function getTransaction(
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	return {
 		...row,
+		detailsVisible: detailsOn,
 		excluded: r.excluded === 1,
 		paysBill: r.paysBill === 1,
 		income: r.income === 1,
@@ -611,7 +613,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, for_person_id AS forPersonId FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -625,12 +627,17 @@ export async function saveEdit(
 			note: string | null;
 			noteGuessed: number;
 			kind: string | null;
+			kindGuessed: number;
 			forPersonId: number | null;
+			forPersonGuessed: number;
 		}>();
 	if (!current) throw new Error(`No transaction ${id}`);
 
 	// The purchase this refund is being linked to now: undefined when its link stays as it is, null
 	// when it's being unlinked.
+	const noteChanged =
+		edit.note !== current.note &&
+		(current.noteGuessed === 0 || edit.detailsVisible !== false);
 	const newLink =
 		edit.refundOfId !== undefined && edit.refundOfId !== current.refundOfId
 			? edit.refundOfId
@@ -738,18 +745,24 @@ export async function saveEdit(
 		changed
 			? gated(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
-						note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
+						note = CASE WHEN ? = 1 THEN ? ELSE note END, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
 						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
-					[edit.categoryId, edit.note, ...excludeArgs, ...reviewArgs],
+					[
+						edit.categoryId,
+						noteChanged ? 1 : 0,
+						edit.note,
+						...excludeArgs,
+						...reviewArgs,
+					],
 				)
 			: gated(
-					`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
+					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
 					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
 					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
-					[edit.note, ...excludeArgs, ...reviewArgs],
+					[noteChanged ? 1 : 0, edit.note, ...excludeArgs, ...reviewArgs],
 				),
 	);
 	// A name a person gives settles the merchant's pending suggestion: accepted when it is one of the
@@ -833,10 +846,14 @@ export async function saveEdit(
 	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
-	const noteChanged = edit.note !== current.note;
-	const kindChanged = edit.kind !== undefined && edit.kind !== current.kind;
+	const kindChanged =
+		edit.kind !== undefined &&
+		edit.kind !== current.kind &&
+		(current.kindGuessed === 0 || edit.detailsVisible !== false);
 	const personChanged =
-		edit.forPersonId !== undefined && edit.forPersonId !== current.forPersonId;
+		edit.forPersonId !== undefined &&
+		edit.forPersonId !== current.forPersonId &&
+		(current.forPersonGuessed === 0 || edit.detailsVisible !== false);
 	if (noteChanged || kindChanged || personChanged || edit.keepDetails) {
 		statements.push(
 			gated(
@@ -845,6 +862,7 @@ export async function saveEdit(
 					kind_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE kind_guessed END,
 					for_person_id = CASE WHEN ? = 1 THEN ? ELSE for_person_id END,
 					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
+					note = CASE WHEN ? = 1 THEN ? ELSE note END,
 					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
 					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
 					note_dismissed = CASE WHEN ? = 1 AND ? = 1 AND trim(COALESCE(?, '')) = '' THEN 1 ELSE note_dismissed END,
@@ -859,6 +877,8 @@ export async function saveEdit(
 					edit.forPersonId ?? null,
 					personChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
+					noteChanged ? 1 : 0,
+					edit.note,
 					noteChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
 					noteChanged ? 1 : 0,

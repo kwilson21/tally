@@ -34,6 +34,8 @@ export type Edit = {
 	kind?: "subscription" | "one_off" | "bill" | "transfer" | null;
 	forPersonId?: number | null;
 	keepDetails?: boolean;
+	/** False when the panel hid guesses because the details switch was off. */
+	detailsVisible?: boolean;
 	/**
 	 * The purchase this refund refunds. Left out, the link stays; null unlinks. A purchase links it,
 	 * unless it's more than what's left of that purchase (saveEdit refuses it, spec §8.5), and
@@ -109,6 +111,9 @@ export function parseEdit(
 	const rawPerson = text(form, "for_person_id");
 	const forPersonId = rawPerson ? Number(rawPerson) : null;
 	const keepDetails = form.get("details_action") === "keep";
+	const detailsVisible = form.has("details_visible")
+		? form.get("details_visible") !== "0"
+		: undefined;
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
 	const creditReviewed = form.get("creditReviewed") === "1";
@@ -152,6 +157,7 @@ export function parseEdit(
 			kind: form.has("kind") ? kind : undefined,
 			forPersonId: form.has("for_person_id") ? forPersonId : undefined,
 			keepDetails,
+			...(detailsVisible === undefined ? {} : { detailsVisible }),
 		},
 	};
 }

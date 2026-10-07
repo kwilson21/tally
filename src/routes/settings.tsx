@@ -147,6 +147,7 @@ type View = {
 	peopleOpen?: number;
 	peopleAddOpen?: boolean;
 	peopleError?: string;
+	peopleErrorPersonId?: number;
 	peopleValue?: string;
 	peopleFocus?: boolean;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
@@ -649,8 +650,12 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					openId={view.peopleOpen}
 					addOpen={view.peopleAddOpen}
 					error={view.peopleError}
+					errorPersonId={view.peopleErrorPersonId}
 					value={view.peopleValue}
-					focus={view.peopleFocus}
+					focus={
+						view.peopleFocus ||
+						new URL(c.req.url).searchParams.get("peopleFocus") === "1"
+					}
 				/>
 			</section>
 			<AiSuggestions switches={aiSwitches} saved={Boolean(view.aiSaved)} />
@@ -994,6 +999,7 @@ settings.post("/settings/people", async (c) => {
 			if (nameTaken(error))
 				return renderSettings(c, {
 					peopleOpen: id,
+					peopleErrorPersonId: id,
 					peopleError: "That name is already in your household.",
 					peopleValue: nameValue,
 					status: 422,

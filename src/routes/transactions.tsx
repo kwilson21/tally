@@ -1195,6 +1195,16 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				<input
+					type="hidden"
+					name="details_visible"
+					value={tx.detailsVisible ? "1" : "0"}
+				/>
+				<input
+					type="hidden"
+					name="displayed_name_guess"
+					value={tx.nameSuggested ? tx.displayName : ""}
+				/>
 				{!purchase && (
 					<>
 						<input
@@ -2127,6 +2137,10 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			? tx.nameChoices !== null && tx.nameChoices !== undefined
 			: offered.some((name) => pickValue(name) === pick);
 	if (pick && !stillOffered) form.delete("name_pick");
+	if (keptDetails && !form.has("merchant") && !form.has("name_pick")) {
+		const displayedGuess = form.get("displayed_name_guess")?.toString() ?? "";
+		if (displayedGuess) form.set("name_pick", pickValue(displayedGuess));
+	}
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),
