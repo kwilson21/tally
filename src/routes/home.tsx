@@ -173,14 +173,18 @@ async function renderHome(
 		(sum, row) => sum + row.refundsCents,
 		0,
 	);
+	const everydayCents = forecastDays.reduce(
+		(sum, row) => sum + row.everydayCents,
+		0,
+	);
 	const forecast = forecastMonth({
 		day,
 		daysInMonth: daysInMonth(month),
 		totalBudgetCents: summary.totalBudgetCents,
 		spentCents: forecastSpentCents,
+		everydayCents,
 		billPaymentsCents,
 		refundsCents,
-		planPaymentsCents: 0,
 		billsStillDueCents: billTotals.stillToPayCents,
 	});
 	const showForecast = day >= FORECAST_START_DAY && forecast.visible;

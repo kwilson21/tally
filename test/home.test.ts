@@ -271,12 +271,12 @@ describe("GET / with the demo seed", () => {
 				daysInMonth: daysInMonth(month),
 				totalBudgetCents: summary.totalBudgetCents,
 				spentCents: days.reduce((sum, row) => sum + row.spentCents, 0),
+				everydayCents: days.reduce((sum, row) => sum + row.everydayCents, 0),
 				billPaymentsCents: days.reduce(
 					(sum, row) => sum + row.billPaymentsCents,
 					0,
 				),
 				refundsCents: days.reduce((sum, row) => sum + row.refundsCents, 0),
-				planPaymentsCents: 0,
 				billsStillDueCents: billTotals.stillToPayCents,
 			});
 			const difference = summary.totalBudgetCents - forecast.endCents;

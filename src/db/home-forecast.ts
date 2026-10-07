@@ -8,6 +8,7 @@ import {
 export type HomeForecastDay = {
 	day: number;
 	spentCents: number;
+	everydayCents: number;
 	billPaymentsCents: number;
 	refundsCents: number;
 };
@@ -30,6 +31,7 @@ export async function homeForecastDays(
 					AND ${countedMonthSql()} = ? AND ${COUNTED_SPENDING}
 			)
 			SELECT day, SUM(amount_cents) AS spentCents,
+				SUM(CASE WHEN role = 'spending' THEN amount_cents ELSE 0 END) AS everydayCents,
 				SUM(CASE WHEN role = 'bill' THEN amount_cents ELSE 0 END) AS billPaymentsCents,
 				SUM(CASE WHEN role = 'refund' THEN -amount_cents ELSE 0 END) AS refundsCents
 			FROM classified GROUP BY day ORDER BY day`,
