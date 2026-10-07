@@ -1,7 +1,7 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
-import type { Edit } from "../transactions/edit";
+import { type Edit, merchantRuleChange } from "../transactions/edit";
 import { type Filters, likePattern, type Show } from "../transactions/filters";
 import {
 	type NameSource,
@@ -31,6 +31,7 @@ import {
 	sameMerchantSql,
 } from "./merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "./merchant-names";
+import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
 import {
 	refundedByOthersSql,
 	refundFitsSql,
@@ -392,6 +393,7 @@ export type TransactionDetail = ListRow & {
 	/** The merchant's chosen display name, or null when it falls back to the raw name. */
 	merchantName: string | null;
 	categorySource: "user" | "merchant_rule" | "bill" | "jev" | null;
+	merchantRuleCategoryId: number | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
 	suggestedCategoryId: number | null;
@@ -457,7 +459,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
 				t.for_person_id AS forPersonId, (SELECT name FROM household_people WHERE id = t.for_person_id) AS forPersonName, t.for_person_guessed AS forPersonGuessed,
 				t.is_split AS isSplit, NULL AS parentName,
@@ -884,18 +886,34 @@ export async function saveEdit(
 				[excluded, actor, id],
 			),
 		);
-	if (edit.alwaysForMerchant && edit.categoryId !== null) {
+	const ruleChange = merchantRuleChange(
+		edit.alwaysWas ?? false,
+		edit.alwaysForMerchant,
+		edit.merchantRuleWas,
+		edit.categoryId,
+	);
+	if (ruleChange.action === "set" && edit.categoryId !== null) {
 		statements.push(
 			gated("UPDATE merchants SET default_category_id = ? WHERE raw_name = ?", [
 				edit.categoryId,
 				current.merchantKey,
 			]),
-			gated(
-				`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+		);
+		if (ruleChange.recategorize)
+			statements.push(
+				gated(
+					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
 					updated_by = ?, updated_at = datetime('now')
 				WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
-				[edit.categoryId, actor, current.merchantKey, id],
-			),
+					[edit.categoryId, actor, current.merchantKey, id],
+				),
+			);
+	} else if (ruleChange.action === "clear" && edit.merchantRuleWas != null) {
+		statements.push(
+			gated(`${CLEAR_MERCHANT_RULE_SQL} AND default_category_id = ?`, [
+				current.merchantKey,
+				edit.merchantRuleWas,
+			]),
 		);
 	}
 	const results = await db.batch(statements);

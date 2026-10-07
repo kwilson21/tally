@@ -22,6 +22,7 @@ import {
 	pendingSuggestions,
 } from "../db/category-suggestions";
 import { namesToReview } from "../db/merchant-names";
+import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
 import {
@@ -40,6 +41,10 @@ import { EmptyState } from "../views/empty-state";
 import { HouseholdPeople } from "../views/household-people";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import {
+	MERCHANT_RULE_SEARCH_THRESHOLD,
+	MerchantRules,
+} from "../views/merchant-rules";
 import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
 import { TimeZoneRow } from "../views/time-zone-row";
@@ -76,6 +81,25 @@ const action = (url: string, formId: string) => ({
 	"hx-swap": "outerHTML",
 });
 
+const ruleFocus = (
+	renderedRules: { merchantKey: string }[],
+	removedKey: string,
+) => {
+	const index = renderedRules.findIndex(
+		(rule) => rule.merchantKey === removedKey,
+	);
+	return {
+		focusRuleIndex:
+			renderedRules.length > 1
+				? Math.min(
+						index < renderedRules.length - 1 ? index : index - 1,
+						renderedRules.length - 2,
+					)
+				: undefined,
+		focusMerchantHeading: renderedRules.length <= 1,
+	};
+};
+
 const summaryClass =
 	"flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden";
 const chevron = (
@@ -89,6 +113,10 @@ type View = {
 	open?: number | "new";
 	/** Move focus here after a swap: a row's summary, the Archived summary, or the Time zone row. */
 	focus?: number | "archived" | "zone";
+	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
+	focusRuleIndex?: number;
+	focusMerchantHeading?: boolean;
+	merchantRuleError?: string;
 	/** What was typed, shown again with the errors. */
 	values?: { name: string };
 	errors?: CategoryErrors;
@@ -102,7 +130,7 @@ type View = {
 		ticked: number[];
 		notes: Record<number, string>;
 	};
-	status?: 200 | 404 | 422;
+	status?: 200 | 400 | 404 | 422;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
 	timeZone?: string;
@@ -123,6 +151,7 @@ type View = {
 	peopleFocus?: boolean;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
 	aiSaved?: boolean;
+	rulesSearch?: string;
 	/** Where a plain browser lands after a save: a section's id, so it isn't sent back to the top. */
 	hash?: string;
 };
@@ -424,6 +453,12 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	).all<{ id: number; name: string }>();
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
+	const rulesSearch =
+		view.rulesSearch ??
+		new URL(c.req.url).searchParams.get("rules_search") ??
+		"";
+	const ruleData = await merchantRules(c.env.DB, aiSwitches.names, rulesSearch);
+	const visibleRules = ruleData.rules;
 	const adding = view.open === "new";
 
 	return c.html(
@@ -581,6 +616,19 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					)}
 				</div>
 			</section>
+			<MerchantRules
+				rules={visibleRules.map((rule) => ({
+					...rule,
+					archived: rule.archived === 1,
+				}))}
+				total={ruleData.total}
+				focusRuleIndex={view.focusRuleIndex}
+				focusHeading={view.focusMerchantHeading}
+				error={view.merchantRuleError}
+				search={
+					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
+				}
+			/>
 			<section
 				id="household"
 				aria-labelledby="household-title"
@@ -630,6 +678,53 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		view.status ?? 200,
 	);
 }
+
+settings.post("/settings/merchant-rules/remove", async (c) => {
+	const form = await c.req.formData();
+	const merchantKey = String(form.get("merchant") ?? "");
+	const search = String(form.get("rules_search") ?? "");
+	if (!merchantKey) {
+		const message = "Choose a merchant to remove.";
+		if (c.req.header("HX-Request"))
+			c.header("HX-Trigger", JSON.stringify({ announce: message }));
+		return renderSettings(c, {
+			rulesSearch: search,
+			merchantRuleError: message,
+			status: 400,
+		});
+	}
+	const switches = await readAiSwitches(c.env.DB);
+	const before = await merchantRules(c.env.DB, switches.names, search, true);
+	const focusRules = before;
+	const removed = await removeMerchantRule(c.env.DB, merchantKey);
+	const view = { rulesSearch: search };
+	if (!removed) {
+		if (c.req.header("HX-Request"))
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({ announce: "Merchant rules list updated." }),
+			);
+		return renderSettings(c, view);
+	}
+	const message = `Removed the Always rule for ${removed}`;
+	if (c.req.header("HX-Request")) {
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: `Removed ${removed}. ${Math.max(0, before.total - 1)} merchant${before.total === 2 ? "" : "s"} left.`,
+			}),
+		);
+		return renderSettings(c, {
+			...view,
+			...ruleFocus(focusRules.rules, merchantKey),
+		});
+	}
+	return c.redirect(
+		`/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`,
+		303,
+	);
+});
 
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	const id = Number(c.req.param("id"));

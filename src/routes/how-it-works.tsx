@@ -378,7 +378,9 @@ howItWorks.get("/how-it-works", async (c) => {
 							A merchant rule: "Always use this category for this merchant," set
 							with "Always for this merchant" in the edit panel. It replaces a
 							bill category or Tally's unconfirmed guess, but never a person's
-							choice.
+							choice. Ticking it on a transaction that does not match the rule
+							changes the rule for that merchant; to change a rule this
+							transaction already matches, remove it in Settings first.
 						</li>
 						<li>
 							A bill: a payment linked by the matcher or by hand takes its
@@ -392,6 +394,10 @@ howItWorks.get("/how-it-works", async (c) => {
 								: `An AI model, which each night picks a category for what's left. Tally applies its pick only when it is at least ${threshold} sure, and never when it says none of the categories fit; anything else waits for a person.`}
 						</li>
 					</ol>
+					<p class="mt-3">
+						See every rule in Settings under Tally's rules. Removing a rule
+						doesn't change transactions it already sorted.
+					</p>
 					<p class="mt-3">
 						A suggested category is only an idea; nothing is created until a
 						person says so.
