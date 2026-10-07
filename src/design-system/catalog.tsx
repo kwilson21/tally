@@ -50,13 +50,19 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
-import { MaybeCategory, SuggestedCategoryChip } from "../views/maybe-category";
+import {
+	MaybeCategory,
+	MaybeIncome,
+	SuggestedCategoryChip,
+} from "../views/maybe-category";
 import { MerchantRules } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
+import { SavingsGoalRow } from "../views/savings-goal-row";
+import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
 import { Switch } from "../views/switch";
@@ -810,14 +816,21 @@ function Rows() {
 		<Group id="rows" title="Rows">
 			<Specimen
 				id="maybe-category"
-				title="MaybeCategory and SuggestedCategoryChip"
+				title="MaybeCategory, MaybeIncome and SuggestedCategoryChip"
 				tier="visual"
-				components={["MaybeCategory", "SuggestedCategoryChip"]}
-				sentence="The dashed Maybe row and first Suggested category chip carry Tally's guess where people already choose a category."
+				components={[
+					"MaybeCategory",
+					"MaybeIncome",
+					"SuggestedCategoryChip",
+					"Chip",
+					"WhyLink",
+				]}
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate."
 			>
-				<div class="flex flex-wrap gap-3">
+				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
 					<MaybeCategory name="Pet Care" kind="new" />
+					<MaybeIncome />
 					<SuggestedCategoryChip
 						name="Eating Out"
 						value="2"
@@ -830,6 +843,15 @@ function Rows() {
 						sure={72}
 						transactionId={2}
 					/>
+					<div class="flex flex-col items-start gap-1">
+						<Chip type="checkbox" name="income" value="1" dashed>
+							Count as income
+						</Chip>
+						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+							Tally's guess · 71% sure
+							<WhyLink section="categorization" topic="income" />
+						</p>
+					</div>
 				</div>
 			</Specimen>
 			<Specimen
@@ -1126,6 +1148,56 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="savings-goal-row"
+				title="SavingsGoalRow"
+				tier="visual"
+				components={["SavingsGoalRow"]}
+				sentence="Home's first Budget row: the bank icon and Savings, its monthly amount with “a month” muted and “Set aside from Safe to spend” under it; before a goal is set, the row moves under Not budgeted as “Set a goal”. It has no bar and isn't a category."
+			>
+				<State label="Goal set">
+					<ul class="max-w-xl divide-y divide-rule">
+						<SavingsGoalRow amountCents={50000} href="#" />
+						{PROGRESS_ROWS.slice(0, 1).map((row) => (
+							<ProgressRow {...row.props} />
+						))}
+					</ul>
+				</State>
+				<State label="No goal: under Not budgeted">
+					<div>
+						<h3 class="text-sm text-muted">Not budgeted</h3>
+						<ul class="max-w-xl divide-y divide-rule">
+							<SavingsGoalRow amountCents={null} href="#" />
+						</ul>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="savings-goal-sheet"
+				title="SavingsGoalSheet"
+				tier="visual"
+				components={["SavingsGoalSheet"]}
+				sentence="The sheet for choosing how much to save each month, with one labeled amount field; Cancel and the backdrop close it and return focus to the Savings row."
+			>
+				<State label="Goal set">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<SavingsGoalSheet
+							value="500.00"
+							month="October"
+							closeAttrs={{
+								"hx-get": "/?focus=savings-goal",
+								"hx-target": "#page",
+								"hx-select": "#page",
+								"hx-swap": "outerHTML",
+								"hx-push-url": "/",
+							}}
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="adjust-mode"
@@ -2209,6 +2281,14 @@ function Diagrams() {
 			>
 				<State label="BudgetDiagram">
 					<BudgetDiagram {...BUDGET_EXAMPLE} />
+				</State>
+				<State label="BudgetDiagram with a savings goal">
+					<BudgetDiagram
+						totalBudgetCents={140000}
+						totalSpentCents={46000}
+						savingsGoalCents={50000}
+						safeToSpendCents={29800}
+					/>
 				</State>
 				<State label="BillsDiagram">
 					<BillsDiagram

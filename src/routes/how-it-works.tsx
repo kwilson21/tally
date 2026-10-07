@@ -261,7 +261,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							Safe to spend is the whole month's budget, minus all counted
 							spending (including uncategorized and unbudgeted), minus bills
-							that are due or overdue and not yet paid.
+							that are due or overdue and not yet paid, minus the full monthly
+							savings goal from the 1st.
 						</li>
 						<li>
 							Before day {FORECAST_START_DAY}, Home shows the daily amount: Safe
@@ -276,7 +277,8 @@ howItWorks.get("/how-it-works", async (c) => {
 					{demo ||
 					summary.categories.length > 0 ||
 					summary.totalSpentCents !== 0 ||
-					unpaidDueBillsCents > 0 ? (
+					unpaidDueBillsCents > 0 ||
+					(summary.savingsGoalCents ?? 0) > 0 ? (
 						<>
 							<Diagram>
 								<BudgetDiagram {...summary} />
