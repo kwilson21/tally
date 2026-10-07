@@ -127,6 +127,11 @@ export const DURATION_TOKENS = [
 		value: "4s",
 		use: "a toast's whole stay: it fades in, holds and fades out; toast.js removes it after the same 4 seconds",
 	},
+	{
+		name: "undo-toast",
+		value: "10s",
+		use: "a cash-delete Undo toast's stay before it goes",
+	},
 ] as const;
 
 export const CATEGORY_COLORS = COLOR_TOKENS.filter((t) =>

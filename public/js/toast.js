@@ -36,22 +36,68 @@
 	}
 
 	document.body.addEventListener("toast", (event) => {
-		const { message, type = "success" } = event.detail ?? {};
+		const {
+			message,
+			type = "success",
+			undo,
+			undoExpiresInMs,
+		} = event.detail ?? {};
 		if (!message) return;
-		const toast = document.createElement("p");
-		toast.className =
-			"min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm";
+		if (undo && !(undoExpiresInMs > 0)) return;
+		const toast = document.createElement("div");
+		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
 		if (type === "error") {
 			toast.className += " flex items-start gap-2";
 			const words = document.createElement("span");
 			words.textContent = message;
 			toast.append(alertIcon(), words);
+		} else if (undo) {
+			const words = document.createElement("span");
+			words.textContent = message;
+			toast.append(words);
+			toast.className +=
+				" pointer-events-auto flex items-center justify-center gap-4";
+			const form = document.createElement("form");
+			form.method = "post";
+			form.action = "/transactions/undo-cash-delete";
+			form.setAttribute("hx-post", form.action);
+			form.setAttribute("hx-target", "#page");
+			form.setAttribute("hx-select", "#page");
+			form.setAttribute("hx-swap", "outerHTML");
+			for (const [name, value] of Object.entries({
+				token: undo,
+				back: location.pathname + location.search,
+			})) {
+				const input = document.createElement("input");
+				input.type = "hidden";
+				input.name = name;
+				input.value = value;
+				form.append(input);
+			}
+			const button = document.createElement("button");
+			button.type = "submit";
+			button.className = "min-h-11 px-2 font-medium underline";
+			button.textContent = "Undo";
+			form.addEventListener("submit", () => {
+				button.disabled = true;
+			});
+			form.append(button);
+			toast.append(form);
 		} else {
 			toast.textContent = message;
 		}
 		document.getElementById("toasts")?.append(toast);
-		setTimeout(() => toast.remove(), DISPLAY_MS);
+		if (undo) window.htmx?.process(toast);
+		if (undo)
+			toast.setAttribute(
+				"style",
+				`--duration-undo-toast: ${Math.min(10_000, undoExpiresInMs)}ms`,
+			);
+		setTimeout(
+			() => toast.remove(),
+			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
+		);
 	});
 
 	document.body.addEventListener("announce", (event) => {

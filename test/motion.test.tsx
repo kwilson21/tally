@@ -122,6 +122,7 @@ describe("the duration tokens", () => {
 		expect(token("slow")).toBe("600ms");
 		expect(token("shake")).toBe("300ms");
 		expect(token("spin")).toBe("700ms");
+		expect(token("undo-toast")).toBe("10s");
 	});
 
 	it("takes the bar fill, the field shake and the busy ring's lengths from them", () => {
@@ -197,6 +198,7 @@ describe("reduced motion", () => {
 			".sheet-slide",
 			".sheet-panel",
 			"#toasts > *",
+			"#toasts > .undo-toast",
 			".toast-motion",
 			".switch-track",
 			".switch-knob",
@@ -721,6 +723,9 @@ describe("the catalog and DESIGN.md", () => {
 		expect(toast).toMatch(/Motion\s+It fades in and rises 8 px in 150 ms/);
 		expect(toast).toContain("DISPLAY_MS");
 		expect(toast).toContain("invisible 150 ms before the script takes it out");
+		expect(toast).toContain(
+			"An Undo toast uses its remaining server token time",
+		);
 		expect(toast).toContain("Reduced motion shows it at once");
 		// Pages: Layout's specimen.
 		const layout = text(section(html, "layout"));

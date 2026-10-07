@@ -105,7 +105,7 @@ describe("GET / with the demo seed", () => {
 		const { html } = await home();
 		expect(html).toContain('href="/transactions?uncategorized=1"');
 		expect(html).toMatch(
-			/12<span class="sr-only"> transactions<\/span> need\s+a\s+category/,
+			/10<span class="sr-only"> transactions<\/span> need\s+a\s+category/,
 		);
 	});
 
@@ -317,7 +317,7 @@ describe("GET / with the demo seed", () => {
 	it("says needs a category once: the Band carries the amount, and there's no Uncategorized row (decision 50)", async () => {
 		const { html } = await home();
 		expect(html).toMatch(
-			/12<span class="sr-only"> transactions<\/span> need a category[\s\S]*?\$228 of this month&#39;s spending/,
+			/10<span class="sr-only"> transactions<\/span> need a category[\s\S]*?\$211 of this month&#39;s spending/,
 		);
 		expect(html).not.toContain("Uncategorized");
 	});
@@ -436,10 +436,10 @@ describe("GET / with the demo seed", () => {
 		const at = (s: string) => html.indexOf(s);
 		expect(html).toMatch(/<h1 class="font-serif text-2xl[^"]*">/);
 		expect(at("Safe to spend")).toBeLessThan(
-			at('12<span class="sr-only"> transactions</span> need'),
+			at('10<span class="sr-only"> transactions</span> need'),
 		);
 		expect(
-			at('12<span class="sr-only"> transactions</span> need'),
+			at('10<span class="sr-only"> transactions</span> need'),
 		).toBeLessThan(at(">Budget<"));
 		expect(at(">Budget<")).toBeLessThan(at("New here? Things to try"));
 	});
