@@ -7,6 +7,7 @@ import {
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
+	olderNeedsCategoryCount,
 	PAGE_SIZE,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -21,6 +22,38 @@ beforeEach(async () => {
 });
 
 describe("listTransactions", () => {
+	it("partitions Needs category between this month and older counted months", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
+		).run();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(89,'Earlier bill',1000,1,'monthly','EARLIER BILL')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 890,id,'2026-09-10',1000,'EARLIER BILL' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(89,'2026-08',890,'user','linked')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 891,id,'2026-08-10',1000,'PLAIN OLD' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 892,id,'2026-09-11',1000,'PLAIN CURRENT' FROM accounts LIMIT 1",
+			),
+		]);
+
+		const needs = await list("month=all&uncategorized=1");
+		expect(needs.rows.map((row) => row.id).sort()).toEqual([890, 891, 892]);
+		expect(await needsCategoryCount(env.DB, "2026-09")).toBe(1);
+		expect(await olderNeedsCategoryCount(env.DB, "2026-09-01")).toBe(2);
+		expect(
+			(await needsCategoryCount(env.DB, "2026-09")) +
+				(await olderNeedsCategoryCount(env.DB, "2026-09-01")),
+		).toBe(needs.total);
+	});
+
 	it("keeps an early payment in its bank month and moves a late payment to its occurrence month", async () => {
 		await env.DB.batch([
 			env.DB.prepare(

@@ -1,8 +1,9 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { calculateBillTotals } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
-import { householdToday, monthLabel, monthName } from "../dates";
+import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
 import { bankSyncs } from "../db/accounts";
 import {
 	type BudgetCategory,
@@ -12,15 +13,26 @@ import {
 	setBudget,
 	threeMonthAverageSpentCents,
 } from "../db/budgets";
+import {
+	COUNTED_JOINS,
+	countedCategorySql,
+	countedMonthSql,
+	FOLLOWS_PURCHASE,
+	INCLUDED,
+} from "../db/counted-month";
+import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, loadMonth } from "../db/month";
+import { olderNeedsCategoryCount } from "../db/transactions";
+import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { centsToAmount, formatCents } from "../money";
-import { flaggedBanks, staleBankWords } from "../stale-bank";
+import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
+import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
@@ -44,6 +56,9 @@ const amount = (cents: number) =>
 /** The Band's amount: whole dollars like the budget rows, but cents under $1, so it never reads "$0" for 30¢. */
 const bandAmount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents >= 100 || cents === 0 });
+
+const COUNTED_CATEGORY = countedCategorySql();
+const NEEDS_CATEGORY_SQL = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
@@ -106,6 +121,7 @@ async function renderHome(
 ) {
 	const currentMonth = today.slice(0, 7);
 	const month = viewMonth ?? currentMonth;
+	const current = month === currentMonth;
 	const data = await loadMonth(c.env.DB, month, month !== currentMonth);
 	const billData =
 		month === currentMonth ? await loadBillRows(c.env.DB, today) : null;
@@ -113,13 +129,36 @@ async function renderHome(
 		billData?.rows.filter(
 			(b) => b.active && (b.status === "due" || b.status === "overdue"),
 		) ?? [];
+	const activeBills = billData?.rows.filter((bill) => bill.active) ?? [];
+	const billTotals = current
+		? calculateBillTotals({
+				month,
+				bills: activeBills.map(({ id, amountCents, frequency }) => ({
+					id,
+					amountCents,
+					frequency,
+					active: true,
+				})),
+				displayedOccurrences: activeBills.map((bill) => ({
+					billId: bill.id,
+					dueDate: bill.dueDate,
+					status: bill.status,
+					amountCents: bill.amountCents,
+					paidCents: bill.paidCents,
+				})),
+				thisMonthOccurrences: activeBills.flatMap((bill) =>
+					bill.totalOccurrences
+						.filter((occurrence) => occurrence.dueDate.startsWith(month))
+						.map((occurrence) => ({ billId: bill.id, ...occurrence })),
+				),
+			})
+		: null;
 	const summary = summarizeMonth({
 		month,
 		...data,
 		unpaidDueBillsCents: dueBills.reduce((sum, b) => sum + b.amountCents, 0),
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
-	const current = month === currentMonth;
 	const storedFirstMonth =
 		firstMonthOption ?? (await firstCountedMonth(c.env.DB));
 	const firstMonth =
@@ -142,15 +181,75 @@ async function renderHome(
 	const focusHeading = focusId !== undefined && !linked.has(focusId);
 	// Adjust is offered when there's a budget it can change: a budgeted category that isn't archived.
 	const canAdjust = summary.categories.some((cat) => linked.has(cat.id));
-	const { count, spentCents } = summary.uncategorized;
-	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
+	const { spentCents } = summary.uncategorized;
+	const needsCount = current
+		? await c.env.DB.prepare(
+				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${countedMonthSql()} = ? AND ${NEEDS_CATEGORY_SQL}`,
+			)
+				.bind(month)
+				.first<{ n: number }>()
+		: null;
+	const currentNeeds = needsCount?.n ?? 0;
+	const olderNeeds = current
+		? await olderNeedsCategoryCount(c.env.DB, `${month}-01`)
+		: 0;
+	const needs = (
+		<>
+			{currentNeeds}
+			<span class="sr-only">
+				{" "}
+				{currentNeeds === 1 ? "transaction" : "transactions"}
+			</span>{" "}
+			{currentNeeds === 1 ? "needs" : "need"} a category
+		</>
+	);
 	const demo = c.env.DEMO === "true";
 	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
 	// no real banks, so it never asks.
-	const bankLine =
+	const bankNotice =
 		demo || !current
 			? null
-			: staleBankWords(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+			: homeBankNotice(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+	const day = Number(today.slice(8, 10));
+	const forecastDays = current
+		? await homeForecastDays(c.env.DB, month, today)
+		: [];
+	const forecastSpentCents = forecastDays.reduce(
+		(sum, row) => sum + row.spentCents,
+		0,
+	);
+	const billPaymentsCents = forecastDays.reduce(
+		(sum, row) => sum + row.billPaymentsCents,
+		0,
+	);
+	const refundsCents = forecastDays.reduce(
+		(sum, row) => sum + row.refundsCents,
+		0,
+	);
+	const everydayCents = forecastDays.reduce(
+		(sum, row) => sum + row.everydayCents,
+		0,
+	);
+	const forecast = forecastMonth({
+		day,
+		daysInMonth: daysInMonth(month),
+		totalBudgetCents: summary.totalBudgetCents,
+		spentCents: forecastSpentCents,
+		everydayCents,
+		billPaymentsCents,
+		refundsCents,
+		billsStillDueCents: billTotals?.stillToPayCents ?? 0,
+	});
+	const showForecast = current && day >= FORECAST_START_DAY && forecast.visible;
+	const dailySpending = Array.from(
+		{ length: day },
+		(_, index) =>
+			forecastDays.find((item) => item.day === index + 1)?.spentCents ?? 0,
+	);
+	const dailyAmount =
+		current && day < FORECAST_START_DAY && summary.safeToSpendCents > 0
+			? `About ${formatCents(Math.floor(summary.safeToSpendCents / (daysInMonth(month) - day + 1)))} a day for ${daysInMonth(month) - day + 1} days left.`
+			: undefined;
 	// Counted spending by category, income left out, as Home counts it (spec §6).
 	const spent = (id: number) =>
 		data.transactions
@@ -183,18 +282,40 @@ async function renderHome(
 								}
 								safeToSpendCents={summary.safeToSpendCents}
 								status={statusSentence(summary.categories)}
-								bankLine={bankLine ?? undefined}
+								bankLine={bankNotice?.words}
+								bankDate={bankNotice?.asOf}
+								dailyAmount={dailyAmount}
+								forecast={
+									showForecast && (
+										<HomeForecast
+											month={month}
+											day={day}
+											daysInMonth={daysInMonth(month)}
+											spentByDay={dailySpending}
+											budgetCents={summary.totalBudgetCents}
+											endCents={forecast.endCents}
+											differenceCents={
+												summary.totalBudgetCents - forecast.endCents
+											}
+										/>
+									)
+								}
 								band={
-									count > 0
+									currentNeeds > 0 || olderNeeds > 0
 										? {
 												href: "/transactions/organize",
-												text: needs,
-												// Home says "needs a category" once: the Band carries the amount (decision 50).
+												text:
+													currentNeeds > 0
+														? needs
+														: `${olderNeeds} ${olderNeeds === 1 ? "transaction" : "transactions"} from earlier months ${olderNeeds === 1 ? "needs" : "need"} a category`,
+												older: currentNeeds > 0 ? olderNeeds : undefined,
 												// Refunds can outweigh the spending; it says so, as the budget sheet does.
 												detail:
-													spentCents < 0
-														? `${bandAmount(-spentCents)} more refunded than spent`
-														: `${bandAmount(spentCents)} of this month's spending`,
+													currentNeeds === 0
+														? undefined
+														: spentCents < 0
+															? `${bandAmount(-summary.uncategorized.spentCents)} more refunded than spent`
+															: `${bandAmount(summary.uncategorized.spentCents)} of this month's spending`,
 											}
 										: undefined
 								}

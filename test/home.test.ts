@@ -1,9 +1,11 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { budgetForMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { setBudget } from "../src/db/budgets";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
+import { OLDER_NEEDS_CATEGORY_SQL } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { home as homeRoute } from "../src/routes/home";
 
@@ -18,6 +20,7 @@ async function homeAt(month: string) {
 }
 
 describe("GET / with the demo seed", () => {
+	afterEach(() => vi.useRealTimers());
 	beforeEach(async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	});
@@ -361,10 +364,74 @@ describe("GET / with the demo seed", () => {
 		expect(html).toContain('<html lang="en">');
 	});
 
+	it("keeps the pre-forecast Home on day 6 and adds the forecast on day 7", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-06T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-06");
+		expect((await home()).html).not.toContain('aria-label="Spending in Oct');
+		expect((await home()).html).toContain("a day for 26 days left");
+		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-07");
+		expect((await home()).html).toContain('aria-label="Spending in Oct');
+	});
+
+	it("uses a fixed number of D1 statements for a large Home request", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+			 INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id)
+			 SELECT 1, '2020-01-01', 100, 'Older Home count ' || i, NULL FROM n`,
+		).run();
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
+			 INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id)
+			 SELECT 1, ?, 100, 'Home count ' || i, 1 FROM n`,
+		)
+			.bind(`${month}-05`)
+			.run();
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 30)
+			 INSERT INTO bills (name,amount_cents,due_day,frequency,merchant_raw_name)
+			 SELECT 'Home count ' || i, 100, 20, 'monthly', 'Home count ' || i FROM n`,
+		).run();
+
+		let statements = 0;
+		const db = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const plan = await env.DB.prepare(
+			`EXPLAIN QUERY PLAN ${OLDER_NEEDS_CATEGORY_SQL}`,
+		)
+			.bind(`${month}-01`, `${monthsBefore(month, -1)}-01`, month)
+			.all<{ detail: string }>();
+		expect(plan.results.map((row) => row.detail).join("\n")).toMatch(
+			/SEARCH (transactions|t) USING (COVERING )?INDEX transactions_date/,
+		);
+		const app = new Hono<{ Bindings: Env }>().route("/", homeRoute);
+		const response = await app.request(
+			"http://tally.test/",
+			{},
+			{ ...env, DB: db },
+		);
+		expect(response.status).toBe(200);
+		expect(await response.text()).toContain("+5000 older");
+		expect(statements).toBeLessThanOrEqual(20);
+	});
+
 	it("leads with safe to spend and the status sentence", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
-		expect(html).toMatch(/Safe to spend<\/p><p[^>]*>\$[\d,]+/);
+		expect(html).toMatch(/Safe to spend[\s\S]*?<\/p><p[^>]*>\$[\d,]+/);
+		expect(html).toContain('href="/how-it-works#budget"');
+		expect(html).toContain('aria-label="Why? safe to spend"');
 		expect(html).toContain(
 			"Eating Out is $36 over. Everything else is on track.",
 		);
@@ -373,25 +440,8 @@ describe("GET / with the demo seed", () => {
 	it("links the uncategorized count to the filtered list", async () => {
 		const { html } = await home();
 		expect(html).toContain('href="/transactions?uncategorized=1"');
-		expect(html).toMatch(/10 transactions need\s+a\s+category/);
-	});
-
-	it("lists due and overdue bills under an accurate heading", async () => {
-		const { html } = await home();
-		expect(html).toContain("Bills due soon");
-		expect(html).toContain("Electric");
-		expect(html).toContain("Internet");
-		expect(html).not.toContain("Bills due in the next 7 days");
-	});
-
-	it("draws Bills due soon as a section title, the same size as Budget", async () => {
-		const { html } = await home();
-		// DESIGN.md Type roles: a section title is 3xl, and Home's two section titles match.
 		expect(html).toMatch(
-			/<h2 id="budget-title"[^>]*class="font-serif text-3xl font-semibold"/,
-		);
-		expect(html).toMatch(
-			/<h2\s+id="home-bills-title"\s+class="font-serif text-3xl font-semibold"\s*>/,
+			/10<span class="sr-only"> transactions<\/span> need\s+a\s+category/,
 		);
 	});
 
@@ -399,7 +449,7 @@ describe("GET / with the demo seed", () => {
 		const dollars = (html: string) =>
 			Number(
 				html
-					.match(/Safe to spend<\/p><p[^>]*>\$([\d,]+)/)?.[1]
+					.match(/class="font-serif text-6xl[^"]*">(?:−)?\$([\d,]+)/)?.[1]
 					?.replaceAll(",", "") ?? Number.NaN,
 			);
 		const withBills = dollars((await home()).html);
@@ -447,7 +497,7 @@ describe("GET / with the demo seed", () => {
 	it("says needs a category once: the Band carries the amount, and there's no Uncategorized row (decision 50)", async () => {
 		const { html } = await home();
 		expect(html).toMatch(
-			/10 transactions need a category<\/span><span[^>]*>\$211 of this month&#39;s spending/,
+			/10<span class="sr-only"> transactions<\/span> need a category[\s\S]*?\$211 of this month&#39;s spending/,
 		);
 		expect(html).not.toContain("Uncategorized");
 	});
@@ -481,8 +531,12 @@ describe("GET / with the demo seed", () => {
 		const { html } = await home();
 		const at = (s: string) => html.indexOf(s);
 		expect(html).toMatch(/<h1 class="font-serif text-2xl[^"]*">/);
-		expect(at("Safe to spend")).toBeLessThan(at("10 transactions need"));
-		expect(at("10 transactions need")).toBeLessThan(at(">Budget<"));
+		expect(at("Safe to spend")).toBeLessThan(
+			at('10<span class="sr-only"> transactions'),
+		);
+		expect(at('10<span class="sr-only"> transactions')).toBeLessThan(
+			at(">Budget<"),
+		);
 		expect(at(">Budget<")).toBeLessThan(at("New here? Things to try"));
 	});
 
