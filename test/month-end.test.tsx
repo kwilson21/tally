@@ -68,111 +68,161 @@ describe("MonthEnd budget bars", () => {
 		}
 	});
 
-	it("scrolls twelve categories in one row without widening the page", () => {
-		const html = renderToString(
-			<MonthEnd
-				chartId="twelve"
-				monthName="September"
-				amountCents={0}
-				rows={rows(12)}
-			/>,
-		);
-		const chart = html.match(
-			/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
-		)?.[0];
-		expect(html).toContain('role="region" tabindex="0"');
-		expect(html).toContain(
-			'aria-label="12 categories; scroll sideways to see them all"',
-		);
-		expect(html).toContain('href="#twelve-chart-end"');
-		expect(html).toContain('aria-label="Show the rest of the categories"');
-		expect(html).toContain(
-			'class="month-end-chart-more inline-flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"',
-		);
-		expect(html).toContain(
-			"month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue",
-		);
-		expect(html).toContain('id="twelve-chart-end"');
-		expect(html).toContain('class="month-end-chart-fade"');
-		expect(html).toContain("swipe sideways for the rest");
-		expect(html).toContain(
-			'class="month-end-chart-more-icon month-end-swipe-arrow',
-		);
-		expect(html).toContain(
-			'class="month-end-swipe-arrow month-end-swipe-arrow-left text-accent"',
-		);
-		expect(html).toContain('class="month-end-swipe-arrow text-accent"');
-		const luminance = (hex: string) => {
-			const rgb = hex
-				.match(/[\da-f]{2}/gi)
-				?.map((value) => Number.parseInt(value, 16) / 255);
-			if (rgb?.length !== 3) throw new Error(`Invalid color: ${hex}`);
-			const channels = rgb.map((value) =>
-				value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
+	it.each([6, 9, 12])(
+		"keeps the phone cue and only scrolls at lg when needed (%i)",
+		(count) => {
+			const html = renderToString(
+				<MonthEnd
+					chartId={count === 12 ? "twelve" : `n-${count}`}
+					monthName="September"
+					amountCents={0}
+					rows={rows(count)}
+				/>,
 			);
-			return (
-				0.2126 * (channels[0] ?? 0) +
-				0.7152 * (channels[1] ?? 0) +
-				0.0722 * (channels[2] ?? 0)
-			);
-		};
-		const contrast = (a: string, b: string) => {
-			const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
-			return ((values[0] ?? 0) + 0.05) / ((values[1] ?? 0) + 0.05);
-		};
-		expect(contrast("#fbf8f2", "#0e0e0e")).toBeGreaterThanOrEqual(3);
-		expect(contrast("#ae5534", "#0e0e0e")).toBeGreaterThanOrEqual(3);
-		expect(chart).toBeDefined();
-		expect(chart).toContain('viewBox="0 0 799 142"');
-		expect(chart).toContain('width="42"');
-		expect(chart).toContain('<line x1="31" x2="799" y1="40" y2="40"');
-		expect(chart).toContain('y="132"');
-		const xs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map((match) =>
-			Number(match[1]),
-		);
-		const labels = [
-			...(chart ?? "").matchAll(/<text x="([\d.]+)" y="132"/g),
-		].map((match) => Number(match[1]));
-		const overLabels = [
-			...(chart ?? "").matchAll(/<text x="([\d.]+)" y="16"/g),
-		].map((match) => Number(match[1]));
-		expect(xs).toHaveLength(12);
-		expect(labels).toHaveLength(12);
-		expect(overLabels).toHaveLength(12);
-		expect(
-			xs.every(
-				(value, index) =>
-					index === 0 || value - (xs[index - 1] ?? value) === 66,
-			),
-		).toBe(true);
-		expect(
-			new Set(
-				[...chart.matchAll(/<text x="[\d.]+" y="132"[^>]*>(.*?)<\/text>/g)].map(
-					(m) => m[1],
+			const wideCueHidden = count <= 10;
+			const chart =
+				html.match(
+					/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
+				)?.[0] ?? "";
+			expect(html).toMatch(
+				new RegExp(
+					`role="region" tabindex="0" aria-label="${count} categories; scroll sideways to see them all" class="[^"]*overflow-x-auto[^"]*${wideCueHidden ? "lg:hidden" : ""}"`,
 				),
-			).size,
-		).toBe(12);
-		expect(html).toContain("overflow-x-auto");
-		expect(html).toContain("max-w-full");
-		expect(chart).toContain('viewBox="0 0 799 142"');
-		expect(chart).toContain('width="799"');
-		const rectXs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
-			(match) => Number(match[1]),
-		);
-		const lastBarEnd = Math.max(...rectXs) + 42;
-		expect(799 - lastBarEnd).toBe(0);
-		expect(html).toContain('id="twelve-chart-end"');
-		expect(html.indexOf('id="twelve-chart-end"')).toBeGreaterThan(
-			html.indexOf("</svg>"),
-		);
-		expect(html.indexOf('id="twelve-chart-end"')).toBeGreaterThan(
-			html.indexOf('class="month-end-chart-tail"'),
-		);
-		expect(appCss).toContain("--month-end-chart-tail-width: calc(");
-		expect(appCss).toMatch(
-			/var\(--month-end-chart-fade-width\)\s*\+\s*var\(--month-end-chart-cue-size\)/,
-		);
-	});
+			);
+			expect(html).toContain(
+				`aria-label="${count} categories; scroll sideways to see them all"`,
+			);
+			expect(html).toContain(
+				`href="#${count === 12 ? "twelve" : `n-${count}`}-chart-end"`,
+			);
+			expect(html).toContain(
+				`class="month-end-chart-fade${wideCueHidden ? " lg:hidden" : ""}"`,
+			);
+			expect(html).toContain(
+				`class="month-end-chart-more inline-flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent${wideCueHidden ? " lg:hidden" : ""}"`,
+			);
+			expect(html).toMatch(
+				new RegExp(
+					`<p class="mt-1 flex items-center justify-center gap-2 text-sm text-muted${wideCueHidden ? " lg:hidden" : ""}">`,
+				),
+			);
+			expect(html).toContain(`swipe sideways for the rest`);
+			expect(html).toContain(
+				`class="month-end-swipe-arrow month-end-swipe-arrow-left text-accent${wideCueHidden ? " lg:hidden" : ""}"`,
+			);
+			if (wideCueHidden) {
+				expect(html).toContain('class="mt-4 hidden lg:block"');
+				expect(html.match(/role="region"/g)).toHaveLength(1);
+				expect(html).toContain(
+					`class="month-end-swipe-arrow text-accent lg:hidden"`,
+				);
+			} else {
+				expect(html).not.toContain("lg:hidden");
+				expect(html).not.toContain('class="mt-4 hidden lg:block"');
+			}
+			const luminance = (hex: string) => {
+				const rgb = hex
+					.match(/[\da-f]{2}/gi)
+					?.map((value) => Number.parseInt(value, 16) / 255);
+				if (rgb?.length !== 3) throw new Error(`Invalid color: ${hex}`);
+				const channels = rgb.map((value) =>
+					value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
+				);
+				return (
+					0.2126 * (channels[0] ?? 0) +
+					0.7152 * (channels[1] ?? 0) +
+					0.0722 * (channels[2] ?? 0)
+				);
+			};
+			const contrast = (a: string, b: string) => {
+				const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+				return ((values[0] ?? 0) + 0.05) / ((values[1] ?? 0) + 0.05);
+			};
+			if (count !== 12) return;
+			expect(contrast("#fbf8f2", "#0e0e0e")).toBeGreaterThanOrEqual(3);
+			expect(contrast("#ae5534", "#0e0e0e")).toBeGreaterThanOrEqual(3);
+			expect(chart).toBeDefined();
+			expect(chart).toContain('viewBox="0 0 799 142"');
+			expect(chart).toContain('width="42"');
+			expect(chart).toContain('<line x1="31" x2="799" y1="40" y2="40"');
+			expect(chart).toContain('y="132"');
+			const xs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
+				(match) => Number(match[1]),
+			);
+			const labels = [
+				...(chart ?? "").matchAll(/<text x="([\d.]+)" y="132"/g),
+			].map((match) => Number(match[1]));
+			const overLabels = [
+				...(chart ?? "").matchAll(/<text x="([\d.]+)" y="16"/g),
+			].map((match) => Number(match[1]));
+			expect(xs).toHaveLength(12);
+			expect(labels).toHaveLength(12);
+			expect(overLabels).toHaveLength(12);
+			expect(
+				xs.every(
+					(value, index) =>
+						index === 0 || value - (xs[index - 1] ?? value) === 66,
+				),
+			).toBe(true);
+			expect(
+				new Set(
+					[
+						...chart.matchAll(/<text x="[\d.]+" y="132"[^>]*>(.*?)<\/text>/g),
+					].map((m) => m[1]),
+				).size,
+			).toBe(12);
+			expect(html).toContain("overflow-x-auto");
+			expect(html).toContain("max-w-full");
+			expect(chart).toContain('viewBox="0 0 799 142"');
+			expect(chart).toContain('width="799"');
+			const rectXs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
+				(match) => Number(match[1]),
+			);
+			const lastBarEnd = Math.max(...rectXs) + 42;
+			expect(799 - lastBarEnd).toBe(0);
+			expect(html).toContain('id="twelve-chart-end"');
+			expect(html.indexOf('id="twelve-chart-end"')).toBeGreaterThan(
+				html.indexOf("</svg>"),
+			);
+			expect(html.indexOf('id="twelve-chart-end"')).toBeGreaterThan(
+				html.indexOf('class="month-end-chart-tail"'),
+			);
+			expect(appCss).toContain("--month-end-chart-tail-width: calc(");
+			expect(appCss).toMatch(
+				/var\(--month-end-chart-fade-width\)\s*\+\s*var\(--month-end-chart-cue-size\)/,
+			);
+		},
+	);
+
+	it.each([
+		[10, "$0.10"],
+		[99, "$0.99"],
+		[100, "$1"],
+		[3650, "$36.50"],
+	])(
+		"keeps cents in a nonzero finished amount and bar overage (%i cents)",
+		(cents, expected) => {
+			const html = renderToString(
+				<MonthEnd
+					chartId="money"
+					monthName="September"
+					amountCents={-cents}
+					rows={[
+						{
+							id: 1,
+							name: "Category 1",
+							spentCents: 10000 + cents,
+							budgetCents: 10000,
+							leftCents: -cents,
+							over: true,
+						},
+					]}
+				/>,
+			);
+			expect(html).toContain(`>${expected}</p>`);
+			expect(html).toContain(`<title>+${expected}</title>`);
+		},
+	);
 
 	it("keeps short category labels at their natural width", () => {
 		const html = renderToString(
@@ -276,7 +326,7 @@ describe("MonthEnd budget bars", () => {
 				]}
 			/>,
 		);
-		expect(html).toContain('class="text-lg text-ok"');
+		expect(html).toContain('class="text-right text-lg text-ok"');
 		expect(html).toContain("+$20");
 	});
 });

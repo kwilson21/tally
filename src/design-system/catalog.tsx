@@ -732,7 +732,7 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	motion:
 		"When more than five categories need a sideways cue, its arrows nudge three times at 1.2 seconds per nudge, then rest. Reduced motion leaves them still. The page uses the shell's browser page transition.",
 	edges:
-		"The strip shows at most 36 months and always contains the viewed month. An older view shifts the window back to end at that month; Earlier and Later open the month before or after the visible window. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either history end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month budget counts only for a category active during that month; an archived category with counted spending remains as a spending-only row. A finished-month chart with more than five budgeted categories is one 42px-bar row inside its own keyboard-scrollable region; its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. A future or pre-history month address opens this month's Home.",
+		"The strip shows at most 36 available months and always contains the viewed month. Near the first month it starts there and extends later to fill the strip when history allows; an older window ends at the viewed month. Earlier and Later open the month before or after the visible window. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either history end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month budget counts only for a category active during that month; an archived category with counted spending remains as a spending-only row. A finished-month chart with more than five budgeted categories is one 42px-bar row inside its own keyboard-scrollable region; at `lg`, the fade, arrow, hint and scrolling region appear only above ten categories, when the row exceeds the 672px Home content width (main column 696px at 1024px; 824px at 1280px and wider). Its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. Nonzero finished amounts and bar overages retain cents when whole-dollar rounding would hide them. A future or pre-history month address opens this month's Home.",
 	words:
 		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
 };
@@ -861,64 +861,72 @@ function HomeTopGroup() {
 					</Picture>
 				</State>
 				<State label="At 320px wide, month links wrap instead of overflowing">
-					<div class="w-[320px] max-w-full">
-						<MonthNavigation
-							month="2026-10"
-							firstMonth="2025-11"
-							currentMonth="2026-10"
-						/>
-					</div>
+					<Picture label="Month navigation at 320px wide, with links wrapping instead of overflowing">
+						<div class="w-[320px] max-w-full">
+							<MonthNavigation
+								month="2026-10"
+								firstMonth="2025-11"
+								currentMonth="2026-10"
+							/>
+						</div>
+					</Picture>
 				</State>
 				<State label="Five budgeted categories: one row, no scrolling region or cue">
-					<div class="w-[320px] max-w-full">
-						<MonthEnd
-							chartId="catalog-five"
-							monthName="September"
-							amountCents={0}
-							rows={Array.from({ length: 5 }, (_, index) => ({
-								id: index + 1,
-								name: `Category ${index + 1}`,
-								budgetCents: 10000,
-								spentCents: 8000,
-								leftCents: 2000,
-								over: false,
-							}))}
-						/>
-					</div>
+					<Picture label="Five categories in one row with no scrolling cue">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-five"
+								monthName="September"
+								amountCents={0}
+								rows={Array.from({ length: 5 }, (_, index) => ({
+									id: index + 1,
+									name: `Category ${index + 1}`,
+									budgetCents: 10000,
+									spentCents: 8000,
+									leftCents: 2000,
+									over: false,
+								}))}
+							/>
+						</div>
+					</Picture>
 				</State>
 				<State label="Twelve budgeted categories: one row, keyboard-scrollable with fade, arrow link and swipe cue">
-					<div class="w-[320px] max-w-full">
-						<MonthEnd
-							chartId="catalog-twelve"
-							monthName="September"
-							amountCents={0}
-							rows={Array.from({ length: 12 }, (_, index) => ({
-								id: index + 1,
-								name: `Category ${index + 1}`,
-								budgetCents: 10000,
-								spentCents: index % 3 === 0 ? 12000 : 8000,
-								leftCents: index % 3 === 0 ? -2000 : 2000,
-								over: index % 3 === 0,
-							}))}
-						/>
-					</div>
+					<Picture label="Twelve categories in one row with a fade, arrow and sideways scrolling cue">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-twelve"
+								monthName="September"
+								amountCents={0}
+								rows={Array.from({ length: 12 }, (_, index) => ({
+									id: index + 1,
+									name: `Category ${index + 1}`,
+									budgetCents: 10000,
+									spentCents: index % 3 === 0 ? 12000 : 8000,
+									leftCents: index % 3 === 0 ? -2000 : 2000,
+									over: index % 3 === 0,
+								}))}
+							/>
+						</div>
+					</Picture>
 				</State>
 				<State label="The twelve-category ink arrow and terracotta cue under prefers-reduced-motion: arrows rest">
-					<div class="w-[320px] max-w-full">
-						<MonthEnd
-							chartId="catalog-twelve-reduced-motion"
-							monthName="September"
-							amountCents={0}
-							rows={Array.from({ length: 12 }, (_, index) => ({
-								id: index + 1,
-								name: `Category ${index + 1}`,
-								budgetCents: 10000,
-								spentCents: 8000,
-								leftCents: 2000,
-								over: false,
-							}))}
-						/>
-					</div>
+					<Picture label="The twelve-category chart cue stays still under reduced motion">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-twelve-reduced-motion"
+								monthName="September"
+								amountCents={0}
+								rows={Array.from({ length: 12 }, (_, index) => ({
+									id: index + 1,
+									name: `Category ${index + 1}`,
+									budgetCents: 10000,
+									spentCents: 8000,
+									leftCents: 2000,
+									over: false,
+								}))}
+							/>
+						</div>
+					</Picture>
 				</State>
 				<UseSpec spec={MONTH_HISTORY_SPEC} />
 			</Specimen>

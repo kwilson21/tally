@@ -124,6 +124,22 @@ describe("GET / with the demo seed", () => {
 		);
 	});
 
+	it("shows an archived category's net refund like a finished-month category row", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO categories (id, name, icon, color, sort_order, archived, archived_on) VALUES (902, 'Refunded archive', 'tag', 'cat-blue', 90, 1, '2026-01-01')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, credit_reviewed) VALUES (1, ?, 1000, 'ARCHIVED SPEND', 902, 1), (1, ?, -3000, 'ARCHIVED REFUND', 902, 1)",
+			).bind(today, today),
+		]);
+		const { html } = await home();
+		expect(html).toContain('class="text-right text-lg text-ok">+$20</span>');
+		expect(html).toContain("Refunded archive");
+		expect(html).not.toContain("-$20");
+	});
+
 	it("keeps the finished amount equal to what Home showed at the end of that month", async () => {
 		vi.useFakeTimers();
 		try {
@@ -222,6 +238,8 @@ describe("GET / with the demo seed", () => {
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) SELECT id, '0100-01-01', 100, 'Ancient cash' FROM accounts ORDER BY id LIMIT 1",
 		).run();
 		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const firstMonth = await firstCountedMonth(env.DB);
+		if (!firstMonth) throw new Error("History has no counted month");
 		for (const viewed of [
 			current,
 			monthsBefore(current, 12),
@@ -244,17 +262,28 @@ describe("GET / with the demo seed", () => {
 			);
 			const firstDot = links[0]?.[1];
 			const lastDot = links.at(-1)?.[1];
-			const olderThanWindow = viewed < monthsBefore(current, 35);
-			expect(firstDot).toBe(
-				olderThanWindow ? monthsBefore(viewed, 35) : monthsBefore(current, 35),
-			);
-			expect(lastDot).toBe(olderThanWindow ? viewed : current);
-			expect(html).toContain(
-				`href="/?month=${monthsBefore(firstDot ?? viewed, 1)}"`,
-			);
-			if (olderThanWindow) {
+			const expectedFirst =
+				firstMonth > monthsBefore(viewed, 35)
+					? firstMonth
+					: monthsBefore(viewed, 35);
+			const expectedLast =
+				current < monthsBefore(expectedFirst, -35)
+					? current
+					: monthsBefore(expectedFirst, -35);
+			expect(firstDot).toBe(expectedFirst);
+			expect(lastDot).toBe(expectedLast);
+			if (firstMonth < (firstDot ?? firstMonth)) {
+				expect(html).toContain(
+					`href="/?month=${monthsBefore(firstDot ?? viewed, 1)}"`,
+				);
+			} else {
+				expect(html).not.toContain(">Earlier</a>");
+			}
+			if ((lastDot ?? current) < current) {
 				expect(html).toContain(">Later</a>");
-				expect(html).toContain(`href="/?month=${monthsBefore(viewed, -1)}"`);
+				expect(html).toContain(
+					`href="/?month=${monthsBefore(lastDot ?? viewed, -1)}"`,
+				);
 			} else {
 				expect(html).not.toContain(">Later</a>");
 			}

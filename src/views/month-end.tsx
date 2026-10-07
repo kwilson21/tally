@@ -4,6 +4,15 @@ import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
+const keepCents = (cents: number) =>
+	formatCents(cents, { wholeDollars: cents % 100 === 0 });
+
+/** One signed amount and color for Home and finished-month category rows. */
+export function categoryRowAmount(cents: number) {
+	return cents < 0
+		? { text: `+${whole(-cents)}`, className: "text-right text-lg text-ok" }
+		: { text: whole(cents), className: "text-right text-lg" };
+}
 const SHORT_NAMES: Record<string, string> = {
 	Groceries: "Groc.",
 	"Eating Out": "Eating",
@@ -88,6 +97,8 @@ function EndBars({
 	chartId: string;
 }) {
 	const scrolls = rows.length > 5;
+	const scrollsAtLg = rows.length > 10;
+	const phoneOnlyCue = scrolls && !scrollsAtLg;
 	const left = scrolls ? 31 : 4;
 	const width = Math.max(350, left + Math.max(0, rows.length - 1) * 66 + 42);
 	const areaRight = 292;
@@ -153,15 +164,15 @@ function EndBars({
 								y={base - height - 6}
 								text-anchor="middle"
 								class="fill-over text-sm font-semibold"
-								aria-label={`Over budget by ${whole(row.spentCents - row.budgetCents)}`}
+								aria-label={`Over budget by ${keepCents(row.spentCents - row.budgetCents)}`}
 								{...(labelNeedsCap(
-									`+${whole(row.spentCents - row.budgetCents)}`,
+									`+${keepCents(row.spentCents - row.budgetCents)}`,
 								)
 									? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
 									: {})}
 							>
-								<title>+{whole(row.spentCents - row.budgetCents)}</title>+
-								{whole(row.spentCents - row.budgetCents)}
+								<title>+{keepCents(row.spentCents - row.budgetCents)}</title>+
+								{keepCents(row.spentCents - row.budgetCents)}
 							</text>
 						)}
 						<text
@@ -190,7 +201,11 @@ function EndBars({
 				role="region"
 				tabindex={0}
 				aria-label={`${rows.length} categories; scroll sideways to see them all`}
-				class="max-w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+				class={
+					phoneOnlyCue
+						? "max-w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:hidden"
+						: "max-w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+				}
 			>
 				<div class="flex w-max">
 					{chart}
@@ -202,35 +217,75 @@ function EndBars({
 					/>
 				</div>
 			</div>
-			<span class="month-end-budget-label" aria-hidden="true">
+			<span
+				class={
+					phoneOnlyCue
+						? "month-end-budget-label lg:hidden"
+						: "month-end-budget-label"
+				}
+				aria-hidden="true"
+			>
 				budget
 			</span>
-			<span class="month-end-chart-fade" aria-hidden="true" />
+			<span
+				class={
+					phoneOnlyCue
+						? "month-end-chart-fade lg:hidden"
+						: "month-end-chart-fade"
+				}
+				aria-hidden="true"
+			/>
 			<a
 				href={`#${chartId}-chart-end`}
 				aria-label="Show the rest of the categories"
-				class="month-end-chart-more inline-flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+				class={
+					phoneOnlyCue
+						? "month-end-chart-more inline-flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:hidden"
+						: "month-end-chart-more inline-flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+				}
 			>
 				<span
-					class="month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue"
+					class={
+						phoneOnlyCue
+							? "month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue lg:hidden"
+							: "month-end-chart-more-icon month-end-swipe-arrow inline-flex size-[34px] items-center justify-center rounded-full bg-ink text-lg text-paper shadow-swipe-cue"
+					}
 					aria-hidden="true"
 				>
 					→
 				</span>
 				<span class="sr-only">Show the rest of the categories</span>
 			</a>
-			<p class="mt-1 flex items-center justify-center gap-2 text-sm text-muted">
+			<p
+				class={
+					phoneOnlyCue
+						? "mt-1 flex items-center justify-center gap-2 text-sm text-muted lg:hidden"
+						: "mt-1 flex items-center justify-center gap-2 text-sm text-muted"
+				}
+			>
 				<span
-					class="month-end-swipe-arrow month-end-swipe-arrow-left text-accent"
+					class={
+						phoneOnlyCue
+							? "month-end-swipe-arrow month-end-swipe-arrow-left text-accent lg:hidden"
+							: "month-end-swipe-arrow month-end-swipe-arrow-left text-accent"
+					}
 					aria-hidden="true"
 				>
 					←
 				</span>
 				swipe sideways for the rest
-				<span class="month-end-swipe-arrow text-accent" aria-hidden="true">
+				<span
+					class={
+						phoneOnlyCue
+							? "month-end-swipe-arrow text-accent lg:hidden"
+							: "month-end-swipe-arrow text-accent"
+					}
+					aria-hidden="true"
+				>
 					→
 				</span>
 			</p>
+			{phoneOnlyCue && <div class="mt-4 hidden lg:block">{chart}</div>}
 		</div>
 	);
 }
@@ -255,7 +310,7 @@ export function MonthEnd({
 				<p
 					class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight ${over ? "text-over" : ""}`}
 				>
-					{whole(Math.abs(amountCents))}
+					{keepCents(Math.abs(amountCents))}
 				</p>
 				<span
 					class={`inline-block -rotate-3 rounded-control border-2 px-3 py-0.5 text-xl font-extrabold tracking-widest uppercase ${over ? "border-over text-over" : "border-ok text-ok"}`}
@@ -284,10 +339,8 @@ export function PastNotBudgeted({
 					<li class="flex min-h-11 items-center gap-4 py-2">
 						<CategoryIcon icon={item.icon} color={item.color} />
 						<span class="min-w-0 flex-1 truncate text-lg">{item.name}</span>
-						<span class={`text-lg ${item.spentCents < 0 ? "text-ok" : ""}`}>
-							{item.spentCents < 0
-								? `+${formatCents(-item.spentCents, { wholeDollars: true })}`
-								: formatCents(item.spentCents, { wholeDollars: true })}
+						<span class={categoryRowAmount(item.spentCents).className}>
+							{categoryRowAmount(item.spentCents).text}
 						</span>
 					</li>
 				))}

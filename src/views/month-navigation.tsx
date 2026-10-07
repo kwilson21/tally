@@ -47,13 +47,11 @@ export function MonthNavigation({
 	currentMonth: string;
 }) {
 	const firstRenderedMonth =
-		month < monthsBefore(currentMonth, 35)
-			? monthsBefore(month, 35)
-			: firstMonth > monthsBefore(currentMonth, 35)
-				? firstMonth
-				: monthsBefore(currentMonth, 35);
+		firstMonth > monthsBefore(month, 35) ? firstMonth : monthsBefore(month, 35);
 	const lastRenderedMonth =
-		month < monthsBefore(currentMonth, 35) ? month : currentMonth;
+		currentMonth < monthsBefore(firstRenderedMonth, -35)
+			? currentMonth
+			: monthsBefore(firstRenderedMonth, -35);
 	const renderedCount =
 		(Number(lastRenderedMonth.slice(0, 4)) -
 			Number(firstRenderedMonth.slice(0, 4))) *

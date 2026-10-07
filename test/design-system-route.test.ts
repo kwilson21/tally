@@ -611,6 +611,35 @@ describe("GET /design-system in the demo", () => {
 		expect(html).not.toMatch(/href="\/design-system#/);
 	});
 
+	it("keeps the month-history visual specimen's month links inert", async () => {
+		const { html } = await get("/design-system");
+		const start = html.lastIndexOf(
+			"<section",
+			html.indexOf('id="home-month-history"'),
+		);
+		let depth = 0;
+		let end = html.length;
+		for (const match of html
+			.slice(start)
+			.matchAll(/<section\b[^>]*>|<\/section>/g)) {
+			depth += match[0] === "</section>" ? -1 : 1;
+			if (depth === 0) {
+				end = start + (match.index ?? 0) + match[0].length;
+				break;
+			}
+		}
+		const section = html.slice(start, end);
+		expect(section).toContain("w-[320px]");
+		const openDivs: boolean[] = [];
+		for (const match of section.matchAll(/<div\b[^>]*>|<\/div>|<a\b[^>]*>/g)) {
+			const tag = match[0];
+			if (tag === "</div>") openDivs.pop();
+			else if (tag.startsWith("<div"))
+				openDivs.push(/\sinert(?:\s|>|=)/.test(tag));
+			else expect(openDivs, tag).toContain(true);
+		}
+	});
+
 	it("gives every specimen one tier, and makes Visual ones inert to htmx", async () => {
 		const { html } = await get("/design-system");
 		const tags = specimens(html);

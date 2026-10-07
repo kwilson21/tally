@@ -24,7 +24,11 @@ import { EmptyState } from "../views/empty-state";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
-import { MonthEnd, PastNotBudgeted } from "../views/month-end";
+import {
+	categoryRowAmount,
+	MonthEnd,
+	PastNotBudgeted,
+} from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { ProgressRow } from "../views/progress-row";
 import { ThingsToTry } from "../views/things-to-try";
@@ -288,8 +292,12 @@ async function renderHome(
 															<span class="min-w-0 flex-1 truncate text-lg">
 																{cat.name}
 															</span>
-															<span class="text-right text-lg">
-																{amount(spent(cat.id))}
+															<span
+																class={
+																	categoryRowAmount(spent(cat.id)).className
+																}
+															>
+																{categoryRowAmount(spent(cat.id)).text}
 															</span>
 														</li>
 													);
