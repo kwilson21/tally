@@ -1161,7 +1161,10 @@ function Rows() {
 				sentence="The sheet for choosing how much to save each month, with one labeled amount field; Cancel and the backdrop close it and return focus to the Savings row."
 			>
 				<State label="Goal set">
-					<div class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
 						<SavingsGoalSheet
 							value="500.00"
 							month="October"
