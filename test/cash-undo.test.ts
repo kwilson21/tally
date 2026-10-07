@@ -190,6 +190,94 @@ describe("cash delete undo", () => {
 		);
 	});
 
+	it.each([
+		{
+			period: "2026-11",
+			linkedPeriod: "2026-10",
+			restored: true,
+		},
+		{
+			period: "2026-10",
+			linkedPeriod: null,
+			restored: false,
+		},
+	])(
+		"checks a reused transaction id against its remapped bill payment id ($period)",
+		async ({ period, linkedPeriod, restored }) => {
+			const account = await env.DB.prepare(
+				"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
+			).first<{ id: number }>();
+			const bill = await env.DB.prepare(
+				"SELECT id, name FROM bills WHERE id NOT IN (SELECT bill_id FROM bill_payments WHERE period IN ('2026-10', '2026-11') AND status='linked') LIMIT 1",
+			).first<{ id: number; name: string }>();
+			if (!account || !bill) throw new Error("undo fixture missing");
+			const inserted = await env.DB.prepare(
+				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1250, 'Remapped payment', 'test')",
+			)
+				.bind(account.id)
+				.run();
+			const originalId = Number(inserted.meta.last_row_id);
+			await env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+				.bind(bill.id, originalId)
+				.run();
+			const deleted = await deleteRequest(originalId, env.DB);
+			const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
+				.undo as string;
+			const replacement = await env.DB.prepare(
+				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 500, 'Replacement', 'test')",
+			)
+				.bind(account.id)
+				.run();
+			expect(Number(replacement.meta.last_row_id)).toBe(originalId);
+			await env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?, ?, ?, 'user', 'linked')",
+			)
+				.bind(bill.id, period, originalId)
+				.run();
+
+			const response = await request("/transactions/undo-cash-delete", {
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({ token, back: "/transactions" }),
+			});
+			const restoredRow = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Remapped payment'",
+			).first<{ id: number }>();
+			const payments = await env.DB.prepare(
+				"SELECT period, transaction_id FROM bill_payments WHERE bill_id=? AND status='linked' ORDER BY period",
+			)
+				.bind(bill.id)
+				.all<{ period: string; transaction_id: number }>();
+			if (restored) {
+				expect(restoredRow?.id).not.toBe(originalId);
+				expect(payments.results).toContainEqual({
+					period: linkedPeriod,
+					transaction_id: restoredRow?.id,
+				});
+				expect(
+					JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").toast
+						.message,
+				).toBe("Restored Remapped payment.");
+			} else {
+				expect(payments.results).toEqual([
+					{ period: "2026-10", transaction_id: originalId },
+				]);
+				expect(
+					JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").toast
+						.message,
+				).toBe(
+					`Restored Remapped payment. ${bill.name} payment no longer fits and was left off.`,
+				);
+			}
+		},
+	);
+
 	it("sends the remaining server deadline computed from the stored hold time", async () => {
 		const id = await cashEntry();
 		const delayedDb = new Proxy(env.DB, {

@@ -114,14 +114,31 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 	for (const row of snapshot.refunds) addLink(row, true);
 	const marker = crypto.randomUUID();
 	try {
+		// Predict the same fresh ids as the insert so payment conflicts never use snapshot ids.
 		const paymentCheck = await db
 			.prepare(
-				`SELECT json_extract(value, '$.bill_name') AS name FROM json_each(?)
-				 WHERE json_extract(value, '$.status') = 'linked' AND (
-				 EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
-				 OR EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=json_extract(value, '$.transaction_id') AND status='linked'))`,
+				`WITH source AS (
+					SELECT value, CAST(json_extract(value, '$.id') AS INTEGER) AS old_id FROM json_each(?)
+				), maximum AS (
+					SELECT MAX((SELECT COALESCE(MAX(id), 0) FROM transactions), COALESCE(MAX(old_id), 0),
+						COALESCE(MAX(CAST(json_extract(value, '$.parent_id') AS INTEGER)), 0),
+						COALESCE(MAX(CAST(json_extract(value, '$.refund_of_id') AS INTEGER)), 0)) AS base
+					FROM source
+				), targets AS (
+					SELECT old_id, maximum.base + ROW_NUMBER() OVER (ORDER BY old_id) AS new_id
+					FROM source CROSS JOIN maximum
+				)
+				SELECT json_extract(payments.value, '$.bill_name') AS name FROM json_each(?) AS payments
+				WHERE json_extract(payments.value, '$.status') = 'linked' AND (
+					EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(payments.value, '$.bill_id') AND period=json_extract(payments.value, '$.period') AND status='linked')
+					OR EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=COALESCE(
+						(SELECT new_id FROM targets WHERE old_id=CAST(json_extract(payments.value, '$.transaction_id') AS INTEGER)),
+						CAST(json_extract(payments.value, '$.transaction_id') AS INTEGER)) AND status='linked'))`,
 			)
-			.bind(JSON.stringify(snapshot.payments))
+			.bind(
+				JSON.stringify([transaction, ...snapshot.parts]),
+				JSON.stringify(snapshot.payments),
+			)
 			.all<{ name: string }>();
 		const lostLinks = paymentCheck.results.map(({ name }) => `${name} payment`);
 		const insertTransactions = `WITH source AS (
@@ -180,7 +197,9 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 								.join(",")}
 						 FROM json_each(?) AS payments WHERE (json_extract(value, '$.status') != 'linked' OR (
 						 NOT EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
-						 AND NOT EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=json_extract(value, '$.transaction_id') AND status='linked')))
+						 AND NOT EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=COALESCE(
+							(SELECT new_id FROM targets WHERE old_id=json_extract(payments.value, '$.transaction_id')),
+							json_extract(payments.value, '$.transaction_id')) AND status='linked')))
 						 AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`,
 					)
 					.bind(
