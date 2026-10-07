@@ -227,34 +227,49 @@ describe("MonthEnd budget bars", () => {
 	});
 
 	it.each([
-		[10, "$0.10"],
-		[99, "$0.99"],
-		[100, "$1"],
-		[3650, "$36.50"],
+		[2553, "$26", 1240, "+$12"],
+		[10, "$0.10", 40, "+$0.40"],
+		[99, "$0.99", 99, "+$0.99"],
+		[100, "$1", 100, "+$1"],
+		[0, "$0", 100, "+$1"],
+		[34040, "$340", 34040, "+$340"],
 	])(
-		"keeps cents in a nonzero finished amount and bar overage (%i cents)",
-		(cents, expected) => {
+		"uses whole dollars except tiny amounts for headlines and overages (%i cents)",
+		(cents, expected, overageCents, overage) => {
 			const html = renderToString(
 				<MonthEnd
 					chartId="money"
 					monthName="September"
-					amountCents={-cents}
+					amountCents={cents}
 					rows={[
 						{
 							id: 1,
 							name: "Category 1",
-							spentCents: 10000 + cents,
+							spentCents: 10000 + overageCents,
 							budgetCents: 10000,
-							leftCents: -cents,
+							leftCents: -overageCents,
 							over: true,
 						},
 					]}
 				/>,
 			);
 			expect(html).toContain(`>${expected}</p>`);
-			expect(html).toContain(`<title>+${expected}</title>`);
+			expect(html).toContain(`<title>${overage}</title>${overage}`);
+			expect(html).toContain(`aria-label="Over budget by ${overage.slice(1)}"`);
 		},
 	);
+
+	it("never shows negative zero", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="zero"
+				monthName="September"
+				amountCents={-1}
+				rows={[]}
+			/>,
+		);
+		expect(html).not.toContain("-$0");
+	});
 
 	it("keeps short category labels at their natural width", () => {
 		const html = renderToString(

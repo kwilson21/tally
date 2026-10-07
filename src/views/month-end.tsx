@@ -4,7 +4,11 @@ import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
-const keepCents = (cents: number) =>
+const wholeUnlessTiny = (cents: number) =>
+	formatCents(cents, {
+		wholeDollars: cents === 0 || Math.abs(cents) >= 100,
+	});
+const centsWhenAny = (cents: number) =>
 	formatCents(cents, {
 		wholeDollars: cents === 0 || (Math.abs(cents) >= 100 && cents % 100 === 0),
 	});
@@ -12,8 +16,11 @@ const keepCents = (cents: number) =>
 /** One signed amount and color for Home and finished-month category rows. */
 export function categoryRowAmount(cents: number) {
 	return cents < 0
-		? { text: `+${keepCents(-cents)}`, className: "text-right text-lg text-ok" }
-		: { text: keepCents(cents), className: "text-right text-lg" };
+		? {
+				text: `+${centsWhenAny(-cents)}`,
+				className: "text-right text-lg text-ok",
+			}
+		: { text: centsWhenAny(cents), className: "text-right text-lg" };
 }
 const SHORT_NAMES: Record<string, string> = {
 	Groceries: "Groc.",
@@ -172,15 +179,17 @@ function EndBars({
 								y={base - height - 6}
 								text-anchor="middle"
 								class="fill-over text-sm font-semibold"
-								aria-label={`Over budget by ${keepCents(row.spentCents - row.budgetCents)}`}
+								aria-label={`Over budget by ${wholeUnlessTiny(row.spentCents - row.budgetCents)}`}
 								{...(labelNeedsCap(
-									`+${keepCents(row.spentCents - row.budgetCents)}`,
+									`+${wholeUnlessTiny(row.spentCents - row.budgetCents)}`,
 								)
 									? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
 									: {})}
 							>
-								<title>+{keepCents(row.spentCents - row.budgetCents)}</title>+
-								{keepCents(row.spentCents - row.budgetCents)}
+								<title>
+									+{wholeUnlessTiny(row.spentCents - row.budgetCents)}
+								</title>
+								+{wholeUnlessTiny(row.spentCents - row.budgetCents)}
 							</text>
 						)}
 						<text
@@ -318,7 +327,7 @@ export function MonthEnd({
 				<p
 					class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight ${over ? "text-over" : ""}`}
 				>
-					{keepCents(Math.abs(amountCents))}
+					{wholeUnlessTiny(Math.abs(amountCents))}
 				</p>
 				<span
 					class={`inline-block -rotate-3 rounded-control border-2 px-3 py-0.5 text-xl font-extrabold tracking-widest uppercase ${over ? "border-over text-over" : "border-ok text-ok"}`}
