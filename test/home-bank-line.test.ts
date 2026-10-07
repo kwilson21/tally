@@ -5,10 +5,10 @@ import { bankSyncs } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
 
-// The stale-bank line on Home (spec §8.5, decision 72 P37 A): a connected bank that needs attention or
-// hasn't synced for 3 days is flagged under the status sentence, before the Band, with a link to Accounts.
-// Only Date is faked: the Workers runtime and D1 keep their real timers. Noon Eastern on Oct 5.
-const NOW = "2026-10-05T16:00:00Z";
+// Home's picked bank alert (decision 82, P96): a connected bank that needs attention or hasn't synced
+// for 3 days gets an as-of tag and a soft alert line with Fix before the forecast.
+// Only Date is faked: the Workers runtime and D1 keep their real timers. Noon Eastern on Oct 7.
+const NOW = "2026-10-07T16:00:00Z";
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const demo = { ...env, DEMO: "true" } as unknown as Env;
 
@@ -83,57 +83,75 @@ describe("Home's stale-bank line", () => {
 	it("is not there when every bank is healthy and synced", async () => {
 		const { html } = await page();
 		expect(html).not.toContain("Safe to spend may be too high");
-		expect(html).not.toContain("Check Accounts");
+		expect(html).not.toContain("Fix the bank in Accounts");
 	});
 
 	it("shows for a bank that needs attention, in the sign-in words", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
 		const { res, html } = await page();
 		expect(res.status).toBe(200);
-		expect(textOf(html)).toContain(
-			`${FIRST} needs you to sign in again, so Safe to spend may be too high.`,
-		);
+		expect(textOf(html)).toContain(`${FIRST} needs signing in`);
 	});
 
-	it("sits between the status sentence and the Band, with the alert icon and a link to Accounts", async () => {
+	it("shows each affected bank on its own line, oldest first, with one Fix and the oldest date", async () => {
+		await setBank(FIRST, {
+			status: "needs_attention",
+			syncedAt: "2026-10-01 06:00:00",
+		});
+		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
+		const { html } = await page();
+		expect(html).toContain(
+			"<li>Northline Card Services stopped updating Sep 20</li>",
+		);
+		expect(html).toContain("<li>First Harbor Bank needs signing in</li>");
+		expect(
+			html.indexOf("Northline Card Services stopped updating Sep 20"),
+		).toBeLessThan(html.indexOf("First Harbor Bank needs signing in"));
+		expect(html).toContain("as of Sep 20");
+		expect(html.match(/data-icon="bank"/g) ?? []).toHaveLength(1);
+		expect(
+			html.match(/Fix<span class="sr-only"> the bank in Accounts<\/span>/g),
+		).toHaveLength(1);
+	});
+
+	it("shows a soft alert after status and before the forecast, with Fix to Accounts", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
 		const { html } = await page();
 		const at = (s: string) => html.indexOf(s);
-		const line = at("needs you to sign in again");
+		const line = at(`${FIRST} needs signing in`);
 		expect(line).toBeGreaterThan(at("Everything else is on track."));
-		expect(line).toBeLessThan(at("transactions need"));
-		// The icon comes with the words, so it isn't color alone, and the words are ink, not brick.
-		const block = html.slice(at("How this works"), at("transactions need"));
-		expect(block).toContain("<svg");
-		expect(block).toContain('aria-hidden="true"');
-		expect(block).not.toContain("text-over");
+		const forecast = at('aria-label="Spending in Oct');
+		expect(line).toBeLessThan(forecast);
+		expect(forecast).toBeLessThan(at("How this works"));
+		const block = html.slice(line - 600, forecast);
+		expect(block).toContain('data-icon="bank"');
+		expect(block).toContain("bg-over/10");
 		expect(block).toMatch(
-			/<a href="\/accounts"[^>]*class="[^"]*min-h-11[^"]*"[^>]*>\s*Check Accounts\s*<\/a>/,
+			/href="\/accounts"[^>]*>Fix<span class="sr-only"> the bank in Accounts/,
 		);
 	});
 
 	it("does not flag a bank that synced 2 days ago", async () => {
-		await setBank(FIRST, { syncedAt: "2026-10-03 06:00:00" });
+		await setBank(FIRST, { syncedAt: "2026-10-05 06:00:00" });
 		const { html } = await page();
-		expect(html).not.toContain("Safe to spend may be too high");
+		expect(html).not.toContain("as of Oct 5");
 	});
 
 	it("flags a bank that last synced 3 days ago, since that day", async () => {
-		await setBank(FIRST, { syncedAt: "2026-10-02 06:00:00" });
+		await setBank(FIRST, { syncedAt: "2026-10-04 06:00:00" });
 		const { html } = await page();
-		expect(textOf(html)).toContain(
-			`${FIRST} hasn't synced since Oct 2, so Safe to spend may be too high.`,
-		);
+		expect(textOf(html)).toContain(`${FIRST} stopped updating Oct 4`);
+		expect(html).toContain("as of Oct 4");
 	});
 
 	it("counts 3 days from the household's today, not UTC's", async () => {
 		// 02:00 UTC on Oct 6 is 22:00 Eastern on Oct 5: Oct 3 is 2 days back, though 3 from UTC's Oct 6.
 		vi.setSystemTime(new Date("2026-10-06T02:00:00Z"));
 		await setBank(FIRST, { syncedAt: "2026-10-03 06:00:00" });
-		expect((await page()).html).not.toContain("Safe to spend may be too high");
+		expect((await page()).html).not.toContain("as of Oct 3");
 		vi.setSystemTime(new Date("2026-10-06T05:00:00Z"));
 		expect(textOf((await page()).html)).toContain(
-			`${FIRST} hasn't synced since Oct 3`,
+			`${FIRST} stopped updating Oct 3`,
 		);
 	});
 
@@ -143,8 +161,8 @@ describe("Home's stale-bank line", () => {
 			syncedAt: "2026-09-01 06:00:00",
 		});
 		const text = textOf((await page()).html);
-		expect(text).toContain(`${FIRST} needs you to sign in again`);
-		expect(text).not.toContain("hasn't synced since");
+		expect(text).toContain(`${FIRST} needs signing in`);
+		expect(text).not.toContain("stopped updating");
 	});
 
 	it("does not flag a disconnected bank", async () => {
@@ -154,36 +172,47 @@ describe("Home's stale-bank line", () => {
 			.bind(FIRST)
 			.run();
 		const { html } = await page();
-		expect(html).not.toContain("Safe to spend may be too high");
+		expect(html).not.toContain("Fix the bank in Accounts");
 	});
 
-	it("names the first bank and counts the rest when two are flagged", async () => {
+	it("names the oldest bank when two are stale", async () => {
+		await setBank(FIRST, { syncedAt: "2026-10-02 06:00:00" });
+		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
+		const text = textOf((await page()).html);
+		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
+		expect(text).toContain(`${FIRST} stopped updating Oct 2`);
+		expect(text).toContain("as of Sep 20");
+		expect(text.indexOf(`${SECOND} stopped updating Sep 20`)).toBeLessThan(
+			text.indexOf(`${FIRST} stopped updating Oct 2`),
+		);
+		expect(text.match(/Fix\s+the bank in Accounts/g)).toHaveLength(1);
+	});
+
+	it("names the bank that needs signing in and keeps the oldest date", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
 		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
 		const text = textOf((await page()).html);
-		expect(text).toContain(
-			`${FIRST} needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high.`,
-		);
-		expect(text).not.toContain(SECOND);
-		expect(text.match(/Check Accounts/g)).toHaveLength(1);
+		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
+		expect(text).toContain(`${FIRST} needs signing in`);
+		expect(text).toContain("as of Sep 20");
 	});
 
 	it("goes away once the bank is fixed or syncs again", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
-		expect((await page()).html).toContain("Safe to spend may be too high");
+		expect((await page()).html).toContain("needs signing in");
 		await setBank(FIRST, { status: "ok" });
-		expect((await page()).html).not.toContain("Safe to spend may be too high");
+		expect((await page()).html).not.toContain("needs signing in");
 
 		await setBank(FIRST, { syncedAt: "2026-09-20 06:00:00" });
-		expect((await page()).html).toContain("Safe to spend may be too high");
+		expect((await page()).html).toContain("stopped updating Sep 20");
 		await setBank(FIRST, { syncedAt: "2026-10-05 15:00:00" });
-		expect((await page()).html).not.toContain("Safe to spend may be too high");
+		expect((await page()).html).not.toContain("stopped updating");
 	});
 
 	it("is on a budget sheet's Home too, so it isn't hidden by opening one", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
 		const res = await home.request("/budget/1", {}, family);
-		expect(textOf(await res.text())).toContain("needs you to sign in again");
+		expect(textOf(await res.text())).toContain("needs signing in");
 	});
 
 	it("never shows in the demo, whatever its banks say", async () => {
@@ -194,7 +223,7 @@ describe("Home's stale-bank line", () => {
 		await setBank(SECOND, { syncedAt: "2026-09-01 06:00:00" });
 		const { res, html } = await page(demo);
 		expect(res.status).toBe(200);
-		expect(html).not.toContain("Safe to spend may be too high");
-		expect(html).not.toContain("Check Accounts");
+		expect(html).not.toContain("needs signing in");
+		expect(html).not.toContain("Fix the bank in Accounts");
 	});
 });
