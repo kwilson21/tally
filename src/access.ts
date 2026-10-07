@@ -179,14 +179,15 @@ export async function verifiedEmail(
 export async function verifiedAccessIdentity(
 	request: Request,
 	env: AccessEnv,
-): Promise<{ email: string; issuedAt: number } | null> {
+): Promise<{ email: string; issuedAt: number | null } | null> {
 	const email = await verifiedEmail(request, env);
 	if (!email) return null;
 	const token = request.headers.get("Cf-Access-Jwt-Assertion");
 	if (!token) return null;
 	const claims = json<Claims>(token.split(".")[1] ?? "");
-	const issuedAt = typeof claims.iat === "number" ? claims.iat : claims.exp;
-	if (typeof issuedAt !== "number" || !Number.isFinite(issuedAt))
-		return refuse("the token has no valid session time");
+	const issuedAt =
+		typeof claims.iat === "number" && Number.isFinite(claims.iat)
+			? claims.iat
+			: null;
 	return { email, issuedAt };
 }

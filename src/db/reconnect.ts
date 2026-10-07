@@ -22,13 +22,13 @@ export async function saveBankSignInEmails(
 export async function noteHouseholdMember(
 	db: D1Database,
 	email: string,
-	issuedAt: number,
+	issuedAt: number | null,
 ) {
 	await db
 		.prepare(
-			"INSERT INTO household_members (email, session_issued_at) VALUES (?, ?) ON CONFLICT(email) DO UPDATE SET last_seen_at = datetime('now'), session_issued_at = excluded.session_issued_at, removed_at = NULL WHERE household_members.session_issued_at < excluded.session_issued_at",
+			"INSERT INTO household_members (email, session_issued_at) VALUES (?, COALESCE(?, 0)) ON CONFLICT(email) DO UPDATE SET last_seen_at = datetime('now'), session_issued_at = excluded.session_issued_at, removed_at = NULL WHERE ? IS NOT NULL AND household_members.session_issued_at < excluded.session_issued_at",
 		)
-		.bind(email, issuedAt)
+		.bind(email, issuedAt, issuedAt)
 		.run();
 }
 
