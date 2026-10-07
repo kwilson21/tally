@@ -407,6 +407,24 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("catalogs transaction detail rows and the household people list before app use (P89 A)", async () => {
+		const { html } = await get("/design-system");
+		const detail =
+			html.split('id="detail-row"')[1]?.split("</section>")[0] ?? "";
+		const people = html.split('id="household-people"')[1] ?? "";
+		expect(detail).toContain('data-ds-components="DetailRow"');
+		expect(detail).toContain("What it was");
+		expect(detail).toContain("Tally&#39;s guess");
+		expect(detail).toContain("decoration-dashed");
+		expect(people).toContain('data-ds-components="HouseholdPeople"');
+		expect(html).toContain("Add a person");
+		expect(html).toContain("Everyone");
+		expect(design).toMatch(
+			/\| DetailRow \|[^\n]*Name, What it was, Kind and For/,
+		);
+		expect(design).toMatch(/\| HouseholdPeople \|[^\n]*Everyone/);
+	});
+
 	it("shows ViewLinks with each view current, as the demo's Transactions draws it, with its whole use spec (P44 A)", async () => {
 		const { html } = await get("/design-system");
 		const tag = specimens(html).find((t) => t.includes('id="view-links"'));

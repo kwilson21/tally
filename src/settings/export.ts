@@ -14,12 +14,13 @@ const EXPORT_COLUMNS = {
 		(SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank_disconnected`,
 	balance_history: "account_id, date, balance_cents",
 	transactions:
-		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, income_confidence, transfer_confidence, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending, jev_none_fit, category_suggestion_id",
+		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, income_confidence, transfer_confidence, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending, jev_none_fit, category_suggestion_id, kind, for_person_id, details_asked, note_guessed, note_tried_at, note_dismissed, kind_guessed, for_person_guessed",
 	bills:
 		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, merchant_raw_text, active",
 	bill_payments:
 		"id, bill_id, period, transaction_id, matched_by, status, created_at",
 	household_settings: "key, value",
+	household_people: "id, name",
 } as const;
 
 /** A dollar value for a spreadsheet, calculated without turning stored money into a float. */
@@ -48,6 +49,8 @@ type CsvRow = {
 	amount_cents: number;
 	category: string | null;
 	excluded: number;
+	kind: string | null;
+	for_person: string;
 	note: string | null;
 	account: string;
 };
@@ -56,10 +59,13 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.date, t.raw_name, ${merchantColumnSql("t", "display_name")} AS display_name, t.amount_cents,
-				c.name AS category, t.excluded, t.note, a.name AS account
+				c.name AS category, t.excluded,
+				CASE t.kind WHEN 'subscription' THEN 'Subscription' WHEN 'one_off' THEN 'One-off' WHEN 'bill' THEN 'Bill' WHEN 'transfer' THEN 'Transfer' END AS kind,
+				COALESCE(hp.name, 'no one') AS for_person, t.note, a.name AS account
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN categories c ON c.id = t.category_id
+			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			WHERE t.is_split = 0
 			ORDER BY t.date DESC, t.id DESC`,
 		)
@@ -72,6 +78,8 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 			"amount (USD; positive = money out)",
 			"category",
 			"excluded",
+			"kind",
+			"for",
 			"note",
 			"account",
 		],
@@ -82,6 +90,8 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 			exportDollars(row.amount_cents),
 			csvText(row.category),
 			row.excluded === 1,
+			csvText(row.kind),
+			csvText(row.for_person),
 			csvText(row.note),
 			csvText(row.account),
 		]),

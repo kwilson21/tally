@@ -60,8 +60,19 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.category_source = 'user' AND p.category_id IS NOT NULL
 	 AND COALESCE(transactions.category_source, '') != 'user'`,
 	// Note: a note the posted row already has is kept.
-	`UPDATE transactions SET note = p.note
+	`UPDATE transactions SET note = p.note, note_guessed = p.note_guessed
 	 ${FROM_PENDING} AND COALESCE(p.note, '') != '' AND COALESCE(transactions.note, '') = ''`,
+	// Kept details beat guesses; a posted person's answer always wins.
+	`UPDATE transactions SET
+		kind = CASE WHEN transactions.kind IS NULL OR (transactions.kind_guessed = 1 AND p.kind_guessed = 0) THEN p.kind ELSE transactions.kind END,
+		kind_guessed = CASE WHEN transactions.kind IS NULL OR (transactions.kind_guessed = 1 AND p.kind_guessed = 0) THEN p.kind_guessed ELSE transactions.kind_guessed END,
+		for_person_id = CASE WHEN transactions.for_person_id IS NULL OR (transactions.for_person_guessed = 1 AND p.for_person_guessed = 0) THEN p.for_person_id ELSE transactions.for_person_id END,
+		for_person_guessed = CASE WHEN transactions.for_person_id IS NULL OR (transactions.for_person_guessed = 1 AND p.for_person_guessed = 0) THEN p.for_person_guessed ELSE transactions.for_person_guessed END,
+		details_asked = MAX(transactions.details_asked, p.details_asked),
+		note_guessed = CASE WHEN COALESCE(transactions.note, '') = '' AND COALESCE(p.note, '') != '' THEN p.note_guessed ELSE transactions.note_guessed END,
+		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
+		note_dismissed = MAX(transactions.note_dismissed, p.note_dismissed)
+	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.note_tried_at IS NOT NULL OR p.note_dismissed = 1)`,
 	// Exclusion, with the flags it came with.
 	`UPDATE transactions SET excluded = p.excluded, excluded_source = 'user',
 		flag_transfer = p.flag_transfer, flag_reimbursement = p.flag_reimbursement

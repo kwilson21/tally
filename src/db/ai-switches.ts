@@ -5,6 +5,8 @@
 export type AiSwitches = {
 	/** Workers AI suggests merchant names. */
 	names: boolean;
+	/** Jev fills empty transaction details; Workers AI writes the note. */
+	details: boolean;
 	/** Jev's category answer, and its transfer and reimbursement flags that exclude. */
 	categories: boolean;
 	/** Jev's income answer. */
@@ -15,6 +17,7 @@ export type AiSwitches = {
 
 export const AI_SWITCHES_ALL_ON: AiSwitches = {
 	names: true,
+	details: true,
 	categories: true,
 	income: true,
 	sortOnArrival: true,
@@ -22,6 +25,7 @@ export const AI_SWITCHES_ALL_ON: AiSwitches = {
 
 const KEYS: Record<keyof AiSwitches, string> = {
 	names: "ai_names",
+	details: "ai_details",
 	categories: "ai_categories",
 	income: "ai_income",
 	sortOnArrival: "ai_sort_on_arrival",
@@ -31,7 +35,8 @@ const KEYS: Record<keyof AiSwitches, string> = {
  * Jev answers category, flags and income together, so it's asked only while one of the two switches
  * that use its answer is on; with both off it isn't asked at all (spec §8.6).
  */
-export const asksJev = (s: AiSwitches): boolean => s.categories || s.income;
+export const asksJev = (s: AiSwitches): boolean =>
+	s.categories || s.income || s.details;
 
 /**
  * Reads the switches. Only a stored "off" turns one off. A database error is thrown, never guessed
@@ -40,15 +45,22 @@ export const asksJev = (s: AiSwitches): boolean => s.categories || s.income;
 export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
 	const { results } = await db
 		.prepare(
-			"SELECT key, value FROM household_settings WHERE key IN (?, ?, ?, ?)",
+			"SELECT key, value FROM household_settings WHERE key IN (?, ?, ?, ?, ?)",
 		)
-		.bind(KEYS.names, KEYS.categories, KEYS.income, KEYS.sortOnArrival)
+		.bind(
+			KEYS.names,
+			KEYS.details,
+			KEYS.categories,
+			KEYS.income,
+			KEYS.sortOnArrival,
+		)
 		.all<{ key: string; value: string }>();
 	const off = new Set(
 		results.filter((row) => row.value === "off").map((row) => row.key),
 	);
 	return {
 		names: !off.has(KEYS.names),
+		details: !off.has(KEYS.details),
 		categories: !off.has(KEYS.categories),
 		income: !off.has(KEYS.income),
 		sortOnArrival: !off.has(KEYS.sortOnArrival),

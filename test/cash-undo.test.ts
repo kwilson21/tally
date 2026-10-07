@@ -873,14 +873,14 @@ describe("cash delete undo", () => {
 		const deleted = await deleteRequest(id, counted.db);
 		expect(deleted.status).toBe(200);
 		expect(counted.statements()).toBeLessThanOrEqual(20);
-		expect(counted.statements()).toBe(15);
+		expect(counted.statements()).toBe(16);
 
 		const small = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT id,'2026-10-06',100,'Small delete' FROM accounts WHERE type='cash' LIMIT 1",
 		).run();
 		const smallCount = countingDb();
 		await deleteRequest(Number(small.meta.last_row_id), smallCount.db);
-		expect(smallCount.statements()).toBe(15);
+		expect(smallCount.statements()).toBe(16);
 		expect(
 			Math.abs(smallCount.statements() - counted.statements()),
 		).toBeLessThanOrEqual(3);

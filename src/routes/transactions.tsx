@@ -51,14 +51,17 @@ import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
+import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
+import { DetailRow } from "../views/detail-row";
 import { EmptyState } from "../views/empty-state";
 import { FilterSelect } from "../views/filter-select";
 import { FormField } from "../views/form-field";
+import type { HouseholdPerson } from "../views/household-people";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
@@ -188,6 +191,13 @@ async function renderList(
 			).all<Category>(),
 			accountChoices(c.env.DB),
 		]);
+	const peoplePrompt = filters.raw
+		? false
+		: await c.env.DB.prepare(
+				"SELECT EXISTS(SELECT 1 FROM transactions WHERE for_person_guessed = 1) AS guessed, (SELECT COUNT(*) FROM household_people) AS people",
+			)
+				.first<{ guessed: number; people: number }>()
+				.then((result) => result?.guessed === 1 && result.people === 1);
 
 	// Only an empty list asks whether it is the first visit's (one cheap statement).
 	const firstVisit = rows.length === 0 ? await firstVisitFor(c) : null;
@@ -354,6 +364,14 @@ async function renderList(
 					</Button>
 				)}
 			</div>
+			{firstVisit === null && peoplePrompt && (
+				<Band
+					href="/settings#household"
+					detail="Add names Tally can suggest for who a purchase was for."
+				>
+					Add the people in your household
+				</Band>
+			)}
 			{/* The demo's "See it without AI" (spec §8.6): plain links to the other view of this list, keeping the
 			    filters but starting at the first page. Swapped out of band on filter and page changes, so they never
 			    name a stale filter. */}
@@ -1021,6 +1039,7 @@ type SheetProps = {
 	tx: TransactionDetail;
 	back: string;
 	categories: Category[];
+	people: HouseholdPerson[];
 	values: Edit;
 	errors?: EditErrors;
 	deleteConfirm?: boolean;
@@ -1054,6 +1073,7 @@ function EditSheet({
 	tx,
 	back,
 	categories,
+	people,
 	values,
 	errors = {},
 	deleteConfirm = false,
@@ -1176,7 +1196,7 @@ function EditSheet({
 			<form
 				method="post"
 				action={`/transactions/${tx.id}`}
-				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
+				class="mt-4 flex flex-col gap-3 border-t border-rule pt-4"
 				hx-post={`/transactions/${tx.id}`}
 				hx-disable="findAll button[type=submit]"
 				hx-indicator="#edit-save"
@@ -1187,6 +1207,31 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				<input
+					type="hidden"
+					name="details_visible"
+					value={tx.detailsVisible ? "1" : "0"}
+				/>
+				<input
+					type="hidden"
+					name="note_was"
+					value={values.noteWas ?? values.note ?? ""}
+				/>
+				<input
+					type="hidden"
+					name="kind_was"
+					value={values.kindWas ?? values.kind ?? ""}
+				/>
+				<input
+					type="hidden"
+					name="for_person_id_was"
+					value={values.forPersonIdWas ?? values.forPersonId ?? ""}
+				/>
+				<input
+					type="hidden"
+					name="displayed_name_guess"
+					value={tx.nameSuggested ? tx.displayName : ""}
+				/>
 				<input
 					type="hidden"
 					name="income_was"
@@ -1217,19 +1262,207 @@ function EditSheet({
 					name="merchant_was"
 					value={nameWas ?? tx.merchantName ?? ""}
 				/>
-				{/* A merchant with suggested names waiting (P29 A): choose one, keep the bank's, or type your own.
-				    Nothing is chosen to start with, so saving for another reason never renames the merchant. */}
-				{tx.nameChoices && (
-					<NameChoices
-						id="name"
-						names={tx.nameChoices.names}
-						source={tx.nameChoices.source}
-						tidied={tx.nameChoices.tidied}
-						count={tx.nameChoices.count}
-						picked={namePick}
-						own={values.displayName ?? ""}
-						error={errors.merchant}
-					/>
+				<div class="border-t border-rule">
+					<DetailRow
+						id="detail-name"
+						label="Name"
+						value={tx.displayName}
+						source={
+							tx.nameFromBank ? "bank" : tx.nameSuggested ? "guess" : "person"
+						}
+						guessed={tx.nameSuggested || tx.nameFromBank}
+						open={Boolean(
+							errors.merchant ||
+								namePick ||
+								values.displayName !== tx.merchantName,
+						)}
+					>
+						{tx.nameChoices ? (
+							<NameChoices
+								id="name"
+								names={tx.nameChoices.names}
+								source={tx.nameChoices.source}
+								tidied={tx.nameChoices.tidied}
+								count={tx.nameChoices.count}
+								picked={namePick}
+								own={values.displayName ?? ""}
+								error={errors.merchant}
+							/>
+						) : (
+							<TextInput
+								id="merchant"
+								label="Name"
+								name="merchant"
+								value={values.displayName ?? ""}
+								placeholder={tx.rawName}
+								autocomplete="off"
+								surface="paper"
+								hint="Renames every transaction from this merchant."
+								error={errors.merchant}
+							/>
+						)}
+					</DetailRow>
+					<DetailRow
+						id="detail-note"
+						label="What it was"
+						value={values.note}
+						source={tx.noteGuessed ? "guess" : "person"}
+						guessed={tx.noteGuessed}
+						open={Boolean(errors.note)}
+					>
+						<FormField id="note" label="What it was" error={errors.note}>
+							{({ class: errorClass, ...a11y }) => (
+								<>
+									<input
+										type="hidden"
+										name="note_was"
+										value={values.noteWas ?? values.note ?? ""}
+									/>
+									<textarea
+										id="note"
+										name="note"
+										rows={2}
+										class={`w-full rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
+										{...a11y}
+									>
+										{values.note ?? ""}
+									</textarea>
+								</>
+							)}
+						</FormField>
+					</DetailRow>
+					<DetailRow
+						id="detail-kind"
+						label="Kind"
+						value={
+							values.kind
+								? (
+										{
+											subscription: "Subscription",
+											one_off: "One-off",
+											bill: "Bill",
+											transfer: "Transfer",
+										} as const
+									)[values.kind]
+								: null
+						}
+						source={tx.kindGuessed ? "guess" : "person"}
+						guessed={tx.kindGuessed}
+						open={Boolean(errors.kind)}
+					>
+						<fieldset
+							class="flex flex-wrap gap-2"
+							aria-describedby={errors.kind ? "kind-error" : undefined}
+						>
+							<legend class="sr-only">Kind</legend>
+							<input
+								type="hidden"
+								name="kind_was"
+								value={values.kindWas ?? values.kind ?? ""}
+							/>
+							{(["subscription", "one_off", "bill", "transfer"] as const).map(
+								(kind) => (
+									<Chip
+										type="radio"
+										name="kind"
+										value={kind}
+										checked={values.kind === kind}
+									>
+										{kind === "one_off"
+											? "One-off"
+											: kind[0]?.toUpperCase() + kind.slice(1)}
+									</Chip>
+								),
+							)}
+							<Chip
+								type="radio"
+								name="kind"
+								value=""
+								checked={values.kind === null}
+							>
+								Not known
+							</Chip>
+						</fieldset>
+						{errors.kind && (
+							<p id="kind-error" role="alert" class="text-sm text-over">
+								{errors.kind}
+							</p>
+						)}
+					</DetailRow>
+					<DetailRow
+						id="detail-for"
+						label="For"
+						value={
+							values.forPersonId == null
+								? people.length < 2
+									? "Add the people in your household"
+									: null
+								: (people.find((person) => person.id === values.forPersonId)
+										?.name ?? null)
+						}
+						source={tx.forPersonGuessed ? "guess" : "person"}
+						guessed={tx.forPersonGuessed}
+						open={Boolean(errors.forPerson)}
+					>
+						<fieldset
+							class="flex flex-wrap gap-2"
+							aria-describedby={
+								errors.forPerson ? "for-person-error" : undefined
+							}
+						>
+							<legend class="sr-only">For</legend>
+							<input
+								type="hidden"
+								name="for_person_id_was"
+								value={values.forPersonIdWas ?? values.forPersonId ?? ""}
+							/>
+							{people.map((person) => (
+								<Chip
+									type="radio"
+									name="for_person_id"
+									value={String(person.id)}
+									checked={values.forPersonId === person.id}
+								>
+									{person.name}
+								</Chip>
+							))}
+							<Chip
+								type="radio"
+								name="for_person_id"
+								value=""
+								checked={values.forPersonId === null}
+							>
+								No one
+							</Chip>
+						</fieldset>
+						{people.length < 2 && (
+							<p class="text-sm text-muted">
+								Add the people in your household.
+							</p>
+						)}
+						{errors.forPerson && (
+							<p id="for-person-error" role="alert" class="text-sm text-over">
+								{errors.forPerson}
+							</p>
+						)}
+					</DetailRow>
+				</div>
+				{!deleteConfirm && (
+					<div class="flex flex-col items-start">
+						<Button
+							name="details_action"
+							value="keep"
+							type="submit"
+							kind="secondary"
+						>
+							Looks right
+							<span class="sr-only">, keep these details</span>
+						</Button>
+						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+							Tally uses these when it picks a category.
+							<WhyLink section="categorization" topic="Tally's guess" />
+						</p>
+					</div>
 				)}
 				<fieldset
 					class="flex flex-col gap-2"
@@ -1452,54 +1685,6 @@ function EditSheet({
 						</Chip>
 					</div>
 				)}
-				{/* Renaming and notes are rarer, so they wait behind one tap. It opens when there's something to
-				    see: a note, a typed name that isn't saved yet (after a failed save), or an error. */}
-				<details
-					class="group border-t border-rule"
-					open={Boolean(
-						values.note ||
-							(!tx.nameChoices &&
-								((values.displayName || null) !== tx.merchantName ||
-									errors.merchant)) ||
-							errors.note,
-					)}
-				>
-					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-						<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
-							<Icon name="chevron-right" class="size-5" />
-						</span>
-						{tx.nameChoices ? "Add a note" : "Rename or add a note"}
-					</summary>
-					<div class="flex flex-col gap-4 pt-2">
-						{/* With names to choose from, the field is "Or your own" up with them. */}
-						{!tx.nameChoices && (
-							<TextInput
-								id="merchant"
-								label="Merchant name"
-								name="merchant"
-								value={values.displayName ?? ""}
-								placeholder={tx.rawName}
-								autocomplete="off"
-								surface="paper"
-								hint="Renames every transaction from this merchant."
-								error={errors.merchant}
-							/>
-						)}
-						<FormField id="note" label="Note" error={errors.note}>
-							{({ class: errorClass, ...a11y }) => (
-								<textarea
-									id="note"
-									name="note"
-									rows={2}
-									class={`rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
-									{...a11y}
-								>
-									{values.note ?? ""}
-								</textarea>
-							)}
-						</FormField>
-					</div>
-				</details>
 				{/* Asking about a delete takes this row's place (below, in the delete form), so the sheet never
 				    has two ways to leave it side by side (decision 84). */}
 				{!deleteConfirm && (
@@ -1742,7 +1927,14 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		creditReviewed: tx.creditReviewedByUser,
 		creditReviewedWas: tx.creditReviewedByUser,
 		refundOfId: tx.refundOfId ?? null,
+		kind: tx.kind,
+		forPersonId: tx.forPersonId,
 	};
+	const people = (
+		await c.env.DB.prepare(
+			"SELECT id, name FROM household_people ORDER BY id",
+		).all<HouseholdPerson>()
+	).results;
 	const refunds = await refundPurchases(c.env.DB, tx);
 	return renderList(c, today, filters, {
 		sheet: (categories, today) => (
@@ -1750,6 +1942,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				tx={tx}
 				back={back}
 				categories={categories}
+				people={people}
 				values={values}
 				refunds={refunds}
 				today={today}
@@ -1981,12 +2174,18 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
+	const keptDetails = form.get("details_action") === "keep";
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
 	).all<{ id: number; name: string }>();
+	const people = (
+		await c.env.DB.prepare(
+			"SELECT id, name FROM household_people ORDER BY id",
+		).all<HouseholdPerson>()
+	).results;
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
 	const refunds = await refundPurchases(c.env.DB, tx);
@@ -2012,9 +2211,14 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			? tx.nameChoices !== null && tx.nameChoices !== undefined
 			: offered.some((name) => pickValue(name) === pick);
 	if (pick && !stillOffered) form.delete("name_pick");
+	if (keptDetails && !form.has("merchant") && !form.has("name_pick")) {
+		const displayedGuess = form.get("displayed_name_guess")?.toString() ?? "";
+		if (displayedGuess) form.set("name_pick", pickValue(displayedGuess));
+	}
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),
+		people.map((person) => person.id),
 	);
 
 	// The panel again, as the person left it, with what's wrong (422).
@@ -2026,6 +2230,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			merchantRuleWas: Number(form.get("rule_category_was")) || null,
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
+			noteWas: form.get("note_was")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
 			income: form.get("income") === "1",
 			incomeWas: form.get("income_was") === "1",
@@ -2034,6 +2239,14 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			creditReviewedProvided:
 				form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
 			refundOfId,
+			kind: form.has("kind")
+				? (form.get("kind")?.toString() as Edit["kind"])
+				: tx.kind,
+			kindWas: form.get("kind_was")?.toString() as Edit["kindWas"],
+			forPersonId: form.has("for_person_id")
+				? Number(form.get("for_person_id")) || null
+				: tx.forPersonId,
+			forPersonIdWas: Number(form.get("for_person_id_was")) || null,
 		};
 		return renderList(c, today, filters, {
 			status: 422,
@@ -2042,6 +2255,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					tx={tx}
 					back={back}
 					categories={all}
+					people={people}
 					values={values}
 					refunds={refunds}
 					errors={errors}
@@ -2082,8 +2296,12 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		parsed.value.displayName !== null &&
 		parsed.value.displayName !== tx.merchantName;
 	const addedNote = parsed.value.note !== null && parsed.value.note !== tx.note;
+	const changedDetails =
+		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
+		(parsed.value.forPersonId !== undefined &&
+			parsed.value.forPersonId !== tx.forPersonId);
 	if (
-		(addedName || addedNote) &&
+		(addedName || addedNote || changedDetails) &&
 		tx.categoryId === null &&
 		parsed.value.categoryId === null
 	)
@@ -2119,8 +2337,12 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
-			toast: { message: `Saved ${name}`, type: "success" },
-			announce: saved + exclusion,
+			toast: {
+				message: keptDetails ? `Kept details for ${name}` : `Saved ${name}`,
+				type: "success",
+			},
+			announce:
+				(keptDetails ? `Kept the details for ${name}.` : saved) + exclusion,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -2134,6 +2356,11 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 	if (form.get("confirm") !== "1") {
+		const people = (
+			await c.env.DB.prepare(
+				"SELECT id, name FROM household_people ORDER BY id",
+			).all<HouseholdPerson>()
+		).results;
 		const values: Edit = {
 			categoryId: tx.categoryId,
 			income: tx.income,
@@ -2146,6 +2373,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			note: tx.note,
 			excluded: tx.excluded,
 			refundOfId: tx.refundOfId ?? null,
+			kind: tx.kind,
+			forPersonId: tx.forPersonId,
 		};
 		const refunds = await refundPurchases(c.env.DB, tx);
 		return renderList(c, today, filtersFrom(c, today, back), {
@@ -2154,6 +2383,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 					tx={tx}
 					back={back}
 					categories={categories}
+					people={people}
 					values={values}
 					refunds={refunds}
 					deleteConfirm
