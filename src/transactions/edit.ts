@@ -23,6 +23,7 @@ export type Edit = {
 	 */
 	keepBankName?: boolean;
 	note: string | null;
+	noteWas?: string | null;
 	noteProvided?: boolean;
 	detailsFieldChanged?: boolean;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
@@ -37,7 +38,9 @@ export type Edit = {
 	/** False when the edit form omitted the credit-review control for an income credit. */
 	creditReviewedProvided?: boolean;
 	kind?: "subscription" | "one_off" | "bill" | "transfer" | null;
+	kindWas?: "subscription" | "one_off" | "bill" | "transfer" | null;
 	forPersonId?: number | null;
+	forPersonIdWas?: number | null;
 	keepDetails?: boolean;
 	/** False when the panel hid guesses because the details switch was off. */
 	detailsVisible?: boolean;

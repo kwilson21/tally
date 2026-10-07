@@ -692,6 +692,75 @@ describe("POST /transactions/:id", () => {
 		creditReviewed: "0",
 	};
 
+	it.each([
+		{ field: "note", submitted: "New note" },
+		{ field: "kind", submitted: "one_off" },
+		{ field: "for_person_id", submitted: "person B" },
+	])(
+		"keeps a hidden guessed $field edit across a validation retry",
+		async ({ field, submitted }) => {
+			const personA = await env.DB.prepare(
+				"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
+			).first<{ id: number }>();
+			const personB = await env.DB.prepare(
+				"INSERT INTO household_people(name) VALUES ('Person B') RETURNING id",
+			).first<{ id: number }>();
+			const personAId = String(personA?.id);
+			const personBId = String(personB?.id);
+			await env.DB.prepare(
+				"UPDATE transactions SET note='Old guess', note_guessed=1, kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
+			)
+				.bind(personA?.id, bakery)
+				.run();
+			const fields = {
+				...save,
+				category: "invalid",
+				details_visible: "0",
+				note: field === "note" ? submitted : "Old guess",
+				note_was: "Old guess",
+				kind: field === "kind" ? submitted : "bill",
+				kind_was: "bill",
+				for_person_id: field === "for_person_id" ? personBId : personAId,
+				for_person_id_was: personAId,
+			};
+			const error = await post(`/transactions/${bakery}`, fields);
+			expect(error.res.status).toBe(422);
+			for (const [name, value] of [
+				["note_was", "Old guess"],
+				["kind_was", "bill"],
+				["for_person_id_was", personAId],
+			])
+				expect(
+					error.html.match(new RegExp(`name="${name}" value="${value}"`, "g")),
+				).toHaveLength(2);
+			expect(error.html).toContain('name="details_visible" value="0"');
+			if (field === "note")
+				expect(error.html).toContain(">New note</textarea>");
+			if (field === "kind")
+				expect(error.html).toMatch(/name="kind" value="one_off" checked/);
+			if (field === "for_person_id")
+				expect(error.html).toContain(
+					`name="for_person_id" value="${personBId}" checked`,
+				);
+
+			await post(`/transactions/${bakery}`, { ...fields, category: "2" });
+			const saved = await env.DB.prepare(
+				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first<Record<string, unknown>>();
+			if (field === "note")
+				expect(saved).toMatchObject({ note: "New note", note_guessed: 0 });
+			if (field === "kind")
+				expect(saved).toMatchObject({ kind: "one_off", kind_guessed: 0 });
+			if (field === "for_person_id")
+				expect(saved).toMatchObject({
+					for_person_id: personB?.id,
+					for_person_guessed: 0,
+				});
+		},
+	);
+
 	it("keeps hidden guesses on empty posts and saves explicit replacements as kept", async () => {
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",

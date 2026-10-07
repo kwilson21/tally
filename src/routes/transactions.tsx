@@ -1212,12 +1212,20 @@ function EditSheet({
 					name="details_visible"
 					value={tx.detailsVisible ? "1" : "0"}
 				/>
-				<input type="hidden" name="note_was" value={values.note ?? ""} />
-				<input type="hidden" name="kind_was" value={values.kind ?? ""} />
+				<input
+					type="hidden"
+					name="note_was"
+					value={values.noteWas ?? values.note ?? ""}
+				/>
+				<input
+					type="hidden"
+					name="kind_was"
+					value={values.kindWas ?? values.kind ?? ""}
+				/>
 				<input
 					type="hidden"
 					name="for_person_id_was"
-					value={values.forPersonId ?? ""}
+					value={values.forPersonIdWas ?? values.forPersonId ?? ""}
 				/>
 				<input
 					type="hidden"
@@ -1308,7 +1316,7 @@ function EditSheet({
 									<input
 										type="hidden"
 										name="note_was"
-										value={values.note ?? ""}
+										value={values.noteWas ?? values.note ?? ""}
 									/>
 									<textarea
 										id="note"
@@ -1347,7 +1355,11 @@ function EditSheet({
 							aria-describedby={errors.kind ? "kind-error" : undefined}
 						>
 							<legend class="sr-only">Kind</legend>
-							<input type="hidden" name="kind_was" value={values.kind ?? ""} />
+							<input
+								type="hidden"
+								name="kind_was"
+								value={values.kindWas ?? values.kind ?? ""}
+							/>
 							{(["subscription", "one_off", "bill", "transfer"] as const).map(
 								(kind) => (
 									<Chip
@@ -1402,7 +1414,7 @@ function EditSheet({
 							<input
 								type="hidden"
 								name="for_person_id_was"
-								value={values.forPersonId ?? ""}
+								value={values.forPersonIdWas ?? values.forPersonId ?? ""}
 							/>
 							{people.map((person) => (
 								<Chip
@@ -2218,6 +2230,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			merchantRuleWas: Number(form.get("rule_category_was")) || null,
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
+			noteWas: form.get("note_was")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
 			income: form.get("income") === "1",
 			incomeWas: form.get("income_was") === "1",
@@ -2229,9 +2242,11 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			kind: form.has("kind")
 				? (form.get("kind")?.toString() as Edit["kind"])
 				: tx.kind,
+			kindWas: form.get("kind_was")?.toString() as Edit["kindWas"],
 			forPersonId: form.has("for_person_id")
 				? Number(form.get("for_person_id")) || null
 				: tx.forPersonId,
+			forPersonIdWas: Number(form.get("for_person_id_was")) || null,
 		};
 		return renderList(c, today, filters, {
 			status: 422,
