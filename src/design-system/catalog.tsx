@@ -769,7 +769,7 @@ function Rows() {
 				]}
 				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate."
 			>
-				<div class="flex flex-wrap gap-3">
+				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
 					<MaybeCategory name="Pet Care" kind="new" />
 					<MaybeIncome />
@@ -789,8 +789,10 @@ function Rows() {
 						<Chip type="checkbox" name="income" value="1" dashed>
 							Count as income
 						</Chip>
-						<p class="text-sm text-muted">Tally's guess · 71% sure</p>
-						<WhyLink section="categorization" topic="income" />
+						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+							Tally's guess · 71% sure
+							<WhyLink section="categorization" topic="income" />
+						</p>
 					</div>
 				</div>
 			</Specimen>

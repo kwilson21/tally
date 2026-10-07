@@ -242,6 +242,9 @@ describe("GET /transactions/:id", () => {
 		expect(spending).not.toContain(`data-transaction="${id}"`);
 		const { html: panel } = await get(`/transactions/${id}`);
 		const sheet = panel.slice(panel.indexOf('role="dialog"'));
+		expect(sheet).toMatch(
+			/<fieldset class="flex flex-col gap-2"[^>]*><legend class="text-base text-ink">Category<\/legend><div class="flex flex-wrap items-start gap-2">/,
+		);
 		expect(sheet).toContain("Count as income");
 		expect(sheet).toContain("border-dashed");
 		expect(sheet).toContain("Tally&#39;s guess · 71% sure");

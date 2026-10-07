@@ -1210,7 +1210,7 @@ function EditSheet({
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
 					<legend class="text-base text-ink">Category</legend>
-					<div class="flex flex-wrap gap-2">
+					<div class="flex flex-wrap items-start gap-2">
 						{!purchase &&
 							tx.categorySource !== "jev" &&
 							tx.maybeCategoryName &&
