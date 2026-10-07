@@ -15,10 +15,11 @@ type Props = {
 	safeToSpendCents: number;
 	/** The status sentence: "Eating Out is $36 over. Everything else is on track." */
 	status: string;
-	/** A connected bank that stopped syncing, in words (src/stale-bank.ts); drawn between the status sentence and the Band (decision 72, P37 A). */
-	bankLine?: string;
+	/** Each connected bank that needs attention, in words (src/stale-bank.ts). */
+	bankLine?: string[];
 	/** The short date printed in the as-of tag. */
 	bankDate?: string;
+	dailyAmount?: string;
 	forecast?: Child;
 	/** Finished months are read-only and never show current-month alerts or projections. */
 	currentMonth?: boolean;
@@ -34,6 +35,7 @@ export function HomeTop({
 	bankLine,
 	band,
 	bankDate,
+	dailyAmount,
 	forecast,
 	currentMonth = true,
 }: Props) {
@@ -69,6 +71,9 @@ export function HomeTop({
 					: status}
 			</p>
 			{currentMonth && bankLine && <BankBehind words={bankLine} />}
+			{currentMonth && dailyAmount && (
+				<p class="mt-1 text-muted">{dailyAmount}</p>
+			)}
 			{currentMonth && forecast}
 			<HowLink section="budget" />
 			{band && (

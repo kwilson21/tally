@@ -19,6 +19,7 @@ import {
 	monthCounts,
 } from "../db/transactions";
 import { loadTrends } from "../db/trends";
+import { FORECAST_START_DAY } from "../home-forecast";
 import {
 	budgetExample,
 	categorizationExample,
@@ -257,6 +258,12 @@ howItWorks.get("/how-it-works", async (c) => {
 							Safe to spend is the whole month's budget, minus all counted
 							spending (including uncategorized and unbudgeted), minus bills
 							that are due or overdue and not yet paid.
+						</li>
+						<li>
+							Before day {FORECAST_START_DAY}, Home shows the daily amount: Safe
+							to spend divided by the days left, today included, with any
+							partial cent left out. From day {FORECAST_START_DAY}, it shows the
+							month-end forecast.
 						</li>
 					</ul>
 					{!demo && summary.categories.length === 0 && (

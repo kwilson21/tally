@@ -7,8 +7,8 @@ import { home } from "../src/routes/home";
 
 // Home's picked bank alert (decision 82, P96): a connected bank that needs attention or hasn't synced
 // for 3 days gets an as-of tag and a soft alert line with Fix before the forecast.
-// Only Date is faked: the Workers runtime and D1 keep their real timers. Noon Eastern on Oct 5.
-const NOW = "2026-10-05T16:00:00Z";
+// Only Date is faked: the Workers runtime and D1 keep their real timers. Noon Eastern on Oct 7.
+const NOW = "2026-10-07T16:00:00Z";
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const demo = { ...env, DEMO: "true" } as unknown as Env;
 
@@ -93,6 +93,27 @@ describe("Home's stale-bank line", () => {
 		expect(textOf(html)).toContain(`${FIRST} needs signing in`);
 	});
 
+	it("shows each affected bank on its own line, oldest first, with one Fix and the oldest date", async () => {
+		await setBank(FIRST, {
+			status: "needs_attention",
+			syncedAt: "2026-10-01 06:00:00",
+		});
+		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
+		const { html } = await page();
+		expect(html).toContain(
+			"<li>Northline Card Services stopped updating Sep 20</li>",
+		);
+		expect(html).toContain("<li>First Harbor Bank needs signing in</li>");
+		expect(
+			html.indexOf("Northline Card Services stopped updating Sep 20"),
+		).toBeLessThan(html.indexOf("First Harbor Bank needs signing in"));
+		expect(html).toContain("as of Sep 20");
+		expect(html.match(/data-icon="bank"/g) ?? []).toHaveLength(1);
+		expect(
+			html.match(/Fix<span class="sr-only"> the bank in Accounts<\/span>/g),
+		).toHaveLength(1);
+	});
+
 	it("shows a soft alert after status and before the forecast, with Fix to Accounts", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
 		const { html } = await page();
@@ -111,16 +132,16 @@ describe("Home's stale-bank line", () => {
 	});
 
 	it("does not flag a bank that synced 2 days ago", async () => {
-		await setBank(FIRST, { syncedAt: "2026-10-03 06:00:00" });
+		await setBank(FIRST, { syncedAt: "2026-10-05 06:00:00" });
 		const { html } = await page();
-		expect(html).not.toContain("as of Oct 3");
+		expect(html).not.toContain("as of Oct 5");
 	});
 
 	it("flags a bank that last synced 3 days ago, since that day", async () => {
-		await setBank(FIRST, { syncedAt: "2026-10-02 06:00:00" });
+		await setBank(FIRST, { syncedAt: "2026-10-04 06:00:00" });
 		const { html } = await page();
-		expect(textOf(html)).toContain(`${FIRST} stopped updating Oct 2`);
-		expect(html).toContain("as of Oct 2");
+		expect(textOf(html)).toContain(`${FIRST} stopped updating Oct 4`);
+		expect(html).toContain("as of Oct 4");
 	});
 
 	it("counts 3 days from the household's today, not UTC's", async () => {
@@ -159,9 +180,11 @@ describe("Home's stale-bank line", () => {
 		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
 		const text = textOf((await page()).html);
 		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
-		expect(text).not.toContain(FIRST);
+		expect(text).toContain(`${FIRST} stopped updating Oct 2`);
 		expect(text).toContain("as of Sep 20");
-		expect(text).toContain("and 1 more bank needs a fix");
+		expect(text.indexOf(`${SECOND} stopped updating Sep 20`)).toBeLessThan(
+			text.indexOf(`${FIRST} stopped updating Oct 2`),
+		);
 		expect(text.match(/Fix\s+the bank in Accounts/g)).toHaveLength(1);
 	});
 
@@ -170,7 +193,7 @@ describe("Home's stale-bank line", () => {
 		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
 		const text = textOf((await page()).html);
 		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
-		expect(text).toContain(`and 1 more: ${FIRST} needs signing in`);
+		expect(text).toContain(`${FIRST} needs signing in`);
 		expect(text).toContain("as of Sep 20");
 	});
 

@@ -39,6 +39,17 @@ describe("GET / with the demo seed", () => {
 		expect(html).toContain('<html lang="en">');
 	});
 
+	it("keeps the pre-forecast Home on day 6 and adds the forecast on day 7", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-06T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-06");
+		expect((await home()).html).not.toContain('aria-label="Spending in Oct');
+		expect((await home()).html).toContain("a day for 26 days left");
+		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-07");
+		expect((await home()).html).toContain('aria-label="Spending in Oct');
+	});
+
 	it("uses a fixed number of D1 statements for a large Home request", async () => {
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare(
@@ -143,10 +154,10 @@ describe("GET / with the demo seed", () => {
 	});
 
 	it.each([
-		"2026-10-05T16:00:00Z",
+		"2026-10-07T16:00:00Z",
 		"2026-10-21T16:00:00Z",
 		"2026-10-28T16:00:00Z",
-		"2026-01-05T16:00:00Z",
+		"2026-01-07T16:00:00Z",
 	])(
 		"forecasts all unpaid occurrences due this month, as Bills does (%s)",
 		async (instant) => {

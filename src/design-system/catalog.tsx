@@ -446,18 +446,18 @@ const BANK_LINE_SPEC: UseSpecText = {
 	purpose:
 		"Show when Safe to spend was last current and take a person to Accounts when a bank needs attention.",
 	affordance:
-		"A dashed “as of” tag sits on the amount; a soft brick-tinted line has a bank icon, plain words, and a 44px Fix button.",
+		"A dashed “as of” tag sits on the amount; one soft brick-tinted line has a bank icon, each bank's words on its own line, and one 44px Fix button.",
 	states:
 		"Shown: a connected bank needs signing in, or hasn't synced for 3 days from the household's today. Not shown: a healthy bank, a disconnected bank, a bank with no recorded sync that doesn't need attention, and the demo.",
 	feedback:
 		"Fix opens Accounts. Once the bank is fixed or syncs again, the line is gone the next time Home loads. Nothing is announced: it is part of the page, not an answer to something a person did.",
 	input:
-		"Touch: Fix is 44px tall. Keyboard: Tab reaches Fix after the bank words; Enter opens Accounts. Screen reader: the sentence and “Fix the bank in Accounts”; the icon is hidden because the words carry the meaning.",
+		"Touch: Fix is 44px tall. Keyboard: Tab reaches Fix after the bank lines; Enter opens Accounts. Screen reader: each bank is a list item, then “Fix the bank in Accounts”; the icon is hidden because the words carry the meaning.",
 	motion: "None.",
 	edges:
-		"A bank that needs signing in says so without an as-of tag. Otherwise the tag uses the last successful sync date. With two or more, the first in link order is named and the rest counted. A long bank name wraps. No JavaScript: Fix is a plain link to Accounts.",
+		"A bank that needs signing in says so without a sync date. Dated banks come first, oldest first; equal dates and banks without dates sort by name. Up to three banks have their own line, followed by a count when more remain. The as-of tag uses the oldest available date. A long bank name wraps. No JavaScript: Fix is a plain link to Accounts.",
 	words:
-		"Tag: “as of Oct 2” · “{bank} stopped updating {Oct 2}” · “{bank} needs signing in” · Fix.",
+		"Tag: “as of Sep 20” · “Chase stopped updating Sep 20” · “Capital One needs signing in” · Fix.",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
@@ -639,19 +639,23 @@ function describeHome({
 	rows = true,
 	bankLine,
 	bankDate,
+	dailyAmount,
+	forecast = true,
 }: {
 	band?: boolean;
 	rows?: boolean;
-	bankLine?: string;
+	bankLine?: string[];
 	bankDate?: string;
+	dailyAmount?: string;
+	forecast?: boolean;
 } = {}) {
 	const parts = [
 		HOME_TOP.month,
 		`Safe to spend ${whole(HOME_TOP.safeToSpendCents)}`,
 		HOME_TOP.status,
 		...(bankDate ? [`as of ${bankDate}`] : []),
-		...(bankLine ? [bankLine, "Fix"] : []),
-		"Forecast",
+		...(bankLine ? [...bankLine, "Fix"] : []),
+		...(forecast ? ["Forecast"] : dailyAmount ? [dailyAmount] : []),
 		"How this works",
 		...(band ? [HOME_TOP.band.text, HOME_TOP.band.detail] : []),
 	];
@@ -667,11 +671,13 @@ function HomeSketch({
 	band = true,
 	bankLine,
 	bankDate,
+	dailyAmount,
 	forecast,
 }: {
 	band?: boolean;
-	bankLine?: string;
+	bankLine?: string[];
 	bankDate?: string;
+	dailyAmount?: string;
 	forecast?: Child;
 }) {
 	return (
@@ -680,6 +686,7 @@ function HomeSketch({
 				{...HOME_TOP}
 				bankLine={bankLine}
 				bankDate={bankDate}
+				dailyAmount={dailyAmount}
 				forecast={forecast}
 				band={band ? HOME_TOP.band : undefined}
 			/>
@@ -715,7 +722,7 @@ function HomeTopGroup() {
 				title="HomeTop"
 				tier="visual"
 				components={["HomeTop", "HomeForecast"]}
-				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend with Why?, the status sentence, a bank alert when needed, the forecast from the third day, How this works and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend with Why?, the status sentence, a bank alert when needed, the forecast from day 7, How this works and the Band. Before then, the picked daily-amount line remains. Things to try moves below the Budget list. On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
 					<PhoneFrame
@@ -723,6 +730,16 @@ function HomeTopGroup() {
 					>
 						<HomeSketch forecast={forecast} />
 					</PhoneFrame>
+				</State>
+				<State label="Before day 7: the daily amount remains under the status sentence">
+					<Picture
+						label={`Home before day 7, with the daily amount: ${describeHome({ forecast: false, dailyAmount: "About $15.03 a day for the 27 days left." })}`}
+					>
+						<HomeSketch
+							forecast={undefined}
+							dailyAmount="About $15.03 a day for the 27 days left."
+						/>
+					</Picture>
 				</State>
 				<State label="Desktop: the top and the Budget list share one width, with no gap beside them">
 					<Picture
@@ -744,12 +761,12 @@ function HomeTopGroup() {
 				title="BankBehind"
 				tier="visual"
 				components={["BankBehind"]}
-				sentence="A bank that's behind adds an as-of date to Safe to spend and a soft alert line with Fix before the forecast (decision 82, P96)."
+				sentence="Each bank that needs attention gets its own line under one bank icon and one Fix button; the as-of date is the oldest bank date (decision 95, Q82 C)."
 			>
 				<State label="The amount's as-of date and stale bank alert on a phone">
 					<PhoneFrame
 						demo={false}
-						label={`Home on a phone in the family app: ${describeHome({ bankLine: BANK_LINES.stale, bankDate: "as of Oct 2" })}`}
+						label={`Home on a phone in the family app: ${describeHome({ bankLine: BANK_LINES.stale, bankDate: "Oct 2" })}`}
 					>
 						<HomeSketch
 							bankLine={BANK_LINES.stale}

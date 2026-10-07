@@ -56,7 +56,7 @@ describe("HomeTop", () => {
 	});
 
 	it("shows a bank alert before the forecast", async () => {
-		const html = await top({ bankLine: "Chase stopped updating Oct 2" });
+		const html = await top({ bankLine: ["Chase stopped updating Oct 2"] });
 		expect(html.indexOf("Chase stopped updating Oct 2")).toBeLessThan(
 			html.indexOf("forecast"),
 		);
@@ -68,7 +68,7 @@ describe("HomeTop", () => {
 		const html = await top({
 			currentMonth: false,
 			bankDate: "as of Oct 2",
-			bankLine: "Chase stopped updating Oct 2",
+			bankLine: ["Chase stopped updating Oct 2"],
 		});
 		expect(html).not.toContain("forecast");
 		expect(html).not.toContain("as of Oct 2");

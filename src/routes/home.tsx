@@ -19,7 +19,7 @@ import {
 	needsCategoryCount,
 	olderNeedsCategoryCount,
 } from "../db/transactions";
-import { forecastMonth } from "../home-forecast";
+import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { centsToAmount, formatCents } from "../money";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
@@ -183,10 +183,15 @@ async function renderHome(
 		refundsCents,
 		billsStillDueCents: billTotals.stillToPayCents,
 	});
+	const showForecast = day >= FORECAST_START_DAY && forecast.visible;
 	const dailySpending = Array.from({ length: day }, (_, index) => {
 		const entry = forecastDays.find((item) => item.day === index + 1);
 		return entry?.spentCents ?? 0;
 	});
+	const dailyAmount =
+		day < FORECAST_START_DAY && summary.safeToSpendCents > 0
+			? `About ${formatCents(Math.floor(summary.safeToSpendCents / (daysInMonth(month) - day + 1)))} a day for ${daysInMonth(month) - day + 1} days left.`
+			: undefined;
 	// Counted spending by category, income left out, as Home counts it (spec §6).
 	const spent = (id: number) =>
 		data.transactions
@@ -209,8 +214,9 @@ async function renderHome(
 							status={statusSentence(summary.categories)}
 							bankLine={bankNotice?.words}
 							bankDate={bankNotice?.asOf}
+							dailyAmount={dailyAmount}
 							forecast={
-								forecast.visible && (
+								showForecast && (
 									<HomeForecast
 										month={month}
 										day={day}

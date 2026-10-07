@@ -24,31 +24,35 @@ export type FlaggedBank =
 export function homeBankNotice(
 	flagged: FlaggedBank[],
 	today: string,
-): { words: string; asOf?: string } | null {
-	const oldest = flagged
-		.filter(
-			(bank): bank is FlaggedBank & { since: string } =>
-				bank.since !== undefined,
-		)
-		.sort((a, b) => a.since.localeCompare(b.since))[0];
-	const first = oldest ?? flagged[0];
-	if (!first) return null;
-	const signIn = flagged.find((bank) => bank.reason === "sign-in");
-	const words =
-		first.reason === "sign-in"
-			? `${first.name} needs signing in`
-			: `${first.name} stopped updating ${shortDay(first.since, today)}`;
-	const others = flagged.length - 1;
-	const more =
-		others === 0
-			? ""
-			: first.reason !== "sign-in" && signIn
-				? `, and ${others} more: ${signIn.name} needs signing in`
-				: `, and ${others} more ${others === 1 ? "bank needs" : "banks need"} a fix`;
+): { words: string[]; asOf?: string } | null {
+	if (flagged.length === 0) return null;
+	const sorted = [...flagged].sort((a, b) => {
+		if (a.since && b.since)
+			return a.since.localeCompare(b.since) || a.name.localeCompare(b.name);
+		if (a.since) return -1;
+		if (b.since) return 1;
+		return a.name.localeCompare(b.name);
+	});
+	const dated = sorted.find(
+		(bank): bank is FlaggedBank & { since: string } => bank.since !== undefined,
+	);
+	const visible = sorted
+		.slice(0, 3)
+		.map((bank) =>
+			bank.reason === "sign-in"
+				? `${bank.name} needs signing in`
+				: `${bank.name} stopped updating ${shortDay(bank.since, today)}`,
+		);
+	if (sorted.length > 3) {
+		const more = sorted.length - 3;
+		visible.push(
+			`and ${more} more bank${more === 1 ? "" : "s"} need${more === 1 ? "s" : ""} a fix`,
+		);
+	}
 	return {
-		words: `${words}${more}`,
-		...(oldest && {
-			asOf: shortDay(oldest.since, today),
+		words: visible,
+		...(dated && {
+			asOf: shortDay(dated.since, today),
 		}),
 	};
 }
@@ -77,26 +81,4 @@ export function flaggedBanks(banks: BankSync[], today: string): FlaggedBank[] {
 			flagged.push({ name: bank.name, reason: "stale", since });
 	}
 	return flagged;
-}
-
-/**
- * The line's words, or null when no bank is flagged. It names the first flagged bank and counts the
- * rest: "Chase needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high."
- */
-export function staleBankWords(
-	flagged: FlaggedBank[],
-	today: string,
-): string | null {
-	const first = flagged[0];
-	if (!first) return null;
-	const others = flagged.length - 1;
-	const otherBanks =
-		others === 0
-			? ""
-			: `, and ${others} other ${others === 1 ? "bank needs" : "banks need"} a look`;
-	const lead =
-		first.reason === "sign-in"
-			? `${first.name} needs you to sign in again`
-			: `${first.name} hasn't synced since ${shortDay(first.since, today)}`;
-	return `${lead}${otherBanks}, so Safe to spend may be too high.`;
 }

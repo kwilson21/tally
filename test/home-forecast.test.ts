@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { homeForecastDays } from "../src/db/home-forecast";
-import { forecastMonth } from "../src/home-forecast";
+import { FORECAST_START_DAY, forecastMonth } from "../src/home-forecast";
 import { HomeForecast } from "../src/views/home-forecast";
 
 describe("forecastMonth", () => {
@@ -28,7 +28,7 @@ describe("forecastMonth", () => {
 	it("rounds a projected overage up to whole dollars", () => {
 		expect(
 			forecastMonth({
-				day: 3,
+				day: 7,
 				daysInMonth: 31,
 				totalBudgetCents: 50000,
 				spentCents: 100000,
@@ -38,8 +38,8 @@ describe("forecastMonth", () => {
 				billsStillDueCents: 0,
 			}),
 		).toEqual({
-			endCents: 1593333,
-			overCents: 1543400,
+			endCents: 648571,
+			overCents: 598600,
 			visible: true,
 		});
 	});
@@ -58,9 +58,9 @@ describe("forecastMonth", () => {
 		expect(forecastMonth(input).endCents).toBe(73800);
 	});
 
-	it("starts on the third day and has no forecast before then", () => {
+	it("starts on day 7 and has no forecast before then", () => {
 		const input = {
-			day: 2,
+			day: 6,
 			daysInMonth: 28,
 			totalBudgetCents: 10000,
 			spentCents: 0,
@@ -69,8 +69,29 @@ describe("forecastMonth", () => {
 			refundsCents: 0,
 			billsStillDueCents: 0,
 		};
+		expect(FORECAST_START_DAY).toBe(7);
 		expect(forecastMonth(input).visible).toBe(false);
-		expect(forecastMonth({ ...input, day: 3 }).visible).toBe(true);
+		expect(forecastMonth({ ...input, day: 7 }).visible).toBe(true);
+	});
+
+	it.each([
+		["2026-02", 28],
+		["2026-03", 31],
+	])("shows on the last day of a %s month", (month, daysInMonth) => {
+		const html = String(
+			HomeForecast({
+				month,
+				day: daysInMonth,
+				daysInMonth,
+				spentByDay: Array.from({ length: daysInMonth }, () => 100),
+				budgetCents: 10000,
+				endCents: 10000,
+				differenceCents: 0,
+			}),
+		);
+		expect(html).toContain(
+			`by ${month === "2026-02" ? "Feb 28" : "Mar 31"}, at this pace`,
+		);
 	});
 });
 

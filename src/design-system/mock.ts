@@ -353,12 +353,12 @@ export const BANK_LINES = {
 				BANK_TODAY,
 			),
 			BANK_TODAY,
-		)?.words ?? "",
+		)?.words ?? [],
 	signIn:
 		homeBankNotice(
 			flaggedBanks([chase({ needsAttention: true })], BANK_TODAY),
 			BANK_TODAY,
-		)?.words ?? "",
+		)?.words ?? [],
 	several:
 		homeBankNotice(
 			flaggedBanks(
@@ -369,7 +369,7 @@ export const BANK_LINES = {
 				BANK_TODAY,
 			),
 			BANK_TODAY,
-		)?.words ?? "",
+		)?.words ?? [],
 };
 
 /** The money input in each state it can show. */

@@ -10,6 +10,8 @@ export type ForecastInput = {
 	billsStillDueCents: number;
 };
 
+export const FORECAST_START_DAY = 7;
+
 /** The month-end estimate in integer cents; refunds reduce spending but never repeat in the projection. */
 export function forecastMonth(input: ForecastInput) {
 	const everydayCents =
@@ -22,7 +24,7 @@ export function forecastMonth(input: ForecastInput) {
 	);
 	const endCents = input.spentCents + input.billsStillDueCents + projectedCents;
 	const differenceCents = input.totalBudgetCents - endCents;
-	const visible = input.day >= 3;
+	const visible = input.day >= FORECAST_START_DAY;
 	return differenceCents >= 0
 		? {
 				endCents,

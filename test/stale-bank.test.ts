@@ -4,7 +4,6 @@ import {
 	flaggedBanks,
 	homeBankNotice,
 	STALE_AFTER_DAYS,
-	staleBankWords,
 } from "../src/stale-bank";
 
 // A bank that stopped syncing means Safe to spend may be too high (spec §8.5, decision 72 P37 A).
@@ -128,71 +127,8 @@ describe("flaggedBanks", () => {
 	});
 });
 
-describe("staleBankWords", () => {
-	it("says nothing when no bank is flagged", () => {
-		expect(staleBankWords([], TODAY)).toBeNull();
-	});
-
-	it("names a bank that hasn't synced, and since when", () => {
-		expect(
-			staleBankWords(
-				[{ name: "Chase", reason: "stale", since: "2026-10-01" }],
-				TODAY,
-			),
-		).toBe(
-			"Chase hasn't synced since Oct 1, so Safe to spend may be too high.",
-		);
-	});
-
-	it("names a bank that needs signing in", () => {
-		expect(staleBankWords([{ name: "Chase", reason: "sign-in" }], TODAY)).toBe(
-			"Chase needs you to sign in again, so Safe to spend may be too high.",
-		);
-	});
-
-	it("adds the year to a sync date from another year", () => {
-		expect(
-			staleBankWords(
-				[{ name: "Chase", reason: "stale", since: "2025-12-30" }],
-				"2026-01-02",
-			),
-		).toBe(
-			"Chase hasn't synced since Dec 30, 2025, so Safe to spend may be too high.",
-		);
-	});
-
-	it("names the first of two and counts the other", () => {
-		expect(
-			staleBankWords(
-				[
-					{ name: "Chase", reason: "sign-in" },
-					{ name: "Citi", reason: "stale", since: "2026-10-01" },
-				],
-				TODAY,
-			),
-		).toBe(
-			"Chase needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high.",
-		);
-	});
-
-	it("names the first of three and counts the rest", () => {
-		expect(
-			staleBankWords(
-				[
-					{ name: "Chase", reason: "stale", since: "2026-10-01" },
-					{ name: "Citi", reason: "sign-in" },
-					{ name: "Ally", reason: "sign-in" },
-				],
-				TODAY,
-			),
-		).toBe(
-			"Chase hasn't synced since Oct 1, and 2 other banks need a look, so Safe to spend may be too high.",
-		);
-	});
-});
-
 describe("homeBankNotice", () => {
-	it("keeps the oldest stale bank and names the sign-in bank", () => {
+	it("keeps one line per bank, with the oldest first and one oldest as-of date", () => {
 		expect(
 			homeBankNotice(
 				[
@@ -202,23 +138,10 @@ describe("homeBankNotice", () => {
 				TODAY,
 			),
 		).toEqual({
-			words:
-				"Old Bank stopped updating Sep 20, and 1 more: Login Bank needs signing in",
-			asOf: "Sep 20",
-		});
-	});
-
-	it("counts another stale bank while naming the oldest one", () => {
-		expect(
-			homeBankNotice(
-				[
-					{ name: "Recent Bank", reason: "stale", since: "2026-10-02" },
-					{ name: "Old Bank", reason: "stale", since: "2026-09-20" },
-				],
-				TODAY,
-			),
-		).toEqual({
-			words: "Old Bank stopped updating Sep 20, and 1 more bank needs a fix",
+			words: [
+				"Old Bank stopped updating Sep 20",
+				"Login Bank needs signing in",
+			],
 			asOf: "Sep 20",
 		});
 	});
@@ -226,7 +149,7 @@ describe("homeBankNotice", () => {
 	it("keeps a single sign-in bank's warning", () => {
 		expect(
 			homeBankNotice([{ name: "Login Bank", reason: "sign-in" }], TODAY),
-		).toEqual({ words: "Login Bank needs signing in" });
+		).toEqual({ words: ["Login Bank needs signing in"] });
 	});
 
 	it("names the oldest stale bank in either link order", () => {
@@ -236,8 +159,10 @@ describe("homeBankNotice", () => {
 		];
 		for (const order of [banks, [...banks].reverse()]) {
 			expect(homeBankNotice(order, TODAY)).toEqual({
-				words:
-					"Older Bank stopped updating Sep 20, and 1 more bank needs a fix",
+				words: [
+					"Older Bank stopped updating Sep 20",
+					"Recent Bank stopped updating Oct 2",
+				],
 				asOf: "Sep 20",
 			});
 		}
@@ -253,8 +178,10 @@ describe("homeBankNotice", () => {
 				TODAY,
 			),
 		).toEqual({
-			words:
-				"Older Bank stopped updating Sep 20, and 1 more: Login Bank needs signing in",
+			words: [
+				"Older Bank stopped updating Sep 20",
+				"Login Bank needs signing in",
+			],
 			asOf: "Sep 20",
 		});
 	});
@@ -269,7 +196,10 @@ describe("homeBankNotice", () => {
 				TODAY,
 			),
 		).toEqual({
-			words: "Login Bank needs signing in, and 1 more bank needs a fix",
+			words: [
+				"Login Bank needs signing in",
+				"Stale Bank stopped updating Sep 20",
+			],
 			asOf: "Sep 15",
 		});
 	});
@@ -281,8 +211,25 @@ describe("homeBankNotice", () => {
 				TODAY,
 			),
 		).toEqual({
-			words: "One Bank stopped updating Oct 2",
+			words: ["One Bank stopped updating Oct 2"],
 			asOf: "Oct 2",
 		});
+	});
+
+	it("sorts equal and undated banks by name after dated banks, in either link order", () => {
+		const banks = [
+			{ name: "No Date Z", reason: "sign-in" as const },
+			{ name: "Same B", reason: "stale" as const, since: "2026-09-20" },
+			{ name: "No Date A", reason: "sign-in" as const },
+			{ name: "Same A", reason: "stale" as const, since: "2026-09-20" },
+		];
+		for (const order of [banks, [...banks].reverse()]) {
+			expect(homeBankNotice(order, TODAY)?.words).toEqual([
+				"Same A stopped updating Sep 20",
+				"Same B stopped updating Sep 20",
+				"No Date A needs signing in",
+				"and 1 more bank needs a fix",
+			]);
+		}
 	});
 });

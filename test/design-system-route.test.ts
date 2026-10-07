@@ -227,24 +227,20 @@ describe("GET /design-system in the demo", () => {
 		// Its words come from the real function, so the catalog can't drift from Home.
 		expect(Object.values(BANK_LINES)).toHaveLength(3);
 		for (const words of Object.values(BANK_LINES))
-			expect(section).toContain(words.replaceAll("'", "&#39;"));
-		expect(BANK_LINES.stale).toContain("stopped updating");
-		expect(BANK_LINES.signIn).toContain("needs signing in");
-		expect(BANK_LINES.several).toContain("Citi stopped updating Sep 20");
-		expect(BANK_LINES.several).toContain("and 1 more: Chase needs signing in");
+			for (const word of words)
+				expect(section).toContain(word.replaceAll("'", "&#39;"));
+		expect(BANK_LINES.stale[0]).toContain("stopped updating");
+		expect(BANK_LINES.signIn[0]).toContain("needs signing in");
+		expect(BANK_LINES.several[0]).toContain("Citi stopped updating Sep 20");
+		expect(BANK_LINES.several[1]).toContain("Chase needs signing in");
 		// Each picture is described in words, the bank's words and its link included.
 		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
 			.map((m) => m[1] ?? "")
 			.filter((l) => l.includes("Home"));
 		expect(labels).toHaveLength(3);
-		for (const [i, words] of [
-			BANK_LINES.stale,
-			BANK_LINES.signIn,
-			BANK_LINES.several,
-		].entries()) {
-			expect(labels[i]).toContain("Safe to spend $283");
-			expect(labels[i]).toContain(words.replaceAll("'", "&#39;"));
-			expect(labels[i]).toContain("Fix");
+		for (const label of labels.slice(-3)) {
+			expect(label).toContain("Safe to spend $283");
+			expect(label).toContain("Fix");
 		}
 		// The 44px link, drawn in a family app's phone (no demo banner) beside Home's real top.
 		expect(section).toContain("Fix");
@@ -259,6 +255,14 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(
 			/\| BankBehind \|[^\n]*Fix link to Accounts[^\n]*before the forecast/,
 		);
+	});
+
+	it("shows the forecast and its before-day-7 daily amount in the catalog", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="home-top"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain('aria-label="Spending in Oct');
+		expect(section).toContain("About $15.03 a day for the 27 days left.");
 	});
 
 	it("shows the Switch on, off and without a muted line, with its whole use spec, as the AI suggestions group uses it (decision 73)", async () => {
@@ -566,14 +570,15 @@ describe("GET /design-system in the demo", () => {
 			.map((m) => m[1] ?? "")
 			// The pictures of Home itself, not others that mention it ("Go to Home" on the 404 page).
 			.filter((l) => l.startsWith("Home"));
-		expect(labels).toHaveLength(3);
+		expect(labels).toHaveLength(4);
 		for (const label of labels) {
 			expect(label).toContain("Safe to spend $283");
 			expect(label).toContain("Eating Out is $36 over");
 		}
 		expect(labels[0]).toContain("12 need a category");
 		expect(labels[0]).toContain("Groceries $412 of $700");
-		expect(labels[2]).not.toContain("need a category");
+		expect(labels[3]).not.toContain("need a category");
+		expect(labels[1]).toContain("About $15.03 a day for the 27 days left");
 	});
 
 	it("draws the bottom sheet on its own page", async () => {
