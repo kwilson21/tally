@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { saveSplit } from "../src/db/transactions";
@@ -239,6 +240,341 @@ describe("adding cash", () => {
 });
 
 describe("cash lifecycle", () => {
+	it("edits a cash entry's date and amount in the edit panel", async () => {
+		const created = await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: "2026-10-01",
+				amount: "18.50",
+				merchant: "Editable cash",
+				category: "1",
+			}),
+		});
+		expect(created.res.status).toBe(200);
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Editable cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const monthSummary = async () => {
+			const data = await loadMonth(env.DB, "2026-10");
+			return summarizeMonth({
+				month: "2026-10",
+				categories: data.categories,
+				amounts: data.amounts,
+				transactions: data.transactions,
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		};
+		const spentBefore = await monthSummary();
+		const panel = await request(`/transactions/${id}`);
+		expect(panel.html).toContain("Cash · you entered this");
+		expect(panel.html).toContain(`name="amount"`);
+		expect(panel.html).toContain(`name="date"`);
+		const saved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: "2026-10-02",
+				amount: "20.00",
+				back: "/transactions",
+			}),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT date,amount_cents FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ date: "2026-10-02", amount_cents: 2000 });
+		expect((await monthSummary()) - spentBefore).toBe(150);
+	});
+
+	it("refuses future cash edit dates and bank date and amount changes", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "18.50",
+				merchant: "Future guard",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Future guard' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const tomorrow = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
+		tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+		const future = tomorrow.toISOString().slice(0, 10);
+		const rejected = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: future,
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(rejected.res.status).toBe(422);
+		expect(rejected.html).toContain("Choose today or an earlier date.");
+		const bankRow = await env.DB.prepare(
+			"SELECT t.id, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id LIMIT 1",
+		).first<{ id: number; bank: string }>();
+		const bankId = bankRow?.id as number;
+		const bankPanel = await request(`/transactions/${bankId}`);
+		expect(bankPanel.html).toContain(
+			`From ${bankRow?.bank}. Its date and amount stay as the bank sent them. If something&#39;s off, you can split it, exclude it, or count it in another month.`,
+		);
+		const bank = await env.DB.prepare(
+			"SELECT date,amount_cents FROM transactions WHERE id=?",
+		)
+			.bind(bankId)
+			.first();
+		await request(`/transactions/${bankId}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: future,
+				amount: "1.00",
+				back: "/transactions",
+			}),
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT date,amount_cents FROM transactions WHERE id=?",
+			)
+				.bind(bankId)
+				.first(),
+		).toEqual(bank);
+	});
+
+	it("keeps split parts with a cash entry date and refuses an amount that differs", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "18.50",
+				merchant: "Split edit",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Split edit' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await saveSplit(
+			env.DB,
+			id,
+			[
+				{ amountCents: 900, categoryId: 1 },
+				{ amountCents: 950, categoryId: 2 },
+			],
+			"demo",
+		);
+		const rejected = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "20.00",
+				back: "/transactions",
+			}),
+		});
+		expect(rejected.res.status).toBe(422);
+		expect(rejected.html).toContain(
+			"The parts add up to $18.50. Change them to match $20.00.",
+		);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id=?",
+				)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(2);
+		const tomorrow = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
+		tomorrow.setUTCDate(tomorrow.getUTCDate() - 1);
+		const moved = tomorrow.toISOString().slice(0, 10);
+		const saved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: moved,
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT DISTINCT date FROM transactions WHERE parent_id=?",
+				)
+					.bind(id)
+					.all()
+			).results,
+		).toEqual([{ date: moved }]);
+	});
+
+	it("counts a cash entry in the month of its edited date", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const previousMonthEnd = new Date(`${today.slice(0, 7)}-01T00:00:00Z`);
+		previousMonthEnd.setUTCDate(0);
+		const oldDate = previousMonthEnd.toISOString().slice(0, 10);
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: oldDate,
+				amount: "18.50",
+				merchant: "Month move cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Month move cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const loadSpent = async () => {
+			const data = await loadMonth(env.DB, today.slice(0, 7));
+			return summarizeMonth({
+				month: today.slice(0, 7),
+				categories: data.categories,
+				amounts: data.amounts,
+				transactions: data.transactions,
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		};
+		const before = await loadSpent();
+		await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today,
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect((await loadSpent()) - before).toBe(1850);
+	});
+
+	it("keeps a cash entry's linked refund and refuses reducing its amount below that refund", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "20.00",
+				merchant: "Refund guard cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Refund guard cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,?, -1500, 'Cash refund', ?, 1 FROM transactions WHERE id=?",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE), id, id)
+			.run();
+		const tooSmall = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "10.00",
+				back: "/transactions",
+			}),
+		});
+		expect(tooSmall.res.status).toBe(422);
+		expect(tooSmall.html).toContain(
+			"This amount is more than what&#39;s left after linked refunds ($0.00 left).",
+		);
+		const yesterday = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
+		yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+		const date = yesterday.toISOString().slice(0, 10);
+		const moved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date,
+				amount: "20.00",
+				back: "/transactions",
+			}),
+		});
+		expect(moved.res.status).toBe(200);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT date,refund_of_id FROM transactions WHERE raw_name='Cash refund' ORDER BY id DESC LIMIT 1",
+				).first<{ refund_of_id: number | null }>()
+			)?.refund_of_id,
+		).toBe(id);
+	});
+
 	it("uses the cash-delete toast wording for a split entry and Undo restores its parent and parts", async () => {
 		const name = "Split market";
 		const created = await request("/transactions/cash", {

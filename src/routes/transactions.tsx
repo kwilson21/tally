@@ -21,12 +21,13 @@ import {
 	saveSplit,
 	type TransactionDetail,
 } from "../db/transactions";
-import { formatCents } from "../money";
+import { centsToAmount, formatCents } from "../money";
 import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
 import {
 	type CashValues,
 	entryKeyOf,
 	parseCash,
+	parseCashDateAmount,
 	saveCash,
 } from "../transactions/cash";
 import {
@@ -69,6 +70,7 @@ import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MoneyInput } from "../views/money-input";
 import {
 	KEEP_VALUE,
 	NameChoices,
@@ -1042,6 +1044,7 @@ type SheetProps = {
 	people: HouseholdPerson[];
 	values: Edit;
 	errors?: EditErrors;
+	cashValues?: { date: string; amount: string };
 	deleteConfirm?: boolean;
 	refunds?: RefundPurchase[];
 	/** The household's date, for the transaction's "Today" label. */
@@ -1076,6 +1079,7 @@ function EditSheet({
 	people,
 	values,
 	errors = {},
+	cashValues,
 	deleteConfirm = false,
 	refunds = [],
 	today,
@@ -1129,13 +1133,26 @@ function EditSheet({
 				{tx.displayName}
 				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}
 			</h2>
-			<p class="font-serif text-4xl font-semibold">
-				{formatCents(tx.amountCents, { signed: true })}
-			</p>
-			<p class="text-muted">
-				{dayLabel(tx.date, today)} · {account}
-			</p>
+			{tx.accountType === "cash" ? (
+				<p class="text-muted">Cash · you entered this</p>
+			) : (
+				<>
+					<p class="font-serif text-4xl font-semibold">
+						{formatCents(tx.amountCents, { signed: true })}
+					</p>
+					<p class="text-muted">
+						{dayLabel(tx.date, today)} · {account}
+					</p>
+				</>
+			)}
 			{tx.pending && <PendingNote />}
+			{tx.accountType !== "cash" && (
+				<p class="mt-2 text-sm text-muted">
+					From {tx.bankName ?? tx.accountName}. Its date and amount stay as the
+					bank sent them. If something's off, you can split it, exclude it, or
+					count it in another month.
+				</p>
+			)}
 			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}
@@ -1232,6 +1249,27 @@ function EditSheet({
 					name="displayed_name_guess"
 					value={tx.nameSuggested ? tx.displayName : ""}
 				/>
+				{cashValues && (
+					<>
+						<MoneyInput
+							id="cash-edit-amount"
+							name="amount"
+							label="Amount"
+							value={cashValues.amount}
+							error={errors.amount}
+						/>
+						<TextInput
+							id="cash-edit-date"
+							name="date"
+							label="Date"
+							type="date"
+							value={cashValues.date}
+							max={today}
+							surface="paper"
+							error={errors.date}
+						/>
+					</>
+				)}
 				<input
 					type="hidden"
 					name="income_was"
@@ -1944,6 +1982,11 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				categories={categories}
 				people={people}
 				values={values}
+				cashValues={
+					tx.accountType === "cash"
+						? { date: tx.date, amount: centsToAmount(tx.amountCents) }
+						: undefined
+				}
 				refunds={refunds}
 				today={today}
 				still={asksFromThisPage(c)}
@@ -2189,6 +2232,17 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
 	const refunds = await refundPurchases(c.env.DB, tx);
+	const cashValues =
+		tx.accountType === "cash"
+			? {
+					date: form.get("date")?.toString() ?? tx.date,
+					amount:
+						form.get("amount")?.toString() ?? centsToAmount(tx.amountCents),
+				}
+			: undefined;
+	const cashParsed = cashValues
+		? parseCashDateAmount(cashValues.date, cashValues.amount, today)
+		: undefined;
 	const current = tx.refundOfId ?? null;
 	const posted = form.get("refund_of");
 	const refundOfId =
@@ -2262,16 +2316,33 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					today={today}
 					namePick={form.get("name_pick")?.toString() ?? null}
 					nameWas={form.get("merchant_was")?.toString() ?? null}
+					cashValues={cashValues}
 				/>
 			),
 		});
 	};
 
-	if (!parsed.ok || !refundOk)
+	if (
+		!parsed.ok ||
+		!refundOk ||
+		(cashParsed && Object.keys(cashParsed.errors).length)
+	)
 		return showErrors({
 			...(parsed.ok ? {} : parsed.errors),
 			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
+			...(cashParsed?.errors ?? {}),
 		});
+	if (cashParsed && tx.isSplit) {
+		const parts = await c.env.DB.prepare(
+			"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions WHERE parent_id = ?",
+		)
+			.bind(tx.id)
+			.first<{ cents: number }>();
+		if (parts && parts.cents !== cashParsed.amountCents)
+			return showErrors({
+				amount: `The parts add up to ${formatCents(parts.cents)}. Change them to match ${formatCents(cashParsed.amountCents)}.`,
+			});
+	}
 
 	// The link is written only when it changes. A refund that is more than what's left of its
 	// purchase is refused by the write itself, with nothing saved (spec §8.5).
@@ -2281,11 +2352,25 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		{
 			...parsed.value,
 			refundOfId: refundOfId === current ? undefined : refundOfId,
+			...(cashParsed
+				? {
+						cashDate: cashValues?.date,
+						cashAmountCents: cashParsed.amountCents,
+					}
+				: {}),
 		},
 		actor(c),
 	);
 	if (!result.saved)
-		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+		return "refundLeftCents" in result
+			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
+			: result.cashError === "split"
+				? showErrors({
+						amount: `The parts add up to ${formatCents(result.amountCents)}. Change them to match ${formatCents(cashParsed?.amountCents ?? 0)}.`,
+					})
+				: showErrors({
+						amount: `This amount is more than what's left after linked refunds (${formatCents(result.amountCents)} left).`,
+					});
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.

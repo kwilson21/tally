@@ -416,6 +416,7 @@ export type TransactionDetail = ListRow & {
 	/** A person explicitly reviewed this credit as non-income; Jev's settled state is separate. */
 	creditReviewedByUser: boolean;
 	accountName: string;
+	bankName: string | null;
 	accountMask: string | null;
 	accountType: string;
 	/** The merchant's chosen display name, or null when it falls back to the raw name. */
@@ -503,9 +504,10 @@ export async function getTransaction(
 				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
 				CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
-				a.name AS accountName, a.mask AS accountMask, a.type AS accountType
+				a.name AS accountName, a.mask AS accountMask, a.type AS accountType, pi.institution_name AS bankName
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
+			LEFT JOIN plaid_items pi ON pi.id = a.plaid_item_id
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
 			LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
@@ -626,7 +628,8 @@ const EXCLUDE =
  */
 export type SaveEditResult =
 	| { saved: true }
-	| { saved: false; refundLeftCents: number };
+	| { saved: false; refundLeftCents: number }
+	| { saved: false; cashError: "split" | "refund"; amountCents: number };
 
 /**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
@@ -714,6 +717,13 @@ export async function saveEdit(
 					args: [id, recounting],
 				}
 			: { sql: () => "", args: [] };
+	if (edit.cashAmountCents !== undefined) {
+		const priorSql = gate.sql;
+		const priorArgs = gate.args;
+		gate.sql = (n) =>
+			`${priorSql(n)} AND EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?${n + priorArgs.length} AND cash.parent_id IS NULL AND cash.account_id IN (SELECT id FROM accounts WHERE type='cash') AND (cash.is_split = 0 OR (SELECT COALESCE(SUM(amount_cents), 0) FROM transactions part WHERE part.parent_id = cash.id) = ?${n + priorArgs.length + 1}) AND COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) <= ?${n + priorArgs.length + 1})`;
+		gate.args = [...priorArgs, id, edit.cashAmountCents];
+	}
 	/** A statement with the gate on its WHERE (before `tail`), binding `args` and then the gate's. */
 	const gated = (sql: string, args: unknown[], tail = "") =>
 		db
@@ -991,7 +1001,41 @@ export async function saveEdit(
 			]),
 		);
 	}
+	let cashChangeIndex: number | null = null;
+	if (edit.cashDate !== undefined && edit.cashAmountCents !== undefined) {
+		cashChangeIndex = statements.length;
+		statements.push(
+			gated(
+				"UPDATE transactions SET date = ?, amount_cents = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+				[edit.cashDate, edit.cashAmountCents, actor, id],
+			),
+			gated(
+				"UPDATE transactions SET date = ?, updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
+				[edit.cashDate, actor, id],
+			),
+		);
+	}
 	const results = await db.batch(statements);
+	if (cashChangeIndex !== null && !results[cashChangeIndex]?.meta.changes) {
+		const state = await db
+			.prepare(
+				`SELECT COALESCE((SELECT SUM(amount_cents) FROM transactions part WHERE part.parent_id = cash.id), 0) AS parts,
+				COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) AS refunds
+				FROM transactions cash WHERE cash.id = ?`,
+			)
+			.bind(id)
+			.first<{ parts: number; refunds: number }>();
+		if (state && current.isSplit && state.parts !== edit.cashAmountCents)
+			return { saved: false, cashError: "split", amountCents: state.parts };
+		return {
+			saved: false,
+			cashError: "refund",
+			amountCents: Math.max(
+				0,
+				(edit.cashAmountCents ?? 0) - (state?.refunds ?? 0),
+			),
+		};
+	}
 	// The statement that decides is the refund's own link, the second one, when there is a link; for a
 	// credit that counts again it is the panel's own update, the first. No change means the amount
 	// didn't fit, and then none of the others applied either.

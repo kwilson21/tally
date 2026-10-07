@@ -9,34 +9,47 @@ export type CashValues = {
 };
 export type CashErrors = Partial<Record<keyof CashValues, string>>;
 
-export function parseCash(
-	values: CashValues,
+export function parseCashDateAmount(
+	date: string,
+	amount: string,
 	today: string,
-	categoryIds: number[],
 ) {
-	const errors: CashErrors = {};
-	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(values.date);
+	const errors: Pick<CashErrors, "date" | "amount"> = {};
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+	const parsedDate = new Date(`${date}T00:00:00.000Z`);
 	const realDate =
 		match !== null &&
-		new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
-			.toISOString()
-			.slice(0, 10) === values.date;
-	const earliest = new Date(`${today}T00:00:00Z`);
-	earliest.setUTCFullYear(earliest.getUTCFullYear() - 10);
-	const earliestDate = earliest.toISOString().slice(0, 10);
-	if (!realDate || values.date > today)
+		!Number.isNaN(parsedDate.getTime()) &&
+		parsedDate.toISOString().slice(0, 10) === date;
+	if (!realDate || date > today)
 		errors.date = "Choose today or an earlier date.";
-	else if (values.date < earliestDate)
-		errors.date = "Choose a date within the last 10 years.";
 	let cents = 0;
 	try {
-		cents = toCents(values.amount);
+		cents = toCents(amount);
 		if (!Number.isSafeInteger(cents))
 			errors.amount = "Enter a smaller amount in dollars and cents.";
 		else if (cents <= 0) errors.amount = "Enter an amount greater than zero.";
 	} catch {
 		errors.amount = "Enter an amount in dollars and cents.";
 	}
+	return { errors, amountCents: cents };
+}
+
+export function parseCash(
+	values: CashValues,
+	today: string,
+	categoryIds: number[],
+) {
+	const errors: CashErrors = {};
+	const parsedAmount = parseCashDateAmount(values.date, values.amount, today);
+	Object.assign(errors, parsedAmount.errors);
+	const earliest = new Date(`${today}T00:00:00Z`);
+	earliest.setUTCFullYear(earliest.getUTCFullYear() - 10);
+	if (
+		!parsedAmount.errors.date &&
+		values.date < earliest.toISOString().slice(0, 10)
+	)
+		errors.date = "Choose a date within the last 10 years.";
 	const merchant = values.merchant.trim();
 	if (!merchant) errors.merchant = "Enter where you spent it.";
 	else if (merchant.length > 120)
@@ -51,7 +64,7 @@ export function parseCash(
 				ok: true as const,
 				value: {
 					date: values.date,
-					amountCents: cents,
+					amountCents: parsedAmount.amountCents,
 					merchant,
 					categoryId,
 					note: values.note.trim() || null,
