@@ -877,6 +877,114 @@ describe("categorizePending", () => {
 		},
 	);
 
+	it.each([
+		[0.19, true],
+		[0.2, true],
+		[0.21, false],
+		[0.79, false],
+		[0.8, true],
+		[0.81, true],
+	] as const)(
+		"Jev-settled income confidence %s reviews a credit: %s",
+		async (incomeConfidence, reviewed) => {
+			const inserted = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, credit_reviewed) VALUES (1, ?, -500, 'INCOME CONFIDENCE EDGE', 0) RETURNING id",
+				)
+				.bind(`${MONTH}-20`)
+				.first<{ id: number }>();
+			const id = inserted?.id as number;
+			const answer = new Response(
+				JSON.stringify({
+					answers: {
+						category: { type: "choice", choice: "Groceries", confidence: 0.9 },
+						transfer: { type: "noul", noul: 0.01 },
+						reimbursement: { type: "noul", noul: 0.01 },
+						income: { type: "noul", noul: incomeConfidence },
+					},
+				}),
+				{ status: 200 },
+			);
+			await categorizePending(withKey, async () => answer.clone(), {
+				rulesApplied: true,
+				onlyIds: [id],
+			});
+			const saved = await db
+				.prepare(
+					"SELECT flag_income, income_confidence, credit_reviewed, category_confidence FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first();
+			expect(saved).toEqual({
+				flag_income: incomeConfidence >= 0.8 ? 1 : 0,
+				income_confidence: incomeConfidence >= 0.8 ? null : incomeConfidence,
+				credit_reviewed: reviewed ? 1 : 0,
+				category_confidence: 0.9,
+			});
+			if (incomeConfidence === 0.2) {
+				const retry = fakeJev(() => reply(0.95));
+				expect(
+					await categorizePending(withKey, retry.fetchImpl, {
+						rulesApplied: true,
+						onlyIds: [id],
+					}),
+				).toEqual({ asked: 0, applied: 0 });
+				expect(retry.calls()).toBe(0);
+			}
+		},
+	);
+
+	it.each([
+		[0.19, false],
+		[0.2, false],
+		[0.21, false],
+		[0.79, false],
+		[0.8, true],
+		[0.81, true],
+	] as const)(
+		"Jev-settled category confidence %s reviews a non-income credit: %s",
+		async (categoryConfidence, reviewed) => {
+			const inserted = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, credit_reviewed) VALUES (1, ?, -500, 'CATEGORY CONFIDENCE EDGE', 0) RETURNING id",
+				)
+				.bind(`${MONTH}-20`)
+				.first<{ id: number }>();
+			const id = inserted?.id as number;
+			const answer = new Response(
+				JSON.stringify({
+					answers: {
+						category: {
+							type: "choice",
+							choice: "Groceries",
+							confidence: categoryConfidence,
+						},
+						transfer: { type: "noul", noul: 0.01 },
+						reimbursement: { type: "noul", noul: 0.01 },
+						income: { type: "noul", noul: 0.1 },
+					},
+				}),
+				{ status: 200 },
+			);
+			await categorizePending(withKey, async () => answer.clone(), {
+				rulesApplied: true,
+				onlyIds: [id],
+			});
+			const saved = await db
+				.prepare(
+					"SELECT category_id, category_confidence, income_confidence, credit_reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first();
+			expect(saved).toEqual({
+				category_id: categoryConfidence >= 0.8 ? 1 : null,
+				category_confidence: categoryConfidence,
+				income_confidence: 0.1,
+				credit_reviewed: reviewed ? 1 : 0,
+			});
+		},
+	);
+
 	it("does nothing without a key", async () => {
 		const jev = fakeJev(() => reply(0.95));
 		const result = await categorizePending({ DB: db }, jev.fetchImpl);

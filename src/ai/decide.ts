@@ -1,4 +1,5 @@
 // Turns Jev's answers into what gets stored (spec §7). Jev suggests; this code decides.
+import { meetsConfidenceThreshold } from "./confidence";
 
 export type Flag = "transfer" | "reimbursement" | "income";
 
@@ -22,6 +23,8 @@ export type Decision = {
 	suggestedCategoryId: number | null;
 	/** Always stored, so a transaction Jev was unsure about isn't asked again (decision 27). */
 	confidence: number;
+	/** Jev's raw yes-probabilities for flags, retained for below-threshold suggestions. */
+	flagConfidence?: Record<Flag, number>;
 	flags: Record<Flag, boolean>;
 };
 
@@ -41,17 +44,24 @@ export function decide(
 		answer.category.label === NONE_FIT || !categoriesOn
 			? undefined
 			: categories.find((c) => c.name === answer.category.label);
-	const confidence = answer.category.confidence;
-	const confident = confidence >= threshold;
+	const confident = meetsConfidenceThreshold(
+		answer.category.confidence,
+		threshold,
+	);
 	return {
 		noneFit: answer.category.label === NONE_FIT && categoriesOn,
 		categoryId: match && confident ? match.id : null,
 		suggestedCategoryId: match ? match.id : null,
-		confidence,
+		confidence: answer.category.confidence,
+		flagConfidence: answer.flags,
 		flags: {
-			transfer: categoriesOn && answer.flags.transfer >= threshold,
-			reimbursement: categoriesOn && answer.flags.reimbursement >= threshold,
-			income: answer.flags.income >= threshold,
+			transfer:
+				categoriesOn &&
+				meetsConfidenceThreshold(answer.flags.transfer, threshold),
+			reimbursement:
+				categoriesOn &&
+				meetsConfidenceThreshold(answer.flags.reimbursement, threshold),
+			income: meetsConfidenceThreshold(answer.flags.income, threshold),
 		},
 	};
 }

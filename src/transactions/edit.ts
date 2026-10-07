@@ -27,8 +27,11 @@ export type Edit = {
 	excluded: boolean;
 	/** Whether this transaction is income; a person can correct Jev's suggestion. */
 	income: boolean;
+	/** The value shown when the person opened the form, so an unchanged post is not a new answer. */
+	incomeWas?: boolean;
 	/** Whether a bank credit was reviewed as a refund or other non-income credit. */
 	creditReviewed: boolean;
+	creditReviewedWas?: boolean;
 	/** False when the edit form omitted the credit-review control for an income credit. */
 	creditReviewedProvided?: boolean;
 	kind?: "subscription" | "one_off" | "bill" | "transfer" | null;
@@ -117,6 +120,12 @@ export function parseEdit(
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
 	const creditReviewed = form.get("creditReviewed") === "1";
+	const incomeWas = form.has("income_was")
+		? form.get("income_was") === "1"
+		: undefined;
+	const creditReviewedWas = form.has("creditReviewed_was")
+		? form.get("creditReviewed_was") === "1"
+		: undefined;
 	const creditReviewedProvided =
 		form.get("creditReviewedVisible") === "1" || form.has("creditReviewed");
 
@@ -152,7 +161,9 @@ export function parseEdit(
 			note: note || null,
 			excluded,
 			income,
+			incomeWas,
 			creditReviewed,
+			creditReviewedWas,
 			creditReviewedProvided,
 			kind: form.has("kind") ? kind : undefined,
 			forPersonId: form.has("for_person_id") ? forPersonId : undefined,

@@ -65,7 +65,10 @@ import type { HouseholdPerson } from "../views/household-people";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
-import { SuggestedCategoryChip } from "../views/maybe-category";
+import {
+	maybeIncomeVisible,
+	SuggestedCategoryChip,
+} from "../views/maybe-category";
 import {
 	KEEP_VALUE,
 	NameChoices,
@@ -1057,6 +1060,14 @@ type SheetProps = {
 	still?: boolean;
 };
 
+function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
+	return (
+		posted.income === tx.income &&
+		posted.creditReviewed === tx.creditReviewedByUser &&
+		maybeIncomeVisible(tx)
+	);
+}
+
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
 function EditSheet({
 	tx,
@@ -1090,6 +1101,7 @@ function EditSheet({
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
+	const showIncomeGuess = showEditIncomeGuess(tx, values);
 	const ruleCategory = categories.find(
 		(cat) => cat.id === tx.merchantRuleCategoryId,
 	);
@@ -1204,6 +1216,11 @@ function EditSheet({
 					type="hidden"
 					name="displayed_name_guess"
 					value={tx.nameSuggested ? tx.displayName : ""}
+				/>
+				<input
+					type="hidden"
+					name="income_was"
+					value={(values.incomeWas ?? values.income) ? "1" : "0"}
 				/>
 				{!purchase && (
 					<>
@@ -1429,7 +1446,7 @@ function EditSheet({
 							</>
 						)}
 					</legend>
-					<div class="flex flex-wrap gap-2">
+					<div class="flex flex-wrap items-start gap-2">
 						{!purchase &&
 							tx.categorySource !== "jev" &&
 							tx.maybeCategoryName &&
@@ -1590,14 +1607,37 @@ function EditSheet({
 							name="income"
 							value="1"
 							checked={values.income}
+							dashed={showIncomeGuess}
+							describedBy={
+								showIncomeGuess
+									? `income-suggestion-confidence-${tx.id}`
+									: undefined
+							}
 						>
 							Count as income
 						</Chip>
 					</div>
+					{showIncomeGuess && (
+						<p
+							id={`income-suggestion-confidence-${tx.id}`}
+							class="flex flex-wrap items-center gap-x-2 text-sm text-muted"
+						>
+							Tally's guess · {Math.round((tx.incomeConfidence ?? 0) * 100)}%
+							sure
+							<WhyLink section="categorization" topic="income" />
+						</p>
+					)}
 				</div>
 				{tx.amountCents < 0 && (
 					<div class="flex flex-col gap-2 border-t border-rule pt-3">
 						<input type="hidden" name="creditReviewedVisible" value="1" />
+						<input
+							type="hidden"
+							name="creditReviewed_was"
+							value={
+								(values.creditReviewedWas ?? values.creditReviewed) ? "1" : "0"
+							}
+						/>
 						{!tx.creditReviewed && !values.income && (
 							<p class="text-sm text-muted">
 								This bank credit is held out of spending until you identify it.
@@ -1851,7 +1891,9 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		note: tx.note,
 		excluded: tx.excluded,
 		income: tx.income,
-		creditReviewed: tx.income ? false : tx.creditReviewed,
+		incomeWas: tx.income,
+		creditReviewed: tx.creditReviewedByUser,
+		creditReviewedWas: tx.creditReviewedByUser,
 		refundOfId: tx.refundOfId ?? null,
 		kind: tx.kind,
 		forPersonId: tx.forPersonId,
@@ -2158,7 +2200,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
 			income: form.get("income") === "1",
+			incomeWas: form.get("income_was") === "1",
 			creditReviewed: form.get("creditReviewed") === "1",
+			creditReviewedWas: form.get("creditReviewed_was") === "1",
 			creditReviewedProvided:
 				form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
 			refundOfId,
@@ -2285,7 +2329,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 		const values: Edit = {
 			categoryId: tx.categoryId,
 			income: tx.income,
-			creditReviewed: tx.creditReviewed,
+			creditReviewed: tx.creditReviewedByUser,
 			alwaysForMerchant:
 				tx.merchantRuleCategoryId !== null &&
 				tx.merchantRuleCategoryId === tx.categoryId,

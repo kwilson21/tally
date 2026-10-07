@@ -1200,6 +1200,44 @@ describe("syncItem", () => {
 		}
 	});
 
+	it("clears Jev flag confidences when either Plaid amount update path changes the amount", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: -30 })] })),
+			),
+		);
+		const tx = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number }>();
+		for (const path of ["added", "modified"] as const) {
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+			)
+				.bind(tx?.id)
+				.run();
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(
+						page({
+							[path]: [transaction({ amount: path === "added" ? -31 : -32 })],
+						}),
+					),
+				),
+			);
+			expect(
+				await env.DB.prepare(
+					"SELECT income_confidence, transfer_confidence FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first(),
+			).toEqual({ income_confidence: null, transfer_confidence: null });
+		}
+	});
+
 	it("keeps Jev ownership after a note-only save so a Plaid amount change reopens review", async () => {
 		const id = await addItem();
 		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
@@ -1229,7 +1267,7 @@ describe("syncItem", () => {
 				note: "synthetic note",
 				excluded: false,
 				income: false,
-				creditReviewed: true,
+				creditReviewed: false,
 			},
 			"synthetic",
 		);
@@ -2783,7 +2821,11 @@ describe("syncItem", () => {
 			 * A person marks the credit income, or reviews it as a refund, in the edit panel. The panel
 			 * sends the exclude toggle as it shows it, so `excluded` says whether it was left on.
 			 */
-			const decide = async (choice: "income" | "refund", excluded = false) =>
+			const decide = async (
+				choice: "income" | "refund",
+				excluded = false,
+				creditReviewed = choice === "refund",
+			) =>
 				saveEdit(
 					env.DB,
 					await rowId(),
@@ -2794,7 +2836,7 @@ describe("syncItem", () => {
 						note: null,
 						excluded,
 						income: choice === "income",
-						creditReviewed: choice === "refund",
+						creditReviewed,
 					},
 					"synthetic-person",
 				);
@@ -3094,7 +3136,7 @@ describe("syncItem", () => {
 					// Tally reviewed it (no person), so a save that keeps it reviewed changes nothing.
 					"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = NULL WHERE plaid_transaction_id = 'transaction-1'",
 				).run();
-				await decide("refund", true);
+				await decide("refund", true, false);
 				expect(await exclusion()).toEqual({
 					excluded: 1,
 					excluded_source: "plaid",

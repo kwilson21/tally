@@ -20,6 +20,11 @@ export function plaidSetIncomeSql(alias: string): string {
 	return `(${alias}.flag_income = 1 AND ${alias}.income_source IS NULL AND ${alias}.plaid_category = '${PLAID_INCOME_CATEGORY}')`;
 }
 
+/** A settled income answer from a person, Jev, or Plaid. */
+export function hasIncomeAnswerSql(alias: string): string {
+	return `COALESCE((${personChoseIncomeSql(alias)} OR ${alias}.income_source = 'jev' OR ${plaidSetIncomeSql(alias)}), 0)`;
+}
+
 /**
  * The new `flag_income` when sync updates a transaction, given SQL for the category and amount Plaid
  * just sent. A person's choice always wins. Otherwise money coming in (a negative amount, Plaid's sign

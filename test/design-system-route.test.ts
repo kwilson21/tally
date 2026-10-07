@@ -493,10 +493,16 @@ describe("GET /design-system in the demo", () => {
 			specimens(html).find((t) => t.includes('id="maybe-category"')) ?? "";
 		expect(tag).toContain('data-ds-tier="visual"');
 		expect(tag).toContain(
-			'data-ds-components="MaybeCategory SuggestedCategoryChip"',
+			'data-ds-components="MaybeCategory MaybeIncome SuggestedCategoryChip Chip WhyLink"',
 		);
 		expect(html).toContain("Maybe new: Pet Care");
 		expect(html).toContain("Tally&#39;s guess");
+		const specimen =
+			html.split('id="maybe-category"')[1]?.split("</section>")[0] ?? "";
+		expect(specimen).toMatch(/<div class="flex flex-wrap items-start gap-3">/);
+		expect(specimen).toMatch(
+			/<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
+		);
 	});
 
 	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {

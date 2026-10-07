@@ -27,7 +27,7 @@ const row = (id: number) =>
 	db
 		.prepare(
 			`SELECT amount_cents, credit_reviewed, category_id, category_source, category_confidence, jev_category_id,
-				flag_transfer, flag_reimbursement, flag_income, excluded, excluded_source, updated_by
+				flag_transfer, flag_reimbursement, flag_income, income_confidence, transfer_confidence, excluded, excluded_source, updated_by
 			FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
@@ -397,6 +397,62 @@ describe("saveJevResult", () => {
 	it("accepts Jev's confident income classification for a negative payroll credit", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: false, reimbursement: false, income: true },
+				flagConfidence: { income: 0.85 },
+			}),
+		);
+		expect(await row(id)).toMatchObject({
+			flag_income: 1,
+			income_confidence: null,
+		});
+		expect(
+			await db
+				.prepare("SELECT income_source FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ income_source: "jev" });
+	});
+
+	it("keeps a below-threshold income guess without counting the credit as income", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: EATING_OUT,
+				confidence: 0.91,
+				flags: { transfer: false, reimbursement: false, income: false },
+				flagConfidence: { income: 0.71, transfer: 0.23 },
+			}),
+		);
+		expect(await row(id)).toMatchObject({
+			flag_income: 0,
+			income_confidence: 0.71,
+			transfer_confidence: 0.23,
+			credit_reviewed: 0,
+		});
+	});
+
+	it("does not keep the income suggestion when Spot paychecks is off", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
 			.prepare("UPDATE transactions SET amount_cents = -1200 WHERE id = ?")
 			.bind(id)
 			.run();
@@ -407,15 +463,38 @@ describe("saveJevResult", () => {
 				categoryId: null,
 				confidence: 0.5,
 				flags: { transfer: false, reimbursement: false, income: true },
+				flagConfidence: { income: 0.95 },
+			}),
+			{ switches: { income: false } },
+		);
+		expect(await row(id)).toMatchObject({
+			flag_income: 0,
+			income_confidence: null,
+		});
+	});
+
+	it("keeps Plaid's income mark when Jev disagrees", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, flag_income = 1, plaid_category = 'INCOME' WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveJevResult(
+			db,
+			id,
+			decision({
+				categoryId: null,
+				confidence: 0.5,
+				flags: { transfer: false, reimbursement: false, income: false },
+				flagConfidence: { income: 0.12 },
 			}),
 		);
-		expect(await row(id)).toMatchObject({ flag_income: 1 });
-		expect(
-			await db
-				.prepare("SELECT income_source FROM transactions WHERE id = ?")
-				.bind(id)
-				.first(),
-		).toEqual({ income_source: "jev" });
+		expect(await row(id)).toMatchObject({
+			flag_income: 1,
+			income_confidence: null,
+		});
 	});
 
 	it("preserves a legacy income choice without a recorded source", async () => {
