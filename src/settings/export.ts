@@ -2,7 +2,7 @@ import { merchantColumnSql } from "../db/merchant-key";
 import { tidyName } from "../transactions/tidy-name";
 
 const EXPORT_COLUMNS = {
-	categories: "id, name, icon, color, sort_order, archived",
+	categories: "id, name, icon, color, sort_order, archived, archived_on",
 	category_suggestions: "id, name, status, created_at, decided_at",
 	budget_amounts: "category_id, effective_month, amount_cents",
 	merchants:

@@ -46,21 +46,23 @@ export function MonthNavigation({
 	firstMonth: string;
 	currentMonth: string;
 }) {
-	const count =
-		(Number(currentMonth.slice(0, 4)) - Number(firstMonth.slice(0, 4))) * 12 +
-		Number(currentMonth.slice(5, 7)) -
-		Number(firstMonth.slice(5, 7));
 	const firstRenderedMonth =
-		count >= 35 ? monthsBefore(currentMonth, 35) : firstMonth;
+		month < monthsBefore(currentMonth, 35)
+			? monthsBefore(month, 35)
+			: firstMonth > monthsBefore(currentMonth, 35)
+				? firstMonth
+				: monthsBefore(currentMonth, 35);
+	const lastRenderedMonth =
+		month < monthsBefore(currentMonth, 35) ? month : currentMonth;
 	const renderedCount =
-		(Number(currentMonth.slice(0, 4)) -
+		(Number(lastRenderedMonth.slice(0, 4)) -
 			Number(firstRenderedMonth.slice(0, 4))) *
 			12 +
-		Number(currentMonth.slice(5, 7)) -
+		Number(lastRenderedMonth.slice(5, 7)) -
 		Number(firstRenderedMonth.slice(5, 7));
 	const months = Array.from(
-		{ length: Math.max(0, renderedCount) + 1 },
-		(_, index) => monthsBefore(currentMonth, renderedCount - index),
+		{ length: Math.min(36, Math.max(0, renderedCount) + 1) },
+		(_, index) => monthsBefore(lastRenderedMonth, renderedCount - index),
 	);
 	const previous = month > firstMonth ? monthsBefore(month, 1) : undefined;
 	const next = month < currentMonth ? monthsBefore(month, -1) : undefined;
@@ -108,6 +110,14 @@ export function MonthNavigation({
 					class="mt-1 inline-flex min-h-11 items-center text-sm text-muted no-underline"
 				>
 					Earlier
+				</a>
+			)}
+			{lastRenderedMonth < currentMonth && (
+				<a
+					href={`/?month=${monthsBefore(lastRenderedMonth, -1)}`}
+					class="mt-1 inline-flex min-h-11 items-center text-sm text-muted no-underline"
+				>
+					Later
 				</a>
 			)}
 		</div>

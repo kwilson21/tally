@@ -124,13 +124,11 @@ async function renderHome(
 			: currentMonth;
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));
 	const notBudgeted = data.categories.filter((cat) => {
-		if (
-			budgeted.has(cat.id) ||
-			(!current &&
-				!data.transactions.some((t) => t.categoryId === cat.id && !t.income))
-		)
-			return false;
-		return current ? !cat.archived : true;
+		if (budgeted.has(cat.id)) return false;
+		const hasSpending = data.transactions.some(
+			(t) => t.categoryId === cat.id && !t.income,
+		);
+		return current ? !cat.archived || hasSpending : hasSpending;
 	});
 	// Focus goes to the row asked for; if it isn't a link any more (archived on another screen while
 	// its sheet was open), to the Budget heading, so focus is never lost.
@@ -283,6 +281,19 @@ async function renderHome(
 										<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
 										<ul class="divide-y divide-rule">
 											{notBudgeted.map((cat) => {
+												if (cat.archived) {
+													return (
+														<li class="flex min-h-11 items-center gap-4 py-2 text-ink">
+															<CategoryIcon icon={cat.icon} color={cat.color} />
+															<span class="min-w-0 flex-1 truncate text-lg">
+																{cat.name}
+															</span>
+															<span class="text-right text-lg">
+																{amount(spent(cat.id))}
+															</span>
+														</li>
+													);
+												}
 												const href = `/budget/${cat.id}`;
 												return (
 													<li>

@@ -144,6 +144,27 @@ describe("categoryNames", () => {
 	});
 });
 
+describe("category archive dates", () => {
+	it("sets the archive date and clears it when the category is restored", async () => {
+		await setArchived(db, 5, true, "2026-09-15");
+		expect(
+			(
+				await db
+					.prepare("SELECT archived_on FROM categories WHERE id = 5")
+					.first<{ archived_on: string }>()
+			)?.archived_on,
+		).toBe("2026-09-15");
+		await setArchived(db, 5, false, "2026-10-01");
+		expect(
+			(
+				await db
+					.prepare("SELECT archived_on FROM categories WHERE id = 5")
+					.first<{ archived_on: string | null }>()
+			)?.archived_on,
+		).toBeNull();
+	});
+});
+
 describe("an archived category on Home", () => {
 	const onHome = async (month: string) =>
 		(await loadMonth(db, month)).categories.map((c) => c.name);

@@ -869,7 +869,12 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
 	const { category } = await find(c);
 	if (!category || category.archived) return gone(c);
-	await setArchived(c.env.DB, category.id, true);
+	await setArchived(
+		c.env.DB,
+		category.id,
+		true,
+		await householdToday(c.env.DB),
+	);
 	return done(
 		c,
 		`Archived ${category.name}`,
@@ -884,7 +889,14 @@ settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 	if (!category?.archived) return gone(c);
 	const problem = restoreProblem(all);
 	if (problem) return renderSettings(c, { restoreError: problem, status: 422 });
-	if (!(await setArchived(c.env.DB, category.id, false))) {
+	if (
+		!(await setArchived(
+			c.env.DB,
+			category.id,
+			false,
+			await householdToday(c.env.DB),
+		))
+	) {
 		// Someone restored it a moment earlier, or the list filled up.
 		const now = (await find(c)).category;
 		if (!now?.archived) return gone(c);

@@ -228,7 +228,15 @@ describe("data exports", () => {
 			expect(data[table], table).toBeInstanceOf(Array);
 		}
 		const exportedColumns = {
-			categories: ["archived", "color", "icon", "id", "name", "sort_order"],
+			categories: [
+				"archived",
+				"archived_on",
+				"color",
+				"icon",
+				"id",
+				"name",
+				"sort_order",
+			],
 			category_suggestions: [
 				"created_at",
 				"decided_at",

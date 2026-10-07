@@ -41,7 +41,7 @@ export async function loadMonth(
 	// db.batch()'s return type is D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess
 	// treats each destructured element as possibly undefined; the query list above guarantees all three.
 	const [categories, amounts, transactions] = (await db.batch([
-		// Keep archived categories with counted spending or a budget that applied to this month.
+		// An archived category's budget applied only if it was active on some day in the month.
 		db
 			.prepare(
 				`SELECT id, name, icon, color, archived FROM categories c
@@ -49,15 +49,19 @@ export async function loadMonth(
 					SELECT 1 FROM transactions t
 					${COUNTED_JOINS}
 					WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND ${COUNTED_SPENDING}
-				 ) OR (?2 = 1 AND EXISTS (
+				 ) OR (?2 = 1 AND (archived_on IS NULL OR archived_on >= (?1 || '-01')) AND EXISTS (
 					SELECT 1 FROM budget_amounts ba WHERE ba.category_id = c.id AND ba.effective_month <= ?1
 				 ))
 				 ORDER BY sort_order, name`,
 			)
 			.bind(month, includeArchivedBudgets ? 1 : 0),
-		db.prepare(
-			"SELECT category_id AS categoryId, effective_month AS effectiveMonth, amount_cents AS amountCents FROM budget_amounts",
-		),
+		db
+			.prepare(
+				`SELECT ba.category_id AS categoryId, ba.effective_month AS effectiveMonth, ba.amount_cents AS amountCents
+				 FROM budget_amounts ba JOIN categories c ON c.id = ba.category_id
+				 WHERE c.archived = 0 OR (?2 = 1 AND c.archived_on IS NOT NULL AND c.archived_on >= (?1 || '-01'))`,
+			)
+			.bind(month, includeArchivedBudgets ? 1 : 0),
 		db
 			.prepare(
 				`SELECT ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income,

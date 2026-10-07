@@ -41,6 +41,57 @@ beforeAll(async () => {
 });
 
 describe("loadMonth", () => {
+	it("keeps archived budgets only from months the category was active, or where it had spending", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (41, 'Before no spend', 'tag', 'cat-blue', 41), (42, 'Before with spend', 'tag', 'cat-blue', 42), (43, 'During', 'tag', 'cat-blue', 43), (44, 'After', 'tag', 'cat-blue', 44), (45, 'Restored', 'tag', 'cat-blue', 45)",
+			),
+			db.prepare(
+				"INSERT INTO budget_amounts VALUES (41, '2026-09', 1000), (42, '2026-09', 2000), (43, '2026-09', 3000), (44, '2026-09', 4000), (45, '2026-09', 5000)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id) VALUES (1, '2026-09-12', 500, 'BEFORE SPEND', 42)",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-08-31' WHERE id IN (41, 42)",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-09-15' WHERE id = 43",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-10-01' WHERE id = 44",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-08-31' WHERE id = 45",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 0, archived_on = NULL WHERE id = 45",
+			),
+		]);
+		const data = await loadMonth(db, "2026-09", true);
+		const byId = new Map(
+			data.categories.map((category) => [category.id, category]),
+		);
+		expect(byId.has(41)).toBe(false);
+		expect(byId.get(42)).toMatchObject({ id: 42, archived: true });
+		expect(byId.has(43)).toBe(true);
+		expect(byId.has(44)).toBe(true);
+		expect(byId.get(45)).toMatchObject({ id: 45, archived: false });
+		const budgeted = new Set(data.amounts.map((amount) => amount.categoryId));
+		expect(budgeted.has(41)).toBe(false);
+		expect(budgeted.has(42)).toBe(false);
+		expect(budgeted.has(43)).toBe(true);
+		expect(budgeted.has(44)).toBe(true);
+		expect(budgeted.has(45)).toBe(true);
+		await db.batch([
+			db.prepare("DELETE FROM transactions WHERE raw_name = 'BEFORE SPEND'"),
+			db.prepare(
+				"DELETE FROM budget_amounts WHERE category_id BETWEEN 41 AND 45",
+			),
+			db.prepare("DELETE FROM categories WHERE id BETWEEN 41 AND 45"),
+		]);
+	});
+
 	it("returns only counted transactions for the month", async () => {
 		const data = await loadMonth(db, "2026-09");
 		const amounts = data.transactions

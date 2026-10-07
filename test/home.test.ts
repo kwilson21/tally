@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { budgetForMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { setBudget } from "../src/db/budgets";
@@ -87,7 +87,7 @@ describe("GET / with the demo seed", () => {
 		).run();
 		const before = (await homeAt("2026-09")).html;
 		await env.DB.prepare(
-			"UPDATE categories SET archived = 1 WHERE id = 900",
+			"UPDATE categories SET archived = 1, archived_on = '2026-10-01' WHERE id = 900",
 		).run();
 		const after = (await homeAt("2026-09")).html;
 		const endedAmount = (html: string) =>
@@ -99,6 +99,51 @@ describe("GET / with the demo seed", () => {
 			before.includes("border-ok text-ok") ===
 				after.includes("border-ok text-ok"),
 		).toBe(true);
+	});
+
+	it("shows current spending from an archived category without a budget action", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO categories (id, name, icon, color, sort_order, archived, archived_on) VALUES (901, 'Old category', 'tag', 'cat-blue', 90, 1, '2026-01-01')",
+			),
+			env.DB.prepare("INSERT INTO budget_amounts VALUES (901, ?, 3000)").bind(
+				monthsBefore(month, 1),
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id) VALUES (1, ?, 1200, 'OLD CATEGORY SPEND', 901)",
+			).bind(today),
+		]);
+		const { html } = await home();
+		expect(html).toContain("Old category");
+		expect(html).toContain("$12");
+		expect(html).not.toContain('href="/budget/901"');
+		expect(html).not.toContain(
+			'Old category</span><span class="text-accent">Add a budget',
+		);
+	});
+
+	it("keeps the finished amount equal to what Home showed at the end of that month", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date("2026-09-30T16:00:00-04:00"));
+			await resetDemo(env.DB, "2026-09-30");
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare("DELETE FROM bills"),
+			]);
+			const whileCurrent = await home();
+			vi.setSystemTime(new Date("2026-10-01T00:01:00-04:00"));
+			const finished = await homeAt("2026-09");
+			const amount = (html: string) =>
+				html.match(/<p class="[^"]*text-6xl[^"]*">([^<]+)<\/p>/)?.[1];
+			expect(whileCurrent.html).toContain("Safe to spend");
+			expect(finished.html).toContain("September ended");
+			expect(amount(finished.html)).toBe(amount(whileCurrent.html));
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("stamps $86 under, then $42 over when unbudgeted spending grows", async () => {
@@ -170,6 +215,50 @@ describe("GET / with the demo seed", () => {
 		expect((await homeAt("0100-01")).html).toContain("January 0100 ended");
 		expect((await home()).html.length).toBeLessThan(100000);
 		expect(current).toBe(todayIn(DEFAULT_TIME_ZONE).slice(0, 7));
+	});
+
+	it("windows the bounded month strip around an older viewed month", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) SELECT id, '0100-01-01', 100, 'Ancient cash' FROM accounts ORDER BY id LIMIT 1",
+		).run();
+		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		for (const viewed of [
+			current,
+			monthsBefore(current, 12),
+			monthsBefore(current, 36),
+			monthsBefore(current, 100),
+		]) {
+			const { html } = await homeAt(viewed);
+			const nav =
+				html.match(/<nav aria-label="Months"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ??
+				"";
+			const links = [
+				...nav.matchAll(
+					/<a href="\/?\?month=(\d{4}-\d{2})"([^>]*)>([\s\S]*?)<\/a>/g,
+				),
+			];
+			expect(links).toHaveLength(36);
+			expect(links.map((link) => link[1])).toContain(viewed);
+			expect(links.find((link) => link[1] === viewed)?.[2]).toContain(
+				'aria-current="page"',
+			);
+			const firstDot = links[0]?.[1];
+			const lastDot = links.at(-1)?.[1];
+			const olderThanWindow = viewed < monthsBefore(current, 35);
+			expect(firstDot).toBe(
+				olderThanWindow ? monthsBefore(viewed, 35) : monthsBefore(current, 35),
+			);
+			expect(lastDot).toBe(olderThanWindow ? viewed : current);
+			expect(html).toContain(
+				`href="/?month=${monthsBefore(firstDot ?? viewed, 1)}"`,
+			);
+			if (olderThanWindow) {
+				expect(html).toContain(">Later</a>");
+				expect(html).toContain(`href="/?month=${monthsBefore(viewed, -1)}"`);
+			} else {
+				expect(html).not.toContain(">Later</a>");
+			}
+		}
 	});
 
 	it("fades the unavailable arrows on this month and the first month with transactions", async () => {
