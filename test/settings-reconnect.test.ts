@@ -33,6 +33,122 @@ const scheduledWith = handler as unknown as {
 };
 
 describe("reconnect reminder schedule", () => {
+	it("uses household local dates for the three day cadence across UTC boundaries and DST", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email) VALUES ('dana@example.com')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status, reconnect_emailed_at) VALUES (905, 'Chase', X'', 'dana@example.com', 'needs_attention', '2026-03-07 04:30:00')",
+		).run();
+		const sent: string[] = [];
+		const sendAt = async (date: string) =>
+			runReconnectReminders(
+				{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+				async () => {
+					sent.push(date);
+					return new Response("{}");
+				},
+				new Date(date),
+			);
+		await sendAt("2026-03-09T13:00:00Z"); // Mar 6 23:30 EST to Mar 9 09:00 EDT: three local dates.
+		expect(sent).toHaveLength(1);
+		await env.DB.prepare(
+			"UPDATE plaid_items SET reconnect_emailed_at = '2026-10-30 04:00:00' WHERE id = 905",
+		).run();
+		await sendAt("2026-11-01T13:00:00Z"); // Two local dates across the fall-back boundary.
+		expect(sent).toHaveLength(1);
+		await sendAt("2026-11-02T13:00:00Z");
+		expect(sent).toHaveLength(2);
+	});
+
+	it("claims before sending so a failed claim cannot cause duplicate mail, and releases a wholly failed claim", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email) VALUES ('dana@example.com')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (906, 'Chase', X'', 'dana@example.com', 'needs_attention')",
+		).run();
+		let failClaim = true;
+		const db = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						const statement = target.prepare(sql);
+						if (sql.startsWith("UPDATE plaid_items SET reconnect_emailed_at"))
+							return new Proxy(statement, {
+								get(inner, key) {
+									if (key === "bind")
+										return (...args: unknown[]) =>
+											new Proxy(inner.bind(...args), {
+												get(bound, method) {
+													if (method === "run")
+														return async () => {
+															if (failClaim) {
+																failClaim = false;
+																throw new Error("D1 unavailable");
+															}
+															return bound.run();
+														};
+													const result = Reflect.get(bound, method);
+													return typeof result === "function"
+														? result.bind(bound)
+														: result;
+												},
+											});
+									const result = Reflect.get(inner, key);
+									return typeof result === "function"
+										? result.bind(inner)
+										: result;
+								},
+							});
+						return statement;
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const sends: string[] = [];
+		const production = { DB: db, DEMO: "false", RESEND_API_KEY: "test-key" };
+		await expect(
+			runReconnectReminders(
+				production as never,
+				async () => {
+					sends.push("first");
+					return new Response("{}");
+				},
+				new Date("2026-10-07T13:00:00Z"),
+			),
+		).rejects.toThrow();
+		await runReconnectReminders(
+			production as never,
+			async () => {
+				sends.push("second");
+				return new Response("{}");
+			},
+			new Date("2026-10-08T13:00:00Z"),
+		);
+		expect(sends).toEqual(["second"]);
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (909, 'Wells Fargo', X'', 'dana@example.com', 'needs_attention')",
+		).run();
+		await runReconnectReminders(
+			{
+				...production,
+				DB: env.DB,
+				EMAIL: {
+					send: async () => {
+						throw new Error("fallback unavailable");
+					},
+				},
+			} as never,
+			async () => new Response("failed", { status: 503 }),
+			new Date("2026-10-09T13:00:00Z"),
+		);
+		const row = await env.DB.prepare(
+			"SELECT reconnect_emailed_at FROM plaid_items WHERE id = 909",
+		).first<{ reconnect_emailed_at: string | null }>();
+		expect(row?.reconnect_emailed_at).toBeNull();
+	});
 	it("routes the 10:00 Worker invocation through the Resend fetch boundary", async () => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (904, 'Chase', X'', 'dana@example.com', 'needs_attention')",
@@ -219,6 +335,50 @@ describe("bank sign-in reminder Settings", () => {
 			.bind("dana@example.com")
 			.first<{ removed_at: string | null }>();
 		expect(row?.removed_at).toBeNull();
+	});
+
+	it("Remove hides a known address from the next pass and quietly rejects an unknown one", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		const removed = await post("/settings/household-members/remove", {
+			email: "dana@example.com",
+		});
+		expect(removed.res.status).toBe(200);
+		const unknown = await post("/settings/household-members/remove", {
+			email: "missing@example.com",
+		});
+		expect(unknown.res.status).toBe(404);
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (907, 'Chase', X'', 'dana@example.com', 'needs_attention')",
+		).run();
+		const sent: string[] = [];
+		await runReconnectReminders(
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			async (_url, init) => {
+				sent.push(String(init?.body));
+				return new Response("{}");
+			},
+			new Date("2026-10-07T13:00:00Z"),
+		);
+		expect(sent).toHaveLength(0);
+	});
+
+	it("does not email members whose last sign-in was over 90 days ago", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email, last_seen_at) VALUES ('old@example.com', '2026-07-08 12:59:59')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (908, 'Chase', X'', 'old@example.com', 'needs_attention')",
+		).run();
+		const sent: string[] = [];
+		await runReconnectReminders(
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			async (_url, init) => {
+				sent.push(String(init?.body));
+				return new Response("{}");
+			},
+			new Date("2026-10-07T13:00:00Z"),
+		);
+		expect(sent).toHaveLength(0);
 	});
 
 	it("keeps the reminder pass below D1's 1,000 statement invocation limit", async () => {

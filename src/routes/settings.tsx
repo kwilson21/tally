@@ -997,6 +997,12 @@ settings.post("/settings/household-members/remove", async (c) => {
 		.toLowerCase();
 	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
 		return c.text("Choose an address to remove.", 400);
+	const member = await c.env.DB.prepare(
+		"SELECT 1 FROM household_members WHERE email = ?",
+	)
+		.bind(email)
+		.first();
+	if (!member) return c.text("Address not found.", 404);
 	await removeHouseholdMember(c.env.DB, email);
 	return done(
 		c,
