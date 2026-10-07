@@ -65,6 +65,27 @@ describe("Home's budget rows", () => {
 		expect(textOf(html)).toContain("Travel Add a budget");
 	});
 
+	it("shows counted spending under a Not budgeted category and leaves an empty one unchanged", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		await env.DB.prepare(
+			"DELETE FROM categories WHERE name='No spending'",
+		).run();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('No spending', 'tag', 'cat-blue', 9)",
+			),
+			env.DB.prepare("DELETE FROM budget_amounts WHERE category_id = 4"),
+			env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source)
+				VALUES (901, 1, ?, 6000, 'KIDS', 4, 'user')`).bind(`${month}-05`),
+		]);
+		const { html } = await get("/");
+		expect(textOf(html)).toContain("Kids $60 spent");
+		expect(textOf(html)).toContain("No spending Add a budget");
+		expect(textOf(html)).not.toContain("No spending $0 spent");
+	});
+
 	it("show an archived category with spending, but not as a link, since it can't be budgeted", async () => {
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE id = 2",
@@ -86,6 +107,70 @@ describe("Home's budget rows", () => {
 });
 
 describe("GET /budget/:id", () => {
+	it("links to exactly the category and month transactions that count in the budget", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const nextMonth = monthsBefore(month, -1);
+		const counted = [1000, 2000, 500, 600, 700, 800, 900, 100, 4000];
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			...counted.map((cents, index) =>
+				env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded)
+					VALUES (?, 1, ?, ?, ?, 1, 'user', ?)`).bind(
+					910 + index,
+					index === 8
+						? `${nextMonth}-02`
+						: `${month}-${String(index + 1).padStart(2, "0")}`,
+					cents,
+					index === 8 ? "LATE BILL" : `COUNTED ${index + 1}`,
+					index === 8 ? 1 : 0,
+				),
+			),
+			env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded)
+				VALUES (919, 1, ?, 3000, 'EXCLUDED', 1, 'user', 1)`).bind(
+				`${month}-10`,
+			),
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (910, 'Kids activity', 4000, 1, 'monthly', 1, 'LATE BILL')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (id, bill_id, period, transaction_id, matched_by, status) VALUES (910, 910, ?, 918, 'user', 'linked')",
+			).bind(month),
+		]);
+		const { html: sheet } = await get("/budget/1");
+		expect(sheet).toMatch(
+			new RegExp(
+				`<a[^>]*href="/transactions\\?category=1&amp;month=${month}&amp;show=spending"[^>]*>9 transactions`,
+			),
+		);
+		const { html: list } = await get(
+			`/transactions?month=${month}&category=1&show=spending`,
+		);
+		const rows = [
+			...list.matchAll(/<li data-transaction="(\d+)">([\s\S]*?)<\/li>/g),
+		];
+		expect(rows).toHaveLength(9);
+		const listedCents = rows.reduce((sum, row) => {
+			const text =
+				row[2]?.match(/shrink-0 text-lg">([^<]+)<\/span>/)?.[1] ?? "";
+			return sum + Math.round(Number(text.replace(/[$,]/g, "")) * 100);
+		}, 0);
+		expect(listedCents).toBe(counted.reduce((sum, cents) => sum + cents, 0));
+		expect(rows.map((row) => row[1])).toContain("918");
+		expect(rows.map((row) => row[1])).not.toContain("919");
+		expect(list).not.toContain("EXCLUDED");
+		expect(textOf(sheet)).toContain("$106.00 spent");
+	});
+
+	it("does not show a transactions button when none count", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+		]);
+		const { html } = await get("/budget/1");
+		expect(html).not.toContain("transactions ›");
+	});
+
 	it("shows the three-month average chip in the demo budget sheet", async () => {
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.batch([

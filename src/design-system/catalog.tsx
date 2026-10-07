@@ -63,6 +63,7 @@ import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
+import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
@@ -75,6 +76,7 @@ import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TimeZoneRow } from "../views/time-zone-row";
 import { TransactionRow } from "../views/transaction-row";
+import { TransactionsButton } from "../views/transactions-button";
 import {
 	ChangeRow,
 	MonthBars,
@@ -1398,7 +1400,7 @@ function Rows() {
 				title="ProgressRow"
 				tier="visual"
 				components={["ProgressRow"]}
-				sentence="One category: icon, name, “spent of budget,” and a 4px bar with no limit marker (decision 46); over budget, the bar is full and brick, with an alert icon and how much it's over in words (“$36 over”). In the app each row opens its budget sheet; here they don't link anywhere."
+				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet; here they don't link anywhere."
 			>
 				{PROGRESS_ROWS.map((s) => (
 					<State label={s.label}>
@@ -1407,6 +1409,58 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="not-budgeted-row"
+				title="NotBudgetedRow"
+				tier="visual"
+				components={["NotBudgetedRow"]}
+				sentence="A category without a budget: counted spending appears under its name, a net refund is green, and an empty category keeps only its name and Add a budget."
+			>
+				<State label="Counted spending, a net refund and no spending">
+					<div>
+						<h3 class="text-sm text-muted">Not budgeted</h3>
+						<ul class="max-w-xl divide-y divide-rule">
+							<NotBudgetedRow
+								name="Kids"
+								icon="kids"
+								color="cat-ochre"
+								spentCents={6000}
+								href="/design-system/bottom-sheet"
+							/>
+							<NotBudgetedRow
+								name="Date Night"
+								icon="tag"
+								color="cat-blue"
+								spentCents={0}
+								href="/design-system/bottom-sheet"
+							/>
+							<NotBudgetedRow
+								name="Groceries"
+								icon="groceries"
+								color="cat-blue"
+								spentCents={-2000}
+								href="/design-system/bottom-sheet"
+							/>
+						</ul>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="transactions-button"
+				title="TransactionsButton"
+				tier="visual"
+				components={["TransactionsButton"]}
+				sentence="A 44px pill link to the counted transactions behind a budget row, shown only when there are some."
+			>
+				<State label="Nine counted transactions">
+					<div class="max-w-xl">
+						<TransactionsButton
+							href="/transactions?category=1&month=2026-10&show=spending"
+							count={9}
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="savings-goal-row"

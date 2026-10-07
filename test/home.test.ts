@@ -171,7 +171,7 @@ describe("GET / with the demo seed", () => {
 			).bind(today, today),
 		]);
 		const { html } = await home();
-		expect(html).toContain('class="text-right text-lg text-ok">+$20</span>');
+		expect(html).toContain('class="block text-sm text-ok">+$20</span>');
 		expect(html).toContain("Refunded archive");
 		expect(html).not.toContain("-$20");
 	});
