@@ -277,20 +277,30 @@ describe("cash lifecycle", () => {
 			}),
 		});
 		expect(restored.res.status).toBe(200);
-		expect(
-			await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
-				.bind(entry.id)
-				.first(),
-		).toEqual(before.parent);
-		expect(
-			(
-				await env.DB.prepare(
-					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
-				)
-					.bind(entry.id)
-					.all()
-			).results,
-		).toEqual(before.parts);
+		const restoredParent = await env.DB.prepare(
+			"SELECT * FROM transactions WHERE raw_name=? AND is_split=1 ORDER BY id DESC LIMIT 1",
+		)
+			.bind(name)
+			.first<Record<string, unknown>>();
+		const restoredParts = (
+			await env.DB.prepare(
+				"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
+			)
+				.bind(restoredParent?.id)
+				.all<Record<string, unknown>>()
+		).results;
+		const withoutIds = ({
+			id: _id,
+			parent_id: _parentId,
+			...row
+		}: Record<string, unknown>) => row;
+		expect(restoredParent).not.toBeNull();
+		expect(withoutIds(restoredParent as Record<string, unknown>)).toEqual(
+			withoutIds(before.parent as Record<string, unknown>),
+		);
+		expect(restoredParts.map(withoutIds)).toEqual(
+			(before.parts as Record<string, unknown>[]).map(withoutIds),
+		);
 	});
 
 	it("is left out of Accounts and net worth", async () => {
@@ -470,19 +480,24 @@ describe("cash lifecycle", () => {
 		expect(
 			JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}").announce,
 		).toBe("Farmers market is back.");
-		expect(
-			await env.DB.prepare(
-				"SELECT raw_name, amount_cents, date FROM transactions WHERE id=?",
-			)
-				.bind(cash?.id)
-				.first(),
-		).toMatchObject({ raw_name: "Farmers market", amount_cents: 2000 });
+		const restoredCash = await env.DB.prepare(
+			"SELECT id, raw_name, amount_cents, date FROM transactions WHERE raw_name='Farmers market' AND is_split=1 ORDER BY id DESC LIMIT 1",
+		).first<{
+			id: number;
+			raw_name: string;
+			amount_cents: number;
+			date: string;
+		}>();
+		expect(restoredCash).toMatchObject({
+			raw_name: "Farmers market",
+			amount_cents: 2000,
+		});
 		expect(
 			(
 				await env.DB.prepare(
 					"SELECT COUNT(*) n FROM transactions WHERE parent_id=?",
 				)
-					.bind(cash?.id)
+					.bind(restoredCash?.id)
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(2);
@@ -492,7 +507,7 @@ describe("cash lifecycle", () => {
 					.bind(refundId)
 					.first<{ refund_of_id: number }>()
 			)?.refund_of_id,
-		).toBe(cash?.id);
+		).toBe(restoredCash?.id);
 		expect(
 			(await request("/")).html
 				.match(/Safe to spend<\/p>\s*<p[^>]*>(.*?)<\/p>/s)?.[1]
@@ -503,7 +518,7 @@ describe("cash lifecycle", () => {
 				await env.DB.prepare(
 					"SELECT COUNT(*) n FROM bill_payments WHERE transaction_id=?",
 				)
-					.bind(cash?.id)
+					.bind(restoredCash?.id)
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(1);
@@ -525,7 +540,7 @@ describe("cash lifecycle", () => {
 		expect(
 			(
 				await env.DB.prepare("SELECT COUNT(*) n FROM transactions WHERE id=?")
-					.bind(cash?.id)
+					.bind(restoredCash?.id)
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(1);
@@ -534,7 +549,7 @@ describe("cash lifecycle", () => {
 	it("refuses expired and unknown undo tokens without changing the deleted entry", async () => {
 		const id = (
 			await env.DB.prepare(
-				"SELECT id FROM transactions WHERE raw_name='Farmers market'",
+				"SELECT id FROM transactions WHERE raw_name='Farmers market' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>()
 		)?.id;
 		const deleted = await request(`/transactions/${id}/delete`, {
@@ -580,7 +595,7 @@ describe("cash lifecycle", () => {
 	it("restores the entry but names a bill link that became unavailable", async () => {
 		const id = (
 			await env.DB.prepare(
-				"SELECT id FROM transactions WHERE raw_name='Farmers market'",
+				"SELECT id FROM transactions WHERE raw_name='Farmers market' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>()
 		)?.id;
 		const bill = await env.DB.prepare(
@@ -627,9 +642,9 @@ describe("cash lifecycle", () => {
 			`${bill?.name} payment no longer fits and was left off.`,
 		);
 		expect(
-			await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
-				.bind(id)
-				.first(),
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Farmers market' ORDER BY id DESC LIMIT 1",
+			).first(),
 		).not.toBeNull();
 		expect(
 			(

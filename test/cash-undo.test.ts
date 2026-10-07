@@ -65,6 +65,131 @@ const deleteRequest = async (id: number, db: D1Database) =>
 	);
 
 describe("cash delete undo", () => {
+	it("restores the deleted maximum id after another transaction takes it", async () => {
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account) throw new Error("cash account missing");
+		const inserted = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1250, 'Latest cash', 'test')",
+		)
+			.bind(account.id)
+			.run();
+		const originalId = Number(inserted.meta.last_row_id);
+		const token = await holdCashDelete(env.DB, originalId, "Latest cash");
+		if (!token) throw new Error("cash delete token missing");
+		const replacement = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 500, 'New cash', 'test')",
+		)
+			.bind(account.id)
+			.run();
+		expect(Number(replacement.meta.last_row_id)).toBe(originalId);
+
+		expect(await restoreCashDelete(env.DB, token)).toMatchObject({
+			name: "Latest cash",
+			alreadyRestored: false,
+		});
+		expect(
+			await env.DB.prepare("SELECT raw_name FROM transactions WHERE id=?")
+				.bind(originalId)
+				.first(),
+		).toEqual({ raw_name: "New cash" });
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name='Latest cash'",
+			).first(),
+		).toEqual({ n: 1 });
+	});
+
+	it("remaps two reused ids and keeps split, refund, and bill links intact", async () => {
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
+		).first<{ id: number }>();
+		const bank = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
+		).first<{ id: number }>();
+		const bill = await env.DB.prepare(
+			"SELECT id FROM bills WHERE active=1 AND id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
+		).first<{ id: number }>();
+		if (!account || !bank || !bill) throw new Error("undo fixture missing");
+		const purchaseInsert = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-01', 1000, 'Collision purchase', 'test')",
+		)
+			.bind(bank.id)
+			.run();
+		const purchaseId = Number(purchaseInsert.meta.last_row_id);
+		const parentInsert = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1000, 'Collision parent', 'test')",
+		)
+			.bind(account.id)
+			.run();
+		const oldParentId = Number(parentInsert.meta.last_row_id);
+		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
+			.bind(oldParentId)
+			.run();
+		const partInsert = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-06', -200, 'Collision refund', ?, ?, 'test')",
+		)
+			.bind(account.id, oldParentId, purchaseId)
+			.run();
+		const oldPartId = Number(partInsert.meta.last_row_id);
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+		)
+			.bind(bill.id, oldParentId)
+			.run();
+		const deleted = await deleteRequest(oldParentId, env.DB);
+		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
+			.undo as string;
+		const replacements = await env.DB.batch(
+			["Reuse parent id", "Reuse part id"].map((raw_name) =>
+				env.DB.prepare(
+					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 100, ?, 'test')",
+				).bind(account.id, raw_name),
+			),
+		);
+		expect(replacements.map((row) => Number(row.meta.last_row_id))).toEqual([
+			oldParentId,
+			oldPartId,
+		]);
+
+		const response = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back: "/transactions" }),
+		});
+		const parent = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE raw_name='Collision parent'",
+		).first<{ id: number }>();
+		const part = await env.DB.prepare(
+			"SELECT id, parent_id, refund_of_id FROM transactions WHERE raw_name='Collision refund'",
+		).first<{ id: number; parent_id: number; refund_of_id: number }>();
+		expect(parent?.id).not.toBe(oldParentId);
+		expect(part).toEqual({
+			id: expect.any(Number),
+			parent_id: parent?.id,
+			refund_of_id: purchaseId,
+		});
+		expect(part?.id).not.toBe(oldPartId);
+		expect(
+			await env.DB.prepare(
+				"SELECT transaction_id, status FROM bill_payments WHERE bill_id=? AND period='2026-10'",
+			)
+				.bind(bill.id)
+				.first(),
+		).toEqual({ transaction_id: parent?.id, status: "linked" });
+		expect(
+			JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Restored Collision parent.");
+		expect(response.res.headers.get("HX-Trigger")).not.toContain(
+			String(oldParentId),
+		);
+	});
+
 	it("sends the remaining server deadline computed from the stored hold time", async () => {
 		const id = await cashEntry();
 		const delayedDb = new Proxy(env.DB, {
@@ -187,10 +312,8 @@ describe("cash delete undo", () => {
 		await restoreCashDelete(env.DB, token);
 		expect(
 			await env.DB.prepare(
-				"SELECT raw_name FROM transactions WHERE parent_id=?",
-			)
-				.bind(id)
-				.first(),
+				"SELECT raw_name FROM transactions WHERE raw_name='Late split'",
+			).first(),
 		).toEqual({ raw_name: "Late split" });
 	});
 
@@ -217,7 +340,7 @@ describe("cash delete undo", () => {
 		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
 			.bind(id)
 			.run();
-		const parts = await env.DB.batch(
+		await env.DB.batch(
 			["First deleted refund", "Second deleted refund"].map((raw_name) =>
 				env.DB.prepare(
 					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-02', -400, ?, ?, ?, 'test')",
@@ -244,12 +367,12 @@ describe("cash delete undo", () => {
 		expect(
 			(
 				await env.DB.prepare(
-					"SELECT id FROM transactions WHERE refund_of_id=? ORDER BY id",
+					"SELECT raw_name FROM transactions WHERE refund_of_id=? ORDER BY id",
 				)
 					.bind(purchaseId)
 					.all()
-			).results.map((row) => row.id),
-		).toEqual([expect.any(Number), Number(parts[0]?.meta.last_row_id)]);
+			).results.map((row) => row.raw_name),
+		).toEqual(["Existing refund", "First deleted refund"]);
 	});
 
 	it.each([
@@ -337,20 +460,29 @@ describe("cash delete undo", () => {
 		const token = await holdCashDelete(env.DB, id, "Market");
 		expect(token).toBeTruthy();
 		expect(await restoreCashDelete(env.DB, token as string)).not.toBeNull();
+		const restoredParent = await env.DB.prepare(
+			"SELECT * FROM transactions WHERE note='parent note'",
+		).first<Record<string, unknown>>();
+		const restoredParts = (
+			await env.DB.prepare(
+				"SELECT * FROM transactions WHERE note='part note' ORDER BY raw_name",
+			).all<Record<string, unknown>>()
+		).results;
+		const withoutIds = ({
+			id: _id,
+			parent_id: _parentId,
+			...row
+		}: Record<string, unknown>) => row;
+		expect(restoredParent).not.toBeNull();
+		expect(withoutIds(restoredParent as Record<string, unknown>)).toEqual(
+			withoutIds(before.parent as Record<string, unknown>),
+		);
+		expect(restoredParts.map(withoutIds)).toEqual(
+			(before.parts as Record<string, unknown>[]).map(withoutIds),
+		);
 		expect(
-			await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
-				.bind(id)
-				.first(),
-		).toEqual(before.parent);
-		expect(
-			(
-				await env.DB.prepare(
-					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
-				)
-					.bind(id)
-					.all()
-			).results,
-		).toEqual(before.parts);
+			restoredParts.every((part) => part.parent_id === restoredParent?.id),
+		).toBe(true);
 	});
 
 	it("restores a bill payment so the bill occurrence is paid again", async () => {
@@ -413,6 +545,11 @@ describe("cash delete undo", () => {
 
 	it("restores a token only once when two restores race", async () => {
 		const id = await cashEntry();
+		await env.DB.prepare(
+			"UPDATE transactions SET note='race restore' WHERE id=?",
+		)
+			.bind(id)
+			.run();
 		const token = await holdCashDelete(env.DB, id, "Market");
 		if (!token) throw new Error("cash delete token missing");
 
@@ -423,9 +560,9 @@ describe("cash delete undo", () => {
 		expect(results.filter(Boolean)).toHaveLength(1);
 		expect(results.filter((result) => result === null)).toHaveLength(1);
 		expect(
-			await env.DB.prepare("SELECT COUNT(*) AS n FROM transactions WHERE id=?")
-				.bind(id)
-				.first(),
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE note='race restore'",
+			).first(),
 		).toEqual({ n: 1 });
 		expect(
 			await env.DB.prepare(
@@ -475,9 +612,9 @@ describe("cash delete undo", () => {
 		expect(message).toContain("Missing partner refund");
 		expect(
 			(
-				await env.DB.prepare("SELECT refund_of_id FROM transactions WHERE id=?")
-					.bind(id)
-					.first<{ refund_of_id: number | null }>()
+				await env.DB.prepare(
+					"SELECT refund_of_id FROM transactions WHERE raw_name='Missing partner refund'",
+				).first<{ refund_of_id: number | null }>()
 			)?.refund_of_id,
 		).toBeNull();
 	});
@@ -507,14 +644,12 @@ describe("cash delete undo", () => {
 			if (value === undefined) throw new Error("purchase insert missing");
 			return value;
 		};
-		const partIds: number[] = [];
 		for (let index = 0; index < purchaseIds.length; index++) {
-			const part = await env.DB.prepare(
+			await env.DB.prepare(
 				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-02', -200, ?, ?, ?, 'test')",
 			)
 				.bind(account.id, `Split refund ${index + 1}`, id, purchaseId(index))
 				.run();
-			partIds.push(Number(part.meta.last_row_id));
 		}
 		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
 			.bind(id)
@@ -540,14 +675,12 @@ describe("cash delete undo", () => {
 		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.message as string;
 		const parts = await env.DB.prepare(
-			"SELECT id, refund_of_id FROM transactions WHERE id IN (?, ?, ?) ORDER BY id",
-		)
-			.bind(...partIds)
-			.all<{ id: number; refund_of_id: number | null }>();
+			"SELECT raw_name, refund_of_id FROM transactions WHERE raw_name LIKE 'Split refund %' ORDER BY raw_name",
+		).all<{ raw_name: string; refund_of_id: number | null }>();
 		expect(parts.results).toEqual([
-			{ id: partIds[0], refund_of_id: null },
-			{ id: partIds[1], refund_of_id: purchaseId(1) },
-			{ id: partIds[2], refund_of_id: null },
+			{ raw_name: "Split refund 1", refund_of_id: null },
+			{ raw_name: "Split refund 2", refund_of_id: purchaseId(1) },
+			{ raw_name: "Split refund 3", refund_of_id: null },
 		]);
 		expect(message).toContain("Split refund 1");
 		expect(message).toContain("Split refund 3");
@@ -590,14 +723,12 @@ describe("cash delete undo", () => {
 		const counted = countingDb();
 		await restoreCashDelete(counted.db, token as string);
 		expect(counted.statements()).toBeLessThanOrEqual(12);
-		expect(counted.statements()).toBe(8);
+		expect(counted.statements()).toBe(7);
 		expect(
 			(
 				await env.DB.prepare(
-					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id=?",
-				)
-					.bind(id)
-					.first<{ n: number }>()
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id=(SELECT MAX(id) FROM transactions WHERE raw_name='Farmers market')",
+				).first<{ n: number }>()
 			)?.n,
 		).toBe(30);
 		const small = await env.DB.prepare(
@@ -610,7 +741,7 @@ describe("cash delete undo", () => {
 		);
 		const smallCount = countingDb();
 		await restoreCashDelete(smallCount.db, smallToken as string);
-		expect(smallCount.statements()).toBe(7);
+		expect(smallCount.statements()).toBe(6);
 		expect(counted.statements() - smallCount.statements()).toBeLessThanOrEqual(
 			1,
 		);

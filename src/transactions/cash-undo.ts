@@ -8,7 +8,8 @@ type Snapshot = {
 	refunds: Row[];
 };
 
-const jsonColumn = (column: string) => `json_extract(value, '$."${column}"')`;
+const jsonColumn = (column: string, alias = "") =>
+	`json_extract(${alias}value, '$."${column}"')`;
 
 /** Save and delete one cash entry from the same D1 snapshot. */
 export async function holdCashDelete(
@@ -123,16 +124,31 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			.bind(JSON.stringify(snapshot.payments))
 			.all<{ name: string }>();
 		const lostLinks = paymentCheck.results.map(({ name }) => `${name} payment`);
-		const insertTransaction = `INSERT INTO transactions (${columns.join(",")}) SELECT ${columns.map((column) => (column === "refund_of_id" ? "NULL" : jsonColumn(column))).join(",")} FROM json_each(?) WHERE json_extract(value, '$.id') = ?`;
-		const insertParts = `INSERT INTO transactions (${columns.join(",")}) SELECT ${columns
-			.map((column) =>
-				column === "refund_of_id" ? "NULL" : jsonColumn(column),
+		const insertTransactions = `WITH source AS (
+				SELECT value, CAST(json_extract(value, '$.id') AS INTEGER) AS old_id FROM json_each(?)
+			), maximum AS (
+				SELECT MAX((SELECT COALESCE(MAX(id), 0) FROM transactions), COALESCE(MAX(old_id), 0),
+					COALESCE(MAX(CAST(json_extract(value, '$.parent_id') AS INTEGER)), 0),
+					COALESCE(MAX(CAST(json_extract(value, '$.refund_of_id') AS INTEGER)), 0)) AS base
+				FROM source
+			), mapped AS (
+				SELECT source.value, source.old_id, maximum.base + ROW_NUMBER() OVER (ORDER BY source.old_id) AS new_id
+				FROM source CROSS JOIN maximum
 			)
-			.join(
-				",",
-			)} FROM json_each(?) WHERE EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`;
+			INSERT INTO transactions (${columns.join(",")})
+			SELECT ${columns
+				.map((column) => {
+					if (column === "id") return "new_id";
+					if (column === "parent_id")
+						return "COALESCE((SELECT new_id FROM mapped parent WHERE parent.old_id=CAST(json_extract(mapped.value, '$.parent_id') AS INTEGER)), json_extract(mapped.value, '$.parent_id'))";
+					return column === "refund_of_id"
+						? "NULL"
+						: jsonColumn(column, "mapped.");
+				})
+				.join(",")}
+			FROM mapped WHERE EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`;
 		const paymentColumns = Object.keys(snapshot.payments[0] ?? {}).filter(
-			(key) => key !== "bill_name",
+			(key) => key !== "bill_name" && key !== "id",
 		);
 		const targets = [transaction, ...snapshot.parts];
 		const writes = [
@@ -142,44 +158,55 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				)
 				.bind(marker, token, now - 10_000, now),
 			db
-				.prepare(
-					insertTransaction.replace(
-						"WHERE json_extract(value, '$.id') = ?",
-						"WHERE json_extract(value, '$.id') = ? AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)",
-					),
-				)
-				.bind(JSON.stringify([transaction]), transaction.id, token, marker),
-			db
-				.prepare(insertParts)
-				.bind(JSON.stringify(snapshot.parts), token, marker),
+				.prepare(insertTransactions)
+				.bind(JSON.stringify(targets), token, marker),
 		];
 		if (snapshot.payments.length > 0)
 			writes.push(
 				db
 					.prepare(
-						`INSERT INTO bill_payments (${paymentColumns.join(",")})
-						 SELECT ${paymentColumns.map(jsonColumn).join(",")}
-						 FROM json_each(?) WHERE (json_extract(value, '$.status') != 'linked' OR (
+						`WITH targets AS (
+							SELECT CAST(json_extract(value, '$.id') AS INTEGER) AS old_id,
+								(SELECT MAX(id) FROM transactions) - (SELECT COUNT(*) FROM json_each(?)) + ROW_NUMBER() OVER (ORDER BY CAST(json_extract(value, '$.id') AS INTEGER)) AS new_id
+							FROM json_each(?)
+						)
+						INSERT INTO bill_payments (${paymentColumns.join(",")})
+						 SELECT ${paymentColumns
+								.map((column) =>
+									column === "transaction_id"
+										? "COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(payments.value, '$.transaction_id')), json_extract(payments.value, '$.transaction_id'))"
+										: jsonColumn(column, "payments."),
+								)
+								.join(",")}
+						 FROM json_each(?) AS payments WHERE (json_extract(value, '$.status') != 'linked' OR (
 						 NOT EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
 						 AND NOT EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=json_extract(value, '$.transaction_id') AND status='linked')))
 						 AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`,
 					)
-					.bind(JSON.stringify(snapshot.payments), token, marker),
+					.bind(
+						JSON.stringify(targets),
+						JSON.stringify(targets),
+						JSON.stringify(snapshot.payments),
+						token,
+						marker,
+					),
 			);
 		writes.push(
 			db
-				.prepare(`WITH links AS (SELECT value FROM json_each(?)), targets AS (SELECT value FROM json_each(?)),
-					candidate AS (SELECT json_extract(links.value, '$.row_id') AS row_id,
-						json_extract(links.value, '$.partner_id') AS partner_id,
+				.prepare(`WITH targets AS (
+						SELECT CAST(json_extract(value, '$.id') AS INTEGER) AS old_id,
+							(SELECT MAX(id) FROM transactions) - (SELECT COUNT(*) FROM json_each(?)) + ROW_NUMBER() OVER (ORDER BY CAST(json_extract(value, '$.id') AS INTEGER)) AS new_id
+						FROM json_each(?)
+					), links AS (SELECT value FROM json_each(?)),
+					candidate AS (SELECT COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(links.value, '$.row_id')), json_extract(links.value, '$.row_id')) AS row_id,
+						COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(links.value, '$.partner_id')), json_extract(links.value, '$.partner_id')) AS partner_id,
 						json_extract(links.value, '$.move_cents') AS move_cents,
 						json_extract(links.value, '$.only_if_unlinked') AS only_if_unlinked,
-						EXISTS (SELECT 1 FROM transactions p WHERE p.id=json_extract(links.value, '$.partner_id'))
-							OR EXISTS (SELECT 1 FROM targets WHERE json_extract(value, '$.id')=json_extract(links.value, '$.partner_id')) AS partner_exists,
-						COALESCE((SELECT amount_cents FROM transactions WHERE id=json_extract(links.value, '$.partner_id')),
-							(SELECT json_extract(value, '$.amount_cents') FROM targets WHERE json_extract(value, '$.id')=json_extract(links.value, '$.partner_id'))) AS purchase_cents,
-						COALESCE((SELECT SUM(ABS(r.amount_cents)) FROM transactions r WHERE r.refund_of_id=json_extract(links.value, '$.partner_id')
-							AND r.is_split=0 AND r.amount_cents<0 AND r.flag_income=0 AND r.id!=json_extract(links.value, '$.row_id')), 0) AS refunded_cents,
-						(SELECT refund_of_id IS NULL FROM transactions WHERE id=json_extract(links.value, '$.row_id')) AS unlinked
+						EXISTS (SELECT 1 FROM transactions p WHERE p.id=COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(links.value, '$.partner_id')), json_extract(links.value, '$.partner_id'))) AS partner_exists,
+						(SELECT amount_cents FROM transactions WHERE id=COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(links.value, '$.partner_id')), json_extract(links.value, '$.partner_id'))) AS purchase_cents,
+						COALESCE((SELECT SUM(ABS(r.amount_cents)) FROM transactions r WHERE r.refund_of_id=COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(links.value, '$.partner_id')), json_extract(links.value, '$.partner_id'))
+							AND r.is_split=0 AND r.amount_cents<0 AND r.flag_income=0 AND r.id!=COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(links.value, '$.row_id')), json_extract(links.value, '$.row_id'))), 0) AS refunded_cents,
+						(SELECT refund_of_id IS NULL FROM transactions WHERE id=COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(links.value, '$.row_id')), json_extract(links.value, '$.row_id'))) AS unlinked
 						FROM links), eligible AS (SELECT * FROM candidate WHERE partner_exists
 						AND (only_if_unlinked=0 OR unlinked=1)), ordered AS (SELECT *,
 						SUM(move_cents) OVER (PARTITION BY partner_id ORDER BY row_id ROWS UNBOUNDED PRECEDING) AS running_cents
@@ -188,7 +215,13 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					WHERE transactions.id=ordered.row_id AND ordered.running_cents<=MAX(0, ordered.purchase_cents-ordered.refunded_cents)
 					AND ${refundFitsSql("transactions.id", "ordered.partner_id")}
 					AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`)
-				.bind(JSON.stringify(links), JSON.stringify(targets), token, marker),
+				.bind(
+					JSON.stringify(targets),
+					JSON.stringify(targets),
+					JSON.stringify(links),
+					token,
+					marker,
+				),
 		);
 		const results = await db.batch(writes);
 		if (results[0]?.meta.changes !== 1) return null;
@@ -196,16 +229,41 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			(
 				await db
 					.prepare(
-						"SELECT id, refund_of_id FROM transactions WHERE id IN (SELECT CAST(json_extract(value, '$.row_id') AS INTEGER) FROM json_each(?))",
+						`WITH targets AS (
+							SELECT CAST(json_extract(value, '$.id') AS INTEGER) AS old_id,
+								(SELECT MAX(id) FROM transactions) - (SELECT COUNT(*) FROM json_each(?)) + ROW_NUMBER() OVER (ORDER BY CAST(json_extract(value, '$.id') AS INTEGER)) AS new_id
+							FROM json_each(?)
+						)
+						SELECT id, refund_of_id FROM transactions WHERE id IN (
+							SELECT COALESCE((SELECT new_id FROM targets WHERE old_id=json_extract(value, '$.row_id')), json_extract(value, '$.row_id')) FROM json_each(?)
+						)`,
 					)
-					.bind(JSON.stringify(links))
+					.bind(
+						JSON.stringify(targets),
+						JSON.stringify(targets),
+						JSON.stringify(links),
+					)
 					.all<{ id: number; refund_of_id: number | null }>()
 			).results
 				.filter((row) => row.refund_of_id !== null)
 				.map((row) => `${row.id}:${row.refund_of_id}`),
 		);
+		const mappedId = (id: number) =>
+			targets.some((row) => Number(row.id) === id)
+				? Number(results[1]?.meta.last_row_id) -
+					targets.length +
+					targets
+						.map((row) => Number(row.id))
+						.sort((a, b) => a - b)
+						.indexOf(id) +
+					1
+				: id;
 		for (const link of links)
-			if (!restoredLinks.has(`${link.row_id}:${link.partner_id}`))
+			if (
+				!restoredLinks.has(
+					`${mappedId(link.row_id)}:${mappedId(link.partner_id)}`,
+				)
+			)
 				lostLinks.push(link.name);
 		return {
 			name: hold.display_name,

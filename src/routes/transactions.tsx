@@ -2092,6 +2092,7 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	const form = await c.req.formData();
 	const token = form.get("token");
 	const back = safeBack(form.get("back")?.toString());
+	const wasFirstVisit = (await firstVisitFor(c)) !== null;
 	const restored =
 		typeof token === "string" && /^[0-9a-f-]{36}$/i.test(token)
 			? await restoreCashDelete(c.env.DB, token)
@@ -2130,5 +2131,10 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 		),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filtersFrom(c, today, back));
+	const restoreEndsFirstVisit =
+		wasFirstVisit && restored !== null && !restored.alreadyRestored;
+	if (restoreEndsFirstVisit) swapWholePage(c);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusHeading: restoreEndsFirstVisit,
+	});
 });
