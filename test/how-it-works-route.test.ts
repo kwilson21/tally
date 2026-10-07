@@ -32,6 +32,15 @@ beforeEach(async () => {
 });
 
 describe("GET /how-it-works in the demo", () => {
+	it("describes bill payments as one payment per occurrence with parts linked later", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"Tally matches at most one payment to each bill occurrence",
+		);
+		expect(html).toContain("A payment links to exactly one bill occurrence.");
+		expect(html).not.toContain("Each bill gets at most one payment per period");
+	});
+
 	it("has the architecture and the Phase 1 feature sections", async () => {
 		const { res, html } = await get("/how-it-works");
 		expect(res.status).toBe(200);

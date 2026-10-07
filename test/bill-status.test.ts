@@ -155,6 +155,25 @@ describe("bill status", () => {
 				status: "due",
 			});
 		});
+		it("applies the same seven-day handoff to quarterly bills", () => {
+			const bill = {
+				frequency: "quarterly",
+				dueDay: 15,
+				anchorMonth: 1,
+			} as const;
+			expect(billOccurrence(bill, "2026-04-20", false)).toMatchObject({
+				dueDate: "2026-04-15",
+				status: "overdue",
+			});
+			expect(billOccurrence(bill, "2026-04-20", false)).toMatchObject({
+				dueDate: "2026-04-15",
+				status: "overdue",
+			});
+			expect(billOccurrence(bill, "2026-07-15", false)).toMatchObject({
+				dueDate: "2026-07-15",
+				status: "due",
+			});
+		});
 		it("applies the same rule to yearly bills", () => {
 			const bill = { frequency: "yearly", dueDay: 15, anchorMonth: 2 } as const;
 			expect(billOccurrence(bill, "2026-10-04", false)).toMatchObject({

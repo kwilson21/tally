@@ -434,6 +434,15 @@ function valuesOf(b?: DbBill): Values {
 	};
 }
 
+function quarterlyMonths(anchorMonth: string) {
+	const first = Math.min(12, Math.max(1, Number(anchorMonth) || 1)) - 1;
+	return [0, 3, 6, 9].map((offset) =>
+		new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
+			new Date(Date.UTC(2026, (first + offset) % 12, 1)),
+		),
+	);
+}
+
 function BillSheet({
 	bill,
 	values = valuesOf(bill),
@@ -614,7 +623,11 @@ function BillSheet({
 						</span>
 					)}
 					<span class="bill-quarter-hint text-sm text-muted">
-						Then every 3 months: October, January, April and July.
+						{"Then every 3 months: " +
+							quarterlyMonths(values.anchor_month)
+								.join(", ")
+								.replace(/, ([^,]+)$/, " and $1") +
+							"."}
 					</span>
 				</label>
 				<div class="bill-anchor-date">
@@ -1159,6 +1172,7 @@ async function billPage(
 			billAmountCents={bill.amount_cents}
 			openedPeriod={pickerPeriod}
 			dueDateLabel={shortDate(occurrenceDate(bill, pickerPeriod))}
+			frequency={bill.frequency}
 			selectedTransactionId={selectedTransactionId}
 			candidates={candidates.map((t) => ({
 				id: t.transaction_id,
@@ -1363,10 +1377,11 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 	const due = occurrenceDate(bill, period);
+	const manualWindow = bill.frequency === "weekly" ? 3 : 30;
 	const eligible = await c.env.DB.prepare(
-		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30",
+		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=?",
 	)
-		.bind(transaction, due)
+		.bind(transaction, due, manualWindow)
 		.first();
 	if (!eligible) {
 		const label = ["monthly", "yearly"].includes(bill.frequency)
@@ -1381,7 +1396,7 @@ bills.post("/bills/:id/link", async (c) => {
 			c,
 			id,
 			opened,
-			`That payment isn't within 30 days of ${label}'s bill.`,
+			`That payment isn't within ${manualWindow} days of ${label}'s bill.`,
 			undefined,
 			today,
 		);

@@ -919,6 +919,7 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
+							frequency="monthly"
 							candidates={[
 								{
 									id: 1,
@@ -955,6 +956,7 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
+							frequency="monthly"
 							candidates={[]}
 							periods={[
 								{

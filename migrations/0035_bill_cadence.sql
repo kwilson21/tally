@@ -18,7 +18,14 @@ CREATE TABLE bills_new (
 	 CHECK ((frequency = 'biweekly' AND anchor_date IS NOT NULL) OR (frequency <> 'biweekly' AND anchor_date IS NULL)),
 	 CHECK (frequency NOT IN ('weekly', 'biweekly') OR due_day BETWEEN 1 AND 7)
 );
-INSERT INTO bills_new SELECT id,name,amount_cents,due_day,frequency,anchor_month,NULL,category_id,merchant_raw_name,merchant_raw_text,active FROM bills;
+INSERT INTO bills_new (
+  id, name, amount_cents, due_day, frequency, anchor_month, anchor_date, category_id,
+  merchant_raw_name, merchant_raw_text, active
+)
+SELECT
+  id, name, amount_cents, due_day, frequency, anchor_month, NULL, category_id,
+  merchant_raw_name, merchant_raw_text, active
+FROM bills;
 DROP TABLE bills;
 ALTER TABLE bills_new RENAME TO bills;
 

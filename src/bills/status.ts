@@ -186,7 +186,10 @@ export function billOccurrence(
 		index++;
 		current = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
 	}
-	if (isLinked(current.period) || daysBetween(today, current.dueDate) < -7) {
+	if (
+		isLinked(current.period) ||
+		(current.dueDate < today && daysBetween(today, current.dueDate) < -7)
+	) {
 		const next = occurrences[index + 1];
 		if (next && daysBetween(today, next.dueDate) <= 7) {
 			index++;

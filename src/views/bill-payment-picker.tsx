@@ -48,6 +48,7 @@ export function BillPaymentPicker({
 	billAmountCents,
 	openedPeriod,
 	dueDateLabel,
+	frequency,
 	candidates,
 	periods,
 	selectedTransactionId,
@@ -57,6 +58,7 @@ export function BillPaymentPicker({
 	billAmountCents: number;
 	openedPeriod: string;
 	dueDateLabel: string;
+	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
 	candidates: PaymentPickerCandidate[];
 	periods: PaymentPickerPeriod[];
 	selectedTransactionId?: number;
@@ -80,8 +82,8 @@ export function BillPaymentPicker({
 				{formatCents(billAmountCents)}.
 			</p>
 			<p class="mt-1 text-muted">
-				Within 30 days of {dueDateLabel}, same merchant first, then closest
-				amount.
+				Within {frequency === "weekly" ? 3 : 30} days of {dueDateLabel}, same
+				merchant first, then closest amount.
 			</p>
 			{candidates.length ? (
 				<form

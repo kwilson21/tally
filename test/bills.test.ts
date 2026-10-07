@@ -286,6 +286,41 @@ describe("Bills", () => {
 		);
 	});
 
+	it("lists quarterly months from the selected first month and defaults to January", async () => {
+		const defaultHtml = await (
+			await exports.default.fetch("http://tally.test/bills/new")
+		).text();
+		expect(defaultHtml).toContain(
+			"Then every 3 months: January, April, July and October.",
+		);
+		const post = (body: URLSearchParams) =>
+			exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body,
+			});
+		const html = await (
+			await post(
+				new URLSearchParams({
+					name: "Quarterly fixture",
+					amount: "bad",
+					due_day: "12",
+					frequency: "quarterly",
+					anchor_month: "11",
+					category_id: "1",
+					merchant_raw_name: "QUARTERLY FIXTURE",
+				}),
+			)
+		).text();
+		const encoded = html.replaceAll("&#39;", "'").replaceAll("&amp;", "&");
+		expect(encoded).toContain(
+			"Then every 3 months: November, February, May and August.",
+		);
+	});
+
 	it("adds a bill and returns htmx feedback", async () => {
 		const body = new URLSearchParams({
 			name: "Gym",
@@ -510,6 +545,41 @@ describe("Bills", () => {
 			.filter((row) => row.active && ["due", "overdue"].includes(row.status))
 			.reduce((sum, row) => sum + row.amountCents, 0);
 		expect(setAside).toBeLessThan(50_000);
+	});
+
+	it("shows the demo's weekly Daycare total for its five October Fridays", async () => {
+		await resetDemo(env.DB, "2026-10-31");
+		const bill = await env.DB.prepare(
+			"SELECT id,amount_cents,frequency FROM bills WHERE name='Daycare'",
+		).first<{ id: number; amount_cents: number; frequency: string }>();
+		expect(bill).toEqual({ id: 8, amount_cents: 24000, frequency: "weekly" });
+		const { rows } = await loadBillRows(env.DB, "2026-10-31");
+		const daycare = rows.find((row) => row.name === "Daycare");
+		expect(
+			daycare?.totalOccurrences.map((occurrence) => occurrence.dueDate).sort(),
+		).toEqual([
+			"2026-10-02",
+			"2026-10-09",
+			"2026-10-16",
+			"2026-10-23",
+			"2026-10-30",
+		]);
+		expect(
+			daycare?.totalOccurrences.reduce(
+				(sum, occurrence) => sum + occurrence.amountCents,
+				0,
+			),
+		).toBe(120000);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html).toContain("Daycare");
+		expect(
+			daycare?.totalOccurrences.reduce(
+				(sum, occurrence) => sum + occurrence.amountCents,
+				0,
+			),
+		).toBe(120000);
 	});
 
 	it("refuses to save, deactivate or reactivate a missing bill", async () => {
