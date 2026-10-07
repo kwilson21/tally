@@ -56,6 +56,25 @@ export const settings = new Hono<App>();
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
+const foldRuleSearch = (value: string) =>
+	value
+		.normalize("NFC")
+		.toLocaleLowerCase()
+		.normalize("NFD")
+		.replace(/\p{M}/gu, "");
+const filterRuleSearch = <T extends { merchant: string; merchantKey: string }>(
+	rules: T[],
+	search: string,
+) => {
+	const query = foldRuleSearch(search.trim());
+	return rules.filter(
+		(rule) =>
+			!query ||
+			foldRuleSearch(rule.merchant).includes(query) ||
+			foldRuleSearch(rule.merchantKey).includes(query),
+	);
+};
+
 /** Every form on the page swaps the Categories section in place; without JavaScript it posts normally. */
 const swap = (url: string, indicator: string) => ({
 	method: "post" as const,
@@ -440,11 +459,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		view.rulesSearch ??
 		new URL(c.req.url).searchParams.get("rules_search") ??
 		"";
-	const ruleData = await merchantRules(c.env.DB, rulesSearch);
-	const visibleRuleData =
-		ruleData.total <= MERCHANT_RULE_SEARCH_THRESHOLD && rulesSearch
-			? await merchantRules(c.env.DB)
-			: ruleData;
+	const ruleData = await merchantRules(c.env.DB, aiSwitches.names);
+	const visibleRules =
+		ruleData.total <= MERCHANT_RULE_SEARCH_THRESHOLD || !rulesSearch
+			? ruleData.rules
+			: filterRuleSearch(ruleData.rules, rulesSearch);
 	const adding = view.open === "new";
 
 	return c.html(
@@ -603,7 +622,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				</div>
 			</section>
 			<MerchantRules
-				rules={visibleRuleData.rules.map((rule) => ({
+				rules={visibleRules.map((rule) => ({
 					...rule,
 					archived: rule.archived === 1,
 				}))}
@@ -671,9 +690,11 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 			status: 400,
 		});
 	}
-	const before = await merchantRules(c.env.DB, search);
+	const before = await merchantRules(c.env.DB);
 	const focusRules =
-		before.total - 1 > 20 && search ? before : await merchantRules(c.env.DB);
+		before.total - 1 > 20 && search
+			? { ...before, rules: filterRuleSearch(before.rules, search) }
+			: before;
 	const removed = await removeMerchantRule(c.env.DB, merchantKey);
 	const view = { rulesSearch: search };
 	if (!removed) {

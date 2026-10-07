@@ -87,6 +87,39 @@ describe("GET /settings", () => {
 		);
 	});
 
+	it("uses the transaction display name for rule order and searches display and bank names", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('BANK CAFE 1234', 'Café', 1), ('OLD SHOP', 'Zed Chosen', 1)",
+		).run();
+		const extra = Array.from(
+			{ length: 21 },
+			(_, i) => `('EXTRA RULE ${i}', 'Extra Rule ${i}', 1)`,
+		).join(",");
+		await env.DB.prepare(
+			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${extra}`,
+		).run();
+		const html = (await get("/settings")).html;
+		const rules = html.slice(html.indexOf('id="merchant-rules"'));
+		expect(rules.indexOf("Local Bakery")).toBeLessThan(
+			rules.indexOf("Zed Chosen"),
+		);
+		for (const query of ["CAFÉ", "café", "cafe", "Cafe"]) {
+			const searched = (
+				await get(`/settings?rules_search=${encodeURIComponent(query)}`)
+			).html;
+			expect(searched).toContain("Café");
+			expect(searched).not.toContain("Zed Chosen");
+		}
+		const byBank = (await get("/settings?rules_search=BAKERY")).html;
+		expect(byBank).toContain("Local Bakery");
+	});
+
 	it("shows an empty state for an empty merchant rule list", async () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = NULL",

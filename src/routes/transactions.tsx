@@ -1344,7 +1344,7 @@ function EditSheet({
 				{/* The two things people change most after the category, one tap each (owner's pick C). */}
 				<div class="flex flex-wrap gap-2">
 					{/* A linked refund has no category of its own to make a rule from. */}
-					{!purchase && (
+					{tx.refundOfId == null && (
 						<Chip
 							type="checkbox"
 							name="always"
@@ -1363,19 +1363,24 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
-				{!purchase && (
+				{tx.refundOfId == null && (
 					<p class="text-sm text-muted">
 						Ticking this for a transaction that doesn't match the rule changes
 						it for this merchant. To change a rule this transaction already
 						matches, remove it in Settings first.
 					</p>
 				)}
-				{ruleCategory && values.alwaysForMerchant && (
+				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null ? (
+					<p class="text-sm text-muted">
+						Remove it in Settings, under{" "}
+						<a href="/settings#merchant-rules">Tally's rules</a>.
+					</p>
+				) : ruleCategory && values.alwaysForMerchant ? (
 					<p class="text-sm text-muted">
 						{tx.displayName} is always {ruleCategory.name}. Untick it and save
 						to remove the rule.
 					</p>
-				)}
+				) : null}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">

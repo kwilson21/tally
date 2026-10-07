@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -50,6 +51,37 @@ describe("row links", () => {
 });
 
 describe("GET /transactions/:id", () => {
+	it("points linked refund rule removal to Settings and keeps the ordinary row guidance", async () => {
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULE REFUND SHOP', 1)",
+		).run();
+		const purchase = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (1,'2026-09-10',1000,'RULE REFUND SHOP','RULE REFUND SHOP',1,'merchant_rule') RETURNING id",
+		).first<{ id: number }>();
+		const refund = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source,credit_reviewed,refund_of_id) VALUES (1,'2026-09-11',-200,'RULE REFUND SHOP','RULE REFUND SHOP',1,'merchant_rule',1,?) RETURNING id",
+		)
+			.bind(purchase?.id)
+			.first<{ id: number }>();
+		expect(
+			await env.DB.prepare("SELECT refund_of_id FROM transactions WHERE id=?")
+				.bind(refund?.id)
+				.first(),
+		).toEqual({ refund_of_id: purchase?.id });
+		expect(await getTransaction(env.DB, refund?.id as number)).toMatchObject({
+			refundOfId: purchase?.id,
+			merchantRuleCategoryId: 1,
+			followsPurchase: true,
+			categoryId: 1,
+		});
+		const linked = (await get(`/transactions/${refund?.id}`)).html;
+		const sheet = linked.slice(linked.indexOf('role="dialog"'));
+		expect(sheet).toContain("Remove it in Settings, under");
+		expect(sheet).toContain('href="/settings#merchant-rules"');
+		expect(sheet).not.toContain("Untick it and save to remove the rule.");
+		const ordinary = (await get(`/transactions/${purchase?.id}`)).html;
+		expect(ordinary).toContain("Untick it and save to remove the rule.");
+	});
 	it("shows a below-threshold Jev pick as the first suggested chip after the real save path", async () => {
 		const id = Number(
 			(
