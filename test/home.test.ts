@@ -127,6 +127,39 @@ describe("GET / with the demo seed", () => {
 		);
 	});
 
+	it("keeps an archived current-month budget in Safe to spend and finished-month totals", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (903, 'Archived this month', 'tag', 'cat-blue', 90)",
+			),
+			env.DB.prepare(
+				"INSERT INTO budget_amounts VALUES (903, '2026-10', 10000)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id) VALUES (1, '2026-10-05', 2000, 'ARCHIVED MONTH SPEND', 903)",
+			),
+			env.DB.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-10-08' WHERE id = 903",
+			),
+		]);
+		const current = await home();
+		const currentRow = current.html.match(
+			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg">([^<]+)<\/span>/,
+		)?.[1];
+		vi.setSystemTime(new Date("2026-11-01T00:01:00-04:00"));
+		const finished = await homeAt("2026-10");
+		const finishedRow = finished.html.match(
+			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg">([^<]+)<\/span>/,
+		)?.[1];
+		expect(currentRow).toBe("$20 of $100");
+		expect(finishedRow).toBe("$20 of $100");
+		expect(current.html).toContain("Archived this month");
+		expect(finished.html).toContain("Archived this month");
+	});
+
 	it("shows an archived category's net refund like a finished-month category row", async () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		await env.DB.batch([

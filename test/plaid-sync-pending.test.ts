@@ -811,12 +811,31 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const answerOf = (plaidId: string) =>
 			env.DB.prepare(
 				`SELECT category_id, category_source, category_confidence, jev_category_id,
-					flag_transfer, flag_reimbursement, flag_income, income_source,
+					flag_transfer, transfer_confidence, flag_reimbursement, flag_income, income_confidence, income_source,
 					excluded, excluded_source, credit_reviewed, credit_reviewed_by
 				 FROM transactions WHERE plaid_transaction_id = ?`,
 			)
 				.bind(plaidId)
 				.first();
+
+		it("does not copy an unsure pending income score onto a Plaid-marked income", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -0.42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence=0.5 WHERE id=?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, {
+				amount: -0.42,
+				personal_finance_category: { primary: "INCOME" },
+			});
+			expect(await answerOf("posted-1")).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+				income_confidence: null,
+			});
+		});
 
 		it("moves a category Jev picked from the pending row onto the posted one", async () => {
 			const item = await addItem();
@@ -852,6 +871,113 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				jev_category_id: 3,
 			});
 			expect(await pendingForJev(env.DB, 10)).toEqual([]);
+		});
+
+		it("moves unsure income and transfer confidence, while keeping confidence already on the posted row", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.4, transfer_confidence = 0.3 WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: 0.4,
+				transfer_confidence: 0.3,
+			});
+		});
+
+		it("moves both unsure confidences when the posted row has no answer", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: 0.5,
+				transfer_confidence: 0.6,
+			});
+		});
+
+		it("moves an unsure income score when Plaid has no category", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42, personal_finance_category: null });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: 0.5,
+				income_source: null,
+			});
+		});
+
+		it("keeps posted Jev-settled income and transfer answers without pending scores", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL, excluded = 1, excluded_source = 'jev', flag_transfer = 1, transfer_confidence = NULL, income_confidence = NULL WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				flag_income: 1,
+				income_source: "jev",
+				income_confidence: null,
+				excluded_source: "jev",
+				flag_transfer: 1,
+				transfer_confidence: null,
+			});
+		});
+
+		it("does not move an income guess onto a posted row with its own income choice", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.5 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: null,
+				income_source: "user",
+				credit_reviewed_by: "user",
+			});
+		});
+
+		it("does not move a transfer guess onto a posted row with its own exclusion choice", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET transfer_confidence = 0.6 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 0, excluded_source = 'user' WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				transfer_confidence: null,
+				excluded_source: "user",
+			});
 		});
 
 		it("moves a none-fit answer with its confidence, so the posted row still counts toward a suggested category (#51)", async () => {

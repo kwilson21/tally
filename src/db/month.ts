@@ -11,6 +11,8 @@ import {
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
+const ARCHIVED_BUDGET_APPLIES =
+	"c.archived = 0 OR c.archived_on IS NULL OR c.archived_on >= (?1 || '-01')";
 
 export type CategoryRow = {
 	id: number;
@@ -25,43 +27,46 @@ export type MonthData = {
 	categories: CategoryRow[];
 	amounts: BudgetAmount[];
 	transactions: CountedTransaction[];
+	savingsGoalCents: number | null;
 };
 
 /**
  * Loads what summarizeMonth needs for a month ('YYYY-MM'). Counted = in month, not excluded (or paying a
  * bill), not a split parent.
- * Categories are active ones, plus archived categories with counted spending that month, and (on a
- * finished month) categories with a budget effective by then.
+ * Categories are active ones, plus archived categories with counted spending that month, or a
+ * budget effective before the category was archived.
  */
 export async function loadMonth(
 	db: D1Database,
 	month: string,
-	includeArchivedBudgets = false,
 ): Promise<MonthData> {
-	// db.batch()'s return type is D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess
-	// treats each destructured element as possibly undefined; the query list above guarantees all three.
-	const [categories, amounts, transactions] = (await db.batch([
-		// An archived category's budget applied only if it was active on some day in the month.
+	// db.batch() returns D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess treats each
+	// destructured element as possibly undefined; the query list above guarantees all four.
+	const [categories, amounts, transactions, savingsGoal] = (await db.batch([
 		db
 			.prepare(
 				`SELECT id, name, icon, color, archived FROM categories c
-				 WHERE archived = 0 OR EXISTS (
-					SELECT 1 FROM transactions t
-					${COUNTED_JOINS}
-					WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND ${COUNTED_SPENDING}
-				 ) OR (?2 = 1 AND (archived_on IS NULL OR archived_on >= (?1 || '-01')) AND EXISTS (
-					SELECT 1 FROM budget_amounts ba WHERE ba.category_id = c.id AND ba.effective_month <= ?1
-				 ))
+				 WHERE c.archived = 0
+					OR EXISTS (
+						SELECT 1 FROM transactions t
+						${COUNTED_JOINS}
+						WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND ${COUNTED_SPENDING}
+					)
+					OR EXISTS (
+						SELECT 1 FROM budget_amounts ba
+						WHERE ba.category_id = c.id AND ba.effective_month <= ?1
+							AND (${ARCHIVED_BUDGET_APPLIES})
+					)
 				 ORDER BY sort_order, name`,
 			)
-			.bind(month, includeArchivedBudgets ? 1 : 0),
+			.bind(month),
 		db
 			.prepare(
 				`SELECT ba.category_id AS categoryId, ba.effective_month AS effectiveMonth, ba.amount_cents AS amountCents
 				 FROM budget_amounts ba JOIN categories c ON c.id = ba.category_id
-				 WHERE c.archived = 0 OR (?2 = 1 AND c.archived_on IS NOT NULL AND c.archived_on >= (?1 || '-01'))`,
+				 WHERE ba.effective_month <= ?1 AND (${ARCHIVED_BUDGET_APPLIES})`,
 			)
-			.bind(month, includeArchivedBudgets ? 1 : 0),
+			.bind(month),
 		db
 			.prepare(
 				`SELECT ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income,
@@ -72,7 +77,12 @@ export async function loadMonth(
 					AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE})`,
 			)
 			.bind(month),
-	])) as [D1Result, D1Result, D1Result];
+		db
+			.prepare(
+				"SELECT amount_cents AS amountCents FROM savings_goal_amounts WHERE effective_month <= ? ORDER BY effective_month DESC LIMIT 1",
+			)
+			.bind(month),
+	])) as [D1Result, D1Result, D1Result, D1Result];
 
 	return {
 		categories: (
@@ -89,6 +99,9 @@ export async function loadMonth(
 				linked: number;
 			}[]
 		).map((t) => ({ ...t, income: t.income === 1, linked: t.linked === 1 })),
+		savingsGoalCents:
+			(savingsGoal.results[0] as { amountCents: number } | undefined)
+				?.amountCents ?? null,
 	};
 }
 

@@ -28,6 +28,14 @@ describe("month-end chart labels", () => {
 		]);
 	});
 
+	it("treats inherited property names as ordinary categories", () => {
+		expect(monthEndLabels(["constructor", "toString", "__proto__"])).toEqual([
+			"constr.",
+			"toStri.",
+			"__prot.",
+		]);
+	});
+
 	it("adds only enough letters to distinguish two and three collisions", () => {
 		expect(monthEndLabels(["Home Improvement", "Home Insurance"])).toEqual([
 			"Home Im.",

@@ -108,7 +108,11 @@ describe("Home's stale-bank line", () => {
 			html.indexOf("Northline Card Services stopped updating Sep 20"),
 		).toBeLessThan(html.indexOf("First Harbor Bank needs signing in"));
 		expect(html).toContain("as of Sep 20");
-		expect(html.match(/data-icon="bank"/g) ?? []).toHaveLength(1);
+		expect(
+			html.match(
+				/<div class="mt-3 flex items-center[\s\S]*?data-icon="bank"/g,
+			) ?? [],
+		).toHaveLength(1);
 		expect(
 			html.match(/Fix<span class="sr-only"> the bank in Accounts<\/span>/g),
 		).toHaveLength(1);

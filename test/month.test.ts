@@ -41,7 +41,7 @@ beforeAll(async () => {
 });
 
 describe("loadMonth", () => {
-	it("keeps archived budgets only from months the category was active, or where it had spending", async () => {
+	it("keeps archived budgets only from months the category was active", async () => {
 		await db.batch([
 			db.prepare(
 				"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (41, 'Before no spend', 'tag', 'cat-blue', 41), (42, 'Before with spend', 'tag', 'cat-blue', 42), (43, 'During', 'tag', 'cat-blue', 43), (44, 'After', 'tag', 'cat-blue', 44), (45, 'Restored', 'tag', 'cat-blue', 45)",
@@ -68,7 +68,7 @@ describe("loadMonth", () => {
 				"UPDATE categories SET archived = 0, archived_on = NULL WHERE id = 45",
 			),
 		]);
-		const data = await loadMonth(db, "2026-09", true);
+		const data = await loadMonth(db, "2026-09");
 		const byId = new Map(
 			data.categories.map((category) => [category.id, category]),
 		);

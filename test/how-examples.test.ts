@@ -204,9 +204,26 @@ describe("budgetExample", () => {
 				uncategorized: { spentCents: 22800, count: 12 },
 				unbudgetedCents: 14000,
 				billsDueCents: 14200,
+				savingsGoalCents: 0,
 			}),
 		).toBe(
-			"Your budgets have $916 left. Safe to spend is $510 less: $228 has no category yet, $140 went to categories with no budget, and $142 is set aside for bills due.",
+			"Your budgets have $916 left. Safe to spend is $510 less: $228 has no category yet, $140 went to categories with no budget, $142 is set aside for bills due, and $0 is set aside for the savings goal.",
+		);
+	});
+
+	it("names the monthly savings goal separately from bills due", () => {
+		expect(
+			budgetExample({
+				totalBudgetCents: 140000,
+				totalSpentCents: 46000,
+				safeToSpendCents: 15200,
+				uncategorized: { spentCents: 0, count: 0 },
+				unbudgetedCents: 0,
+				billsDueCents: 14200,
+				savingsGoalCents: 50000,
+			}),
+		).toBe(
+			"Your budgets have $940 left. Safe to spend is $642 less: $0 has no category yet, $0 went to categories with no budget, $142 is set aside for bills due, and $500 is set aside for the savings goal.",
 		);
 	});
 
@@ -219,9 +236,10 @@ describe("budgetExample", () => {
 				uncategorized: { spentCents: 3000, count: 1 },
 				unbudgetedCents: 2000,
 				billsDueCents: 10000,
+				savingsGoalCents: 0,
 			}),
 		).toBe(
-			"Your budgets have $930 left. Safe to spend is $150 less: $30 has no category yet, $20 went to categories with no budget, and $100 is set aside for bills due.",
+			"Your budgets have $930 left. Safe to spend is $150 less: $30 has no category yet, $20 went to categories with no budget, $100 is set aside for bills due, and $0 is set aside for the savings goal.",
 		);
 	});
 });

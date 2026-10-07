@@ -22,6 +22,7 @@ import {
 } from "../db/counted-month";
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, loadMonth } from "../db/month";
+import { setSavingsGoal } from "../db/savings-goals";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { centsToAmount, formatCents } from "../money";
@@ -43,6 +44,8 @@ import {
 } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { ProgressRow } from "../views/progress-row";
+import { SavingsGoalRow } from "../views/savings-goal-row";
+import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { ThingsToTry } from "../views/things-to-try";
 import { loadBillRows } from "./bills";
 
@@ -69,6 +72,14 @@ const openAttrs = (href: string) => ({
 	"hx-push-url": "true",
 });
 
+const closeSavingsGoalAttrs = {
+	"hx-get": "/?focus=savings-goal",
+	"hx-target": "#page",
+	"hx-select": "#page",
+	"hx-swap": "outerHTML",
+	"hx-push-url": "/",
+};
+
 // Adjust mode (#94): Adjust, Done and each − or + swap Home in place. They share one queue on the
 // body, so rapid taps apply one after another and Done waits for a tap still saving; focus stays on
 // the tapped button by its id. htmx picks a request's target when it's tapped, so they all swap into
@@ -93,9 +104,13 @@ type HomeOptions = {
 	/** First month with a counted transaction, already read by the root route. */
 	firstMonth?: string;
 	/** The budget sheet over Home, drawn with this month's numbers. */
-	sheet?: (spentCents: (id: number) => number) => Child;
+	sheet?: (
+		spentCents: (id: number) => number,
+		savingsGoalCents: number | null,
+	) => Child;
 	/** Move focus to this category's row: after a save, or when the sheet closes. */
 	focusId?: number;
+	focusSavingsGoal?: boolean;
 	/** Adjust mode: − and + on every budgeted row (#94). */
 	adjusting?: boolean;
 	/** After a tap reaches a limit, focus goes to the row's other button. */
@@ -114,6 +129,7 @@ async function renderHome(
 		firstMonth: firstMonthOption,
 		sheet,
 		focusId,
+		focusSavingsGoal,
 		adjusting,
 		nudgeFocus,
 		status = 200,
@@ -122,7 +138,7 @@ async function renderHome(
 	const currentMonth = today.slice(0, 7);
 	const month = viewMonth ?? currentMonth;
 	const current = month === currentMonth;
-	const data = await loadMonth(c.env.DB, month, month !== currentMonth);
+	const data = await loadMonth(c.env.DB, month);
 	const billData =
 		month === currentMonth ? await loadBillRows(c.env.DB, today) : null;
 	const dueBills =
@@ -157,6 +173,7 @@ async function renderHome(
 		month,
 		...data,
 		unpaidDueBillsCents: dueBills.reduce((sum, b) => sum + b.amountCents, 0),
+		savingsGoalCents: data.savingsGoalCents,
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const storedFirstMonth =
@@ -193,6 +210,7 @@ async function renderHome(
 	const olderNeeds = current
 		? await olderNeedsCategoryCount(c.env.DB, `${month}-01`)
 		: 0;
+	const hasSavingsGoal = (data.savingsGoalCents ?? 0) > 0;
 	const needs = (
 		<>
 			{currentNeeds}
@@ -361,8 +379,16 @@ async function renderHome(
 									/>
 								)}
 							</div>
-							{summary.categories.length > 0 && (
+							{(summary.categories.length > 0 || hasSavingsGoal) && (
 								<ul class="mt-2 divide-y divide-rule">
+									{hasSavingsGoal && (
+										<SavingsGoalRow
+											amountCents={data.savingsGoalCents}
+											href="/savings-goal"
+											attrs={openAttrs("/savings-goal")}
+											autofocus={focusSavingsGoal}
+										/>
+									)}
 									{summary.categories.map((cat) => {
 										// An archived category shows for a month it has spending in (spec §7), but it
 										// can't be budgeted, so its row isn't a link.
@@ -400,54 +426,55 @@ async function renderHome(
 							)}
 							{!current ? (
 								<PastNotBudgeted items={pastNotBudgeted} />
-							) : (
-								notBudgeted.length > 0 && (
-									<>
-										<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
-										<ul class="divide-y divide-rule">
-											{notBudgeted.map((cat) => {
-												if (cat.archived) {
-													return (
-														<li class="flex min-h-11 items-center gap-4 py-2 text-ink">
-															<CategoryIcon icon={cat.icon} color={cat.color} />
-															<span class="min-w-0 flex-1 truncate text-lg">
-																{cat.name}
-															</span>
-															<span
-																class={
-																	categoryRowAmount(spent(cat.id)).className
-																}
-															>
-																{categoryRowAmount(spent(cat.id)).text}
-															</span>
-														</li>
-													);
-												}
-												const href = `/budget/${cat.id}`;
-												return (
-													<li>
-														<a
-															href={href}
-															autofocus={cat.id === focusId}
-															class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
-															{...openAttrs(href)}
-														>
-															<CategoryIcon icon={cat.icon} color={cat.color} />
-															<span class="min-w-0 flex-1 truncate text-lg">
-																{cat.name}
-															</span>
-															<span class="text-accent">Add a budget</span>
-														</a>
-													</li>
-												);
-											})}
-										</ul>
-									</>
-								)
-							)}
+							) : notBudgeted.length > 0 || !hasSavingsGoal ? (
+								<>
+									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
+									<ul class="divide-y divide-rule">
+										{!hasSavingsGoal && (
+											<SavingsGoalRow
+												amountCents={data.savingsGoalCents}
+												href="/savings-goal"
+												attrs={openAttrs("/savings-goal")}
+												autofocus={focusSavingsGoal}
+											/>
+										)}
+										{notBudgeted.map((cat) =>
+											cat.archived ? (
+												<li class="flex min-h-11 items-center gap-4 py-2 text-ink">
+													<CategoryIcon icon={cat.icon} color={cat.color} />
+													<span class="min-w-0 flex-1 truncate text-lg">
+														{cat.name}
+													</span>
+													<span
+														class={categoryRowAmount(spent(cat.id)).className}
+													>
+														{categoryRowAmount(spent(cat.id)).text}
+													</span>
+												</li>
+											) : (
+												<li>
+													<a
+														href={`/budget/${cat.id}`}
+														autofocus={cat.id === focusId}
+														class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
+														{...openAttrs(`/budget/${cat.id}`)}
+													>
+														<CategoryIcon icon={cat.icon} color={cat.color} />
+														<span class="min-w-0 flex-1 truncate text-lg">
+															{cat.name}
+														</span>
+														<span class="text-accent">Add a budget</span>
+													</a>
+												</li>
+											),
+										)}
+									</ul>
+								</>
+							) : null}
 							{current &&
 								summary.categories.length === 0 &&
-								notBudgeted.length === 0 && (
+								notBudgeted.length === 0 &&
+								!hasSavingsGoal && (
 									<EmptyState
 										kind="done"
 										sentence="No categories to budget yet."
@@ -483,7 +510,7 @@ async function renderHome(
 							</div>
 						)}
 					</div>
-					<div id="sheet">{sheet?.(spent)}</div>
+					<div id="sheet">{sheet?.(spent, data.savingsGoalCents)}</div>
 				</div>
 			</div>
 		</Layout>,
@@ -613,9 +640,17 @@ home.get("/", async (c) => {
 			? requested
 			: currentMonth;
 	const focus = Number(c.req.query("focus"));
+	if (c.req.query("focus") === "savings-goal" && c.req.header("HX-Request")) {
+		const message = "Savings goal editing cancelled.";
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ toast: { message, type: "info" }, announce: message }),
+		);
+	}
 	return renderHome(c, today, {
 		viewMonth,
 		firstMonth,
+		focusSavingsGoal: c.req.query("focus") === "savings-goal",
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		adjusting: viewMonth === currentMonth && c.req.query("adjust") === "1",
 	});
@@ -648,6 +683,76 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 			/>
 		),
 	});
+});
+
+home.get("/savings-goal", async (c) => {
+	const today = await householdToday(c.env.DB);
+	return renderHome(c, today, {
+		sheet: (_spent, amountCents) => (
+			<BottomSheet
+				labelledBy="savings-goal-sheet-title"
+				closeHref="/"
+				closeAttrs={closeSavingsGoalAttrs}
+			>
+				<SavingsGoalSheet
+					value={
+						amountCents !== null && amountCents > 0
+							? centsToAmount(amountCents)
+							: ""
+					}
+					month={monthName(today.slice(0, 7))}
+					closeAttrs={closeSavingsGoalAttrs}
+				/>
+			</BottomSheet>
+		),
+	});
+});
+
+home.post("/savings-goal", async (c) => {
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
+	const typed = String((await c.req.formData()).get("goal") ?? "");
+	const parsed = parseBudgetAmount(typed);
+	if (!parsed.ok) {
+		if (c.req.header("HX-Request")) {
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({
+					toast: { message: parsed.error, type: "error" },
+					announce: parsed.error,
+				}),
+			);
+		}
+		return renderHome(c, today, {
+			status: 422,
+			sheet: () => (
+				<BottomSheet
+					labelledBy="savings-goal-sheet-title"
+					closeHref="/"
+					closeAttrs={closeSavingsGoalAttrs}
+					still
+				>
+					<SavingsGoalSheet
+						value={typed}
+						error={parsed.error}
+						month={monthName(month)}
+						closeAttrs={closeSavingsGoalAttrs}
+					/>
+				</BottomSheet>
+			),
+		});
+	}
+	await setSavingsGoal(c.env.DB, parsed.cents, month);
+	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message: "Saved the savings goal", type: "success" },
+			announce: `Savings is ${amount(parsed.cents)} a month from ${monthName(month)} on.`,
+		}),
+	);
+	c.header("HX-Push-Url", "/");
+	return renderHome(c, today, { focusSavingsGoal: true });
 });
 
 // Saving a budget, from this month on (spec §7). htmx gets Home back with a toast; plain browsers are redirected.

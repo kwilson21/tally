@@ -3,7 +3,6 @@ import { formatCents } from "../money";
 import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
 
-const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
 const wholeUnlessTiny = (cents: number) =>
 	formatCents(cents, {
 		wholeDollars: cents === 0 || Math.abs(cents) >= 100,
@@ -51,7 +50,10 @@ export function monthEndLabels(names: string[]): string[] {
 		);
 		const base = `${first.slice(0, count).join("")}${count < first.length ? "." : ""}`;
 		if (fullSpecial[index]) return name;
-		if ((extra[index] ?? 0) === 0) return SHORT_NAMES[name] ?? base;
+		if ((extra[index] ?? 0) === 0)
+			return Object.hasOwn(SHORT_NAMES, name)
+				? (SHORT_NAMES[name] ?? base)
+				: base;
 		if (parts.length === 1) return base || name;
 		let remaining = extra[index] ?? 0;
 		const suffix = parts.slice(1).flatMap((part) => {
@@ -127,7 +129,7 @@ function EndBars({
 	const names = rows
 		.map(
 			(row) =>
-				`${row.name} ${whole(row.spentCents)} of ${whole(row.budgetCents)}`,
+				`${row.name} ${wholeUnlessTiny(row.spentCents)} of ${wholeUnlessTiny(row.budgetCents)}`,
 		)
 		.join(", ");
 	const chart = (

@@ -341,7 +341,9 @@ describe("linking a refund", () => {
 			["back", "/transactions"],
 			["income", "0"],
 			["creditReviewedVisible", "1"],
-			["creditReviewed", "1"],
+			["creditReviewed", "0"],
+			["creditReviewed_was", "0"],
+			["income_was", "0"],
 			["refund_of", String(PURCHASE)],
 		]);
 		expect(res.status).toBe(200);

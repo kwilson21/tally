@@ -20,6 +20,29 @@ const rows = (count: number): CategorySummary[] =>
 	}));
 
 describe("MonthEnd budget bars", () => {
+	it("keeps cents in the chart accessible name for tiny amounts", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="tiny"
+				monthName="September"
+				amountCents={0}
+				rows={[
+					{
+						id: 1,
+						name: "Dining",
+						budgetCents: 0,
+						spentCents: -30,
+						leftCents: 30,
+						over: false,
+					},
+				]}
+			/>,
+		);
+		expect(html).toContain(
+			'aria-label="Spent against each budget: Dining -$0.30 of $0"',
+		);
+	});
+
 	it("keeps five categories in one row without the scrolling cue", () => {
 		const html = renderToString(
 			<MonthEnd

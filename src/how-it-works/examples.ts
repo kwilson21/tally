@@ -14,9 +14,11 @@ export function budgetExample(
 		| "totalBudgetCents"
 		| "totalSpentCents"
 		| "safeToSpendCents"
+		| "savingsGoalCents"
 		| "uncategorized"
 	> & { unbudgetedCents: number; billsDueCents: number },
 ): string {
+	const savingsGoalCents = s.savingsGoalCents ?? 0;
 	const uncategorizedCents = s.uncategorized.spentCents;
 	const budgetsLeftCents =
 		s.totalBudgetCents -
@@ -24,7 +26,7 @@ export function budgetExample(
 		uncategorizedCents +
 		s.unbudgetedCents;
 	const differenceCents =
-		uncategorizedCents + s.unbudgetedCents + s.billsDueCents;
+		uncategorizedCents + s.unbudgetedCents + s.billsDueCents + savingsGoalCents;
 	const amount = (cents: number) =>
 		formatCents(cents, { wholeDollars: cents % 100 === 0 });
 	const difference =
@@ -35,7 +37,7 @@ export function budgetExample(
 		cents < 0
 			? `${amount(-cents)} more came back as refunds than was spent ${where}`
 			: `${amount(cents)} ${normal}`;
-	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${difference}: ${spendingPart(uncategorizedCents, "has no category yet", "there")}, ${spendingPart(s.unbudgetedCents, "went to categories with no budget", "in categories with no budget")}, and ${amount(s.billsDueCents)} is set aside for bills due.`;
+	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${difference}: ${spendingPart(uncategorizedCents, "has no category yet", "there")}, ${spendingPart(s.unbudgetedCents, "went to categories with no budget", "in categories with no budget")}, ${amount(s.billsDueCents)} is set aside for bills due, and ${amount(savingsGoalCents)} is set aside for the savings goal.`;
 }
 
 /**
