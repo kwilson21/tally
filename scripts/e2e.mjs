@@ -171,7 +171,7 @@ await page.setViewportSize({ width: 390, height: 844 });
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 
 await page
-	.getByRole("link", { name: /12 transactions need a category/ })
+	.getByRole("link", { name: /10 transactions need a category/ })
 	.click();
 await page.waitForURL(/\/transactions\/organize$/);
 await page.getByRole("heading", { name: "Organize", level: 1 }).waitFor();
@@ -180,8 +180,8 @@ step("Home's band opens Organize");
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
-assert.equal(await rows(), 12);
-step("the Needs category filter lists the 12 transactions");
+assert.equal(await rows(), 10);
+step("the Needs category filter lists the 10 transactions");
 
 await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
 await page.locator("#month").selectOption("all");
@@ -265,23 +265,23 @@ await page.locator("#sheet").getByText("Eating Out", { exact: true }).click();
 await page.getByRole("button", { name: "Save" }).click();
 await page.locator("#toasts").getByText("Saved Local Bakery").waitFor();
 await page.locator('[role="dialog"]').waitFor({ state: "detached" });
-assert.equal(await rows(), 11);
+assert.equal(await rows(), 9);
 assert.match(page.url(), /\/transactions\?uncategorized=1$/);
-step("saving shows a toast, closes the sheet, and leaves 11 to categorize");
+step("saving shows a toast, closes the sheet, and leaves 9 to categorize");
 
 await page.locator("#results li[data-transaction] a").first().click();
 await page.locator('[role="dialog"]').waitFor();
 await page.getByText("Exclude from budget", { exact: true }).click();
 await page.getByRole("button", { name: "Save" }).click();
 await page.locator('[role="dialog"]').waitFor({ state: "detached" });
-assert.equal(await rows(), 10);
-step("excluding a transaction takes it out of the list, leaving 10");
+assert.equal(await rows(), 8);
+step("excluding a transaction takes it out of the list, leaving 8");
 
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
-	.getByRole("link", { name: /10 transactions need a category/ })
+	.getByRole("link", { name: /8 transactions need a category/ })
 	.waitFor();
-step("Home now says 10 transactions need a category");
+step("Home now says 8 transactions need a category");
 
 // Change a budget amount (spec §11): Home → Groceries → 650, nudged up $1 and 1¢ → Home shows it.
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
@@ -493,7 +493,7 @@ await page
 	.locator("#toasts")
 	.getByText("Set 2 transactions to Groceries.")
 	.waitFor();
-await page.getByText("Needs category (10)", { exact: true }).waitFor();
+await page.getByText("Needs category (8)", { exact: true }).waitFor();
 step(
 	"selecting two rows sets Groceries and lowers the uncategorized count by two",
 );
