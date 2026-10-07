@@ -38,7 +38,7 @@ describe("data exports", () => {
 	});
 	it("includes income and credit review decisions in the JSON transaction export", async () => {
 		await env.DB.prepare(
-			"UPDATE transactions SET income_source = 'jev', credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = 1",
+			"UPDATE transactions SET income_source = 'jev', credit_reviewed = 0, credit_reviewed_by = NULL, income_confidence = 0.71, transfer_confidence = 0.62 WHERE id = 1",
 		).run();
 		const response = await exports.default.fetch(
 			`${BASE}/settings/export/tally.json`,
@@ -48,9 +48,25 @@ describe("data exports", () => {
 		};
 		expect(data.transactions[0]).toMatchObject({
 			income_source: "jev",
+			income_confidence: 0.71,
+			transfer_confidence: 0.62,
 			credit_reviewed: 0,
 			credit_reviewed_by: null,
 		});
+	});
+	it("reports transaction columns omitted from the JSON export", async () => {
+		const columns = await env.DB.prepare(
+			"PRAGMA table_info(transactions)",
+		).all<{ name: string }>();
+		const data = (await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).json()) as { transactions: Record<string, unknown>[] };
+		const exported = new Set(Object.keys(data.transactions[0] ?? {}));
+		expect(
+			columns.results
+				.map(({ name }) => name)
+				.filter((name) => !exported.has(name)),
+		).toEqual(["entry_key"]);
 	});
 
 	it("includes Plaid's merchant name and the pending flag in the JSON transaction export", async () => {
@@ -276,6 +292,7 @@ describe("data exports", () => {
 				"flag_reimbursement",
 				"flag_transfer",
 				"id",
+				"income_confidence",
 				"income_source",
 				"is_split",
 				"jev_category_id",
@@ -290,6 +307,7 @@ describe("data exports", () => {
 				"raw_name",
 				"refund_of_id",
 				"split_removed_from_cents",
+				"transfer_confidence",
 				"updated_at",
 				"updated_by",
 			],
