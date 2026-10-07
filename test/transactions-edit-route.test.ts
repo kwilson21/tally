@@ -1,8 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
+import { decide, NONE_FIT } from "../src/ai/decide";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -273,6 +275,38 @@ describe("GET /transactions/:id", () => {
 		const { html: reviewedPanel } = await get(`/transactions/${id}`);
 		expect(reviewedPanel).not.toContain("Tally&#39;s guess · 71% sure");
 	});
+
+	it.each([0.1999, 0.2, 0.2001, 0.7949, 0.795, 0.7999, 0.8, 0.8001])(
+		"saves the income answer consistently at %s",
+		async (score) => {
+			const id = Number(
+				(
+					await env.DB.prepare(
+						"INSERT INTO transactions (account_id,date,amount_cents,raw_name,credit_reviewed) VALUES (1,'2026-09-14',-71000,'BORDERLINE PAYROLL',0) RETURNING id",
+					).first<{ id: number }>()
+				)?.id,
+			);
+			const decision = decide(
+				{
+					category: { label: NONE_FIT, confidence: 0.5 },
+					flags: { transfer: 0.1, reimbursement: 0.1, income: score },
+				},
+				[{ id: 1, name: "Groceries" }],
+				JEV_THRESHOLD,
+			);
+			await saveJevResult(env.DB, id, decision, { switches: { income: true } });
+			const stored = await env.DB.prepare(
+				"SELECT flag_income, income_confidence, credit_reviewed FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first();
+			expect(stored).toEqual({
+				flag_income: score >= 0.8 ? 1 : 0,
+				income_confidence: score >= 0.8 ? null : score,
+				credit_reviewed: score >= 0.8 ? 1 : 0,
+			});
+		},
+	);
 
 	it("keeps the edit-panel income guess consistent with posted choices on validation errors", async () => {
 		const id = Number(
@@ -568,6 +602,277 @@ describe("POST /transactions/:id", () => {
 			credit_reviewed_by: null,
 		});
 	});
+
+	it.each([
+		{
+			name: "Jev-reviewed non-income",
+			stored:
+				"flag_income = 0, income_source = NULL, credit_reviewed = 1, credit_reviewed_by = NULL",
+			form: {
+				income: "0",
+				creditReviewed: "0",
+				income_was: "0",
+				creditReviewed_was: "0",
+			},
+			expected: {
+				flag_income: 0,
+				income_source: null,
+				credit_reviewed: 1,
+				credit_reviewed_by: null,
+			},
+		},
+		{
+			name: "Jev income",
+			stored:
+				"flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL",
+			form: {
+				income: "1",
+				creditReviewed: "0",
+				income_was: "1",
+				creditReviewed_was: "0",
+			},
+			expected: {
+				flag_income: 1,
+				income_source: "jev",
+				credit_reviewed: 1,
+				credit_reviewed_by: null,
+			},
+		},
+	])(
+		"keeps $name settled on a note-only save",
+		async ({ stored, form, expected }) => {
+			await env.DB.prepare(
+				`UPDATE transactions SET amount_cents=-500, ${stored} WHERE id=?`,
+			)
+				.bind(bakery)
+				.run();
+			await post(`/transactions/${bakery}`, {
+				merchant: "Local Bakery",
+				note: "note",
+				back: "/transactions",
+				creditReviewedVisible: "1",
+				...form,
+			});
+			expect(
+				await env.DB.prepare(
+					"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id=?",
+				)
+					.bind(bakery)
+					.first(),
+			).toEqual(expected);
+		},
+	);
+
+	it("keeps a Jev non-income credit counted in spending after a note-only save", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-500, category_id=1, category_source='user', flag_income=0, income_source=NULL, credit_reviewed=1, credit_reviewed_by=NULL WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "note",
+			back: "/transactions",
+			income: "0",
+			income_was: "0",
+			creditReviewed: "0",
+			creditReviewed_was: "0",
+			creditReviewedVisible: "1",
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT credit_reviewed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({ credit_reviewed: 1 });
+	});
+
+	it.each([
+		{
+			state: "Jev non-income",
+			stored:
+				"flag_income=0, income_source=NULL, credit_reviewed=1, credit_reviewed_by=NULL",
+			baseIncome: 0,
+			baseReview: 0,
+			choice: 0,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: null,
+				credit_reviewed: 1,
+				credit_reviewed_by: null,
+			},
+		},
+		{
+			state: "Jev non-income",
+			stored:
+				"flag_income=0, income_source=NULL, credit_reviewed=1, credit_reviewed_by=NULL",
+			baseIncome: 0,
+			baseReview: 0,
+			choice: 1,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			},
+		},
+		{
+			state: "Jev income",
+			stored:
+				"flag_income=1, income_source='jev', credit_reviewed=1, credit_reviewed_by=NULL",
+			baseIncome: 1,
+			baseReview: 0,
+			choice: 0,
+			nextIncome: 1,
+			expected: {
+				flag_income: 1,
+				income_source: "jev",
+				credit_reviewed: 1,
+				credit_reviewed_by: null,
+			},
+		},
+		{
+			state: "Jev income",
+			stored:
+				"flag_income=1, income_source='jev', credit_reviewed=1, credit_reviewed_by=NULL",
+			baseIncome: 1,
+			baseReview: 0,
+			choice: 1,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			},
+		},
+		{
+			state: "person-reviewed non-income",
+			stored:
+				"flag_income=0, income_source='user', credit_reviewed=1, credit_reviewed_by='user'",
+			baseIncome: 0,
+			baseReview: 1,
+			choice: 0,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 0,
+				credit_reviewed_by: null,
+			},
+		},
+		{
+			state: "person-reviewed non-income",
+			stored:
+				"flag_income=0, income_source='user', credit_reviewed=1, credit_reviewed_by='user'",
+			baseIncome: 0,
+			baseReview: 1,
+			choice: 1,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			},
+		},
+		{
+			state: "person income",
+			stored:
+				"flag_income=1, income_source='user', credit_reviewed=0, credit_reviewed_by=NULL",
+			baseIncome: 1,
+			baseReview: 0,
+			choice: 0,
+			nextIncome: 1,
+			expected: {
+				flag_income: 1,
+				income_source: "user",
+				credit_reviewed: 0,
+				credit_reviewed_by: null,
+			},
+		},
+		{
+			state: "person income",
+			stored:
+				"flag_income=1, income_source='user', credit_reviewed=0, credit_reviewed_by=NULL",
+			baseIncome: 1,
+			baseReview: 0,
+			choice: 1,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			},
+		},
+		{
+			state: "unreviewed",
+			stored:
+				"flag_income=0, income_source=NULL, credit_reviewed=0, credit_reviewed_by=NULL",
+			baseIncome: 0,
+			baseReview: 0,
+			choice: 0,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: null,
+				credit_reviewed: 0,
+				credit_reviewed_by: null,
+			},
+		},
+		{
+			state: "unreviewed",
+			stored:
+				"flag_income=0, income_source=NULL, credit_reviewed=0, credit_reviewed_by=NULL",
+			baseIncome: 0,
+			baseReview: 0,
+			choice: 1,
+			nextIncome: 0,
+			expected: {
+				flag_income: 0,
+				income_source: "user",
+				credit_reviewed: 1,
+				credit_reviewed_by: "user",
+			},
+		},
+	])(
+		"preserves the $state credit state for posted review choice $choice",
+		async ({
+			stored,
+			baseIncome,
+			baseReview,
+			choice,
+			nextIncome,
+			expected,
+		}) => {
+			await env.DB.prepare(
+				`UPDATE transactions SET amount_cents=-500, ${stored} WHERE id=?`,
+			)
+				.bind(bakery)
+				.run();
+			await post(`/transactions/${bakery}`, {
+				merchant: "Local Bakery",
+				note: "matrix",
+				back: "/transactions",
+				income_was: String(baseIncome),
+				...(nextIncome ? { income: "1" } : {}),
+				creditReviewed_was: String(baseReview),
+				...(choice ? { creditReviewed: "1" } : {}),
+				creditReviewedVisible: "1",
+			});
+			expect(
+				await env.DB.prepare(
+					"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id=?",
+				)
+					.bind(bakery)
+					.first(),
+			).toEqual(expected);
+		},
+	);
 
 	it("opens a Jev-settled income credit with income checked and person review unchecked", async () => {
 		await env.DB.prepare(

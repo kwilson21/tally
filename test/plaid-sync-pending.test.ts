@@ -818,6 +818,25 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				.bind(plaidId)
 				.first();
 
+		it("does not copy an unsure pending income score onto a Plaid-marked income", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -0.42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence=0.5 WHERE id=?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, {
+				amount: -0.42,
+				personal_finance_category: { primary: "INCOME" },
+			});
+			expect(await answerOf("posted-1")).toMatchObject({
+				flag_income: 1,
+				income_source: null,
+				income_confidence: null,
+			});
+		});
+
 		it("moves a category Jev picked from the pending row onto the posted one", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item);

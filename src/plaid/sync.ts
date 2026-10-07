@@ -537,6 +537,8 @@ export async function syncItem(
 									date: transaction.date,
 									name: transaction.name,
 									merchantName: merchantNameOf(transaction),
+									plaidCategory:
+										transaction.personal_finance_category?.primary ?? null,
 								},
 							),
 						);

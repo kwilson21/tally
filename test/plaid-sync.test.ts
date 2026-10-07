@@ -1265,7 +1265,7 @@ describe("syncItem", () => {
 				note: "synthetic note",
 				excluded: false,
 				income: false,
-				creditReviewed: true,
+				creditReviewed: false,
 			},
 			"synthetic",
 		);
@@ -2819,7 +2819,11 @@ describe("syncItem", () => {
 			 * A person marks the credit income, or reviews it as a refund, in the edit panel. The panel
 			 * sends the exclude toggle as it shows it, so `excluded` says whether it was left on.
 			 */
-			const decide = async (choice: "income" | "refund", excluded = false) =>
+			const decide = async (
+				choice: "income" | "refund",
+				excluded = false,
+				creditReviewed = choice === "refund",
+			) =>
 				saveEdit(
 					env.DB,
 					await rowId(),
@@ -2830,7 +2834,7 @@ describe("syncItem", () => {
 						note: null,
 						excluded,
 						income: choice === "income",
-						creditReviewed: choice === "refund",
+						creditReviewed,
 					},
 					"synthetic-person",
 				);
@@ -3130,7 +3134,7 @@ describe("syncItem", () => {
 					// Tally reviewed it (no person), so a save that keeps it reviewed changes nothing.
 					"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = NULL WHERE plaid_transaction_id = 'transaction-1'",
 				).run();
-				await decide("refund", true);
+				await decide("refund", true, false);
 				expect(await exclusion()).toEqual({
 					excluded: 1,
 					excluded_source: "plaid",

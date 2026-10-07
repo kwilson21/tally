@@ -1,4 +1,5 @@
 // Turns Jev's answers into what gets stored (spec §7). Jev suggests; this code decides.
+import { meetsConfidenceThreshold } from "./confidence";
 
 export type Flag = "transfer" | "reimbursement" | "income";
 
@@ -41,7 +42,10 @@ export function decide(
 		answer.category.label === NONE_FIT || !categoriesOn
 			? undefined
 			: categories.find((c) => c.name === answer.category.label);
-	const confident = answer.category.confidence >= threshold;
+	const confident = meetsConfidenceThreshold(
+		answer.category.confidence,
+		threshold,
+	);
 	return {
 		noneFit: answer.category.label === NONE_FIT && categoriesOn,
 		categoryId: match && confident ? match.id : null,
@@ -49,9 +53,13 @@ export function decide(
 		confidence: answer.category.confidence,
 		flagConfidence: answer.flags,
 		flags: {
-			transfer: categoriesOn && answer.flags.transfer >= threshold,
-			reimbursement: categoriesOn && answer.flags.reimbursement >= threshold,
-			income: answer.flags.income >= threshold,
+			transfer:
+				categoriesOn &&
+				meetsConfidenceThreshold(answer.flags.transfer, threshold),
+			reimbursement:
+				categoriesOn &&
+				meetsConfidenceThreshold(answer.flags.reimbursement, threshold),
+			income: meetsConfidenceThreshold(answer.flags.income, threshold),
 		},
 	};
 }

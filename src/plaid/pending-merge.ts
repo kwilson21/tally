@@ -26,7 +26,7 @@
 
 // Parameters, shared by every statement: 1 the pending id, 2 the posted id, 3 the bank's amount in
 // cents now, 4 and 5 the Item row and its lock, 6 to 8 the posted date, bank text and merchant name.
-import { personChoseIncomeSql } from "../db/income";
+import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
 function hasAnswerSql(personChoice: string, jevAnswer: string) {
@@ -97,10 +97,7 @@ const STATEMENTS = [
 	// Uncertain flag answers move only when the posted row has no confidence of its own, like category_confidence.
 	`UPDATE transactions SET income_confidence = p.income_confidence
 	 ${FROM_PENDING} AND p.income_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND NOT ${hasAnswerSql(
-			personChoseIncomeSql("transactions"),
-			"transactions.income_source = 'jev' OR transactions.income_confidence IS NOT NULL",
-		)}`,
+	 AND NOT (${hasIncomeAnswerSql("transactions")} OR transactions.income_confidence IS NOT NULL OR (?9 = 'INCOME' AND ?3 < 0))`,
 	`UPDATE transactions SET transfer_confidence = p.transfer_confidence
 	 ${FROM_PENDING} AND p.transfer_confidence IS NOT NULL AND p.amount_cents = ?3
 	 AND NOT ${hasAnswerSql(
@@ -163,6 +160,7 @@ export function mergePendingIntoPosted(
 		date: string;
 		name: string;
 		merchantName: string | null;
+		plaidCategory: string | null;
 	},
 ): D1PreparedStatement[] {
 	const values = [
@@ -174,6 +172,7 @@ export function mergePendingIntoPosted(
 		posted.date,
 		posted.name,
 		posted.merchantName,
+		posted.plaidCategory,
 	];
 	// D1 wants exactly as many values as the statement's highest numbered parameter.
 	return STATEMENTS.map((sql) =>

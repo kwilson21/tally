@@ -58,12 +58,14 @@ describe("rowCaption", () => {
 		expect(html).not.toContain("Review credit");
 	});
 	it.each([
-		[0.19, false],
+		[0.1999, false],
 		[0.2, false],
-		[0.21, true],
-		[0.79, true],
+		[0.2001, true],
+		[0.7949, true],
+		[0.795, true],
+		[0.7999, true],
 		[0.8, false],
-		[0.81, false],
+		[0.8001, false],
 	] as const)(
 		"income visibility at %s is maybe income: %s",
 		async (confidence, visible) => {

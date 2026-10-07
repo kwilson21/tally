@@ -1,5 +1,5 @@
 import { JEV_THRESHOLD } from "../ai/categorize";
-import { confidencePercent } from "../ai/confidence";
+import { confidenceBasisPoints } from "../ai/confidence";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
 
@@ -20,8 +20,8 @@ export function maybeIncomeVisible({
 	paysBill?: boolean;
 }) {
 	const confidence =
-		incomeConfidence == null ? null : confidencePercent(incomeConfidence);
-	const threshold = confidencePercent(JEV_THRESHOLD);
+		incomeConfidence == null ? null : confidenceBasisPoints(incomeConfidence);
+	const threshold = confidenceBasisPoints(JEV_THRESHOLD);
 	return (
 		amountCents < 0 &&
 		!income &&
@@ -30,7 +30,7 @@ export function maybeIncomeVisible({
 		incomeConfidence != null &&
 		confidence !== null &&
 		confidence < threshold &&
-		confidence > 100 - threshold
+		confidence > 10_000 - threshold
 	);
 }
 

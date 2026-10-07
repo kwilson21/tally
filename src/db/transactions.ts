@@ -1,5 +1,5 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
-import { confidencePercent } from "../ai/confidence";
+import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
@@ -25,7 +25,7 @@ import {
 	PAYS_A_BILL,
 	paysBillSql,
 } from "./counted-month";
-import { plaidSetIncomeSql } from "./income";
+import { hasIncomeAnswerSql, plaidSetIncomeSql } from "./income";
 import {
 	merchantColumnSql,
 	merchantKeySql,
@@ -217,7 +217,7 @@ export async function listTransactions(
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=p.id AND bp.status='linked' LIMIT 1) AS parentBillName,
-				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, t.income_confidence AS incomeConfidence,
+				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
 				CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew,
@@ -457,7 +457,7 @@ export async function getTransaction(
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
-				${PENDING_SQL} AS pending, t.flag_income AS income, t.income_confidence AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				${PENDING_SQL} AS pending, t.flag_income AS income, CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,
@@ -591,14 +591,16 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded, refund_of_id AS refundOfId, is_split AS isSplit FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
 			merchantKey: string;
 			categoryId: number | null;
 			income: number;
+			incomeSource: string | null;
 			creditReviewed: number | null;
+			creditReviewedBy: string | null;
 			excluded: number;
 			refundOfId: number | null;
 			isSplit: number;
@@ -650,31 +652,37 @@ export async function saveEdit(
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
-	const creditReviewProvided = edit.creditReviewedProvided !== false;
 	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
+	const incomeChanged =
+		edit.incomeWas === undefined
+			? (edit.income ? 1 : 0) !== current.income
+			: edit.income !== edit.incomeWas;
+	const creditReviewChanged =
+		edit.creditReviewedProvided === false
+			? false
+			: edit.creditReviewedWas === undefined
+				? edit.creditReviewed !== (current.creditReviewedBy === "user")
+				: edit.creditReviewed !== edit.creditReviewedWas;
 	const creditReviewByUser =
-		creditReviewProvided &&
-		!edit.income &&
-		creditReviewChoice === 1 &&
-		(current.creditReviewed !== 1 || current.income === 1);
+		creditReviewChanged && !edit.income && creditReviewChoice === 1;
 	// Changing the exclusion makes it a person's choice, which Jev never overrides. A refund being
 	// linked counts, whatever the panel's Exclude chip held (it was drawn from the old state).
 	const excluded = edit.excluded && !linking ? 1 : 0;
 	const excludeArgs = [excluded, excluded];
 	// The review and income parameters the panel's own UPDATE shares between its two forms.
 	const reviewArgs = [
+		incomeChanged ? 1 : 0,
 		edit.income ? 1 : 0,
-		edit.income ? 1 : 0,
+		incomeChanged ? 1 : 0,
 		creditReviewByUser ? 1 : 0,
-		edit.income ? 1 : 0,
-		creditReviewByUser ? 1 : 0,
-		creditReviewProvided ? 1 : 0,
-		edit.income ? 1 : 0,
+		creditReviewChanged ? 1 : 0,
 		creditReviewChoice,
-		creditReviewProvided ? 1 : 0,
-		edit.income ? 1 : 0,
+		creditReviewChanged ? 1 : 0,
+		creditReviewChoice,
+		incomeChanged ? 1 : 0,
+		creditReviewChoice,
 		creditReviewByUser ? 1 : 0,
-		creditReviewProvided ? 1 : 0,
+		creditReviewChanged ? 1 : 0,
 		creditReviewChoice,
 		actor,
 		id,
@@ -714,15 +722,17 @@ export async function saveEdit(
 		changed
 			? gated(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
-						note = ?, ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
-						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
+						note = ?, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+						income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
+						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[edit.categoryId, edit.note, ...excludeArgs, ...reviewArgs],
 				)
 			: gated(
-					`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = ?, income_source = CASE WHEN flag_income IS NOT ? OR (amount_cents < 0 AND ? = 1 AND ? = 0) THEN 'user' WHEN amount_cents < 0 AND ? = 1 THEN 'user' ELSE income_source END,
-					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN ? WHEN amount_cents < 0 AND ? = 1 AND ? = 0 THEN 0 ELSE credit_reviewed END,
+					`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+					income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
+					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[edit.note, ...excludeArgs, ...reviewArgs],
@@ -1247,21 +1257,21 @@ export async function saveJevResult(
 			d.categoryId === null ? null : "jev",
 			d.confidence,
 			incomeOn ? 1 : 0,
-			confidencePercent(incomeConfidence ?? 0),
-			confidencePercent(JEV_THRESHOLD),
+			confidenceBasisPoints(incomeConfidence ?? 0),
+			confidenceBasisPoints(JEV_THRESHOLD),
 			incomeConfidence ?? 0,
 			options.switches?.categories === false ? 0 : 1,
-			confidencePercent(
+			confidenceBasisPoints(
 				d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
 			),
-			confidencePercent(JEV_THRESHOLD),
+			confidenceBasisPoints(JEV_THRESHOLD),
 			d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
 			d.categoryId !== null ? 1 : 0,
-			confidencePercent(d.confidence),
-			confidencePercent(JEV_THRESHOLD),
+			confidenceBasisPoints(d.confidence),
+			confidenceBasisPoints(JEV_THRESHOLD),
 			incomeConfidence,
-			confidencePercent(incomeConfidence ?? 0),
-			100 - confidencePercent(JEV_THRESHOLD),
+			confidenceBasisPoints(incomeConfidence ?? 0),
+			10_000 - confidenceBasisPoints(JEV_THRESHOLD),
 			income ? 1 : 0,
 			d.suggestedCategoryId,
 			d.noneFit ? 1 : 0,
