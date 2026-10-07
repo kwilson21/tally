@@ -81,6 +81,25 @@ const action = (url: string, formId: string) => ({
 	"hx-swap": "outerHTML",
 });
 
+const ruleFocus = (
+	renderedRules: { merchantKey: string }[],
+	removedKey: string,
+) => {
+	const index = renderedRules.findIndex(
+		(rule) => rule.merchantKey === removedKey,
+	);
+	return {
+		focusRuleIndex:
+			renderedRules.length > 1
+				? Math.min(
+						index < renderedRules.length - 1 ? index : index - 1,
+						renderedRules.length - 2,
+					)
+				: undefined,
+		focusMerchantHeading: renderedRules.length <= 1,
+	};
+};
+
 const summaryClass =
 	"flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden";
 const chevron = (
@@ -654,7 +673,7 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 	}
 	const before = await merchantRules(c.env.DB, search);
 	const focusRules =
-		before.total > 20 && search ? await merchantRules(c.env.DB) : before;
+		before.total - 1 > 20 && search ? before : await merchantRules(c.env.DB);
 	const removed = await removeMerchantRule(c.env.DB, merchantKey);
 	const view = { rulesSearch: search };
 	if (!removed) {
@@ -674,16 +693,9 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 				announce: `Removed ${removed}. ${Math.max(0, before.total - 1)} merchant${before.total === 2 ? "" : "s"} left.`,
 			}),
 		);
-		const index = focusRules.rules.findIndex(
-			(rule) => rule.merchantKey === merchantKey,
-		);
 		return renderSettings(c, {
 			...view,
-			focusRuleIndex:
-				focusRules.rules.length > 1
-					? Math.max(0, Math.min(index, focusRules.rules.length - 2))
-					: undefined,
-			focusMerchantHeading: focusRules.rules.length <= 1,
+			...ruleFocus(focusRules.rules, merchantKey),
 		});
 	}
 	return c.redirect(

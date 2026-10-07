@@ -293,6 +293,55 @@ describe("GET /settings", () => {
 		);
 	});
 
+	it("keeps focus in the rendered search results while search remains", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		const rows = [
+			...Array.from(
+				{ length: 22 },
+				(_, i) =>
+					`('RULE OTHER ${String(i).padStart(2, "0")}', 'Other ${String(i).padStart(2, "0")}', 1)`,
+			),
+			...["A", "B", "C"].map(
+				(name) => `('RULE MATCH ${name}', 'Match ${name}', 1)`,
+			),
+		].join(",");
+		await env.DB.prepare(
+			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${rows}`,
+		).run();
+
+		const middle = await post("/settings/merchant-rules/remove", {
+			merchant: "RULE MATCH B",
+			rules_search: "Match",
+		});
+		expect(middle.html).toMatch(
+			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Match C/,
+		);
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'RULE MATCH B'",
+		).run();
+
+		const last = await post("/settings/merchant-rules/remove", {
+			merchant: "RULE MATCH C",
+			rules_search: "Match",
+		});
+		expect(last.html).toMatch(
+			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Match B/,
+		);
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE MATCH ONLY', 'Unique', 1)",
+		).run();
+
+		const only = await post("/settings/merchant-rules/remove", {
+			merchant: "RULE MATCH ONLY",
+			rules_search: "Unique",
+		});
+		expect(only.html).toMatch(
+			/<h2 id="merchant-rules-title" tabindex="-1" autofocus/,
+		);
+	});
+
 	it("shows an announced alert for an invalid merchant and calmly updates for a missing one", async () => {
 		const invalid = await post("/settings/merchant-rules/remove", {
 			merchant: "",
