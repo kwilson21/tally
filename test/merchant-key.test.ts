@@ -95,6 +95,71 @@ beforeEach(async () => {
 });
 
 describe("merchantKeySql", () => {
+	it.each([
+		["new check sets and applies rule", false, true, 1, 4, 4, 4],
+		["checked category change is transaction-only", true, true, 1, 3, 1, 1],
+		["explicit uncheck clears rule", true, false, 1, null, null, 1],
+		["unchecked note save keeps rule", false, false, 1, null, 1, 1],
+		["paused checked rule keeps category and rule", true, true, 1, null, 1, 1],
+	] as const)(
+		"saveEdit: %s",
+		async (_name, was, now, ruleWas, categoryId, expectedRule, expectedSibling) => {
+			await insert(
+				{
+					id: 8801,
+					date: "2026-09-01",
+					cents: 100,
+					raw: "RULE EDIT",
+					merchant: "RULE EDIT",
+					categoryId: 1,
+				},
+				{
+					id: 8802,
+					date: "2026-09-02",
+					cents: 100,
+					raw: "RULE EDIT",
+					merchant: "RULE EDIT",
+					categoryId: 1,
+				},
+			);
+			await db.batch([
+				db.prepare(
+					"UPDATE transactions SET category_source = 'merchant_rule' WHERE id IN (8801, 8802)",
+				),
+				db.prepare(
+					"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULE EDIT', 1)",
+				),
+			]);
+			await saveEdit(
+				db,
+				8801,
+				edit({
+					categoryId,
+					alwaysForMerchant: now,
+					alwaysWas: was,
+					merchantRuleWas: ruleWas,
+					note: "saved",
+				}),
+				"me",
+			);
+			expect(
+				(
+					await db
+						.prepare(
+							"SELECT default_category_id FROM merchants WHERE raw_name='RULE EDIT'",
+						)
+						.first<{ default_category_id: number | null }>()
+				)?.default_category_id,
+			).toBe(expectedRule);
+			expect(await row(8802)).toMatchObject({ category_id: expectedSibling });
+			expect(
+				await db
+					.prepare("SELECT category_id FROM transactions WHERE id=8801")
+					.first(),
+			).toEqual({ category_id: categoryId ?? 1 });
+		},
+	);
+
 	it("is the merchant name when there is one, otherwise the raw name", async () => {
 		await insert(
 			{

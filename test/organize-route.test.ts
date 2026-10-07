@@ -4,6 +4,7 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
+const textOf = (html: string) => html.replace(/<[^>]+>/g, "");
 
 async function get(path = "/transactions/organize") {
 	const res = await exports.default.fetch(BASE + path);
@@ -160,6 +161,18 @@ describe("POST /transactions/organize", () => {
 				.bind(rawNames[0])
 				.first(),
 		).toEqual({ name: "The Bakery", category: 2 });
+		const settings = await exports.default.fetch("http://tally.test/settings");
+		const settingsHtml = await settings.text();
+		const rules = settingsHtml.slice(
+			settingsHtml.indexOf('id="merchant-rules"'),
+		);
+		const bakery = rules.match(
+			/<li[^>]*>[\s\S]*?The Bakery[\s\S]*?<\/li>/,
+		)?.[0];
+		expect(bakery).toBeDefined();
+		expect(textOf(bakery ?? "")).toMatch(
+			/The Bakery.*Always .* · \d+ transactions?/,
+		);
 	});
 
 	it("returns 422 with a fieldset alert when category is missing", async () => {

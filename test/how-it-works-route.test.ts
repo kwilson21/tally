@@ -409,6 +409,19 @@ describe("links in the demo", () => {
 			/<a href="\/how-it-works"[^>]*>How Tally works<\/a>/,
 		);
 	});
+
+	it("explains where merchant rules can be reviewed and removed", async () => {
+		const html = (await get("/how-it-works")).html;
+		const categorization =
+			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
+			"";
+		expect(categorization).toContain(
+			"See every rule in Settings under Tally&#39;s rules.",
+		);
+		expect(categorization).toContain(
+			"Removing a rule doesn&#39;t change transactions it already sorted.",
+		);
+	});
 });
 
 describe("the Net worth section (spec §9, feature 7; decision 65)", () => {

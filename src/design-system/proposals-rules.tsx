@@ -135,7 +135,9 @@ const settingsTwoSections = (
 			<h2 id="p88-b-always" class="font-serif text-3xl font-semibold">
 				Always for these merchants
 			</h2>
-			<p class="mt-1 text-muted">Tally sorts these merchants for you.</p>
+			<p class="mt-1 text-muted">
+				What Tally does on its own, and what it won't suggest.
+			</p>
 			<RuleRows rules={RULES.slice(0, 2)} />
 		</section>
 		<section class="mt-8" aria-labelledby="p88-b-never">
