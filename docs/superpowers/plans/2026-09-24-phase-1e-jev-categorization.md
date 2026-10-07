@@ -127,7 +127,7 @@
 ### Task 5: Set the threshold on the seed data (spec §7), after the first live run
 
 The key stays only on the demo Worker (owner's choice): no key in this environment or CI.
-- [ ] Ship with 0.80. After the owner merges and the demo is deployed, the 09:00 UTC run asks Jev about the seed's 12 uncategorized transactions, using the Worker's own `JEV_API_KEY`.
+- [ ] Ship with 0.80. After the owner merges and the demo is deployed, the 09:00 UTC run asks Jev about the seed's 10 uncategorized transactions after bill matching, using the Worker's own `JEV_API_KEY`.
 - [ ] The next morning, read the results from the demo database:
       `wrangler d1 execute DB --env demo --remote --command "SELECT t.raw_name, c.name AS category, t.category_source, t.category_confidence, t.flag_income, t.flag_transfer, t.flag_reimbursement FROM transactions t LEFT JOIN categories c ON c.id = t.category_id WHERE t.category_source = 'jev' AND t.category_confidence != 0.94 OR (t.category_source IS NULL AND t.category_confidence IS NOT NULL)"`
       This is fake seed data, so reading it is fine; it isn't logged anywhere.

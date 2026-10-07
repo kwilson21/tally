@@ -122,7 +122,7 @@ describe("a payment linked to a bill", () => {
 				trends: before.trends + 150000,
 				counted: before.counted + 1,
 				// It has no category, so it needs one like anything else that counts.
-				needsCategory: before.needsCategory + 1,
+				needsCategory: before.needsCategory,
 				breakdownExcluded: before.breakdownExcluded - 1,
 				filterExcluded: before.filterExcluded - 1,
 			});
@@ -130,13 +130,26 @@ describe("a payment linked to a bill", () => {
 			expect(await stored(9501)).toEqual([exclusion]);
 			// And the list doesn't call it excluded: it says what it is, a payment that counts.
 			const row = await rowOf(9501);
-			expect(row).toMatchObject({ excluded: true, paysBill: true });
+			expect(row).toMatchObject({
+				excluded: true,
+				paysBill: true,
+				categoryName: "Household",
+				billName: "Mortgage",
+			});
+			expect(rowCaption(row as NonNullable<typeof row>).caption).toBe(
+				"Household · paid Mortgage bill",
+			);
 			expect(rowCaption(row as NonNullable<typeof row>).kind).not.toBe(
 				"excluded",
 			);
 
 			await unlink().run();
 			expect(await readings()).toEqual(before);
+			expect(
+				await env.DB.prepare(
+					"SELECT category_id,category_source FROM transactions WHERE id=9501",
+				).first(),
+			).toEqual({ category_id: 5, category_source: "bill" });
 			expect(await stored(9501)).toEqual([exclusion]);
 			const after = await rowOf(9501);
 			expect(after).toMatchObject({ excluded: true, paysBill: false });
@@ -262,12 +275,17 @@ describe("a split whose bank transaction pays a bill", () => {
 			.bind(MONTH)
 			.run();
 		// The part's own link adds nothing: it already counted through its parent.
-		expect(await readings()).toEqual(parentOnly);
+		expect(await readings()).toEqual({
+			...parentOnly,
+			needsCategory: parentOnly.needsCategory - 1,
+		});
 		expect(parentOnly.home).toBe(before.home + 200000);
 
 		// Without the parent's link the part still counts on its own link, and its sibling no longer does.
 		await unlink().run();
 		expect((await readings()).home).toBe(before.home + 150000);
+		// Unlinking the parent removes it from the counted split; the directly linked part keeps its category.
+		expect((await readings()).needsCategory).toBe(parentOnly.needsCategory - 2);
 	});
 });
 
@@ -658,9 +676,13 @@ describe("Jev and a payment that pays a bill", () => {
 		await addPayment("plaid").run();
 		expect(await asked()).toBeUndefined();
 		await link(9501).run();
-		expect(await asked()).toMatchObject({ id: 9501, categoryOnly: true });
+		expect(await asked()).toBeUndefined();
 		await unlink().run();
 		expect(await asked()).toBeUndefined();
+		expect(await row()).toMatchObject({
+			category_id: 5,
+			category_source: "bill",
+		});
 	});
 
 	it("files only the category: a transfer, reimbursement or income answer changes nothing about its exclusion or Spent", async () => {
@@ -674,7 +696,7 @@ describe("Jev and a payment that pays a bill", () => {
 				answer({ transfer: true, reimbursement: true, income: true }),
 				{ categoryOnly: true, switches: { income: true } },
 			),
-		).toBe(true);
+		).toBe(false);
 		expect(await row()).toEqual({
 			excluded: 1,
 			excluded_source: "plaid",
@@ -683,14 +705,11 @@ describe("Jev and a payment that pays a bill", () => {
 			flag_income: 0,
 			income_source: null,
 			category_id: 5,
-			category_source: "jev",
+			category_source: "bill",
 		});
 		expect(await stillLinked()).toBe(1);
-		// Categorized now, so it no longer needs one; everything else reads as before.
-		expect(await readings()).toEqual({
-			...before,
-			needsCategory: before.needsCategory - 1,
-		});
+		// The bill's category already answers the only question Jev could help with.
+		expect(await readings()).toEqual(before);
 	});
 
 	it("keeps Jev's own exclusion on a linked payment through Jev's answers", async () => {
@@ -706,6 +725,7 @@ describe("Jev and a payment that pays a bill", () => {
 			excluded_source: "jev",
 			flag_transfer: 1,
 			flag_income: 0,
+			category_source: "bill",
 		});
 		expect(await spendFor()).toBe(before);
 		await unlink().run();
@@ -723,7 +743,10 @@ describe("Jev and a payment that pays a bill", () => {
 		expect(
 			await saveJevResult(db, 9501, answer({}), { categoryOnly: true }),
 		).toBe(false);
-		expect(await row()).toMatchObject({ category_id: null });
+		expect(await row()).toMatchObject({
+			category_id: 5,
+			category_source: "bill",
+		});
 	});
 
 	it("keeps the bill paid and in Spent when Jev answers transfer and income on it (a whole run)", async () => {
@@ -757,13 +780,13 @@ describe("Jev and a payment that pays a bill", () => {
 			{ DB: db, JEV_API_KEY: "test-key" },
 			jev,
 		);
-		expect(result.asked).toBe(1);
+		expect(result.asked).toBe(0);
 		expect(await row()).toMatchObject({
 			excluded: 1,
 			excluded_source: "plaid",
 			flag_transfer: 0,
 			flag_income: 0,
-			category_source: "jev",
+			category_source: "bill",
 		});
 		expect(await stillLinked()).toBe(1);
 		expect(await spendFor()).toBe(before);

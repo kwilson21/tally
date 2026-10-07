@@ -97,6 +97,9 @@ export async function runScheduled(
 	time?: RunClock,
 ) {
 	const budgets = budgetsFor(time);
+	await env.DB.prepare("DELETE FROM cash_delete_holds WHERE created_at <= ?")
+		.bind(Date.now() - 86_400_000)
+		.run();
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE), {
 			categoryExample: true,

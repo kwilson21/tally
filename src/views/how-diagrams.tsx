@@ -431,6 +431,7 @@ export function ExclusionsDiagram({
 export function CategoriesDiagram(c: {
 	user: number;
 	merchantRule: number;
+	bill: number;
 	jev: number;
 	waiting: number;
 	income: number;
@@ -447,35 +448,38 @@ export function CategoriesDiagram(c: {
 	const steps: [string, number][] = [
 		["A person's choice", c.user],
 		["A merchant rule", c.merchantRule],
+		["A bill", c.bill],
 		[`${ai}, if ${c.threshold} or more sure`, c.jev],
 		["Waits for a person", c.waiting],
 	];
+	const stepY = (i: number) => 4 + i * 64;
+	const incomeY = stepY(steps.length - 1) + 44 + 6;
 	return (
 		<Figure
 			id="categories-diagram"
 			title="Where a transaction's category comes from"
-			desc={`Each transaction's category comes from the first step that applies. This month: a person chose ${c.user}, merchant rules ${c.merchantRule}, ${ai} ${c.jev}, and ${c.waiting} ${c.waiting === 1 ? "waits" : "wait"} for a person.${income}`}
-			height={c.income > 0 ? 272 : 244}
+			desc={`Each transaction's category comes from the first step that applies. This month: a person chose ${c.user}, merchant rules ${c.merchantRule}, bills ${c.bill}, ${ai} ${c.jev}, and ${c.waiting} ${c.waiting === 1 ? "waits" : "wait"} for a person.${income}`}
+			height={c.income > 0 ? incomeY + 70 : 308}
 		>
 			{steps.map(([label, count], i) => (
 				<>
 					<Step
-						y={4 + i * 64}
+						y={stepY(i)}
 						label={
 							<>
 								<tspan font-weight="600">{i + 1}</tspan> {label}
 							</>
 						}
 						count={count}
-						dashed={i === 3}
+						dashed={i === 4}
 					/>
-					{i < 3 && (
+					{i < 4 && (
 						<path d={down(40, 48 + i * 64, 64 + i * 64)} class="stroke-ink" />
 					)}
 				</>
 			))}
 			{c.income > 0 && (
-				<text x="16" y="266" font-size="13" class="fill-muted">
+				<text x="16" y={incomeY} font-size="13" class="fill-muted">
 					+ {c.income} income, which needs no category
 				</text>
 			)}

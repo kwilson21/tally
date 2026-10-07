@@ -30,6 +30,11 @@ import {
 	saveCash,
 } from "../transactions/cash";
 import {
+	cashDeleteUndoExpiresInMs,
+	holdCashDelete,
+	restoreCashDelete,
+} from "../transactions/cash-undo";
+import {
 	type Edit,
 	type EditErrors,
 	parseEdit,
@@ -1065,6 +1070,9 @@ function EditSheet({
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
+	const ruleCategory = categories.find(
+		(cat) => cat.id === tx.merchantRuleCategoryId,
+	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1167,6 +1175,20 @@ function EditSheet({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="back" value={back} />
+				{!purchase && (
+					<>
+						<input
+							type="hidden"
+							name="always_was"
+							value={values.alwaysWas ? "1" : "0"}
+						/>
+						<input
+							type="hidden"
+							name="rule_category_was"
+							value={values.merchantRuleWas ?? ""}
+						/>
+					</>
+				)}
 				{/* While the delete question is open there's no Save, so Enter in the name field would save the
 				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
 				{deleteConfirm && <button type="submit" disabled hidden />}
@@ -1197,7 +1219,15 @@ function EditSheet({
 					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
-					<legend class="text-base text-ink">Category</legend>
+					<legend class="flex items-center gap-1 text-base text-ink">
+						Category
+						{tx.categorySource === "bill" && (
+							<>
+								<span aria-hidden="true">·</span>
+								<WhyLink section="categorization" topic="this category" />
+							</>
+						)}
+					</legend>
 					<div class="flex flex-wrap gap-2">
 						{!purchase &&
 							tx.categorySource !== "jev" &&
@@ -1314,7 +1344,7 @@ function EditSheet({
 				{/* The two things people change most after the category, one tap each (owner's pick C). */}
 				<div class="flex flex-wrap gap-2">
 					{/* A linked refund has no category of its own to make a rule from. */}
-					{!purchase && (
+					{tx.refundOfId == null && (
 						<Chip
 							type="checkbox"
 							name="always"
@@ -1333,6 +1363,24 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
+				{tx.refundOfId == null && (
+					<p class="text-sm text-muted">
+						Ticking this for a transaction that doesn't match the rule changes
+						it for this merchant. To change a rule this transaction already
+						matches, remove it in Settings first.
+					</p>
+				)}
+				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null ? (
+					<p class="text-sm text-muted">
+						Remove it in Settings, under{" "}
+						<a href="/settings#merchant-rules">Tally's rules</a>.
+					</p>
+				) : ruleCategory && values.alwaysForMerchant ? (
+					<p class="text-sm text-muted">
+						{tx.displayName} is always {ruleCategory.name}. Untick it and save
+						to remove the rule.
+					</p>
+				) : null}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">
@@ -1452,7 +1500,7 @@ function EditSheet({
 								// The bottom scroll margin brings Delete and Keep it into view with it on a phone.
 								class="scroll-mb-24 text-lg outline-none"
 							>
-								{`Delete ${tx.displayName}, ${formatCents(tx.amountCents)}? This can't be undone.`}
+								{`Delete ${tx.displayName}, ${formatCents(tx.amountCents)}?`}
 							</p>
 							<div class="mt-3 grid grid-cols-2 gap-3">
 								<Button type="submit" class="w-full">
@@ -1639,7 +1687,13 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
-		alwaysForMerchant: false,
+		alwaysForMerchant:
+			tx.merchantRuleCategoryId !== null &&
+			tx.merchantRuleCategoryId === tx.categoryId,
+		alwaysWas:
+			tx.merchantRuleCategoryId !== null &&
+			tx.merchantRuleCategoryId === tx.categoryId,
+		merchantRuleWas: tx.merchantRuleCategoryId,
 		displayName: tx.merchantName,
 		note: tx.note,
 		excluded: tx.excluded,
@@ -1926,6 +1980,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
+			alwaysWas: form.get("always_was") === "1",
+			merchantRuleWas: Number(form.get("rule_category_was")) || null,
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
@@ -2038,7 +2094,10 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			categoryId: tx.categoryId,
 			income: tx.income,
 			creditReviewed: tx.creditReviewed,
-			alwaysForMerchant: false,
+			alwaysForMerchant:
+				tx.merchantRuleCategoryId !== null &&
+				tx.merchantRuleCategoryId === tx.categoryId,
+			merchantRuleWas: tx.merchantRuleCategoryId,
 			displayName: tx.merchantName,
 			note: tx.note,
 			excluded: tx.excluded,
@@ -2059,17 +2118,20 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			),
 		});
 	}
-	await c.env.DB.prepare(
-		"DELETE FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
-	)
-		.bind(tx.id)
-		.run();
+	const undoToken = await holdCashDelete(c.env.DB, tx.id, tx.displayName);
+	if (!undoToken) return c.notFound();
+	const undoExpiresInMs = await cashDeleteUndoExpiresInMs(c.env.DB, undoToken);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
-			toast: { message: `Deleted ${tx.displayName}`, type: "success" },
-			announce: `Deleted cash transaction for ${tx.displayName}.`,
+			toast: {
+				message: `Deleted ${tx.displayName}, ${formatCents(tx.amountCents)}.`,
+				type: "success",
+				undo: undoToken,
+				undoExpiresInMs,
+			},
+			announce: `Deleted ${tx.displayName}.`,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -2077,5 +2139,56 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	if (nowFirstVisit) swapWholePage(c);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		focusHeading: nowFirstVisit,
+	});
+});
+
+transactions.post("/transactions/undo-cash-delete", async (c) => {
+	const form = await c.req.formData();
+	const token = form.get("token");
+	const back = safeBack(form.get("back")?.toString());
+	const wasFirstVisit = (await firstVisitFor(c)) !== null;
+	const restored =
+		typeof token === "string" && /^[0-9a-f-]{36}$/i.test(token)
+			? await restoreCashDelete(c.env.DB, token)
+			: null;
+	const today = await householdToday(c.env.DB);
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify(
+			restored && !restored.alreadyRestored
+				? {
+						toast: {
+							message:
+								restored.lostLinks.length > 0
+									? `Restored ${restored.name}. ${restored.lostLinks.join(", ")} no longer fits and was left off.`
+									: `Restored ${restored.name}.`,
+							type: "success",
+						},
+						announce: `${restored.name} is back.`,
+					}
+				: restored?.alreadyRestored
+					? {
+							toast: {
+								message: "That cash entry is already back.",
+								type: "success",
+							},
+							announce: `${restored.name} is already back.`,
+						}
+					: {
+							toast: {
+								message: "Undo expired. The cash entry stays deleted.",
+								type: "error",
+							},
+							announce: "Undo expired. The cash entry stays deleted.",
+						},
+		),
+	);
+	c.header("HX-Push-Url", back);
+	const restoreEndsFirstVisit =
+		wasFirstVisit && restored !== null && !restored.alreadyRestored;
+	if (restoreEndsFirstVisit) swapWholePage(c);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusHeading: restoreEndsFirstVisit,
 	});
 });

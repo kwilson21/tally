@@ -15,21 +15,29 @@ export function budgetExample(
 		| "totalSpentCents"
 		| "safeToSpendCents"
 		| "savingsGoalCents"
-	>,
+		| "uncategorized"
+	> & { unbudgetedCents: number; billsDueCents: number },
 ): string {
 	const savingsGoalCents = s.savingsGoalCents ?? 0;
-	const billsCents =
+	const uncategorizedCents = s.uncategorized.spentCents;
+	const budgetsLeftCents =
 		s.totalBudgetCents -
-		s.totalSpentCents -
-		s.safeToSpendCents -
-		savingsGoalCents;
-	const bills =
-		billsCents > 0 ? ` − ${formatCents(billsCents)} for bills due` : "";
-	const savings =
-		savingsGoalCents > 0
-			? ` − ${formatCents(savingsGoalCents)} savings goal`
-			: "";
-	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent${bills}${savings} = ${formatCents(s.safeToSpendCents)} safe to spend.`;
+		s.totalSpentCents +
+		uncategorizedCents +
+		s.unbudgetedCents;
+	const differenceCents =
+		uncategorizedCents + s.unbudgetedCents + s.billsDueCents + savingsGoalCents;
+	const amount = (cents: number) =>
+		formatCents(cents, { wholeDollars: cents % 100 === 0 });
+	const difference =
+		differenceCents === 0
+			? "the same as your budgets"
+			: `${amount(Math.abs(differenceCents))} ${differenceCents > 0 ? "less" : "more"}`;
+	const spendingPart = (cents: number, normal: string, where: string) =>
+		cents < 0
+			? `${amount(-cents)} more came back as refunds than was spent ${where}`
+			: `${amount(cents)} ${normal}`;
+	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${difference}: ${spendingPart(uncategorizedCents, "has no category yet", "there")}, ${spendingPart(s.unbudgetedCents, "went to categories with no budget", "in categories with no budget")}, ${amount(s.billsDueCents)} is set aside for bills due, and ${amount(savingsGoalCents)} is set aside for the savings goal.`;
 }
 
 /**
@@ -132,6 +140,7 @@ export function categorizationExample(
 	c: {
 		user: number;
 		merchantRule: number;
+		bill: number;
 		jev: number;
 		/** Jev picked a category but wasn't sure enough to apply it. */
 		unsure: number;
@@ -167,6 +176,8 @@ export function categorizationExample(
 	}
 	if (c.merchantRule > 0)
 		parts.push(`${c.merchantRule} came from merchant rules.`);
+	if (c.bill > 0)
+		parts.push(`${c.bill} took its category from a bill they pay.`);
 	if (c.user > 0)
 		parts.push(
 			`${c.user} ${c.user === 1 ? "was" : "were"} chosen by a person.`,

@@ -19,6 +19,7 @@ import {
 	monthCounts,
 } from "../db/transactions";
 import { loadTrends } from "../db/trends";
+import { FORECAST_START_DAY } from "../home-forecast";
 import {
 	budgetExample,
 	categorizationExample,
@@ -171,6 +172,15 @@ howItWorks.get("/how-it-works", async (c) => {
 		)
 		.reduce((sum, bill) => sum + bill.amountCents, 0);
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
+	const budgeted = new Set(summary.categories.map((category) => category.id));
+	const unbudgetedCents = data.transactions
+		.filter(
+			(transaction) =>
+				!transaction.income &&
+				transaction.categoryId !== null &&
+				!budgeted.has(transaction.categoryId),
+		)
+		.reduce((sum, transaction) => sum + transaction.amountCents, 0);
 	const netWorthText = netWorthExample(
 		(await accountsByBank(c.env.DB)).flatMap((bank) => bank.accounts),
 	);
@@ -250,6 +260,12 @@ howItWorks.get("/how-it-works", async (c) => {
 							that are due or overdue and not yet paid, minus the full monthly
 							savings goal from the 1st.
 						</li>
+						<li>
+							Before day {FORECAST_START_DAY}, Home shows the daily amount: Safe
+							to spend divided by the days left, today included, with any
+							partial cent left out. From day {FORECAST_START_DAY}, it shows the
+							month-end forecast.
+						</li>
 					</ul>
 					{!demo && summary.categories.length === 0 && (
 						<p class="mt-3">No budgets have been set yet.</p>
@@ -264,9 +280,11 @@ howItWorks.get("/how-it-works", async (c) => {
 								<BudgetDiagram {...summary} />
 							</Diagram>
 							<Example demo={demo} monthName={monthLabel}>
-								{budgetExample(summary)} This includes{" "}
-								{demo ? "the demo's " : ""}
-								due and overdue, unpaid bills and the savings goal.
+								{budgetExample({
+									...summary,
+									unbudgetedCents,
+									billsDueCents: unpaidDueBillsCents,
+								})}
 							</Example>
 						</>
 					) : null}
@@ -378,7 +396,17 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>A person's choice, which nothing overwrites.</li>
 						<li>
 							A merchant rule: "Always use this category for this merchant," set
-							with "Always for this merchant" in the edit panel.
+							with "Always for this merchant" in the edit panel. It replaces a
+							bill category or Tally's unconfirmed guess, but never a person's
+							choice. Ticking it on a transaction that does not match the rule
+							changes the rule for that merchant; to change a rule this
+							transaction already matches, remove it in Settings first.
+						</li>
+						<li>
+							A bill: a payment linked by the matcher or by hand takes its
+							bill's category when it has none, a Tally pick or an earlier
+							bill's category. A person's choice is never replaced, and
+							unlinking leaves the category.
 						</li>
 						<li>
 							{demo
@@ -386,6 +414,10 @@ howItWorks.get("/how-it-works", async (c) => {
 								: `An AI model, which each night picks a category for what's left. Tally applies its pick only when it is at least ${threshold} sure, and never when it says none of the categories fit; anything else waits for a person.`}
 						</li>
 					</ol>
+					<p class="mt-3">
+						See every rule in Settings under Tally's rules. Removing a rule
+						doesn't change transactions it already sorted.
+					</p>
 					<p class="mt-3">
 						A suggested category is only an idea; nothing is created until a
 						person says so.
@@ -396,6 +428,7 @@ howItWorks.get("/how-it-works", async (c) => {
 								<CategoriesDiagram
 									user={counts.user}
 									merchantRule={counts.merchantRule}
+									bill={counts.bill}
 									jev={counts.jev}
 									waiting={counts.needsCategory + counts.linkedWaiting}
 									income={counts.income}

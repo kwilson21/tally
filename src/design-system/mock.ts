@@ -5,7 +5,7 @@ import { daysBefore } from "../dates";
 import type { ListRow } from "../db/transactions";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type NetWorthPoint, netWorthView } from "../net-worth";
-import { type BankSync, flaggedBanks, staleBankWords } from "../stale-bank";
+import { type BankSync, flaggedBanks, homeBankNotice } from "../stale-bank";
 import { tidyName } from "../transactions/tidy-name";
 import type { MonthSpend, TrendCategory, TrendsInput } from "../trends";
 
@@ -42,6 +42,22 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 			categoryName: "Groceries",
 			categoryIcon: "groceries",
 			categoryColor: "cat-blue",
+		},
+	},
+	{
+		label: "Payment linked to a bill",
+		row: {
+			...row,
+			id: 8,
+			displayName: "Harbor Property",
+			rawName: "HARBOR PROPERTY MGMT",
+			amountCents: 120000,
+			categoryId: 5,
+			categoryName: "Rent",
+			categoryIcon: "rent",
+			categoryColor: "cat-slate",
+			paysBill: true,
+			billName: "Rent",
 		},
 	},
 	{ label: "Needs a category (unnamed merchant, raw text tidied)", row },
@@ -273,7 +289,7 @@ export const HOME_TOP = {
 	status: "Eating Out is $36 over. Everything else is on track.",
 	band: {
 		href: "/transactions?uncategorized=1",
-		text: "12 transactions need a category",
+		text: "12 need a category",
 		detail: "$228 of this month's spending",
 	},
 };
@@ -318,28 +334,42 @@ export const HOME_ROWS = [
 /** The Band links to the demo's real "needs a category" list, which is what it says. */
 export const BAND = {
 	href: "/transactions?uncategorized=1",
-	text: "12 transactions need a category",
+	text: "12 need a category",
 };
 
-const BANK_TODAY = "2026-09-28";
+const BANK_TODAY = "2026-10-05";
 const chase = (overrides: Partial<BankSync>): BankSync => ({
 	name: "Chase",
 	needsAttention: false,
 	lastSyncedAt: "2026-09-28 09:00:00",
 	...overrides,
 });
-/** The words for these banks as Home says them, from the real function so the catalog can't drift. */
-const bankWords = (banks: BankSync[]) =>
-	staleBankWords(flaggedBanks(banks, BANK_TODAY), BANK_TODAY) ?? "";
-
-/** BankLine's three wordings (decision 72, P37 A): not synced for 3 days, needs signing in, and several banks. */
+/** BankBehind's three wordings, from the same helper as Home. */
 export const BANK_LINES = {
-	stale: bankWords([chase({ lastSyncedAt: "2026-09-25 09:00:00" })]),
-	signIn: bankWords([chase({ needsAttention: true })]),
-	several: bankWords([
-		chase({ needsAttention: true }),
-		chase({ name: "Citi", lastSyncedAt: "2026-09-20 09:00:00" }),
-	]),
+	stale:
+		homeBankNotice(
+			flaggedBanks(
+				[chase({ lastSyncedAt: "2026-10-02 09:00:00" })],
+				BANK_TODAY,
+			),
+			BANK_TODAY,
+		)?.words ?? [],
+	signIn:
+		homeBankNotice(
+			flaggedBanks([chase({ needsAttention: true })], BANK_TODAY),
+			BANK_TODAY,
+		)?.words ?? [],
+	several:
+		homeBankNotice(
+			flaggedBanks(
+				[
+					chase({ needsAttention: true }),
+					chase({ name: "Citi", lastSyncedAt: "2026-09-20 09:00:00" }),
+				],
+				BANK_TODAY,
+			),
+			BANK_TODAY,
+		)?.words ?? [],
 };
 
 /** The money input in each state it can show. */
@@ -410,6 +440,7 @@ export const EXCLUSIONS_EXAMPLE: {
 export const CATEGORIES_EXAMPLE = {
 	user: 14,
 	merchantRule: 22,
+	bill: 5,
 	jev: 40,
 	waiting: 12,
 	income: 3,

@@ -972,9 +972,12 @@ const rulesList = (
 		<h1 class={TITLE}>Settings</h1>
 		<section class="mt-8" aria-labelledby="p69-rules">
 			<h2 id="p69-rules" class="font-serif text-3xl font-semibold">
-				Always for these merchants
+				Tally's rules
 			</h2>
-			<p class="mt-1 text-muted">Tally sorts these merchants for you.</p>
+			<p class="mt-1 text-muted">
+				What Tally does on its own, and what it won't suggest.
+			</p>
+			<h3 class="mt-5 text-lg font-semibold">Always for these merchants</h3>
 			<RuleRows />
 		</section>
 	</>

@@ -1847,8 +1847,8 @@ export function Phase5PicksProposals() {
 				<Fixed>
 					Safe to spend is the whole budget minus counted spending minus bills
 					due or overdue and unpaid, so it can be below $0 (§6). At exactly $0
-					Home says “$0”. The forecast (P95) sits under the sentence from the
-					3rd, and is left out of this drawing.
+					Home says “$0”. The forecast (P95) sits under the sentence from day 7,
+					and is left out of this drawing.
 				</Fixed>
 				<NeedsLine settled={DECISION}>
 					Below $0 the number is negative and brick (“−$40”), with Why? beside
@@ -1884,8 +1884,8 @@ export function Phase5PicksProposals() {
 			>
 				<Fixed>
 					code calculates every number (§2, rule 6), and charts are server-drawn
-					SVG with a text alternative (§8.1). The forecast shows from the 3rd
-					day of the month.
+					SVG with a text alternative (§8.1). The forecast shows from day 7 of
+					the month.
 				</Fixed>
 				<NeedsLine settled={DECISION}>
 					The forecast is where the month ends if everyday spending keeps its

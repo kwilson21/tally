@@ -371,4 +371,56 @@ describe("the page after the first cash entry", () => {
 		expect(res.headers.get("HX-Retarget")).toBeNull();
 		expect(html).toContain("Farmers market");
 	});
+
+	it("restores the first-visit controls when undoing the only transaction", async () => {
+		await post("/transactions/cash", cash);
+		const id = (
+			await env.DB.prepare("SELECT id FROM transactions").first<{
+				id: number;
+			}>()
+		)?.id;
+		if (!id) throw new Error("cash entry missing");
+		const deleted = await post(`/transactions/${id}/delete`, {
+			back: "/transactions",
+			confirm: "1",
+		});
+		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.undo as string;
+		const restored = await post("/transactions/undo-cash-delete", {
+			token,
+			back: "/transactions",
+		});
+		expect(restored.res.status).toBe(200);
+		expect(restored.res.headers.get("HX-Retarget")).toBe("#main");
+		expect(restored.res.headers.get("HX-Reswap")).toBe("innerHTML");
+		expect(restored.res.headers.get("HX-Reselect")).toBe("#main > *");
+		expect(restored.html).toContain('id="q"');
+		expect(restored.html).toContain('id="filters"');
+		expect(restored.html).toContain('id="select-toggle"');
+	});
+
+	it("keeps undo on #page when other transactions remain", async () => {
+		await post("/transactions/cash", cash);
+		await post("/transactions/cash", cash);
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions ORDER BY id LIMIT 1",
+			).first<{
+				id: number;
+			}>()
+		)?.id;
+		if (!id) throw new Error("cash entry missing");
+		const deleted = await post(`/transactions/${id}/delete`, {
+			back: "/transactions",
+			confirm: "1",
+		});
+		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
+			.toast.undo as string;
+		const restored = await post("/transactions/undo-cash-delete", {
+			token,
+			back: "/transactions",
+		});
+		expect(restored.res.headers.get("HX-Retarget")).toBeNull();
+		expect(restored.res.headers.get("HX-Reswap")).toBeNull();
+	});
 });
