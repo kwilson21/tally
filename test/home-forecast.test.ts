@@ -2,10 +2,54 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { homeForecastDays } from "../src/db/home-forecast";
+import { resetDemo } from "../src/demo/reset";
 import { FORECAST_START_DAY, forecastMonth } from "../src/home-forecast";
 import { HomeForecast } from "../src/views/home-forecast";
 
 describe("forecastMonth", () => {
+	it("projects each transaction role once in the everyday pace", () => {
+		const cases = [
+			{
+				name: "bill credit",
+				spentCents: -2000,
+				billPaymentsCents: -2000,
+				everydayCents: 0,
+			},
+			{
+				name: "unlinked refund",
+				spentCents: -2000,
+				billPaymentsCents: 0,
+				everydayCents: -2000,
+			},
+			{
+				name: "bill payment",
+				spentCents: 5000,
+				billPaymentsCents: 5000,
+				everydayCents: 0,
+			},
+			{
+				name: "everyday spending",
+				spentCents: 1000,
+				billPaymentsCents: 0,
+				everydayCents: 1000,
+			},
+		];
+		for (const entry of cases) {
+			const forecast = forecastMonth({
+				day: 15,
+				daysInMonth: 31,
+				totalBudgetCents: 100000,
+				spentCents: entry.spentCents,
+				billPaymentsCents: entry.billPaymentsCents,
+				planPaymentsCents: 0,
+				billsStillDueCents: 0,
+			});
+			expect(forecast.endCents, entry.name).toBe(
+				entry.spentCents + Math.round((entry.everydayCents * 16) / 15),
+			);
+		}
+	});
+
 	it("projects everyday spending and bills still due in integer cents", () => {
 		expect(
 			forecastMonth({
@@ -15,12 +59,11 @@ describe("forecastMonth", () => {
 				spentCents: 40000,
 				billPaymentsCents: 10000,
 				planPaymentsCents: 0,
-				refundsCents: 2000,
 				billsStillDueCents: 5000,
 			}),
 		).toEqual({
-			endCents: 79133,
-			underCents: 20800,
+			endCents: 77000,
+			underCents: 23000,
 			visible: true,
 		});
 	});
@@ -34,12 +77,11 @@ describe("forecastMonth", () => {
 				spentCents: 100000,
 				billPaymentsCents: 0,
 				planPaymentsCents: 0,
-				refundsCents: 60000,
 				billsStillDueCents: 0,
 			}),
 		).toEqual({
-			endCents: 648571,
-			overCents: 598600,
+			endCents: 442857,
+			overCents: 392900,
 			visible: true,
 		});
 	});
@@ -52,10 +94,9 @@ describe("forecastMonth", () => {
 			spentCents: 40000,
 			billPaymentsCents: 10000,
 			planPaymentsCents: 5000,
-			refundsCents: 2000,
 			billsStillDueCents: 5000,
 		};
-		expect(forecastMonth(input).endCents).toBe(73800);
+		expect(forecastMonth(input).endCents).toBe(71667);
 	});
 
 	it("starts on day 7 and has no forecast before then", () => {
@@ -66,7 +107,6 @@ describe("forecastMonth", () => {
 			spentCents: 0,
 			billPaymentsCents: 0,
 			planPaymentsCents: 0,
-			refundsCents: 0,
 			billsStillDueCents: 0,
 		};
 		expect(FORECAST_START_DAY).toBe(7);
@@ -117,6 +157,91 @@ describe("HomeForecast chart scale", () => {
 });
 
 describe("homeForecastDays query budget", () => {
+	it("assigns linked credits, refunds, bill payments, and spending once", async () => {
+		const month = "2099-10";
+		await resetDemo(env.DB, `${month}-18`);
+		const before = await homeForecastDays(env.DB, month, `${month}-18`);
+		const names = [
+			"Forecast role bill credit",
+			"Forecast role refund",
+			"Forecast role payment",
+			"Forecast role everyday",
+		];
+		const bill = await env.DB.prepare(
+			"INSERT INTO bills(name,amount_cents,due_day,frequency,merchant_raw_name) VALUES('Forecast role bill', 2000, 15, 'monthly', 'Forecast role bill') RETURNING id",
+		).first<{ id: number }>();
+		const paymentBill = await env.DB.prepare(
+			"INSERT INTO bills(name,amount_cents,due_day,frequency,merchant_raw_name) VALUES('Forecast role payment bill', 5000, 17, 'monthly', 'Forecast role payment bill') RETURNING id",
+		).first<{ id: number }>();
+		try {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name,credit_reviewed) VALUES(1, ?, -2000, ?, 1)",
+				).bind(`${month}-15`, names[0]),
+				env.DB.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name,credit_reviewed) VALUES(1, ?, -2000, ?, 1)",
+				).bind(`${month}-16`, names[1]),
+				env.DB.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1, ?, 5000, ?)",
+				).bind(`${month}-17`, names[2]),
+				env.DB.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1, ?, 1000, ?)",
+				).bind(`${month}-18`, names[3]),
+			]);
+			const credit = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = ? ORDER BY id DESC LIMIT 1",
+			)
+				.bind(names[0])
+				.first<{ id: number }>();
+			const payment = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = ? ORDER BY id DESC LIMIT 1",
+			)
+				.bind(names[2])
+				.first<{ id: number }>();
+			if (!bill || !paymentBill || !credit || !payment)
+				throw new Error("Forecast fixture missing");
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, ?, ?, 'user', 'linked')",
+				).bind(bill.id, month, credit.id),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, ?, ?, 'user', 'linked')",
+				).bind(paymentBill.id, month, payment.id),
+			]);
+			const rows = await homeForecastDays(env.DB, month, `${month}-18`);
+			for (const [day, spentCents, billPaymentsCents] of [
+				[15, -2000, -2000],
+				[16, -2000, 0],
+				[17, 5000, 5000],
+				[18, 1000, 0],
+			]) {
+				const prior = before.find((row) => row.day === day);
+				const actual = rows.find((row) => row.day === day);
+				expect((actual?.spentCents ?? 0) - (prior?.spentCents ?? 0)).toBe(
+					spentCents,
+				);
+				expect(
+					(actual?.billPaymentsCents ?? 0) - (prior?.billPaymentsCents ?? 0),
+				).toBe(billPaymentsCents);
+			}
+		} finally {
+			await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id = ?")
+				.bind(bill?.id)
+				.run();
+			await env.DB.prepare(
+				"DELETE FROM transactions WHERE raw_name IN (?, ?, ?, ?)",
+			)
+				.bind(...names)
+				.run();
+			await env.DB.prepare("DELETE FROM bills WHERE id = ?")
+				.bind(bill?.id)
+				.run();
+			await env.DB.prepare("DELETE FROM bills WHERE id = ?")
+				.bind(paymentBill?.id)
+				.run();
+		}
+	});
+
 	it("reads the current month's forecast in one bounded statement", async () => {
 		let statements = 0;
 		let forecastSql = "";

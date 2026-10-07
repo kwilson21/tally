@@ -276,7 +276,6 @@ describe("GET / with the demo seed", () => {
 					0,
 				),
 				planPaymentsCents: 0,
-				refundsCents: days.reduce((sum, row) => sum + row.refundsCents, 0),
 				billsStillDueCents: billTotals.stillToPayCents,
 			});
 			const difference = summary.totalBudgetCents - forecast.endCents;
