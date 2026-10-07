@@ -141,7 +141,7 @@ describe("GET /settings", () => {
 		expect(rules).toMatch(/Count Test[\s\S]*Always Groceries · 3 transactions/);
 	});
 
-	it("counts 300 rules and thousands of transactions with two statements, bounded values, and no correlated count", async () => {
+	it("counts 300 rules and 5,000 transactions with two statements, bounded values, and the merchant index", async () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = NULL",
 		).run();
@@ -153,7 +153,7 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${values}`,
 		).run();
-		for (let start = 0; start < 1200; start += 100) {
+		for (let start = 0; start < 5000; start += 100) {
 			const transactions = Array.from({ length: 100 }, (_, offset) => {
 				const i = (start + offset) % 300;
 				return `(1, '2026-09-01', -100, 'LOAD BANK TEXT ${start + offset}', 'RULE LOAD ${String(i).padStart(3, "0")}')`;
@@ -186,6 +186,9 @@ describe("GET /settings", () => {
 		}) as D1Database;
 		const result = await merchantRules(db);
 		expect(result.rules).toHaveLength(300);
+		expect(
+			result.rules.reduce((total, rule) => total + rule.transactions, 0),
+		).toBe(5000);
 		expect(prepared).toHaveLength(2);
 		expect(
 			prepared.reduce((total, statement) => total + statement.values.length, 0),
@@ -197,12 +200,15 @@ describe("GET /settings", () => {
 		const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${rows?.sql}`)
 			.bind(...(rows?.values ?? []))
 			.all<{ detail: string }>();
-		expect(plan.results.map(({ detail }) => detail).join(" ")).not.toContain(
-			"CORRELATED SCALAR SUBQUERY",
+		expect(plan.results.map(({ detail }) => detail).join(" ")).toContain(
+			"transactions_merchant_history",
 		);
 	});
 
 	it("removing an Always rule leaves already sorted transactions unchanged", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
 		const merchant = "RULE REMOVE TEST";
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, 'Remove Test', 1)",
@@ -217,7 +223,7 @@ describe("GET /settings", () => {
 		const { res } = await post("/settings/merchant-rules/remove", { merchant });
 		expect(res.status).toBe(200);
 		expect(trigger(res).announce).toBe(
-			"Removed the Always rule for Remove Test.",
+			"Removed Remove Test. 0 merchants left.",
 		);
 		expect(
 			await env.DB.prepare(
@@ -261,6 +267,29 @@ describe("GET /settings", () => {
 		});
 		expect(empty.html).toMatch(
 			/<h2 id="merchant-rules-title" tabindex="-1" autofocus/,
+		);
+	});
+
+	it("chooses the next Remove button from the full list after search falls below 21", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = NULL",
+		).run();
+		const rows = Array.from(
+			{ length: 21 },
+			(_, i) =>
+				`('RULE SEARCH ${String(i).padStart(2, "0")}', 'Merchant ${String(i).padStart(2, "0")}', 1)`,
+		).join(",");
+		await env.DB.prepare(
+			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${rows}`,
+		).run();
+		const { html } = await post("/settings/merchant-rules/remove", {
+			merchant: "RULE SEARCH 00",
+			rules_search: "Merchant 00",
+		});
+		const rules = html.slice(html.indexOf('id="merchant-rules"'));
+		expect(rules).not.toContain('name="rules_search"');
+		expect(rules).toMatch(
+			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Merchant 01/,
 		);
 	});
 

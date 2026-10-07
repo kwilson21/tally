@@ -205,7 +205,8 @@ describe("GET /transactions/:id", () => {
 			back: "/transactions",
 			income: "0",
 			creditReviewed: "0",
-			merchant_rule_was: "2",
+			always_was: "1",
+			rule_category_was: "2",
 		});
 		expect(res.status).toBe(200);
 		expect(

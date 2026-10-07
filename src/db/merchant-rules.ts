@@ -29,15 +29,13 @@ export async function merchantRules(
 			.prepare(
 				`SELECT m.raw_name AS merchantKey, COALESCE(NULLIF(m.display_name, ''), m.raw_name) AS merchant,
 					c.id AS categoryId, c.name AS category, c.icon, c.color, c.archived,
-					COALESCE(transaction_counts.transactions, 0) AS transactions
+					COUNT(t.id) AS transactions
 				FROM merchants m JOIN categories c ON c.id = m.default_category_id
-				LEFT JOIN (
-					SELECT ${merchantKeySql("t")} AS merchantKey, COUNT(*) AS transactions
-					FROM transactions t WHERE t.parent_id IS NULL
-					GROUP BY ${merchantKeySql("t")}
-				) transaction_counts ON transaction_counts.merchantKey = m.raw_name
+				LEFT JOIN transactions t INDEXED BY transactions_merchant_history
+					ON ${merchantKeySql("t")} = m.raw_name AND t.parent_id IS NULL
 				WHERE m.default_category_id IS NOT NULL
 					AND (? = '' OR instr(lower(COALESCE(NULLIF(m.display_name, ''), m.raw_name)), lower(?)) > 0)
+				GROUP BY m.raw_name, m.display_name, c.id, c.name, c.icon, c.color, c.archived
 				ORDER BY merchant COLLATE NOCASE, merchantKey`,
 			)
 			.bind(search, search)

@@ -376,7 +376,10 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>A person's choice, which nothing overwrites.</li>
 						<li>
 							A merchant rule: "Always use this category for this merchant," set
-							with "Always for this merchant" in the edit panel.
+							with "Always for this merchant" in the edit panel. Ticking it on a
+							transaction that does not match the rule changes the rule for that
+							merchant; to change a rule this transaction already matches,
+							remove it in Settings first.
 						</li>
 						<li>
 							{demo

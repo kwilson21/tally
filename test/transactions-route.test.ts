@@ -12,12 +12,170 @@ async function get(path: string, headers: Record<string, string> = {}) {
 	return { res, html: await res.text() };
 }
 
+async function post(path: string, fields: Record<string, string>) {
+	const res = await exports.default.fetch(`http://tally.test${path}`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/x-www-form-urlencoded",
+			"HX-Request": "true",
+			Origin: "http://tally.test",
+		},
+		body: new URLSearchParams(fields),
+	});
+	return { res, html: await res.text() };
+}
+
 const rowCount = (html: string) =>
 	(html.match(/<li data-transaction=/g) ?? []).length;
 
 /** The aria-live result count's text. */
 const countOf = (html: string) =>
 	html.match(/<p id="result-count"[^>]*>([^<]+)<\/p>/)?.[1];
+
+describe("saving a transaction whose category matches its merchant rule", () => {
+	it("sets a newly checked rule and recategorizes eligible transactions", async () => {
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name) VALUES ('RULE NEW ROUTE')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99004, 1, '2026-10-01', -100, 'RULE NEW ROUTE', 'RULE NEW ROUTE', 1, 'jev'), (99005, 1, '2026-10-02', -100, 'RULE NEW ROUTE', 'RULE NEW ROUTE', NULL, NULL)",
+		).run();
+		const { res } = await post("/transactions/99004", {
+			back: "/transactions",
+			category: "4",
+			always: "1",
+			always_was: "0",
+			rule_category_was: "",
+			merchant: "RULE NEW ROUTE",
+			merchant_was: "RULE NEW ROUTE",
+			note: "",
+			excluded: "0",
+			income: "0",
+			creditReviewed: "1",
+			creditReviewedVisible: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = 'RULE NEW ROUTE'",
+			).first(),
+		).toEqual({ default_category_id: 4 });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id FROM transactions WHERE id = 99005",
+			).first(),
+		).toEqual({ category_id: 4 });
+	});
+
+	it("leaves an existing rule alone on an unchecked note-only save", async () => {
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULE NOTE ROUTE', 2)",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99006, 1, '2026-10-01', -100, 'RULE NOTE ROUTE', 'RULE NOTE ROUTE', 3, 'user'), (99007, 1, '2026-10-02', -100, 'RULE NOTE ROUTE', 'RULE NOTE ROUTE', 2, 'merchant_rule')",
+		).run();
+		const { res } = await post("/transactions/99006", {
+			back: "/transactions",
+			category: "3",
+			always_was: "0",
+			rule_category_was: "2",
+			merchant: "RULE NOTE ROUTE",
+			merchant_was: "RULE NOTE ROUTE",
+			note: "keep rule",
+			excluded: "0",
+			income: "0",
+			creditReviewed: "1",
+			creditReviewedVisible: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = 'RULE NOTE ROUTE'",
+			).first(),
+		).toEqual({ default_category_id: 2 });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id FROM transactions WHERE id = 99007",
+			).first(),
+		).toEqual({ category_id: 2 });
+	});
+
+	it("changes only this transaction when a different category is picked and Always stays checked", async () => {
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULE ROUTE', 1)",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99001, 1, '2026-10-01', -100, 'RULE ROUTE', 'RULE ROUTE', 1, 'merchant_rule'), (99002, 1, '2026-10-02', -100, 'RULE ROUTE', 'RULE ROUTE', 1, 'merchant_rule')",
+		).run();
+		const { res } = await post("/transactions/99001", {
+			back: "/transactions",
+			category: "3",
+			always: "1",
+			always_was: "1",
+			rule_category_was: "1",
+			merchant: "RULE ROUTE",
+			merchant_was: "RULE ROUTE",
+			note: "",
+			excluded: "0",
+			income: "0",
+			creditReviewed: "1",
+			creditReviewedVisible: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = 'RULE ROUTE'",
+			).first(),
+		).toEqual({ default_category_id: 1 });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE id = 99001",
+			).first(),
+		).toEqual({ category_id: 3, category_source: "user" });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE id = 99002",
+			).first(),
+		).toEqual({ category_id: 1, category_source: "merchant_rule" });
+	});
+
+	it("saves unrelated changes when a paused rule has no posted category", async () => {
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULE PAUSED ROUTE', 1)",
+		).run();
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 1",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99003, 1, '2026-10-01', -100, 'RULE PAUSED ROUTE', 'RULE PAUSED ROUTE', 1, 'merchant_rule')",
+		).run();
+		const { res } = await post("/transactions/99003", {
+			back: "/transactions",
+			category: "",
+			always: "1",
+			always_was: "1",
+			rule_category_was: "1",
+			merchant: "RULE PAUSED ROUTE",
+			merchant_was: "RULE PAUSED ROUTE",
+			note: "paused note",
+			excluded: "0",
+			income: "0",
+			creditReviewed: "1",
+			creditReviewedVisible: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, note FROM transactions WHERE id = 99003",
+			).first(),
+		).toEqual({ category_id: 1, note: "paused note" });
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = 'RULE PAUSED ROUTE'",
+			).first(),
+		).toEqual({ default_category_id: 1 });
+	});
+});
 
 /** The text of each option of the select with this id, as the page renders it (entities decoded). */
 function optionsOf(html: string, id: string) {

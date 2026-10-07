@@ -1,7 +1,7 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
-import type { Edit } from "../transactions/edit";
+import { type Edit, merchantRuleChange } from "../transactions/edit";
 import { type Filters, likePattern, type Show } from "../transactions/filters";
 import {
 	type NameSource,
@@ -804,20 +804,29 @@ export async function saveEdit(
 				[excluded, actor, id],
 			),
 		);
-	if (edit.alwaysForMerchant && edit.categoryId !== null) {
+	const ruleChange = merchantRuleChange(
+		edit.alwaysWas ?? false,
+		edit.alwaysForMerchant,
+		edit.merchantRuleWas,
+		edit.categoryId,
+	);
+	if (ruleChange.action === "set" && edit.categoryId !== null) {
 		statements.push(
 			gated("UPDATE merchants SET default_category_id = ? WHERE raw_name = ?", [
 				edit.categoryId,
 				current.merchantKey,
 			]),
-			gated(
-				`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+		);
+		if (ruleChange.recategorize)
+			statements.push(
+				gated(
+					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
 					updated_by = ?, updated_at = datetime('now')
 				WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
-				[edit.categoryId, actor, current.merchantKey, id],
-			),
-		);
-	} else if (edit.merchantRuleWas != null) {
+					[edit.categoryId, actor, current.merchantKey, id],
+				),
+			);
+	} else if (ruleChange.action === "clear" && edit.merchantRuleWas != null) {
 		statements.push(
 			gated(`${CLEAR_MERCHANT_RULE_SQL} AND default_category_id = ?`, [
 				current.merchantKey,

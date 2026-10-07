@@ -653,6 +653,8 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 		});
 	}
 	const before = await merchantRules(c.env.DB, search);
+	const focusRules =
+		before.total > 20 && search ? await merchantRules(c.env.DB) : before;
 	const removed = await removeMerchantRule(c.env.DB, merchantKey);
 	const view = { rulesSearch: search };
 	if (!removed) {
@@ -669,19 +671,19 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 			"HX-Trigger",
 			JSON.stringify({
 				toast: { message, type: "success" },
-				announce: `${message}.`,
+				announce: `Removed ${removed}. ${Math.max(0, before.total - 1)} merchant${before.total === 2 ? "" : "s"} left.`,
 			}),
 		);
-		const index = before.rules.findIndex(
+		const index = focusRules.rules.findIndex(
 			(rule) => rule.merchantKey === merchantKey,
 		);
 		return renderSettings(c, {
 			...view,
 			focusRuleIndex:
-				before.rules.length > 1
-					? Math.max(0, Math.min(index, before.rules.length - 2))
+				focusRules.rules.length > 1
+					? Math.max(0, Math.min(index, focusRules.rules.length - 2))
 					: undefined,
-			focusMerchantHeading: before.rules.length <= 1,
+			focusMerchantHeading: focusRules.rules.length <= 1,
 		});
 	}
 	return c.redirect(

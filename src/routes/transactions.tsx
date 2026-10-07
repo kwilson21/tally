@@ -1171,11 +1171,18 @@ function EditSheet({
 			>
 				<input type="hidden" name="back" value={back} />
 				{!purchase && (
-					<input
-						type="hidden"
-						name="merchant_rule_was"
-						value={values.merchantRuleWas ?? ""}
-					/>
+					<>
+						<input
+							type="hidden"
+							name="always_was"
+							value={values.alwaysWas ? "1" : "0"}
+						/>
+						<input
+							type="hidden"
+							name="rule_category_was"
+							value={values.merchantRuleWas ?? ""}
+						/>
+					</>
 				)}
 				{/* While the delete question is open there's no Save, so Enter in the name field would save the
 				    form anyway; a disabled first submit button makes Enter do nothing (HTML implicit submission). */}
@@ -1343,10 +1350,17 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
+				{!purchase && (
+					<p class="text-sm text-muted">
+						Ticking this for a transaction that doesn't match the rule changes
+						it for this merchant. To change a rule this transaction already
+						matches, remove it in Settings first.
+					</p>
+				)}
 				{ruleCategory && values.alwaysForMerchant && (
 					<p class="text-sm text-muted">
 						{tx.displayName} is always {ruleCategory.name}. Untick it and save
-						to stop.
+						to remove the rule.
 					</p>
 				)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
@@ -1658,6 +1672,9 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		alwaysForMerchant:
 			tx.merchantRuleCategoryId !== null &&
 			tx.merchantRuleCategoryId === tx.categoryId,
+		alwaysWas:
+			tx.merchantRuleCategoryId !== null &&
+			tx.merchantRuleCategoryId === tx.categoryId,
 		merchantRuleWas: tx.merchantRuleCategoryId,
 		displayName: tx.merchantName,
 		note: tx.note,
@@ -1945,7 +1962,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
-			merchantRuleWas: Number(form.get("merchant_rule_was")) || null,
+			alwaysWas: form.get("always_was") === "1",
+			merchantRuleWas: Number(form.get("rule_category_was")) || null,
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",

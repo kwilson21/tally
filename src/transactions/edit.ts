@@ -4,6 +4,8 @@ export type Edit = {
 	/** null leaves the category as it is. */
 	categoryId: number | null;
 	alwaysForMerchant: boolean;
+	/** Toggle state when the panel opened. */
+	alwaysWas?: boolean;
 	/** Rule category shown when this panel opened, for clearing only the unchanged rule on save. */
 	merchantRuleWas?: number | null;
 	/** null falls back to the bank's raw name. */
@@ -37,6 +39,20 @@ export type Edit = {
 	refundOfId?: number | null;
 };
 
+/** The edit panel changes a merchant rule only when the person changes the toggle. */
+export function merchantRuleChange(
+	alwaysWas: boolean,
+	alwaysNow: boolean,
+	ruleCategoryWas: number | null | undefined,
+	categoryId: number | null,
+): { action: "set" | "clear" | "keep"; recategorize: boolean } {
+	if (!alwaysWas && alwaysNow)
+		return { action: "set", recategorize: categoryId !== null };
+	if (alwaysWas && !alwaysNow && ruleCategoryWas != null)
+		return { action: "clear", recategorize: false };
+	return { action: "keep", recategorize: false };
+}
+
 export type EditErrors = Partial<
 	Record<"category" | "merchant" | "note" | "refund", string>
 >;
@@ -56,6 +72,8 @@ export function parseEdit(
 	const rawCategory = text(form, "category");
 	const categoryId = rawCategory === "" ? null : Number(rawCategory);
 	const alwaysForMerchant = form.get("always") === "1";
+	const alwaysWas = form.get("always_was") === "1";
+	const ruleCategoryWas = Number(form.get("rule_category_was")) || null;
 	// A name typed in the field is a person's own and wins over a chip. The chips (P29 A) post `name_pick`:
 	// "s:" and a suggested name, or "keep" for the bank's. No chip is chosen to start with.
 	const typedName = text(form, "merchant");
@@ -84,7 +102,7 @@ export function parseEdit(
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
 		errors.category = "Pick a category from the list.";
-	} else if (alwaysForMerchant && categoryId === null) {
+	} else if (!alwaysWas && alwaysForMerchant && categoryId === null) {
 		errors.category = "Pick a category to use for this merchant.";
 	}
 	if (displayName.length > MAX_NAME)
@@ -98,9 +116,8 @@ export function parseEdit(
 		value: {
 			categoryId,
 			alwaysForMerchant,
-			...(form.has("merchant_rule_was")
-				? { merchantRuleWas: Number(form.get("merchant_rule_was")) || null }
-				: {}),
+			alwaysWas,
+			merchantRuleWas: ruleCategoryWas,
 			displayName: displayName || null,
 			nameChanged,
 			keepBankName,
