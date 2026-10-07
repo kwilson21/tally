@@ -243,7 +243,7 @@ describe("GET /transactions", () => {
 		expect(html).toMatch(/<label[^>]*for="month"/);
 		expect(html).toMatch(/<label[^>]*for="category"/);
 		expect(html).toMatch(
-			/Needs category \(<span id="needs-count">12<\/span>\)/,
+			/Needs category \(<span id="needs-count">10<\/span>\)/,
 		);
 		expect(html).toMatch(/Excluded/);
 		// Day headings ("Today, Sep 22" or "Sep 21"); which day is newest depends on the seed and today.
@@ -253,7 +253,7 @@ describe("GET /transactions", () => {
 
 	it("filters to what needs a category, with the chip checked", async () => {
 		const { html } = await get("/transactions?uncategorized=1");
-		expect(rowCount(html)).toBe(12);
+		expect(rowCount(html)).toBe(10);
 		expect(html).toMatch(
 			/<input[^>]*name="uncategorized"[^>]*value="1"[^>]*checked/,
 		);
@@ -308,7 +308,7 @@ describe("GET /transactions", () => {
 	it("shows the result count in a stable live region that htmx updates in place", async () => {
 		const { html } = await get("/transactions?uncategorized=1");
 		expect(html).toMatch(
-			/<p id="result-count" aria-live="polite"[^>]*>12 transactions needing a category in [A-Z][a-z]+<\/p>/,
+			/<p id="result-count" aria-live="polite"[^>]*>10 transactions needing a category in [A-Z][a-z]+<\/p>/,
 		);
 		expect(html).toContain(
 			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #organize-link:innerHTML, #add-cash:outerHTML, #select-toggle:outerHTML,',
@@ -452,7 +452,7 @@ describe("GET /transactions", () => {
 		const home = (await get("/")).html;
 		const href = home.match(/href="(\/transactions\?[^"]+)"/)?.[1];
 		expect(href).toBe("/transactions?uncategorized=1");
-		expect(rowCount((await get(href as string)).html)).toBe(12);
+		expect(rowCount((await get(href as string)).html)).toBe(10);
 	});
 });
 

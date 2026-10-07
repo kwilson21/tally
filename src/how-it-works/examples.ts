@@ -122,6 +122,7 @@ export function categorizationExample(
 	c: {
 		user: number;
 		merchantRule: number;
+		bill: number;
 		jev: number;
 		/** Jev picked a category but wasn't sure enough to apply it. */
 		unsure: number;
@@ -157,6 +158,8 @@ export function categorizationExample(
 	}
 	if (c.merchantRule > 0)
 		parts.push(`${c.merchantRule} came from merchant rules.`);
+	if (c.bill > 0)
+		parts.push(`${c.bill} took its category from a bill they pay.`);
 	if (c.user > 0)
 		parts.push(
 			`${c.user} ${c.user === 1 ? "was" : "were"} chosen by a person.`,

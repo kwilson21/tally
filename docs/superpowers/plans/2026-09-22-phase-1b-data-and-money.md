@@ -1336,7 +1336,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 9: Local check, docs, PR
 
 - [ ] **Step 1: Check it end to end locally.** Run `npm run db:migrate:local`, start `npm run dev`, then in another terminal run `npm run db:seed:local`, then:
-  `npx wrangler d1 execute DB --local --command "SELECT COUNT(*) FROM transactions"`. Expected: **125** (history: 5 months × (15 category transactions + 2 paychecks + 1 transfer) = 90; this month: 19 categorized + 12 uncategorized + 2 paychecks + 1 transfer + 1 reimbursement = 35).
+  `npx wrangler d1 execute DB --local --command "SELECT COUNT(*) FROM transactions"`. Expected: **125** (history: 5 months × (15 category transactions + 2 paychecks + 1 transfer) = 90; this month after bill matching: 21 categorized + 10 uncategorized + 2 paychecks + 1 transfer + 1 reimbursement = 35).
 
   If `npm run dev` fails with "Could not resolve 'hono'" and a Yarn PnP message, that's the owner's stray `~/.pnp.cjs` (not a repo issue). Run the check from a copy of the repo outside the home directory, and report it.
 

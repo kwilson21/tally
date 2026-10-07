@@ -376,10 +376,17 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>A person's choice, which nothing overwrites.</li>
 						<li>
 							A merchant rule: "Always use this category for this merchant," set
-							with "Always for this merchant" in the edit panel. Ticking it on a
-							transaction that does not match the rule changes the rule for that
-							merchant; to change a rule this transaction already matches,
-							remove it in Settings first.
+							with "Always for this merchant" in the edit panel. It replaces a
+							bill category or Tally's unconfirmed guess, but never a person's
+							choice. Ticking it on a transaction that does not match the rule
+							changes the rule for that merchant; to change a rule this
+							transaction already matches, remove it in Settings first.
+						</li>
+						<li>
+							A bill: a payment linked by the matcher or by hand takes its
+							bill's category when it has none, a Tally pick or an earlier
+							bill's category. A person's choice is never replaced, and
+							unlinking leaves the category.
 						</li>
 						<li>
 							{demo
@@ -401,6 +408,7 @@ howItWorks.get("/how-it-works", async (c) => {
 								<CategoriesDiagram
 									user={counts.user}
 									merchantRule={counts.merchantRule}
+									bill={counts.bill}
 									jev={counts.jev}
 									waiting={counts.needsCategory + counts.linkedWaiting}
 									income={counts.income}
