@@ -154,15 +154,24 @@ describe("Home's stale-bank line", () => {
 		expect(html).not.toContain("Fix the bank in Accounts");
 	});
 
-	it("names the first bank and counts the rest when two are flagged", async () => {
+	it("names the oldest bank when two are stale", async () => {
+		await setBank(FIRST, { syncedAt: "2026-10-02 06:00:00" });
+		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
+		const text = textOf((await page()).html);
+		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
+		expect(text).not.toContain(FIRST);
+		expect(text).toContain("as of Sep 20");
+		expect(text).not.toContain("other bank needs a look");
+		expect(text.match(/Fix\s+the bank in Accounts/g)).toHaveLength(1);
+	});
+
+	it("uses the oldest stale bank when the first bank needs signing in", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
 		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
 		const text = textOf((await page()).html);
-		expect(text).toContain(
-			`${FIRST} needs signing in, and 1 other bank needs a look`,
-		);
-		expect(text).not.toContain(SECOND);
-		expect(text.match(/Fix\s+the bank in Accounts/g)).toHaveLength(1);
+		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
+		expect(text).not.toContain(`${FIRST} needs signing in`);
+		expect(text).toContain("as of Sep 20");
 	});
 
 	it("goes away once the bank is fixed or syncs again", async () => {

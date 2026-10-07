@@ -15,7 +15,10 @@ import {
 } from "../db/budgets";
 import { homeForecastDays } from "../db/home-forecast";
 import { loadMonth } from "../db/month";
-import { needsCategoryCount } from "../db/transactions";
+import {
+	needsCategoryCount,
+	olderNeedsCategoryCount,
+} from "../db/transactions";
 import { forecastMonth } from "../home-forecast";
 import { centsToAmount, formatCents } from "../money";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
@@ -148,9 +151,8 @@ async function renderHome(
 			{count === 1 ? "needs" : "need"} a category
 		</>
 	);
-	const allNeeds = await needsCategoryCount(c.env.DB, "all");
 	const currentNeeds = await needsCategoryCount(c.env.DB, month);
-	const olderNeeds = Math.max(0, allNeeds - currentNeeds);
+	const olderNeeds = await olderNeedsCategoryCount(c.env.DB, `${month}-01`);
 	const demo = c.env.DEMO === "true";
 	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
 	// no real banks, so it never asks.

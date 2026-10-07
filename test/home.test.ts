@@ -11,6 +11,7 @@ import {
 } from "../src/dates";
 import { homeForecastDays } from "../src/db/home-forecast";
 import { loadMonth } from "../src/db/month";
+import { OLDER_NEEDS_CATEGORY_SQL } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { forecastMonth } from "../src/home-forecast";
 import { formatCents } from "../src/money";
@@ -38,6 +39,11 @@ describe("GET / with the demo seed", () => {
 	it("uses a fixed number of D1 statements for a large Home request", async () => {
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+			 INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id)
+			 SELECT 1, '2020-01-01', 100, 'Older Home count ' || i, NULL FROM n`,
+		).run();
+		await env.DB.prepare(
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
 			 INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id)
 			 SELECT 1, ?, 100, 'Home count ' || i, 1 FROM n`,
@@ -62,6 +68,14 @@ describe("GET / with the demo seed", () => {
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+		const plan = await env.DB.prepare(
+			`EXPLAIN QUERY PLAN ${OLDER_NEEDS_CATEGORY_SQL}`,
+		)
+			.bind(`${month}-01`)
+			.all<{ detail: string }>();
+		expect(plan.results.map((row) => row.detail).join("\n")).toMatch(
+			/SEARCH (transactions|t) USING (COVERING )?INDEX transactions_date/,
+		);
 		const app = new Hono<{ Bindings: Env }>().route("/", homeRoute);
 		const response = await app.request(
 			"http://tally.test/",
@@ -69,6 +83,7 @@ describe("GET / with the demo seed", () => {
 			{ ...env, DB: db },
 		);
 		expect(response.status).toBe(200);
+		expect(await response.text()).toContain("+5000 older");
 		expect(statements).toBeLessThanOrEqual(20);
 	});
 

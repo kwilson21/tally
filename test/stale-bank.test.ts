@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	type BankSync,
 	flaggedBanks,
+	homeBankNotice,
 	STALE_AFTER_DAYS,
 	staleBankWords,
 } from "../src/stale-bank";
@@ -25,7 +26,7 @@ describe("flaggedBanks", () => {
 
 	it("flags a bank that needs attention, however recently it synced", () => {
 		expect(flaggedBanks([bank({ needsAttention: true })], TODAY)).toEqual([
-			{ name: "Chase", reason: "sign-in" },
+			{ name: "Chase", reason: "sign-in", since: "2026-10-05" },
 		]);
 	});
 
@@ -82,7 +83,7 @@ describe("flaggedBanks", () => {
 				[bank({ needsAttention: true, lastSyncedAt: "2026-09-01 12:00:00" })],
 				TODAY,
 			),
-		).toEqual([{ name: "Chase", reason: "sign-in" }]);
+		).toEqual([{ name: "Chase", reason: "sign-in", since: "2026-09-01" }]);
 	});
 
 	it("never flags a disconnected bank", () => {
@@ -187,5 +188,62 @@ describe("staleBankWords", () => {
 		).toBe(
 			"Chase hasn't synced since Oct 1, and 2 other banks need a look, so Safe to spend may be too high.",
 		);
+	});
+});
+
+describe("homeBankNotice", () => {
+	it("names the oldest stale bank in either link order", () => {
+		const banks = [
+			{ name: "Recent Bank", reason: "stale" as const, since: "2026-10-02" },
+			{ name: "Older Bank", reason: "stale" as const, since: "2026-09-20" },
+		];
+		for (const order of [banks, [...banks].reverse()]) {
+			expect(homeBankNotice(order, TODAY)).toEqual({
+				words: "Older Bank stopped updating Sep 20",
+				asOf: "Sep 20",
+			});
+		}
+	});
+
+	it("uses the oldest stale bank when a sign-in bank is first", () => {
+		expect(
+			homeBankNotice(
+				[
+					{ name: "Login Bank", reason: "sign-in", since: "2026-10-01" },
+					{ name: "Older Bank", reason: "stale", since: "2026-09-20" },
+				],
+				TODAY,
+			),
+		).toEqual({
+			words: "Older Bank stopped updating Sep 20",
+			asOf: "Sep 20",
+		});
+	});
+
+	it("uses a sign-in bank's sync date when it is the oldest", () => {
+		expect(
+			homeBankNotice(
+				[
+					{ name: "Login Bank", reason: "sign-in", since: "2026-09-15" },
+					{ name: "Stale Bank", reason: "stale", since: "2026-09-20" },
+				],
+				TODAY,
+			),
+		).toEqual({
+			words: "Login Bank needs signing in",
+			asOf: "Sep 15",
+		});
+	});
+
+	it("keeps the one-bank stale notice", () => {
+		expect(
+			homeBankNotice(
+				[{ name: "One Bank", reason: "stale", since: "2026-10-02" }],
+				TODAY,
+			),
+		).toEqual({
+			words: "One Bank stopped updating Oct 2",
+			asOf: "Oct 2",
+		});
 	});
 });

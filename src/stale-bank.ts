@@ -17,28 +17,29 @@ export type BankSync = {
 };
 
 export type FlaggedBank =
-	| { name: string; reason: "sign-in" }
+	| { name: string; reason: "sign-in"; since?: string }
 	| { name: string; reason: "stale"; since: string };
 
 /** Home's selected wording and the date attached to the Safe to spend amount. */
 export function homeBankNotice(
 	flagged: FlaggedBank[],
 	today: string,
-): { words: string; otherBanks: string; asOf?: string } | null {
-	const [first, ...rest] = flagged;
+): { words: string; asOf?: string } | null {
+	const first =
+		flagged
+			.filter(
+				(bank): bank is FlaggedBank & { since: string } =>
+					bank.since !== undefined,
+			)
+			.sort((a, b) => a.since.localeCompare(b.since))[0] ?? flagged[0];
 	if (!first) return null;
 	const words =
 		first.reason === "sign-in"
 			? `${first.name} needs signing in`
 			: `${first.name} stopped updating ${shortDay(first.since, today)}`;
-	const others =
-		rest.length === 0
-			? ""
-			: `, and ${rest.length} other ${rest.length === 1 ? "bank needs" : "banks need"} a look`;
 	return {
-		words: `${words}${others}`,
-		otherBanks: others,
-		...(first.reason === "stale" && {
+		words,
+		...(first.since && {
 			asOf: shortDay(first.since, today),
 		}),
 	};
@@ -54,11 +55,15 @@ export function flaggedBanks(banks: BankSync[], today: string): FlaggedBank[] {
 	const flagged: FlaggedBank[] = [];
 	for (const bank of banks) {
 		if (bank.disconnected) continue;
+		const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
 		if (bank.needsAttention) {
-			flagged.push({ name: bank.name, reason: "sign-in" });
+			flagged.push({
+				name: bank.name,
+				reason: "sign-in",
+				...(since && { since }),
+			});
 			continue;
 		}
-		const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
 		// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
 		if (since !== undefined && since <= staleSince)
 			flagged.push({ name: bank.name, reason: "stale", since });
@@ -76,10 +81,14 @@ export function staleBankWords(
 ): string | null {
 	const first = flagged[0];
 	if (!first) return null;
-	const notice = homeBankNotice(flagged, today);
+	const others = flagged.length - 1;
+	const otherBanks =
+		others === 0
+			? ""
+			: `, and ${others} other ${others === 1 ? "bank needs" : "banks need"} a look`;
 	const lead =
 		first.reason === "sign-in"
 			? `${first.name} needs you to sign in again`
 			: `${first.name} hasn't synced since ${shortDay(first.since, today)}`;
-	return `${lead}${notice?.otherBanks ?? ""}, so Safe to spend may be too high.`;
+	return `${lead}${otherBanks}, so Safe to spend may be too high.`;
 }
