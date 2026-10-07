@@ -264,6 +264,9 @@ describe("bill matching and price changes", () => {
 			const picker = await get(`/bills/1/occurrences/${period}/link`);
 			expect(picker).toContain('name="transaction_id" value="1"');
 			expect(picker).toContain("Excluded");
+			await env.DB.prepare(
+				"UPDATE bills SET category_id=(SELECT id FROM categories ORDER BY id LIMIT 1) WHERE id=1",
+			).run();
 
 			const res = await post("/bills/1/link", {
 				transaction_id: "1",
@@ -277,6 +280,11 @@ describe("bill matching and price changes", () => {
 			expect(
 				await rows("bill_payments", "status='linked' AND matched_by='user'"),
 			).toHaveLength(1);
+			expect(
+				await env.DB.prepare(
+					"SELECT category_source FROM transactions WHERE id=1",
+				).first(),
+			).toEqual({ category_source: "bill" });
 			// The hand link counts the payment without changing its exclusion.
 			expect(
 				await rows(

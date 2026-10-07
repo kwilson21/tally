@@ -58,7 +58,7 @@ beforeEach(async () => {
 describe("pendingForJev", () => {
 	it("returns the transactions that need a category, with what Jev is told", async () => {
 		const pending = await pendingForJev(db, 40);
-		expect(pending).toHaveLength(12);
+		expect(pending).toHaveLength(10);
 		expect(pending).toContainEqual(
 			expect.objectContaining({
 				id: await idOf("SQ *LOCAL BAKERY 4432"),
@@ -84,7 +84,7 @@ describe("pendingForJev", () => {
 			decision({ categoryId: null, confidence: 0.4 }),
 		);
 		const pending = await pendingForJev(db, 40);
-		expect(pending).toHaveLength(11);
+		expect(pending).toHaveLength(9);
 		expect(pending.map((p) => p.id)).not.toContain(id);
 	});
 
@@ -99,7 +99,7 @@ describe("pendingForJev", () => {
 		expect(await pendingForJev(db, 40)).toContainEqual(
 			expect.objectContaining({ id, amountCents: -1200 }),
 		);
-		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(9);
 	});
 
 	describe("with categories and exclusions off (spec §8.6)", () => {
@@ -129,7 +129,7 @@ describe("pendingForJev", () => {
 			const pending = await pendingForJev(db, 40, { categories: false });
 			expect(pending.map((p) => p.id)).not.toContain(id);
 			// Everything else is still asked about, for the income answer.
-			expect(pending).toHaveLength(11);
+			expect(pending).toHaveLength(9);
 		});
 
 		// A review that was never recorded is NULL, not 0: it means "not reviewed by a person", so the
@@ -171,16 +171,16 @@ describe("pendingForJev", () => {
 						categoryOnly: false,
 					}),
 				);
-				expect(withoutCategories).toHaveLength(12);
+				expect(withoutCategories).toHaveLength(10);
 				// The same rows are listed with categories on.
-				expect(await pendingForJev(db, 40)).toHaveLength(12);
+				expect(await pendingForJev(db, 40)).toHaveLength(10);
 			},
 		);
 
 		it("doesn't let those rows use up the limit", async () => {
 			await reviewedCredit();
 			expect(await pendingForJev(db, 11, { categories: false })).toHaveLength(
-				11,
+				9,
 			);
 		});
 	});
@@ -291,7 +291,7 @@ describe("applyMerchantRules", () => {
 			category_source: "merchant_rule",
 			category_confidence: null,
 		});
-		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(9);
 	});
 
 	it("never changes a person's choice or an already categorized transaction", async () => {
@@ -334,7 +334,7 @@ describe("applyMerchantRules", () => {
 			category_id: null,
 			category_source: null,
 		});
-		expect(await needsCategoryCount(db, "2026-09")).toBe(12);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(10);
 	});
 });
 
@@ -362,7 +362,7 @@ describe("saveJevResult", () => {
 			excluded: 1,
 			updated_by: before,
 		});
-		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(9);
 	});
 
 	it("stores Jev's confident income answer so it is excluded from spending", async () => {
@@ -389,7 +389,7 @@ describe("saveJevResult", () => {
 			flag_income: 1,
 			excluded: 1,
 		});
-		expect(await needsCategoryCount(db, "2026-09")).toBe(11);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(9);
 	});
 
 	it("accepts Jev's confident income classification for a negative payroll credit", async () => {
@@ -616,7 +616,7 @@ describe("saveJevResult", () => {
 	});
 
 	it("reports whether it wrote anything", async () => {
-		const id = await idOf("GOOGLE *YOUTUBE");
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
 		expect(await saveJevResult(db, id, decision())).toBe(true);
 		expect(await saveJevResult(db, id, decision())).toBe(false);
 	});
@@ -638,7 +638,7 @@ describe("saveJevResult", () => {
 			category_confidence: 0.55,
 			jev_category_id: GROCERIES,
 		});
-		expect(await needsCategoryCount(db, "2026-09")).toBe(12);
+		expect(await needsCategoryCount(db, "2026-09")).toBe(10);
 	});
 
 	it("does nothing if a person chose a category in the meantime", async () => {

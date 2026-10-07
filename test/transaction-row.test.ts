@@ -260,6 +260,31 @@ describe("rowCaption", () => {
 		).toBeNull();
 	});
 
+	it("uses bank text on an uncategorized refund only when no refund pair supplies a caption", async () => {
+		expect(
+			rowCaption({
+				...base,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			}).caption,
+		).toBe("Refund for Sep 5");
+		expect(rowCaption({ ...base, displayName: "Bakery" }).caption).toBe(
+			"SQ *LOCAL BAKERY 4432",
+		);
+		const pending = await TransactionRow({
+			row: {
+				...base,
+				pending: true,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			},
+		}).toString();
+		expect(pending).toContain(
+			'Pending ·</span><span class="truncate text-muted">Refund for Sep 5',
+		);
+		expect(pending).not.toContain("SQ *LOCAL BAKERY 4432");
+	});
+
 	it("explains when a bank amount change removed a saved split", () => {
 		expect(rowCaption({ ...base, splitRemovedFromCents: 1234 })).toEqual({
 			kind: "needs",
@@ -277,6 +302,81 @@ describe("rowCaption", () => {
 				categoryName: "Groceries",
 			})?.caption,
 		).toBe("Groceries · Split from Costco");
+	});
+
+	it("names the bill on split payment parts and parent, leaving other splits alone", () => {
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				parentBillName: "Rent",
+				paysBill: true,
+				categoryName: "Groceries",
+			}).caption,
+		).toBe("Groceries · Split from Costco · paid Rent bill");
+		expect(
+			rowCaption({
+				...base,
+				isSplit: true,
+				paysBill: true,
+				billName: "Rent",
+			}).caption,
+		).toBe("Split transaction · paid Rent bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				billName: "Internet",
+			}).caption,
+		).toBe("Split from Costco · paid Internet bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				parentBillName: "Rent",
+			}).caption,
+		).toBe("Split from Costco · paid Rent bill");
+		expect(
+			rowCaption({
+				...base,
+				parentId: 9,
+				parentName: "Costco",
+				paysBill: true,
+				billName: "Internet",
+				parentBillName: "Rent",
+			}).caption,
+		).toBe("Split from Costco · paid Internet bill");
+		expect(
+			rowCaption({ ...base, parentId: 9, parentName: "Costco" }).caption,
+		).toBe("Split from Costco");
+	});
+
+	it("names the bill a payment paid after its category", () => {
+		expect(
+			rowCaption({
+				...base,
+				categoryName: "Rent",
+				paysBill: true,
+				billName: "Rent",
+			}),
+		).toMatchObject({ kind: "category", caption: "Rent · paid Rent bill" });
+		expect(
+			rowCaption({
+				...base,
+				categoryName: "Utilities",
+				paysBill: true,
+				billName: "Internet",
+				categoryId: 3,
+			}),
+		).toMatchObject({
+			kind: "category",
+			caption: "Utilities · paid Internet bill",
+		});
 	});
 
 	it("drops the bank-change note once the purchase has a category again", () => {

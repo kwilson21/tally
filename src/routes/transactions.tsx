@@ -1209,7 +1209,15 @@ function EditSheet({
 					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
-					<legend class="text-base text-ink">Category</legend>
+					<legend class="flex items-center gap-1 text-base text-ink">
+						Category
+						{tx.categorySource === "bill" && (
+							<>
+								<span aria-hidden="true">·</span>
+								<WhyLink section="categorization" topic="this category" />
+							</>
+						)}
+					</legend>
 					<div class="flex flex-wrap items-start gap-2">
 						{!purchase &&
 							tx.categorySource !== "jev" &&
