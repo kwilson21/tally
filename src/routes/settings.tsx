@@ -24,6 +24,11 @@ import {
 } from "../db/category-suggestions";
 import { namesToReview } from "../db/merchant-names";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
+import {
+	readBankSignInEmails,
+	removeHouseholdMember,
+	saveBankSignInEmails,
+} from "../db/reconnect";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
 import {
@@ -434,6 +439,10 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
+	const bankEmailsOn = await readBankSignInEmails(c.env.DB);
+	const members = await c.env.DB.prepare(
+		"SELECT email FROM household_members WHERE removed_at IS NULL ORDER BY email",
+	).all<{ email: string }>();
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
 	const rulesSearch =
@@ -599,6 +608,79 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					)}
 				</div>
 			</section>
+			<section
+				id="reminders"
+				aria-labelledby="reminders-title"
+				class="mt-8 lg:max-w-3xl"
+			>
+				<h2 id="reminders-title" class="font-serif text-3xl font-semibold">
+					Reminders
+				</h2>
+				<p class="mt-1 text-muted">
+					Goes to the people who have signed in within the last 90 days.
+				</p>
+				<form
+					method="post"
+					action="/settings/bank-sign-in-emails"
+					hx-post="/settings/bank-sign-in-emails"
+					hx-target="#reminders"
+					hx-select="#reminders"
+					hx-swap="outerHTML"
+					class="mt-3 border-y border-rule"
+				>
+					<Switch
+						id="bank-sign-in-emails"
+						name="enabled"
+						label="Bank sign-in emails"
+						checked={bankEmailsOn}
+					/>
+					<div class="pb-4">
+						<Button type="submit">Save</Button>
+					</div>
+				</form>
+				<p class="mt-2 text-sm text-muted">
+					{members.results
+						.map(({ email }) =>
+							email
+								.slice(0, email.indexOf("@"))
+								.split(/[._-]/)
+								.map((part) => part.charAt(0).toUpperCase())
+								.join("")
+								.slice(0, 2),
+						)
+						.join(" · ")}
+				</p>
+				<details class="mt-2 border-y border-rule">
+					<summary class="flex min-h-11 cursor-pointer items-center">
+						Addresses{" "}
+						<span class="ml-auto text-muted">{members.results.length}</span>
+					</summary>
+					<ul class="divide-y divide-rule">
+						{members.results.map(({ email }) => (
+							<li class="flex min-h-11 items-center gap-4">
+								<span class="min-w-0 flex-1">{email}</span>
+								<form
+									method="post"
+									action="/settings/household-members/remove"
+									hx-post="/settings/household-members/remove"
+									hx-target="#reminders"
+									hx-select="#reminders"
+									hx-swap="outerHTML"
+								>
+									<input type="hidden" name="email" value={email} />
+									<Button
+										type="submit"
+										kind="text"
+										aria-label={`Remove ${email}`}
+									>
+										Remove
+									</Button>
+								</form>
+							</li>
+						))}
+					</ul>
+				</details>
+			</section>
 			<MerchantRules
 				rules={visibleRules.map((rule) => ({
 					...rule,
@@ -745,7 +827,9 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		(await readAiSwitches(c.env.DB)).categories
 	)
 		c.executionCtx.waitUntil(
-			askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
+			new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
+				askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
+			),
 		);
 	const out = result.leftOut.length;
 	const count = result.moved;
@@ -892,6 +976,33 @@ settings.post("/settings/ai", async (c) => {
 		"Saved AI suggestions",
 		`Saved AI suggestions. ${spoken}.${band}`,
 		{ aiSaved: true, hash: "ai-suggestions" },
+	);
+});
+
+settings.post("/settings/bank-sign-in-emails", async (c) => {
+	const form = await c.req.formData();
+	await saveBankSignInEmails(c.env.DB, form.get("enabled") === "on");
+	return done(
+		c,
+		"Saved bank sign-in emails",
+		`Bank sign-in emails ${form.get("enabled") === "on" ? "On" : "Off"}.`,
+		{ hash: "reminders" },
+	);
+});
+
+settings.post("/settings/household-members/remove", async (c) => {
+	const form = await c.req.formData();
+	const email = String(form.get("email") ?? "")
+		.trim()
+		.toLowerCase();
+	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+		return c.text("Choose an address to remove.", 400);
+	await removeHouseholdMember(c.env.DB, email);
+	return done(
+		c,
+		"Removed address",
+		"Removed this sign-in address from bank sign-in emails.",
+		{ hash: "reminders" },
 	);
 });
 

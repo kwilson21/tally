@@ -2501,6 +2501,47 @@ function SettingsGroup() {
 	return (
 		<Group id="settings" title="Settings">
 			<Specimen
+				id="reconnect-reminders"
+				title="Reconnect reminders"
+				tier="interactive"
+				components={["Switch"]}
+				sentence="One household switch, with the recent addresses shown beneath it and removable by anyone in the family."
+			>
+				<State label="On, with two household addresses">
+					<div class="max-w-xl border-y border-rule">
+						<Switch
+							id="catalog-bank-sign-in-emails"
+							name="catalog-bank-sign-in-emails"
+							label="Bank sign-in emails"
+							checked
+						/>
+						<p class="text-sm text-muted">
+							Goes to people who signed in within the last 90 days.
+						</p>
+						<p class="py-3">DK</p>
+						<details class="border-t border-rule">
+							<summary class="flex min-h-11 cursor-pointer items-center">
+								2 addresses{" "}
+								<span class="ml-auto text-muted">Dana K. · Riley K.</span>
+							</summary>
+							<p class="min-h-11 py-3">
+								dana@example.com{" "}
+								<button type="button" class="ml-4 min-h-11 text-accent">
+									Remove
+								</button>
+							</p>
+							<p class="min-h-11 py-3">
+								riley@example.com{" "}
+								<button type="button" class="ml-4 min-h-11 text-accent">
+									Remove
+								</button>
+							</p>
+						</details>
+					</div>
+				</State>
+				<UseSpec spec={SWITCH_SPEC} />
+			</Specimen>
+			<Specimen
 				id="merchant-rules-list"
 				title="Merchant rules"
 				tier="visual"

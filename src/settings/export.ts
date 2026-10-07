@@ -19,6 +19,7 @@ const EXPORT_COLUMNS = {
 	bill_payments:
 		"id, bill_id, period, transaction_id, matched_by, status, created_at",
 	household_settings: "key, value",
+	household_members: "email, first_seen_at, last_seen_at",
 } as const;
 
 /** A dollar value for a spreadsheet, calculated without turning stored money into a float. */

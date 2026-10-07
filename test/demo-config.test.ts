@@ -92,11 +92,10 @@ describe("production environment config (#23)", () => {
 		expect(JSON.stringify(production)).not.toContain("finance.");
 	});
 
-	// Three runs, each its own invocation with D1's 1,000 queries to itself (decision 56): the sync,
-	// the first Jev pass with the names, and the second Jev pass. src/index.tsx routes by these exact strings.
-	it("syncs every bank at 09:00 UTC, asks Jev then names at 09:20, and asks Jev again at 09:40 (decision 56)", () => {
+	// Each run has its own D1 query budget; reconnect reminders have a dedicated invocation after sync and sorting.
+	it("runs sync at 09:00 UTC, Jev and names at 09:20 and 09:40, then reconnect reminders at 10:00", () => {
 		expect(production.triggers).toEqual({
-			crons: ["0 9 * * *", "20 9 * * *", "40 9 * * *"],
+			crons: ["0 9 * * *", "20 9 * * *", "40 9 * * *", "0 10 * * *"],
 		});
 	});
 

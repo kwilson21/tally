@@ -10,6 +10,7 @@ type Claims = {
 	exp?: unknown;
 	nbf?: unknown;
 	email?: unknown;
+	iat?: unknown;
 };
 type AccessKey = JsonWebKey & { kid?: string };
 type Certs = { keys?: AccessKey[] };
@@ -172,4 +173,20 @@ export async function verifiedEmail(
 			`the token couldn't be checked (${error instanceof Error ? error.name : "unknown error"})`,
 		);
 	}
+}
+
+/** The verified address and the issue time of the signed Access session. */
+export async function verifiedAccessIdentity(
+	request: Request,
+	env: AccessEnv,
+): Promise<{ email: string; issuedAt: number } | null> {
+	const email = await verifiedEmail(request, env);
+	if (!email) return null;
+	const token = request.headers.get("Cf-Access-Jwt-Assertion");
+	if (!token) return null;
+	const claims = json<Claims>(token.split(".")[1] ?? "");
+	const issuedAt = typeof claims.iat === "number" ? claims.iat : claims.exp;
+	if (typeof issuedAt !== "number" || !Number.isFinite(issuedAt))
+		return refuse("the token has no valid session time");
+	return { email, issuedAt };
 }

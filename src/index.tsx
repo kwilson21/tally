@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { verifiedEmail } from "./access";
+import { verifiedAccessIdentity } from "./access";
 import {
 	categorizePending,
 	MAX_CALLS_PER_RUN,
@@ -10,11 +10,13 @@ import {
 	suggestNewCategories,
 } from "./category-suggestions-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "./dates";
+import { noteHouseholdMember } from "./db/reconnect";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
+import { runReconnectReminders } from "./reconnect/reminders";
 import { accounts } from "./routes/accounts";
 import { bills } from "./routes/bills";
 import { designSystem } from "./routes/design-system";
@@ -38,11 +40,31 @@ type AppEnv = Env & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
 	APP_VERSION?: string;
+	RESEND_API_KEY?: string;
+	EMAIL?: {
+		send(message: {
+			to: string;
+			from: string;
+			subject: string;
+			html: string;
+			text: string;
+		}): Promise<unknown>;
+	};
 };
 type App = { Bindings: AppEnv; Variables: { actor: string } };
 type ScheduledEnv = PlaidEnv & {
 	DB: D1Database;
 	DEMO?: string;
+	RESEND_API_KEY?: string;
+	EMAIL?: {
+		send(message: {
+			to: string;
+			from: string;
+			subject: string;
+			html: string;
+			text: string;
+		}): Promise<unknown>;
+	};
 	JEV_API_KEY?: string;
 	/** Workers AI, bound in production and the demo (wrangler.jsonc); local development has none. */
 	AI?: Ai;
@@ -57,7 +79,7 @@ app.notFound(notFoundPage);
 app.onError(serverErrorPage);
 
 /**
- * Production runs three times each morning, 20 minutes apart, because D1 allows 1,000 queries in one
+ * Production runs four times each morning, with reminders in their own invocation, because D1 allows 1,000 queries in one
  * Worker invocation and a Jev call costs about three of them (the switches read before it and after it,
  * and saving its answer). Each run has the whole limit to itself, and the day's Jev calls still add up
  * to the 500 of decision 56:
@@ -68,6 +90,7 @@ app.onError(serverErrorPage);
  *   200, then makes the night's names, up to 100.
  * - 09:40, the second sort run (`runSecondSort`): asks Jev about what is left, up to `MAX_CALLS_PER_RUN`,
  *   300. No names.
+ * - 10:00, reconnect reminders (`runReconnectReminders`): its own query budget after sync and sorting.
  *
  * Every step that makes calls has a time budget counted from the start of the run (src/run-budget.ts), so
  * a slow Jev or a slow Workers AI can't use up the run's time and leave the next step none, and a cron run
@@ -84,6 +107,7 @@ app.onError(serverErrorPage);
  */
 const FIRST_SORT_CRON = "20 9 * * *";
 const SECOND_SORT_CRON = "40 9 * * *";
+const RECONNECT_EMAIL_CRON = "0 10 * * *";
 const FIRST_SORT_MAX_CALLS = 200;
 
 /**
@@ -258,13 +282,15 @@ app.use("*", async (c, next) => {
 		c.set("actor", "demo");
 		return next();
 	}
-	const email = await verifiedEmail(c.req.raw, {
+	const identity = await verifiedAccessIdentity(c.req.raw, {
 		ACCESS_TEAM_DOMAIN: (c.env as Env & { ACCESS_TEAM_DOMAIN?: string })
 			.ACCESS_TEAM_DOMAIN,
 		ACCESS_AUD: (c.env as Env & { ACCESS_AUD?: string }).ACCESS_AUD,
 	});
-	if (!email) return c.text("Sign in through Cloudflare Access.", 403);
-	c.set("actor", email);
+	if (!identity) return c.text("Sign in through Cloudflare Access.", 403);
+	c.set("actor", identity.email);
+	if (c.env.DEMO !== "true")
+		await noteHouseholdMember(c.env.DB, identity.email, identity.issuedAt);
 	return next();
 });
 // Only inject the first-party, opt-in diagnostics collector when an operator enables it.
@@ -318,6 +344,8 @@ export default {
 	async scheduled(controller, env) {
 		if (controller.cron === FIRST_SORT_CRON) await runFirstSort(env);
 		else if (controller.cron === SECOND_SORT_CRON) await runSecondSort(env);
+		else if (controller.cron === RECONNECT_EMAIL_CRON)
+			await runReconnectReminders(env);
 		else await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;

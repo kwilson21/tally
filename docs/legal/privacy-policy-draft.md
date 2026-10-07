@@ -43,6 +43,8 @@ Plaid supplies bank connection and transaction data. For technical categorizatio
 
 Cloudflare Access handles production sign-in. Cloudflare Workers and D1 host the application and its implemented records. Plaid and Jev provide the integrations described above. GitHub receives feedback issue content when private filing is configured. Provider and deployment practices that are not established by application source are listed in the publication checklist.
 
+For bank sign-in reminder emails, Tally stores verified Cloudflare Access addresses seen using the family app and their first and most recent sign-in times. Removing an address hides it from reminders and retains a removal marker until a newer Access session is seen. Resend receives each recipient address, the bank name, account names and endings, and last sync time to send the reminder. If Resend fails, Cloudflare Email Service may receive the same message; that fallback reaches only destinations verified in Cloudflare Email Routing. The demo does not store household addresses for reminders or send email.
+
 ## How we use and share personal information
 
 The application uses connected bank and transaction data to provide the implemented household budget, account, and transaction features. Jev's response is used for transaction categorization and flags. Household data is available to people authorized through the production Access gate.

@@ -59,7 +59,8 @@ Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggest
 | **Plaid (REST over `fetch`)** | Supplies accounts, transactions, and balances from the family's banks. |
 | **Jev (TypeSafe AI)** | Picks a category and flags for each transaction, with a confidence score. |
 | **Workers AI** | Suggests a clean merchant name, which a person accepts or rejects. |
-| **Cron Triggers** | Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. The demo has no bank sync: each night it resets to the seed data, then retries uncategorized transactions. |
+| **Resend** | Sends bank sign-in reminder emails; Cloudflare Email Service is the best-effort fallback for destinations verified in Cloudflare Email Routing (decision 86). |
+| **Cron Triggers** | Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. A separate 10:00 UTC run sends due reconnect reminders. The demo has no bank sync or email: each night it resets to the seed data, then retries uncategorized transactions. |
 | **Cloudflare Access** | A login wall with the family's emails in front of the family app; the app has no login code of its own. |
 | **Wrangler** | The command-line tool that deploys the Worker and stores secrets. |
 
@@ -75,8 +76,9 @@ Wrangler environments deploy the same code twice:
 | Plaid | On | **Off.** No Plaid secrets exist in this environment. |
 | Jev | On | On |
 | Workers AI | On (`AI` binding) | On (`AI` binding), after each nightly reset; the seed also holds a few suggestions, so they show right after a reset (§7). |
+| Resend | On (`RESEND_API_KEY` secret) | Off; no binding or secret. |
 | Login | Cloudflare Access | Public, with a demo banner on every page |
-| Nightly job | Three runs, 20 minutes apart, each its own Worker invocation with the 1,000 D1 queries that allows to itself (§7). 09:00, the sync run: sync (the merchant rules run at the end of it, §8.5), then the feedback retry; it asks Jev and Workers AI nothing. 09:20, the first sort and names run: a first categorization pass, up to 200 calls, which starts no call more than 9 minutes after the run began, then name suggestions, which start no request more than 13 minutes after it began (§7). 09:40, the second sort run: a second categorization pass, up to 300 calls, which starts no call more than 13 minutes after the run began, and no names (§7) | One run, 09:00: reset the database and bucket to the seed, then categorize (up to 40 calls, none started after 9 minutes), then name suggestions (up to 100, none started after 13 minutes), then the feedback retry |
+| Nightly job | Four production runs, each its own Worker invocation with the 1,000 D1 queries that allows to itself (§7). 09:00, sync and feedback retry; 09:20, up to 200 categorization calls and names; 09:40, up to 300 categorization calls; 10:00, due reconnect reminder emails. The demo has one 09:00 run and never sends email. | One run, 09:00: reset the database and bucket to the seed, then categorize (up to 40 calls, none started after 9 minutes), then name suggestions (up to 100, none started after 13 minutes), then the feedback retry |
 
 The account is on Workers Paid (decision 90), which the nightly design relies on: 1,000 D1 queries per invocation (50 on Free), long scheduled runs, and room for more Cron Triggers than Free's 5.
 
@@ -93,6 +95,7 @@ Secrets are stored with `wrangler secret put` and never committed. The owner ent
 | `PLAID_WEBHOOK_URL` (plain config, not secret) | yes | no |
 | `PLAID_ENV` (plain config: `sandbox` or `production`; anything else means sandbox) | yes | no |
 | `JEV_API_KEY` | yes | yes |
+| `RESEND_API_KEY` | yes | no |
 
 Local development uses a git-ignored `.dev.vars` file, with Plaid **Sandbox** keys only (decision 36); tests fake Plaid at `fetch`, and production keys exist only as secrets on the production Worker. The repo commits a `.dev.vars.example` with placeholder names only.
 
@@ -119,7 +122,7 @@ All money is stored as **integer cents**, because SQLite has no exact decimal ty
 | `documents` | Details of each stored PDF, whose file lives in R2. Unused until receipts are built (decision 66). | `id`, `r2_key`, `filename`, `size_bytes`, `uploaded_by`, `uploaded_at`, `note` |
 | `household_settings` (Phase 3.5, decision 67) | The household's own choices, one row each. | `key` (primary key), `value`. `time_zone` starts as `America/New_York`; an unknown or missing value means Eastern. The AI switches (§8.6) are rows here too, one per switch, all on to start (decision 79). `jev_calls_<date>` is how many calls Jev has had on that household day, against the daily cap (§8.6); only today's row is kept. The demo's nightly reset puts the time zone and the switches back and leaves the `jev_calls_` rows, so two runs on one household day can't spend the cap twice |
 | `household_people` (decision 80) | The household's list of people a transaction can be "for". It holds names, not logins: it gives no one access, and §3's one shared household still holds, so everyone still sees and edits the same data. It always holds one row, Everyone, for a purchase that was for the whole household, which can't be renamed or removed. Anyone in the family adds, renames or removes a name in Settings; removing one clears it from the transactions marked for it, and the toast says how many ("Removed Kids. 3 purchases for Kids now say no one."; decision 81). | `id`, `name` |
-| `household_members` (Phase 5, decision 82) | The addresses that have signed in to Tally, so the reconnect email knows who to send to. Tally notes a verified sign-in address (the Cloudflare Access login token below) the first time it sees it, and updates its `last_seen_at` each time that person signs in. The email goes only to addresses seen signing in within the last 90 days, and anyone in the family can remove an address in Settings (like the people list, decision 81), so a person who has left stops getting it; a removed address comes back only if that person signs in again, which needs Cloudflare Access. The table gives no one access (Cloudflare Access does), and the demo, which sends no email, notes none. | `email` (unique), `first_seen_at`, `last_seen_at` |
+| `household_members` (Phase 5, decision 82) | The verified addresses seen using Tally, so the reconnect email knows who to send to. Tally notes a new verified Access session and updates `last_seen_at`; the email goes only to addresses seen within the last 90 days, and anyone in the family can remove an address in Settings. Removal stays in effect until that person starts a newer Access session. The demo sends no email and stores no members. | `email` (unique), `first_seen_at`, `last_seen_at`, Access session issue time and nullable removal time |
 | `never_suggest_rules` (decision 79) | One row per suggestion a person said No to, so Tally never makes it again until the family removes the row. | `id`, `merchant_key` (the merchant key, §6.1), `kind` (the kind of suggestion: name, category, new category, income or transfer), `category_id` (nullable: the category that was refused, for a category suggestion) |
 
 `updated_by`, `linked_by`, and `uploaded_by` hold the email claim from Cloudflare Access's signed login token. The Worker verifies the `Cf-Access-Jwt-Assertion` JWT against the team's public keys (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, cached) and never trusts the plain `Cf-Access-Authenticated-User-Email` header. In one sentence: we read who you are from Cloudflare's signed login token, not from a header anyone could fake. In the demo they hold `demo`.
@@ -215,7 +218,7 @@ Phone first. Phones get a bottom tab bar (Home, Transactions, Bills, Trends, Mor
 | **Trends** | Spending by category over the last 6 months, and this month vs. last month (§8.3) | 6 |
 | **More → Accounts** | Balances, net worth, net-worth chart, Link a bank, Fix connection for items that need attention, Disconnect a bank, and Sync now with when each bank last synced (§8.1) | 7 |
 | **More → Documents** | Not built; moved to the Later list with receipts (decision 66), and not linked from More or the sidebar until then, so no menu item leads to a page that isn't built (decision 84) | — |
-| **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review; the household's "Bank sign-in emails" switch (§8.4); Download your data (§8.1) | — |
+| **More → Settings** | Categories (rename, order, archive, restore; each row links to its budget on Home); merchant name review; Reminders with one household "Bank sign-in emails" switch on to start, Save and the recent sign-in addresses shown as initials and under a disclosure with Remove; Download your data (§8.1) | — |
 | **Transactions → Organize** | Transactions that need a category, grouped by merchant, each group categorized in one go (§8.1) | 3 |
 | **How Tally works** | One section per feature, in the demo and the family app; the architecture part is demo only (decision 65) | — |
 | **Demo only** | A banner on every page ("Demo data. Nothing here is real.") and a "Things to try" list | — |
