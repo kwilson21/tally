@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { decryptToken, encryptToken } from "../src/plaid/token-crypto";
 import { plaid } from "../src/routes/plaid";
 
@@ -69,6 +70,7 @@ async function post(path: string, jwt?: string, body = "") {
 describe("Plaid routes", () => {
 	beforeEach(async () => {
 		await env.DB.prepare("DELETE FROM plaid_items").run();
+		await saveAiSwitches(env.DB, { details: false });
 		Object.assign(env, {
 			DEMO: "false",
 			PLAID_CLIENT_ID: "client-id",

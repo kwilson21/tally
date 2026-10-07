@@ -149,7 +149,7 @@ export async function listTransactions(
 ): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
-	const { names: namesOn } = await readAiSwitches(db);
+	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
 	const rowMonth = f.raw ? "substr(t.date,1,7)" : COUNTED_MONTH;
 	const rowCategory = f.raw ? "t.category_id" : COUNTED_CATEGORY;
 	if (f.month !== "all") {
@@ -208,7 +208,7 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : "t.note"} AS note, ${f.raw ? "0" : "t.note_guessed"} AS noteGuessed, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw || !detailsOn ? "NULL" : "t.note"} AS note, ${f.raw || !detailsOn ? "0" : "t.note_guessed"} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -509,7 +509,7 @@ export async function getTransaction(
 	// A person's chosen name wins; until then the first pending suggestion, shown dashed; otherwise the
 	// bank's raw text is tidied for display (spec §7). The panel offers every pending suggestion.
 	const { suggestedNames, suggestionStatus, merchantKey, ...row } = r;
-	const { names: namesOn } = await readAiSwitches(db);
+	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
 	const merchant = {
 		stored: suggestedNames,
 		status: suggestionStatus,
@@ -528,9 +528,14 @@ export async function getTransaction(
 		paysBill: r.paysBill === 1,
 		income: r.income === 1,
 		creditReviewed: r.creditReviewed === 1,
-		noteGuessed: r.noteGuessed === 1,
-		kindGuessed: r.kindGuessed === 1,
-		forPersonGuessed: r.forPersonGuessed === 1,
+		note: r.noteGuessed === 1 && !detailsOn ? null : r.note,
+		noteGuessed: r.noteGuessed === 1 && detailsOn,
+		kind: r.kindGuessed === 1 && !detailsOn ? null : r.kind,
+		kindGuessed: r.kindGuessed === 1 && detailsOn,
+		forPersonId: r.forPersonGuessed === 1 && !detailsOn ? null : r.forPersonId,
+		forPersonName:
+			r.forPersonGuessed === 1 && !detailsOn ? null : r.forPersonName,
+		forPersonGuessed: r.forPersonGuessed === 1 && detailsOn,
 		isSplit: r.isSplit === 1,
 		followsPurchase: r.followsPurchase === 1,
 		pending: r.pending === 1,
@@ -596,7 +601,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, kind, for_person_id AS forPersonId FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, credit_reviewed AS creditReviewed, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, for_person_id AS forPersonId FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -608,6 +613,7 @@ export async function saveEdit(
 			refundOfId: number | null;
 			isSplit: number;
 			note: string | null;
+			noteGuessed: number;
 			kind: string | null;
 			forPersonId: number | null;
 		}>();
@@ -830,6 +836,9 @@ export async function saveEdit(
 					for_person_id = CASE WHEN ? = 1 THEN ? ELSE for_person_id END,
 					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
 					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
+					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
+					note_dismissed = CASE WHEN ? = 1 AND ? = 1 AND trim(COALESCE(?, '')) = '' THEN 1 ELSE note_dismissed END,
+					category_confidence = CASE WHEN ? = 1 OR ? = 1 THEN NULL ELSE category_confidence END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 				[
 					kindChanged ? 1 : 0,
@@ -842,6 +851,13 @@ export async function saveEdit(
 					edit.keepDetails ? 1 : 0,
 					noteChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
+					noteChanged ? 1 : 0,
+					edit.note,
+					noteChanged ? 1 : 0,
+					current.noteGuessed,
+					edit.note,
+					kindChanged ? 1 : 0,
+					personChanged ? 1 : 0,
 					actor,
 					id,
 				],
@@ -1272,7 +1288,8 @@ export async function transactionsNeedingNoteGuess(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName FROM transactions t
-			 WHERE t.details_asked = 1 AND ${EMPTY_NOTE} ORDER BY t.date DESC, t.id DESC LIMIT ?`,
+			 WHERE t.details_asked = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
+			 ORDER BY t.note_tried_at IS NOT NULL, t.note_tried_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
 		.all<{ id: number; rawName: string }>();
@@ -1280,21 +1297,24 @@ export async function transactionsNeedingNoteGuess(
 }
 
 /** Stores successful note guesses together; one JSON parameter stays below D1's bind limit. */
-export async function saveNoteGuesses(
+export async function saveNoteAttempts(
 	db: D1Database,
+	attempted: number[],
 	notes: { id: number; note: string }[],
 ): Promise<void> {
-	if (notes.length === 0) return;
+	if (attempted.length === 0) return;
 	await db
 		.prepare(
-			`WITH guesses AS (
+			`WITH attempted AS (SELECT value AS id FROM json_each(?)), guesses AS (
 				SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?)
 			)
-			UPDATE transactions AS t SET note = (SELECT note FROM guesses WHERE guesses.id = t.id),
-				note_guessed = 1, updated_at = datetime('now')
-			WHERE ${EMPTY_NOTE} AND t.details_asked = 1 AND t.id IN (SELECT id FROM guesses)`,
+			UPDATE transactions AS t SET
+				note = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN (SELECT note FROM guesses WHERE guesses.id = t.id) ELSE note END,
+				note_guessed = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN 1 ELSE note_guessed END,
+				note_tried_at = datetime('now'), updated_at = datetime('now')
+			WHERE t.id IN (SELECT id FROM attempted)`,
 		)
-		.bind(JSON.stringify(notes))
+		.bind(JSON.stringify(attempted), JSON.stringify(notes))
 		.run();
 }
 
@@ -1311,6 +1331,7 @@ export async function saveJevResult(
 	d: Decision,
 	options: {
 		categoryOnly?: boolean;
+		categoryAsked?: boolean;
 		switches?: { income: boolean };
 	} = {},
 ): Promise<boolean> {
@@ -1328,11 +1349,11 @@ export async function saveJevResult(
 					AND ${INCLUDED_ROW} AND is_split = 0`,
 			)
 			.bind(
-				d.categoryId,
-				d.categoryId === null ? null : "jev",
-				d.confidence,
-				d.suggestedCategoryId,
-				d.noneFit ? 1 : 0,
+				options.categoryAsked === false ? null : d.categoryId,
+				options.categoryAsked === false || d.categoryId === null ? null : "jev",
+				options.categoryAsked === false ? null : d.confidence,
+				options.categoryAsked === false ? null : d.suggestedCategoryId,
+				options.categoryAsked === false || !d.noneFit ? 0 : 1,
 				id,
 			)
 			.run();
@@ -1369,15 +1390,15 @@ export async function saveJevResult(
 				)`,
 		)
 		.bind(
-			d.categoryId,
-			d.categoryId === null ? null : "jev",
-			d.confidence,
+			options.categoryAsked === false ? null : d.categoryId,
+			options.categoryAsked === false || d.categoryId === null ? null : "jev",
+			options.categoryAsked === false ? null : d.confidence,
 			d.categoryId !== null ? 1 : 0,
 			d.confidence,
 			JEV_THRESHOLD,
 			income ? 1 : 0,
-			d.suggestedCategoryId,
-			d.noneFit ? 1 : 0,
+			options.categoryAsked === false ? null : d.suggestedCategoryId,
+			options.categoryAsked === false || !d.noneFit ? 0 : 1,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
 			income ? 1 : 0,

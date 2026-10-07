@@ -6,7 +6,7 @@ import { suggestNames, suggestNote } from "./ai/suggest-name";
 import { readAiSwitches } from "./db/ai-switches";
 import { merchantsToAsk, saveAskedNames } from "./db/merchant-names";
 import {
-	saveNoteGuesses,
+	saveNoteAttempts,
 	transactionsNeedingNoteGuess,
 } from "./db/transactions";
 import { type Deadline, pastDeadline } from "./run-budget";
@@ -43,6 +43,7 @@ export async function suggestTransactionNotes(
 	const transactions = await transactionsNeedingNoteGuess(env.DB, limit);
 	let failuresInARow = 0;
 	for (let i = 0; i < transactions.length; i += DETAIL_SWITCH_CHECK_BATCH) {
+		const attempted: number[] = [];
 		const guesses: { id: number; note: string }[] = [];
 		for (const transaction of transactions.slice(
 			i,
@@ -50,18 +51,21 @@ export async function suggestTransactionNotes(
 		)) {
 			if (pastDeadline(time)) break;
 			done.asked += 1;
-			const note = await suggestNote(env.AI, transaction.rawName);
-			if (note === null) {
+			attempted.push(transaction.id);
+			const result = await suggestNote(env.AI, transaction.rawName);
+			if (!result.ok) {
 				failuresInARow += 1;
 				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
 				continue;
 			}
 			failuresInARow = 0;
-			guesses.push({ id: transaction.id, note });
+			if (result.note !== null)
+				guesses.push({ id: transaction.id, note: result.note });
 		}
 		// Keep or discard this small batch together if the details switch changed during an AI call.
-		if (!(await readAiSwitches(env.DB)).details) break;
-		await saveNoteGuesses(env.DB, guesses);
+		const detailsOn = (await readAiSwitches(env.DB)).details;
+		await saveNoteAttempts(env.DB, attempted, detailsOn ? guesses : []);
+		if (!detailsOn) break;
 		done.suggested += guesses.length;
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}

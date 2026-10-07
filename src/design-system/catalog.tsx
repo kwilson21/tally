@@ -504,17 +504,17 @@ const DETAIL_ROW_SPEC: UseSpecText = {
 	purpose:
 		"Let a person keep or change one of the four transaction details in the edit panel.",
 	affordance:
-		"A ruled disclosure row names the detail and its source at the left, with the current value at the right. An unkept guess has a muted dashed underline; a guessed name also has the sparkles icon. After the four rows comes Looks right, then the muted category explainer and a WhyLink, then category choices.",
+		"A ruled disclosure row names the detail and its source at the left, with the current value at the right. An unkept guess has a muted dashed underline; a guessed name also has the sparkles icon. With Fill in details off, unkept guesses are hidden while kept values remain visible. After the four rows comes Looks right, then the muted category explainer and a WhyLink, then category choices.",
 	states:
 		"Closed: label, source and value are visible. Open: the row's plain field or choices appear below it. A saved guess stays dashed until kept; editing one row clears only that row's guess flag.",
 	feedback:
-		"After the four rows, Looks right keeps all four current details; the muted category explainer and WhyLink come next, then category choices. The person edits one or more rows and presses the panel's one Save. The server announces the saved change and focuses the list row.",
+		"After the four rows, Looks right keeps the values posted in the form; the muted category explainer and WhyLink come next, then category choices. Kind and For each offer an empty choice to clear a value. The person edits one or more rows and presses the panel's one Save. The server announces the saved change and focuses the list row.",
 	input:
 		"Touch: the row and its choices are at least 44px tall. Keyboard: summary opens with Enter or Space; native fields and choices remain reachable. Screen reader: the label, source, value and disclosure state are read in order.",
 	motion:
 		"The chevron turns in 150 ms; reduced motion shows the open state at once.",
 	edges:
-		"An empty detail stays empty until a person fills it. A missing household list prompts Settings. No JavaScript: native details, labeled fields, chips and the panel form.",
+		"An empty detail stays empty until a person fills it. Kind offers Not known, and For offers No one, distinct from Everyone. A missing household list prompts Settings. No JavaScript: native details, labeled fields, chips and the panel form.",
 	words:
 		"Name · What it was · Kind · For · Tally's guess · From your bank · Your choice · Looks right.",
 };
@@ -527,7 +527,7 @@ const HOUSEHOLD_PEOPLE_SPEC: UseSpecText = {
 	states:
 		"Closed rows show each name. An open row has its name field, Save and Remove. Add opens its own field. Everyone is always first and cannot be changed or removed. Errors stay beside the field in role=alert.",
 	feedback:
-		"Each form posts without JavaScript. The people list swaps in place, an aria-live announcement gives the change, and focus returns to the row. Removing a name clears it from marked purchases and says how many.",
+		"Each form posts without JavaScript. Rejected names stay in their fields. The people list swaps in place, an aria-live announcement gives the change, and focus returns to the changed row or section heading. Removing a name clears it from marked purchases and says how many.",
 	input:
 		"Touch targets are at least 44px. Keyboard opens disclosures with Enter or Space and reaches every labeled field and action. Screen readers hear each person's name and the expanded state.",
 	motion:

@@ -112,11 +112,12 @@ export async function categorizePending(
 	// Sent even when only income is on: the one call asks everything together (spec §7), and a row is
 	// marked as asked by the category confidence the answer carries (decision 27).
 	const names = categories.map((c) => c.name);
-	const people = start.details
+	let people = start.details
 		? await env.DB.prepare(
 				"SELECT id, name FROM household_people ORDER BY id",
 			).all<{ id: number; name: string }>()
 		: { results: [] as { id: number; name: string }[] };
+	let peopleLoaded = start.details;
 
 	// The household's zone is read once; each call then works out the date from it, with no query.
 	const timeZone = await householdTimeZone(env.DB);
@@ -157,6 +158,13 @@ export async function categorizePending(
 			if (!asksJev(before) || (bySync && !before.sortOnArrival)) return done;
 			// A credit a person reviewed, or an excluded payment that pays a bill, is asked about only for its category.
 			if (tx.categoryOnly && !before.categories && !before.details) continue;
+			if (before.details && !peopleLoaded) {
+				people = await env.DB.prepare(
+					"SELECT id, name FROM household_people ORDER BY id",
+				).all<{ id: number; name: string }>();
+				peopleLoaded = true;
+			}
+			const detailRequested = before.details && !tx.detailsAsked;
 			done.asked += 1;
 			const result = await askJev(
 				{
@@ -169,8 +177,8 @@ export async function categorizePending(
 				env.JEV_API_KEY,
 				fetchImpl,
 				{
-					details: before.details && !tx.detailsAsked,
-					people: people.results.map((person) => person.name),
+					details: detailRequested,
+					people: detailRequested ? people.results : undefined,
 				},
 			);
 			if (!result.ok) {
@@ -201,11 +209,12 @@ export async function categorizePending(
 				});
 				const written = await saveJevResult(env.DB, tx.id, decision, {
 					categoryOnly: tx.categoryOnly,
+					categoryAsked: categories.length > 0,
 					switches: { income: now.income },
 				});
 				if (written && decision.categoryId !== null) done.applied += 1;
 			}
-			if (now.details && !tx.detailsAsked) {
+			if (detailRequested && now.details) {
 				const kind = result.answer.kind;
 				const kindValue =
 					kind &&
@@ -217,9 +226,8 @@ export async function categorizePending(
 				const personValue =
 					person &&
 					person.confidence >= JEV_THRESHOLD &&
-					person.label !== "Not sure"
-						? (people.results.find((entry) => entry.name === person.label)
-								?.id ?? null)
+					person.label.startsWith("person:")
+						? Number(person.label.slice("person:".length)) || null
 						: null;
 				detailsAnswers.push({
 					id: tx.id,
@@ -230,7 +238,8 @@ export async function categorizePending(
 		}
 	} finally {
 		try {
-			await saveJevDetails(env.DB, detailsAnswers);
+			if ((await readAiSwitches(env.DB)).details)
+				await saveJevDetails(env.DB, detailsAnswers);
 		} catch {
 			console.error("jev: couldn't save transaction details");
 		}

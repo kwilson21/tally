@@ -1298,6 +1298,14 @@ function EditSheet({
 									</Chip>
 								),
 							)}
+							<Chip
+								type="radio"
+								name="kind"
+								value=""
+								checked={values.kind === null}
+							>
+								Not known
+							</Chip>
 						</fieldset>
 						{errors.kind && (
 							<p id="kind-error" role="alert" class="text-sm text-over">
@@ -1337,6 +1345,14 @@ function EditSheet({
 									{person.name}
 								</Chip>
 							))}
+							<Chip
+								type="radio"
+								name="for_person_id"
+								value=""
+								checked={values.forPersonId === null}
+							>
+								No one
+							</Chip>
 						</fieldset>
 						{people.length < 2 && (
 							<p class="text-sm text-muted">
@@ -2035,19 +2051,6 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
 	const refunds = await refundPurchases(c.env.DB, tx);
-	if (form.get("details_action") === "keep") {
-		form.set("note", tx.note ?? "");
-		form.set("kind", tx.kind ?? "");
-		form.set(
-			"for_person_id",
-			tx.forPersonId == null ? "" : String(tx.forPersonId),
-		);
-		if (tx.nameChoices?.names[0])
-			form.set("name_pick", pickValue(tx.nameChoices.names[0]));
-		else if (tx.nameChoices?.source === "bank")
-			form.set("name_pick", KEEP_VALUE);
-		else form.set("merchant", tx.merchantName ?? "");
-	}
 	const current = tx.refundOfId ?? null;
 	const posted = form.get("refund_of");
 	const refundOfId =
@@ -2144,8 +2147,12 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		parsed.value.displayName !== null &&
 		parsed.value.displayName !== tx.merchantName;
 	const addedNote = parsed.value.note !== null && parsed.value.note !== tx.note;
+	const changedDetails =
+		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
+		(parsed.value.forPersonId !== undefined &&
+			parsed.value.forPersonId !== tx.forPersonId);
 	if (
-		(addedName || addedNote) &&
+		(addedName || addedNote || changedDetails) &&
 		tx.categoryId === null &&
 		parsed.value.categoryId === null
 	)

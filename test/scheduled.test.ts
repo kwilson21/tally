@@ -49,6 +49,8 @@ const jevAnswer = () =>
 			transfer: { type: "noul", noul: 0.01 },
 			reimbursement: { type: "noul", noul: 0.01 },
 			income: { type: "noul", noul: 0.01 },
+			kind: { type: "choice", choice: "one_off", confidence: 0.99 },
+			for_person: { type: "choice", choice: "none", confidence: 0.99 },
 		},
 	});
 

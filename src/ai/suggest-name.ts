@@ -68,7 +68,7 @@ export async function suggestNames(
 export async function suggestNote(
 	ai: Ai,
 	rawName: string,
-): Promise<string | null> {
+): Promise<{ ok: true; note: string | null } | { ok: false }> {
 	try {
 		const answer = await ai.run(
 			NAME_MODEL,
@@ -90,23 +90,27 @@ export async function suggestNote(
 			typeof answer === "string"
 				? answer
 				: (answer as { response?: unknown } | null)?.response;
-		if (typeof text !== "string") return null;
+		if (typeof text !== "string") return { ok: false };
 		const note = text
 			.split(/\r?\n/)[0]
 			?.trim()
 			.replace(/^['"“”]+|['"“”]+$/g, "")
 			.replace(/\s+/g, " ");
-		return note &&
-			note.length >= 2 &&
-			note.length <= 80 &&
-			!/https?:|www\.|\d{3,}|[$#]/i.test(note)
-			? note
-			: null;
+		return {
+			ok: true,
+			note:
+				note &&
+				note.length >= 2 &&
+				note.length <= 80 &&
+				!/https?:|www\.|\d{3,}|[$#]/i.test(note)
+					? note
+					: null,
+		};
 	} catch (error) {
 		console.error(
 			`workers-ai: note ${error instanceof Error ? error.name : "failed"}`,
 		);
-		return null;
+		return { ok: false };
 	}
 }
 

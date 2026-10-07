@@ -77,8 +77,8 @@ export function rowCaption(row: ListRow): Caption {
 	return {
 		kind: "needs",
 		caption:
-			row.note ||
 			pair ||
+			row.note ||
 			(row.rawName === row.displayName ? null : row.rawName),
 		tag: true,
 	};
@@ -149,6 +149,9 @@ export function TransactionRow({
 	const pending = row.pending === true;
 	const caption =
 		pending && kind === "needs" && tag && said === row.rawName ? null : said;
+	const guessedNoteShown = Boolean(
+		row.noteGuessed && kind === "needs" && caption === row.note,
+	);
 	const pendingLast =
 		pending &&
 		!countsIn &&
@@ -199,9 +202,9 @@ export function TransactionRow({
 						) : (
 							caption && (
 								<span
-									class={`truncate text-muted ${row.noteGuessed ? SUGGESTED_NAME_CLASS : ""}`}
+									class={`truncate text-muted ${guessedNoteShown ? SUGGESTED_NAME_CLASS : ""}`}
 								>
-									{row.noteGuessed && (
+									{guessedNoteShown && (
 										<span class="sr-only">Tally's guess: </span>
 									)}
 									{caption}

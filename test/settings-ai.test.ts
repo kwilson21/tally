@@ -339,8 +339,8 @@ describe("POST /settings/ai", () => {
 // Sorting right after a sync needs Jev to be asked at all, which takes categories or income on (spec
 // §8.6, decision 79). With both off the switch is greyed out: disabled, still showing its saved setting,
 // and Save leaves that setting as it was, so sorting right away comes back with the switch it needs.
-describe("the sorting switch with categories and income both off", () => {
-	const greyed = { categories: false, income: false };
+describe("the sorting switch with categories, income and details all off", () => {
+	const greyed = { categories: false, income: false, details: false };
 
 	it("is greyed out, and says what it needs, in the words the rows use today", async () => {
 		await saveAiSwitches(env.DB, greyed);
@@ -350,15 +350,27 @@ describe("the sorting switch with categories and income both off", () => {
 		expect(disabled(html, "income")).toBe(false);
 		const words = textOf(group(html));
 		expect(words).toContain("Sort new transactions as they arrive");
-		expect(words).toContain("Needs Categories and exclusions or Income on.");
+		expect(words).toContain(
+			"Needs Fill in details, Categories and exclusions, or Income on.",
+		);
 		expect(group(html)).not.toMatch(/jev/i);
+	});
+
+	it("stays enabled when details are on, and sync sorting can call Jev for details", async () => {
+		await saveAiSwitches(env.DB, {
+			categories: false,
+			income: false,
+			details: true,
+		});
+		const { html } = await get("/settings");
+		expect(disabled(html, "sortOnArrival")).toBe(false);
 	});
 
 	it("keeps showing its saved setting, On or Off", async () => {
 		await saveAiSwitches(env.DB, { ...greyed, sortOnArrival: true });
 		expect(inputs((await get("/settings")).html)).toEqual([
 			{ name: "names", on: true },
-			{ name: "details", on: true },
+			{ name: "details", on: false },
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: true },
@@ -366,7 +378,7 @@ describe("the sorting switch with categories and income both off", () => {
 		await saveAiSwitches(env.DB, { sortOnArrival: false });
 		expect(inputs((await get("/settings")).html)).toEqual([
 			{ name: "names", on: true },
-			{ name: "details", on: true },
+			{ name: "details", on: false },
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: false },

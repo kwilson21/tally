@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import { readAiSwitches, saveAiSwitches } from "../src/db/ai-switches";
+import { pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestTransactionNotes } from "../src/suggest-names-pending";
 
@@ -51,6 +52,34 @@ beforeEach(async () => {
 });
 
 describe("transaction detail guesses", () => {
+	it("records empty note answers and reaches older untried purchases next", async () => {
+		await db
+			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,details_asked) VALUES
+			(1,'2026-10-01',100,'NEWEST A',1),(1,'2026-10-02',100,'NEWEST B',1),
+			(1,'2026-10-03',100,'NEWEST C',1),(1,'2026-09-01',100,'OLDER',1)`)
+			.run();
+		const asked: string[] = [];
+		const ai = {
+			run: vi.fn(
+				async (_model: string, input: { messages: { content: string }[] }) => {
+					asked.push(
+						input.messages[1]?.content.replace("Bank text: ", "") ?? "",
+					);
+					return { response: "" };
+				},
+			),
+		} as unknown as Ai;
+		await suggestTransactionNotes({ DB: db, AI: ai }, 3);
+		await suggestTransactionNotes({ DB: db, AI: ai }, 1);
+		expect(asked).toEqual(["NEWEST C", "NEWEST B", "NEWEST A", "OLDER"]);
+		const tried = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'NEWEST %' AND note_tried_at IS NOT NULL",
+			)
+			.first<{ n: number }>();
+		expect(tried?.n).toBe(3);
+	});
+
 	it("checks the detail switch at a bounded interval for 100 notes", async () => {
 		await db
 			.prepare(
@@ -162,7 +191,7 @@ describe("transaction detail guesses", () => {
 						reimbursement: { noul: 0 },
 						income: { noul: 0 },
 						kind: { choice: "one_off", confidence: 0.99 },
-						for_person: { choice: "Morgan", confidence: 0.99 },
+						for_person: { choice: `person:${person?.id}`, confidence: 0.99 },
 					},
 				}),
 				{ status: 200 },
@@ -215,7 +244,174 @@ describe("transaction detail guesses", () => {
 		);
 	});
 
+	it("hides unkept detail guesses when the details switch is off", async () => {
+		const id = await charge();
+		await db
+			.prepare(
+				"UPDATE transactions SET note='Dinner claim',note_guessed=1,kind='one_off',kind_guessed=1,for_person_id=1,for_person_guessed=1 WHERE id=?",
+			)
+			.bind(id)
+			.run();
+		await saveAiSwitches(db, { details: false });
+		const { html } = await get(`/transactions/${id}`);
+		expect(html).not.toContain("Dinner claim");
+		expect(html).not.toContain('name="kind" value="one_off" checked');
+		expect(html).not.toContain('name="for_person_id" value="1" checked');
+		const list = await get("/transactions?month=all");
+		expect(list.html).not.toContain("Dinner claim");
+		await db
+			.prepare(
+				"UPDATE transactions SET note_guessed=0,kind_guessed=0,for_person_guessed=0 WHERE id=?",
+			)
+			.bind(id)
+			.run();
+		const kept = await get(`/transactions/${id}`);
+		expect(kept.html).toContain("Dinner claim");
+	});
+
+	it("does not mark detail questions asked when Jev omits a requested answer", async () => {
+		const id = await charge();
+		await saveAiSwitches(db, { details: true, categories: true, income: true });
+		await categorizePending(
+			{ DB: db, JEV_API_KEY: "test-key" },
+			async () =>
+				Response.json({
+					answers: {
+						category: { choice: "Eating Out", confidence: 0.99 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+						for_person: { choice: "none", confidence: 0.99 },
+					},
+				}),
+			{ onlyIds: [id] },
+		);
+		expect(
+			await db
+				.prepare("SELECT details_asked FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ details_asked: 0 });
+	});
+
+	it("re-asks Jev after a kind or person correction", async () => {
+		const id = await charge();
+		await db
+			.prepare("INSERT INTO household_people(name) VALUES('Morgan')")
+			.run();
+		const person = await db
+			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence=0.5, kind='subscription', for_person_id=1 WHERE id=?",
+			)
+			.bind(id)
+			.run();
+		await post(`/transactions/${id}`, {
+			back: "/transactions",
+			merchant_was: "Coffee shop",
+			merchant: "Coffee shop",
+			note: "",
+			kind: "bill",
+			for_person_id: String(person?.id),
+		});
+		expect(
+			await db
+				.prepare("SELECT category_confidence FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toMatchObject({ category_confidence: null });
+		expect(
+			(await pendingForJev(db, 20, { details: true })).some(
+				(tx) => tx.id === id,
+			),
+		).toBe(true);
+	});
+
+	it("drops queued detail answers when the switch turns off before the final write", async () => {
+		const ids = [await charge(), await charge()];
+		await db
+			.prepare("INSERT INTO household_people(name) VALUES('Morgan')")
+			.run();
+		let calls = 0;
+		await categorizePending(
+			{ DB: db, JEV_API_KEY: "test-key" },
+			async () => {
+				calls += 1;
+				if (calls === 2) await saveAiSwitches(db, { details: false });
+				return Response.json({
+					answers: {
+						category: { choice: "Eating Out", confidence: 0.5 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+						kind: { choice: "one_off", confidence: 0.99 },
+						for_person: { choice: "person:1", confidence: 0.99 },
+					},
+				});
+			},
+			{ onlyIds: ids },
+		);
+		const rows = await db
+			.prepare("SELECT details_asked FROM transactions WHERE id IN (?,?)")
+			.bind(...ids)
+			.all<{ details_asked: number }>();
+		expect(rows.results.map((row) => row.details_asked)).toEqual([0, 0]);
+	});
+
+	it("loads household choices if details become enabled during a categorization pass", async () => {
+		const ids = [await charge(), await charge()];
+		await db
+			.prepare("INSERT INTO household_people(name) VALUES('Morgan')")
+			.run();
+		await saveAiSwitches(db, { details: false });
+		let calls = 0;
+		let secondQuestions: Record<string, unknown> | undefined;
+		await categorizePending(
+			{ DB: db, JEV_API_KEY: "test-key" },
+			async (_url, init) => {
+				calls += 1;
+				if (calls === 1) await saveAiSwitches(db, { details: true });
+				else secondQuestions = JSON.parse(String(init?.body)).questions;
+				return Response.json({
+					answers: {
+						category: { choice: "Eating Out", confidence: 0.5 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+						...(calls === 1
+							? {}
+							: {
+									kind: { choice: "one_off", confidence: 0.99 },
+									for_person: { choice: "person:2", confidence: 0.99 },
+								}),
+					},
+				});
+			},
+			{ onlyIds: ids },
+		);
+		if (!secondQuestions) throw new Error("second request was not sent");
+		expect(
+			(secondQuestions.for_person as { criteria: Record<string, unknown> })
+				.criteria["person:2"],
+		).toBe("Morgan");
+		expect(
+			await db
+				.prepare("SELECT details_asked FROM transactions WHERE id=?")
+				.bind(ids[1])
+				.first(),
+		).toEqual({ details_asked: 0 });
+		expect(
+			await db
+				.prepare("SELECT details_asked FROM transactions WHERE id=?")
+				.bind(ids[0])
+				.first(),
+		).toEqual({ details_asked: 1 });
+	});
+
 	it("shows a guessed note as the dashed caption beside Needs category", async () => {
+		await saveAiSwitches(db, { details: true, categories: true, income: true });
 		const id = await charge();
 		await db
 			.prepare(
@@ -240,6 +436,39 @@ describe("transaction detail guesses", () => {
 		const { html } = await get("/transactions?month=all");
 		expect(textOf(html)).toContain("Add the people in your household");
 		expect(html).toContain('href="/settings#household"');
+	});
+
+	it("clearing a guessed note records the person's decision against future guesses", async () => {
+		const id = await charge();
+		await db
+			.prepare(
+				"UPDATE transactions SET note='Unwanted guess',note_guessed=1,details_asked=1 WHERE id=?",
+			)
+			.bind(id)
+			.run();
+		await post(`/transactions/${id}`, {
+			back: "/transactions",
+			merchant_was: "Coffee shop",
+			merchant: "Coffee shop",
+			note: "",
+		});
+		const row = await db
+			.prepare(
+				"SELECT note,note_guessed,note_tried_at FROM transactions WHERE id=?",
+			)
+			.bind(id)
+			.first<{
+				note: string | null;
+				note_guessed: number;
+				note_tried_at: string | null;
+			}>();
+		expect(row).toMatchObject({ note: null, note_guessed: 0 });
+		expect(row?.note_tried_at).not.toBeNull();
+		const ai = {
+			run: vi.fn(async () => ({ response: "Another guess" })),
+		} as unknown as Ai;
+		await suggestTransactionNotes({ DB: db, AI: ai }, 1);
+		expect(ai.run).not.toHaveBeenCalled();
 	});
 
 	it("a correction keeps only that row and a later guess cannot replace kept details", async () => {
@@ -299,7 +528,7 @@ describe("transaction detail guesses", () => {
 							reimbursement: { noul: 0 },
 							income: { noul: 0 },
 							kind: { choice: "subscription", confidence: 0.99 },
-							for_person: { choice: "Everyone", confidence: 0.99 },
+							for_person: { choice: "person:1", confidence: 0.99 },
 						},
 					}),
 					{ status: 200 },
@@ -352,6 +581,7 @@ describe("transaction detail guesses", () => {
 		const kept = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "",
+			name_pick: "s:Coffee Shop",
 			note: "Dinner",
 			kind: "one_off",
 			for_person_id: String(person?.id),
@@ -430,6 +660,46 @@ describe("transaction detail guesses", () => {
 		});
 	});
 
+	it("Looks right keeps the values posted with the confirmation", async () => {
+		const id = await charge();
+		await db
+			.prepare("INSERT INTO household_people (name) VALUES ('Morgan')")
+			.run();
+		const person = await db
+			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"UPDATE transactions SET note='Old guess',note_guessed=1,kind='subscription',kind_guessed=1,for_person_id=1,for_person_guessed=1 WHERE id=?",
+			)
+			.bind(id)
+			.run();
+		await post(`/transactions/${id}`, {
+			back: "/transactions",
+			merchant_was: "",
+			merchant: "Edited name",
+			note: "New note",
+			kind: "bill",
+			for_person_id: String(person?.id),
+			details_action: "keep",
+		});
+		expect(
+			await db
+				.prepare(
+					"SELECT note,kind,for_person_id,note_guessed,kind_guessed,for_person_guessed FROM transactions WHERE id=?",
+				)
+				.bind(id)
+				.first(),
+		).toMatchObject({
+			note: "New note",
+			kind: "bill",
+			for_person_id: person?.id,
+			note_guessed: 0,
+			kind_guessed: 0,
+			for_person_guessed: 0,
+		});
+	});
+
 	it("Looks right preserves a name a person had already chosen", async () => {
 		const id = await charge();
 		await db
@@ -470,13 +740,89 @@ describe("transaction detail guesses", () => {
 				.split('<legend class="sr-only">For</legend>')[1]
 				?.split("</fieldset>")[0] ?? "";
 		expect(forRow).toContain("Everyone");
+		expect(forRow).toContain('name="for_person_id" value=""');
+		expect(forRow).toContain("No one");
 		expect(forRow).toContain("Kids");
 		expect(forRow).toContain("Morgan");
 		expect(forRow).not.toContain('name="category"');
+		expect(html).toContain('name="kind" value=""');
+		expect(html).toContain("Not known");
+	});
+
+	it("offers a household member named Not sure as a distinct Jev choice", async () => {
+		const id = await charge();
+		await saveAiSwitches(db, { details: true, categories: true, income: true });
+		await db
+			.prepare("INSERT INTO household_people(name) VALUES('Not sure')")
+			.run();
+		await categorizePending(
+			{ DB: db, JEV_API_KEY: "test-key" },
+			async (_url, init) => {
+				const request = JSON.parse(String(init?.body)) as Record<
+					string,
+					unknown
+				>;
+				const person = (
+					request.questions as {
+						for_person: { criteria: Record<string, unknown> };
+					}
+				).for_person.criteria;
+				const idChoice = Object.keys(person).find(
+					(key) => person[key] === "Not sure",
+				);
+				return Response.json({
+					answers: {
+						category: { choice: "Eating Out", confidence: 0.99 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+						kind: { choice: "one_off", confidence: 0.99 },
+						for_person: { choice: idChoice, confidence: 0.99 },
+					},
+				});
+			},
+			{ onlyIds: [id] },
+		);
+		expect(
+			await db
+				.prepare(
+					"SELECT hp.name FROM transactions t LEFT JOIN household_people hp ON hp.id=t.for_person_id WHERE t.id=?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({ name: "Not sure" });
 	});
 });
 
 describe("household people and details switch", () => {
+	it("keeps rejected add and rename values in the redisplayed fields", async () => {
+		const tooLong = "x".repeat(41);
+		const add = await post("/settings/people", {
+			action: "add",
+			name: tooLong,
+		});
+		expect(add.res.status).toBe(422);
+		expect(add.html).toContain(`value="${tooLong}"`);
+		await db
+			.prepare("INSERT INTO household_people(name) VALUES('Existing')")
+			.run();
+		const person = await db
+			.prepare("SELECT id FROM household_people WHERE name='Existing'")
+			.first<{ id: number }>();
+		const duplicate = await post("/settings/people", {
+			action: "rename",
+			person_id: String(person?.id),
+			name: "Everyone",
+		});
+		expect(duplicate.res.status).toBe(422);
+		expect(duplicate.html).toContain('value="Everyone"');
+	});
+
+	it("returns focus to the people section after a save or remove", async () => {
+		const add = await post("/settings/people", { action: "add", name: "Kids" });
+		expect(add.html).toMatch(/<h3 id="people-title"[^>]*autofocus/);
+	});
+
 	it("shows household people in Settings and allows adding one without JavaScript", async () => {
 		const tx = await charge();
 		const { html } = await get("/settings");

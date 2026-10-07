@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NONE_FIT } from "../src/ai/decide";
 import {
 	categorizePending,
 	jevCallLimit,
@@ -89,6 +90,52 @@ afterEach(() => {
 });
 
 describe("categorizePending", () => {
+	it("leaves an unasked category eligible when the household has no active categories", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.prepare("UPDATE categories SET archived=1").run();
+		await switchTo({ categories: true, income: true });
+		const id = Number(
+			(
+				await db
+					.prepare(
+						"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,500,'NO ACTIVE CATEGORIES') RETURNING id",
+					)
+					.bind(`${MONTH}-20`)
+					.first<{ id: number }>()
+			)?.id,
+		);
+		await categorizePending(
+			withKey,
+			async () =>
+				Response.json({
+					answers: {
+						category: { type: "choice", choice: NONE_FIT, confidence: 0.99 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+					},
+				}),
+			{ rulesApplied: true, onlyIds: [id] },
+		);
+		expect(
+			await db
+				.prepare(
+					"SELECT category_confidence, jev_category_id, jev_none_fit FROM transactions WHERE id=?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			category_confidence: null,
+			jev_category_id: null,
+			jev_none_fit: 0,
+		});
+		await db.prepare("UPDATE categories SET archived=0").run();
+		await switchTo({ categories: true, income: true });
+		expect((await pendingForJev(db, 50)).some((row) => row.id === id)).toBe(
+			true,
+		);
+	});
+
 	it("does not read or send history when category guessing is off, but does when it is on", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const target = await db

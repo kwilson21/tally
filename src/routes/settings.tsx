@@ -119,6 +119,8 @@ type View = {
 	peopleOpen?: number;
 	peopleAddOpen?: boolean;
 	peopleError?: string;
+	peopleValue?: string;
+	peopleFocus?: boolean;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
 	aiSaved?: boolean;
 	/** Where a plain browser lands after a save: a section's id, so it isn't sent back to the top. */
@@ -180,7 +182,8 @@ const AI_FEATURES: {
 ];
 
 /** What the greyed sorting switch says it needs, in the words of the rows above it. */
-const SORT_NEEDS = "Needs Categories and exclusions or Income on.";
+const SORT_NEEDS =
+	"Needs Fill in details, Categories and exclusions, or Income on.";
 /** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
 const SORT_GREYED = "sortOnArrivalGreyed";
 
@@ -193,8 +196,9 @@ function AiSuggestions({
 	saved: boolean;
 }) {
 	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
-	// Sorting right after a sync needs category or income work (spec §8.6).
-	const nothingToSort = !switches.categories && !switches.income;
+	// A sync has useful Jev work when any of the three answer groups is enabled.
+	const nothingToSort =
+		!switches.categories && !switches.income && !switches.details;
 	return (
 		<section
 			id="ai-suggestions"
@@ -597,6 +601,8 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					openId={view.peopleOpen}
 					addOpen={view.peopleAddOpen}
 					error={view.peopleError}
+					value={view.peopleValue}
+					focus={view.peopleFocus}
 				/>
 			</section>
 			<AiSuggestions switches={aiSwitches} saved={Boolean(view.aiSaved)} />
@@ -824,7 +830,8 @@ settings.post("/settings/people", async (c) => {
 	const action = form.has("remove")
 		? "remove"
 		: String(form.get("action") ?? "");
-	const name = String(form.get("name") ?? "").trim();
+	const nameValue = String(form.get("name") ?? "");
+	const name = nameValue.trim();
 	const id = Number(form.get("person_id"));
 	if (action === "remove") {
 		if (!Number.isInteger(id) || id <= 1) return c.text("Not found", 404);
@@ -834,20 +841,18 @@ settings.post("/settings/people", async (c) => {
 			.bind(id)
 			.first<{ name: string }>();
 		if (!person) return c.notFound();
-		const cleared = await c.env.DB.prepare(
-			"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0, updated_by = ?, updated_at = datetime('now') WHERE for_person_id = ?",
-		)
-			.bind(actor(c), id)
-			.run();
-		await c.env.DB.prepare("DELETE FROM household_people WHERE id = ?")
-			.bind(id)
-			.run();
-		const count = cleared.meta.changes;
+		const [cleared] = await c.env.DB.batch([
+			c.env.DB.prepare(
+				"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0, updated_by = ?, updated_at = datetime('now') WHERE for_person_id = ?",
+			).bind(actor(c), id),
+			c.env.DB.prepare("DELETE FROM household_people WHERE id = ?").bind(id),
+		]);
+		const count = cleared?.meta.changes ?? 0;
 		return done(
 			c,
 			`Removed ${person.name}`,
 			`Removed ${person.name}. ${count} ${count === 1 ? "purchase" : "purchases"} for ${person.name} now say no one.`,
-			{ hash: "household", peopleAddOpen: true },
+			{ hash: "household", peopleAddOpen: true, peopleFocus: true },
 		);
 	}
 	if (!name || name.length > 40)
@@ -855,6 +860,7 @@ settings.post("/settings/people", async (c) => {
 			peopleOpen: action === "rename" ? id : undefined,
 			peopleAddOpen: action !== "rename",
 			peopleError: "Enter a name up to 40 characters.",
+			peopleValue: nameValue,
 			status: 422,
 		});
 	if (action === "add") {
@@ -867,6 +873,7 @@ settings.post("/settings/people", async (c) => {
 				return renderSettings(c, {
 					peopleAddOpen: true,
 					peopleError: "That name is already in your household.",
+					peopleValue: nameValue,
 					status: 422,
 				});
 			throw error;
@@ -874,6 +881,7 @@ settings.post("/settings/people", async (c) => {
 		return done(c, `Added ${name}`, `Added ${name} to your household.`, {
 			hash: "household",
 			peopleAddOpen: true,
+			peopleFocus: true,
 		});
 	}
 	if (action === "rename" && Number.isInteger(id) && id > 1) {
@@ -889,6 +897,7 @@ settings.post("/settings/people", async (c) => {
 				return renderSettings(c, {
 					peopleOpen: id,
 					peopleError: "That name is already in your household.",
+					peopleValue: nameValue,
 					status: 422,
 				});
 			throw error;
@@ -896,6 +905,7 @@ settings.post("/settings/people", async (c) => {
 		return done(c, `Renamed to ${name}`, `Renamed this person to ${name}.`, {
 			hash: "household",
 			peopleOpen: id,
+			peopleFocus: true,
 		});
 	}
 	return c.text("Choose add, rename or remove.", 400);

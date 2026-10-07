@@ -45,6 +45,42 @@ const goodBody = {
 };
 
 describe("askJev", () => {
+	it.each(["kind", "for_person"])(
+		"rejects an answer that omits requested %s",
+		async (detail) => {
+			const { fetchImpl } = fakeFetch(() =>
+				ok({
+					answers: {
+						...goodBody.answers,
+						[detail === "kind" ? "for_person" : "kind"]: {
+							choice: detail === "kind" ? "none" : "one_off",
+							confidence: 0.99,
+						},
+					},
+				}),
+			);
+			expect(
+				await askJev(input, categories, "k", fetchImpl, {
+					details: true,
+					people: [{ id: 4, name: "Morgan" }],
+				}),
+			).toMatchObject({ ok: false, status: 200 });
+		},
+	);
+
+	it("gives the unknown-person choice an id distinct from household names", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(input, [], "k", fetchImpl, {
+			details: true,
+			people: [{ id: 4, name: "Not sure" }],
+		});
+		const body = JSON.parse(String(calls[0]?.init.body));
+		expect(Object.keys(body.questions.for_person.criteria)).toEqual([
+			"person:4",
+			"none",
+		]);
+	});
+
 	it("makes one POST with the key, and asks the category and all flags together", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(input, categories, "test-key", fetchImpl);

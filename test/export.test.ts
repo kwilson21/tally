@@ -269,6 +269,7 @@ describe("data exports", () => {
 				"category_id",
 				"category_source",
 				"category_suggestion_id",
+				"details_asked",
 				"credit_reviewed",
 				"credit_reviewed_by",
 				"date",
@@ -286,6 +287,8 @@ describe("data exports", () => {
 				"merchant_name",
 				"note",
 				"note_guessed",
+				"note_tried_at",
+				"note_dismissed",
 				"kind",
 				"kind_guessed",
 				"for_person_id",
@@ -364,7 +367,7 @@ describe("data exports", () => {
 			"INSERT INTO household_people (name) VALUES ('Kids') RETURNING id",
 		).first<{ id: number }>();
 		await env.DB.prepare(
-			"UPDATE transactions SET note = 'Soccer shoes', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1 WHERE id = 1",
+			"UPDATE transactions SET note = 'Soccer shoes', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1, details_asked = 1, note_tried_at = '2026-10-06 09:00:00' WHERE id = 1",
 		)
 			.bind(person?.id)
 			.run();
@@ -381,6 +384,9 @@ describe("data exports", () => {
 		expect(json.transactions.find((row) => row.id === 1)).toMatchObject({
 			note: "Soccer shoes",
 			note_guessed: 1,
+			details_asked: 1,
+			note_tried_at: "2026-10-06 09:00:00",
+			note_dismissed: 0,
 			kind: "one_off",
 			kind_guessed: 1,
 			for_person_id: person?.id,

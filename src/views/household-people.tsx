@@ -11,6 +11,7 @@ export function HouseholdPeople({
 	addOpen = false,
 	error,
 	focus = false,
+	value = "",
 	action = "/settings/people",
 }: {
 	people: HouseholdPerson[];
@@ -18,6 +19,7 @@ export function HouseholdPeople({
 	addOpen?: boolean;
 	error?: string;
 	focus?: boolean;
+	value?: string;
 	action?: string;
 }) {
 	return (
@@ -26,17 +28,19 @@ export function HouseholdPeople({
 			aria-labelledby="people-title"
 			class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
 		>
-			<h3 id="people-title" class="font-serif text-2xl font-semibold">
+			<h3
+				id="people-title"
+				tabIndex={-1}
+				autofocus={focus}
+				class="font-serif text-2xl font-semibold"
+			>
 				People
 			</h3>
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
 				{people.map((person, index) => (
 					<li>
 						<details class="group" open={person.id === openId}>
-							<summary
-								class="flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden"
-								autofocus={focus && person.id === openId}
-							>
+							<summary class="flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden">
 								<span class="min-w-0 flex-1 truncate text-lg">
 									{person.name}
 								</span>
@@ -64,7 +68,7 @@ export function HouseholdPeople({
 										id={`person-${person.id}`}
 										name="name"
 										label="Name"
-										value={person.name}
+										value={person.id === openId && error ? value : person.name}
 										autocomplete="off"
 										error={error}
 									/>
@@ -106,6 +110,7 @@ export function HouseholdPeople({
 								id="person-new"
 								name="name"
 								label="Name"
+								value={value}
 								autocomplete="off"
 								error={error}
 							/>

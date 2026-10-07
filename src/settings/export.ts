@@ -13,7 +13,7 @@ const EXPORT_COLUMNS = {
 		(SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank_disconnected`,
 	balance_history: "account_id, date, balance_cents",
 	transactions:
-		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending, jev_none_fit, category_suggestion_id, kind, for_person_id, note_guessed, kind_guessed, for_person_guessed",
+		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending, jev_none_fit, category_suggestion_id, kind, for_person_id, details_asked, note_guessed, note_tried_at, note_dismissed, kind_guessed, for_person_guessed",
 	bills:
 		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, merchant_raw_text, active",
 	bill_payments:

@@ -45,7 +45,7 @@ export async function askJev(
 	categories: string[],
 	apiKey: string,
 	fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = fetch,
-	options: { details?: boolean; people?: string[] } = {},
+	options: { details?: boolean; people?: { id: number; name: string }[] } = {},
 ): Promise<JevResult> {
 	const categoryInstructions = [
 		"Which of this household's budget categories does this bank transaction belong to?",
@@ -114,10 +114,13 @@ export async function askJev(
 						for_person: {
 							type: "choice",
 							instructions:
-								"Who was this purchase for? Choose a household person, or Not sure.",
+								"Who was this purchase for? Choose the household person's id, or none if it is unclear.",
 							criteria: Object.fromEntries([
-								...(options.people ?? []).map((person) => [person, null]),
-								["Not sure", "It isn't clear who this was for."],
+								...(options.people ?? []).map((person) => [
+									`person:${person.id}`,
+									person.name,
+								]),
+								["none", "It isn't clear who this was for."],
 							]),
 						},
 					}
@@ -149,7 +152,9 @@ export async function askJev(
 		options.details
 			? ["subscription", "one_off", "bill", "transfer", "None of these"]
 			: [],
-		options.people ? [...options.people, "Not sure"] : [],
+		options.people
+			? [...options.people.map((person) => `person:${person.id}`), "none"]
+			: [],
 	);
 	return answer
 		? { ok: true, answer }
@@ -200,8 +205,8 @@ function parseAnswer(
 	};
 	const kind = choice("kind", kinds);
 	const forPerson = choice("for_person", people);
-	if (kinds.length && answers?.kind && !kind) return null;
-	if (people.length && answers?.for_person && !forPerson) return null;
+	if (kinds.length && !kind) return null;
+	if (people.length && !forPerson) return null;
 	return {
 		category: category
 			? {

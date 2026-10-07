@@ -124,6 +124,20 @@ describe("rowCaption", () => {
 		});
 	});
 
+	it("keeps refund captions ahead of an uncategorized purchase note", () => {
+		expect(
+			rowCaption({ ...base, note: "Dinner", refundedCents: 2499 }).caption,
+		).toBe("$24.99 refunded");
+		expect(
+			rowCaption({
+				...base,
+				note: "Dinner",
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			}).caption,
+		).toBe("Refund for Sep 5");
+	});
+
 	it("flags what needs a category, showing the raw name when it differs", () => {
 		expect(rowCaption(base)).toEqual({
 			kind: "needs",
@@ -163,6 +177,27 @@ describe("rowCaption", () => {
 });
 
 describe("TransactionRow", () => {
+	it("marks only a caption that shows the guessed note", async () => {
+		const category = await TransactionRow({
+			row: {
+				...base,
+				note: "Dinner",
+				noteGuessed: true,
+				categoryId: 1,
+				categoryName: "Groceries",
+				categoryIcon: "groceries",
+				categoryColor: "cat-blue",
+			},
+		}).toString();
+		expect(category).not.toContain("Tally&#39;s guess");
+		expect(category).not.toContain("decoration-dashed");
+		const note = await TransactionRow({
+			row: { ...base, note: "Dinner", noteGuessed: true },
+		}).toString();
+		expect(note).toContain("Tally&#39;s guess:");
+		expect(note).toContain("decoration-dashed");
+	});
+
 	it("leaves Counts in off a linked refund, whose caption already explains it", async () => {
 		const row = {
 			...base,
