@@ -381,13 +381,16 @@ async function renderHome(
 							</div>
 							{(summary.categories.length > 0 || hasSavingsGoal) && (
 								<ul class="mt-2 divide-y divide-rule">
-									{hasSavingsGoal && (
+									{hasSavingsGoal && current && (
 										<SavingsGoalRow
 											amountCents={data.savingsGoalCents}
 											href="/savings-goal"
 											attrs={openAttrs("/savings-goal")}
 											autofocus={focusSavingsGoal}
 										/>
+									)}
+									{hasSavingsGoal && !current && (
+										<SavingsGoalRow amountCents={data.savingsGoalCents} />
 									)}
 									{summary.categories.map((cat) => {
 										// An archived category shows for a month it has spending in (spec §7), but it
