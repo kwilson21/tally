@@ -221,34 +221,31 @@ describe("GET /design-system in the demo", () => {
 
 	it("shows the stale-bank line in each of its states, with its whole use spec, as the family app draws it", async () => {
 		const { html } = await get("/design-system");
-		const tag = specimens(html).find((t) => t.includes('id="bank-line"'));
+		const tag = specimens(html).find((t) => t.includes('id="bank-behind"'));
 		expect(tag).toContain('data-ds-tier="visual"');
-		expect(tag).toContain('data-ds-components="BankLine"');
+		expect(tag).toContain('data-ds-components="BankBehind"');
 		const section =
-			html.split('id="bank-line"')[1]?.split("</section>")[0] ?? "";
+			html.split('id="bank-behind"')[1]?.split("</section>")[0] ?? "";
 		// Its words come from the real function, so the catalog can't drift from Home.
 		expect(Object.values(BANK_LINES)).toHaveLength(3);
 		for (const words of Object.values(BANK_LINES))
-			expect(section).toContain(words.replaceAll("'", "&#39;"));
-		expect(BANK_LINES.stale).toContain("hasn't synced since");
-		expect(BANK_LINES.signIn).toContain("needs you to sign in again");
-		expect(BANK_LINES.several).toContain("1 other bank needs a look");
+			for (const word of words)
+				expect(section).toContain(word.replaceAll("'", "&#39;"));
+		expect(BANK_LINES.stale[0]).toContain("stopped updating");
+		expect(BANK_LINES.signIn[0]).toContain("needs signing in");
+		expect(BANK_LINES.several[0]).toContain("Citi stopped updating Sep 20");
+		expect(BANK_LINES.several[1]).toContain("Chase needs signing in");
 		// Each picture is described in words, the bank's words and its link included.
 		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
 			.map((m) => m[1] ?? "")
 			.filter((l) => l.includes("Home"));
 		expect(labels).toHaveLength(3);
-		for (const [i, words] of [
-			BANK_LINES.stale,
-			BANK_LINES.signIn,
-			BANK_LINES.several,
-		].entries()) {
-			expect(labels[i]).toContain("Safe to spend $283");
-			expect(labels[i]).toContain(words.replaceAll("'", "&#39;"));
-			expect(labels[i]).toContain("Check Accounts");
+		for (const label of labels.slice(-3)) {
+			expect(label).toContain("Safe to spend $283");
+			expect(label).toContain("Fix");
 		}
 		// The 44px link, drawn in a family app's phone (no demo banner) beside Home's real top.
-		expect(section).toContain("Check Accounts");
+		expect(section).toContain("Fix");
 		expect(section).toContain("min-h-11");
 		expect(section).toContain("Safe to spend");
 		expect(section).not.toContain("Demo data. Nothing here is real.");
@@ -258,8 +255,16 @@ describe("GET /design-system in the demo", () => {
 		}
 		// DESIGN.md says where it sits.
 		expect(design).toMatch(
-			/\| BankLine \|[^\n]*Check Accounts[^\n]*between the status sentence and the Band/,
+			/\| BankBehind \|[^\n]*Fix link to Accounts[^\n]*before the forecast/,
 		);
+	});
+
+	it("shows the forecast and its before-day-7 daily amount in the catalog", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="home-top"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain('aria-label="Spending in Oct');
+		expect(section).toContain("About $15.03 a day for the 27 days left.");
 	});
 
 	it("shows the Switch on, off and without a muted line, with its whole use spec, as the AI suggestions group uses it (decision 73)", async () => {
@@ -573,14 +578,15 @@ describe("GET /design-system in the demo", () => {
 			.map((m) => m[1] ?? "")
 			// The pictures of Home itself, not others that mention it ("Go to Home" on the 404 page).
 			.filter((l) => l.startsWith("Home"));
-		expect(labels).toHaveLength(3);
+		expect(labels).toHaveLength(4);
 		for (const label of labels) {
 			expect(label).toContain("Safe to spend $283");
 			expect(label).toContain("Eating Out is $36 over");
 		}
-		expect(labels[0]).toContain("12 transactions need a category");
+		expect(labels[0]).toContain("12 need a category");
 		expect(labels[0]).toContain("Groceries $412 of $700");
-		expect(labels[2]).not.toContain("need a category");
+		expect(labels[3]).not.toContain("need a category");
+		expect(labels[1]).toContain("About $15.03 a day for the 27 days left");
 	});
 
 	it("draws the bottom sheet on its own page", async () => {

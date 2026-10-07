@@ -1216,7 +1216,9 @@ describe("POST /transactions/:id", () => {
 
 	it("updates Home", async () => {
 		await post(`/transactions/${bakery}`, save);
-		expect((await get("/")).html).toContain("9 transactions need a category");
+		expect((await get("/")).html).toMatch(
+			/9<span class="sr-only"> transactions<\/span> need a category/,
+		);
 	});
 });
 
@@ -1333,7 +1335,9 @@ describe("excluding a transaction (spec §6, #27)", () => {
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
 			"Saved Local Bakery. It's excluded from the budget.",
 		);
-		expect((await get("/")).html).toContain("9 transactions need a category");
+		expect((await get("/")).html).toMatch(
+			/9<span class="sr-only"> transactions<\/span> need a category/,
+		);
 	});
 
 	it("includes an excluded transaction again when the box is cleared, and says so", async () => {

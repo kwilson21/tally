@@ -109,6 +109,9 @@ export const PAGE_SIZE = 25;
 // "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
 // while held credits and income stay out of spending classification.
 const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+export const OLDER_NEEDS_CATEGORY_SQL = `SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS}
+	WHERE (t.date < ?1 OR (t.date >= ?1 AND t.date < ?2 AND ${COUNTED_MONTH} < ?3))
+	AND ${NEEDS_CATEGORY}`;
 const bankRowSql = (sql: string) => sql.replaceAll(" AND t.is_split = 0", "");
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
 const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
@@ -338,6 +341,20 @@ export async function needsCategoryCount(
 	).first<{
 		n: number;
 	}>();
+	return row?.n ?? 0;
+}
+
+/** How many uncategorized transactions count before this month, using bounded transaction-date ranges. */
+export async function olderNeedsCategoryCount(
+	db: D1Database,
+	monthStart: string,
+): Promise<number> {
+	const [year = 0, month = 1] = monthStart.slice(0, 7).split("-").map(Number);
+	const nextMonthStart = `${month === 12 ? year + 1 : year}-${String(month === 12 ? 1 : month + 1).padStart(2, "0")}-01`;
+	const row = await db
+		.prepare(OLDER_NEEDS_CATEGORY_SQL)
+		.bind(monthStart, nextMonthStart, monthStart.slice(0, 7))
+		.first<{ n: number }>();
 	return row?.n ?? 0;
 }
 

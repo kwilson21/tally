@@ -133,7 +133,9 @@ describe("select several transactions", () => {
 	it("excludes selections as a user and redirects no-JS requests to the filtered list", async () => {
 		const before = await (await request("/")).text();
 		const count = Number(
-			before.match(/(\d+) transactions need a category/)?.[1],
+			before.match(
+				/(\d+)<span class="sr-only"> transactions<\/span> need a category/,
+			)?.[1],
 		);
 		const res = await request("/transactions/select/exclude", {
 			method: "POST",
@@ -151,7 +153,9 @@ describe("select several transactions", () => {
 			).first(),
 		).toEqual({ excluded: 1, excluded_source: "user" });
 		const after = await (await request("/")).text();
-		expect(after).toContain(`${count - 1} transactions need a category`);
+		expect(after).toContain(
+			`${count - 1}<span class="sr-only"> transactions</span> need a category`,
+		);
 	});
 
 	const snapshot = async () =>
