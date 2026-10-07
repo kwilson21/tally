@@ -236,6 +236,59 @@ describe("reconnect reminder schedule", () => {
 		expect(sent).toHaveLength(2);
 	});
 
+	it("keeps a partial delivery claim and retries every recipient on the next three day pass", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email) VALUES ('dana@example.com'), ('riley@example.com')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (910, 'Chase', X'', 'dana@example.com', 'needs_attention')",
+		).run();
+		const attempted: string[] = [];
+		const production = {
+			...env,
+			DEMO: "false",
+			RESEND_API_KEY: "test-key",
+			EMAIL: {
+				send: async ({ to }: { to: string }) => {
+					attempted.push(`fallback:${to}`);
+					if (to === "riley@example.com")
+						throw new Error("fallback unavailable");
+				},
+			},
+		};
+		const sendAt = (date: string) =>
+			runReconnectReminders(
+				production as never,
+				async (_url, init) => {
+					const body = JSON.parse(String(init?.body)) as { to: string };
+					attempted.push(`resend:${body.to}`);
+					return new Response("failed", {
+						status: body.to === "riley@example.com" ? 503 : 200,
+					});
+				},
+				new Date(date),
+			);
+		await sendAt("2026-10-07T13:00:00Z");
+		const claim = await env.DB.prepare(
+			"SELECT reconnect_emailed_at FROM plaid_items WHERE id = 910",
+		).first<{ reconnect_emailed_at: string | null }>();
+		expect(claim?.reconnect_emailed_at).not.toBeNull();
+		expect(attempted).toEqual([
+			"resend:dana@example.com",
+			"resend:riley@example.com",
+			"fallback:riley@example.com",
+		]);
+		await sendAt("2026-10-08T13:00:00Z");
+		await sendAt("2026-10-09T13:00:00Z");
+		expect(attempted).toHaveLength(3);
+		await sendAt("2026-10-10T13:00:00Z");
+		expect(attempted.slice(3)).toEqual([
+			"resend:dana@example.com",
+			"resend:riley@example.com",
+			"fallback:riley@example.com",
+		]);
+	});
+
 	it("sends individually to recent members, falls back after a Resend failure, and skips Off and demo", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_members (email) VALUES ('dana@example.com'), ('riley@example.com')",
@@ -309,6 +362,31 @@ describe("reconnect reminder schedule", () => {
 });
 
 describe("bank sign-in reminder Settings", () => {
+	it("shows and emails only members seen within the last 90 days", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email, last_seen_at) VALUES ('old@example.com', datetime('now', '-91 days')), ('recent@example.com', datetime('now', '-89 days'))",
+		).run();
+		const response = await exports.default.fetch(`${BASE}/settings`);
+		const settingsHtml = await response.text();
+		const reminders =
+			settingsHtml.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
+		expect(reminders).toContain("recent@example.com");
+		expect(reminders).not.toContain("old@example.com");
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (911, 'Chase', X'', 'recent@example.com', 'needs_attention')",
+		).run();
+		const sent: string[] = [];
+		await runReconnectReminders(
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			async (_url, init) => {
+				sent.push(JSON.parse(String(init?.body)).to);
+				return new Response("{}");
+			},
+			new Date(),
+		);
+		expect(sent).toEqual(["recent@example.com"]);
+	});
+
 	it("saves the household switch and renders Off afterwards", async () => {
 		const { html } = await post("/settings/bank-sign-in-emails", {});
 		expect(await readBankSignInEmails(env.DB)).toBe(false);
@@ -337,7 +415,7 @@ describe("bank sign-in reminder Settings", () => {
 		expect(row?.removed_at).toBeNull();
 	});
 
-	it("Remove hides a known address from the next pass and quietly rejects an unknown one", async () => {
+	it("Remove hides a known address and announces invalid and unknown address errors", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
 		const removed = await post("/settings/household-members/remove", {
 			email: "dana@example.com",
@@ -347,6 +425,21 @@ describe("bank sign-in reminder Settings", () => {
 			email: "missing@example.com",
 		});
 		expect(unknown.res.status).toBe(404);
+		for (const [response, message, status] of [
+			[unknown, "Address not found.", 404],
+			[
+				await post("/settings/household-members/remove", { email: "bad" }),
+				"Choose an address to remove.",
+				400,
+			],
+		] as const) {
+			expect(response.res.status).toBe(status);
+			expect(response.html).toContain('role="alert"');
+			expect(response.html).toContain(message);
+			expect(
+				JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").announce,
+			).toContain(message);
+		}
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (907, 'Chase', X'', 'dana@example.com', 'needs_attention')",
 		).run();

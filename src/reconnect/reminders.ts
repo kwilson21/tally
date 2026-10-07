@@ -20,6 +20,14 @@ type ReminderEnv = {
 	};
 };
 
+export function reconnectRecipients(db: D1Database) {
+	return db
+		.prepare(
+			"SELECT email FROM household_members WHERE removed_at IS NULL AND last_seen_at >= datetime('now', '-90 days') ORDER BY email",
+		)
+		.all<{ email: string }>();
+}
+
 export async function runReconnectReminders(
 	env: ReminderEnv,
 	fetchImpl: typeof fetch = fetch,
@@ -49,12 +57,11 @@ export async function runReconnectReminders(
 			) <= cutoff,
 	);
 	if (!banks.length) return;
-	const recipients = await env.DB.prepare(
-		"SELECT email FROM household_members WHERE removed_at IS NULL AND last_seen_at >= datetime('now', '-90 days') ORDER BY email",
-	).all<{ email: string }>();
+	const recipients = await reconnectRecipients(env.DB);
 	if (!recipients.results.length) return;
 	for (const bank of banks) {
 		const claimedAt = now.toISOString().replace("T", " ").slice(0, 19);
+		// A partial delivery keeps the claim; a failed recipient waits for the next three-day pass.
 		const claim = await env.DB.prepare(
 			"UPDATE plaid_items SET reconnect_emailed_at = ? WHERE id = ? AND reconnect_emailed_at IS ? AND status = 'needs_attention' AND disconnected_at IS NULL",
 		)

@@ -31,6 +31,7 @@ import {
 } from "../db/reconnect";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
+import { reconnectRecipients } from "../reconnect/reminders";
 import {
 	type CategoryErrors,
 	fullMessage,
@@ -149,6 +150,7 @@ type View = {
 	budgetsOob?: boolean;
 	/** Why the posted time zone wasn't saved, shown under its select. */
 	zoneError?: string;
+	reminderError?: string;
 	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
 	aiSaved?: boolean;
 	rulesSearch?: string;
@@ -440,9 +442,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
 	const bankEmailsOn = await readBankSignInEmails(c.env.DB);
-	const members = await c.env.DB.prepare(
-		"SELECT email FROM household_members WHERE removed_at IS NULL ORDER BY email",
-	).all<{ email: string }>();
+	const members = await reconnectRecipients(c.env.DB);
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
 	const rulesSearch =
@@ -616,6 +616,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				<h2 id="reminders-title" class="font-serif text-3xl font-semibold">
 					Reminders
 				</h2>
+				{view.reminderError && (
+					<p role="alert" class="mt-3 text-sm text-over">
+						{view.reminderError}
+					</p>
+				)}
 				<p class="mt-1 text-muted">
 					Goes to the people who have signed in within the last 90 days.
 				</p>
@@ -996,13 +1001,13 @@ settings.post("/settings/household-members/remove", async (c) => {
 		.trim()
 		.toLowerCase();
 	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-		return c.text("Choose an address to remove.", 400);
+		return reminderError(c, "Choose an address to remove.", 400);
 	const member = await c.env.DB.prepare(
 		"SELECT 1 FROM household_members WHERE email = ?",
 	)
 		.bind(email)
 		.first();
-	if (!member) return c.text("Address not found.", 404);
+	if (!member) return reminderError(c, "Address not found.", 404);
 	await removeHouseholdMember(c.env.DB, email);
 	return done(
 		c,
@@ -1011,6 +1016,11 @@ settings.post("/settings/household-members/remove", async (c) => {
 		{ hash: "reminders" },
 	);
 });
+
+function reminderError(c: Context<App>, message: string, status: 400 | 404) {
+	c.header("HX-Trigger", JSON.stringify({ announce: message }));
+	return renderSettings(c, { reminderError: message, status });
+}
 
 // Only a zone the select offers is saved, and nothing else changes: "today" reads it from there
 // (src/dates.ts), and a transaction's own date is never converted (decision 67).
