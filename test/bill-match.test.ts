@@ -115,6 +115,67 @@ describe("bill payment matching", () => {
 		).toEqual({ period: "2026-10-16" });
 	});
 
+	it("keeps statement counts constant and below D1's limit for ten weekly bills", async () => {
+		const countForYears = async (years: number) => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare("DELETE FROM bills"),
+				env.DB.prepare("DELETE FROM transactions"),
+				...Array.from({ length: 10 }, (_, index) =>
+					env.DB.prepare(
+						"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?,'Weekly',10000,5,'weekly','LANDLORD')",
+					).bind(index + 1),
+				),
+			]);
+			const start = Date.UTC(2023, 0, 6);
+			const end = Date.UTC(2026, 0, 2);
+			const cutoff = end - years * 365 * 86_400_000;
+			const payments: D1PreparedStatement[] = [];
+			for (let day = start; day <= end; day += 7 * 86_400_000) {
+				if (day < cutoff) continue;
+				const date = new Date(day).toISOString().slice(0, 10);
+				payments.push(
+					env.DB.prepare(
+						"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,10000,'LANDLORD')",
+					).bind(date),
+				);
+			}
+			await env.DB.batch(payments);
+			let statements = 0;
+			const counted = new Proxy(env.DB, {
+				get(target, property) {
+					if (property === "prepare")
+						return (sql: string) => {
+							statements++;
+							return target.prepare(sql);
+						};
+					const value = Reflect.get(target, property, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			}) as D1Database;
+			await matchBillPayments(counted, "2026-01-02");
+			const assignments = await env.DB.prepare(
+				"SELECT COUNT(*) AS total,COUNT(DISTINCT transaction_id) AS unique_transactions FROM bill_payments WHERE status='linked'",
+			).first<{ total: number; unique_transactions: number }>();
+			expect(assignments?.total).toBe(assignments?.unique_transactions);
+			if (years === 3) {
+				expect(assignments?.total).toBeGreaterThan(150);
+				expect(
+					await env.DB.prepare(
+						"SELECT transaction_id FROM bill_payments WHERE period='2023-01-06' AND status='linked'",
+					).first(),
+				).toBeDefined();
+			}
+			return statements;
+		};
+		const oneYear = await countForYears(1);
+		const threeYears = await countForYears(3);
+		expect(oneYear).toBe(15);
+		expect(threeYears).toBe(15);
+		expect(threeYears).toBe(oneYear);
+		expect(threeYears).toBeLessThan(1_000);
+	});
+
 	it("gives Jev and earlier bill categories to a matched payment, but preserves user and merchant rule choices", async () => {
 		await env.DB.batch([
 			env.DB.prepare("UPDATE bills SET category_id=1 WHERE id=1"),

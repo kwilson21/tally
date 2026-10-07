@@ -94,6 +94,18 @@ export async function matchBillPayments(
 	const linked = new Set(
 		linkedRows.map((row) => `${row.bill_id}:${row.period}`),
 	);
+	const dismissedRows = (
+		await db
+			.prepare(
+				"SELECT bill_id,period,transaction_id FROM bill_payments WHERE status='dismissed'",
+			)
+			.all<{ bill_id: number; period: string; transaction_id: number }>()
+	).results;
+	const dismissed = new Set(
+		dismissedRows.map(
+			(row) => `${row.bill_id}:${row.period}:${row.transaction_id}`,
+		),
+	);
 	const reserved = new Set<number>();
 	for (const bill of bills) {
 		if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
@@ -105,54 +117,62 @@ export async function matchBillPayments(
 						(bill.due_day - 1)
 					: dayNumber(bill.anchor_date ?? today);
 			const window = WEEKLY_BILL_DATE_WINDOW_DAYS;
-			let occurrenceDay =
-				anchorDay + Math.floor((firstDay - window - anchorDay) / step) * step;
+			const firstOccurrence =
+				anchorDay + Math.ceil((firstDay - anchorDay) / step) * step;
+			let occurrenceDay = firstOccurrence;
+			const occurrenceDates: { due: string; period: string; day: number }[] =
+				[];
 			while (occurrenceDay <= endDay + window) {
 				const due = new Date(occurrenceDay * 86_400_000)
 					.toISOString()
 					.slice(0, 10);
 				const period = due;
 				if (!linked.has(`${bill.id}:${period}`)) {
-					const startDate = new Date((occurrenceDay - window) * 86_400_000)
-						.toISOString()
-						.slice(0, 10);
-					const endDate = new Date((occurrenceDay + window) * 86_400_000)
-						.toISOString()
-						.slice(0, 10);
-					const candidates = (
-						await db
-							.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
-					 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
-					 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user') AND t.date BETWEEN ? AND ?
-					 AND NOT EXISTS (SELECT 1 FROM bill_payments occurrence WHERE occurrence.bill_id=? AND occurrence.period=? AND occurrence.status='linked')
-					 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
-					 AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed')`)
-							.bind(
-								...merchantTextArgs(bill),
-								startDate,
-								endDate,
-								bill.id,
-								period,
-								bill.id,
-								period,
-							)
-							.all<MatchCandidate>()
-					).results;
-					for (const candidate of candidates)
-						if (pickBillPayment([candidate], due, bill.amount_cents, window))
-							pairs.push({
-								bill,
-								period,
-								candidate,
-								dateDistance: Math.abs(
-									dayNumber(candidate.date) - occurrenceDay,
-								),
-								amountDistance: Math.abs(
-									candidate.amountCents - bill.amount_cents,
-								),
-							});
+					occurrenceDates.push({ due, period, day: occurrenceDay });
 				}
 				occurrenceDay += step;
+			}
+			if (occurrenceDates.length) {
+				const firstOccurrenceDate = occurrenceDates[0];
+				const lastOccurrenceDate = occurrenceDates.at(-1);
+				if (!firstOccurrenceDate || !lastOccurrenceDate) continue;
+				const startDate = new Date(
+					(firstOccurrenceDate.day - window) * 86_400_000,
+				)
+					.toISOString()
+					.slice(0, 10);
+				const finishDate = new Date(
+					(lastOccurrenceDate.day + window) * 86_400_000,
+				)
+					.toISOString()
+					.slice(0, 10);
+				const candidates = (
+					await db
+						.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
+				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
+				 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user') AND t.date BETWEEN ? AND ?
+				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')`)
+						.bind(...merchantTextArgs(bill), startDate, finishDate)
+						.all<MatchCandidate>()
+				).results;
+				for (const { due, period, day } of occurrenceDates) {
+					for (const candidate of candidates) {
+						if (
+							!pickBillPayment([candidate], due, bill.amount_cents, window) ||
+							dismissed.has(`${bill.id}:${period}:${candidate.id}`)
+						)
+							continue;
+						pairs.push({
+							bill,
+							period,
+							candidate,
+							dateDistance: Math.abs(dayNumber(candidate.date) - day),
+							amountDistance: Math.abs(
+								candidate.amountCents - bill.amount_cents,
+							),
+						});
+					}
+				}
 			}
 			continue;
 		}
@@ -253,21 +273,23 @@ export async function matchBillPayments(
 	// whatever its exclusion (spec §8.5), which linking never writes. One a person excluded is theirs: the
 	// matcher leaves it, and only their hand link takes it. Income is never a bill payment (the candidate
 	// query leaves `flag_income` ones out, as the hand-link picker does).
-	const statements: D1PreparedStatement[] = [];
-	for (const pair of assignPairs(pairs, reserved))
-		statements.push(
-			db
-				.prepare(
-					"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'auto','linked')",
-				)
-				.bind(pair.bill.id, pair.period, pair.candidate.id),
-		);
-	if (!statements.length) return 0;
-	const results = await db.batch(statements);
-	return results.reduce(
-		(total, result) => total + (result.meta.changes ?? 0),
-		0,
-	);
+	const assignments = assignPairs(pairs, reserved);
+	if (!assignments.length) return 0;
+	const result = await db
+		.prepare(
+			"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT json_extract(value,'$.billId'),json_extract(value,'$.period'),json_extract(value,'$.transactionId'),'auto','linked' FROM json_each(?)",
+		)
+		.bind(
+			JSON.stringify(
+				assignments.map((pair) => ({
+					billId: pair.bill.id,
+					period: pair.period,
+					transactionId: pair.candidate.id,
+				})),
+			),
+		)
+		.run();
+	return result.meta.changes ?? 0;
 }
 
 type Pair = {

@@ -131,31 +131,6 @@ async function renderHome(
 					)
 				: b.status === "due" || b.status === "overdue"),
 	);
-	const unpaidBillsCents = billData.rows.reduce((sum, bill) => {
-		if (!bill.active) return sum;
-		if (["weekly", "biweekly", "quarterly"].includes(bill.frequency))
-			return (
-				sum +
-				bill.totalOccurrences
-					.filter(
-						(occurrence) =>
-							occurrence.dueDate.startsWith(month) &&
-							(occurrence.status === "due" || occurrence.status === "overdue"),
-					)
-					.reduce(
-						(total, occurrence) =>
-							total +
-							Math.max(0, occurrence.amountCents - occurrence.paidCents),
-						0,
-					)
-			);
-		return (
-			sum +
-			(["due", "overdue"].includes(bill.status)
-				? Math.max(0, bill.amountCents - bill.paidCents)
-				: 0)
-		);
-	}, 0);
 	const billTotals = calculateBillTotals({
 		month,
 		bills: activeBills.map((bill) => ({
@@ -177,6 +152,7 @@ async function renderHome(
 				.map((occurrence) => ({ billId: bill.id, ...occurrence })),
 		),
 	});
+	const unpaidBillsCents = billTotals.soonCents;
 	const summary = summarizeMonth({
 		month,
 		...data,

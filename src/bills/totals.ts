@@ -7,6 +7,12 @@ export type BillTotalFrequency =
 	| "biweekly"
 	| "quarterly";
 
+const cadenceFrequencies = new Set<BillTotalFrequency>([
+	"weekly",
+	"biweekly",
+	"quarterly",
+]);
+
 export function monthlyBillShare(
 	amountCents: number,
 	frequency: BillTotalFrequency,
@@ -57,6 +63,7 @@ export function calculateBillTotals({
 	const activeIds = new Set(
 		bills.filter((bill) => bill.active).map((bill) => bill.id),
 	);
+	const frequencyById = new Map(bills.map((bill) => [bill.id, bill.frequency]));
 	const monthlyCents = bills.reduce(
 		(total, bill) =>
 			total +
@@ -70,9 +77,20 @@ export function calculateBillTotals({
 		paidCents: 0,
 	};
 	let stillToPayCents = 0;
+	let soonCount = 0;
+	let soonCents = 0;
 	for (const occurrence of displayedOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
 		const left = Math.max(0, occurrence.amountCents - occurrence.paidCents);
+		if (
+			!cadenceFrequencies.has(
+				frequencyById.get(occurrence.billId) ?? "monthly",
+			) &&
+			(occurrence.status === "due" || occurrence.status === "overdue")
+		) {
+			soonCount += 1;
+			soonCents += left;
+		}
 		const key =
 			`${occurrence.status === "paid" ? "paid" : occurrence.status}Cents` as keyof typeof groups;
 		if (
@@ -83,11 +101,21 @@ export function calculateBillTotals({
 	}
 	for (const occurrence of thisMonthOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
+		if (
+			cadenceFrequencies.has(
+				frequencyById.get(occurrence.billId) ?? "monthly",
+			) &&
+			occurrence.dueDate.startsWith(month) &&
+			(occurrence.status === "due" || occurrence.status === "overdue")
+		) {
+			soonCount += 1;
+			soonCents += Math.max(0, occurrence.amountCents - occurrence.paidCents);
+		}
 		if (occurrence.dueDate.startsWith(month))
 			stillToPayCents += Math.max(
 				0,
 				occurrence.amountCents - occurrence.paidCents,
 			);
 	}
-	return { monthlyCents, stillToPayCents, groups };
+	return { monthlyCents, stillToPayCents, soonCount, soonCents, groups };
 }

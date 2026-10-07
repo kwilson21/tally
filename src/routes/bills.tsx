@@ -268,9 +268,6 @@ async function page(
 	});
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
-	const soon = active.filter(
-		(b) => b.status === "due" || b.status === "overdue",
-	);
 	const totals = calculateBillTotals({
 		month: today.slice(0, 7),
 		bills: active.map((bill) => ({
@@ -308,8 +305,8 @@ async function page(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">Bills</h1>
 				{rows.length > 0 && (
 					<p class="mt-2 font-serif text-lg italic">
-						{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
-						{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
+						{totals.soonCount} {totals.soonCount === 1 ? "bill" : "bills"} to
+						pay soon, {formatCents(totals.soonCents)} in all
 					</p>
 				)}
 				{rows.length > 0 && (

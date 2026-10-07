@@ -582,6 +582,27 @@ describe("Bills", () => {
 		).toBe(120000);
 	});
 
+	it("counts each unpaid due weekly occurrence in the Bills summary", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-07");
+		await env.DB.prepare("DELETE FROM bills").run();
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9396,'Weekly fixture',10000,5,'weekly',5,'WEEKLY FIXTURE')",
+		).run();
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html.match(/\d+ bills? to pay soon, \$[\d.]+ in all/)?.[0]).toBe(
+			"2 bills to pay soon, $200.00 in all",
+		);
+		const home = await (
+			await exports.default.fetch("http://tally.test/")
+		).text();
+		expect(home).toContain("Weekly fixture");
+		expect(home).toContain("Bills due soon");
+	});
+
 	it("refuses to save, deactivate or reactivate a missing bill", async () => {
 		const post = (path: string, body = "") =>
 			exports.default.fetch(`http://tally.test${path}`, {
