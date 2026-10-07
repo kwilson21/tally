@@ -673,9 +673,9 @@ export async function saveEdit(
 	const excludeArgs = [excluded, excluded];
 	// The review and income parameters the panel's own UPDATE shares between its two forms.
 	const reviewArgs = [
-		incomeChanged ? 1 : 0,
-		edit.income ? 1 : 0,
-		incomeChanged ? 1 : 0,
+		creditReviewByUser || incomeChanged ? 1 : 0,
+		incomeChanged && edit.income ? 1 : 0,
+		incomeChanged || creditReviewByUser ? 1 : 0,
 		creditReviewByUser ? 1 : 0,
 		creditReviewChanged ? 1 : 0,
 		creditReviewChoice,
@@ -733,7 +733,7 @@ export async function saveEdit(
 				)
 			: gated(
 					`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
-					income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
+				income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,

@@ -97,7 +97,7 @@ const STATEMENTS = [
 	// Uncertain flag answers move only when the posted row has no confidence of its own, like category_confidence.
 	`UPDATE transactions SET income_confidence = p.income_confidence
 	 ${FROM_PENDING} AND p.income_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND NOT (${hasIncomeAnswerSql("transactions")} OR transactions.income_confidence IS NOT NULL OR (?9 = 'INCOME' AND ?3 < 0))`,
+		AND NOT (${hasIncomeAnswerSql("transactions")} OR transactions.income_confidence IS NOT NULL OR (COALESCE(?9 = 'INCOME', 0) AND ?3 < 0))`,
 	`UPDATE transactions SET transfer_confidence = p.transfer_confidence
 	 ${FROM_PENDING} AND p.transfer_confidence IS NOT NULL AND p.amount_cents = ?3
 	 AND NOT ${hasAnswerSql(

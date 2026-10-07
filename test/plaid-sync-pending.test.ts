@@ -906,6 +906,21 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			});
 		});
 
+		it("moves an unsure income score when Plaid has no category", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42, personal_finance_category: null });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: 0.5,
+				income_source: null,
+			});
+		});
+
 		it("keeps posted Jev-settled income and transfer answers without pending scores", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item, { amount: -42 });

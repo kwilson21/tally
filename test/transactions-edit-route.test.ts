@@ -1080,6 +1080,45 @@ describe("POST /transactions/:id", () => {
 		});
 	});
 
+	it("clears a newly marked Jev income when reviewed as non-income", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, flag_income = 0, income_source = NULL, income_confidence = 0.72, credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const sheet = await get(`/transactions/${bakery}`);
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 1, income_source = 'jev' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			income_was: "0",
+			creditReviewedVisible: "1",
+			creditReviewed: "1",
+			creditReviewed_was: "0",
+		});
+		expect(sheet.html).toContain("Count as income");
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT flag_income, income_source, income_confidence, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({
+			flag_income: 0,
+			income_source: "user",
+			income_confidence: 0.72,
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+		});
+	});
+
 	it("saves, closes the sheet, and confirms with a toast and announcement (htmx)", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, save);
 		expect(res.status).toBe(200);
