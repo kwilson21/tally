@@ -49,6 +49,10 @@ export const INCLUDED_ROW = `(excluded = 0 OR ${PAYS_A_BILL})`;
 export const COUNTED_SPENDING = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0
 	AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR ${FOLLOWS_PURCHASE})`;
 
+/** Any transaction that contributes to a month, including income and counted refunds. */
+export const COUNTED_TRANSACTION = `${INCLUDED} AND t.is_split = 0
+	AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE})`;
+
 /** The month a transaction's own date and bill payment put it in. */
 function billMonthSql(transaction: string, payment: string, bill: string) {
 	const bankMonth = `substr(${transaction}.date,1,7)`;

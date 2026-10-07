@@ -257,6 +257,18 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 });
 
 describe("resetDemo", () => {
+	it("clears category archive dates on reset", async () => {
+		await resetDemo(env.DB, "2026-10-05");
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1, archived_on = '2026-10-04' WHERE id = 1",
+		).run();
+		await resetDemo(env.DB, "2026-10-05");
+		const row = await env.DB.prepare(
+			"SELECT archived, archived_on FROM categories WHERE id = 1",
+		).first<{ archived: number; archived_on: string | null }>();
+		expect(row).toEqual({ archived: 0, archived_on: null });
+	});
+
 	it("removes custom household people and restores the seeded Everyone row", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_people (name) VALUES ('Kids')",

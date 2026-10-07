@@ -59,6 +59,8 @@ import {
 } from "../views/maybe-category";
 import { MerchantRules } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
+import { MonthEnd, PastNotBudgeted } from "../views/month-end";
+import { MonthNavigation } from "../views/month-navigation";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
 import { PendingNote } from "../views/pending-note";
@@ -121,6 +123,8 @@ import {
 	CATEGORY_COLORS,
 	COLOR_TOKENS,
 	DURATION_TOKENS,
+	SHADOW_TOKENS,
+	SWIPE_MOTION_TOKENS,
 	TYPE_ROLES,
 } from "./tokens";
 
@@ -278,7 +282,7 @@ function Foundation() {
 				id="motion"
 				title="Motion"
 				tier="visual"
-				sentence="Quiet confirmations in CSS only (decision 76): a switch's knob slides, a sheet rises, a toast fades in, and pages cross-fade, each over in 150 to 200 ms; the budget bars fill on load. Nothing counts up or bounces, and reduced motion shows every end state with nothing moving. Each move is a class in app.css that names a duration token below, never a length, and is written into its component's use spec: the Switch, the Toast, the BottomSheet and the page shell, in the sections that follow."
+				sentence="Quiet confirmations in CSS only (decision 76): a switch's knob slides, a sheet rises, a toast fades in, and pages cross-fade; the budget bars fill on load. A finished-month chart's arrows nudge three times when more than five categories need scrolling, then rest. Reduced motion stops them. Every move names motion tokens in app.css, and the component's use spec says how it behaves."
 			>
 				<State label="Duration tokens (app.css @theme): a rule names one, never a length">
 					<dl class="max-w-prose divide-y divide-rule border-y border-rule">
@@ -288,6 +292,30 @@ function Foundation() {
 									duration-{t.name} <span class="text-muted">{t.value}</span>
 								</dt>
 								<dd class="mt-1 text-muted sm:mt-0">{t.use}</dd>
+							</div>
+						))}
+					</dl>
+				</State>
+				<State label="Swipe cue easing and distance tokens (app.css @theme)">
+					<dl class="max-w-prose divide-y divide-rule border-y border-rule">
+						{SWIPE_MOTION_TOKENS.map((t) => (
+							<div class="py-3 sm:grid sm:grid-cols-[14rem_1fr] sm:gap-4">
+								<dt class="font-medium">
+									{t.name} <span class="text-muted">{t.value}</span>
+								</dt>
+								<dd class="mt-1 text-muted sm:mt-0">{t.use}</dd>
+							</div>
+						))}
+					</dl>
+				</State>
+				<State label="Elevation token (app.css @theme)">
+					<dl class="max-w-prose divide-y divide-rule border-y border-rule">
+						{SHADOW_TOKENS.map((t) => (
+							<div class="py-3 sm:grid sm:grid-cols-[14rem_1fr] sm:gap-4">
+								<dt class="font-medium">{t.name}</dt>
+								<dd class="mt-1 text-muted sm:mt-0">
+									{t.value} · {t.use}
+								</dd>
 							</div>
 						))}
 					</dl>
@@ -677,6 +705,13 @@ function Picture({ label, children }: { label: string; children?: Child }) {
 }
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
+const HOME_MONTH_HEADING = (
+	<MonthNavigation
+		month="2026-10"
+		firstMonth="2026-05"
+		currentMonth="2026-10"
+	/>
+);
 
 /**
  * What a picture of Home shows, in words, built from the same data it draws, so a screen reader
@@ -732,6 +767,7 @@ function HomeSketch({
 		<>
 			<HomeTop
 				{...HOME_TOP}
+				monthHeading={HOME_MONTH_HEADING}
 				bankLine={bankLine}
 				bankDate={bankDate}
 				dailyAmount={dailyAmount}
@@ -747,6 +783,25 @@ function HomeSketch({
 		</>
 	);
 }
+
+const MONTH_HISTORY_SPEC: UseSpecText = {
+	purpose:
+		"Open a month to review how its budgets ended and return to this month.",
+	affordance:
+		"Previous and next are round 44px arrows beside the month. Each month dot is a 44px link; the selected month is filled and this month is ringed. When the finished chart scrolls, a 44px link holds a 34px ink circle with a paper arrow and soft elevation token; the line beside it has accent arrows.",
+	states:
+		"Available arrows and dots are links. At the first month and this month, the corresponding arrow is faded and hidden from assistive technology because it has no action. The current dot is ringed even while another month is selected. Each link is 44px wide with a 32px dot and a text-sm month label.",
+	feedback:
+		"A link loads that month's own Home URL. The browser announces the new page title and the selected month; no in-place swap or JavaScript is needed.",
+	input:
+		"Touch targets are 44px. The arrow circle is 34px; its paper arrow and accent focus ring each contrast at least 3:1 against ink. Keyboard Tab reaches each available arrow and month link in order; Enter follows it. Screen readers hear Previous month, August; Next month, October; and a month name with this month where applicable. Unavailable arrows are hidden because they are not controls.",
+	motion:
+		"When more than five categories need a sideways cue, its arrows nudge three times at 1.2 seconds per nudge, then rest. Reduced motion leaves them still. The page uses the shell's browser page transition.",
+	edges:
+		"The strip shows at most 36 available months and always contains the viewed month. Near the first month it starts there and extends later to fill the strip when history allows; an older window ends at the viewed month. Earlier and Later open the month before or after the visible window. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either history end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month budget counts only for a category active during that month; an archived category with counted spending remains as a spending-only row. A finished-month chart with more than five budgeted categories is one 42px-bar row inside its own keyboard-scrollable region; at `lg`, the fade, arrow, hint and scrolling region appear only above ten categories, when the row exceeds the 672px Home content width (main column 696px at 1024px; 824px at 1280px and wider). Its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. Nonzero finished amounts and bar overages retain cents when whole-dollar rounding would hide them. A future or pre-history month address opens this month's Home.",
+	words:
+		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
+};
 
 function HomeTopGroup() {
 	const forecast = (
@@ -800,9 +855,171 @@ function HomeTopGroup() {
 					<Picture
 						label={`Home's top when nothing needs a category, with no Band: ${describeHome({ band: false, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} forecast={forecast} band={undefined} />
+						<HomeTop
+							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
+							forecast={forecast}
+							band={undefined}
+						/>
 					</Picture>
 				</State>
+			</Specimen>
+			<Specimen
+				id="home-month-history"
+				title="Month navigation and finished Home"
+				tier="visual"
+				components={[
+					"MonthNavigation",
+					"MonthEnd",
+					"PastNotBudgeted",
+					"ProgressRow",
+				]}
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94)."
+			>
+				<State label="September ended under overall, with Eating Out over its own budget">
+					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+							/>
+							<MonthEnd
+								chartId="catalog-september"
+								monthName="September"
+								amountCents={8600}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 63600,
+										leftCents: 6400,
+										over: false,
+									},
+									{
+										id: 2,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 28600,
+										leftCents: -3600,
+										over: true,
+									},
+									{
+										id: 3,
+										name: "Gas",
+										budgetCents: 20000,
+										spentCents: 19200,
+										leftCents: 800,
+										over: false,
+									},
+								]}
+							/>
+							<a
+								href="/"
+								class="mt-3 inline-flex min-h-11 items-center text-accent"
+							>
+								Back to October
+							</a>
+							<h2 class="mt-8 font-serif text-3xl font-semibold">Budget</h2>
+							<ul class="mt-2 divide-y divide-rule">
+								<ProgressRow
+									name="Groceries"
+									icon="groceries"
+									color="cat-blue"
+									spentCents={63600}
+									budgetCents={70000}
+								/>
+								<ProgressRow
+									name="Eating Out"
+									icon="eating-out"
+									color="cat-plum"
+									spentCents={28600}
+									budgetCents={25000}
+								/>
+							</ul>
+							<PastNotBudgeted
+								items={[
+									{
+										name: "Kids",
+										icon: "kids",
+										color: "cat-ochre",
+										spentCents: 3000,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="At 320px wide, month links wrap instead of overflowing">
+					<Picture label="Month navigation at 320px wide, with links wrapping instead of overflowing">
+						<div class="w-[320px] max-w-full">
+							<MonthNavigation
+								month="2026-10"
+								firstMonth="2025-11"
+								currentMonth="2026-10"
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="Five budgeted categories: one row, no scrolling region or cue">
+					<Picture label="Five categories in one row with no scrolling cue">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-five"
+								monthName="September"
+								amountCents={0}
+								rows={Array.from({ length: 5 }, (_, index) => ({
+									id: index + 1,
+									name: `Category ${index + 1}`,
+									budgetCents: 10000,
+									spentCents: 8000,
+									leftCents: 2000,
+									over: false,
+								}))}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="Twelve budgeted categories: one row, keyboard-scrollable with fade, arrow link and swipe cue">
+					<Picture label="Twelve categories in one row with a fade, arrow and sideways scrolling cue">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-twelve"
+								monthName="September"
+								amountCents={0}
+								rows={Array.from({ length: 12 }, (_, index) => ({
+									id: index + 1,
+									name: `Category ${index + 1}`,
+									budgetCents: 10000,
+									spentCents: index % 3 === 0 ? 12000 : 8000,
+									leftCents: index % 3 === 0 ? -2000 : 2000,
+									over: index % 3 === 0,
+								}))}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="The twelve-category ink arrow and terracotta cue under prefers-reduced-motion: arrows rest">
+					<Picture label="The twelve-category chart cue stays still under reduced motion">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-twelve-reduced-motion"
+								monthName="September"
+								amountCents={0}
+								rows={Array.from({ length: 12 }, (_, index) => ({
+									id: index + 1,
+									name: `Category ${index + 1}`,
+									budgetCents: 10000,
+									spentCents: 8000,
+									leftCents: 2000,
+									over: false,
+								}))}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<UseSpec spec={MONTH_HISTORY_SPEC} />
 			</Specimen>
 			<Specimen
 				id="bank-behind"
@@ -829,6 +1046,7 @@ function HomeTopGroup() {
 					>
 						<HomeTop
 							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
 							bankLine={BANK_LINES.signIn}
 							forecast={forecast}
 						/>
@@ -840,6 +1058,7 @@ function HomeTopGroup() {
 					>
 						<HomeTop
 							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
 							bankLine={BANK_LINES.several}
 							forecast={forecast}
 						/>
