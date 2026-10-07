@@ -5,13 +5,15 @@ import { CategoryIcon } from "./category";
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
 const keepCents = (cents: number) =>
-	formatCents(cents, { wholeDollars: cents % 100 === 0 });
+	formatCents(cents, {
+		wholeDollars: cents === 0 || (Math.abs(cents) >= 100 && cents % 100 === 0),
+	});
 
 /** One signed amount and color for Home and finished-month category rows. */
 export function categoryRowAmount(cents: number) {
 	return cents < 0
-		? { text: `+${whole(-cents)}`, className: "text-right text-lg text-ok" }
-		: { text: whole(cents), className: "text-right text-lg" };
+		? { text: `+${keepCents(-cents)}`, className: "text-right text-lg text-ok" }
+		: { text: keepCents(cents), className: "text-right text-lg" };
 }
 const SHORT_NAMES: Record<string, string> = {
 	Groceries: "Groc.",
@@ -100,7 +102,10 @@ function EndBars({
 	const scrollsAtLg = rows.length > 10;
 	const phoneOnlyCue = scrolls && !scrollsAtLg;
 	const left = scrolls ? 31 : 4;
-	const width = Math.max(350, left + Math.max(0, rows.length - 1) * 66 + 42);
+	const width = Math.max(
+		350,
+		left + Math.max(0, rows.length - 1) * 66 + 42 + (scrolls ? 44 : 0),
+	);
 	const areaRight = 292;
 	const unit = 72;
 	const barWidth = 42;
@@ -135,11 +140,14 @@ function EndBars({
 				stroke-width="1"
 				stroke-dasharray="4 4"
 			/>
-			{!scrolls && (
-				<text x="298" y="45" class="fill-muted text-sm">
-					budget
-				</text>
-			)}
+			<text
+				x={scrolls ? width - 4 : 298}
+				y="45"
+				text-anchor={scrolls ? "end" : undefined}
+				class="fill-muted text-sm"
+			>
+				budget
+			</text>
 			{rows.map((row, index) => {
 				const base = 112;
 				const over = row.spentCents > row.budgetCents;

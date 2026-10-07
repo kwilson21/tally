@@ -3,7 +3,11 @@ import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
 import type { CategorySummary } from "../src/budget";
 import appCss from "../src/styles/app.css?raw";
-import { MonthEnd, PastNotBudgeted } from "../src/views/month-end";
+import {
+	categoryRowAmount,
+	MonthEnd,
+	PastNotBudgeted,
+} from "../src/views/month-end";
 
 const rows = (count: number): CategorySummary[] =>
 	Array.from({ length: count }, (_, index) => ({
@@ -31,6 +35,7 @@ describe("MonthEnd budget bars", () => {
 		const chart = html.match(
 			/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
 		)?.[0];
+		expect(chart).toContain(">budget</text>");
 		expect(chart).toContain('viewBox="0 0 350 142"');
 		expect(chart).toContain('width="42"');
 		expect([...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)]).toHaveLength(5);
@@ -84,6 +89,7 @@ describe("MonthEnd budget bars", () => {
 				html.match(
 					/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
 				)?.[0] ?? "";
+			if ([7, 12].includes(count)) expect(chart).toContain(">budget</text>");
 			expect(html).toMatch(
 				new RegExp(
 					`role="region" tabindex="0" aria-label="${count} categories; scroll sideways to see them all" class="[^"]*overflow-x-auto[^"]*${wideCueHidden ? "lg:hidden" : ""}"`,
@@ -142,9 +148,9 @@ describe("MonthEnd budget bars", () => {
 			expect(contrast("#fbf8f2", "#0e0e0e")).toBeGreaterThanOrEqual(3);
 			expect(contrast("#ae5534", "#0e0e0e")).toBeGreaterThanOrEqual(3);
 			expect(chart).toBeDefined();
-			expect(chart).toContain('viewBox="0 0 799 142"');
+			expect(chart).toContain('viewBox="0 0 843 142"');
 			expect(chart).toContain('width="42"');
-			expect(chart).toContain('<line x1="31" x2="799" y1="40" y2="40"');
+			expect(chart).toContain('<line x1="31" x2="843" y1="40" y2="40"');
 			expect(chart).toContain('y="132"');
 			const xs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
 				(match) => Number(match[1]),
@@ -173,13 +179,13 @@ describe("MonthEnd budget bars", () => {
 			).toBe(12);
 			expect(html).toContain("overflow-x-auto");
 			expect(html).toContain("max-w-full");
-			expect(chart).toContain('viewBox="0 0 799 142"');
-			expect(chart).toContain('width="799"');
+			expect(chart).toContain('viewBox="0 0 843 142"');
+			expect(chart).toContain('width="843"');
 			const rectXs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
 				(match) => Number(match[1]),
 			);
 			const lastBarEnd = Math.max(...rectXs) + 42;
-			expect(799 - lastBarEnd).toBe(0);
+			expect(843 - lastBarEnd).toBe(44);
 			expect(html).toContain('id="twelve-chart-end"');
 			expect(html.indexOf('id="twelve-chart-end"')).toBeGreaterThan(
 				html.indexOf("</svg>"),
@@ -193,6 +199,32 @@ describe("MonthEnd budget bars", () => {
 			);
 		},
 	);
+
+	it("labels every dashed budget line at five, seven, and twelve categories", () => {
+		for (const count of [5, 7, 12]) {
+			const html = renderToString(
+				<MonthEnd
+					chartId={`budget-${count}`}
+					monthName="September"
+					amountCents={0}
+					rows={rows(count)}
+				/>,
+			);
+			const chart = html.match(/<svg[^>]*>[\s\S]*?<\/svg>/)?.[0] ?? "";
+			expect(chart).toContain('stroke-dasharray="4 4"');
+			expect(chart).toContain(">budget</text>");
+		}
+	});
+
+	it.each([
+		[-30, "+$0.30"],
+		[-2000, "+$20"],
+		[-2050, "+$20.50"],
+		[30, "$0.30"],
+		[0, "$0"],
+	])("formats category row amount %i cents as %s", (cents, expected) => {
+		expect(categoryRowAmount(cents).text).toBe(expected);
+	});
 
 	it.each([
 		[10, "$0.10"],
