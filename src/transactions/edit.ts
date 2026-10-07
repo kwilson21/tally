@@ -23,6 +23,9 @@ export type Edit = {
 	 */
 	keepBankName?: boolean;
 	note: string | null;
+	noteWas?: string | null;
+	noteProvided?: boolean;
+	detailsFieldChanged?: boolean;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
 	excluded: boolean;
 	/** Whether this transaction is income; a person can correct Jev's suggestion. */
@@ -34,6 +37,13 @@ export type Edit = {
 	creditReviewedWas?: boolean;
 	/** False when the edit form omitted the credit-review control for an income credit. */
 	creditReviewedProvided?: boolean;
+	kind?: "subscription" | "one_off" | "bill" | "transfer" | null;
+	kindWas?: "subscription" | "one_off" | "bill" | "transfer" | null;
+	forPersonId?: number | null;
+	forPersonIdWas?: number | null;
+	keepDetails?: boolean;
+	/** False when the panel hid guesses because the details switch was off. */
+	detailsVisible?: boolean;
 	/**
 	 * The purchase this refund refunds. Left out, the link stays; null unlinks. A purchase links it,
 	 * unless it's more than what's left of that purchase (saveEdit refuses it, spec §8.5), and
@@ -57,7 +67,10 @@ export function merchantRuleChange(
 }
 
 export type EditErrors = Partial<
-	Record<"category" | "merchant" | "note" | "refund", string>
+	Record<
+		"category" | "merchant" | "note" | "refund" | "kind" | "forPerson",
+		string
+	>
 >;
 
 const MAX_NAME = 80;
@@ -70,6 +83,7 @@ const text = (form: FormData, key: string) =>
 export function parseEdit(
 	form: FormData,
 	categoryIds: number[],
+	peopleIds?: number[],
 ): { ok: true; value: Edit } | { ok: false; errors: EditErrors } {
 	const errors: EditErrors = {};
 	const rawCategory = text(form, "category");
@@ -97,6 +111,22 @@ export function parseEdit(
 				? false
 				: fieldChanged;
 	const note = text(form, "note");
+	const rawKind = text(form, "kind");
+	const allowedKinds = ["subscription", "one_off", "bill", "transfer"];
+	const kind = allowedKinds.includes(rawKind)
+		? (rawKind as "subscription" | "one_off" | "bill" | "transfer")
+		: null;
+	const rawPerson = text(form, "for_person_id");
+	const forPersonId = rawPerson ? Number(rawPerson) : null;
+	const keepDetails = form.get("details_action") === "keep";
+	const detailsVisible = form.has("details_visible")
+		? form.get("details_visible") !== "0"
+		: undefined;
+	const hiddenUntouched = detailsVisible === false;
+	const noteWas = text(form, "note_was");
+	const kindWas = text(form, "kind_was");
+	const personWasRaw = text(form, "for_person_id_was");
+	const personWas = personWasRaw ? Number(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
 	const creditReviewed = form.get("creditReviewed") === "1";
@@ -118,6 +148,14 @@ export function parseEdit(
 		errors.merchant = `Keep the name under ${MAX_NAME} characters.`;
 	if (note.length > MAX_NOTE)
 		errors.note = `Keep the note under ${MAX_NOTE} characters.`;
+	if (rawKind && !allowedKinds.includes(rawKind))
+		errors.kind = "Pick a kind from the list.";
+	if (
+		rawPerson &&
+		(!Number.isInteger(forPersonId) ||
+			(peopleIds && !peopleIds.includes(forPersonId as number)))
+	)
+		errors.forPerson = "Pick a person from the household list.";
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };
 	return {
@@ -131,12 +169,41 @@ export function parseEdit(
 			nameChanged,
 			keepBankName,
 			note: note || null,
+			...(form.has("details_visible")
+				? {
+						noteProvided: !(
+							hiddenUntouched &&
+							((!form.has("note_was") && note === "") ||
+								(form.has("note_was") && note === noteWas))
+						),
+						detailsFieldChanged:
+							hiddenUntouched &&
+							((form.has("kind_was") && kind !== kindWas) ||
+								(form.has("for_person_id_was") && forPersonId !== personWas)),
+					}
+				: {}),
 			excluded,
 			income,
 			incomeWas,
 			creditReviewed,
 			creditReviewedWas,
 			creditReviewedProvided,
+			kind:
+				form.has("kind") &&
+				(!hiddenUntouched ||
+					(form.has("kind_was") ? kind !== kindWas : kind !== null))
+					? kind
+					: undefined,
+			forPersonId:
+				form.has("for_person_id") &&
+				(!hiddenUntouched ||
+					(form.has("for_person_id_was")
+						? forPersonId !== personWas
+						: forPersonId !== null))
+					? forPersonId
+					: undefined,
+			keepDetails,
+			...(detailsVisible === undefined ? {} : { detailsVisible }),
 		},
 	};
 }

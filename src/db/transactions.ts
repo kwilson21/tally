@@ -40,6 +40,9 @@ import {
 	unlinkSplitOverRefundedSql,
 } from "./refunded";
 
+/** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
+const EMPTY_NOTE = "(t.note IS NULL OR trim(t.note) = '')";
+
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
 // A split part is its own row, stored as posted; it is as pending as its parent (the purchase), read
@@ -54,6 +57,7 @@ export type ListRow = {
 	rawName: string;
 	displayName: string;
 	note: string | null;
+	noteGuessed?: boolean;
 	/** As stored: a person's or a machine's exclusion. A payment linked to a bill counts all the same (`paysBill`). */
 	excluded: boolean;
 	/** Linked to a bill's occurrence: it counts in Spent whatever its exclusion, and isn't shown as excluded. */
@@ -154,7 +158,11 @@ export async function listTransactions(
 ): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
-	const { names: namesOn, income: incomeOn } = await readAiSwitches(db);
+	const {
+		names: namesOn,
+		details: detailsOn,
+		income: incomeOn,
+	} = await readAiSwitches(db);
 	const rowMonth = f.raw ? "substr(t.date,1,7)" : COUNTED_MONTH;
 	const rowCategory = f.raw ? "t.category_id" : COUNTED_CATEGORY;
 	if (f.month !== "all") {
@@ -213,7 +221,7 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : `CASE WHEN ${detailsOn ? "1" : "0"} = 0 AND t.note_guessed = 1 THEN NULL ELSE t.note END`} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -238,6 +246,7 @@ export async function listTransactions(
 				| "paysBill"
 				| "income"
 				| "creditReviewed"
+				| "noteGuessed"
 				| "displayName"
 				| "isSplit"
 				| "followsPurchase"
@@ -258,6 +267,7 @@ export async function listTransactions(
 					isSplit: number;
 					followsPurchase: number;
 					pending: number;
+					noteGuessed: number;
 				}
 		>();
 
@@ -305,6 +315,7 @@ export async function listTransactions(
 				isSplit: r.isSplit === 1,
 				followsPurchase: r.followsPurchase === 1,
 				pending: r.pending === 1,
+				noteGuessed: r.noteGuessed === 1,
 				displayName: shown.name,
 				nameSuggested: shown.suggested,
 				nameFromBank: shown.fromBank,
@@ -395,6 +406,13 @@ export async function firstVisitState(
 }
 
 export type TransactionDetail = ListRow & {
+	detailsVisible: boolean;
+	noteGuessed: boolean;
+	kind: "subscription" | "one_off" | "bill" | "transfer" | null;
+	kindGuessed: boolean;
+	forPersonId: number | null;
+	forPersonName: string | null;
+	forPersonGuessed: boolean;
 	/** A person explicitly reviewed this credit as non-income; Jev's settled state is separate. */
 	creditReviewedByUser: boolean;
 	accountName: string;
@@ -470,6 +488,8 @@ export async function getTransaction(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
+				t.for_person_id AS forPersonId, (SELECT name FROM household_people WHERE id = t.for_person_id) AS forPersonName, t.for_person_guessed AS forPersonGuessed,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -502,6 +522,9 @@ export async function getTransaction(
 				| "paysBill"
 				| "income"
 				| "creditReviewed"
+				| "noteGuessed"
+				| "kindGuessed"
+				| "forPersonGuessed"
 				| "creditReviewedByUser"
 				| "displayName"
 				| "isSplit"
@@ -518,13 +541,20 @@ export async function getTransaction(
 					isSplit: number;
 					followsPurchase: number;
 					pending: number;
+					noteGuessed: number;
+					kindGuessed: number;
+					forPersonGuessed: number;
 				}
 		>();
 	if (!r) return null;
 	// A person's chosen name wins; until then the first pending suggestion, shown dashed; otherwise the
 	// bank's raw text is tidied for display (spec §7). The panel offers every pending suggestion.
 	const { suggestedNames, suggestionStatus, merchantKey, ...row } = r;
-	const { names: namesOn, income: incomeOn } = await readAiSwitches(db);
+	const {
+		names: namesOn,
+		details: detailsOn,
+		income: incomeOn,
+	} = await readAiSwitches(db);
 	const merchant = {
 		stored: suggestedNames,
 		status: suggestionStatus,
@@ -539,11 +569,20 @@ export async function getTransaction(
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	return {
 		...row,
+		detailsVisible: detailsOn,
 		excluded: r.excluded === 1,
 		paysBill: r.paysBill === 1,
 		income: r.income === 1,
 		incomeConfidence: incomeOn ? r.incomeConfidence : null,
 		creditReviewed: r.creditReviewed === 1,
+		note: r.noteGuessed === 1 && !detailsOn ? null : r.note,
+		noteGuessed: r.noteGuessed === 1 && detailsOn,
+		kind: r.kindGuessed === 1 && !detailsOn ? null : r.kind,
+		kindGuessed: r.kindGuessed === 1 && detailsOn,
+		forPersonId: r.forPersonGuessed === 1 && !detailsOn ? null : r.forPersonId,
+		forPersonName:
+			r.forPersonGuessed === 1 && !detailsOn ? null : r.forPersonName,
+		forPersonGuessed: r.forPersonGuessed === 1 && detailsOn,
 		creditReviewedByUser: r.creditReviewedByUser === 1,
 		isSplit: r.isSplit === 1,
 		followsPurchase: r.followsPurchase === 1,
@@ -610,7 +649,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -623,11 +662,23 @@ export async function saveEdit(
 			excluded: number;
 			refundOfId: number | null;
 			isSplit: number;
+			note: string | null;
+			noteGuessed: number;
+			kind: string | null;
+			kindGuessed: number;
+			forPersonId: number | null;
+			forPersonGuessed: number;
 		}>();
 	if (!current) throw new Error(`No transaction ${id}`);
 
 	// The purchase this refund is being linked to now: undefined when its link stays as it is, null
 	// when it's being unlinked.
+	const noteChanged =
+		edit.noteProvided !== false &&
+		edit.note !== current.note &&
+		(current.noteGuessed === 0 ||
+			edit.detailsVisible !== false ||
+			edit.noteProvided === true);
 	const newLink =
 		edit.refundOfId !== undefined && edit.refundOfId !== current.refundOfId
 			? edit.refundOfId
@@ -741,20 +792,26 @@ export async function saveEdit(
 		changed
 			? gated(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
-						note = ?, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+						note = CASE WHEN ? = 1 THEN ? ELSE note END, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 						income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
-					[edit.categoryId, edit.note, ...excludeArgs, ...reviewArgs],
+					[
+						edit.categoryId,
+						noteChanged ? 1 : 0,
+						edit.note,
+						...excludeArgs,
+						...reviewArgs,
+					],
 				)
 			: gated(
-					`UPDATE transactions SET note = ?, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 				income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
-					[edit.note, ...excludeArgs, ...reviewArgs],
+					[noteChanged ? 1 : 0, edit.note, ...excludeArgs, ...reviewArgs],
 				),
 	);
 	// A name a person gives settles the merchant's pending suggestion: accepted when it is one of the
@@ -838,6 +895,60 @@ export async function saveEdit(
 	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
+	const kindChanged =
+		edit.kind !== undefined &&
+		edit.kind !== current.kind &&
+		(edit.kind !== undefined || edit.detailsFieldChanged === true) &&
+		(current.kindGuessed === 0 ||
+			edit.detailsVisible !== false ||
+			edit.detailsFieldChanged === true);
+	const personChanged =
+		edit.forPersonId !== undefined &&
+		edit.forPersonId !== current.forPersonId &&
+		(edit.forPersonId !== undefined || edit.detailsFieldChanged === true) &&
+		(current.forPersonGuessed === 0 ||
+			edit.detailsVisible !== false ||
+			edit.detailsFieldChanged === true);
+	if (noteChanged || kindChanged || personChanged || edit.keepDetails) {
+		statements.push(
+			gated(
+				`UPDATE transactions SET
+					kind = CASE WHEN ? = 1 THEN ? ELSE kind END,
+					kind_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE kind_guessed END,
+					for_person_id = CASE WHEN ? = 1 THEN ? ELSE for_person_id END,
+					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
+					note = CASE WHEN ? = 1 THEN ? ELSE note END,
+					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
+					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
+					note_dismissed = CASE WHEN ? = 1 AND ? = 1 AND trim(COALESCE(?, '')) = '' THEN 1 ELSE note_dismissed END,
+					category_confidence = CASE WHEN ? = 1 OR ? = 1 THEN NULL ELSE category_confidence END,
+					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
+				[
+					kindChanged ? 1 : 0,
+					edit.kind ?? null,
+					kindChanged ? 1 : 0,
+					edit.keepDetails ? 1 : 0,
+					personChanged ? 1 : 0,
+					edit.forPersonId ?? null,
+					personChanged ? 1 : 0,
+					edit.keepDetails ? 1 : 0,
+					noteChanged ? 1 : 0,
+					edit.note,
+					noteChanged ? 1 : 0,
+					edit.keepDetails ? 1 : 0,
+					noteChanged ? 1 : 0,
+					edit.note,
+					noteChanged ? 1 : 0,
+					current.noteGuessed,
+					edit.note,
+					kindChanged ? 1 : 0,
+					personChanged ? 1 : 0,
+					actor,
+					id,
+				],
+			),
+		);
+	}
 	if (excluded !== current.excluded)
 		statements.push(
 			gated(
@@ -1072,33 +1183,65 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
 export async function pendingForJev(
 	db: D1Database,
 	limit: number,
-	{ categories = true, ids }: { categories?: boolean; ids?: number[] } = {},
+	{
+		categories = true,
+		income = true,
+		details = false,
+		ids,
+	}: {
+		categories?: boolean;
+		income?: boolean;
+		details?: boolean;
+		ids?: number[];
+	} = {},
 ): Promise<
-	(JevInput & { id: number; categoryOnly: boolean; merchantKey: string })[]
+	(JevInput & {
+		id: number;
+		categoryOnly: boolean;
+		merchantKey: string;
+		detailsAsked: boolean;
+	})[]
 > {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
 				t.amount_cents AS amountCents, a.type AS accountType,
-				t.plaid_category AS plaidCategory, t.note,
+				t.plaid_category AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
+				t.details_asked AS detailsAsked,
 				${CATEGORY_ONLY} AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
+			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
-			WHERE ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND NOT ${FOLLOWS_PURCHASE}
+			WHERE NOT ${FOLLOWS_PURCHASE} AND (
+				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL)
+				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (${EMPTY_NOTE} OR t.kind IS NULL OR t.for_person_id IS NULL))
+			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
 				${ids ? "AND t.id IN (SELECT value FROM json_each(?))" : ""}
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
 			LIMIT ?`,
 		)
-		.bind(categories ? 1 : 0, ...(ids ? [JSON.stringify(ids)] : []), limit)
+		.bind(
+			categories || income ? 1 : 0,
+			details ? 1 : 0,
+			categories || details ? 1 : 0,
+			...(ids ? [JSON.stringify(ids)] : []),
+			limit,
+		)
 		.all<
-			JevInput & { id: number; categoryOnly: number; merchantKey: string }
+			JevInput & {
+				id: number;
+				categoryOnly: number;
+				merchantKey: string;
+				detailsAsked: number;
+			}
 		>();
 	return results.map((transaction) => ({
 		...transaction,
 		categoryOnly: transaction.categoryOnly === 1,
+		detailsAsked: transaction.detailsAsked === 1,
 	}));
 }
 
@@ -1211,6 +1354,71 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
 		.run();
 }
 
+/** Stores only Jev's valid detail choices, and records that this transaction was asked once. */
+export async function saveJevDetails(
+	db: D1Database,
+	details: { id: number; kind: string | null; forPersonId: number | null }[],
+): Promise<void> {
+	if (details.length === 0) return;
+	const result = await db
+		.prepare(
+			`WITH answers AS (
+				SELECT json_extract(value, '$.id') AS id,
+					json_extract(value, '$.kind') AS kind,
+					json_extract(value, '$.forPersonId') AS forPersonId
+				FROM json_each(?)
+			)
+			UPDATE transactions SET
+				kind = CASE WHEN kind IS NULL THEN (SELECT kind FROM answers WHERE answers.id = transactions.id) ELSE kind END,
+				kind_guessed = CASE WHEN kind IS NULL AND (SELECT kind FROM answers WHERE answers.id = transactions.id) IS NOT NULL THEN 1 ELSE kind_guessed END,
+				for_person_id = CASE WHEN for_person_id IS NULL AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN (SELECT forPersonId FROM answers WHERE answers.id = transactions.id) ELSE for_person_id END,
+				for_person_guessed = CASE WHEN for_person_id IS NULL AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
+				details_asked = 1, updated_at = datetime('now')
+			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)`,
+		)
+		.bind(JSON.stringify(details))
+		.run();
+	void result;
+}
+
+/** The bounded set of note guesses for this run; Jev must have asked before Workers AI sees the text. */
+export async function transactionsNeedingNoteGuess(
+	db: D1Database,
+	limit: number,
+): Promise<{ id: number; rawName: string }[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, t.raw_name AS rawName FROM transactions t
+			 WHERE t.details_asked = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
+			 ORDER BY t.note_tried_at IS NOT NULL, t.note_tried_at, t.date DESC, t.id DESC LIMIT ?`,
+		)
+		.bind(limit)
+		.all<{ id: number; rawName: string }>();
+	return results;
+}
+
+/** Stores successful note guesses together; one JSON parameter stays below D1's bind limit. */
+export async function saveNoteAttempts(
+	db: D1Database,
+	attempted: number[],
+	notes: { id: number; note: string }[],
+): Promise<void> {
+	if (attempted.length === 0) return;
+	await db
+		.prepare(
+			`WITH attempted AS (SELECT value AS id FROM json_each(?)), guesses AS (
+				SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?)
+			)
+			UPDATE transactions AS t SET
+				note = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN (SELECT note FROM guesses WHERE guesses.id = t.id) ELSE note END,
+				note_guessed = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN 1 ELSE note_guessed END,
+				note_tried_at = datetime('now'), updated_at = datetime('now')
+			WHERE t.id IN (SELECT id FROM attempted)`,
+		)
+		.bind(JSON.stringify(attempted), JSON.stringify(notes))
+		.run();
+}
+
 /**
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
@@ -1224,6 +1432,7 @@ export async function saveJevResult(
 	d: Decision,
 	options: {
 		categoryOnly?: boolean;
+		categoryAsked?: boolean;
 		switches?: { income: boolean; categories?: boolean };
 	} = {},
 ): Promise<boolean> {
@@ -1241,11 +1450,11 @@ export async function saveJevResult(
 					AND ${INCLUDED_ROW} AND is_split = 0`,
 			)
 			.bind(
-				d.categoryId,
-				d.categoryId === null ? null : "jev",
-				d.confidence,
-				d.suggestedCategoryId,
-				d.noneFit ? 1 : 0,
+				options.categoryAsked === false ? null : d.categoryId,
+				options.categoryAsked === false || d.categoryId === null ? null : "jev",
+				options.categoryAsked === false ? null : d.confidence,
+				options.categoryAsked === false ? null : d.suggestedCategoryId,
+				options.categoryAsked === false || !d.noneFit ? 0 : 1,
 				id,
 			)
 			.run();
@@ -1288,9 +1497,9 @@ export async function saveJevResult(
 				)`,
 		)
 		.bind(
-			d.categoryId,
-			d.categoryId === null ? null : "jev",
-			d.confidence,
+			options.categoryAsked === false ? null : d.categoryId,
+			options.categoryAsked === false || d.categoryId === null ? null : "jev",
+			options.categoryAsked === false ? null : d.confidence,
 			incomeOn ? 1 : 0,
 			confidenceBasisPoints(incomeConfidence ?? 0),
 			confidenceBasisPoints(JEV_THRESHOLD),
@@ -1308,8 +1517,8 @@ export async function saveJevResult(
 			confidenceBasisPoints(incomeConfidence ?? 0),
 			10_000 - confidenceBasisPoints(JEV_THRESHOLD),
 			income ? 1 : 0,
-			d.suggestedCategoryId,
-			d.noneFit ? 1 : 0,
+			options.categoryAsked === false ? null : d.suggestedCategoryId,
+			options.categoryAsked === false || !d.noneFit ? 0 : 1,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
 			income ? 1 : 0,

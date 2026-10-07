@@ -144,12 +144,45 @@ describe("categoryNames", () => {
 	});
 });
 
+describe("category archive dates", () => {
+	it("keeps the first archive date when an overlapping archive request finishes later", async () => {
+		await setArchived(db, 5, true, "2026-09-30");
+		await setArchived(db, 5, true, "2026-10-01");
+		expect(
+			(
+				await db
+					.prepare("SELECT archived_on FROM categories WHERE id = 5")
+					.first<{ archived_on: string }>()
+			)?.archived_on,
+		).toBe("2026-09-30");
+	});
+
+	it("sets the archive date and clears it when the category is restored", async () => {
+		await setArchived(db, 5, true, "2026-09-15");
+		expect(
+			(
+				await db
+					.prepare("SELECT archived_on FROM categories WHERE id = 5")
+					.first<{ archived_on: string }>()
+			)?.archived_on,
+		).toBe("2026-09-15");
+		await setArchived(db, 5, false, "2026-10-01");
+		expect(
+			(
+				await db
+					.prepare("SELECT archived_on FROM categories WHERE id = 5")
+					.first<{ archived_on: string | null }>()
+			)?.archived_on,
+		).toBeNull();
+	});
+});
+
 describe("an archived category on Home", () => {
 	const onHome = async (month: string) =>
 		(await loadMonth(db, month)).categories.map((c) => c.name);
 
-	it("stays for a month it has spending in, so the month still adds up, and leaves after", async () => {
-		await setArchived(db, 2, true);
+	it("drops its budget after the archive month and keeps counted spending", async () => {
+		await setArchived(db, 2, true, "2026-09-15");
 		expect(await onHome(MONTH)).toContain("Eating Out");
 		expect(await onHome("2026-10")).not.toContain("Eating Out");
 	});
@@ -161,8 +194,8 @@ describe("an archived category on Home", () => {
 			)
 			.bind(MONTH)
 			.run();
-		await setArchived(db, 2, true);
-		expect(await onHome(MONTH)).not.toContain("Eating Out");
+		await setArchived(db, 2, true, "2026-09-15");
+		expect(await onHome(MONTH)).toContain("Eating Out");
 	});
 });
 

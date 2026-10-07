@@ -261,6 +261,20 @@ describe("rowCaption", () => {
 		});
 	});
 
+	it("keeps refund captions ahead of an uncategorized purchase note", () => {
+		expect(
+			rowCaption({ ...base, note: "Dinner", refundedCents: 2499 }).caption,
+		).toBe("$24.99 refunded");
+		expect(
+			rowCaption({
+				...base,
+				note: "Dinner",
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			}).caption,
+		).toBe("Refund for Sep 5");
+	});
+
 	it("flags what needs a category, showing the raw name when it differs", () => {
 		expect(rowCaption(base)).toEqual({
 			kind: "needs",
@@ -291,9 +305,8 @@ describe("rowCaption", () => {
 				refundPurchaseDate: "2026-09-05",
 			},
 		}).toString();
-		expect(pending).toContain(
-			'Pending ·</span><span class="truncate text-muted">Refund for Sep 5',
-		);
+		expect(pending).toContain("Pending ·");
+		expect(pending).toContain("Refund for Sep 5");
 		expect(pending).not.toContain("SQ *LOCAL BAKERY 4432");
 	});
 
@@ -400,6 +413,86 @@ describe("rowCaption", () => {
 });
 
 describe("TransactionRow", () => {
+	it.each([
+		{
+			name: "a bill caption before a guessed note",
+			row: {
+				note: "Dinner",
+				noteGuessed: true,
+				paysBill: true,
+				billName: "Rent",
+			},
+			caption: "paid Rent bill",
+			showsGuessedNote: false,
+		},
+		{
+			name: "a refund caption before a guessed note",
+			row: {
+				note: "Dinner",
+				noteGuessed: true,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+			},
+			caption: "Refund for Sep 5",
+			showsGuessedNote: false,
+		},
+		{
+			name: "a split part followed by its bill",
+			row: {
+				parentId: 9,
+				parentName: "Costco",
+				parentBillName: "Rent",
+				paysBill: true,
+			},
+			caption: "Split from Costco · paid Rent bill",
+			showsGuessedNote: false,
+		},
+		{
+			name: "Excluded before a guessed note",
+			row: { excluded: true, note: "Dinner", noteGuessed: true },
+			caption: "Excluded",
+			showsGuessedNote: false,
+		},
+		{
+			name: "Pending before bank text",
+			row: { pending: true },
+			caption: "SQ *LOCAL BAKERY 4432",
+			showsGuessedNote: false,
+		},
+	])(
+		"keeps $name in the caption order",
+		async ({ row, caption, showsGuessedNote }) => {
+			const transaction = { ...base, ...row };
+			expect(rowCaption(transaction).caption).toBe(caption);
+			const html = await TransactionRow({ row: transaction }).toString();
+			expect(html.includes("Tally&#39;s guess:")).toBe(showsGuessedNote);
+			if (transaction.pending) {
+				expect(html).toContain("Pending");
+				expect(html).not.toContain("SQ *LOCAL BAKERY 4432");
+			}
+		},
+	);
+
+	it("marks only a caption that shows the guessed note", async () => {
+		const category = await TransactionRow({
+			row: {
+				...base,
+				note: "Dinner",
+				noteGuessed: true,
+				categoryId: 1,
+				categoryName: "Groceries",
+				categoryIcon: "groceries",
+				categoryColor: "cat-blue",
+			},
+		}).toString();
+		expect(category).not.toContain("Tally&#39;s guess");
+		expect(category).not.toContain("decoration-dashed");
+		const note = await TransactionRow({
+			row: { ...base, note: "Dinner", noteGuessed: true },
+		}).toString();
+		expect(note).toContain("Tally&#39;s guess:");
+		expect(note).toContain("decoration-dashed");
+	});
 	it("prioritizes Maybe income over an unsure category on the row", async () => {
 		const row = {
 			...base,
@@ -421,6 +514,7 @@ describe("TransactionRow", () => {
 		expect(html).toContain("truncate");
 		expect(html).not.toContain("shrink-0");
 	});
+
 	it("leaves Counts in off a linked refund, whose caption already explains it", async () => {
 		const row = {
 			...base,

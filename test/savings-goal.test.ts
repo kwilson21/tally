@@ -184,6 +184,52 @@ describe("savings goal routes", () => {
 		expect(await removed.text()).toContain("Set a goal");
 	});
 
+	it("shows a finished month's savings goal as a read-only line without changing its result", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-09', 140000)",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id) SELECT id, '2026-09-15', 46000, 'GROCERIES', 1 FROM accounts LIMIT 1",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-09', 50000)",
+		).run();
+		const before = await loadMonth(env.DB, "2026-09");
+		const resultBefore = summarizeMonth({
+			month: "2026-09",
+			...before,
+			unpaidDueBillsCents: 0,
+			savingsGoalCents: before.savingsGoalCents,
+		});
+
+		const pastResponse = await exports.default.fetch(
+			"http://tally.test/?month=2026-09",
+		);
+		const pastHtml = await pastResponse.text();
+		expect(pastHtml).toContain("Savings");
+		expect(pastHtml).toContain("$500");
+		expect(pastHtml).toContain("Set aside from Safe to spend");
+		expect(pastHtml).not.toContain('href="/savings-goal"');
+		expect(pastHtml).not.toContain('hx-get="/savings-goal"');
+		const after = await loadMonth(env.DB, "2026-09");
+		const resultAfter = summarizeMonth({
+			month: "2026-09",
+			...after,
+			unpaidDueBillsCents: 0,
+			savingsGoalCents: after.savingsGoalCents,
+		});
+		expect(resultAfter).toEqual(resultBefore);
+
+		const currentResponse = await exports.default.fetch("http://tally.test/");
+		const currentHtml = await currentResponse.text();
+		expect(currentHtml).toContain('href="/savings-goal"');
+	});
+
 	it("keeps Home's D1 statement count below the per-invocation limit", async () => {
 		let statements = 0;
 		const counted = new Proxy(env.DB, {

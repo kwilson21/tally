@@ -2,6 +2,7 @@ import type { BudgetAmount, CountedTransaction } from "../budget";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
+	COUNTED_TRANSACTION,
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
@@ -10,13 +11,15 @@ import {
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
+const ARCHIVED_BUDGET_APPLIES =
+	"c.archived = 0 OR c.archived_on IS NULL OR c.archived_on >= (?1 || '-01')";
 
 export type CategoryRow = {
 	id: number;
 	name: string;
 	icon: string;
 	color: string;
-	/** Archived categories only appear for a month they have spending in. */
+	/** Archived categories appear for counted spending, or a budget that applied to a finished month. */
 	archived: boolean;
 };
 
@@ -30,7 +33,8 @@ export type MonthData = {
 /**
  * Loads what summarizeMonth needs for a month ('YYYY-MM'). Counted = in month, not excluded (or paying a
  * bill), not a split parent.
- * Categories are the active ones plus any archived one with counted spending that month (spec §7).
+ * Categories are active ones, plus archived categories with counted spending that month, or a
+ * budget effective before the category was archived.
  */
 export async function loadMonth(
 	db: D1Database,
@@ -39,21 +43,30 @@ export async function loadMonth(
 	// db.batch() returns D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess treats each
 	// destructured element as possibly undefined; the query list above guarantees all four.
 	const [categories, amounts, transactions, savingsGoal] = (await db.batch([
-		// An archived category stays for a month it has counted spending in (not income), so the month still adds up.
 		db
 			.prepare(
 				`SELECT id, name, icon, color, archived FROM categories c
-				 WHERE archived = 0 OR EXISTS (
-					SELECT 1 FROM transactions t
-					${COUNTED_JOINS}
-					WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND ${COUNTED_SPENDING}
-				 )
+				 WHERE c.archived = 0
+					OR EXISTS (
+						SELECT 1 FROM transactions t
+						${COUNTED_JOINS}
+						WHERE ${COUNTED_CATEGORY} = c.id AND ${COUNTED_MONTH} = ?1 AND ${COUNTED_SPENDING}
+					)
+					OR EXISTS (
+						SELECT 1 FROM budget_amounts ba
+						WHERE ba.category_id = c.id AND ba.effective_month <= ?1
+							AND (${ARCHIVED_BUDGET_APPLIES})
+					)
 				 ORDER BY sort_order, name`,
 			)
 			.bind(month),
-		db.prepare(
-			"SELECT category_id AS categoryId, effective_month AS effectiveMonth, amount_cents AS amountCents FROM budget_amounts",
-		),
+		db
+			.prepare(
+				`SELECT ba.category_id AS categoryId, ba.effective_month AS effectiveMonth, ba.amount_cents AS amountCents
+				 FROM budget_amounts ba JOIN categories c ON c.id = ba.category_id
+				 WHERE ba.effective_month <= ?1 AND (${ARCHIVED_BUDGET_APPLIES})`,
+			)
+			.bind(month),
 		db
 			.prepare(
 				`SELECT ${COUNTED_CATEGORY} AS categoryId, t.amount_cents AS amountCents, t.flag_income AS income,
@@ -90,4 +103,32 @@ export async function loadMonth(
 			(savingsGoal.results[0] as { amountCents: number } | undefined)
 				?.amountCents ?? null,
 	};
+}
+
+/** First counted month, checking the earliest counted date and its two-month bill-occurrence bound. */
+export async function firstCountedMonth(
+	db: D1Database,
+): Promise<string | null> {
+	const row = await db
+		.prepare(
+			`WITH first_date AS MATERIALIZED (
+				SELECT t.date, ${COUNTED_MONTH} AS month FROM transactions t
+				${COUNTED_JOINS}
+				WHERE ${COUNTED_TRANSACTION}
+				ORDER BY t.date
+				LIMIT 1
+			), nearby_month AS (
+				SELECT MIN(${COUNTED_MONTH}) AS month
+				FROM first_date f, transactions t INDEXED BY transactions_date
+				${COUNTED_JOINS}
+				WHERE ${COUNTED_TRANSACTION}
+					AND t.date >= f.date AND t.date <= date(f.date, '+2 months')
+			)
+			SELECT MIN(month) AS month FROM (
+				SELECT month FROM first_date
+				UNION ALL SELECT month FROM nearby_month
+			)`,
+		)
+		.first<{ month: string | null }>();
+	return row?.month ?? null;
 }

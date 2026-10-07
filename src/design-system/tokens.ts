@@ -132,6 +132,28 @@ export const DURATION_TOKENS = [
 		value: "10s",
 		use: "a cash-delete Undo toast's stay before it goes",
 	},
+	{
+		name: "swipe",
+		value: "1.2s",
+		use: "one finished-month chart arrow nudge; the cue moves three times",
+	},
+] as const;
+
+export const SWIPE_MOTION_TOKENS = [
+	{
+		name: "ease-swipe",
+		value: "ease-in-out",
+		use: "finished-month chart arrows",
+	},
+	{ name: "distance-swipe", value: "12px", use: "finished-month chart arrows" },
+] as const;
+
+export const SHADOW_TOKENS = [
+	{
+		name: "shadow-swipe-cue",
+		value: "0 2px 8px ink at 18%",
+		use: "the dark finished-month chart arrow",
+	},
 ] as const;
 
 export const CATEGORY_COLORS = COLOR_TOKENS.filter((t) =>

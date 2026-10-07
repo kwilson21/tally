@@ -99,6 +99,7 @@ beforeEach(async () => {
 		void promise.catch(() => {});
 	});
 	await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
+	await saveAiSwitches(db, { details: false });
 	await db
 		.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'")
 		.run();
@@ -421,6 +422,7 @@ describe("asking again honors what everything else does", () => {
 	it("asks nothing with categories and income both switched off", async () => {
 		await saveAiSwitches(db, {
 			...AI_SWITCHES_ALL_ON,
+			details: false,
 			categories: false,
 			income: false,
 		});

@@ -10,6 +10,8 @@ export const NONE_FIT = "None of these fit";
 export type JevAnswer = {
 	category: { label: string; confidence: number };
 	flags: Record<Flag, number>;
+	kind?: { label: string; confidence: number };
+	forPerson?: { label: string; confidence: number };
 };
 
 export type Decision = {

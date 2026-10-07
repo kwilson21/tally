@@ -54,12 +54,24 @@ describe("schema", () => {
 			"category_suggestions",
 			"documents",
 			"feedback",
+			"household_people",
 			"household_settings",
 			"merchants",
 			"plaid_items",
 			"savings_goal_amounts",
 			"transactions",
 		]);
+	});
+
+	it("records the optional category archive date", async () => {
+		const { results } = await db
+			.prepare("PRAGMA table_info(categories)")
+			.all<{ name: string; notnull: number }>();
+		expect(
+			results.find((column) => column.name === "archived_on"),
+		).toMatchObject({
+			notnull: 0,
+		});
 	});
 
 	it("rejects duplicate Plaid item ids", async () => {

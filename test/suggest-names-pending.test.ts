@@ -88,6 +88,31 @@ beforeEach(async () => {
 });
 
 describe("suggestMerchantNames", () => {
+	it("reads household switches a bounded number of times for up to 100 names", async () => {
+		await addTransactions(
+			Array.from({ length: 100 }, (_, i) => ({
+				rawName: `UNIQUE SHOP ${i}`,
+			})),
+		);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const ai = fakeAi(() => ({ response: "Unique Shop" }));
+		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
+		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
+		// One candidate query, one batch save and fixed switch reads; 100 per-row saves exceed this.
+		expect(statements).toBeLessThanOrEqual(10);
+	});
+
 	it("asks once for a merchant Plaid didn't name and keeps the names, pending, without renaming it", async () => {
 		await addTransactions([{ rawName: RAW }, { rawName: RAW }]);
 		const ai = fakeAi(() => ({
@@ -216,7 +241,7 @@ describe("suggestMerchantNames", () => {
 		expect(await merchants()).toEqual([]);
 	});
 
-	it("drops an answer that comes back after the switch went off, or after a person named the merchant", async () => {
+	it("drops a batch of answers that come back after the switch went off, or after a person named the merchant", async () => {
 		await addTransactions([
 			{ rawName: "FIRST SHOP" },
 			{ rawName: "SECOND SHOP" },
@@ -230,8 +255,8 @@ describe("suggestMerchantNames", () => {
 			suggested: 0,
 		});
 		expect(await merchants()).toEqual([]);
-		// It stopped there: the second shop wasn't asked either.
-		expect(ai.run).toHaveBeenCalledTimes(1);
+		// It checks once after a batch of at most 25, then makes no further calls.
+		expect(ai.run).toHaveBeenCalledTimes(2);
 
 		await saveAiSwitches(db, { names: true });
 		const naming = fakeAi(() => ({ response: "A Name" }));

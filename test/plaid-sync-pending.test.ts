@@ -766,6 +766,45 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				.first()
 		)?.refund_of_id;
 
+	it("moves kept details and their flags onto a posted row already stored", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await env.DB.prepare(
+			"INSERT INTO household_people(id,name) VALUES (2,'Kept person') ON CONFLICT(id) DO NOTHING",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET kind='bill', kind_guessed=0, for_person_id=2, for_person_guessed=0, note='Maybe', note_guessed=1, details_asked=1, note_tried_at='2026-10-06 09:00:00' WHERE id=?",
+		)
+			.bind(ids.pending)
+			.run();
+		await post(item, {});
+		expect(await row("posted-1")).toMatchObject({
+			kind: "bill",
+			kind_guessed: 0,
+			for_person_id: 2,
+			for_person_guessed: 0,
+			note: "Maybe",
+			note_guessed: 1,
+			details_asked: 1,
+			note_tried_at: "2026-10-06 09:00:00",
+		});
+		const secondItem = await addItem();
+		const ownKind = await bothStored(secondItem);
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET kind='bill', kind_guessed=0 WHERE id=?",
+			).bind(ownKind.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET kind='subscription', kind_guessed=0 WHERE id=?",
+			).bind(ownKind.posted),
+		]);
+		await post(secondItem, {});
+		expect(await row("posted-1")).toMatchObject({
+			kind: "subscription",
+			kind_guessed: 0,
+		});
+	});
+
 	it("moves a person's category, note, exclusion and income choice onto it, over a machine's", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item, { amount: -42 });

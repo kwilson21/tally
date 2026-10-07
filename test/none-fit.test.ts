@@ -54,6 +54,7 @@ beforeEach(async () => {
 	vi.spyOn(console, "log").mockImplementation(() => {});
 	vi.spyOn(console, "error").mockImplementation(() => {});
 	await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
+	await saveAiSwitches(db, { details: false });
 	await db
 		.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'")
 		.run();
@@ -96,6 +97,18 @@ describe("saveJevResult", () => {
 		await saveJevResult(db, c, decision());
 		for (const id of [a, b, c])
 			expect(await marked(id)).toMatchObject({ jev_none_fit: 0 });
+	});
+
+	it("does not store category answers when the request had no category choices", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await saveJevResult(db, id, decision({ noneFit: true }), {
+			categoryAsked: false,
+		});
+		expect(await marked(id)).toMatchObject({
+			jev_none_fit: 0,
+			jev_category_id: null,
+			category_confidence: null,
+		});
 	});
 
 	it("keeps it for a credit a person already reviewed, which Jev only helps with the category of", async () => {

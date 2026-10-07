@@ -51,28 +51,40 @@ export async function merchantsToAsk(
 }
 
 /**
- * Keeps the names Workers AI gave for a bank text: pending when there are any, an empty suggestion
- * when there are none (so it isn't asked again). Only a merchant nobody has named, suggested for or
- * decided about takes them, so an answer that arrives after a person named it is dropped.
+ * Keeps one batch of Workers AI answers in a single JSON-backed upsert: pending when there are any,
+ * an empty suggestion when there are none (so it isn't asked again). Only merchants nobody has named,
+ * suggested for or decided about take them, so late answers are dropped.
  */
 export async function saveAskedNames(
 	db: D1Database,
-	key: string,
-	names: string[],
-): Promise<boolean> {
+	answers: { rawName: string; names: string[] }[],
+): Promise<number> {
+	if (answers.length === 0) return 0;
 	const result = await db
 		.prepare(
-			`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, ?)
+			`WITH answers AS (
+				SELECT json_extract(value, '$.rawName') AS rawName,
+					json_extract(value, '$.suggestedName') AS suggestedName,
+					json_extract(value, '$.status') AS status
+				FROM json_each(?)
+			)
+			INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
+			SELECT rawName, suggestedName, status FROM answers WHERE 1
 			 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = excluded.suggestion_status
-			 WHERE merchants.display_name IS NULL AND merchants.suggestion_status = 'none' AND merchants.suggested_name IS NULL`,
+			 WHERE merchants.display_name IS NULL AND merchants.suggestion_status = 'none' AND merchants.suggested_name IS NULL
+			 RETURNING suggested_name`,
 		)
 		.bind(
-			key,
-			storeSuggestedNames(names),
-			names.length > 0 ? "pending" : "none",
+			JSON.stringify(
+				answers.map(({ rawName, names }) => ({
+					rawName,
+					suggestedName: storeSuggestedNames(names),
+					status: names.length > 0 ? "pending" : "none",
+				})),
+			),
 		)
-		.run();
-	return result.meta.changes > 0;
+		.all<{ suggested_name: string | null }>();
+	return result.results.filter((row) => Boolean(row.suggested_name)).length;
 }
 
 export type NameReview = {

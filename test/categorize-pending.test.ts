@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NONE_FIT } from "../src/ai/decide";
 import {
 	categorizePending,
 	jevCallLimit,
@@ -74,10 +75,11 @@ const callsUsed = async (day?: string) =>
 	);
 
 const switchTo = (over: Partial<typeof AI_SWITCHES_ALL_ON>) =>
-	saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...over });
+	saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, details: false, ...over });
 
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
+	await saveAiSwitches(db, { details: false });
 	// The demo's reset keeps the day's Jev count, so each test starts a day of its own.
 	await newDay();
 });
@@ -88,6 +90,52 @@ afterEach(() => {
 });
 
 describe("categorizePending", () => {
+	it("leaves an unasked category eligible when the household has no active categories", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.prepare("UPDATE categories SET archived=1").run();
+		await switchTo({ categories: true, income: true });
+		const id = Number(
+			(
+				await db
+					.prepare(
+						"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,500,'NO ACTIVE CATEGORIES') RETURNING id",
+					)
+					.bind(`${MONTH}-20`)
+					.first<{ id: number }>()
+			)?.id,
+		);
+		await categorizePending(
+			withKey,
+			async () =>
+				Response.json({
+					answers: {
+						category: { type: "choice", choice: NONE_FIT, confidence: 0.99 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+					},
+				}),
+			{ rulesApplied: true, onlyIds: [id] },
+		);
+		expect(
+			await db
+				.prepare(
+					"SELECT category_confidence, jev_category_id, jev_none_fit FROM transactions WHERE id=?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			category_confidence: null,
+			jev_category_id: null,
+			jev_none_fit: 0,
+		});
+		await db.prepare("UPDATE categories SET archived=0").run();
+		await switchTo({ categories: true, income: true });
+		expect((await pendingForJev(db, 50)).some((row) => row.id === id)).toBe(
+			true,
+		);
+	});
+
 	it("does not read or send history when category guessing is off, but does when it is on", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const target = await db
@@ -808,7 +856,11 @@ describe("categorizePending", () => {
 					),
 			);
 
-			await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, income: enabled });
+			await saveAiSwitches(db, {
+				...AI_SWITCHES_ALL_ON,
+				details: false,
+				income: enabled,
+			});
 			await categorizePending(withKey, jev.fetchImpl);
 			expect(
 				await db
@@ -1282,6 +1334,7 @@ describe("categorizePending", () => {
 
 	it("keeps a night's queries under D1's 1,000 per invocation", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
+		await saveAiSwitches(db, { details: true });
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
@@ -1306,8 +1359,8 @@ describe("categorizePending", () => {
 			{ ...withKey, DB: counted as D1Database, DEMO: "false" },
 			fakeJev(() => reply(0.95)).fetchImpl,
 		);
-		// Three queries per call, one history read per run, and a few for setup.
-		expect(statements).toBeLessThanOrEqual(MAX_CALLS_PER_RUN * 3 + 16);
+		// Three queries per call, one batched details save and history read per run, and setup.
+		expect(statements).toBeLessThanOrEqual(MAX_CALLS_PER_RUN * 3 + 17);
 		expect(statements).toBeLessThan(1000 - 50);
 	}, 60_000);
 
@@ -1383,6 +1436,7 @@ describe("categorizePending", () => {
 			quiet();
 			await saveAiSwitches(db, {
 				...AI_SWITCHES_ALL_ON,
+				details: false,
 				categories: false,
 				income: false,
 			});
@@ -1458,10 +1512,8 @@ describe("categorizePending", () => {
 				fakeJev(() => reply(0.95)).fetchImpl,
 				{ rulesApplied: true, onlyIds: ids },
 			);
-			// Six more calls cost the switches read before and after each (two) and its save (one); history is one query per run.
-			const perCall = (many.statements() - few.statements()) / 6;
-			expect(perCall).toBeLessThanOrEqual(3);
-			expect(many.statements() - few.statements()).toBeLessThanOrEqual(19);
+			// Six calls cost three each, plus the run's one bulk details save and history read.
+			expect(many.statements() - few.statements()).toBeLessThanOrEqual(20);
 		});
 
 		it("gives back what it reserved and didn't ask when the run stops early", async () => {
@@ -1849,6 +1901,11 @@ describe("categorizePending", () => {
 
 	it("doesn't ask Jev at all when there are no categories to offer", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
+		await saveAiSwitches(db, {
+			categories: false,
+			income: false,
+			details: false,
+		});
 		const jev = fakeJev(() => reply(0.95));
 		const result = await categorizePending(withKey, jev.fetchImpl);
 		expect(jev.calls()).toBe(0);
@@ -1928,7 +1985,7 @@ describe("categorizePending", () => {
 // Tally works from rules and people's choices alone, and nothing already decided changes.
 describe("the AI switches", () => {
 	const setSwitches = (over: Partial<typeof AI_SWITCHES_ALL_ON>) =>
-		saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...over });
+		saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, details: false, ...over });
 
 	/** A Jev reply with a flag's probability set, whatever the category. */
 	const flagged = (flags: {
@@ -2163,6 +2220,7 @@ describe("the AI switches", () => {
 	it("is back on after the demo's nightly reset", async () => {
 		await setSwitches({ categories: false, income: false });
 		await resetDemo(db, TODAY);
+		await saveAiSwitches(db, { details: false });
 		const jev = fakeJev(() => reply(0.95));
 		await categorizePending(withKey, jev.fetchImpl);
 		expect(jev.calls()).toBe(10);

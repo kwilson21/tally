@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
 import {
 	getTransaction,
@@ -88,6 +89,7 @@ describe("syncItem", () => {
 			env.DB.prepare("DELETE FROM plaid_items"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
+		await saveAiSwitches(env.DB, { details: false });
 	});
 
 	it("sets last_synced_at only after a successful sync", async () => {
@@ -3297,6 +3299,7 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 			env.DB.prepare("DELETE FROM plaid_items"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
+		await saveAiSwitches(env.DB, { details: false });
 	});
 
 	it("counts a paycheck Plaid calls INCOME toward Income and not Spent, and never holds it for review", async () => {

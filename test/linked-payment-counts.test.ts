@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
 import {
 	excludedBreakdown,
@@ -97,6 +98,7 @@ const addPayment = (source: Source) =>
 
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
+	await saveAiSwitches(db, { details: false });
 	await db
 		.prepare(
 			"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9500, 'Mortgage', 150000, 5, 'monthly', 5, 'LANDLORD LLC')",

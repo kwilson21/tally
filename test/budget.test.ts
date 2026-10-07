@@ -6,6 +6,7 @@ import {
 	statusSentence,
 	summarizeMonth,
 } from "../src/budget";
+import { endBarRatio } from "../src/views/bar";
 
 const CATEGORIES = [
 	{ id: 1, name: "Groceries" },
@@ -61,6 +62,41 @@ describe("summarizeMonth with a linked refund", () => {
 });
 
 describe("summarizeMonth", () => {
+	it("computes a finished month's amount from its full budgets and all counted spending", () => {
+		const finished = (extra: number) =>
+			summarizeMonth({
+				month: "2026-09",
+				categories: [
+					{ id: 1, name: "Groceries" },
+					{ id: 2, name: "Eating Out" },
+				],
+				amounts: [
+					{ categoryId: 1, effectiveMonth: "2026-09", amountCents: 100000 },
+					{ categoryId: 2, effectiveMonth: "2026-09", amountCents: 85000 },
+					{ categoryId: 2, effectiveMonth: "2026-10", amountCents: 99000 },
+				],
+				transactions: [
+					tx(1, 100000),
+					tx(2, 73400),
+					tx(null, 3000),
+					tx(null, extra),
+				],
+				unpaidDueBillsCents: 50000,
+			});
+		expect(finished(0).totalBudgetCents - finished(0).totalSpentCents).toBe(
+			8600,
+		);
+		expect(
+			finished(12800).totalBudgetCents - finished(12800).totalSpentCents,
+		).toBe(-4200);
+		expect(
+			finished(0).categories.map(({ name, over }) => [name, over]),
+		).toEqual([
+			["Groceries", false],
+			["Eating Out", false],
+		]);
+	});
+
 	it("keeps payroll out of spending while purchases and refunds affect remaining budget", () => {
 		const summarize = (income: boolean) =>
 			summarizeMonth({
@@ -155,6 +191,19 @@ describe("summarizeMonth", () => {
 			"Eating Out",
 		]);
 		expect(s.totalSpentCents).toBe(5000);
+	});
+});
+
+describe("finished month bars", () => {
+	it.each([
+		[5000, 10000, { ratio: 0.5, capped: false }],
+		[12000, 10000, { ratio: 1.2, capped: false }],
+		[20000, 10000, { ratio: 1.25, capped: true }],
+		[3000, 0, { ratio: 1.25, capped: true }],
+		[0, 0, { ratio: 0, capped: false }],
+		[-1000, 10000, { ratio: 0, capped: false }],
+	])("draws %i cents against a %i-cent budget", (spent, budget, expected) => {
+		expect(endBarRatio(spent, budget)).toEqual(expected);
 	});
 });
 

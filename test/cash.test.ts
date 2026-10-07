@@ -118,6 +118,42 @@ describe("adding cash", () => {
 		expect(html).toContain("Enter a smaller amount in dollars and cents.");
 	});
 
+	it("rejects cash dates more than ten years before today and accepts the boundary", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const dateYearsBack = (years: number) =>
+			`${String(Number(today.slice(0, 4)) - years).padStart(4, "0")}${today.slice(4)}`;
+		for (const [date, accepted, message] of [
+			[dateYearsBack(10), true, ""],
+			[dateYearsBack(11), false, "Choose a date within the last 10 years."],
+			[
+				`${String(Number(today.slice(0, 4)) + 1).padStart(4, "0")}${today.slice(4)}`,
+				false,
+				"Choose today or an earlier date.",
+			],
+		] as const) {
+			const { res, html } = await request("/transactions/cash", {
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({
+					date,
+					amount: "20",
+					merchant: "Date check",
+					category: "1",
+					note: "",
+				}),
+			});
+			if (accepted) expect(res.status).toBe(200);
+			else {
+				expect(res.status).toBe(422);
+				expect(html).toContain(message);
+			}
+		}
+	});
+
 	it("says why a non-number amount and an empty Where are wrong", async () => {
 		const { html } = await request("/transactions/cash", {
 			method: "POST",

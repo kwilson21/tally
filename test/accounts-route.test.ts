@@ -200,6 +200,8 @@ describe("GET /accounts", () => {
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
 		]);
+		await saveAiSwitches(env.DB, { details: false });
+		await saveAiSwitches(env.DB, { details: false });
 		const { html } = await get("/accounts");
 		const text = textOf(html);
 		// Decision 55: no $0 headline before there's anything to add up; the add drawing instead.
@@ -291,6 +293,7 @@ describe("POST /accounts/sync feedback", () => {
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
 		]);
+		await saveAiSwitches(env.DB, { details: false });
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		vi.spyOn(console, "error").mockImplementation(() => {});
 	});
