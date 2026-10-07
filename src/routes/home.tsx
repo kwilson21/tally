@@ -169,12 +169,17 @@ async function renderHome(
 		(sum, row) => sum + row.billPaymentsCents,
 		0,
 	);
+	const refundsCents = forecastDays.reduce(
+		(sum, row) => sum + row.refundsCents,
+		0,
+	);
 	const forecast = forecastMonth({
 		day,
 		daysInMonth: daysInMonth(month),
 		totalBudgetCents: summary.totalBudgetCents,
 		spentCents: forecastSpentCents,
 		billPaymentsCents,
+		refundsCents,
 		planPaymentsCents: 0,
 		billsStillDueCents: billTotals.stillToPayCents,
 	});

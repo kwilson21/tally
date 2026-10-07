@@ -275,6 +275,7 @@ describe("GET / with the demo seed", () => {
 					(sum, row) => sum + row.billPaymentsCents,
 					0,
 				),
+				refundsCents: days.reduce((sum, row) => sum + row.refundsCents, 0),
 				planPaymentsCents: 0,
 				billsStillDueCents: billTotals.stillToPayCents,
 			});

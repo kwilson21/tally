@@ -9,6 +9,7 @@ export type HomeForecastDay = {
 	day: number;
 	spentCents: number;
 	billPaymentsCents: number;
+	refundsCents: number;
 };
 
 /** Reads only this month's dates through today; the date range uses transactions_date. */
@@ -29,7 +30,8 @@ export async function homeForecastDays(
 					AND ${countedMonthSql()} = ? AND ${COUNTED_SPENDING}
 			)
 			SELECT day, SUM(amount_cents) AS spentCents,
-				SUM(CASE WHEN role = 'bill' THEN amount_cents ELSE 0 END) AS billPaymentsCents
+				SUM(CASE WHEN role = 'bill' THEN amount_cents ELSE 0 END) AS billPaymentsCents,
+				SUM(CASE WHEN role = 'refund' THEN -amount_cents ELSE 0 END) AS refundsCents
 			FROM classified GROUP BY day ORDER BY day`,
 		)
 		.bind(`${month}-01`, nextMonth, today, month)

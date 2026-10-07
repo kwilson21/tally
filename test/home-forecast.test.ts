@@ -7,31 +7,35 @@ import { FORECAST_START_DAY, forecastMonth } from "../src/home-forecast";
 import { HomeForecast } from "../src/views/home-forecast";
 
 describe("forecastMonth", () => {
-	it("projects each transaction role once in the everyday pace", () => {
+	it("counts refunds once without projecting them as everyday spending", () => {
 		const cases = [
 			{
 				name: "bill credit",
 				spentCents: -2000,
 				billPaymentsCents: -2000,
-				everydayCents: 0,
+				refundsCents: 0,
+				endCents: -2000,
 			},
 			{
 				name: "unlinked refund",
-				spentCents: -2000,
+				spentCents: 8000,
 				billPaymentsCents: 0,
-				everydayCents: -2000,
+				refundsCents: 2000,
+				endCents: 18667,
 			},
 			{
 				name: "bill payment",
 				spentCents: 5000,
 				billPaymentsCents: 5000,
-				everydayCents: 0,
+				refundsCents: 0,
+				endCents: 5000,
 			},
 			{
 				name: "everyday spending",
 				spentCents: 1000,
 				billPaymentsCents: 0,
-				everydayCents: 1000,
+				refundsCents: 0,
+				endCents: 2067,
 			},
 		];
 		for (const entry of cases) {
@@ -41,13 +45,34 @@ describe("forecastMonth", () => {
 				totalBudgetCents: 100000,
 				spentCents: entry.spentCents,
 				billPaymentsCents: entry.billPaymentsCents,
+				refundsCents: entry.refundsCents,
 				planPaymentsCents: 0,
 				billsStillDueCents: 0,
 			});
-			expect(forecast.endCents, entry.name).toBe(
-				entry.spentCents + Math.round((entry.everydayCents * 16) / 15),
-			);
+			expect(forecast.endCents, entry.name).toBe(entry.endCents);
 		}
+		const noRefund = forecastMonth({
+			day: 15,
+			daysInMonth: 31,
+			totalBudgetCents: 100000,
+			spentCents: 10000,
+			billPaymentsCents: 0,
+			refundsCents: 0,
+			planPaymentsCents: 0,
+			billsStillDueCents: 0,
+		});
+		expect(noRefund.endCents).toBe(20667);
+		const overRefunded = forecastMonth({
+			day: 15,
+			daysInMonth: 31,
+			totalBudgetCents: 100000,
+			spentCents: -2000,
+			billPaymentsCents: 0,
+			refundsCents: 3000,
+			planPaymentsCents: 0,
+			billsStillDueCents: 0,
+		});
+		expect(overRefunded.endCents).toBe(-2000);
 	});
 
 	it("projects everyday spending and bills still due in integer cents", () => {
@@ -58,6 +83,7 @@ describe("forecastMonth", () => {
 				totalBudgetCents: 100000,
 				spentCents: 40000,
 				billPaymentsCents: 10000,
+				refundsCents: 0,
 				planPaymentsCents: 0,
 				billsStillDueCents: 5000,
 			}),
@@ -76,6 +102,7 @@ describe("forecastMonth", () => {
 				totalBudgetCents: 50000,
 				spentCents: 100000,
 				billPaymentsCents: 0,
+				refundsCents: 0,
 				planPaymentsCents: 0,
 				billsStillDueCents: 0,
 			}),
@@ -93,6 +120,7 @@ describe("forecastMonth", () => {
 			totalBudgetCents: 100000,
 			spentCents: 40000,
 			billPaymentsCents: 10000,
+			refundsCents: 0,
 			planPaymentsCents: 5000,
 			billsStillDueCents: 5000,
 		};
@@ -106,6 +134,7 @@ describe("forecastMonth", () => {
 			totalBudgetCents: 10000,
 			spentCents: 0,
 			billPaymentsCents: 0,
+			refundsCents: 0,
 			planPaymentsCents: 0,
 			billsStillDueCents: 0,
 		};
@@ -209,11 +238,11 @@ describe("homeForecastDays query budget", () => {
 				).bind(paymentBill.id, month, payment.id),
 			]);
 			const rows = await homeForecastDays(env.DB, month, `${month}-18`);
-			for (const [day, spentCents, billPaymentsCents] of [
-				[15, -2000, -2000],
-				[16, -2000, 0],
-				[17, 5000, 5000],
-				[18, 1000, 0],
+			for (const [day, spentCents, billPaymentsCents, refundsCents] of [
+				[15, -2000, -2000, 0],
+				[16, -2000, 0, 2000],
+				[17, 5000, 5000, 0],
+				[18, 1000, 0, 0],
 			]) {
 				const prior = before.find((row) => row.day === day);
 				const actual = rows.find((row) => row.day === day);
@@ -223,6 +252,9 @@ describe("homeForecastDays query budget", () => {
 				expect(
 					(actual?.billPaymentsCents ?? 0) - (prior?.billPaymentsCents ?? 0),
 				).toBe(billPaymentsCents);
+				expect((actual?.refundsCents ?? 0) - (prior?.refundsCents ?? 0)).toBe(
+					refundsCents,
+				);
 			}
 		} finally {
 			await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id = ?")

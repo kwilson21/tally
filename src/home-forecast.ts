@@ -4,6 +4,7 @@ export type ForecastInput = {
 	totalBudgetCents: number;
 	spentCents: number;
 	billPaymentsCents: number;
+	refundsCents: number;
 	/** Planned-expense payments already counted in spending; remove them from the everyday pace. */
 	planPaymentsCents: number;
 	billsStillDueCents: number;
@@ -14,7 +15,15 @@ export const FORECAST_START_DAY = 7;
 /** The month-end estimate in integer cents; signed refunds reduce spending and never repeat in the projection. */
 export function forecastMonth(input: ForecastInput) {
 	const everydayCents =
-		input.spentCents - input.billPaymentsCents - input.planPaymentsCents;
+		input.spentCents < 0
+			? 0
+			: Math.max(
+					0,
+					input.spentCents -
+						input.billPaymentsCents -
+						input.planPaymentsCents +
+						input.refundsCents,
+				);
 	const projectedCents = Math.round(
 		(everydayCents * (input.daysInMonth - input.day)) / input.day,
 	);
