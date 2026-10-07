@@ -60,6 +60,8 @@ describe("HomeTop", () => {
 		expect(html.indexOf("Chase stopped updating Oct 2")).toBeLessThan(
 			html.indexOf("forecast"),
 		);
+		expect(html).toContain('href="/accounts"');
+		expect(html).toContain("Fix");
 	});
 
 	it("omits the forecast, daily amount, and bank Fix line for a finished month", async () => {

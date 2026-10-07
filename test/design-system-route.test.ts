@@ -231,7 +231,7 @@ describe("GET /design-system in the demo", () => {
 		expect(BANK_LINES.stale).toContain("stopped updating");
 		expect(BANK_LINES.signIn).toContain("needs signing in");
 		expect(BANK_LINES.several).toContain("Citi stopped updating Sep 20");
-		expect(BANK_LINES.several).not.toContain("other bank needs a look");
+		expect(BANK_LINES.several).toContain("and 1 more: Chase needs signing in");
 		// Each picture is described in words, the bank's words and its link included.
 		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
 			.map((m) => m[1] ?? "")

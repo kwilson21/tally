@@ -25,22 +25,30 @@ export function homeBankNotice(
 	flagged: FlaggedBank[],
 	today: string,
 ): { words: string; asOf?: string } | null {
-	const first =
-		flagged
-			.filter(
-				(bank): bank is FlaggedBank & { since: string } =>
-					bank.since !== undefined,
-			)
-			.sort((a, b) => a.since.localeCompare(b.since))[0] ?? flagged[0];
+	const oldest = flagged
+		.filter(
+			(bank): bank is FlaggedBank & { since: string } =>
+				bank.since !== undefined,
+		)
+		.sort((a, b) => a.since.localeCompare(b.since))[0];
+	const first = oldest ?? flagged[0];
 	if (!first) return null;
+	const signIn = flagged.find((bank) => bank.reason === "sign-in");
 	const words =
 		first.reason === "sign-in"
 			? `${first.name} needs signing in`
 			: `${first.name} stopped updating ${shortDay(first.since, today)}`;
+	const others = flagged.length - 1;
+	const more =
+		others === 0
+			? ""
+			: first.reason !== "sign-in" && signIn
+				? `, and ${others} more: ${signIn.name} needs signing in`
+				: `, and ${others} more ${others === 1 ? "bank needs" : "banks need"} a fix`;
 	return {
-		words,
-		...(first.since && {
-			asOf: shortDay(first.since, today),
+		words: `${words}${more}`,
+		...(oldest && {
+			asOf: shortDay(oldest.since, today),
 		}),
 	};
 }

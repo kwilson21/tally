@@ -161,16 +161,16 @@ describe("Home's stale-bank line", () => {
 		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
 		expect(text).not.toContain(FIRST);
 		expect(text).toContain("as of Sep 20");
-		expect(text).not.toContain("other bank needs a look");
+		expect(text).toContain("and 1 more bank needs a fix");
 		expect(text.match(/Fix\s+the bank in Accounts/g)).toHaveLength(1);
 	});
 
-	it("uses the oldest stale bank when the first bank needs signing in", async () => {
+	it("names the bank that needs signing in and keeps the oldest date", async () => {
 		await setBank(FIRST, { status: "needs_attention" });
 		await setBank(SECOND, { syncedAt: "2026-09-20 06:00:00" });
 		const text = textOf((await page()).html);
 		expect(text).toContain(`${SECOND} stopped updating Sep 20`);
-		expect(text).not.toContain(`${FIRST} needs signing in`);
+		expect(text).toContain(`and 1 more: ${FIRST} needs signing in`);
 		expect(text).toContain("as of Sep 20");
 	});
 

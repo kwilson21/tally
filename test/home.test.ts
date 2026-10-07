@@ -74,7 +74,7 @@ describe("GET / with the demo seed", () => {
 		const plan = await env.DB.prepare(
 			`EXPLAIN QUERY PLAN ${OLDER_NEEDS_CATEGORY_SQL}`,
 		)
-			.bind(`${month}-01`)
+			.bind(`${month}-01`, `${monthsBefore(month, -1)}-01`, month)
 			.all<{ detail: string }>();
 		expect(plan.results.map((row) => row.detail).join("\n")).toMatch(
 			/SEARCH (transactions|t) USING (COVERING )?INDEX transactions_date/,

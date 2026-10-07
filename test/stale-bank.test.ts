@@ -192,6 +192,43 @@ describe("staleBankWords", () => {
 });
 
 describe("homeBankNotice", () => {
+	it("keeps the oldest stale bank and names the sign-in bank", () => {
+		expect(
+			homeBankNotice(
+				[
+					{ name: "Login Bank", reason: "sign-in", since: "2026-10-01" },
+					{ name: "Old Bank", reason: "stale", since: "2026-09-20" },
+				],
+				TODAY,
+			),
+		).toEqual({
+			words:
+				"Old Bank stopped updating Sep 20, and 1 more: Login Bank needs signing in",
+			asOf: "Sep 20",
+		});
+	});
+
+	it("counts another stale bank while naming the oldest one", () => {
+		expect(
+			homeBankNotice(
+				[
+					{ name: "Recent Bank", reason: "stale", since: "2026-10-02" },
+					{ name: "Old Bank", reason: "stale", since: "2026-09-20" },
+				],
+				TODAY,
+			),
+		).toEqual({
+			words: "Old Bank stopped updating Sep 20, and 1 more bank needs a fix",
+			asOf: "Sep 20",
+		});
+	});
+
+	it("keeps a single sign-in bank's warning", () => {
+		expect(
+			homeBankNotice([{ name: "Login Bank", reason: "sign-in" }], TODAY),
+		).toEqual({ words: "Login Bank needs signing in" });
+	});
+
 	it("names the oldest stale bank in either link order", () => {
 		const banks = [
 			{ name: "Recent Bank", reason: "stale" as const, since: "2026-10-02" },
@@ -199,7 +236,8 @@ describe("homeBankNotice", () => {
 		];
 		for (const order of [banks, [...banks].reverse()]) {
 			expect(homeBankNotice(order, TODAY)).toEqual({
-				words: "Older Bank stopped updating Sep 20",
+				words:
+					"Older Bank stopped updating Sep 20, and 1 more bank needs a fix",
 				asOf: "Sep 20",
 			});
 		}
@@ -215,7 +253,8 @@ describe("homeBankNotice", () => {
 				TODAY,
 			),
 		).toEqual({
-			words: "Older Bank stopped updating Sep 20",
+			words:
+				"Older Bank stopped updating Sep 20, and 1 more: Login Bank needs signing in",
 			asOf: "Sep 20",
 		});
 	});
@@ -230,7 +269,7 @@ describe("homeBankNotice", () => {
 				TODAY,
 			),
 		).toEqual({
-			words: "Login Bank needs signing in",
+			words: "Login Bank needs signing in, and 1 more bank needs a fix",
 			asOf: "Sep 15",
 		});
 	});
