@@ -65,7 +65,7 @@ describe("bill totals", () => {
 		expect(totals.stillToPayCents).toBe(5000);
 	});
 
-	it("sets aside each due or overdue weekly occurrence this month, but not last month's Not paid occurrence", () => {
+	it("sets aside each weekly occurrence this month, but not last month's Not paid occurrence", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(24000, "weekly")],
@@ -108,7 +108,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
-		expect(totals.stillToPayCents).toBe(72000);
+		expect(totals.stillToPayCents).toBe(96000);
 	});
 
 	it("uses displayed occurrences for headings and all October occurrences for still to pay", () => {

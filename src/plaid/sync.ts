@@ -62,6 +62,15 @@ export const TRANSIENT_ITEM_ERROR_CODES = [
 
 const transient = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 
+/** Jev's confidence and category suggestion columns all describe the transaction's current amount. */
+const clearJevAnswersOnAmountChange = (changed: string) =>
+	`category_confidence = CASE WHEN ${changed} THEN NULL ELSE category_confidence END,
+	 category_suggestion_id = CASE WHEN ${changed} THEN NULL ELSE category_suggestion_id END,
+	 jev_none_fit = CASE WHEN ${changed} THEN 0 ELSE jev_none_fit END,
+	 jev_category_id = CASE WHEN ${changed} THEN NULL ELSE jev_category_id END,
+	 income_confidence = CASE WHEN ${changed} THEN NULL ELSE income_confidence END,
+	 transfer_confidence = CASE WHEN ${changed} THEN NULL ELSE transfer_confidence END`;
+
 export type SyncSummary = {
 	added: number;
 	modified: number;
@@ -528,6 +537,8 @@ export async function syncItem(
 									date: transaction.date,
 									name: transaction.name,
 									merchantName: merchantNameOf(transaction),
+									plaidCategory:
+										transaction.personal_finance_category?.primary ?? null,
 								},
 							),
 						);
@@ -580,10 +591,7 @@ export async function syncItem(
 							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
 							category_id = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_id END,
 							category_source = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_source END,
-							category_confidence = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_confidence END,
-							category_suggestion_id = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.category_suggestion_id END,
-							jev_none_fit = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.jev_none_fit END,
-							jev_category_id = CASE WHEN transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.jev_category_id END,
+							${clearJevAnswersOnAmountChange("transactions.amount_cents != excluded.amount_cents")},
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
 							raw_name = excluded.raw_name,
@@ -651,10 +659,7 @@ export async function syncItem(
 							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
 							category_id = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_id END,
 							category_source = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_source END,
-							category_confidence = CASE WHEN amount_cents != ? THEN NULL ELSE category_confidence END,
-							category_suggestion_id = CASE WHEN amount_cents != ? THEN NULL ELSE category_suggestion_id END,
-							jev_none_fit = CASE WHEN amount_cents != ? THEN 0 ELSE jev_none_fit END,
-							jev_category_id = CASE WHEN amount_cents != ? THEN NULL ELSE jev_category_id END,
+							${clearJevAnswersOnAmountChange("amount_cents != ?")},
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?, merchant_name = ?,
 							plaid_category = ?, pending = ?,
@@ -672,6 +677,8 @@ export async function syncItem(
 						newKey,
 						cents,
 						newKey,
+						cents,
+						cents,
 						cents,
 						cents,
 						cents,

@@ -51,8 +51,9 @@ describe("Home's budget rows", () => {
 			/<a href="\/budget\/1"[^>]*hx-get="\/budget\/1"[^>]*hx-target="#sheet"/,
 		);
 		expect(html).toContain('<div id="sheet">');
-		// Every category has a budget in the demo, so nothing is listed as not budgeted.
-		expect(html).not.toContain("Not budgeted");
+		// Savings has no goal yet, so it is the one row under Not budgeted.
+		expect(textOf(html)).toContain("Not budgeted Savings Set a goal");
+		expect(textOf(html)).not.toContain("Add a budget");
 	});
 
 	it("list a category with no budget under Not budgeted", async () => {
@@ -78,7 +79,9 @@ describe("Home's budget rows", () => {
 			"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES ('Old', 'tag', 'cat-blue', 9, 1)",
 		).run();
 		const { html } = await get("/");
-		expect(html).not.toContain("Not budgeted");
+		expect(html).toContain("Not budgeted");
+		expect(textOf(html)).toContain("Savings Set a goal");
+		expect(textOf(html)).not.toContain("Old Add a budget");
 	});
 });
 

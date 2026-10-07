@@ -48,7 +48,7 @@ describe("GET /how-it-works in the demo", () => {
 		}
 		expect(html).toContain('role="img"');
 		expect(html).toContain("Income counts only toward Income, not spending.");
-		expect(html).toContain("due and overdue");
+		expect(html).toContain("due or overdue and not yet paid");
 		expect(html).toMatch(/including uncategorized and\s+unbudgeted/);
 		expect(html).not.toMatch(/small AI/);
 	});
@@ -127,13 +127,21 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("keeps its budget example equal to Home", async () => {
 		const page = (await get("/how-it-works")).html;
-		const match = page.match(/= (-?\$[\d,]+\.\d\d) safe to spend\./);
-		expect(match).not.toBeNull();
-		const cents = Math.round(
-			Number((match?.[1] ?? "").replace(/[$,]/g, "")) * 100,
+		const match = page.match(
+			/Your budgets have (\$[\d,]+(?:\.\d\d)?) left\. Safe to spend is (\$[\d,]+(?:\.\d\d)?) less:/,
 		);
+		expect(match).not.toBeNull();
+		const cents = (value: string) =>
+			Math.round(Number(value.replace(/[$,]/g, "")) * 100);
+		const safeCents = cents(match?.[1] ?? "$0") - cents(match?.[2] ?? "$0");
 		const homeHtml = (await get("/")).html;
-		expect(homeHtml).toContain(formatCents(cents, { wholeDollars: true }));
+		const shown = homeHtml.match(
+			/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
+		);
+		expect(shown).not.toBeNull();
+		const shownCents =
+			Number(shown?.[2]?.replaceAll(",", "")) * 100 * (shown?.[1] ? -1 : 1);
+		expect(shownCents).toBe(Math.trunc(safeCents / 100) * 100);
 	});
 
 	it("explains exclusions with this month's excluded count", async () => {
@@ -157,7 +165,14 @@ describe("GET /how-it-works in the demo", () => {
 			page.match(new RegExp(`<desc id="${id}-desc">([^<]+)<`))?.[1] ?? "";
 		const example = (re: RegExp) => page.match(re)?.slice(1) ?? [];
 
-		const [safe] = example(/= (-?\$[\d,]+\.\d\d) safe to spend\./);
+		const [budgetsLeft, less] = example(
+			/Your budgets have (\$[\d,]+(?:\.\d\d)?) left\. Safe to spend is (\$[\d,]+(?:\.\d\d)?) less:/,
+		);
+		const amountCents = (value: string) =>
+			Math.round(Number(value.replace(/[$,]/g, "")) * 100);
+		const safe = formatCents(
+			amountCents(budgetsLeft ?? "$0") - amountCents(less ?? "$0"),
+		);
 		expect(descOf("budget-diagram")).toContain(`leaves ${safe} safe to spend.`);
 
 		const [counted, needs] = example(
@@ -191,6 +206,51 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).toMatch(/Jev categorized \d+ transactions\./);
 		expect(decodeHtml(html)).toContain("10 are waiting for tonight's run.");
 		expect(html).toContain("80%");
+	});
+});
+
+describe("the budget guide with no activity", () => {
+	const budgetSection = (html: string) =>
+		html.match(/<section[^>]*id="budget"[\s\S]*?<\/section>/)?.[0] ?? "";
+
+	it("shows the worked example for a household whose only data is a savings goal", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES (?, 50000)",
+		)
+			.bind(month)
+			.run();
+
+		const html = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		const section = budgetSection(html);
+		expect(section).toContain("With your numbers");
+		expect(section).toContain("Savings goal");
+		expect(section).toContain("$500.00");
+	});
+
+	it("keeps the empty state when the household has no budget data or goal", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+		]);
+		const html = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		const section = budgetSection(html);
+		expect(section).toContain("No budgets have been set yet.");
+		expect(section).not.toContain("With your numbers");
 	});
 });
 

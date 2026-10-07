@@ -19,6 +19,7 @@ import {
 	monthCounts,
 } from "../db/transactions";
 import { loadTrends } from "../db/trends";
+import { FORECAST_START_DAY } from "../home-forecast";
 import {
 	budgetExample,
 	categorizationExample,
@@ -190,6 +191,15 @@ howItWorks.get("/how-it-works", async (c) => {
 		);
 	}, 0);
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
+	const budgeted = new Set(summary.categories.map((category) => category.id));
+	const unbudgetedCents = data.transactions
+		.filter(
+			(transaction) =>
+				!transaction.income &&
+				transaction.categoryId !== null &&
+				!budgeted.has(transaction.categoryId),
+		)
+		.reduce((sum, transaction) => sum + transaction.amountCents, 0);
 	const netWorthText = netWorthExample(
 		(await accountsByBank(c.env.DB)).flatMap((bank) => bank.accounts),
 	);
@@ -266,7 +276,14 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							Safe to spend is the whole month's budget, minus all counted
 							spending (including uncategorized and unbudgeted), minus bills
-							that are due or overdue and not yet paid.
+							that are due or overdue and not yet paid, minus the full monthly
+							savings goal from the 1st.
+						</li>
+						<li>
+							Before day {FORECAST_START_DAY}, Home shows the daily amount: Safe
+							to spend divided by the days left, today included, with any
+							partial cent left out. From day {FORECAST_START_DAY}, it shows the
+							month-end forecast.
 						</li>
 					</ul>
 					{!demo && summary.categories.length === 0 && (
@@ -275,15 +292,18 @@ howItWorks.get("/how-it-works", async (c) => {
 					{demo ||
 					summary.categories.length > 0 ||
 					summary.totalSpentCents !== 0 ||
-					unpaidDueBillsCents > 0 ? (
+					unpaidDueBillsCents > 0 ||
+					(summary.savingsGoalCents ?? 0) > 0 ? (
 						<>
 							<Diagram>
 								<BudgetDiagram {...summary} />
 							</Diagram>
 							<Example demo={demo} monthName={monthLabel}>
-								{budgetExample(summary)} This includes{" "}
-								{demo ? "the demo's " : ""}
-								due and overdue, unpaid bills.
+								{budgetExample({
+									...summary,
+									unbudgetedCents,
+									billsDueCents: unpaidDueBillsCents,
+								})}
 							</Example>
 						</>
 					) : null}

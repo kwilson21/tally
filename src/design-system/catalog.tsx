@@ -38,6 +38,7 @@ import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { FilterSelect } from "../views/filter-select";
+import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import {
 	BillsDiagram,
@@ -49,13 +50,19 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
-import { MaybeCategory, SuggestedCategoryChip } from "../views/maybe-category";
+import {
+	MaybeCategory,
+	MaybeIncome,
+	SuggestedCategoryChip,
+} from "../views/maybe-category";
 import { MerchantRules } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
+import { SavingsGoalRow } from "../views/savings-goal-row";
+import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm } from "../views/split-form";
 import { Switch } from "../views/switch";
@@ -445,20 +452,20 @@ const ADJUST_SPEC: UseSpecText = {
 // The stale-bank line's use spec (decision 72, P37 A): every line answered before the owner signs it off.
 const BANK_LINE_SPEC: UseSpecText = {
 	purpose:
-		"Tell a person, right under the number it affects, that a bank has stopped syncing, so Safe to spend may be too high, and take them to Accounts to fix it.",
+		"Show when Safe to spend was last current and take a person to Accounts when a bank needs attention.",
 	affordance:
-		"An alert icon and a sentence in ink say it without color; “Check Accounts” is terracotta text like every link, on its own line with a 44px target. The line isn't tinted, so the Band stays Home's one highlighted row.",
+		"A dashed “as of” tag sits on the amount; one soft brick-tinted line has a bank icon, each bank's words on its own line, and one 44px Fix button.",
 	states:
-		"Shown: a connected bank needs signing in, or hasn't synced for 3 days, counted from the household's today. Not shown: every bank healthy and synced within 2 days, a disconnected bank, a bank with no recorded sync that doesn't need attention, and the whole demo. The link has rest, the focus-visible ring and pressed; hover, disabled and loading don't apply to a plain link.",
+		"Shown: a connected bank needs signing in, or hasn't synced for 3 days from the household's today. Not shown: a healthy bank, a disconnected bank, a bank with no recorded sync that doesn't need attention, and the demo.",
 	feedback:
-		"“Check Accounts” opens Accounts, where the bank says “Needs attention: sign in again” with Fix connection, or shows its “Synced …” line next to Sync now. Once the bank is fixed or syncs again, the line is gone the next time Home loads. Nothing is announced: it is part of the page, not an answer to something a person did.",
+		"Fix opens Accounts. Once the bank is fixed or syncs again, the line is gone the next time Home loads. Nothing is announced: it is part of the page, not an answer to something a person did.",
 	input:
-		"Touch: the link is 44px tall. Keyboard: Tab reaches it after “How this works”; Enter follows it. Screen reader: the sentence, then “Check Accounts, link”; the icon is hidden from it because the words carry the meaning.",
+		"Touch: Fix is 44px tall. Keyboard: Tab reaches Fix after the bank lines; Enter opens Accounts. Screen reader: each bank is a list item, then “Fix the bank in Accounts”; the icon is hidden because the words carry the meaning.",
 	motion: "None.",
 	edges:
-		"A bank that needs signing in and hasn't synced says the sign-in words. With two or more, the first in the order they were linked is named and the rest counted. A long bank name wraps with the sentence. With no Band (nothing needs a category) the line is the last thing in Home's top. A last sync from another year adds its year (“Dec 30, 2025”). No JavaScript: it's a plain link. The demo never shows it: it has no real banks to fix.",
+		"A bank that needs signing in says so without a sync date. Dated banks come first, oldest first; equal dates and banks without dates sort by name. Up to three banks have their own line, followed by a count when more remain. The as-of tag uses the oldest available date. A long bank name wraps. No JavaScript: Fix is a plain link to Accounts.",
 	words:
-		"“{bank} hasn't synced since {Oct 1}, so Safe to spend may be too high.” · “{bank} needs you to sign in again, so Safe to spend may be too high.” · “{bank} needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high.” (“2 other banks need a look” for more) · Link: Check Accounts.",
+		"Tag: “as of Sep 20” · “Chase stopped updating Sep 20” · “Capital One needs signing in” · Fix.",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
@@ -639,17 +646,25 @@ function describeHome({
 	band = true,
 	rows = true,
 	bankLine,
+	bankDate,
+	dailyAmount,
+	forecast = true,
 }: {
 	band?: boolean;
 	rows?: boolean;
-	bankLine?: string;
+	bankLine?: string[];
+	bankDate?: string;
+	dailyAmount?: string;
+	forecast?: boolean;
 } = {}) {
 	const parts = [
 		HOME_TOP.month,
 		`Safe to spend ${whole(HOME_TOP.safeToSpendCents)}`,
 		HOME_TOP.status,
+		...(bankDate ? [`as of ${bankDate}`] : []),
+		...(bankLine ? [...bankLine, "Fix"] : []),
+		...(forecast ? ["Forecast"] : dailyAmount ? [dailyAmount] : []),
 		"How this works",
-		...(bankLine ? [bankLine, "Check Accounts"] : []),
 		...(band ? [HOME_TOP.band.text, HOME_TOP.band.detail] : []),
 	];
 	if (rows)
@@ -663,15 +678,24 @@ function describeHome({
 function HomeSketch({
 	band = true,
 	bankLine,
+	bankDate,
+	dailyAmount,
+	forecast,
 }: {
 	band?: boolean;
-	bankLine?: string;
+	bankLine?: string[];
+	bankDate?: string;
+	dailyAmount?: string;
+	forecast?: Child;
 }) {
 	return (
 		<>
 			<HomeTop
 				{...HOME_TOP}
 				bankLine={bankLine}
+				bankDate={bankDate}
+				dailyAmount={dailyAmount}
+				forecast={forecast}
 				band={band ? HOME_TOP.band : undefined}
 			/>
 			<h2 class="mt-8 font-serif text-3xl font-semibold">Budget</h2>
@@ -685,64 +709,100 @@ function HomeSketch({
 }
 
 function HomeTopGroup() {
+	const forecast = (
+		<HomeForecast
+			month="2026-10"
+			day={15}
+			daysInMonth={31}
+			spentByDay={[
+				2400, 1600, 5200, 1300, 4100, 3400, 2500, 6200, 1200, 5200, 3200, 4500,
+				1800, 3500, 5200,
+			]}
+			budgetCents={165000}
+			endCents={153000}
+			differenceCents={12000}
+		/>
+	);
 	return (
 		<Group id="home" title="Home's top">
 			<Specimen
 				id="home-top"
 				title="HomeTop"
 				tier="visual"
-				components={["HomeTop"]}
-				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend, the status sentence, How this works, a BankLine when a bank has stopped syncing (its own entry, below) and the Band. Things to try moves below the Budget list. On desktop the top and the list share one width."
+				components={["HomeTop", "HomeForecast"]}
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend with Why?, the status sentence, a bank alert when needed, the forecast from day 7, How this works and the Band. Before then, the picked daily-amount line remains. Things to try moves below the Budget list. On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
 					<PhoneFrame
 						label={`Home on a phone's first screen, top to bottom: ${describeHome()}`}
 					>
-						<HomeSketch />
+						<HomeSketch forecast={forecast} />
 					</PhoneFrame>
+				</State>
+				<State label="Before day 7: the daily amount remains under the status sentence">
+					<Picture
+						label={`Home before day 7, with the daily amount: ${describeHome({ forecast: false, dailyAmount: "About $15.03 a day for the 27 days left." })}`}
+					>
+						<HomeSketch
+							forecast={undefined}
+							dailyAmount="About $15.03 a day for the 27 days left."
+						/>
+					</Picture>
 				</State>
 				<State label="Desktop: the top and the Budget list share one width, with no gap beside them">
 					<Picture
 						label={`Home on desktop, top and Budget list at one width: ${describeHome()}`}
 					>
-						<HomeSketch />
+						<HomeSketch forecast={forecast} />
 					</Picture>
 				</State>
 				<State label="Nothing needs a category: no Band">
 					<Picture
 						label={`Home's top when nothing needs a category, with no Band: ${describeHome({ band: false, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} band={undefined} />
+						<HomeTop {...HOME_TOP} forecast={forecast} band={undefined} />
 					</Picture>
 				</State>
 			</Specimen>
 			<Specimen
-				id="bank-line"
-				title="BankLine"
+				id="bank-behind"
+				title="BankBehind"
 				tier="visual"
-				components={["BankLine"]}
-				sentence="When a connected bank needs you to sign in again, or hasn't synced for 3 days, Safe to spend may be too high, so a line under the status sentence says so and links to Accounts (decision 72, P37 A). Family app only: the demo has no banks to fix."
+				components={["BankBehind"]}
+				sentence="Each bank that needs attention gets its own line under one bank icon and one Fix button; the as-of date is the oldest bank date (decision 95, Q82 C)."
 			>
-				<State label="Hasn't synced for 3 days, on the family app's phone first screen: the number stays on top, and the Band keeps its job">
+				<State label="The amount's as-of date and stale bank alert on a phone">
 					<PhoneFrame
 						demo={false}
-						label={`Home on a phone's first screen in the family app, top to bottom: ${describeHome({ bankLine: BANK_LINES.stale })}`}
+						label={`Home on a phone in the family app: ${describeHome({ bankLine: BANK_LINES.stale, bankDate: "Oct 2" })}`}
 					>
-						<HomeSketch bankLine={BANK_LINES.stale} />
+						<HomeSketch
+							bankLine={BANK_LINES.stale}
+							bankDate="Oct 2"
+							forecast={forecast}
+						/>
 					</PhoneFrame>
 				</State>
-				<State label="Needs signing in again (also the words for a bank that hasn't synced too)">
+				<State label="Needs signing in">
 					<Picture
 						label={`Home's top with a bank that needs signing in: ${describeHome({ bankLine: BANK_LINES.signIn, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} bankLine={BANK_LINES.signIn} />
+						<HomeTop
+							{...HOME_TOP}
+							bankLine={BANK_LINES.signIn}
+							forecast={forecast}
+						/>
 					</Picture>
 				</State>
-				<State label="Two or more banks: it names the first and counts the rest">
+				<State label="Several banks need a look">
 					<Picture
 						label={`Home's top with several banks to look at: ${describeHome({ bankLine: BANK_LINES.several, rows: false })}`}
 					>
-						<HomeTop {...HOME_TOP} bankLine={BANK_LINES.several} />
+						<HomeTop
+							{...HOME_TOP}
+							bankLine={BANK_LINES.several}
+							forecast={forecast}
+						/>
 					</Picture>
 				</State>
 				<UseSpec spec={BANK_LINE_SPEC} />
@@ -756,14 +816,21 @@ function Rows() {
 		<Group id="rows" title="Rows">
 			<Specimen
 				id="maybe-category"
-				title="MaybeCategory and SuggestedCategoryChip"
+				title="MaybeCategory, MaybeIncome and SuggestedCategoryChip"
 				tier="visual"
-				components={["MaybeCategory", "SuggestedCategoryChip"]}
-				sentence="The dashed Maybe row and first Suggested category chip carry Tally's guess where people already choose a category."
+				components={[
+					"MaybeCategory",
+					"MaybeIncome",
+					"SuggestedCategoryChip",
+					"Chip",
+					"WhyLink",
+				]}
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate."
 			>
-				<div class="flex flex-wrap gap-3">
+				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
 					<MaybeCategory name="Pet Care" kind="new" />
+					<MaybeIncome />
 					<SuggestedCategoryChip
 						name="Eating Out"
 						value="2"
@@ -776,6 +843,15 @@ function Rows() {
 						sure={72}
 						transactionId={2}
 					/>
+					<div class="flex flex-col items-start gap-1">
+						<Chip type="checkbox" name="income" value="1" dashed>
+							Count as income
+						</Chip>
+						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+							Tally's guess · 71% sure
+							<WhyLink section="categorization" topic="income" />
+						</p>
+					</div>
 				</div>
 			</Specimen>
 			<Specimen
@@ -1072,6 +1148,56 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+			</Specimen>
+			<Specimen
+				id="savings-goal-row"
+				title="SavingsGoalRow"
+				tier="visual"
+				components={["SavingsGoalRow"]}
+				sentence="Home's first Budget row: the bank icon and Savings, its monthly amount with “a month” muted and “Set aside from Safe to spend” under it; before a goal is set, the row moves under Not budgeted as “Set a goal”. It has no bar and isn't a category."
+			>
+				<State label="Goal set">
+					<ul class="max-w-xl divide-y divide-rule">
+						<SavingsGoalRow amountCents={50000} href="#" />
+						{PROGRESS_ROWS.slice(0, 1).map((row) => (
+							<ProgressRow {...row.props} />
+						))}
+					</ul>
+				</State>
+				<State label="No goal: under Not budgeted">
+					<div>
+						<h3 class="text-sm text-muted">Not budgeted</h3>
+						<ul class="max-w-xl divide-y divide-rule">
+							<SavingsGoalRow amountCents={null} href="#" />
+						</ul>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="savings-goal-sheet"
+				title="SavingsGoalSheet"
+				tier="visual"
+				components={["SavingsGoalSheet"]}
+				sentence="The sheet for choosing how much to save each month, with one labeled amount field; Cancel and the backdrop close it and return focus to the Savings row."
+			>
+				<State label="Goal set">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<SavingsGoalSheet
+							value="500.00"
+							month="October"
+							closeAttrs={{
+								"hx-get": "/?focus=savings-goal",
+								"hx-target": "#page",
+								"hx-select": "#page",
+								"hx-swap": "outerHTML",
+								"hx-push-url": "/",
+							}}
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="adjust-mode"
@@ -2155,6 +2281,14 @@ function Diagrams() {
 			>
 				<State label="BudgetDiagram">
 					<BudgetDiagram {...BUDGET_EXAMPLE} />
+				</State>
+				<State label="BudgetDiagram with a savings goal">
+					<BudgetDiagram
+						totalBudgetCents={140000}
+						totalSpentCents={46000}
+						savingsGoalCents={50000}
+						safeToSpendCents={29800}
+					/>
 				</State>
 				<State label="BillsDiagram">
 					<BillsDiagram

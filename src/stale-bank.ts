@@ -17,8 +17,45 @@ export type BankSync = {
 };
 
 export type FlaggedBank =
-	| { name: string; reason: "sign-in" }
+	| { name: string; reason: "sign-in"; since?: string }
 	| { name: string; reason: "stale"; since: string };
+
+/** Home's selected wording and the date attached to the Safe to spend amount. */
+export function homeBankNotice(
+	flagged: FlaggedBank[],
+	today: string,
+): { words: string[]; asOf?: string } | null {
+	if (flagged.length === 0) return null;
+	const sorted = [...flagged].sort((a, b) => {
+		if (a.since && b.since)
+			return a.since.localeCompare(b.since) || a.name.localeCompare(b.name);
+		if (a.since) return -1;
+		if (b.since) return 1;
+		return a.name.localeCompare(b.name);
+	});
+	const dated = sorted.find(
+		(bank): bank is FlaggedBank & { since: string } => bank.since !== undefined,
+	);
+	const visible = sorted
+		.slice(0, 3)
+		.map((bank) =>
+			bank.reason === "sign-in"
+				? `${bank.name} needs signing in`
+				: `${bank.name} stopped updating ${shortDay(bank.since, today)}`,
+		);
+	if (sorted.length > 3) {
+		const more = sorted.length - 3;
+		visible.push(
+			`and ${more} more bank${more === 1 ? "" : "s"} need${more === 1 ? "s" : ""} a fix`,
+		);
+	}
+	return {
+		words: visible,
+		...(dated && {
+			asOf: shortDay(dated.since, today),
+		}),
+	};
+}
 
 /**
  * The connected banks Home flags, in the order given. A bank that needs signing in says so, even
@@ -30,35 +67,18 @@ export function flaggedBanks(banks: BankSync[], today: string): FlaggedBank[] {
 	const flagged: FlaggedBank[] = [];
 	for (const bank of banks) {
 		if (bank.disconnected) continue;
+		const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
 		if (bank.needsAttention) {
-			flagged.push({ name: bank.name, reason: "sign-in" });
+			flagged.push({
+				name: bank.name,
+				reason: "sign-in",
+				...(since && { since }),
+			});
 			continue;
 		}
-		const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
 		// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
 		if (since !== undefined && since <= staleSince)
 			flagged.push({ name: bank.name, reason: "stale", since });
 	}
 	return flagged;
-}
-
-/**
- * The line's words, or null when no bank is flagged. It names the first flagged bank and counts the
- * rest: "Chase needs you to sign in again, and 1 other bank needs a look, so Safe to spend may be too high."
- */
-export function staleBankWords(
-	flagged: FlaggedBank[],
-	today: string,
-): string | null {
-	const [first, ...rest] = flagged;
-	if (!first) return null;
-	const lead =
-		first.reason === "sign-in"
-			? `${first.name} needs you to sign in again`
-			: `${first.name} hasn't synced since ${shortDay(first.since, today)}`;
-	const others =
-		rest.length === 0
-			? ""
-			: `, and ${rest.length} other ${rest.length === 1 ? "bank needs" : "banks need"} a look`;
-	return `${lead}${others}, so Safe to spend may be too high.`;
 }

@@ -24,6 +24,7 @@ export type MonthData = {
 	categories: CategoryRow[];
 	amounts: BudgetAmount[];
 	transactions: CountedTransaction[];
+	savingsGoalCents: number | null;
 };
 
 /**
@@ -35,9 +36,9 @@ export async function loadMonth(
 	db: D1Database,
 	month: string,
 ): Promise<MonthData> {
-	// db.batch()'s return type is D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess
-	// treats each destructured element as possibly undefined; the query list above guarantees all three.
-	const [categories, amounts, transactions] = (await db.batch([
+	// db.batch() returns D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess treats each
+	// destructured element as possibly undefined; the query list above guarantees all four.
+	const [categories, amounts, transactions, savingsGoal] = (await db.batch([
 		// An archived category stays for a month it has counted spending in (not income), so the month still adds up.
 		db
 			.prepare(
@@ -63,7 +64,12 @@ export async function loadMonth(
 					AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE})`,
 			)
 			.bind(month),
-	])) as [D1Result, D1Result, D1Result];
+		db
+			.prepare(
+				"SELECT amount_cents AS amountCents FROM savings_goal_amounts WHERE effective_month <= ? ORDER BY effective_month DESC LIMIT 1",
+			)
+			.bind(month),
+	])) as [D1Result, D1Result, D1Result, D1Result];
 
 	return {
 		categories: (
@@ -80,5 +86,8 @@ export async function loadMonth(
 				linked: number;
 			}[]
 		).map((t) => ({ ...t, income: t.income === 1, linked: t.linked === 1 })),
+		savingsGoalCents:
+			(savingsGoal.results[0] as { amountCents: number } | undefined)
+				?.amountCents ?? null,
 	};
 }

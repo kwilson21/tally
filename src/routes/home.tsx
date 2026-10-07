@@ -1,8 +1,9 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { calculateBillTotals } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
-import { householdToday, monthName } from "../dates";
+import { daysInMonth, householdToday, monthName } from "../dates";
 import { bankSyncs } from "../db/accounts";
 import {
 	type BudgetCategory,
@@ -12,19 +13,29 @@ import {
 	setBudget,
 	threeMonthAverageSpentCents,
 } from "../db/budgets";
+import { homeForecastDays } from "../db/home-forecast";
 import { loadMonth } from "../db/month";
+import { setSavingsGoal } from "../db/savings-goals";
+import {
+	needsCategoryCount,
+	olderNeedsCategoryCount,
+} from "../db/transactions";
+import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { centsToAmount, formatCents } from "../money";
-import { flaggedBanks, staleBankWords } from "../stale-bank";
+import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { EmptyState } from "../views/empty-state";
+import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
+import { SavingsGoalRow } from "../views/savings-goal-row";
+import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { ThingsToTry } from "../views/things-to-try";
 import { loadBillRows } from "./bills";
 
@@ -48,6 +59,14 @@ const openAttrs = (href: string) => ({
 	"hx-push-url": "true",
 });
 
+const closeSavingsGoalAttrs = {
+	"hx-get": "/?focus=savings-goal",
+	"hx-target": "#page",
+	"hx-select": "#page",
+	"hx-swap": "outerHTML",
+	"hx-push-url": "/",
+};
+
 // Adjust mode (#94): Adjust, Done and each − or + swap Home in place. They share one queue on the
 // body, so rapid taps apply one after another and Done waits for a tap still saving; focus stays on
 // the tapped button by its id. htmx picks a request's target when it's tapped, so they all swap into
@@ -68,9 +87,13 @@ const nudgeAttrs = inPlace;
 
 type HomeOptions = {
 	/** The budget sheet over Home, drawn with this month's numbers. */
-	sheet?: (spentCents: (id: number) => number) => Child;
+	sheet?: (
+		spentCents: (id: number) => number,
+		savingsGoalCents: number | null,
+	) => Child;
 	/** Move focus to this category's row: after a save, or when the sheet closes. */
 	focusId?: number;
+	focusSavingsGoal?: boolean;
 	/** Adjust mode: − and + on every budgeted row (#94). */
 	adjusting?: boolean;
 	/** After a tap reaches a limit, focus goes to the row's other button. */
@@ -84,11 +107,19 @@ type HomeOptions = {
 async function renderHome(
 	c: Context<App>,
 	today: string,
-	{ sheet, focusId, adjusting, nudgeFocus, status = 200 }: HomeOptions = {},
+	{
+		sheet,
+		focusId,
+		focusSavingsGoal,
+		adjusting,
+		nudgeFocus,
+		status = 200,
+	}: HomeOptions = {},
 ) {
 	const month = today.slice(0, 7);
 	const data = await loadMonth(c.env.DB, month);
 	const billData = await loadBillRows(c.env.DB, today);
+	const activeBills = billData.rows.filter((bill) => bill.active);
 	const dueBills = billData.rows.filter(
 		(b) =>
 			b.active &&
@@ -96,29 +127,61 @@ async function renderHome(
 				? b.totalOccurrences.some(
 						(o) =>
 							o.dueDate.startsWith(month) &&
-							(o.status === "due" || o.status === "overdue") &&
-							o.paidCents < o.amountCents,
+							(o.status === "due" || o.status === "overdue"),
 					)
 				: b.status === "due" || b.status === "overdue"),
 	);
-	const unpaidBillsCents = dueBills.reduce(
-		(sum, bill) =>
+	const unpaidBillsCents = billData.rows.reduce((sum, bill) => {
+		if (!bill.active) return sum;
+		if (["weekly", "biweekly", "quarterly"].includes(bill.frequency))
+			return (
+				sum +
+				bill.totalOccurrences
+					.filter(
+						(occurrence) =>
+							occurrence.dueDate.startsWith(month) &&
+							(occurrence.status === "due" || occurrence.status === "overdue"),
+					)
+					.reduce(
+						(total, occurrence) =>
+							total +
+							Math.max(0, occurrence.amountCents - occurrence.paidCents),
+						0,
+					)
+			);
+		return (
 			sum +
-			(["weekly", "biweekly", "quarterly"].includes(bill.frequency)
-				? bill.totalOccurrences
-						.filter(
-							(o) =>
-								o.dueDate.startsWith(month) &&
-								(o.status === "due" || o.status === "overdue"),
-						)
-						.reduce((n, o) => n + Math.max(0, o.amountCents - o.paidCents), 0)
-				: Math.max(0, bill.amountCents - bill.paidCents)),
-		0,
-	);
+			(["due", "overdue"].includes(bill.status)
+				? Math.max(0, bill.amountCents - bill.paidCents)
+				: 0)
+		);
+	}, 0);
+	const billTotals = calculateBillTotals({
+		month,
+		bills: activeBills.map((bill) => ({
+			id: bill.id,
+			amountCents: bill.amountCents,
+			frequency: bill.frequency,
+			active: true,
+		})),
+		displayedOccurrences: activeBills.map((bill) => ({
+			billId: bill.id,
+			dueDate: bill.dueDate,
+			status: bill.status,
+			amountCents: bill.amountCents,
+			paidCents: bill.paidCents,
+		})),
+		thisMonthOccurrences: activeBills.flatMap((bill) =>
+			bill.totalOccurrences
+				.filter((occurrence) => occurrence.dueDate.startsWith(month))
+				.map((occurrence) => ({ billId: bill.id, ...occurrence })),
+		),
+	});
 	const summary = summarizeMonth({
 		month,
 		...data,
 		unpaidDueBillsCents: unpaidBillsCents,
+		savingsGoalCents: data.savingsGoalCents,
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));
@@ -133,14 +196,63 @@ async function renderHome(
 	const focusHeading = focusId !== undefined && !linked.has(focusId);
 	// Adjust is offered when there's a budget it can change: a budgeted category that isn't archived.
 	const canAdjust = summary.categories.some((cat) => linked.has(cat.id));
+	const hasSavingsGoal = (data.savingsGoalCents ?? 0) > 0;
 	const { count, spentCents } = summary.uncategorized;
-	const needs = `${count} ${count === 1 ? "transaction needs" : "transactions need"} a category`;
+	const needs = (
+		<>
+			{count}
+			<span class="sr-only">
+				{" "}
+				{count === 1 ? "transaction" : "transactions"}
+			</span>{" "}
+			{count === 1 ? "needs" : "need"} a category
+		</>
+	);
+	const currentNeeds = await needsCategoryCount(c.env.DB, month);
+	const olderNeeds = await olderNeedsCategoryCount(c.env.DB, `${month}-01`);
 	const demo = c.env.DEMO === "true";
 	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
 	// no real banks, so it never asks.
-	const bankLine = demo
+	const bankNotice = demo
 		? null
-		: staleBankWords(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+		: homeBankNotice(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+	const day = Number(today.slice(8, 10));
+	const forecastDays = await homeForecastDays(c.env.DB, month, today);
+	const forecastSpentCents = forecastDays.reduce(
+		(sum, row) => sum + row.spentCents,
+		0,
+	);
+	const billPaymentsCents = forecastDays.reduce(
+		(sum, row) => sum + row.billPaymentsCents,
+		0,
+	);
+	const refundsCents = forecastDays.reduce(
+		(sum, row) => sum + row.refundsCents,
+		0,
+	);
+	const everydayCents = forecastDays.reduce(
+		(sum, row) => sum + row.everydayCents,
+		0,
+	);
+	const forecast = forecastMonth({
+		day,
+		daysInMonth: daysInMonth(month),
+		totalBudgetCents: summary.totalBudgetCents,
+		spentCents: forecastSpentCents,
+		everydayCents,
+		billPaymentsCents,
+		refundsCents,
+		billsStillDueCents: billTotals.stillToPayCents,
+	});
+	const showForecast = day >= FORECAST_START_DAY && forecast.visible;
+	const dailySpending = Array.from({ length: day }, (_, index) => {
+		const entry = forecastDays.find((item) => item.day === index + 1);
+		return entry?.spentCents ?? 0;
+	});
+	const dailyAmount =
+		day < FORECAST_START_DAY && summary.safeToSpendCents > 0
+			? `About ${formatCents(Math.floor(summary.safeToSpendCents / (daysInMonth(month) - day + 1)))} a day for ${daysInMonth(month) - day + 1} days left.`
+			: undefined;
 	// Counted spending by category, income left out, as Home counts it (spec §6).
 	const spent = (id: number) =>
 		data.transactions
@@ -161,18 +273,41 @@ async function renderHome(
 							month={monthName(month)}
 							safeToSpendCents={summary.safeToSpendCents}
 							status={statusSentence(summary.categories)}
-							bankLine={bankLine ?? undefined}
+							bankLine={bankNotice?.words}
+							bankDate={bankNotice?.asOf}
+							dailyAmount={dailyAmount}
+							forecast={
+								showForecast && (
+									<HomeForecast
+										month={month}
+										day={day}
+										daysInMonth={daysInMonth(month)}
+										spentByDay={dailySpending}
+										budgetCents={summary.totalBudgetCents}
+										endCents={forecast.endCents}
+										differenceCents={
+											summary.totalBudgetCents - forecast.endCents
+										}
+									/>
+								)
+							}
 							band={
-								count > 0
+								currentNeeds > 0 || olderNeeds > 0
 									? {
 											href: "/transactions/organize",
-											text: needs,
+											text:
+												currentNeeds > 0
+													? needs
+													: `${olderNeeds} ${olderNeeds === 1 ? "transaction" : "transactions"} from earlier months ${olderNeeds === 1 ? "needs" : "need"} a category`,
+											older: currentNeeds > 0 ? olderNeeds : undefined,
 											// Home says "needs a category" once: the Band carries the amount (decision 50).
 											// Refunds can outweigh the spending; it says so, as the budget sheet does.
 											detail:
-												spentCents < 0
-													? `${bandAmount(-spentCents)} more refunded than spent`
-													: `${bandAmount(spentCents)} of this month's spending`,
+												currentNeeds === 0
+													? undefined
+													: spentCents < 0
+														? `${bandAmount(-summary.uncategorized.spentCents)} more refunded than spent`
+														: `${bandAmount(summary.uncategorized.spentCents)} of this month's spending`,
 										}
 									: undefined
 							}
@@ -195,8 +330,16 @@ async function renderHome(
 									/>
 								)}
 							</div>
-							{summary.categories.length > 0 && (
+							{(summary.categories.length > 0 || hasSavingsGoal) && (
 								<ul class="mt-2 divide-y divide-rule">
+									{hasSavingsGoal && (
+										<SavingsGoalRow
+											amountCents={data.savingsGoalCents}
+											href="/savings-goal"
+											attrs={openAttrs("/savings-goal")}
+											autofocus={focusSavingsGoal}
+										/>
+									)}
 									{summary.categories.map((cat) => {
 										// An archived category shows for a month it has spending in (spec §7), but it
 										// can't be budgeted, so its row isn't a link.
@@ -231,10 +374,18 @@ async function renderHome(
 									})}
 								</ul>
 							)}
-							{notBudgeted.length > 0 && (
+							{(notBudgeted.length > 0 || !hasSavingsGoal) && (
 								<>
 									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
 									<ul class="divide-y divide-rule">
+										{!hasSavingsGoal && (
+											<SavingsGoalRow
+												amountCents={data.savingsGoalCents}
+												href="/savings-goal"
+												attrs={openAttrs("/savings-goal")}
+												autofocus={focusSavingsGoal}
+											/>
+										)}
 										{notBudgeted.map((cat) => {
 											const href = `/budget/${cat.id}`;
 											return (
@@ -257,14 +408,16 @@ async function renderHome(
 									</ul>
 								</>
 							)}
-							{summary.categories.length === 0 && notBudgeted.length === 0 && (
-								<EmptyState
-									kind="done"
-									sentence="No categories to budget yet."
-									hint="Add a category in Settings to get started."
-									action={{ href: "/settings", label: "Open Settings" }}
-								/>
-							)}
+							{!hasSavingsGoal &&
+								summary.categories.length === 0 &&
+								notBudgeted.length === 0 && (
+									<EmptyState
+										kind="done"
+										sentence="No categories to budget yet."
+										hint="Add a category in Settings to get started."
+										action={{ href: "/settings", label: "Open Settings" }}
+									/>
+								)}
 						</section>
 						{dueBills.length > 0 && (
 							<section class="mt-8" aria-labelledby="home-bills-title">
@@ -293,7 +446,7 @@ async function renderHome(
 							</div>
 						)}
 					</div>
-					<div id="sheet">{sheet?.(spent)}</div>
+					<div id="sheet">{sheet?.(spent, data.savingsGoalCents)}</div>
 				</div>
 			</div>
 		</Layout>,
@@ -407,9 +560,21 @@ async function activeCategory(c: Context<App>) {
 // ?focus=<id> puts focus on that row when the sheet closes.
 // ?adjust=1 is Adjust mode (#94).
 home.get("/", async (c) => {
-	const focus = Number(c.req.query("focus"));
+	const focusValue = c.req.query("focus");
+	const focus = Number(focusValue);
+	if (focusValue === "savings-goal" && c.req.header("HX-Request")) {
+		const message = "Savings goal editing cancelled.";
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "info" },
+				announce: message,
+			}),
+		);
+	}
 	return renderHome(c, await householdToday(c.env.DB), {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		focusSavingsGoal: c.req.query("focus") === "savings-goal",
 		adjusting: c.req.query("adjust") === "1",
 	});
 });
@@ -441,6 +606,76 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 			/>
 		),
 	});
+});
+
+home.get("/savings-goal", async (c) => {
+	const today = await householdToday(c.env.DB);
+	return renderHome(c, today, {
+		sheet: (_spent, amountCents) => (
+			<BottomSheet
+				labelledBy="savings-goal-sheet-title"
+				closeHref="/"
+				closeAttrs={closeSavingsGoalAttrs}
+			>
+				<SavingsGoalSheet
+					value={
+						amountCents !== null && amountCents > 0
+							? centsToAmount(amountCents)
+							: ""
+					}
+					month={monthName(today.slice(0, 7))}
+					closeAttrs={closeSavingsGoalAttrs}
+				/>
+			</BottomSheet>
+		),
+	});
+});
+
+home.post("/savings-goal", async (c) => {
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
+	const typed = String((await c.req.formData()).get("goal") ?? "");
+	const parsed = parseBudgetAmount(typed);
+	if (!parsed.ok) {
+		if (c.req.header("HX-Request")) {
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({
+					toast: { message: parsed.error, type: "error" },
+					announce: parsed.error,
+				}),
+			);
+		}
+		return renderHome(c, today, {
+			status: 422,
+			sheet: () => (
+				<BottomSheet
+					labelledBy="savings-goal-sheet-title"
+					closeHref="/"
+					closeAttrs={closeSavingsGoalAttrs}
+					still
+				>
+					<SavingsGoalSheet
+						value={typed}
+						error={parsed.error}
+						month={monthName(month)}
+						closeAttrs={closeSavingsGoalAttrs}
+					/>
+				</BottomSheet>
+			),
+		});
+	}
+	await setSavingsGoal(c.env.DB, parsed.cents, month);
+	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message: "Saved the savings goal", type: "success" },
+			announce: `Savings is ${amount(parsed.cents)} a month from ${monthName(month)} on.`,
+		}),
+	);
+	c.header("HX-Push-Url", "/");
+	return renderHome(c, today, { focusSavingsGoal: true });
 });
 
 // Saving a budget, from this month on (spec §7). htmx gets Home back with a toast; plain browsers are redirected.

@@ -16,12 +16,31 @@ const answer = (
 });
 
 describe("decide", () => {
+	it.each([
+		[0.1999, false],
+		[0.2, false],
+		[0.2001, false],
+		[0.7949, false],
+		[0.795, false],
+		[0.7999, false],
+		[0.8, true],
+		[0.8001, true],
+	] as const)(
+		"uses the income threshold consistently at %s",
+		(score, income) => {
+			expect(
+				decide(answer("Groceries", 0.9, { income: score }), categories, 0.8)
+					.flags.income,
+			).toBe(income);
+		},
+	);
 	it("applies the category at or above the threshold", () => {
 		expect(decide(answer("Eating Out", 0.93), categories, 0.8)).toEqual({
 			categoryId: 2,
 			suggestedCategoryId: 2,
 			confidence: 0.93,
 			noneFit: false,
+			flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -38,6 +57,7 @@ describe("decide", () => {
 			suggestedCategoryId: 1,
 			confidence: 0.62,
 			noneFit: false,
+			flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -55,6 +75,7 @@ describe("decide", () => {
 			suggestedCategoryId: null,
 			confidence: 0.97,
 			noneFit: true,
+			flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 			flags: { transfer: false, reimbursement: false, income: false },
 		});
 	});
@@ -96,6 +117,7 @@ describe("decide", () => {
 				suggestedCategoryId: null,
 				confidence: 0.97,
 				noneFit: false,
+				flagConfidence: { transfer: 0, reimbursement: 0, income: 0 },
 				flags: { transfer: false, reimbursement: false, income: false },
 			});
 		});

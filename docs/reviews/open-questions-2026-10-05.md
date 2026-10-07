@@ -116,7 +116,7 @@ The owner answered these on Oct 6 by seeing a picture of each, so they have no r
 
 **Home's top (#199)**
 60. *Where Why? goes below $0.* The label stays, because the number now shows as negative ("−$40"), so Why? sits beside "Safe to spend" as before (P94).
-61. *The daily line on the last day, and when it rounds to 0¢.* The daily line is gone: a forecast of where the month ends replaces it, from the 3rd day of the month, so neither case arises (P95).
+61. *The daily line on the last day, and when it rounds to 0¢.* The picked daily amount remains through day 6 while the forecast waits for a week of pace (decision 95). It is omitted when Safe to spend is $0 or less; on the last day, the forecast is already shown (P95).
 62. *The order of this line and the stale-bank line.* The bank line comes first, then the forecast; the bank line keeps its job and gets a dashed "as of Oct 2" tag and a soft brick-tinted line with a Fix button, and no playful words (P96).
 63. *A headline just below $0.* "−$0.40": cents show only when the amount is under $1 (P94).
 64. *The words for exactly one older transaction.* The Band reads "12 need a category" with a small "+1 older" chip (P97).

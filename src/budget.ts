@@ -7,6 +7,7 @@ export type BudgetAmount = {
 	effectiveMonth: string;
 	amountCents: number;
 };
+export type SavingsGoalAmount = { effectiveMonth: string; amountCents: number };
 export type Category = { id: number; name: string };
 /** A counted transaction: in the month, not excluded, not a split parent (the query guarantees this). */
 export type CountedTransaction = {
@@ -31,21 +32,45 @@ export type MonthSummary = {
 	incomeCents: number;
 	totalBudgetCents: number;
 	totalSpentCents: number;
+	savingsGoalCents?: number;
 	safeToSpendCents: number;
 };
 
-/** The budget for a category in a month: the latest amount effective on or before that month, or null. */
+/** The latest amount effective on or before the month, optionally limited by a matching rule. */
+function latestEffectiveAmount<
+	T extends { effectiveMonth: string; amountCents: number },
+>(
+	amounts: T[],
+	month: string,
+	matches: (amount: T) => boolean = () => true,
+): number | null {
+	let best: T | undefined;
+	for (const amount of amounts) {
+		if (!matches(amount) || amount.effectiveMonth > month) continue;
+		if (!best || amount.effectiveMonth > best.effectiveMonth) best = amount;
+	}
+	return best?.amountCents ?? null;
+}
+
+/** The budget for a category in a month, or null if it has not started yet. */
 export function budgetForMonth(
 	amounts: BudgetAmount[],
 	categoryId: number,
 	month: string,
 ): number | null {
-	let best: BudgetAmount | undefined;
-	for (const a of amounts) {
-		if (a.categoryId !== categoryId || a.effectiveMonth > month) continue;
-		if (!best || a.effectiveMonth > best.effectiveMonth) best = a;
-	}
-	return best ? best.amountCents : null;
+	return latestEffectiveAmount(
+		amounts,
+		month,
+		(amount) => amount.categoryId === categoryId,
+	);
+}
+
+/** The savings goal for a month: its latest amount effective on or before that month, or null. */
+export function savingsGoalForMonth(
+	amounts: SavingsGoalAmount[],
+	month: string,
+): number | null {
+	return latestEffectiveAmount(amounts, month);
 }
 
 type MonthInput = {
@@ -55,6 +80,8 @@ type MonthInput = {
 	transactions: CountedTransaction[];
 	/** Bills due or overdue this month and not paid (0 until Phase 3 adds bills). */
 	unpaidDueBillsCents: number;
+	/** The full monthly savings goal, set aside from the first day of the month. */
+	savingsGoalCents?: number | null;
 };
 
 export function summarizeMonth(input: MonthInput): MonthSummary {
@@ -111,8 +138,12 @@ export function summarizeMonth(input: MonthInput): MonthSummary {
 		incomeCents,
 		totalBudgetCents,
 		totalSpentCents,
+		savingsGoalCents: input.savingsGoalCents ?? 0,
 		safeToSpendCents:
-			totalBudgetCents - totalSpentCents - input.unpaidDueBillsCents,
+			totalBudgetCents -
+			totalSpentCents -
+			input.unpaidDueBillsCents -
+			(input.savingsGoalCents ?? 0),
 	};
 }
 

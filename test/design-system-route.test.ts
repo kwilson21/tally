@@ -95,6 +95,43 @@ describe("GET /design-system in the demo", () => {
 		for (const name of names) expect(shown).toContain(name);
 	});
 
+	it("renders the savings goal sheet specimen and documents it", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain('data-ds-components="SavingsGoalSheet"');
+		expect(html).toContain(
+			"Set aside from Safe to spend at the start of every month.",
+		);
+		expect(html).toContain("Save each month, from October on");
+		expect(html).toContain(">Cancel</a>");
+		expect(html).toContain(">Save</button>");
+		expect(design).toMatch(/\| SavingsGoalSheet \|/);
+	});
+
+	it("keeps catalog autofocus controls inside inert sample wrappers", async () => {
+		const { html } = await get("/design-system");
+		const savingsGoal = html.match(
+			/<section[^>]*id="savings-goal-sheet"[\s\S]*?<\/section>/,
+		)?.[0];
+		expect(savingsGoal).toMatch(/<div[^>]*\binert(?:="")?[^>]*>/);
+
+		const catalog = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";
+		const stack: { tag: string; inert: boolean }[] = [];
+		for (const token of catalog.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
+			const tag = token[1]?.toLowerCase();
+			if (!tag) continue;
+			if (token[0].startsWith("</")) {
+				stack.pop();
+				continue;
+			}
+			if (/\bautofocus(?:="")?\b/i.test(token[0])) {
+				expect(stack.some((ancestor) => ancestor.inert)).toBe(true);
+			}
+			if (!/\/>$/.test(token[0])) {
+				stack.push({ tag, inert: /\binert(?:="")?\b/i.test(token[0]) });
+			}
+		}
+	});
+
 	it("renders each component's own output, with the catalog's sample data", async () => {
 		const { html } = await get("/design-system");
 		const outputs = [
@@ -221,34 +258,31 @@ describe("GET /design-system in the demo", () => {
 
 	it("shows the stale-bank line in each of its states, with its whole use spec, as the family app draws it", async () => {
 		const { html } = await get("/design-system");
-		const tag = specimens(html).find((t) => t.includes('id="bank-line"'));
+		const tag = specimens(html).find((t) => t.includes('id="bank-behind"'));
 		expect(tag).toContain('data-ds-tier="visual"');
-		expect(tag).toContain('data-ds-components="BankLine"');
+		expect(tag).toContain('data-ds-components="BankBehind"');
 		const section =
-			html.split('id="bank-line"')[1]?.split("</section>")[0] ?? "";
+			html.split('id="bank-behind"')[1]?.split("</section>")[0] ?? "";
 		// Its words come from the real function, so the catalog can't drift from Home.
 		expect(Object.values(BANK_LINES)).toHaveLength(3);
 		for (const words of Object.values(BANK_LINES))
-			expect(section).toContain(words.replaceAll("'", "&#39;"));
-		expect(BANK_LINES.stale).toContain("hasn't synced since");
-		expect(BANK_LINES.signIn).toContain("needs you to sign in again");
-		expect(BANK_LINES.several).toContain("1 other bank needs a look");
+			for (const word of words)
+				expect(section).toContain(word.replaceAll("'", "&#39;"));
+		expect(BANK_LINES.stale[0]).toContain("stopped updating");
+		expect(BANK_LINES.signIn[0]).toContain("needs signing in");
+		expect(BANK_LINES.several[0]).toContain("Citi stopped updating Sep 20");
+		expect(BANK_LINES.several[1]).toContain("Chase needs signing in");
 		// Each picture is described in words, the bank's words and its link included.
 		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
 			.map((m) => m[1] ?? "")
 			.filter((l) => l.includes("Home"));
 		expect(labels).toHaveLength(3);
-		for (const [i, words] of [
-			BANK_LINES.stale,
-			BANK_LINES.signIn,
-			BANK_LINES.several,
-		].entries()) {
-			expect(labels[i]).toContain("Safe to spend $283");
-			expect(labels[i]).toContain(words.replaceAll("'", "&#39;"));
-			expect(labels[i]).toContain("Check Accounts");
+		for (const label of labels.slice(-3)) {
+			expect(label).toContain("Safe to spend $283");
+			expect(label).toContain("Fix");
 		}
 		// The 44px link, drawn in a family app's phone (no demo banner) beside Home's real top.
-		expect(section).toContain("Check Accounts");
+		expect(section).toContain("Fix");
 		expect(section).toContain("min-h-11");
 		expect(section).toContain("Safe to spend");
 		expect(section).not.toContain("Demo data. Nothing here is real.");
@@ -258,8 +292,16 @@ describe("GET /design-system in the demo", () => {
 		}
 		// DESIGN.md says where it sits.
 		expect(design).toMatch(
-			/\| BankLine \|[^\n]*Check Accounts[^\n]*between the status sentence and the Band/,
+			/\| BankBehind \|[^\n]*Fix link to Accounts[^\n]*before the forecast/,
 		);
+	});
+
+	it("shows the forecast and its before-day-7 daily amount in the catalog", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="home-top"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain('aria-label="Spending in Oct');
+		expect(section).toContain("About $15.03 a day for the 27 days left.");
 	});
 
 	it("shows the Switch on, off and without a muted line, with its whole use spec, as the AI suggestions group uses it (decision 73)", async () => {
@@ -470,10 +512,16 @@ describe("GET /design-system in the demo", () => {
 			specimens(html).find((t) => t.includes('id="maybe-category"')) ?? "";
 		expect(tag).toContain('data-ds-tier="visual"');
 		expect(tag).toContain(
-			'data-ds-components="MaybeCategory SuggestedCategoryChip"',
+			'data-ds-components="MaybeCategory MaybeIncome SuggestedCategoryChip Chip WhyLink"',
 		);
 		expect(html).toContain("Maybe new: Pet Care");
 		expect(html).toContain("Tally&#39;s guess");
+		const specimen =
+			html.split('id="maybe-category"')[1]?.split("</section>")[0] ?? "";
+		expect(specimen).toMatch(/<div class="flex flex-wrap items-start gap-3">/);
+		expect(specimen).toMatch(
+			/<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
+		);
 	});
 
 	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {
@@ -567,14 +615,15 @@ describe("GET /design-system in the demo", () => {
 			.map((m) => m[1] ?? "")
 			// The pictures of Home itself, not others that mention it ("Go to Home" on the 404 page).
 			.filter((l) => l.startsWith("Home"));
-		expect(labels).toHaveLength(3);
+		expect(labels).toHaveLength(4);
 		for (const label of labels) {
 			expect(label).toContain("Safe to spend $283");
 			expect(label).toContain("Eating Out is $36 over");
 		}
-		expect(labels[0]).toContain("12 transactions need a category");
+		expect(labels[0]).toContain("12 need a category");
 		expect(labels[0]).toContain("Groceries $412 of $700");
-		expect(labels[2]).not.toContain("need a category");
+		expect(labels[3]).not.toContain("need a category");
+		expect(labels[1]).toContain("About $15.03 a day for the 27 days left");
 	});
 
 	it("draws the bottom sheet on its own page", async () => {

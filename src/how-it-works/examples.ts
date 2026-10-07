@@ -11,15 +11,33 @@ const plural = (n: number, one: string, many: string) =>
 export function budgetExample(
 	s: Pick<
 		MonthSummary,
-		"totalBudgetCents" | "totalSpentCents" | "safeToSpendCents"
-	>,
+		| "totalBudgetCents"
+		| "totalSpentCents"
+		| "safeToSpendCents"
+		| "savingsGoalCents"
+		| "uncategorized"
+	> & { unbudgetedCents: number; billsDueCents: number },
 ): string {
-	// What was set aside for bills is whatever makes the sum add up (spec §6); 0 until bills ship.
-	const billsCents =
-		s.totalBudgetCents - s.totalSpentCents - s.safeToSpendCents;
-	const bills =
-		billsCents > 0 ? ` − ${formatCents(billsCents)} for bills due` : "";
-	return `${formatCents(s.totalBudgetCents)} budget − ${formatCents(s.totalSpentCents)} spent${bills} = ${formatCents(s.safeToSpendCents)} safe to spend.`;
+	const savingsGoalCents = s.savingsGoalCents ?? 0;
+	const uncategorizedCents = s.uncategorized.spentCents;
+	const budgetsLeftCents =
+		s.totalBudgetCents -
+		s.totalSpentCents +
+		uncategorizedCents +
+		s.unbudgetedCents;
+	const differenceCents =
+		uncategorizedCents + s.unbudgetedCents + s.billsDueCents + savingsGoalCents;
+	const amount = (cents: number) =>
+		formatCents(cents, { wholeDollars: cents % 100 === 0 });
+	const difference =
+		differenceCents === 0
+			? "the same as your budgets"
+			: `${amount(Math.abs(differenceCents))} ${differenceCents > 0 ? "less" : "more"}`;
+	const spendingPart = (cents: number, normal: string, where: string) =>
+		cents < 0
+			? `${amount(-cents)} more came back as refunds than was spent ${where}`
+			: `${amount(cents)} ${normal}`;
+	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${difference}: ${spendingPart(uncategorizedCents, "has no category yet", "there")}, ${spendingPart(s.unbudgetedCents, "went to categories with no budget", "in categories with no budget")}, ${amount(s.billsDueCents)} is set aside for bills due, and ${amount(savingsGoalCents)} is set aside for the savings goal.`;
 }
 
 /**

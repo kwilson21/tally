@@ -181,7 +181,7 @@ export async function categorizePending(
 			});
 			const written = await saveJevResult(env.DB, tx.id, decision, {
 				categoryOnly: tx.categoryOnly,
-				switches: { income: now.income },
+				switches: { income: now.income, categories: now.categories },
 			});
 			if (written && decision.categoryId !== null) done.applied += 1;
 		}

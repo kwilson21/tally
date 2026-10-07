@@ -140,6 +140,14 @@ describe("groupNoneFit", () => {
 	});
 });
 describe("shared Maybe parts", () => {
+	it("renders Maybe income as the shared dashed row tag", async () => {
+		const { MaybeIncome } = await import("../src/views/maybe-category");
+		const { renderToString } = await import("hono/jsx/dom/server");
+		const html = renderToString(MaybeIncome());
+		expect(html).toContain("Maybe income");
+		expect(html).toContain("border-dashed");
+		expect(html).not.toContain('data-icon="circle-dashed"');
+	});
 	it("renders both new-category and below-threshold category row tags", async () => {
 		const { MaybeCategory } = await import("../src/views/maybe-category");
 		const { renderToString } = await import("hono/jsx/dom/server");
@@ -149,6 +157,9 @@ describe("shared Maybe parts", () => {
 		expect(
 			renderToString(MaybeCategory({ name: "Eating Out", kind: "category" })),
 		).toContain("Maybe Eating Out");
+		expect(
+			renderToString(MaybeCategory({ name: "Eating Out", kind: "category" })),
+		).toContain('data-icon="circle-dashed"');
 	});
 	it("renders the first dashed category chip as Suggested with Tally's confidence", async () => {
 		const { SuggestedCategoryChip } = await import(
@@ -177,7 +188,7 @@ describe("shared Maybe parts", () => {
 		const html = await res.text();
 		expect(res.status).toBe(200);
 		expect(html).toContain(
-			'data-ds-components="MaybeCategory SuggestedCategoryChip"',
+			'data-ds-components="MaybeCategory MaybeIncome SuggestedCategoryChip Chip WhyLink"',
 		);
 		const confidenceIds = [
 			...html.matchAll(/<span class="sr-only" id="([^"]+)">Tally&#39;s guess/g),

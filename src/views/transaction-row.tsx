@@ -3,7 +3,11 @@ import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
-import { MaybeCategory } from "./maybe-category";
+import {
+	MaybeCategory,
+	MaybeIncome,
+	maybeIncomeVisible,
+} from "./maybe-category";
 import { BankMark, GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
 
 type Caption = {
@@ -22,6 +26,8 @@ export function rowCaption(row: ListRow): Caption {
 	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
 	if (row.excluded && !row.paysBill)
 		return { kind: "excluded", caption: "Excluded", tag: false };
+	if (maybeIncomeVisible(row))
+		return { kind: "needs", caption: "Maybe income", tag: false };
 	if (
 		!row.followsPurchase &&
 		!row.creditReviewed &&
@@ -207,7 +213,9 @@ export function TransactionRow({
 								Pending{(caption || countsIn) && " ·"}
 							</span>
 						)}
-						{maybeCategory ? (
+						{maybeIncomeVisible(row) ? (
+							<MaybeIncome />
+						) : maybeCategory ? (
 							<MaybeCategory
 								name={maybeCategory.name}
 								kind={maybeCategory.kind}
