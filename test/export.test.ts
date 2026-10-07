@@ -186,6 +186,9 @@ describe("data exports", () => {
 	});
 
 	it("includes every specified table while exposing only safe bank and document fields", async () => {
+		await env.DB.prepare(
+			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-10', 50000)",
+		).run();
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM bills"),
@@ -231,6 +234,7 @@ describe("data exports", () => {
 			"categories",
 			"category_suggestions",
 			"budget_amounts",
+			"savings_goal_amounts",
 			"merchants",
 			"accounts",
 			"balance_history",
@@ -253,6 +257,7 @@ describe("data exports", () => {
 				"status",
 			],
 			budget_amounts: ["amount_cents", "category_id", "effective_month"],
+			savings_goal_amounts: ["amount_cents", "effective_month"],
 			merchants: [
 				"default_category_id",
 				"display_name",

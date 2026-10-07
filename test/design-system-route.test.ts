@@ -95,6 +95,43 @@ describe("GET /design-system in the demo", () => {
 		for (const name of names) expect(shown).toContain(name);
 	});
 
+	it("renders the savings goal sheet specimen and documents it", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain('data-ds-components="SavingsGoalSheet"');
+		expect(html).toContain(
+			"Set aside from Safe to spend at the start of every month.",
+		);
+		expect(html).toContain("Save each month, from October on");
+		expect(html).toContain(">Cancel</a>");
+		expect(html).toContain(">Save</button>");
+		expect(design).toMatch(/\| SavingsGoalSheet \|/);
+	});
+
+	it("keeps catalog autofocus controls inside inert sample wrappers", async () => {
+		const { html } = await get("/design-system");
+		const savingsGoal = html.match(
+			/<section[^>]*id="savings-goal-sheet"[\s\S]*?<\/section>/,
+		)?.[0];
+		expect(savingsGoal).toMatch(/<div[^>]*\binert(?:="")?[^>]*>/);
+
+		const catalog = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";
+		const stack: { tag: string; inert: boolean }[] = [];
+		for (const token of catalog.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
+			const tag = token[1]?.toLowerCase();
+			if (!tag) continue;
+			if (token[0].startsWith("</")) {
+				stack.pop();
+				continue;
+			}
+			if (/\bautofocus(?:="")?\b/i.test(token[0])) {
+				expect(stack.some((ancestor) => ancestor.inert)).toBe(true);
+			}
+			if (!/\/>$/.test(token[0])) {
+				stack.push({ tag, inert: /\binert(?:="")?\b/i.test(token[0]) });
+			}
+		}
+	});
+
 	it("renders each component's own output, with the catalog's sample data", async () => {
 		const { html } = await get("/design-system");
 		const outputs = [
