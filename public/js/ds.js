@@ -8,7 +8,11 @@ document.addEventListener("click", (event) => {
 	button.dispatchEvent(
 		new CustomEvent("toast", {
 			bubbles: true,
-			detail: { message, type: button.dataset.dsToast },
+			detail: {
+				message,
+				type: button.dataset.dsToast,
+				undo: button.dataset.dsUndo,
+			},
 		}),
 	);
 	button.dispatchEvent(
