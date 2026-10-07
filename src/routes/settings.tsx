@@ -769,8 +769,11 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		env.JEV_API_KEY &&
 		(await readAiSwitches(c.env.DB)).categories
 	)
+		// waitUntil starts a promise at once; yield this turn so the page can answer first.
 		c.executionCtx.waitUntil(
-			askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
+			new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
+				askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
+			),
 		);
 	const out = result.leftOut.length;
 	const count = result.moved;

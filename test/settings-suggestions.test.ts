@@ -594,7 +594,12 @@ describe("creating the category", () => {
 
 	it("asks nothing, but leaves the unticked ones for the night, while Guess categories and Spot paychecks are off", async () => {
 		const { id, ids } = await petCare();
-		await saveAiSwitches(db, { categories: false, income: false });
+		// Details alone only runs for transactions already sorted; this new-category flow leaves this one unsorted.
+		await saveAiSwitches(db, {
+			categories: false,
+			income: false,
+			details: true,
+		});
 		const jev = vi.fn();
 		vi.stubGlobal("fetch", jev);
 		await post(
