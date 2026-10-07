@@ -585,6 +585,12 @@ export function buildSeed(today: string): Seed {
 			displayName: "Reimbursement, doctor's office",
 			defaultCategoryId: null,
 		},
+		{
+			key: "LITTLE SPROUTS DAYCARE",
+			displayName: "Little Sprouts Daycare",
+			defaultCategoryId: null,
+			notABill: true,
+		},
 		...subscriptions.map(([rawName]) => ({
 			key: rawName,
 			displayName:

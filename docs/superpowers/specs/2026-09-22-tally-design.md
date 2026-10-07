@@ -334,7 +334,7 @@ The seed data tells the story of a fictional household ("the Rivera family") wit
 | Feature | Seed data includes |
 |---|---|
 | 1 | A current month with categories on track, one close to its limit, and one over |
-| 2 | One bill due soon, one overdue, one paid |
+| 2 | One bill due soon, one overdue, one paid, and a $240 Daycare bill due every Friday |
 | 3 | Realistic merchants, plus a handful left uncategorized for Jev to sort |
 | 4 | A warehouse-store purchase to split between Groceries and Household |
 | 5 | A transfer between accounts and a reimbursement, both excluded |
@@ -343,6 +343,8 @@ The seed data tells the story of a fictional household ("the Rivera family") wit
 | 8 | None until receipts are built (decision 66) |
 
 Seed dates are relative to the current month, so the demo always looks current. The nightly job rebuilds the demo database and bucket from the seed. Visitors can edit anything; their changes are gone the next morning.
+
+The Bills section explains monthly, yearly, weekly, every-two-weeks and quarterly schedules; weekly and every-two-weeks occurrences use their due date as the key, and a quarterly occurrence uses the calendar quarter containing its due date. Safe to spend includes every due or overdue occurrence that is unpaid; an unpaid occurrence from an earlier month is shown as "Not paid" and is no longer set aside. The demo includes Daycare at $240 every Friday.
 
 The "How Tally works" page has two parts:
 

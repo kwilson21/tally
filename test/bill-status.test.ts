@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { billOccurrence } from "../src/bills/status";
+import { billOccurrence, billOccurrenceForMonth } from "../src/bills/status";
 import { billStatusLine } from "../src/views/bill-row";
 
 describe("bill status", () => {
@@ -39,6 +39,56 @@ describe("bill status", () => {
 				false,
 			),
 		).toEqual({ dueDate: "2026-10-15", period: "2026", status: "due" });
+	});
+
+	it("keys each weekly occurrence by its due date", () => {
+		const bill = { frequency: "weekly", dueDay: 5 } as const;
+		expect(
+			[2, 9, 16, 23, 30].map((day) =>
+				billOccurrence(bill, `2026-10-${String(day).padStart(2, "0")}`, false),
+			),
+		).toEqual(
+			[2, 9, 16, 23, 30].map((day) => ({
+				dueDate: `2026-10-${String(day).padStart(2, "0")}`,
+				period: `2026-10-${String(day).padStart(2, "0")}`,
+				status: "due",
+			})),
+		);
+	});
+
+	it("counts biweekly occurrences from its anchor date", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "biweekly", dueDay: 5, anchorDate: "2026-10-02" },
+				"2026-10-16",
+				false,
+			),
+		).toMatchObject({ dueDate: "2026-10-16", period: "2026-10-16" });
+	});
+
+	it("keys quarterly occurrences by calendar quarter", () => {
+		expect(
+			billOccurrenceForMonth(
+				{ frequency: "quarterly", dueDay: 15, anchorMonth: 11 },
+				2026,
+				11,
+			),
+		).toEqual({ dueDate: "2026-11-15", period: "2026-Q4" });
+	});
+
+	it("keeps weekly missed occurrences set aside until paid, then drops an earlier month", () => {
+		const bill = { frequency: "weekly", dueDay: 5 } as const;
+		expect(billOccurrence(bill, "2026-10-12", false)).toMatchObject({
+			dueDate: "2026-10-09",
+			status: "overdue",
+		});
+		expect(
+			billOccurrence(bill, "2026-10-12", new Set(["2026-10-09"])),
+		).toMatchObject({ dueDate: "2026-10-16", status: "due" });
+		expect(billOccurrence(bill, "2026-11-02", false)).toMatchObject({
+			dueDate: "2026-10-30",
+			status: "overdue",
+		});
 	});
 
 	it("makes a linked occurrence paid before considering its date", () => {

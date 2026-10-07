@@ -65,6 +65,52 @@ describe("bill totals", () => {
 		expect(totals.stillToPayCents).toBe(5000);
 	});
 
+	it("sets aside each due or overdue weekly occurrence this month, but not last month's Not paid occurrence", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-09-25",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-09",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-16",
+					status: "due",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-23",
+					status: "upcoming",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.stillToPayCents).toBe(72000);
+	});
+
 	it("uses displayed occurrences for headings and all October occurrences for still to pay", () => {
 		const upcomingBill = { ...bill(5000), id: 2 };
 		const bills = [bill(10000), upcomingBill];

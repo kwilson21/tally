@@ -31,6 +31,12 @@ describe("bill payment matching", () => {
 		).toBeUndefined();
 	});
 
+	it("keeps a weekly payment on the Friday occurrence within three days", () => {
+		const payment = { id: 13, date: "2026-10-13", amountCents: 10000 };
+		expect(pickBillPayment([payment], "2026-10-09", 10000, 3)).toBeUndefined();
+		expect(pickBillPayment([payment], "2026-10-16", 10000, 3)?.id).toBe(13);
+	});
+
 	beforeEach(async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
@@ -62,6 +68,51 @@ describe("bill payment matching", () => {
 			{ period: "2026-03", transaction_id: 1 },
 			{ period: "2026-04", transaction_id: 3 },
 		]);
+	});
+
+	it("links October 13 only to the October 16 weekly occurrence", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='weekly',due_day=5,anchor_month=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(91,1,'2026-10-13',10000,'LANDLORD')",
+			),
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT id,date,raw_name,merchant_name,is_split,flag_income FROM transactions",
+			).all(),
+		).toMatchObject({
+			results: [
+				{
+					id: 91,
+					date: "2026-10-13",
+					raw_name: "LANDLORD",
+					is_split: 0,
+					flag_income: 0,
+				},
+			],
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT id,frequency,due_day,anchor_date,merchant_raw_text FROM bills WHERE id=1",
+			).first(),
+		).toEqual({
+			id: 1,
+			frequency: "weekly",
+			due_day: 5,
+			anchor_date: null,
+			merchant_raw_text: 0,
+		});
+		expect(await matchBillPayments(env.DB, "2026-10-13")).toBe(1);
+		expect(
+			await env.DB.prepare(
+				"SELECT period FROM bill_payments WHERE status='linked'",
+			).first(),
+		).toEqual({ period: "2026-10-16" });
 	});
 
 	it("gives Jev and earlier bill categories to a matched payment, but preserves user and merchant rule choices", async () => {
@@ -140,6 +191,13 @@ describe("bill payment matching", () => {
 				env.DB.prepare(
 					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?, ?, 10000, 10, 'monthly', ?)",
 				).bind(1000 + i, `Unmatched ${i}`, `NO MATCH ${i}`),
+			),
+		);
+		await env.DB.batch(
+			Array.from({ length: 40 }, (_, i) =>
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?, ?, 10000, 5, 'weekly', ?)",
+				).bind(2000 + i, `Weekly ${i}`, `NO WEEKLY MATCH ${i}`),
 			),
 		);
 		let statements = 0;

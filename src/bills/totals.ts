@@ -57,6 +57,7 @@ export function calculateBillTotals({
 	const activeIds = new Set(
 		bills.filter((bill) => bill.active).map((bill) => bill.id),
 	);
+	const frequencies = new Map(bills.map((bill) => [bill.id, bill.frequency]));
 	const monthlyCents = bills.reduce(
 		(total, bill) =>
 			total +
@@ -83,7 +84,14 @@ export function calculateBillTotals({
 	}
 	for (const occurrence of thisMonthOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
-		if (occurrence.dueDate.startsWith(month))
+		if (
+			occurrence.dueDate.startsWith(month) &&
+			(!["weekly", "biweekly", "quarterly"].includes(
+				frequencies.get(occurrence.billId) ?? "",
+			) ||
+				occurrence.status === "due" ||
+				occurrence.status === "overdue")
+		)
 			stillToPayCents += Math.max(
 				0,
 				occurrence.amountCents - occurrence.paidCents,

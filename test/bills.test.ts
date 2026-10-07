@@ -343,7 +343,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
-		expect(html).toContain("Inactive (7)");
+		expect(html).toContain("Inactive (8)");
 		expect(html).not.toContain("No bills yet.");
 		// With bills but none due, the count is accurate and stays.
 		expect(html).toContain("0 bills to pay soon, $0.00 in all");
@@ -509,7 +509,7 @@ describe("Bills", () => {
 		const setAside = rows
 			.filter((row) => row.active && ["due", "overdue"].includes(row.status))
 			.reduce((sum, row) => sum + row.amountCents, 0);
-		expect(setAside).toBeLessThan(25_000);
+		expect(setAside).toBeLessThan(50_000);
 	});
 
 	it("refuses to save, deactivate or reactivate a missing bill", async () => {
@@ -1337,7 +1337,7 @@ describe("Bill guards", () => {
 		});
 
 		describe("bills that already share a name", () => {
-			// Two active Rent bills, as a family's data may already hold. Ids 8 and 9.
+			// Two active Rent bills, as a family's data may already hold. Daycare uses id 8.
 			beforeEach(async () => {
 				for (const merchant of ["LANDLORD", "LANDLORD 2"])
 					await env.DB.prepare(
@@ -1347,6 +1347,7 @@ describe("Bill guards", () => {
 						.bind(merchant)
 						.run();
 			});
+			const rentIds = [9, 10];
 			const edit = (id: number, over: Record<string, string>) =>
 				post(
 					`/bills/${id}`,
@@ -1354,12 +1355,12 @@ describe("Bill guards", () => {
 						name: "Rent",
 						amount: "1200.00",
 						due_day: "1",
-						merchant_raw_name: id === 8 ? "LANDLORD" : "LANDLORD 2",
+						merchant_raw_name: id === 9 ? "LANDLORD" : "LANDLORD 2",
 						...over,
 					}),
 				);
 
-			it.each([8, 9])("still lets bill %i's amount be changed", async (id) => {
+			it.each(rentIds)("still lets bill %i's amount be changed", async (id) => {
 				const res = await edit(id, { amount: "1250.00" });
 				expect(res.headers.get("HX-Trigger")).toContain(
 					'"announce":"Bill saved"',
@@ -1368,7 +1369,7 @@ describe("Bill guards", () => {
 				expect(await nameOf(id)).toBe("Rent");
 			});
 
-			it.each([8, 9])(
+			it.each(rentIds)(
 				"still refuses renaming bill %i to a third bill's name",
 				async (id) => {
 					const res = await edit(id, { name: "water" });

@@ -90,12 +90,35 @@ async function renderHome(
 	const data = await loadMonth(c.env.DB, month);
 	const billData = await loadBillRows(c.env.DB, today);
 	const dueBills = billData.rows.filter(
-		(b) => b.active && (b.status === "due" || b.status === "overdue"),
+		(b) =>
+			b.active &&
+			(["weekly", "biweekly", "quarterly"].includes(b.frequency)
+				? b.totalOccurrences.some(
+						(o) =>
+							o.dueDate.startsWith(month) &&
+							(o.status === "due" || o.status === "overdue") &&
+							o.paidCents < o.amountCents,
+					)
+				: b.status === "due" || b.status === "overdue"),
+	);
+	const unpaidBillsCents = dueBills.reduce(
+		(sum, bill) =>
+			sum +
+			(["weekly", "biweekly", "quarterly"].includes(bill.frequency)
+				? bill.totalOccurrences
+						.filter(
+							(o) =>
+								o.dueDate.startsWith(month) &&
+								(o.status === "due" || o.status === "overdue"),
+						)
+						.reduce((n, o) => n + Math.max(0, o.amountCents - o.paidCents), 0)
+				: Math.max(0, bill.amountCents - bill.paidCents)),
+		0,
 	);
 	const summary = summarizeMonth({
 		month,
 		...data,
-		unpaidDueBillsCents: dueBills.reduce((sum, b) => sum + b.amountCents, 0),
+		unpaidDueBillsCents: unpaidBillsCents,
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));

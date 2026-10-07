@@ -15,7 +15,7 @@ const EXPORT_COLUMNS = {
 	transactions:
 		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, split_removed_from_cents, merchant_name, pending, jev_none_fit, category_suggestion_id",
 	bills:
-		"id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, merchant_raw_text, active",
+		"id, name, amount_cents, due_day, frequency, anchor_month, anchor_date, category_id, merchant_raw_name, merchant_raw_text, active",
 	bill_payments:
 		"id, bill_id, period, transaction_id, matched_by, status, created_at",
 	household_settings: "key, value",
