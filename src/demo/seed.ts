@@ -246,7 +246,8 @@ const SUGGESTED_NAMES: Record<string, string[]> = {
 	"POS 4417 CITY PARKING": ["City Parking Garage", "City Parking Lot"],
 };
 
-// This month, uncategorized (12 transactions, $228.01): [targetDay, rawName, cents, displayName].
+// Twelve seed rows start without categories ($228.01); bill matching categorizes two of them.
+// [targetDay, rawName, cents, displayName].
 const UNCATEGORIZED: [number, string, number, string | null][] = [
 	[22, "SQ *LOCAL BAKERY 4432", 1200, "Local Bakery"],
 	[3, "PAYPAL *XYZSHOP", 2349, null],
