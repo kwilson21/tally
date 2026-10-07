@@ -1,4 +1,5 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
+import { confidencePercent } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import type { Edit } from "../transactions/edit";
@@ -376,6 +377,8 @@ export async function firstVisitState(
 }
 
 export type TransactionDetail = ListRow & {
+	/** A person explicitly reviewed this credit as non-income; Jev's settled state is separate. */
+	creditReviewedByUser: boolean;
 	accountName: string;
 	accountMask: string | null;
 	accountType: string;
@@ -455,7 +458,7 @@ export async function getTransaction(
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
 				${PENDING_SQL} AS pending, t.flag_income AS income, t.income_confidence AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
-				t.credit_reviewed AS creditReviewed,
+				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,
 				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
@@ -480,6 +483,7 @@ export async function getTransaction(
 				| "paysBill"
 				| "income"
 				| "creditReviewed"
+				| "creditReviewedByUser"
 				| "displayName"
 				| "isSplit"
 				| "followsPurchase"
@@ -490,6 +494,7 @@ export async function getTransaction(
 					paysBill: number;
 					income: number;
 					creditReviewed: number;
+					creditReviewedByUser: number;
 					incomeConfidence: number | null;
 					isSplit: number;
 					followsPurchase: number;
@@ -520,6 +525,7 @@ export async function getTransaction(
 		income: r.income === 1,
 		incomeConfidence: incomeOn ? r.incomeConfidence : null,
 		creditReviewed: r.creditReviewed === 1,
+		creditReviewedByUser: r.creditReviewedByUser === 1,
 		isSplit: r.isSplit === 1,
 		followsPurchase: r.followsPurchase === 1,
 		pending: r.pending === 1,
@@ -1241,19 +1247,21 @@ export async function saveJevResult(
 			d.categoryId === null ? null : "jev",
 			d.confidence,
 			incomeOn ? 1 : 0,
-			incomeConfidence ?? 0,
-			JEV_THRESHOLD,
+			confidencePercent(incomeConfidence ?? 0),
+			confidencePercent(JEV_THRESHOLD),
 			incomeConfidence ?? 0,
 			options.switches?.categories === false ? 0 : 1,
-			d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
-			JEV_THRESHOLD,
+			confidencePercent(
+				d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
+			),
+			confidencePercent(JEV_THRESHOLD),
 			d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
 			d.categoryId !== null ? 1 : 0,
-			d.confidence,
-			JEV_THRESHOLD,
+			confidencePercent(d.confidence),
+			confidencePercent(JEV_THRESHOLD),
 			incomeConfidence,
-			incomeConfidence,
-			1 - JEV_THRESHOLD,
+			confidencePercent(incomeConfidence ?? 0),
+			100 - confidencePercent(JEV_THRESHOLD),
 			income ? 1 : 0,
 			d.suggestedCategoryId,
 			d.noneFit ? 1 : 0,

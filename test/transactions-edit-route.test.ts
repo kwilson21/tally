@@ -569,6 +569,58 @@ describe("POST /transactions/:id", () => {
 		});
 	});
 
+	it("opens a Jev-settled income credit with income checked and person review unchecked", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toMatch(/name="income" value="1" checked/);
+		expect(sheet).toMatch(/name="creditReviewed" value="1"(?! checked)/);
+	});
+
+	it("unticking Jev income alone leaves the credit unreviewed by a person and held", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewedVisible: "1",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 0,
+			credit_reviewed_by: null,
+			excluded: 0,
+		});
+	});
+
+	it("opens a person-reviewed credit with person review checked", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, flag_income = 0, income_source = NULL, credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toMatch(/name="creditReviewed" value="1" checked/);
+	});
+
 	it("lets a person turn Jev income into a reviewed refund in one save", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = 0.95, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",

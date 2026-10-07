@@ -1039,7 +1039,7 @@ type SheetProps = {
 function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
 	return (
 		posted.income === tx.income &&
-		posted.creditReviewed === tx.creditReviewed &&
+		posted.creditReviewed === tx.creditReviewedByUser &&
 		maybeIncomeVisible(tx)
 	);
 }
@@ -1680,7 +1680,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		note: tx.note,
 		excluded: tx.excluded,
 		income: tx.income,
-		creditReviewed: tx.creditReviewed,
+		creditReviewed: tx.creditReviewedByUser,
 		refundOfId: tx.refundOfId ?? null,
 	};
 	const refunds = await refundPurchases(c.env.DB, tx);
@@ -2073,7 +2073,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 		const values: Edit = {
 			categoryId: tx.categoryId,
 			income: tx.income,
-			creditReviewed: tx.creditReviewed,
+			creditReviewed: tx.creditReviewedByUser,
 			alwaysForMerchant: false,
 			displayName: tx.merchantName,
 			note: tx.note,

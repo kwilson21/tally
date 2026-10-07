@@ -57,18 +57,28 @@ describe("rowCaption", () => {
 		expect(html).toContain("Maybe income");
 		expect(html).not.toContain("Review credit");
 	});
-	it.each([0.01, 0.2])("hides a confident NO at %s", async (confidence) => {
-		const row = {
-			...base,
-			amountCents: -2500,
-			creditReviewed: false,
-			incomeConfidence: confidence,
-		};
-		expect(rowCaption(row).caption).not.toBe("Maybe income");
-		expect(await TransactionRow({ row }).toString()).not.toContain(
-			"Maybe income",
-		);
-	});
+	it.each([
+		[0.19, false],
+		[0.2, false],
+		[0.21, true],
+		[0.79, true],
+		[0.8, false],
+		[0.81, false],
+	] as const)(
+		"income visibility at %s is maybe income: %s",
+		async (confidence, visible) => {
+			const row = {
+				...base,
+				amountCents: -2500,
+				creditReviewed: false,
+				incomeConfidence: confidence,
+			};
+			expect(rowCaption(row).caption === "Maybe income").toBe(visible);
+			expect(
+				(await TransactionRow({ row }).toString()).includes("Maybe income"),
+			).toBe(visible);
+		},
+	);
 	it("shows the applied 0.8 answer as Income", async () => {
 		const row = {
 			...base,

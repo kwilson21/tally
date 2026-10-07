@@ -26,6 +26,13 @@
 
 // Parameters, shared by every statement: 1 the pending id, 2 the posted id, 3 the bank's amount in
 // cents now, 4 and 5 the Item row and its lock, 6 to 8 the posted date, bank text and merchant name.
+import { personChoseIncomeSql } from "../db/income";
+
+/** A person choice or Jev's stored answer means a posted flag already has an answer. */
+function hasAnswerSql(personChoice: string, jevAnswer: string) {
+	return `(COALESCE((${personChoice}), 0) OR COALESCE((${jevAnswer}), 0))`;
+}
+
 const PENDING =
 	"(SELECT id FROM transactions WHERE plaid_transaction_id = ?1 AND pending = 1)";
 const POSTED = "(SELECT id FROM transactions WHERE plaid_transaction_id = ?2)";
@@ -90,12 +97,16 @@ const STATEMENTS = [
 	// Uncertain flag answers move only when the posted row has no confidence of its own, like category_confidence.
 	`UPDATE transactions SET income_confidence = p.income_confidence
 	 ${FROM_PENDING} AND p.income_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND transactions.income_confidence IS NULL AND transactions.income_source IS NULL
-	 AND COALESCE(transactions.credit_reviewed, 0) = 0 AND transactions.credit_reviewed_by IS NULL
-	 AND transactions.flag_income = 0`,
+	 AND NOT ${hasAnswerSql(
+			personChoseIncomeSql("transactions"),
+			"transactions.income_source = 'jev' OR transactions.income_confidence IS NOT NULL",
+		)}`,
 	`UPDATE transactions SET transfer_confidence = p.transfer_confidence
 	 ${FROM_PENDING} AND p.transfer_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND transactions.transfer_confidence IS NULL AND COALESCE(transactions.excluded_source, '') != 'user'`,
+	 AND NOT ${hasAnswerSql(
+			"transactions.excluded_source = 'user'",
+			"transactions.excluded_source = 'jev' OR transactions.transfer_confidence IS NOT NULL",
+		)}`,
 	`UPDATE transactions SET credit_reviewed = 1
 	 ${FROM_PENDING} AND p.amount_cents < 0 AND p.amount_cents = ?3 AND p.credit_reviewed = 1
 	 AND p.credit_reviewed_by IS NULL AND p.category_confidence IS NOT NULL

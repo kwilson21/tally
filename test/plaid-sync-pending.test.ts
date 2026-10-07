@@ -887,6 +887,28 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			});
 		});
 
+		it("keeps posted Jev-settled income and transfer answers without pending scores", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL, excluded = 1, excluded_source = 'jev', flag_transfer = 1, transfer_confidence = NULL, income_confidence = NULL WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				flag_income: 1,
+				income_source: "jev",
+				income_confidence: null,
+				excluded_source: "jev",
+				flag_transfer: 1,
+				transfer_confidence: null,
+			});
+		});
+
 		it("does not move an income guess onto a posted row with its own income choice", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item, { amount: -42 });
