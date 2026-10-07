@@ -187,9 +187,9 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("counts this month's transactions and who categorized them", async () => {
 		const { html } = await get("/how-it-works");
-		expect(html).toMatch(/counted transactions, and 12 need a category\./);
+		expect(html).toMatch(/counted transactions, and 10 need a category\./);
 		expect(html).toMatch(/Jev categorized \d+ transactions\./);
-		expect(decodeHtml(html)).toContain("12 are waiting for tonight's run.");
+		expect(decodeHtml(html)).toContain("10 are waiting for tonight's run.");
 		expect(html).toContain("80%");
 	});
 });

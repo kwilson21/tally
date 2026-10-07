@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import toastSource from "../public/js/toast.js?raw";
+import appStyles from "../src/styles/app.css?raw";
 import { Icon } from "../src/views/icons";
 
 it("only maps the trusted feedback confirmation and clears it", () => {
@@ -18,14 +19,22 @@ const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 const COULDNT_LOAD = "Couldn't load. Check your connection and try again.";
 const LONG_NAME = "x".repeat(48);
 
-class FakeNode {
+class FakeNode extends EventTarget {
 	children: FakeNode[] = [];
 	parent: FakeNode | null = null;
 	attrs = new Map<string, string>();
 	className = "";
+	method = "";
+	action = "";
+	type = "";
+	disabled = false;
+	name = "";
+	value = "";
 	/** A node's own text. */
 	own = "";
-	constructor(readonly tag: string) {}
+	constructor(readonly tag: string) {
+		super();
+	}
 	/** As in a real page: this node's own text, then its children's, in order. */
 	get textContent(): string {
 		return this.own + this.children.map((child) => child.textContent).join("");
@@ -77,10 +86,23 @@ async function page() {
 	vi.stubGlobal("document", document);
 	vi.stubGlobal("location", { search: "", pathname: "/", hash: "" });
 	vi.stubGlobal("history", { replaceState: () => {} });
+	const htmx = { process: vi.fn() };
+	vi.stubGlobal("window", { htmx });
 	vi.stubGlobal("requestAnimationFrame", (run: () => void) => run());
+	vi.stubGlobal("getComputedStyle", (node: FakeNode) => ({
+		getPropertyValue: (name: string) =>
+			name ===
+			(node.className.includes("undo-toast")
+				? "--duration-undo-toast"
+				: "--duration-toast")
+				? node.className.includes("undo-toast")
+					? "10s"
+					: "4s"
+				: "",
+	}));
 	vi.resetModules();
 	await load?.();
-	return { document, body, toasts };
+	return { document, body, toasts, htmx };
 }
 
 const fire = (target: EventTarget, name: string, detail: unknown) =>
@@ -423,6 +445,80 @@ describe("several failures at once", () => {
 });
 
 describe("the toasts the server sends", () => {
+	it("builds the cash-delete Undo form from the toast detail", async () => {
+		const { body, toasts, htmx } = await page();
+		const token = '"><img src=x onerror=alert(1)>';
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: token,
+			undoExpiresInMs: 10000,
+		});
+		const toast = toasts.children[0] as FakeNode;
+		const form = toast.all().find((node) => node.tag === "form");
+		expect(form).toBeDefined();
+		expect(form?.action).toBe("/transactions/undo-cash-delete");
+		expect(form?.method).toBe("post");
+		const fields = form?.children.filter((node) => node.tag === "input") ?? [];
+		expect(
+			fields.map(({ name, type, value }) => ({ name, type, value })),
+		).toEqual([
+			{ name: "token", type: "hidden", value: token },
+			{ name: "back", type: "hidden", value: "/" },
+		]);
+		expect(toast.all().some((node) => node.tag === "img")).toBe(false);
+		const button = form?.children.find((node) => node.tag === "button");
+		expect(button?.type).toBe("submit");
+		expect(button?.textContent).toBe("Undo");
+		expect(button?.className).toContain("min-h-11");
+		// A native submit button is in the tab order unless explicitly removed from it.
+		expect(button?.attrs.get("tabindex")).not.toBe("-1");
+		form?.dispatchEvent(new Event("submit"));
+		expect(button?.disabled).toBe(true);
+		expect(toast.attrs.get("role")).toBe("status");
+		expect(htmx.process).toHaveBeenCalledWith(toast);
+		expect(appStyles).toContain("--duration-undo-toast: 10s");
+		expect(toast.attrs.get("style")).toBe("--duration-undo-toast: 10000ms");
+		expect(toastSource).toContain("undoExpiresInMs");
+		expect(toastSource).not.toContain("undo ? 10_000");
+	});
+
+	it("keeps an Undo toast for the server's remaining 4,000 ms", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 4000,
+		});
+		const toast = toasts.children[0] as FakeNode;
+		expect(toast.attrs.get("role")).toBe("status");
+		expect(toast.all().some((node) => node.tag === "form")).toBe(true);
+		vi.advanceTimersByTime(3999);
+		expect(toasts.children).toContain(toast);
+		vi.advanceTimersByTime(1);
+		expect(toasts.children).not.toContain(toast);
+	});
+
+	it.each([0, -1])(
+		"does not show Undo with %i ms remaining",
+		async (undoExpiresInMs) => {
+			const { body, toasts } = await page();
+			fire(body, "toast", {
+				message: "Deleted Coffee, $5.00.",
+				undo: "token",
+				undoExpiresInMs,
+			});
+			expect(toasts.children).toHaveLength(0);
+		},
+	);
+
+	it("does not render an Undo form without undo detail", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", { message: "Saved." });
+		expect(toasts.children[0]?.all().some((node) => node.tag === "form")).toBe(
+			false,
+		);
+	});
+
 	it("draws the alert icon on any error toast too, so an error is never colour alone", async () => {
 		const { body, toasts } = await page();
 		fire(body, "toast", { message: "That didn't save.", type: "error" });

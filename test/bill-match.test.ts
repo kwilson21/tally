@@ -44,7 +44,7 @@ describe("bill payment matching", () => {
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(1,'Rent',10000,10,'monthly','LANDLORD')",
 			),
 			env.DB.prepare(
-				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(1,1,'2026-03-10',10000,'LANDLORD'),(2,1,'2026-04-10',10000,'LANDLORD'),(3,1,'2026-04-09',10000,'LANDLORD')",
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(1,1,'2026-03-10',10000,'LANDLORD'),(2,1,'2026-04-10',10000,'LANDLORD'),(3,1,'2026-04-09',10000,'LANDLORD'),(4,1,'2026-05-10',10000,'LANDLORD'),(5,1,'2026-06-10',10000,'LANDLORD')",
 			),
 			env.DB.prepare(
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,'2026-04',2,'user','dismissed')",
@@ -62,6 +62,100 @@ describe("bill payment matching", () => {
 			{ period: "2026-03", transaction_id: 1 },
 			{ period: "2026-04", transaction_id: 3 },
 		]);
+	});
+
+	it("gives Jev and earlier bill categories to a matched payment, but preserves user and merchant rule choices", async () => {
+		await env.DB.batch([
+			env.DB.prepare("UPDATE bills SET category_id=1 WHERE id=1"),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id=3, category_source='bill' WHERE id=1",
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='jev', category_confidence=0.91, jev_category_id=2 WHERE id=3",
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id=4, category_source='merchant_rule' WHERE id=4",
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=5",
+			),
+		]);
+
+		await matchBillPayments(env.DB, "2026-06-12");
+
+		const rows = await env.DB.prepare(
+			"SELECT id,category_id AS categoryId,category_source AS categorySource,category_confidence AS categoryConfidence,jev_category_id AS jevCategoryId FROM transactions WHERE id IN (1,3,4,5) ORDER BY id",
+		).all();
+		expect(rows.results).toEqual([
+			{
+				id: 1,
+				categoryId: 1,
+				categorySource: "bill",
+				categoryConfidence: null,
+				jevCategoryId: null,
+			},
+			{
+				id: 3,
+				categoryId: 1,
+				categorySource: "bill",
+				categoryConfidence: null,
+				jevCategoryId: null,
+			},
+			{
+				id: 4,
+				categoryId: 4,
+				categorySource: "merchant_rule",
+				categoryConfidence: null,
+				jevCategoryId: null,
+			},
+			{
+				id: 5,
+				categoryId: 2,
+				categorySource: "user",
+				categoryConfidence: null,
+				jevCategoryId: null,
+			},
+		]);
+	});
+
+	it("gives an uncategorized matched payment its bill category", async () => {
+		await env.DB.batch([
+			env.DB.prepare("UPDATE bills SET category_id=5 WHERE id=1"),
+			env.DB.prepare("UPDATE transactions SET date='2026-04-10' WHERE id=6"),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(6,1,'2026-04-10',10000,'LANDLORD')",
+			),
+		]);
+		await matchBillPayments(env.DB, "2026-04-03");
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id,category_source FROM transactions WHERE id=6",
+			).first(),
+		).toEqual({ category_id: 5, category_source: "bill" });
+	});
+
+	it("keeps a long bill scan under D1's 1,000 query limit", async () => {
+		await env.DB.batch(
+			Array.from({ length: 40 }, (_, i) =>
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?, ?, 10000, 10, 'monthly', ?)",
+				).bind(1000 + i, `Unmatched ${i}`, `NO MATCH ${i}`),
+			),
+		);
+		let statements = 0;
+		const counted = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		await matchBillPayments(counted as D1Database, "2026-04-03");
+		expect(statements).toBeLessThan(1000);
 	});
 
 	it("skips split parents, the wrong merchant, claimed rows, and dismissals", async () => {

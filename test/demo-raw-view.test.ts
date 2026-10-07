@@ -422,7 +422,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			countOf(
 				(await demo(`/transactions?uncategorized=1&month=${month}`)).html,
 			),
-		).toContain("12 transactions needing a category");
+		).toContain("10 transactions needing a category");
 	});
 
 	it("shows a categorized transaction without its category", async () => {

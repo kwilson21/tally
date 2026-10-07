@@ -49,6 +49,7 @@ describe("schema", () => {
 			"bill_payments",
 			"bills",
 			"budget_amounts",
+			"cash_delete_holds",
 			"categories",
 			"category_suggestions",
 			"documents",

@@ -63,6 +63,7 @@
 	--duration-slow: 600ms; /* a budget bar filling on load */
 	--duration-spin: 700ms; /* one turn of the busy ring */
 	--duration-toast: 4s; /* a toast's whole stay; toast.js's DISPLAY_MS is the same 4 seconds */
+	--duration-undo-toast: 10s; /* a cash-delete undo's whole stay */
 	--duration-swipe: 1.2s; /* one small movement of a finished-month chart cue */
 	--ease-swipe: ease-in-out; /* the finished-month chart's sideways cue */
 	--distance-swipe: 12px; /* the finished-month chart's sideways cue */
@@ -389,9 +390,32 @@ html:not(.js) [data-money-js] {
 		opacity: 0;
 	}
 }
+@keyframes toast-undo {
+	0% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	1.5% {
+		opacity: 1;
+		transform: none;
+	}
+	97% {
+		opacity: 1;
+		transform: none;
+	}
+	98.5% {
+		opacity: 0;
+	}
+	100% {
+		opacity: 0;
+	}
+}
 #toasts > *,
 .toast-motion {
 	animation: toast var(--duration-toast) ease-out both;
+}
+#toasts > .undo-toast {
+	animation: toast-undo var(--duration-undo-toast) ease-out both;
 }
 
 /*
@@ -436,6 +460,7 @@ html:not(.js) [data-money-js] {
 	.sheet-slide,
 	.sheet-panel,
 	#toasts > *,
+	#toasts > .undo-toast,
 	.toast-motion {
 		animation: none;
 	}

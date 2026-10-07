@@ -152,7 +152,7 @@ describe("GET /transactions/:id", () => {
 	it("shows the list and the edit sheet, labeled and focused", async () => {
 		const { res, html } = await get(`/transactions/${bakery}?uncategorized=1`);
 		expect(res.status).toBe(200);
-		expect(rowCount(html)).toBe(12);
+		expect(rowCount(html)).toBe(10);
 		expect(html).toMatch(/<section role="dialog" aria-labelledby="edit-title"/);
 		expect(html).toMatch(
 			/<h2 id="edit-title"[^>]*autofocus[^>]*class="[^"]*\bmin-w-0\b[^"]*\bwrap-anywhere\b[^"]*">Local Bakery<\/h2>/,
@@ -309,7 +309,7 @@ describe("POST /transactions/:id", () => {
 	it("saves, closes the sheet, and confirms with a toast and announcement (htmx)", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, save);
 		expect(res.status).toBe(200);
-		expect(rowCount(html)).toBe(11);
+		expect(rowCount(html)).toBe(9);
 		expect(html).not.toContain('role="dialog"');
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message: "Saved Local Bakery", type: "success" },
@@ -346,7 +346,7 @@ describe("POST /transactions/:id", () => {
 			/<form method="post"[^>]*hx-select-oob="#needs-count:innerHTML"/,
 		);
 		const { html } = await post(`/transactions/${bakery}`, save);
-		expect(html).toMatch(/<span id="needs-count">11<\/span>/);
+		expect(html).toMatch(/<span id="needs-count">9<\/span>/);
 	});
 
 	it("saves a person's income choice and preserves it when Jev runs again", async () => {
@@ -403,7 +403,7 @@ describe("POST /transactions/:id", () => {
 
 	it("updates Home", async () => {
 		await post(`/transactions/${bakery}`, save);
-		expect((await get("/")).html).toContain("11 transactions need a category");
+		expect((await get("/")).html).toContain("9 transactions need a category");
 	});
 });
 
@@ -430,6 +430,47 @@ describe("who picked the category", () => {
 		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
 			"Picked by Tally",
 		);
+	});
+
+	it("explains a bill category beside Category, but not a person's choice", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id=5, category_source='bill' WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		let sheet = (await get(`/transactions/${bakery}`)).html;
+		expect(sheet).toMatch(
+			/<legend[^>]*>Category[\s\S]*?<a[^>]*href="\/how-it-works#categorization"[^>]*aria-label="Why\? this category"/,
+		);
+
+		await setSource("user", null);
+		sheet = (await get(`/transactions/${bakery}`)).html;
+		expect(sheet).not.toContain('aria-label="Why? this category"');
+	});
+
+	it("lets an Always merchant rule replace a bill category without replacing a person's choice", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions (id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9800,id,'2026-09-20',1200,'SQ *LOCAL BAKERY 4432',5,'bill' FROM accounts LIMIT 1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9801,id,'2026-09-19',1200,'SQ *LOCAL BAKERY 4432',4,'user' FROM accounts LIMIT 1",
+			),
+		]);
+		await post(`/transactions/${bakery}`, {
+			category: "2",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			always: "1",
+		});
+		const rows = await env.DB.prepare(
+			"SELECT id,category_id AS categoryId,category_source AS categorySource FROM transactions WHERE id IN (9800,9801) ORDER BY id",
+		).all();
+		expect(rows.results).toEqual([
+			{ id: 9800, categoryId: 2, categorySource: "merchant_rule" },
+			{ id: 9801, categoryId: 4, categorySource: "user" },
+		]);
 	});
 
 	it("goes away once a person chooses the category", async () => {
@@ -475,11 +516,11 @@ describe("excluding a transaction (spec §6, #27)", () => {
 			excluded: "1",
 			back: "/transactions?uncategorized=1",
 		});
-		expect(rowCount(html)).toBe(11);
+		expect(rowCount(html)).toBe(9);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
 			"Saved Local Bakery. It's excluded from the budget.",
 		);
-		expect((await get("/")).html).toContain("11 transactions need a category");
+		expect((await get("/")).html).toContain("9 transactions need a category");
 	});
 
 	it("includes an excluded transaction again when the box is cleared, and says so", async () => {

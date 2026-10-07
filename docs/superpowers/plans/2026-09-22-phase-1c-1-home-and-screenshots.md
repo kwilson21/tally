@@ -380,7 +380,7 @@ Start after Part A is merged: `git switch main && git pull && git switch -c phas
 | Month title | current month | "September" |
 | Safe to spend | 28299 | "$283" |
 | Status sentence | Eating Out 28600 of 25000 | "Eating Out is $36 over. Everything else is on track." |
-| Band | 12 uncategorized | "12 transactions need a category" → `/transactions?uncategorized=1` |
+| Band | 10 uncategorized after bill matching | "10 transactions need a category" → `/transactions?uncategorized=1` |
 | Groceries | 41200 of 70000 | "$412 of $700", green bar |
 | Eating Out | 28600 of 25000 | "$286 of $250", brick bar, alert icon + "over budget" |
 | Gas / Kids / Household | 18600 of 20000 / 21000 of 30000 / 9500 of 25000 | green bars |
@@ -646,7 +646,7 @@ describe("GET / with the demo seed", () => {
 	it("links the uncategorized count to the filtered list", async () => {
 		const { html } = await home();
 		expect(html).toContain('href="/transactions?uncategorized=1"');
-		expect(html).toContain("12 transactions need a category");
+		expect(html).toContain("10 transactions need a category");
 	});
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {

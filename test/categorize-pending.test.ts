@@ -830,7 +830,7 @@ describe("categorizePending", () => {
 		const result = await categorizePending({ DB: db }, jev.fetchImpl);
 		expect(jev.calls()).toBe(0);
 		expect(result).toEqual({ asked: 0, applied: 0 });
-		expect(await needsCategoryCount(db, MONTH)).toBe(12);
+		expect(await needsCategoryCount(db, MONTH)).toBe(10);
 	});
 
 	it("offers category-only help for a user-reviewed credit and never overwrites the decision", async () => {
@@ -930,14 +930,14 @@ describe("categorizePending", () => {
 
 		const result = await categorizePending(withKey, jev.fetchImpl);
 
-		expect(jev.calls()).toBe(12);
-		expect(result).toEqual({ asked: 12, applied: 4 });
-		expect(await needsCategoryCount(db, MONTH)).toBe(8);
+		expect(jev.calls()).toBe(10);
+		expect(result).toEqual({ asked: 10, applied: 4 });
+		expect(await needsCategoryCount(db, MONTH)).toBe(6);
 		expect(
 			await countWhere(
 				"category_source IS NULL AND category_id IS NULL AND category_confidence = 0.5",
 			),
-		).toBe(8);
+		).toBe(6);
 	});
 
 	it.each(["merchant_rule", "user"] as const)(
@@ -1036,14 +1036,14 @@ describe("categorizePending", () => {
 
 		expect(jev.calls()).toBe(3);
 		expect(first).toEqual({ asked: 3, applied: 2 });
-		expect(await needsCategoryCount(db, MONTH)).toBe(10);
+		expect(await needsCategoryCount(db, MONTH)).toBe(8);
 		// The only thing logged about a failure: the status and Jev's request id.
 		expect(errors).toHaveBeenCalledTimes(1);
 		expect(errors).toHaveBeenCalledWith("jev: 429 req_9");
 
 		const next = fakeJev(() => reply(0.95));
 		await categorizePending(withKey, next.fetchImpl);
-		expect(next.calls()).toBe(10);
+		expect(next.calls()).toBe(8);
 		expect(await needsCategoryCount(db, MONTH)).toBe(0);
 	});
 
@@ -1070,7 +1070,7 @@ describe("categorizePending", () => {
 		const logs = vi.spyOn(console, "log").mockImplementation(() => {});
 		await categorizePending(withKey, fakeJev(() => reply(0.95)).fetchImpl);
 		expect(logs).toHaveBeenCalledTimes(1);
-		expect(logs).toHaveBeenCalledWith("jev: asked 12, applied 12");
+		expect(logs).toHaveBeenCalledWith("jev: asked 10, applied 10");
 	});
 
 	it("applies merchant rules before asking Jev", async () => {
@@ -1082,7 +1082,7 @@ describe("categorizePending", () => {
 			.run();
 		const jev = fakeJev(() => reply(0.5));
 		await categorizePending(withKey, jev.fetchImpl);
-		expect(jev.calls()).toBe(11);
+		expect(jev.calls()).toBe(9);
 		expect(await countWhere("category_source = 'merchant_rule'")).toBe(1);
 	});
 
@@ -1242,12 +1242,12 @@ describe("categorizePending", () => {
 			await categorizePending(withKey, first.fetchImpl, {
 				rulesApplied: true,
 			});
-			expect(first.calls()).toBe(12);
+			expect(first.calls()).toBe(10);
 			// ... then 50 more arrive, and the nightly run gets the 28 left of 40.
 			await addExtras();
 			const second = fakeJev(() => reply(0.5));
 			await categorizePending(withKey, second.fetchImpl);
-			expect(second.calls()).toBe(28);
+			expect(second.calls()).toBe(30);
 			expect(await callsUsed()).toBe(40);
 		});
 
@@ -1255,7 +1255,7 @@ describe("categorizePending", () => {
 			quiet();
 			await spend(40);
 			const waiting = (await pendingForJev(db, 100)).length;
-			expect(waiting).toBe(12);
+			expect(waiting).toBe(10);
 			const jev = fakeJev(() => reply(0.95));
 			const result = await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(0);
@@ -1290,7 +1290,7 @@ describe("categorizePending", () => {
 			await newDay();
 			const jev = fakeJev(() => reply(0.5));
 			await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(12);
+			expect(jev.calls()).toBe(10);
 		});
 
 		it("never goes over the cap when runs go at the same moment", async () => {
@@ -1365,8 +1365,8 @@ describe("categorizePending", () => {
 			expect(await callsUsed()).toBe(1);
 			const next = fakeJev(() => reply(0.95));
 			await categorizePending(withKey, next.fetchImpl);
-			expect(next.calls()).toBe(12);
-			expect(await callsUsed()).toBe(13);
+			expect(next.calls()).toBe(10);
+			expect(await callsUsed()).toBe(11);
 		});
 
 		it("starts no new call once its deadline has passed, and gives back what it didn't ask", async () => {
@@ -1413,7 +1413,7 @@ describe("categorizePending", () => {
 					categorizePending(withKey, jev.fetchImpl),
 				).resolves.toEqual({ asked: 1, applied: 0 });
 				// Lost, never over-spent: all twelve stay counted.
-				expect(await callsUsed()).toBe(12);
+				expect(await callsUsed()).toBe(10);
 				expect(JSON.stringify(errors.mock.calls)).not.toContain("nope");
 			} finally {
 				await db.prepare("DROP TRIGGER fail_give_back").run();
@@ -1457,8 +1457,8 @@ describe("categorizePending", () => {
 				});
 				const next = fakeJev(() => reply(0.95));
 				await categorizePending(withKey, next.fetchImpl);
-				expect(next.calls()).toBe(10);
-				expect(await callsUsed("2026-10-06")).toBe(10);
+				expect(next.calls()).toBe(8);
+				expect(await callsUsed("2026-10-06")).toBe(8);
 			});
 
 			it("takes the household's own zone, not the server's", async () => {
@@ -1516,10 +1516,10 @@ describe("categorizePending", () => {
 			expect(jev.calls()).toBe(3);
 			expect(result.asked).toBe(3);
 			// The nine older ones are still waiting, and the night's run takes them.
-			expect(await pendingForJev(db, 100)).toHaveLength(9);
+			expect(await pendingForJev(db, 100)).toHaveLength(7);
 			const night = fakeJev(() => reply(0.95));
 			await categorizePending(withKey, night.fetchImpl);
-			expect(night.calls()).toBe(9);
+			expect(night.calls()).toBe(7);
 		});
 
 		it("counts only the calls it makes against the day", async () => {
@@ -1574,7 +1574,7 @@ describe("categorizePending", () => {
 			const result = await categorizePending(withKey, jev.fetchImpl, {
 				onlyIds: ids,
 			});
-			expect(result.asked).toBe(11);
+			expect(result.asked).toBe(9);
 			expect(
 				await db
 					.prepare(
@@ -1605,7 +1605,7 @@ describe("categorizePending", () => {
 			});
 			expect(jev.calls()).toBe(250);
 			// The seed's twelve weren't listed, so they still wait.
-			expect(await pendingForJev(db, 100)).toHaveLength(12);
+			expect(await pendingForJev(db, 100)).toHaveLength(10);
 		}, 30_000);
 	});
 
@@ -1654,7 +1654,7 @@ describe("categorizePending", () => {
 			// The second call was on its way when it went off, so its answer is kept; no third goes out.
 			expect(jev.calls()).toBe(2);
 			expect(result).toEqual({ asked: 2, applied: 2 });
-			expect(await needsCategoryCount(db, MONTH)).toBe(10);
+			expect(await needsCategoryCount(db, MONTH)).toBe(8);
 			// And the ten it didn't ask about are free for the night.
 			expect(await callsUsed()).toBe(2);
 		});
@@ -1665,8 +1665,8 @@ describe("categorizePending", () => {
 				if (call === 2) await switchTo({ sortOnArrival: false });
 			});
 			const result = await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(12);
-			expect(result.asked).toBe(12);
+			expect(jev.calls()).toBe(10);
+			expect(result.asked).toBe(10);
 		});
 
 		it("still stops for the switches every run honors", async () => {
@@ -1708,8 +1708,8 @@ describe("categorizePending", () => {
 
 		const result = await categorizePending(withKey, fetchImpl);
 
-		expect(calls).toBe(12);
-		expect(result).toEqual({ asked: 12, applied: 11 });
+		expect(calls).toBe(10);
+		expect(result).toEqual({ asked: 10, applied: 9 });
 		expect(await needsCategoryCount(db, MONTH)).toBe(1);
 		expect(errors).toHaveBeenCalledWith("jev: 200 req_bad");
 	});
@@ -1725,7 +1725,7 @@ describe("categorizePending", () => {
 				return calls === 1 ? new Response("{}", { status }) : reply(0.95);
 			};
 			await categorizePending(withKey, fetchImpl);
-			expect(calls).toBe(12);
+			expect(calls).toBe(10);
 		},
 	);
 
@@ -1773,8 +1773,8 @@ describe("categorizePending", () => {
 				: reply(0.95);
 		};
 		const result = await categorizePending(withKey, fetchImpl);
-		expect(calls).toBe(12);
-		expect(result.applied).toBe(8);
+		expect(calls).toBe(10);
+		expect(result.applied).toBe(6);
 	});
 
 	it("asks about transactions that failed before last, so they never block the rest", async () => {
@@ -1800,8 +1800,8 @@ describe("categorizePending", () => {
 		});
 		// Night 2: the other nine are asked first and applied; the three bad ones are last.
 		expect(await categorizePending(withKey, fetchImpl)).toEqual({
-			asked: 12,
-			applied: 9,
+			asked: 10,
+			applied: 7,
 		});
 		expect(await needsCategoryCount(db, MONTH)).toBe(3);
 	});
@@ -1896,8 +1896,8 @@ describe("the AI switches", () => {
 		await setSwitches({ names: false, sortOnArrival: false });
 		const jev = fakeJev(() => reply(0.95));
 		const result = await categorizePending(withKey, jev.fetchImpl);
-		expect(jev.calls()).toBe(12);
-		expect(result.applied).toBe(12);
+		expect(jev.calls()).toBe(10);
+		expect(result.applied).toBe(10);
 	});
 
 	describe("with categories and exclusions off, and income on", () => {
@@ -1907,7 +1907,7 @@ describe("the AI switches", () => {
 			const asked = (await pendingForJev(db, 40)).map((t) => t.id);
 			const jev = fakeJev(() => reply(0.97));
 			const result = await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(12);
+			expect(jev.calls()).toBe(10);
 			expect(result.applied).toBe(0);
 			// Neither applied nor kept as a suggestion to show; only that it was asked is kept.
 			const rows = await db
@@ -1916,7 +1916,7 @@ describe("the AI switches", () => {
 					FROM transactions WHERE id IN (${asked.join(",")})`,
 				)
 				.all();
-			expect(rows.results).toHaveLength(12);
+			expect(rows.results).toHaveLength(10);
 			for (const row of rows.results)
 				expect(row).toEqual({
 					category_id: null,
@@ -1924,7 +1924,7 @@ describe("the AI switches", () => {
 					jev_category_id: null,
 					category_confidence: 0.97,
 				});
-			expect(await needsCategoryCount(db, MONTH)).toBe(12);
+			expect(await needsCategoryCount(db, MONTH)).toBe(10);
 		});
 
 		it("lets Jev's transfer and reimbursement flags exclude nothing", async () => {
@@ -1936,7 +1936,7 @@ describe("the AI switches", () => {
 				flagged({ transfer: 0.99, reimbursement: 0.99 }),
 			);
 			await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(12);
+			expect(jev.calls()).toBe(10);
 			expect(await countWhere("excluded = 1")).toBe(excludedBefore);
 			expect(
 				await countWhere("flag_transfer = 1 OR flag_reimbursement = 1"),
@@ -1985,9 +1985,9 @@ describe("the AI switches", () => {
 		it("marks what it asked about as looked at, so the same ones aren't asked every night", async () => {
 			const jev = fakeJev(() => reply(0.97));
 			await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(12);
+			expect(jev.calls()).toBe(10);
 			await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(12);
+			expect(jev.calls()).toBe(10);
 		});
 
 		it("doesn't ask about a credit a person already reviewed, since only its category could be asked", async () => {
@@ -2057,7 +2057,7 @@ describe("the AI switches", () => {
 		await resetDemo(db, TODAY);
 		const jev = fakeJev(() => reply(0.95));
 		await categorizePending(withKey, jev.fetchImpl);
-		expect(jev.calls()).toBe(12);
+		expect(jev.calls()).toBe(10);
 	});
 
 	// Someone can save the switches while a run is going, so each transaction reads them again: before
@@ -2092,7 +2092,7 @@ describe("the AI switches", () => {
 			expect(jev.calls()).toBe(1);
 			expect(result.applied).toBe(0);
 			expect(await snapshot()).toEqual(before);
-			expect(await needsCategoryCount(db, MONTH)).toBe(12);
+			expect(await needsCategoryCount(db, MONTH)).toBe(10);
 		});
 
 		it("keeps what it saved before they went off, and sends nothing after", async () => {
@@ -2107,7 +2107,7 @@ describe("the AI switches", () => {
 			// The first answer was saved; the second arrived with the switches off, and no third went out.
 			expect(jev.calls()).toBe(2);
 			expect(result.applied).toBe(1);
-			expect(await needsCategoryCount(db, MONTH)).toBe(11);
+			expect(await needsCategoryCount(db, MONTH)).toBe(9);
 		});
 
 		it("drops a category from the answer on its way back when categories went off, and carries on for income", async () => {
@@ -2119,7 +2119,7 @@ describe("the AI switches", () => {
 				() => reply(0.95),
 			);
 			await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(12);
+			expect(jev.calls()).toBe(10);
 			const rows = (
 				await db
 					.prepare(

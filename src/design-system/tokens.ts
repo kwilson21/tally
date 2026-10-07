@@ -128,6 +128,11 @@ export const DURATION_TOKENS = [
 		use: "a toast's whole stay: it fades in, holds and fades out; toast.js removes it after the same 4 seconds",
 	},
 	{
+		name: "undo-toast",
+		value: "10s",
+		use: "a cash-delete Undo toast's stay before it goes",
+	},
+	{
 		name: "swipe",
 		value: "1.2s",
 		use: "one finished-month chart arrow nudge; the cue moves three times",

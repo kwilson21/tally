@@ -438,7 +438,7 @@ describe("resetDemo", () => {
 			unpaidDueBillsCents: 0,
 		});
 		expect(summary.safeToSpendCents).toBe(24500);
-		expect(summary.uncategorized.count).toBe(12);
+		expect(summary.uncategorized.count).toBe(10);
 
 		const { results } = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM merchants WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",

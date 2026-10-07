@@ -57,6 +57,26 @@ describe("monthCounts", () => {
 		);
 		expect((await monthCounts(db, "2026-10")).counted).toBe(0);
 	});
+
+	it("counts a bill category in the Categorization section", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(94,'Rent',1000,30,'monthly',5,'COUNT BILL')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 904,id,'2026-09-02',1000,'COUNT BILL' FROM accounts LIMIT 1",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(94,'2026-09',904,'user','linked')",
+			),
+		]);
+		expect(
+			await db
+				.prepare("SELECT category_source FROM transactions WHERE id=904")
+				.first(),
+		).toEqual({ category_source: "bill" });
+		expect(await monthCounts(db, MONTH)).toMatchObject({ bill: 3 });
+	});
 	it("counts the month's transactions and who categorized them, matching Home", async () => {
 		const counts = await monthCounts(db, MONTH);
 		expect(counts).toEqual({
@@ -64,16 +84,17 @@ describe("monthCounts", () => {
 			needsCategory: await needsCategoryCount(db, MONTH),
 			user: 1,
 			merchantRule: 0,
+			bill: 2,
 			jev: await countWhere("category_source = 'jev'"),
 			unsure: 0,
 			noneFit: 0,
-			notYetAsked: 12,
+			notYetAsked: 10,
 			income: await countWhere("category_id IS NULL AND flag_income = 1"),
 			heldForReview: 0,
 			linkedWaiting: 0,
 		});
 		expect(counts.income).toBeGreaterThan(0);
-		expect(counts.needsCategory).toBe(12);
+		expect(counts.needsCategory).toBe(10);
 		expect(counts.jev).toBeGreaterThan(0);
 	});
 
@@ -113,12 +134,12 @@ describe("monthCounts", () => {
 
 		const counts = await monthCounts(db, MONTH);
 		expect(counts).toMatchObject({
-			needsCategory: 10,
+			needsCategory: 8,
 			user: 2,
 			merchantRule: 1,
 			unsure: 1,
 			noneFit: 1,
-			notYetAsked: 8,
+			notYetAsked: 6,
 		});
 	});
 
