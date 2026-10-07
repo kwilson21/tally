@@ -50,6 +50,7 @@ import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MaybeCategory, SuggestedCategoryChip } from "../views/maybe-category";
+import { MerchantRules } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
@@ -124,6 +125,7 @@ const SECTIONS = [
 	["shell", "Page shell"],
 	["home", "Home's top"],
 	["accounts", "Accounts"],
+	["settings", "Settings"],
 	["trends", "Trends"],
 	["rows", "Rows"],
 	["controls", "Controls"],
@@ -2719,6 +2721,39 @@ const TRENDS_TOP_STATES = [
 	["Within a dollar, in words: never “$0 less”", 0, 0],
 ] as const;
 
+function SettingsGroup() {
+	return (
+		<Group id="settings" title="Settings">
+			<Specimen
+				id="merchant-rules-list"
+				title="Merchant rules"
+				tier="visual"
+				components={["MerchantRules"]}
+				sentence="One place for what Tally does on its own and what it won't suggest. The merchant list is A to Z, with search above 20 merchants."
+			>
+				<State label="More than 20 merchants · search and count">
+					<MerchantRules
+						id="catalog-merchant-rules"
+						total={34}
+						rules={[
+							{
+								merchantKey: "COSTCO",
+								merchant: "Costco",
+								categoryId: 1,
+								category: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+								archived: false,
+								transactions: 23,
+							},
+						]}
+					/>
+				</State>
+			</Specimen>
+		</Group>
+	);
+}
+
 function TrendsGroup() {
 	const partPage = buildTrends(TRENDS_PART_INPUT);
 	const early = earlyPage(TRENDS_EARLY_INPUT);
@@ -2949,6 +2984,7 @@ export function Catalog() {
 			<Shell />
 			<HomeTopGroup />
 			<AccountsGroup />
+			<SettingsGroup />
 			<TrendsGroup />
 			<Rows />
 			<Controls />

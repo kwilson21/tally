@@ -77,6 +77,8 @@ describe("parseEdit", () => {
 			value: {
 				categoryId: 2,
 				alwaysForMerchant: false,
+				alwaysWas: false,
+				merchantRuleWas: null,
 				displayName: "Local Bakery",
 				nameChanged: true,
 				keepBankName: false,
