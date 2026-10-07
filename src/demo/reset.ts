@@ -22,6 +22,7 @@ const TABLES_CHILD_FIRST = [
 	"documents",
 	"balance_history",
 	"transactions",
+	"household_people",
 	"category_suggestions",
 	"bills",
 	"budget_amounts",
@@ -91,6 +92,9 @@ export async function resetDemo(
 		// second run on the same household day can't spend the demo's cap over again (spec §8.6).
 		db.prepare(
 			"DELETE FROM household_settings WHERE key NOT GLOB 'jev_calls_*'",
+		),
+		db.prepare(
+			"INSERT INTO household_people (id, name) VALUES (1, 'Everyone')",
 		),
 		// The demo's time zone goes back to the default, like everything else a visitor can change.
 		db

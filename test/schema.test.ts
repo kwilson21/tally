@@ -12,6 +12,13 @@ async function tables() {
 	return results.map((r) => r.name);
 }
 
+async function columns(table: string) {
+	const { results } = await db
+		.prepare(`PRAGMA table_info(${table})`)
+		.all<{ name: string }>();
+	return results.map((column) => column.name);
+}
+
 beforeEach(async () => {
 	await db.batch([
 		db.prepare("DELETE FROM bill_payments"),
@@ -55,12 +62,52 @@ describe("schema", () => {
 			"documents",
 			"feedback",
 			"household_members",
+			"household_people",
 			"household_settings",
 			"merchants",
 			"plaid_items",
 			"savings_goal_amounts",
 			"transactions",
 		]);
+	});
+
+	it("records the optional category archive date", async () => {
+		const { results } = await db
+			.prepare("PRAGMA table_info(categories)")
+			.all<{ name: string; notnull: number }>();
+		expect(
+			results.find((column) => column.name === "archived_on"),
+		).toMatchObject({
+			notnull: 0,
+		});
+	});
+
+	it("keeps the transaction details and reconnect migration columns", async () => {
+		expect(await columns("transactions")).toEqual(
+			expect.arrayContaining([
+				"kind",
+				"for_person_id",
+				"note_guessed",
+				"kind_guessed",
+				"for_person_guessed",
+				"details_asked",
+				"note_tried_at",
+				"note_dismissed",
+			]),
+		);
+		expect(await columns("household_people")).toEqual(
+			expect.arrayContaining(["id", "name"]),
+		);
+		expect(await columns("household_members")).toEqual(
+			expect.arrayContaining([
+				"email",
+				"first_seen_at",
+				"last_seen_at",
+				"session_issued_at",
+				"removed_at",
+			]),
+		);
+		expect(await columns("plaid_items")).toContain("reconnect_emailed_at");
 	});
 
 	it("rejects duplicate Plaid item ids", async () => {

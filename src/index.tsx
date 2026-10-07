@@ -34,7 +34,11 @@ import { trends } from "./routes/trends";
 import { webhooks } from "./routes/webhooks";
 import { type Deadline, runTimeBudgetMs, sortTimeBudgetMs } from "./run-budget";
 import { sameOrigin, security } from "./security";
-import { nameCallLimit, suggestMerchantNames } from "./suggest-names-pending";
+import {
+	nameCallLimit,
+	suggestMerchantNames,
+	suggestTransactionNotes,
+} from "./suggest-names-pending";
 
 type AppEnv = Env & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
@@ -201,7 +205,8 @@ async function sortWithJev(
  */
 async function nameMerchants(env: ScheduledEnv, deadline: Deadline) {
 	try {
-		await suggestMerchantNames(env, nameCallLimit, deadline);
+		const notes = await suggestTransactionNotes(env, nameCallLimit, deadline);
+		await suggestMerchantNames(env, nameCallLimit - notes.asked, deadline);
 	} catch (error) {
 		console.error(
 			`workers-ai: names step failed ${error instanceof Error ? error.name : "unknown"}`,

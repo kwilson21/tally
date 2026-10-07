@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { COLOR_TOKENS, DURATION_TOKENS } from "../src/design-system/tokens";
+import {
+	COLOR_TOKENS,
+	DURATION_TOKENS,
+	SHADOW_TOKENS,
+	SWIPE_MOTION_TOKENS,
+} from "../src/design-system/tokens";
 import css from "../src/styles/app.css?raw";
 import { Chip } from "../src/views/chip";
 
@@ -52,6 +57,8 @@ const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
  */
 const EXCEPTIONS: Record<string, string[]> = {
 	"../public/js/toast.js": ["shadow-sm"],
+	"../src/views/month-end.tsx": ["shadow-swipe-cue"],
+	"../src/design-system/tokens.ts": ["shadow-swipe-cue"],
 	"../src/design-system/proposals-polish.tsx": [
 		"[&_[data-money]_.rounded-control]:rounded-lg",
 		"[&_[data-money]_.rounded-tr-control]:rounded-tr-lg",
@@ -335,7 +342,7 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(Object.keys(SOURCES)).toContain("../public/js/toast.js");
 	});
 
-	it("uses only token colors, token radii, and no shadows except toasts", () => {
+	it("uses only token colors, token radii and documented shadow tokens", () => {
 		const all = Object.entries(SOURCES).flatMap(([file, text]) =>
 			problems(file, text).map((p) => `${file}: ${p}`),
 		);
@@ -726,5 +733,22 @@ describe("design tokens (DESIGN.md)", () => {
 		);
 		expect(theme.length).toBeGreaterThan(5);
 		expect(DURATION_TOKENS.map((t) => [t.name, t.value])).toEqual(theme);
+	});
+
+	it("lists the swipe easing and distance as app.css tokens", () => {
+		for (const token of SWIPE_MOTION_TOKENS) {
+			expect(css).toContain(`--${token.name}: ${token.value};`);
+		}
+	});
+
+	it("lists the finished-chart shadow as an app.css token", () => {
+		expect(css).toContain("--shadow-swipe-cue:");
+		expect(SHADOW_TOKENS).toEqual([
+			{
+				name: "shadow-swipe-cue",
+				value: "0 2px 8px ink at 18%",
+				use: "the dark finished-month chart arrow",
+			},
+		]);
 	});
 });

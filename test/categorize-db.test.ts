@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import {
 	applyMerchantRules,
 	needsCategoryCount,
@@ -53,6 +54,7 @@ const decision = (over = {}) => ({
 
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
+	await saveAiSwitches(db, { details: false });
 });
 
 describe("pendingForJev", () => {

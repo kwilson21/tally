@@ -10,3 +10,13 @@ export function barGeometry(spentCents: number, budgetCents: number) {
 		fillPct: Math.min(100, Math.round((spent / budgetCents) * 1000) / 10),
 	};
 }
+
+/** A finished month's chart bar: at most 25% past its dashed budget line. */
+export function endBarRatio(spentCents: number, budgetCents: number) {
+	if (spentCents <= 0) return { ratio: 0, capped: false };
+	if (budgetCents <= 0) return { ratio: 1.25, capped: true };
+	const ratio = spentCents / budgetCents;
+	return ratio > 1.25
+		? { ratio: 1.25, capped: true }
+		: { ratio, capped: false };
+}

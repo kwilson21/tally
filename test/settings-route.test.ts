@@ -574,6 +574,67 @@ describe("Cancel", () => {
 	});
 });
 
+describe("household people", () => {
+	it.each(["", "x".repeat(61)])(
+		"shows an invalid rename on that person's row",
+		async (name) => {
+			await env.DB.prepare(
+				"INSERT INTO household_people(name) VALUES ('Person A'),('Person B')",
+			).run();
+			const person = await env.DB.prepare(
+				"SELECT id FROM household_people WHERE name='Person A'",
+			).first<{ id: number }>();
+			const { res, html } = await post("/settings/people", {
+				action: "rename",
+				person_id: String(person?.id),
+				name,
+			});
+			expect(res.status).toBe(422);
+			const people = html.slice(html.indexOf('id="household-people"'));
+			const row = people.slice(
+				people.indexOf(`id="person-${person?.id}"`) - 300,
+				people.indexOf('id="person-3"'),
+			);
+			expect(row).toContain('role="alert"');
+			expect(
+				people.slice(people.indexOf('id="person-3"')).match(/role="alert"/g) ??
+					[],
+			).toHaveLength(0);
+		},
+	);
+
+	it("scopes a rejected rename error and value to its person", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Person A'),('Person B')",
+		).run();
+		const a = await env.DB.prepare(
+			"SELECT id FROM household_people WHERE name='Person A'",
+		).first<{ id: number }>();
+		const { res, html } = await post("/settings/people", {
+			action: "rename",
+			person_id: String(a?.id),
+			name: "Everyone",
+		});
+		expect(res.status).toBe(422);
+		const people = html.slice(html.indexOf('id="household-people"'));
+		const b = people.slice(
+			people.indexOf('id="person-3"'),
+			people.indexOf('id="person-new"'),
+		);
+		expect(b).not.toContain("That name is already in your household.");
+		expect(people.slice(people.indexOf('id="person-new"'))).not.toContain(
+			"That name is already in your household.",
+		);
+		expect(people).toContain('id="person-new"');
+	});
+
+	it("Cancel returns the focused household people section", async () => {
+		const { html } = await get("/settings?peopleFocus=1");
+		const people = html.slice(html.indexOf('id="household-people"'));
+		expect(people).toMatch(/<h3[^>]*id="people-title"[^>]*autofocus/);
+	});
+});
+
 describe("a name taken by someone else at the same moment", () => {
 	it("shows the usual error instead of failing", async () => {
 		// The form's check passes, then the database refuses: the first save won.

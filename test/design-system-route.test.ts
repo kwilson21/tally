@@ -239,6 +239,24 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('id="announcer"');
 	});
 
+	it("gives the two scrollable MonthEnd specimens unique targets across the catalog", async () => {
+		const { html } = await get("/design-system");
+		const ids = [...html.matchAll(/id="([^"]*-chart-end)"/g)].map(
+			(match) => match[1],
+		);
+		const links = [...html.matchAll(/href="#([^"]*-chart-end)"/g)].map(
+			(match) => match[1],
+		);
+		expect(ids).toHaveLength(2);
+		expect(new Set(ids).size).toBe(ids.length);
+		expect(links).toEqual(ids);
+		expect(html).toContain("bg-ink text-lg text-paper shadow-swipe-cue");
+		expect(html).toContain("month-end-swipe-arrow-left text-accent");
+		expect(html).toContain(
+			"The twelve-category ink arrow and terracotta cue under prefers-reduced-motion: arrows rest",
+		);
+	});
+
 	it("describes every Accounts action's states, and shows Sync now as the app does", async () => {
 		const { html } = await get("/design-system");
 		const section =
@@ -405,6 +423,24 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toContain(
 			"A name typed here is used instead of any name above. For all 9 transactions from this merchant.",
 		);
+	});
+
+	it("catalogs transaction detail rows and the household people list before app use (P89 A)", async () => {
+		const { html } = await get("/design-system");
+		const detail =
+			html.split('id="detail-row"')[1]?.split("</section>")[0] ?? "";
+		const people = html.split('id="household-people"')[1] ?? "";
+		expect(detail).toContain('data-ds-components="DetailRow"');
+		expect(detail).toContain("What it was");
+		expect(detail).toContain("Tally&#39;s guess");
+		expect(detail).toContain("decoration-dashed");
+		expect(people).toContain('data-ds-components="HouseholdPeople"');
+		expect(html).toContain("Add a person");
+		expect(html).toContain("Everyone");
+		expect(design).toMatch(
+			/\| DetailRow \|[^\n]*Name, What it was, Kind and For/,
+		);
+		expect(design).toMatch(/\| HouseholdPeople \|[^\n]*Everyone/);
 	});
 
 	it("shows ViewLinks with each view current, as the demo's Transactions draws it, with its whole use spec (P44 A)", async () => {
@@ -642,6 +678,35 @@ describe("GET /design-system in the demo", () => {
 	it("has no links that go nowhere: no specimen links back to the catalog itself", async () => {
 		const { html } = await get("/design-system");
 		expect(html).not.toMatch(/href="\/design-system#/);
+	});
+
+	it("keeps the month-history visual specimen's month links inert", async () => {
+		const { html } = await get("/design-system");
+		const start = html.lastIndexOf(
+			"<section",
+			html.indexOf('id="home-month-history"'),
+		);
+		let depth = 0;
+		let end = html.length;
+		for (const match of html
+			.slice(start)
+			.matchAll(/<section\b[^>]*>|<\/section>/g)) {
+			depth += match[0] === "</section>" ? -1 : 1;
+			if (depth === 0) {
+				end = start + (match.index ?? 0) + match[0].length;
+				break;
+			}
+		}
+		const section = html.slice(start, end);
+		expect(section).toContain("w-[320px]");
+		const openDivs: boolean[] = [];
+		for (const match of section.matchAll(/<div\b[^>]*>|<\/div>|<a\b[^>]*>/g)) {
+			const tag = match[0];
+			if (tag === "</div>") openDivs.pop();
+			else if (tag.startsWith("<div"))
+				openDivs.push(/\sinert(?:\s|>|=)/.test(tag));
+			else expect(openDivs, tag).toContain(true);
+		}
 	});
 
 	it("gives every specimen one tier, and makes Visual ones inert to htmx", async () => {

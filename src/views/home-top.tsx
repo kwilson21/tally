@@ -12,6 +12,7 @@ import { WhyLink } from "./why-link";
 type Props = {
 	/** "September" */
 	month: string;
+	monthHeading?: Child;
 	safeToSpendCents: number;
 	/** The status sentence: "Eating Out is $36 over. Everything else is on track." */
 	status: string;
@@ -30,6 +31,7 @@ type Props = {
 /** The month, then Safe to spend, the status sentence, How this works, a stale-bank line when needed, and the Band. */
 export function HomeTop({
 	month,
+	monthHeading,
 	safeToSpendCents,
 	status,
 	bankLine,
@@ -45,12 +47,15 @@ export function HomeTop({
 		: formatCents(safeToSpendCents, { wholeDollars: true });
 	return (
 		<>
-			<h1 class="font-serif text-2xl font-semibold tracking-tight">{month}</h1>
+			{monthHeading ?? (
+				<h1 class="font-serif text-2xl font-semibold tracking-tight">
+					{month}
+				</h1>
+			)}
 			<div class="mt-2 flex items-center justify-between gap-6">
 				<div>
-					<p class="flex items-center text-lg text-muted">
-						Safe to spend <span class="mx-1">·</span>
-						<WhyLink section="budget" topic="safe to spend" />
+					<p class="text-lg text-muted">
+						Safe to spend · <WhyLink section="budget" topic="safe to spend" />
 					</p>
 					<p
 						class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${over ? "text-over" : ""}`}

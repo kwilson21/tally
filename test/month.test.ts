@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
-import { loadMonth } from "../src/db/month";
+import { firstCountedMonth, loadMonth } from "../src/db/month";
 
 const db = env.DB;
 
@@ -41,6 +41,57 @@ beforeAll(async () => {
 });
 
 describe("loadMonth", () => {
+	it("keeps archived budgets only from months the category was active", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (41, 'Before no spend', 'tag', 'cat-blue', 41), (42, 'Before with spend', 'tag', 'cat-blue', 42), (43, 'During', 'tag', 'cat-blue', 43), (44, 'After', 'tag', 'cat-blue', 44), (45, 'Restored', 'tag', 'cat-blue', 45)",
+			),
+			db.prepare(
+				"INSERT INTO budget_amounts VALUES (41, '2026-09', 1000), (42, '2026-09', 2000), (43, '2026-09', 3000), (44, '2026-09', 4000), (45, '2026-09', 5000)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id) VALUES (1, '2026-09-12', 500, 'BEFORE SPEND', 42)",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-08-31' WHERE id IN (41, 42)",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-09-15' WHERE id = 43",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-10-01' WHERE id = 44",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 1, archived_on = '2026-08-31' WHERE id = 45",
+			),
+			db.prepare(
+				"UPDATE categories SET archived = 0, archived_on = NULL WHERE id = 45",
+			),
+		]);
+		const data = await loadMonth(db, "2026-09");
+		const byId = new Map(
+			data.categories.map((category) => [category.id, category]),
+		);
+		expect(byId.has(41)).toBe(false);
+		expect(byId.get(42)).toMatchObject({ id: 42, archived: true });
+		expect(byId.has(43)).toBe(true);
+		expect(byId.has(44)).toBe(true);
+		expect(byId.get(45)).toMatchObject({ id: 45, archived: false });
+		const budgeted = new Set(data.amounts.map((amount) => amount.categoryId));
+		expect(budgeted.has(41)).toBe(false);
+		expect(budgeted.has(42)).toBe(false);
+		expect(budgeted.has(43)).toBe(true);
+		expect(budgeted.has(44)).toBe(true);
+		expect(budgeted.has(45)).toBe(true);
+		await db.batch([
+			db.prepare("DELETE FROM transactions WHERE raw_name = 'BEFORE SPEND'"),
+			db.prepare(
+				"DELETE FROM budget_amounts WHERE category_id BETWEEN 41 AND 45",
+			),
+			db.prepare("DELETE FROM categories WHERE id BETWEEN 41 AND 45"),
+		]);
+	});
+
 	it("returns only counted transactions for the month", async () => {
 		const data = await loadMonth(db, "2026-09");
 		const amounts = data.transactions
@@ -100,5 +151,207 @@ describe("loadMonth", () => {
 				(t) => t.amountCents === 4000,
 			),
 		).toBe(false);
+	});
+});
+
+describe("firstCountedMonth query count", () => {
+	it("uses one indexed date lookup", async () => {
+		let statements = 0;
+		let lookup = "";
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						lookup = sql;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		expect(await firstCountedMonth(counted as D1Database)).toBe("2026-08");
+		expect(statements).toBe(1);
+		const plan = await db
+			.prepare(`EXPLAIN QUERY PLAN ${lookup}`)
+			.all<{ detail: string }>();
+		expect(plan.results.map((row) => row.detail).join(" ")).toContain(
+			"transactions_date",
+		);
+		expect(
+			plan.results.some(({ detail }) =>
+				/SEARCH t USING INDEX transactions_date \(date>\? AND date<\?\)/.test(
+					detail,
+				),
+			),
+		).toBe(true);
+	});
+
+	async function clearHistory() {
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM bills"),
+			db.prepare("DELETE FROM transactions"),
+		]);
+	}
+
+	it("starts at the earliest month with a counted transaction, skipping excluded history", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded) VALUES (301, 1, '2026-08-12', 1000, 'TRANSFER', 1)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (302, 1, '2026-09-02', 1000, 'GROCERIES')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-09");
+	});
+
+	it("starts at income before spending, while still skipping an excluded earlier month", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded, flag_income) VALUES (313, 1, '2026-07-12', 1000, 'EXCLUDED', 1, 0)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, flag_income) VALUES (314, 1, '2026-08-12', -100000, 'PAYCHECK', 1)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (315, 1, '2026-09-02', 1000, 'GROCERIES')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-08");
+	});
+
+	it("uses an earlier linked bill occurrence month", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(93,'First rent',4000,1,'monthly',1,'RENT')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES(93,1,'2026-08-31',4000,'RENT',1)",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(93,'2026-07',93,'user','linked')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-07");
+	});
+
+	it("finds an earlier occurrence even when a later bank date follows the first spending date", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(94,'July rent',4000,1,'monthly',1,'RENT')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES (307,1,'2026-08-02',1000,'GROCERIES',1), (308,1,'2026-09-02',4000,'RENT',1)",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(94,'2026-07',308,'user','linked')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-07");
+	});
+
+	it("covers a bill occurrence two calendar months before its payment date", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(95,'January rent',4000,31,'monthly',1,'RENT')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES (309,1,'2026-02-01',1000,'GROCERIES',1), (310,1,'2026-03-02',4000,'RENT',1)",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(95,'2026-01',310,'user','linked')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-01");
+	});
+
+	it("does not let a payment outside the link date window extend the bound", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(96,'July rent',4000,1,'monthly',1,'RENT')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES (311,1,'2026-08-02',1000,'GROCERIES',1), (312,1,'2026-11-02',4000,'RENT',1)",
+			),
+			// The link route rejects this: the bank date is over 30 days from July 1.
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(96,'2026-07',312,'user','linked')",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-08");
+	});
+
+	it("uses the purchase month for a linked refund dated earlier", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (304, 1, '2026-09-12', 1000, 'PURCHASE', 1)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, credit_reviewed, refund_of_id) VALUES (305, 1, '2026-08-12', -500, 'REFUND', 1, 1, 304)",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-09");
+	});
+
+	it("returns no month when history has no counted transaction", async () => {
+		await clearHistory();
+		await db
+			.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, excluded) VALUES (306, 1, '2026-08-12', 1000, 'TRANSFER', 1)",
+			)
+			.run();
+		expect(await firstCountedMonth(db)).toBeNull();
+	});
+
+	it("moves the first month back for a first-month bill payment counted in its prior occurrence month", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(91,'First rent',4000,1,'monthly',1,'RENT')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES(91,1,'2026-08-31',4000,'RENT',1)",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(91,'2026-07',91,'user','linked')",
+			)
+			.run();
+		expect(await firstCountedMonth(db)).toBe("2026-07");
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments WHERE bill_id=91"),
+			db.prepare("DELETE FROM transactions WHERE id=91"),
+			db.prepare("DELETE FROM bills WHERE id=91"),
+		]);
+	});
+
+	it("keeps the bank month when a bill payment occurrence is later than its date month", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(92,'Later rent',4000,1,'monthly',1,'RENT')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) VALUES(92,1,'2026-08-30',4000,'RENT',1)",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(92,'2026-09',92,'user','linked')",
+			)
+			.run();
+		expect(await firstCountedMonth(db)).toBe("2026-08");
 	});
 });

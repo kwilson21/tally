@@ -3,7 +3,7 @@ import type { Child } from "hono/jsx";
 import { calculateBillTotals } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
-import { daysInMonth, householdToday, monthName } from "../dates";
+import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
 import { bankSyncs } from "../db/accounts";
 import {
 	type BudgetCategory,
@@ -13,13 +13,17 @@ import {
 	setBudget,
 	threeMonthAverageSpentCents,
 } from "../db/budgets";
-import { homeForecastDays } from "../db/home-forecast";
-import { loadMonth } from "../db/month";
-import { setSavingsGoal } from "../db/savings-goals";
 import {
-	needsCategoryCount,
-	olderNeedsCategoryCount,
-} from "../db/transactions";
+	COUNTED_JOINS,
+	countedCategorySql,
+	countedMonthSql,
+	FOLLOWS_PURCHASE,
+	INCLUDED,
+} from "../db/counted-month";
+import { homeForecastDays } from "../db/home-forecast";
+import { firstCountedMonth, loadMonth } from "../db/month";
+import { setSavingsGoal } from "../db/savings-goals";
+import { olderNeedsCategoryCount } from "../db/transactions";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { centsToAmount, formatCents } from "../money";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
@@ -33,6 +37,12 @@ import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
+import {
+	categoryRowAmount,
+	MonthEnd,
+	PastNotBudgeted,
+} from "../views/month-end";
+import { MonthNavigation } from "../views/month-navigation";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
@@ -49,6 +59,9 @@ const amount = (cents: number) =>
 /** The Band's amount: whole dollars like the budget rows, but cents under $1, so it never reads "$0" for 30¢. */
 const bandAmount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents >= 100 || cents === 0 });
+
+const COUNTED_CATEGORY = countedCategorySql();
+const NEEDS_CATEGORY_SQL = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
@@ -86,6 +99,10 @@ const adjustAttrs = (href: string) => ({
 const nudgeAttrs = inPlace;
 
 type HomeOptions = {
+	/** A finished month selected from Home's month strip. */
+	viewMonth?: string;
+	/** First month with a counted transaction, already read by the root route. */
+	firstMonth?: string;
 	/** The budget sheet over Home, drawn with this month's numbers. */
 	sheet?: (
 		spentCents: (id: number) => number,
@@ -108,6 +125,8 @@ async function renderHome(
 	c: Context<App>,
 	today: string,
 	{
+		viewMonth,
+		firstMonth: firstMonthOption,
 		sheet,
 		focusId,
 		focusSavingsGoal,
@@ -116,34 +135,40 @@ async function renderHome(
 		status = 200,
 	}: HomeOptions = {},
 ) {
-	const month = today.slice(0, 7);
+	const currentMonth = today.slice(0, 7);
+	const month = viewMonth ?? currentMonth;
+	const current = month === currentMonth;
 	const data = await loadMonth(c.env.DB, month);
-	const billData = await loadBillRows(c.env.DB, today);
-	const activeBills = billData.rows.filter((bill) => bill.active);
-	const dueBills = billData.rows.filter(
-		(b) => b.active && (b.status === "due" || b.status === "overdue"),
-	);
-	const billTotals = calculateBillTotals({
-		month,
-		bills: activeBills.map((bill) => ({
-			id: bill.id,
-			amountCents: bill.amountCents,
-			frequency: bill.frequency,
-			active: true,
-		})),
-		displayedOccurrences: activeBills.map((bill) => ({
-			billId: bill.id,
-			dueDate: bill.dueDate,
-			status: bill.status,
-			amountCents: bill.amountCents,
-			paidCents: bill.paidCents,
-		})),
-		thisMonthOccurrences: activeBills.flatMap((bill) =>
-			bill.totalOccurrences
-				.filter((occurrence) => occurrence.dueDate.startsWith(month))
-				.map((occurrence) => ({ billId: bill.id, ...occurrence })),
-		),
-	});
+	const billData =
+		month === currentMonth ? await loadBillRows(c.env.DB, today) : null;
+	const dueBills =
+		billData?.rows.filter(
+			(b) => b.active && (b.status === "due" || b.status === "overdue"),
+		) ?? [];
+	const activeBills = billData?.rows.filter((bill) => bill.active) ?? [];
+	const billTotals = current
+		? calculateBillTotals({
+				month,
+				bills: activeBills.map(({ id, amountCents, frequency }) => ({
+					id,
+					amountCents,
+					frequency,
+					active: true,
+				})),
+				displayedOccurrences: activeBills.map((bill) => ({
+					billId: bill.id,
+					dueDate: bill.dueDate,
+					status: bill.status,
+					amountCents: bill.amountCents,
+					paidCents: bill.paidCents,
+				})),
+				thisMonthOccurrences: activeBills.flatMap((bill) =>
+					bill.totalOccurrences
+						.filter((occurrence) => occurrence.dueDate.startsWith(month))
+						.map((occurrence) => ({ billId: bill.id, ...occurrence })),
+				),
+			})
+		: null;
 	const summary = summarizeMonth({
 		month,
 		...data,
@@ -151,10 +176,20 @@ async function renderHome(
 		savingsGoalCents: data.savingsGoalCents,
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
+	const storedFirstMonth =
+		firstMonthOption ?? (await firstCountedMonth(c.env.DB));
+	const firstMonth =
+		storedFirstMonth && storedFirstMonth < currentMonth
+			? storedFirstMonth
+			: currentMonth;
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));
-	const notBudgeted = data.categories.filter(
-		(cat) => !cat.archived && !budgeted.has(cat.id),
-	);
+	const notBudgeted = data.categories.filter((cat) => {
+		if (budgeted.has(cat.id)) return false;
+		const hasSpending = data.transactions.some(
+			(t) => t.categoryId === cat.id && !t.income,
+		);
+		return current ? !cat.archived || hasSpending : hasSpending;
+	});
 	// Focus goes to the row asked for; if it isn't a link any more (archived on another screen while
 	// its sheet was open), to the Budget heading, so focus is never lost.
 	const linked = new Set(
@@ -163,28 +198,40 @@ async function renderHome(
 	const focusHeading = focusId !== undefined && !linked.has(focusId);
 	// Adjust is offered when there's a budget it can change: a budgeted category that isn't archived.
 	const canAdjust = summary.categories.some((cat) => linked.has(cat.id));
+	const { spentCents } = summary.uncategorized;
+	const needsCount = current
+		? await c.env.DB.prepare(
+				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${countedMonthSql()} = ? AND ${NEEDS_CATEGORY_SQL}`,
+			)
+				.bind(month)
+				.first<{ n: number }>()
+		: null;
+	const currentNeeds = needsCount?.n ?? 0;
+	const olderNeeds = current
+		? await olderNeedsCategoryCount(c.env.DB, `${month}-01`)
+		: 0;
 	const hasSavingsGoal = (data.savingsGoalCents ?? 0) > 0;
-	const { count, spentCents } = summary.uncategorized;
 	const needs = (
 		<>
-			{count}
+			{currentNeeds}
 			<span class="sr-only">
 				{" "}
-				{count === 1 ? "transaction" : "transactions"}
+				{currentNeeds === 1 ? "transaction" : "transactions"}
 			</span>{" "}
-			{count === 1 ? "needs" : "need"} a category
+			{currentNeeds === 1 ? "needs" : "need"} a category
 		</>
 	);
-	const currentNeeds = await needsCategoryCount(c.env.DB, month);
-	const olderNeeds = await olderNeedsCategoryCount(c.env.DB, `${month}-01`);
 	const demo = c.env.DEMO === "true";
 	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
 	// no real banks, so it never asks.
-	const bankNotice = demo
-		? null
-		: homeBankNotice(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+	const bankNotice =
+		demo || !current
+			? null
+			: homeBankNotice(flaggedBanks(await bankSyncs(c.env.DB), today), today);
 	const day = Number(today.slice(8, 10));
-	const forecastDays = await homeForecastDays(c.env.DB, month, today);
+	const forecastDays = current
+		? await homeForecastDays(c.env.DB, month, today)
+		: [];
 	const forecastSpentCents = forecastDays.reduce(
 		(sum, row) => sum + row.spentCents,
 		0,
@@ -209,15 +256,16 @@ async function renderHome(
 		everydayCents,
 		billPaymentsCents,
 		refundsCents,
-		billsStillDueCents: billTotals.stillToPayCents,
+		billsStillDueCents: billTotals?.stillToPayCents ?? 0,
 	});
-	const showForecast = day >= FORECAST_START_DAY && forecast.visible;
-	const dailySpending = Array.from({ length: day }, (_, index) => {
-		const entry = forecastDays.find((item) => item.day === index + 1);
-		return entry?.spentCents ?? 0;
-	});
+	const showForecast = current && day >= FORECAST_START_DAY && forecast.visible;
+	const dailySpending = Array.from(
+		{ length: day },
+		(_, index) =>
+			forecastDays.find((item) => item.day === index + 1)?.spentCents ?? 0,
+	);
 	const dailyAmount =
-		day < FORECAST_START_DAY && summary.safeToSpendCents > 0
+		current && day < FORECAST_START_DAY && summary.safeToSpendCents > 0
 			? `About ${formatCents(Math.floor(summary.safeToSpendCents / (daysInMonth(month) - day + 1)))} a day for ${daysInMonth(month) - day + 1} days left.`
 			: undefined;
 	// Counted spending by category, income left out, as Home counts it (spec §6).
@@ -225,6 +273,10 @@ async function renderHome(
 		data.transactions
 			.filter((t) => t.categoryId === id && !t.income)
 			.reduce((sum, t) => sum + t.amountCents, 0);
+	const pastNotBudgeted = notBudgeted.map((cat) => ({
+		...cat,
+		spentCents: spent(cat.id),
+	}));
 
 	return c.html(
 		<Layout
@@ -236,49 +288,79 @@ async function renderHome(
 				<div id="page">
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}
 					<div class="lg:max-w-2xl">
-						<HomeTop
-							month={monthName(month)}
-							safeToSpendCents={summary.safeToSpendCents}
-							status={statusSentence(summary.categories)}
-							bankLine={bankNotice?.words}
-							bankDate={bankNotice?.asOf}
-							dailyAmount={dailyAmount}
-							forecast={
-								showForecast && (
-									<HomeForecast
+						{current ? (
+							<HomeTop
+								month={monthName(month)}
+								monthHeading={
+									<MonthNavigation
 										month={month}
-										day={day}
-										daysInMonth={daysInMonth(month)}
-										spentByDay={dailySpending}
-										budgetCents={summary.totalBudgetCents}
-										endCents={forecast.endCents}
-										differenceCents={
-											summary.totalBudgetCents - forecast.endCents
-										}
+										firstMonth={firstMonth}
+										currentMonth={currentMonth}
 									/>
-								)
-							}
-							band={
-								currentNeeds > 0 || olderNeeds > 0
-									? {
-											href: "/transactions/organize",
-											text:
-												currentNeeds > 0
-													? needs
-													: `${olderNeeds} ${olderNeeds === 1 ? "transaction" : "transactions"} from earlier months ${olderNeeds === 1 ? "needs" : "need"} a category`,
-											older: currentNeeds > 0 ? olderNeeds : undefined,
-											// Home says "needs a category" once: the Band carries the amount (decision 50).
-											// Refunds can outweigh the spending; it says so, as the budget sheet does.
-											detail:
-												currentNeeds === 0
-													? undefined
-													: spentCents < 0
-														? `${bandAmount(-summary.uncategorized.spentCents)} more refunded than spent`
-														: `${bandAmount(summary.uncategorized.spentCents)} of this month's spending`,
-										}
-									: undefined
-							}
-						/>
+								}
+								safeToSpendCents={summary.safeToSpendCents}
+								status={statusSentence(summary.categories)}
+								bankLine={bankNotice?.words}
+								bankDate={bankNotice?.asOf}
+								dailyAmount={dailyAmount}
+								forecast={
+									showForecast && (
+										<HomeForecast
+											month={month}
+											day={day}
+											daysInMonth={daysInMonth(month)}
+											spentByDay={dailySpending}
+											budgetCents={summary.totalBudgetCents}
+											endCents={forecast.endCents}
+											differenceCents={
+												summary.totalBudgetCents - forecast.endCents
+											}
+										/>
+									)
+								}
+								band={
+									currentNeeds > 0 || olderNeeds > 0
+										? {
+												href: "/transactions/organize",
+												text:
+													currentNeeds > 0
+														? needs
+														: `${olderNeeds} ${olderNeeds === 1 ? "transaction" : "transactions"} from earlier months ${olderNeeds === 1 ? "needs" : "need"} a category`,
+												older: currentNeeds > 0 ? olderNeeds : undefined,
+												// Refunds can outweigh the spending; it says so, as the budget sheet does.
+												detail:
+													currentNeeds === 0
+														? undefined
+														: spentCents < 0
+															? `${bandAmount(-summary.uncategorized.spentCents)} more refunded than spent`
+															: `${bandAmount(summary.uncategorized.spentCents)} of this month's spending`,
+											}
+										: undefined
+								}
+							/>
+						) : (
+							<>
+								<MonthNavigation
+									month={month}
+									firstMonth={firstMonth}
+									currentMonth={currentMonth}
+								/>
+								<MonthEnd
+									chartId={month}
+									monthName={monthLabel(month, currentMonth)}
+									amountCents={
+										summary.totalBudgetCents - summary.totalSpentCents
+									}
+									rows={summary.categories}
+								/>
+								<a
+									href="/"
+									class="mt-3 inline-flex min-h-11 items-center text-accent"
+								>
+									Back to {monthName(currentMonth)}
+								</a>
+							</>
+						)}
 
 						<section class="mt-8" aria-labelledby="budget-title">
 							<div class="flex items-baseline justify-between gap-4">
@@ -290,7 +372,7 @@ async function renderHome(
 								>
 									Budget
 								</h2>
-								{canAdjust && (
+								{current && canAdjust && (
 									<AdjustLink
 										adjusting={adjusting === true}
 										attrs={adjustAttrs(adjusting ? "/" : "/?adjust=1")}
@@ -299,7 +381,7 @@ async function renderHome(
 							</div>
 							{(summary.categories.length > 0 || hasSavingsGoal) && (
 								<ul class="mt-2 divide-y divide-rule">
-									{hasSavingsGoal && (
+									{hasSavingsGoal && current && (
 										<SavingsGoalRow
 											amountCents={data.savingsGoalCents}
 											href="/savings-goal"
@@ -307,12 +389,16 @@ async function renderHome(
 											autofocus={focusSavingsGoal}
 										/>
 									)}
+									{hasSavingsGoal && !current && (
+										<SavingsGoalRow amountCents={data.savingsGoalCents} />
+									)}
 									{summary.categories.map((cat) => {
 										// An archived category shows for a month it has spending in (spec §7), but it
 										// can't be budgeted, so its row isn't a link.
-										const href = looks.get(cat.id)?.archived
-											? undefined
-											: `/budget/${cat.id}`;
+										const href =
+											current && !looks.get(cat.id)?.archived
+												? `/budget/${cat.id}`
+												: undefined;
 										return (
 											<ProgressRow
 												name={cat.name}
@@ -324,7 +410,7 @@ async function renderHome(
 												attrs={href ? openAttrs(href) : undefined}
 												autofocus={cat.id === focusId}
 												nudge={
-													adjusting && href
+													current && adjusting && href
 														? {
 																href: `${href}/nudge`,
 																id: `nudge-${cat.id}`,
@@ -341,7 +427,9 @@ async function renderHome(
 									})}
 								</ul>
 							)}
-							{(notBudgeted.length > 0 || !hasSavingsGoal) && (
+							{!current ? (
+								<PastNotBudgeted items={pastNotBudgeted} />
+							) : notBudgeted.length > 0 || !hasSavingsGoal ? (
 								<>
 									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
 									<ul class="divide-y divide-rule">
@@ -353,15 +441,26 @@ async function renderHome(
 												autofocus={focusSavingsGoal}
 											/>
 										)}
-										{notBudgeted.map((cat) => {
-											const href = `/budget/${cat.id}`;
-											return (
+										{notBudgeted.map((cat) =>
+											cat.archived ? (
+												<li class="flex min-h-11 items-center gap-4 py-2 text-ink">
+													<CategoryIcon icon={cat.icon} color={cat.color} />
+													<span class="min-w-0 flex-1 truncate text-lg">
+														{cat.name}
+													</span>
+													<span
+														class={categoryRowAmount(spent(cat.id)).className}
+													>
+														{categoryRowAmount(spent(cat.id)).text}
+													</span>
+												</li>
+											) : (
 												<li>
 													<a
-														href={href}
+														href={`/budget/${cat.id}`}
 														autofocus={cat.id === focusId}
 														class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
-														{...openAttrs(href)}
+														{...openAttrs(`/budget/${cat.id}`)}
 													>
 														<CategoryIcon icon={cat.icon} color={cat.color} />
 														<span class="min-w-0 flex-1 truncate text-lg">
@@ -370,14 +469,15 @@ async function renderHome(
 														<span class="text-accent">Add a budget</span>
 													</a>
 												</li>
-											);
-										})}
+											),
+										)}
 									</ul>
 								</>
-							)}
-							{!hasSavingsGoal &&
+							) : null}
+							{current &&
 								summary.categories.length === 0 &&
-								notBudgeted.length === 0 && (
+								notBudgeted.length === 0 &&
+								!hasSavingsGoal && (
 									<EmptyState
 										kind="done"
 										sentence="No categories to budget yet."
@@ -386,7 +486,7 @@ async function renderHome(
 									/>
 								)}
 						</section>
-						{dueBills.length > 0 && (
+						{current && dueBills.length > 0 && (
 							<section class="mt-8" aria-labelledby="home-bills-title">
 								<div class="flex items-baseline justify-between">
 									<h2
@@ -401,13 +501,13 @@ async function renderHome(
 								</div>
 								<ul class="divide-y divide-rule">
 									{dueBills.slice(0, 3).map((bill) => (
-										<BillRow bill={bill} today={billData.today} />
+										<BillRow bill={bill} today={billData?.today ?? today} />
 									))}
 								</ul>
 							</section>
 						)}
 						{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
-						{demo && (
+						{current && demo && (
 							<div class="mt-8">
 								<ThingsToTry />
 							</div>
@@ -527,22 +627,35 @@ async function activeCategory(c: Context<App>) {
 // ?focus=<id> puts focus on that row when the sheet closes.
 // ?adjust=1 is Adjust mode (#94).
 home.get("/", async (c) => {
-	const focusValue = c.req.query("focus");
-	const focus = Number(focusValue);
-	if (focusValue === "savings-goal" && c.req.header("HX-Request")) {
+	const today = await householdToday(c.env.DB);
+	const currentMonth = today.slice(0, 7);
+	const storedFirstMonth = await firstCountedMonth(c.env.DB);
+	const firstMonth =
+		storedFirstMonth && storedFirstMonth < currentMonth
+			? storedFirstMonth
+			: currentMonth;
+	const requested = c.req.query("month");
+	const viewMonth =
+		requested &&
+		/^\d{4}-(0[1-9]|1[0-2])$/.test(requested) &&
+		requested >= firstMonth &&
+		requested <= currentMonth
+			? requested
+			: currentMonth;
+	const focus = Number(c.req.query("focus"));
+	if (c.req.query("focus") === "savings-goal" && c.req.header("HX-Request")) {
 		const message = "Savings goal editing cancelled.";
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
-				toast: { message, type: "info" },
-				announce: message,
-			}),
+			JSON.stringify({ toast: { message, type: "info" }, announce: message }),
 		);
 	}
-	return renderHome(c, await householdToday(c.env.DB), {
-		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+	return renderHome(c, today, {
+		viewMonth,
+		firstMonth,
 		focusSavingsGoal: c.req.query("focus") === "savings-goal",
-		adjusting: c.req.query("adjust") === "1",
+		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		adjusting: viewMonth === currentMonth && c.req.query("adjust") === "1",
 	});
 });
 

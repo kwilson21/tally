@@ -107,16 +107,17 @@ export async function setArchived(
 	db: D1Database,
 	id: number,
 	archived: boolean,
+	archivedOn = new Date().toISOString().slice(0, 10),
 ): Promise<boolean> {
 	const result = await db
 		.prepare(
 			archived
-				? "UPDATE categories SET archived = 1 WHERE id = ?"
-				: `UPDATE categories SET archived = 0,
+				? "UPDATE categories SET archived = 1, archived_on = ? WHERE id = ? AND archived = 0"
+				: `UPDATE categories SET archived = 0, archived_on = NULL,
 					sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE archived = 0)
 				WHERE id = ? AND archived = 1 AND ${ROOM}`,
 		)
-		.bind(id)
+		.bind(...(archived ? [archivedOn, id] : [id]))
 		.run();
 	// False when a restore found the category already active, or the list already full.
 	return result.meta.changes > 0;

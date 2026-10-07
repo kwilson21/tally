@@ -93,15 +93,10 @@ export function rowCaption(row: ListRow): Caption {
 	return {
 		kind: "needs",
 		caption:
-			[
-				pair,
-				paidBill,
-				!pair && !paidBill && row.rawName !== row.displayName
-					? row.rawName
-					: null,
-			]
-				.filter(Boolean)
-				.join(" · ") || null,
+			pair ||
+			paidBill ||
+			row.note ||
+			(row.rawName === row.displayName ? null : row.rawName),
 		tag: true,
 	};
 }
@@ -171,6 +166,9 @@ export function TransactionRow({
 	const pending = row.pending === true;
 	const caption =
 		pending && kind === "needs" && tag && said === row.rawName ? null : said;
+	const guessedNoteShown = Boolean(
+		row.noteGuessed && kind === "needs" && caption === row.note,
+	);
 	const pendingLast =
 		pending &&
 		!countsIn &&
@@ -221,7 +219,16 @@ export function TransactionRow({
 								kind={maybeCategory.kind}
 							/>
 						) : (
-							caption && <span class="truncate text-muted">{caption}</span>
+							caption && (
+								<span
+									class={`truncate text-muted ${guessedNoteShown ? SUGGESTED_NAME_CLASS : ""}`}
+								>
+									{guessedNoteShown && (
+										<span class="sr-only">Tally's guess: </span>
+									)}
+									{caption}
+								</span>
+							)
 						)}
 						{/* A linked refund's caption names its purchase; the month shows only when a bill moved it. */}
 						{countsIn && (

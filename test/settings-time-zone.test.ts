@@ -36,7 +36,8 @@ const trigger = (res: Response) =>
 
 /** The Household section's markup. */
 const group = (html: string) =>
-	html.split('id="household"')[1]?.split("</section>")[0] ?? "";
+	html.split('id="household"')[1]?.split('<section id="household-people"')[0] ??
+	"";
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")
@@ -382,7 +383,7 @@ describe("today follows the saved zone", () => {
 		await post("/settings/time-zone", { time_zone: "Europe/London" });
 		const london = await get("/");
 		expect(london.html).toContain("November");
-		expect(london.html).not.toContain("October");
+		expect(london.html).toMatch(/<h1[^>]*>November<\/h1>/);
 
 		await post("/settings/time-zone", { time_zone: "America/New_York" });
 		const back = await get("/");

@@ -4,6 +4,7 @@ import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { decide, NONE_FIT } from "../src/ai/decide";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { getTransaction, saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -33,6 +34,7 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 let bakery: number;
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	await saveAiSwitches(env.DB, { details: false });
 	bakery = (
 		await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
@@ -509,7 +511,7 @@ describe("GET /transactions/:id", () => {
 		const { html } = await get(`/transactions/${id}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).not.toContain('type="radio" name="category" value="1"');
-		expect(sheet).not.toContain("Tally&#39;s guess");
+		expect(sheet).not.toContain("Tally&#39;s guess ·");
 	});
 
 	it("shows the list and the edit sheet, labeled and focused", async () => {
@@ -530,7 +532,7 @@ describe("GET /transactions/:id", () => {
 		expect(html).toContain("Always for this merchant");
 		expect(html).toContain("Count as income");
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value="Local Bakery"/);
-		expect(html).toMatch(/<label for="note"[^>]*>Note<\/label>/);
+		expect(html).toMatch(/<label for="note"[^>]*>What it was<\/label>/);
 		expect(html).toMatch(
 			/<a href="\/transactions\?uncategorized=1"[^>]*>Cancel<\/a>/,
 		);
@@ -689,6 +691,134 @@ describe("POST /transactions/:id", () => {
 		income: "0",
 		creditReviewed: "0",
 	};
+
+	it.each([
+		{ field: "note", submitted: "New note" },
+		{ field: "kind", submitted: "one_off" },
+		{ field: "for_person_id", submitted: "person B" },
+	])(
+		"keeps a hidden guessed $field edit across a validation retry",
+		async ({ field, submitted }) => {
+			const personA = await env.DB.prepare(
+				"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
+			).first<{ id: number }>();
+			const personB = await env.DB.prepare(
+				"INSERT INTO household_people(name) VALUES ('Person B') RETURNING id",
+			).first<{ id: number }>();
+			const personAId = String(personA?.id);
+			const personBId = String(personB?.id);
+			await env.DB.prepare(
+				"UPDATE transactions SET note='Old guess', note_guessed=1, kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
+			)
+				.bind(personA?.id, bakery)
+				.run();
+			const fields = {
+				...save,
+				category: "invalid",
+				details_visible: "0",
+				note: field === "note" ? submitted : "Old guess",
+				note_was: "Old guess",
+				kind: field === "kind" ? submitted : "bill",
+				kind_was: "bill",
+				for_person_id: field === "for_person_id" ? personBId : personAId,
+				for_person_id_was: personAId,
+			};
+			const error = await post(`/transactions/${bakery}`, fields);
+			expect(error.res.status).toBe(422);
+			for (const [name, value] of [
+				["note_was", "Old guess"],
+				["kind_was", "bill"],
+				["for_person_id_was", personAId],
+			])
+				expect(
+					error.html.match(new RegExp(`name="${name}" value="${value}"`, "g")),
+				).toHaveLength(2);
+			expect(error.html).toContain('name="details_visible" value="0"');
+			if (field === "note")
+				expect(error.html).toContain(">New note</textarea>");
+			if (field === "kind")
+				expect(error.html).toMatch(/name="kind" value="one_off" checked/);
+			if (field === "for_person_id")
+				expect(error.html).toContain(
+					`name="for_person_id" value="${personBId}" checked`,
+				);
+
+			await post(`/transactions/${bakery}`, { ...fields, category: "2" });
+			const saved = await env.DB.prepare(
+				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first<Record<string, unknown>>();
+			if (field === "note")
+				expect(saved).toMatchObject({ note: "New note", note_guessed: 0 });
+			if (field === "kind")
+				expect(saved).toMatchObject({ kind: "one_off", kind_guessed: 0 });
+			if (field === "for_person_id")
+				expect(saved).toMatchObject({
+					for_person_id: personB?.id,
+					for_person_guessed: 0,
+				});
+		},
+	);
+
+	it("keeps hidden guesses on empty posts and saves explicit replacements as kept", async () => {
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET note='Old guess', note_guessed=1, kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
+		)
+			.bind(person?.id, bakery)
+			.run();
+		await post(`/transactions/${bakery}`, {
+			...save,
+			details_visible: "0",
+			note: "Old guess",
+			kind: "bill",
+			for_person_id: String(person?.id),
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({
+			note: "Old guess",
+			note_guessed: 1,
+			kind: "bill",
+			kind_guessed: 1,
+			for_person_id: person?.id,
+			for_person_guessed: 1,
+		});
+		const another = await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Person B') RETURNING id",
+		).first<{ id: number }>();
+		await post(`/transactions/${bakery}`, {
+			...save,
+			details_visible: "0",
+			note: "Lunch",
+			note_was: "Old guess",
+			kind: "one_off",
+			kind_was: "bill",
+			for_person_id: String(another?.id),
+			for_person_id_was: String(person?.id),
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({
+			note: "Lunch",
+			note_guessed: 0,
+			kind: "one_off",
+			kind_guessed: 0,
+			for_person_id: another?.id,
+			for_person_guessed: 0,
+		});
+	});
 
 	it("keeps a Jev income credit unchanged on a note-only save", async () => {
 		await env.DB.prepare(
@@ -1378,29 +1508,30 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 			).first<{ id: number }>()
 		)?.id as number;
 
-	it("keeps renaming and the note behind one closed disclosure", async () => {
+	it("keeps each transaction detail in its own closed row", async () => {
 		const { html } = await get(`/transactions/${bakery}`);
-		expect(html).toMatch(
-			/<details class="[^"]*group[^"]*">\s*<summary[^>]*>[\s\S]*Rename or add a note/,
-		);
 		expect(html).not.toMatch(/<details[^>]*\bopen/);
-		// The name field is inside the disclosure.
-		expect(html.indexOf('name="merchant"')).toBeGreaterThan(
-			html.indexOf("Rename or add a note"),
-		);
+		for (const row of [
+			"detail-name",
+			"detail-note",
+			"detail-kind",
+			"detail-for",
+		])
+			expect(html).toContain(`id="${row}"`);
 	});
 
-	it("opens the disclosure when there's a note to see", async () => {
+	it("shows an existing note in its detail row", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET note = 'birthday' WHERE id = ?",
 		)
 			.bind(bakery)
 			.run();
 		const { html } = await get(`/transactions/${bakery}`);
-		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(html).toContain("birthday");
+		expect(html).not.toMatch(/<details[^>]*\bopen/);
 	});
 
-	it("opens the disclosure when a failed save brings back a typed new name", async () => {
+	it("opens the Name row when a failed save brings back a typed new name", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: "99",
 			merchant: "Corner Bakery",
@@ -1408,7 +1539,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 			back: "/transactions",
 		});
 		expect(res.status).toBe(422);
-		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(html).toMatch(/<details id="detail-name"[^>]*\bopen/);
 		expect(html).toMatch(/name="merchant"[^>]*value="Corner Bakery"/);
 	});
 
@@ -1467,6 +1598,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 	it("has one How this works link", async () => {
 		const html = (await get(`/transactions/${bakery}`)).html;
 		const sheet = html.slice(html.indexOf('id="edit-title"'));
-		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(1);
+		expect((sheet.match(/>How this works<\/a>/g) ?? []).length).toBe(1);
+		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(2);
 	});
 });
