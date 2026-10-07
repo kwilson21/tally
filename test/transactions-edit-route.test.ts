@@ -692,6 +692,65 @@ describe("POST /transactions/:id", () => {
 		creditReviewed: "0",
 	};
 
+	it("keeps hidden guesses on empty posts and saves explicit replacements as kept", async () => {
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET note='Old guess', note_guessed=1, kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
+		)
+			.bind(person?.id, bakery)
+			.run();
+		await post(`/transactions/${bakery}`, {
+			...save,
+			details_visible: "0",
+			note: "Old guess",
+			kind: "bill",
+			for_person_id: String(person?.id),
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({
+			note: "Old guess",
+			note_guessed: 1,
+			kind: "bill",
+			kind_guessed: 1,
+			for_person_id: person?.id,
+			for_person_guessed: 1,
+		});
+		const another = await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Person B') RETURNING id",
+		).first<{ id: number }>();
+		await post(`/transactions/${bakery}`, {
+			...save,
+			details_visible: "0",
+			note: "Lunch",
+			note_was: "Old guess",
+			kind: "one_off",
+			kind_was: "bill",
+			for_person_id: String(another?.id),
+			for_person_id_was: String(person?.id),
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({
+			note: "Lunch",
+			note_guessed: 0,
+			kind: "one_off",
+			kind_guessed: 0,
+			for_person_id: another?.id,
+			for_person_guessed: 0,
+		});
+	});
+
 	it("keeps a Jev income credit unchanged on a note-only save", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = 0.95, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",

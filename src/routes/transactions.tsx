@@ -1212,6 +1212,13 @@ function EditSheet({
 					name="details_visible"
 					value={tx.detailsVisible ? "1" : "0"}
 				/>
+				<input type="hidden" name="note_was" value={values.note ?? ""} />
+				<input type="hidden" name="kind_was" value={values.kind ?? ""} />
+				<input
+					type="hidden"
+					name="for_person_id_was"
+					value={values.forPersonId ?? ""}
+				/>
 				<input
 					type="hidden"
 					name="displayed_name_guess"
@@ -1297,15 +1304,22 @@ function EditSheet({
 					>
 						<FormField id="note" label="What it was" error={errors.note}>
 							{({ class: errorClass, ...a11y }) => (
-								<textarea
-									id="note"
-									name="note"
-									rows={2}
-									class={`w-full rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
-									{...a11y}
-								>
-									{values.note ?? ""}
-								</textarea>
+								<>
+									<input
+										type="hidden"
+										name="note_was"
+										value={values.note ?? ""}
+									/>
+									<textarea
+										id="note"
+										name="note"
+										rows={2}
+										class={`w-full rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
+										{...a11y}
+									>
+										{values.note ?? ""}
+									</textarea>
+								</>
 							)}
 						</FormField>
 					</DetailRow>
@@ -1333,6 +1347,7 @@ function EditSheet({
 							aria-describedby={errors.kind ? "kind-error" : undefined}
 						>
 							<legend class="sr-only">Kind</legend>
+							<input type="hidden" name="kind_was" value={values.kind ?? ""} />
 							{(["subscription", "one_off", "bill", "transfer"] as const).map(
 								(kind) => (
 									<Chip
@@ -1384,6 +1399,11 @@ function EditSheet({
 							}
 						>
 							<legend class="sr-only">For</legend>
+							<input
+								type="hidden"
+								name="for_person_id_was"
+								value={values.forPersonId ?? ""}
+							/>
 							{people.map((person) => (
 								<Chip
 									type="radio"

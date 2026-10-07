@@ -674,8 +674,11 @@ export async function saveEdit(
 	// The purchase this refund is being linked to now: undefined when its link stays as it is, null
 	// when it's being unlinked.
 	const noteChanged =
+		edit.noteProvided !== false &&
 		edit.note !== current.note &&
-		(current.noteGuessed === 0 || edit.detailsVisible !== false);
+		(current.noteGuessed === 0 ||
+			edit.detailsVisible !== false ||
+			edit.noteProvided === true);
 	const newLink =
 		edit.refundOfId !== undefined && edit.refundOfId !== current.refundOfId
 			? edit.refundOfId
@@ -895,11 +898,17 @@ export async function saveEdit(
 	const kindChanged =
 		edit.kind !== undefined &&
 		edit.kind !== current.kind &&
-		(current.kindGuessed === 0 || edit.detailsVisible !== false);
+		(edit.kind !== undefined || edit.detailsFieldChanged === true) &&
+		(current.kindGuessed === 0 ||
+			edit.detailsVisible !== false ||
+			edit.detailsFieldChanged === true);
 	const personChanged =
 		edit.forPersonId !== undefined &&
 		edit.forPersonId !== current.forPersonId &&
-		(current.forPersonGuessed === 0 || edit.detailsVisible !== false);
+		(edit.forPersonId !== undefined || edit.detailsFieldChanged === true) &&
+		(current.forPersonGuessed === 0 ||
+			edit.detailsVisible !== false ||
+			edit.detailsFieldChanged === true);
 	if (noteChanged || kindChanged || personChanged || edit.keepDetails) {
 		statements.push(
 			gated(

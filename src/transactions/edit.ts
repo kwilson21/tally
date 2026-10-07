@@ -23,6 +23,8 @@ export type Edit = {
 	 */
 	keepBankName?: boolean;
 	note: string | null;
+	noteProvided?: boolean;
+	detailsFieldChanged?: boolean;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
 	excluded: boolean;
 	/** Whether this transaction is income; a person can correct Jev's suggestion. */
@@ -117,6 +119,11 @@ export function parseEdit(
 	const detailsVisible = form.has("details_visible")
 		? form.get("details_visible") !== "0"
 		: undefined;
+	const hiddenUntouched = detailsVisible === false;
+	const noteWas = text(form, "note_was");
+	const kindWas = text(form, "kind_was");
+	const personWasRaw = text(form, "for_person_id_was");
+	const personWas = personWasRaw ? Number(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";
 	const income = form.get("income") === "1";
 	const creditReviewed = form.get("creditReviewed") === "1";
@@ -159,14 +166,39 @@ export function parseEdit(
 			nameChanged,
 			keepBankName,
 			note: note || null,
+			...(form.has("details_visible")
+				? {
+						noteProvided: !(
+							hiddenUntouched &&
+							((!form.has("note_was") && note === "") ||
+								(form.has("note_was") && note === noteWas))
+						),
+						detailsFieldChanged:
+							hiddenUntouched &&
+							((form.has("kind_was") && kind !== kindWas) ||
+								(form.has("for_person_id_was") && forPersonId !== personWas)),
+					}
+				: {}),
 			excluded,
 			income,
 			incomeWas,
 			creditReviewed,
 			creditReviewedWas,
 			creditReviewedProvided,
-			kind: form.has("kind") ? kind : undefined,
-			forPersonId: form.has("for_person_id") ? forPersonId : undefined,
+			kind:
+				form.has("kind") &&
+				(!hiddenUntouched ||
+					(form.has("kind_was") ? kind !== kindWas : kind !== null))
+					? kind
+					: undefined,
+			forPersonId:
+				form.has("for_person_id") &&
+				(!hiddenUntouched ||
+					(form.has("for_person_id_was")
+						? forPersonId !== personWas
+						: forPersonId !== null))
+					? forPersonId
+					: undefined,
 			keepDetails,
 			...(detailsVisible === undefined ? {} : { detailsVisible }),
 		},

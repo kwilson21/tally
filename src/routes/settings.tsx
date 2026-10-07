@@ -961,6 +961,7 @@ settings.post("/settings/people", async (c) => {
 	if (!name || name.length > 40)
 		return renderSettings(c, {
 			peopleOpen: action === "rename" ? id : undefined,
+			peopleErrorPersonId: action === "rename" ? id : undefined,
 			peopleAddOpen: action !== "rename",
 			peopleError: "Enter a name up to 40 characters.",
 			peopleValue: nameValue,
