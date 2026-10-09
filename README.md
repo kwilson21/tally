@@ -2,7 +2,7 @@
 
 A family budgeting app. It pulls in bank transactions, sorts them into categories with a small AI model, and shows how much is left to spend this month.
 
-- **Demo:** https://tally-demo.thesuperhuman.us (fake data; coming in Phase 1)
+- **Public demo:** https://tally-demo.thesuperhuman.us (fictional data; resets nightly). It is a separate place for visitors to explore Tally. Our private instance is for household dogfooding.
 - **Design:** [spec](docs/superpowers/specs/2026-09-22-tally-design.md) · [decisions](docs/decisions.md) · [roadmap](ROADMAP.md)
 
 ## How it works
