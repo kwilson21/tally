@@ -6,7 +6,11 @@ export type RuleOffer = {
 	count: number;
 };
 
-/** Counts a person's picks in the merchant's own transaction history, using its history index. */
+/**
+ * Counts a person's picks of `categoryId` for the merchant, in its own transaction history, using its
+ * history index. Nothing counts a store's categories or months (decision 90), so a store that also has
+ * other categories' picks is still offered.
+ */
 export async function categoryRuleOffer(
 	db: D1Database,
 	merchantKey: string,
@@ -14,8 +18,7 @@ export async function categoryRuleOffer(
 ): Promise<RuleOffer | null> {
 	const rows = await db
 		.prepare(
-			`SELECT SUM(CASE WHEN category_id = ? THEN 1 ELSE 0 END) AS count,
-				COUNT(DISTINCT category_id) AS categories
+			`SELECT SUM(CASE WHEN category_id = ? THEN 1 ELSE 0 END) AS count
 			FROM transactions INDEXED BY transactions_merchant_history
 			WHERE ${merchantKeySql("transactions")} = ? AND parent_id IS NULL
 				AND amount_cents > 0
@@ -24,8 +27,7 @@ export async function categoryRuleOffer(
 				AND NOT EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("transactions")} AND m.default_category_id IS NOT NULL)`,
 		)
 		.bind(categoryId, merchantKey)
-		.first<{ count: number; categories: number }>();
-	if ((rows?.categories ?? 0) > 1) return null;
+		.first<{ count: number }>();
 	const count = rows?.count ?? 0;
 	if (count < 3) return null;
 	return { merchantKey, categoryId, count };

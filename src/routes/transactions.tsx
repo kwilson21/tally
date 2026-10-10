@@ -2418,6 +2418,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					? " It still counts while it pays a bill."
 					: " It's excluded from the budget."
 				: " It counts in the budget again.";
+	const saveWords =
+		(keptDetails ? `Kept the details for ${name}.` : saved) + exclusion;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
@@ -2426,8 +2428,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 				type: "success",
 			},
 			announce: ruleOffer
-				? ruleOfferAnnouncement(ruleOffer)
-				: (keptDetails ? `Kept the details for ${name}.` : saved) + exclusion,
+				? ruleOfferAnnouncement(ruleOffer, saveWords)
+				: saveWords,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -2447,6 +2449,7 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	)
 		.bind(categoryId)
 		.first<{ id: number; name: string }>();
+	const askedName = form.get("merchant")?.toString() ?? "";
 	const merchantName = merchantKey
 		? await c.env.DB.prepare(
 				"SELECT display_name AS displayName FROM merchants WHERE raw_name = ?",
@@ -2460,7 +2463,7 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 			: null;
 	const message =
 		yes && offer && validCategory
-			? `Always use ${validCategory.name} for ${merchantName?.displayName || tidyName(merchantKey)}.`
+			? `Always use ${validCategory.name} for ${askedName || merchantName?.displayName || tidyName(merchantKey)}.`
 			: validCategory
 				? `Saved as ${validCategory.name}.`
 				: "Saved.";

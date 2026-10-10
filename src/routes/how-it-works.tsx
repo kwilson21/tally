@@ -417,8 +417,7 @@ howItWorks.get("/how-it-works", async (c) => {
 					<p class="mt-3">
 						After a person picks the same category for the same merchant three
 						times, Tally asks whether to always use it. Yes makes it the
-						merchant's rule, and Not now changes nothing. A store sold in two or
-						more categories never gets the question.
+						merchant's rule, and Not now changes nothing.
 					</p>
 					<p class="mt-3">
 						See every rule in Settings under Tally's rules. Removing a rule

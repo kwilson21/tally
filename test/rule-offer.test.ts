@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { removeMerchantRule } from "../src/db/merchant-rules";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -26,7 +27,9 @@ function offerFields(html: string): Record<string, string> {
 		...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g),
 	]
 		.filter((match) =>
-			["merchant_key", "category", "count", "back"].includes(match[1] ?? ""),
+			["merchant_key", "merchant", "category", "count", "back"].includes(
+				match[1] ?? "",
+			),
 		)
 		.reduce<Record<string, string>>((fields, match) => {
 			fields[match[1] ?? ""] = match[2] ?? "";
@@ -114,13 +117,16 @@ describe("merchant category rule offer", () => {
 		);
 	});
 
-	it("does not offer for a merchant put in two categories, even on a third save of one of them", async () => {
+	it("still offers when the store also has another category's picks (decision 90: nothing counts a store's categories)", async () => {
 		await setCategory([ids[0]], household, "user");
 		await setCategory([ids[1], ids[2]], groceries, "user");
 		await setCategory([ids[3]], null, null);
-		// Three Groceries picks now: without the two-category rule this save would be asked.
+		// Two Groceries picks and one Household pick: the third Groceries pick is asked.
 		const third = await post(`/transactions/${ids[3]}`, edit(groceries));
-		expect(third.html).not.toContain(QUESTION);
+		expect(third.html).toContain(QUESTION);
+		expect(third.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
 	});
 
 	it("does not offer for a merchant that already has a rule, even on a third save", async () => {
@@ -269,12 +275,13 @@ describe("merchant category rule offer", () => {
 			category_id: groceries,
 			category_source: "user",
 		});
-		// A rule removed in Settings: the earlier picks still count.
+		// A rule made, then removed in Settings: the earlier picks still count.
 		await env.DB.prepare(
-			"UPDATE merchants SET default_category_id = NULL WHERE raw_name = ?",
+			"UPDATE merchants SET default_category_id = ? WHERE raw_name = ?",
 		)
-			.bind(merchant)
+			.bind(groceries, merchant)
 			.run();
+		expect(await removeMerchantRule(env.DB, merchant)).toBe(merchant);
 		const panel = await post(`/transactions/${ids[1]}`, edit(groceries));
 		expect(panel.html).not.toContain(QUESTION);
 		const cash = await post("/transactions/cash", {
@@ -290,6 +297,45 @@ describe("merchant category rule offer", () => {
 		expect(cash.html).toContain(
 			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
 		);
+	});
+
+	it("the Yes toast names the merchant the question named, when the bank's text differs from the merchant key", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		// The save gives no name, so the question names the tidied bank text, not the merchant key.
+		await env.DB.prepare("UPDATE transactions SET raw_name = ? WHERE id = ?")
+			.bind("SQ RULE OFFER STORE", ids[2])
+			.run();
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const asked = third.html.match(/Always use Groceries for ([^?<]+)\?/)?.[1];
+		expect(asked).toBeTruthy();
+		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+		expect(
+			JSON.parse(yes.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe(`Always use Groceries for ${asked}.`);
+	});
+
+	it("the Yes toast names the merchant as the save renamed it", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			merchant: "Fresh Market",
+		});
+		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+		expect(
+			JSON.parse(yes.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Always use Groceries for Fresh Market.");
+	});
+
+	it("announces an exclusion with the question on a third save that excludes the transaction", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			excluded: "1",
+		});
+		const announce = JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}")
+			.announce as string;
+		expect(announce).toContain("It's excluded from the budget.");
+		expect(announce).toContain(QUESTION);
 	});
 
 	it("asks after a cash entry saved without an entry key", async () => {

@@ -1657,8 +1657,8 @@ function Categorization() {
 			<p class="mt-4 text-muted">
 				Use: the question follows every matching save until the merchant has a
 				rule. Not now closes it without saving a rule; Yes applies the existing
-				merchant rule behavior. A merchant chosen in two or more categories gets
-				no offer. All answers use server forms, and every swap is announced.
+				merchant rule behavior. All answers use server forms, and every swap is
+				announced.
 			</p>
 		</Group>
 	);

@@ -11,8 +11,11 @@ export type RuleOfferValue = {
 };
 
 /** What the screen reader hears when the offer appears: the save, then the question. */
-export function ruleOfferAnnouncement(value: RuleOfferValue): string {
-	return `Saved as ${value.category}. Always use ${value.category} for ${value.merchant}? You've picked ${value.category} for ${value.merchant} ${value.count} times.`;
+export function ruleOfferAnnouncement(
+	value: RuleOfferValue,
+	lead = `Saved as ${value.category}.`,
+): string {
+	return `${lead} Always use ${value.category} for ${value.merchant}? You've picked ${value.category} for ${value.merchant} ${value.count} times.`;
 }
 
 /** The one yes-or-no question after a person has chosen a merchant's category three times. */
@@ -51,6 +54,7 @@ export function RuleOffer({
 					hx-swap="outerHTML"
 				>
 					<input type="hidden" name="merchant_key" value={value.merchantKey} />
+					<input type="hidden" name="merchant" value={value.merchant} />
 					<input
 						type="hidden"
 						name="category"
@@ -71,6 +75,7 @@ export function RuleOffer({
 					hx-swap="outerHTML"
 				>
 					<input type="hidden" name="merchant_key" value={value.merchantKey} />
+					<input type="hidden" name="merchant" value={value.merchant} />
 					<input
 						type="hidden"
 						name="category"

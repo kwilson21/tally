@@ -111,7 +111,7 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toContain('href="/how-it-works#categorization"');
 	});
 
-	it("explains the rule offer and that a store sold in many categories gets none", async () => {
+	it("explains the rule offer, and names no count of a store's categories", async () => {
 		const { html } = await get("/how-it-works");
 		const categories =
 			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
@@ -120,9 +120,7 @@ describe("GET /how-it-works in the demo", () => {
 			"picks the same category for the same merchant three times",
 		);
 		expect(categories).toContain("Yes makes it the merchant");
-		expect(categories).toContain(
-			"A store sold in two or more categories never gets the question.",
-		);
+		expect(categories).not.toContain("two or more categories");
 	});
 
 	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
