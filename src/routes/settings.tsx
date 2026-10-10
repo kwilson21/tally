@@ -40,6 +40,7 @@ import {
 import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
 import { Band } from "../views/band";
+import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
@@ -117,18 +118,18 @@ const chevron = (
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
-	/** Move focus here after a swap: a row's summary, the Archived summary, the Time zone row, or a Reminders control. */
+	/** Move focus here after a swap: a row's summary, the Archived summary, the Time zone row, or a bank sign-in email control. */
 	focus?:
 		| number
 		| "archived"
 		| "zone"
-		| "reminder-save"
-		| "reminder-summary"
-		| "reminder-remove";
-	/** Keeps the Reminders addresses disclosure open after a swap. */
-	remindersOpen?: boolean;
+		| "bank-sign-in-email-save"
+		| "bank-sign-in-email-summary"
+		| "bank-sign-in-email-remove";
+	/** Keeps the "Who gets them" disclosure open after a swap. */
+	bankSignInEmailsOpen?: boolean;
 	/** The address whose Remove button takes focus after a swap. */
-	reminderFocusEmail?: string;
+	bankSignInEmailFocusEmail?: string;
 	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
 	focusRuleIndex?: number;
 	focusMerchantHeading?: boolean;
@@ -160,7 +161,7 @@ type View = {
 	budgetsOob?: boolean;
 	/** Why the posted time zone wasn't saved, shown under its select. */
 	zoneError?: string;
-	reminderError?: string;
+	bankSignInEmailError?: string;
 	peopleOpen?: number;
 	peopleAddOpen?: boolean;
 	peopleError?: string;
@@ -650,96 +651,6 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				}
 			/>
 			<section
-				id="reminders"
-				aria-labelledby="reminders-title"
-				class="mt-8 lg:max-w-3xl"
-			>
-				<h2 id="reminders-title" class="font-serif text-3xl font-semibold">
-					Reminders
-				</h2>
-				{view.reminderError && (
-					<p role="alert" class="mt-3 text-sm text-over">
-						{view.reminderError}
-					</p>
-				)}
-				<p class="mt-1 text-muted">
-					Goes to the people who have signed in within the last 90 days.
-				</p>
-				<form
-					method="post"
-					action="/settings/bank-sign-in-emails"
-					hx-post="/settings/bank-sign-in-emails"
-					hx-target="#reminders"
-					hx-select="#reminders"
-					hx-swap="outerHTML"
-					class="mt-3 border-y border-rule"
-				>
-					<Switch
-						id="bank-sign-in-emails"
-						name="enabled"
-						label="Bank sign-in emails"
-						checked={bankEmailsOn}
-					/>
-					<div class="pb-4">
-						<Button type="submit" autofocus={view.focus === "reminder-save"}>
-							Save
-						</Button>
-					</div>
-				</form>
-				<p class="mt-2 text-sm text-muted">
-					{members.results
-						.map(({ email }) =>
-							email
-								.slice(0, email.indexOf("@"))
-								.split(/[._-]/)
-								.map((part) => part.charAt(0).toUpperCase())
-								.join("")
-								.slice(0, 2),
-						)
-						.join(" · ")}
-				</p>
-				<details
-					class="mt-2 border-y border-rule"
-					open={Boolean(view.remindersOpen)}
-				>
-					<summary
-						class="flex min-h-11 cursor-pointer items-center"
-						autofocus={view.focus === "reminder-summary"}
-					>
-						Addresses{" "}
-						<span class="ml-auto text-muted">{members.results.length}</span>
-					</summary>
-					<ul class="divide-y divide-rule">
-						{members.results.map(({ email }) => (
-							<li class="flex min-h-11 items-center gap-4">
-								<span class="min-w-0 flex-1">{email}</span>
-								<form
-									method="post"
-									action="/settings/household-members/remove"
-									hx-post="/settings/household-members/remove"
-									hx-target="#reminders"
-									hx-select="#reminders"
-									hx-swap="outerHTML"
-								>
-									<input type="hidden" name="email" value={email} />
-									<Button
-										type="submit"
-										kind="text"
-										aria-label={`Remove ${email}`}
-										autofocus={
-											view.focus === "reminder-remove" &&
-											email === view.reminderFocusEmail
-										}
-									>
-										Remove
-									</Button>
-								</form>
-							</li>
-						))}
-					</ul>
-				</details>
-			</section>
-			<section
 				id="household"
 				aria-labelledby="household-title"
 				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
@@ -752,6 +663,14 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						zone={timeZone}
 						error={view.zoneError}
 						focus={view.focus === "zone"}
+					/>
+					<BankSignInEmails
+						on={bankEmailsOn}
+						recipients={members.results.map(({ email }) => email)}
+						error={view.bankSignInEmailError}
+						open={Boolean(view.bankSignInEmailsOpen)}
+						focus={bankSignInEmailFocus(view.focus)}
+						focusEmail={view.bankSignInEmailFocusEmail}
 					/>
 				</div>
 				<HouseholdPeople
@@ -1039,28 +958,33 @@ settings.post("/settings/ai", async (c) => {
 
 settings.post("/settings/bank-sign-in-emails", async (c) => {
 	const form = await c.req.formData();
-	await saveBankSignInEmails(c.env.DB, form.get("enabled") === "on");
+	// A Remove button posts its address as `remove`; a Remove never changes the switch.
+	if (form.has("remove"))
+		return removeBankSignInEmail(c, String(form.get("remove") ?? ""));
+	const on = form.get("enabled") === "on";
+	await saveBankSignInEmails(c.env.DB, on);
 	return done(
 		c,
 		"Saved bank sign-in emails",
-		`Bank sign-in emails ${form.get("enabled") === "on" ? "On" : "Off"}.`,
-		{ hash: "reminders", focus: "reminder-save", remindersOpen: true },
+		`Bank sign-in emails ${on ? "On" : "Off"}.`,
+		{
+			hash: "household",
+			focus: "bank-sign-in-email-save",
+			bankSignInEmailsOpen: true,
+		},
 	);
 });
 
-settings.post("/settings/household-members/remove", async (c) => {
-	const form = await c.req.formData();
-	const email = String(form.get("email") ?? "")
-		.trim()
-		.toLowerCase();
+async function removeBankSignInEmail(c: Context<App>, posted: string) {
+	const email = posted.trim().toLowerCase();
 	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-		return reminderError(c, "Choose an address to remove.", 400);
+		return bankSignInEmailError(c, "Choose an address to remove.", 400);
 	const member = await c.env.DB.prepare(
 		"SELECT 1 FROM household_members WHERE email = ?",
 	)
 		.bind(email)
 		.first();
-	if (!member) return reminderError(c, "Address not found.", 404);
+	if (!member) return bankSignInEmailError(c, "Address not found.", 404);
 	await removeHouseholdMember(c.env.DB, email);
 	// The list is in address order: the address that takes the removed row's place is the next one, else the one before it.
 	const remaining = (await reconnectRecipients(c.env.DB)).results.map(
@@ -1073,26 +997,40 @@ settings.post("/settings/household-members/remove", async (c) => {
 		"Removed address",
 		"Removed this sign-in address from bank sign-in emails.",
 		{
-			hash: "reminders",
-			focus: focusEmail ? "reminder-remove" : "reminder-summary",
-			remindersOpen: true,
-			reminderFocusEmail: focusEmail,
+			hash: "household",
+			focus: focusEmail
+				? "bank-sign-in-email-remove"
+				: "bank-sign-in-email-summary",
+			bankSignInEmailsOpen: true,
+			bankSignInEmailFocusEmail: focusEmail,
 		},
 	);
-});
+}
 
-function reminderError(c: Context<App>, message: string, status: 400 | 404) {
+function bankSignInEmailError(
+	c: Context<App>,
+	message: string,
+	status: 400 | 404,
+) {
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "error" }, announce: message }),
 	);
 	// The Remove that was pressed is gone from the swap, so the addresses stay open and focus goes to their summary.
 	return renderSettings(c, {
-		reminderError: message,
+		bankSignInEmailError: message,
 		status,
-		remindersOpen: true,
-		focus: "reminder-summary",
+		bankSignInEmailsOpen: true,
+		focus: "bank-sign-in-email-summary",
 	});
+}
+
+/** Which control of the bank sign-in emails block takes focus after a swap, from the page's focus. */
+function bankSignInEmailFocus(focus: View["focus"]) {
+	if (focus === "bank-sign-in-email-save") return "save";
+	if (focus === "bank-sign-in-email-summary") return "summary";
+	if (focus === "bank-sign-in-email-remove") return "remove";
+	return undefined;
 }
 
 settings.post("/settings/people", async (c) => {

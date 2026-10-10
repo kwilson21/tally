@@ -34,10 +34,9 @@ const trigger = (res: Response) =>
 		announce?: string;
 	};
 
-/** The Household section's markup. */
+/** The Household section's time zone row: from the section to the bank sign-in emails block after it. */
 const group = (html: string) =>
-	html.split('id="household"')[1]?.split('<section id="household-people"')[0] ??
-	"";
+	html.split('id="household"')[1]?.split('<div id="household-emails"')[0] ?? "";
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")

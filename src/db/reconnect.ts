@@ -19,6 +19,11 @@ export async function saveBankSignInEmails(
 		.run();
 }
 
+/**
+ * Notes a verified sign-in. An address that isn't removed is refreshed at each new Access session,
+ * or at each visit when its token has no issue time (null). A removed address comes back only for a
+ * session issued after its removal. A visit without an issue time never lowers the stored session.
+ */
 export async function noteHouseholdMember(
 	db: D1Database,
 	email: string,
@@ -26,9 +31,9 @@ export async function noteHouseholdMember(
 ) {
 	await db
 		.prepare(
-			"INSERT INTO household_members (email, session_issued_at) VALUES (?, COALESCE(?, 0)) ON CONFLICT(email) DO UPDATE SET last_seen_at = datetime('now'), session_issued_at = excluded.session_issued_at, removed_at = NULL WHERE ? IS NOT NULL AND household_members.session_issued_at < excluded.session_issued_at AND (household_members.removed_at IS NULL OR ? > unixepoch(household_members.removed_at))",
+			"INSERT INTO household_members (email, session_issued_at) VALUES (?, COALESCE(?, 0)) ON CONFLICT(email) DO UPDATE SET last_seen_at = datetime('now'), session_issued_at = MAX(household_members.session_issued_at, excluded.session_issued_at), removed_at = NULL WHERE (household_members.removed_at IS NULL AND (? IS NULL OR household_members.session_issued_at < excluded.session_issued_at)) OR (? IS NOT NULL AND household_members.session_issued_at < excluded.session_issued_at AND ? > unixepoch(household_members.removed_at))",
 		)
-		.bind(email, issuedAt, issuedAt, issuedAt)
+		.bind(email, issuedAt, issuedAt, issuedAt, issuedAt)
 		.run();
 }
 

@@ -18,6 +18,7 @@ import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
+import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
@@ -2981,55 +2982,30 @@ function SettingsGroup() {
 		<Group id="settings" title="Settings">
 			<Specimen
 				id="reconnect-reminders"
-				title="Reconnect reminders"
-				tier="interactive"
-				components={["Switch", "Button"]}
-				sentence="After Categories, Settings shows Tally's rules, then Reminders, then Household people. Reminders has one household switch, with recent addresses shown beneath it and removable by anyone in the family."
+				title="Bank sign-in emails"
+				tier="visual"
+				components={["BankSignInEmails", "TimeZoneRow", "Switch", "Button"]}
+				sentence="Under Household, after the time zone: one household switch, the people it goes to as round initials, and a “Who gets them” disclosure listing each address with Remove."
 			>
-				<State label="On, with two household addresses">
-					<div class="max-w-xl">
-						<p class="mt-1 text-muted">
-							Goes to the people who have signed in within the last 90 days.
-						</p>
-						<div class="mt-3 border-y border-rule">
-							<Switch
-								id="catalog-bank-sign-in-emails"
-								name="catalog-bank-sign-in-emails"
-								label="Bank sign-in emails"
-								checked
-							/>
-							<div class="pb-4">
-								<Button type="button">Save</Button>
-							</div>
-						</div>
-						<p class="mt-2 text-sm text-muted">DK · RK</p>
-						<details class="mt-2 border-y border-rule">
-							<summary class="flex min-h-11 cursor-pointer items-center">
-								Addresses <span class="ml-auto text-muted">2</span>
-							</summary>
-							<ul class="divide-y divide-rule">
-								<li class="flex min-h-11 items-center gap-4">
-									<span class="min-w-0 flex-1">dana@example.com</span>
-									<Button
-										type="button"
-										kind="text"
-										aria-label="Remove dana@example.com"
-									>
-										Remove
-									</Button>
-								</li>
-								<li class="flex min-h-11 items-center gap-4">
-									<span class="min-w-0 flex-1">riley@example.com</span>
-									<Button
-										type="button"
-										kind="text"
-										aria-label="Remove riley@example.com"
-									>
-										Remove
-									</Button>
-								</li>
-							</ul>
-						</details>
+				<State label="On, three people">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="catalog-time-zone"
+							zone="America/New_York"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+						<BankSignInEmails
+							on
+							recipients={[
+								"alex@example.com",
+								"sam@example.com",
+								"jo@example.com",
+							]}
+							open
+							action="#"
+						/>
 					</div>
 				</State>
 				<UseSpec spec={SWITCH_SPEC} />

@@ -9,7 +9,10 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import handler from "../src/index";
 import { renderReconnectEmail } from "../src/reconnect/email";
-import { runReconnectReminders } from "../src/reconnect/reminders";
+import {
+	reconnectRecipients,
+	runReconnectReminders,
+} from "../src/reconnect/reminders";
 
 const BASE = "http://tally.test";
 const post = async (path: string, fields: Record<string, string>) => {
@@ -299,9 +302,9 @@ describe("reconnect reminder schedule", () => {
 		]);
 	});
 
-	it("times out stalled Resend, falls back, releases a failed claim, and logs no address", async () => {
+	it("times out stalled Resend for each recipient, falls back, releases a failed claim, and logs no address", async () => {
 		await env.DB.prepare(
-			"INSERT INTO household_members (email) VALUES ('dana@example.com')",
+			"INSERT INTO household_members (email) VALUES ('dana@example.com'), ('riley@example.com')",
 		).run();
 		await env.DB.prepare(
 			"UPDATE household_settings SET value = 'on' WHERE key = 'bank_sign_in_emails'",
@@ -336,17 +339,24 @@ describe("reconnect reminder schedule", () => {
 			new Date("2026-10-07T13:00:00Z"),
 			() => AbortSignal.timeout(10),
 		);
-		expect(stalledFetch.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
-		expect(fallback).toHaveBeenCalledOnce();
+		expect(stalledFetch).toHaveBeenCalledTimes(2);
+		const [first, second] = stalledFetch.mock.calls;
+		expect(JSON.parse(String(first?.[1]?.body)).to).toBe("dana@example.com");
+		expect(JSON.parse(String(second?.[1]?.body)).to).toBe("riley@example.com");
+		expect(first?.[1]?.signal).toBeInstanceOf(AbortSignal);
+		expect(second?.[1]?.signal).toBeInstanceOf(AbortSignal);
+		expect(first?.[1]?.signal).not.toBe(second?.[1]?.signal);
+		expect(fallback).toHaveBeenCalledTimes(2);
 		const claim = await env.DB.prepare(
 			"SELECT reconnect_emailed_at FROM plaid_items WHERE id = 911",
 		).first<{ reconnect_emailed_at: string | null }>();
 		expect(claim?.reconnect_emailed_at).toBeNull();
 		expect(log).toHaveBeenCalledOnce();
 		expect(log.mock.calls[0]?.[0]).toBe(
-			"reconnect reminders: 0 sent, 1 failed (resend timeout or error, email fallback error)",
+			"reconnect reminders: 0 sent, 2 failed (resend timeout or error, email fallback error)",
 		);
 		expect(log.mock.calls[0]?.[0]).not.toContain("dana@example.com");
+		expect(log.mock.calls[0]?.[0]).not.toContain("riley@example.com");
 		log.mockRestore();
 	});
 
@@ -540,6 +550,22 @@ describe("reconnect reminder schedule", () => {
 	});
 });
 
+/** The bank sign-in emails block: from its wrapper to the people list that follows it in Household. */
+const emailsBlock = (html: string) =>
+	html.split('id="household-emails"')[1]?.split('id="household-people"')[0] ??
+	"";
+
+/** The Remove button for one address, found by its accessible name ("Remove <email>"). */
+const removeButton = (block: string, email: string) =>
+	block
+		.split("<button")
+		.find((part) =>
+			part.includes(`Remove<span class="sr-only"> ${email}</span>`),
+		) ?? "";
+
+/** The disclosure's summary tag, whichever attributes it carries. */
+const summaryTag = (block: string) => block.match(/<summary[^>]*>/)?.[0] ?? "";
+
 describe("bank sign-in reminder Settings", () => {
 	it("shows and emails only members seen within the last 90 days", async () => {
 		await env.DB.prepare(
@@ -547,8 +573,7 @@ describe("bank sign-in reminder Settings", () => {
 		).run();
 		const response = await exports.default.fetch(`${BASE}/settings`);
 		const settingsHtml = await response.text();
-		const reminders =
-			settingsHtml.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
+		const reminders = emailsBlock(settingsHtml);
 		expect(reminders).toContain("recent@example.com");
 		expect(reminders).not.toContain("old@example.com");
 		await env.DB.prepare(
@@ -566,38 +591,79 @@ describe("bank sign-in reminder Settings", () => {
 		expect(sent).toEqual(["recent@example.com"]);
 	});
 
-	it("saves the household switch and renders Off afterwards", async () => {
+	it("saves the household switch, keeps the disclosure open and focuses Save", async () => {
 		const { html } = await post("/settings/bank-sign-in-emails", {});
 		expect(await readBankSignInEmails(env.DB)).toBe(false);
-		const reminders =
-			html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
-		expect(reminders).toContain(">Off<");
-		expect(reminders).toContain('open=""');
-		expect(reminders).toContain('autofocus=""');
-		expect(reminders).not.toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		const block = emailsBlock(html);
+		expect(block).toContain(">Off<");
+		expect(block).toMatch(/<details [^>]*open=""/);
+		expect(block).toMatch(/autofocus=""[^>]*>Save<\/button>/);
+		expect(block).not.toMatch(/id="bank-sign-in-emails"[^>]*checked/);
 	});
 
 	it("keeps the address disclosure open and focuses the next Remove or its summary", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
 		await noteHouseholdMember(env.DB, "riley@example.com", 100);
-		const removed = await post("/settings/household-members/remove", {
-			email: "dana@example.com",
+		const removed = await post("/settings/bank-sign-in-emails", {
+			remove: "dana@example.com",
 		});
-		const reminders =
-			removed.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
-		expect(reminders).toContain('open=""');
-		expect(reminders).toContain(
-			'aria-label="Remove riley@example.com" autofocus=""',
-		);
+		const block = emailsBlock(removed.html);
+		expect(block).toMatch(/<details [^>]*open=""/);
+		expect(removeButton(block, "riley@example.com")).toContain('autofocus=""');
+		expect(removeButton(block, "dana@example.com")).toBe("");
 
-		const last = await post("/settings/household-members/remove", {
-			email: "riley@example.com",
+		const last = await post("/settings/bank-sign-in-emails", {
+			remove: "riley@example.com",
 		});
-		const emptyReminders =
-			last.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
-		expect(emptyReminders).toContain('open=""');
-		expect(emptyReminders).toContain(
-			'<summary class="flex min-h-11 cursor-pointer items-center" autofocus="">',
+		const emptyBlock = emailsBlock(last.html);
+		expect(emptyBlock).toMatch(/<details [^>]*open=""/);
+		expect(summaryTag(emptyBlock)).toContain('autofocus=""');
+		expect(summaryTag(emptyBlock)).toContain("min-h-11");
+		expect(emptyBlock).toContain("Who gets them");
+	});
+
+	it("Remove leaves the saved switch as it was", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await noteHouseholdMember(env.DB, "riley@example.com", 100);
+		await saveBankSignInEmails(env.DB, true);
+		// A Remove posts no `enabled` field, so the saved On must survive it.
+		const removed = await post("/settings/bank-sign-in-emails", {
+			remove: "dana@example.com",
+		});
+		expect(removed.res.status).toBe(200);
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
+		await saveBankSignInEmails(env.DB, false);
+		await post("/settings/bank-sign-in-emails", {
+			remove: "riley@example.com",
+		});
+		expect(await readBankSignInEmails(env.DB)).toBe(false);
+	});
+
+	it("shows the people the switch goes to as round initials, with their addresses read aloud", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await noteHouseholdMember(env.DB, "riley@example.com", 100);
+		const response = await exports.default.fetch(`${BASE}/settings`);
+		const block = emailsBlock(await response.text());
+		expect(block).toContain(
+			'<p class="sr-only">Goes to dana@example.com, riley@example.com</p>',
+		);
+		const initials =
+			block.split('<ul aria-hidden="true"')[1]?.split("</ul>")[0] ?? "";
+		expect(
+			[...initials.matchAll(/<li[^>]*>([^<]*)<\/li>/g)].map(
+				(match) => match[1],
+			),
+		).toEqual(["D", "R"]);
+	});
+
+	it("shows no initials and no sentence about who gets the emails when no one has signed in", async () => {
+		const response = await exports.default.fetch(`${BASE}/settings`);
+		const block = emailsBlock(await response.text());
+		expect(block).not.toContain("Goes to");
+		expect(block).not.toContain('<ul aria-hidden="true"');
+		expect(block).toContain("Who gets them");
+		expect(block).toContain(
+			"Everyone who has signed in to Tally in the last 90 days.",
 		);
 	});
 
@@ -605,39 +671,45 @@ describe("bank sign-in reminder Settings", () => {
 		await noteHouseholdMember(env.DB, "amy@example.com", 100);
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
 		await noteHouseholdMember(env.DB, "riley@example.com", 100);
-		const middle = await post("/settings/household-members/remove", {
-			email: "dana@example.com",
+		const middle = await post("/settings/bank-sign-in-emails", {
+			remove: "dana@example.com",
 		});
-		const afterMiddle =
-			middle.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
-		expect(afterMiddle).toContain(
-			'aria-label="Remove riley@example.com" autofocus=""',
+		const afterMiddle = emailsBlock(middle.html);
+		expect(removeButton(afterMiddle, "riley@example.com")).toContain(
+			'autofocus=""',
 		);
-		expect(afterMiddle).not.toContain(
-			'aria-label="Remove amy@example.com" autofocus=""',
+		expect(removeButton(afterMiddle, "amy@example.com")).not.toContain(
+			"autofocus",
 		);
 
-		const last = await post("/settings/household-members/remove", {
-			email: "riley@example.com",
+		const last = await post("/settings/bank-sign-in-emails", {
+			remove: "riley@example.com",
 		});
-		const afterLast =
-			last.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
-		expect(afterLast).toContain(
-			'aria-label="Remove amy@example.com" autofocus=""',
+		const afterLast = emailsBlock(last.html);
+		expect(removeButton(afterLast, "amy@example.com")).toContain(
+			'autofocus=""',
 		);
 	});
 
-	it("places Reminders after Tally's rules and before Household", async () => {
+	it("places the Bank sign-in emails switch in Household, after the time zone and before the people", async () => {
 		const response = await exports.default.fetch(`${BASE}/settings`);
 		const html = await response.text();
-		const rules = html.indexOf('id="merchant-rules"');
-		const reminders = html.indexOf('id="reminders"');
-		const household = html.indexOf('id="household"');
-		expect(html.indexOf('id="categories"')).toBeGreaterThan(-1);
-		expect(html.indexOf('id="categories"')).toBeLessThan(rules);
-		expect(rules).toBeGreaterThan(-1);
-		expect(rules).toBeLessThan(reminders);
-		expect(reminders).toBeLessThan(household);
+		const order = [
+			'id="categories"',
+			'id="merchant-rules"',
+			'id="household"',
+			'id="time-zone"',
+			'id="bank-sign-in-emails"',
+			'id="household-people"',
+		].map((marker) => html.indexOf(marker));
+		expect(order.every((index) => index > -1)).toBe(true);
+		expect(order).toEqual([...order].sort((a, b) => a - b));
+		expect(html).not.toContain('id="reminders"');
+		expect(html).not.toContain("Reminders");
+		expect(html).toContain("Who gets them");
+		expect(html).toContain(
+			"Everyone who has signed in to Tally in the last 90 days.",
+		);
 	});
 
 	it("restores a removed address only for a session issued after removal", async () => {
@@ -674,20 +746,73 @@ describe("bank sign-in reminder Settings", () => {
 		expect(row?.removed_at).toBeNull();
 	});
 
+	it("refreshes a member who isn't removed on a visit whose token has no issue time, without lowering the session", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await env.DB.prepare(
+			"UPDATE household_members SET last_seen_at = datetime('now', '-91 days') WHERE email = ?",
+		)
+			.bind("dana@example.com")
+			.run();
+		const recipientsBefore = await reconnectRecipients(env.DB);
+		expect(recipientsBefore.results.map(({ email }) => email)).not.toContain(
+			"dana@example.com",
+		);
+		await noteHouseholdMember(env.DB, "dana@example.com", null);
+		const recipientsAfter = await reconnectRecipients(env.DB);
+		expect(recipientsAfter.results.map(({ email }) => email)).toContain(
+			"dana@example.com",
+		);
+		const row = await env.DB.prepare(
+			"SELECT session_issued_at, removed_at FROM household_members WHERE email = ?",
+		)
+			.bind("dana@example.com")
+			.first<{ session_issued_at: number; removed_at: string | null }>();
+		expect(row).toEqual({ session_issued_at: 100, removed_at: null });
+	});
+
+	it("leaves a removed member's last visit alone when the visit has no issue time", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await removeHouseholdMember(env.DB, "dana@example.com");
+		await env.DB.prepare(
+			"UPDATE household_members SET last_seen_at = '2026-01-01 00:00:00' WHERE email = ?",
+		)
+			.bind("dana@example.com")
+			.run();
+		await noteHouseholdMember(env.DB, "dana@example.com", null);
+		const row = await env.DB.prepare(
+			"SELECT last_seen_at, removed_at FROM household_members WHERE email = ?",
+		)
+			.bind("dana@example.com")
+			.first<{ last_seen_at: string; removed_at: string | null }>();
+		expect(row?.last_seen_at).toBe("2026-01-01 00:00:00");
+		expect(row?.removed_at).not.toBeNull();
+	});
+
+	it("keeps the newest session a member has been seen with", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 200);
+		await noteHouseholdMember(env.DB, "dana@example.com", 150);
+		const row = await env.DB.prepare(
+			"SELECT session_issued_at FROM household_members WHERE email = ?",
+		)
+			.bind("dana@example.com")
+			.first<{ session_issued_at: number }>();
+		expect(row?.session_issued_at).toBe(200);
+	});
+
 	it("Remove hides a known address and announces invalid and unknown address errors", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
-		const removed = await post("/settings/household-members/remove", {
-			email: "dana@example.com",
+		const removed = await post("/settings/bank-sign-in-emails", {
+			remove: "dana@example.com",
 		});
 		expect(removed.res.status).toBe(200);
-		const unknown = await post("/settings/household-members/remove", {
-			email: "missing@example.com",
+		const unknown = await post("/settings/bank-sign-in-emails", {
+			remove: "missing@example.com",
 		});
 		expect(unknown.res.status).toBe(404);
 		for (const [response, message, status] of [
 			[unknown, "Address not found.", 404],
 			[
-				await post("/settings/household-members/remove", { email: "bad" }),
+				await post("/settings/bank-sign-in-emails", { remove: "bad" }),
 				"Choose an address to remove.",
 				400,
 			],
@@ -698,12 +823,11 @@ describe("bank sign-in reminder Settings", () => {
 				JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}"),
 			).toMatchObject({ toast: { message, type: "error" }, announce: message });
 			expect(response.html).toContain(message);
-			const reminders =
-				response.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
-			expect(reminders).toContain('open=""');
-			expect(reminders).toContain(
-				'<summary class="flex min-h-11 cursor-pointer items-center" autofocus="">',
-			);
+			const block = emailsBlock(response.html);
+			expect(block).toContain(`role="alert"`);
+			expect(block).toContain(message);
+			expect(block).toMatch(/<details [^>]*open=""/);
+			expect(summaryTag(block)).toContain('autofocus=""');
 			expect(
 				JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").announce,
 			).toContain(message);
