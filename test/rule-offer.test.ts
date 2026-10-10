@@ -304,4 +304,100 @@ describe("merchant category rule offer", () => {
 		});
 		expect(cash.html).toContain(QUESTION);
 	});
+
+	it("does not ask on a third save that also ticks Always for this merchant", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			always: "1",
+		});
+		expect(third.html).not.toContain(QUESTION);
+		const rule = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+		expect(rule?.default_category_id).toBe(groceries);
+	});
+
+	it("names the merchant as the save renamed it on the third pick", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			merchant: "Fresh Market",
+		});
+		expect(third.html).toContain("Always use Groceries for Fresh Market?");
+		expect(
+			JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}").announce,
+		).toContain("Always use Groceries for Fresh Market?");
+	});
+
+	it("asks one merchant when a Select save takes two merchants to three, and the other on its next matching save", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 1000, 'other', 'other'), (1, ?, 1000, 'other', 'other'), (1, ?, 1000, 'other', 'other')",
+		)
+			.bind(
+				todayIn(DEFAULT_TIME_ZONE),
+				todayIn(DEFAULT_TIME_ZONE),
+				todayIn(DEFAULT_TIME_ZONE),
+			)
+			.run();
+		const otherIds = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE merchant_name = 'other' ORDER BY id",
+		)
+			.all<{ id: number }>()
+			.then((r) => r.results.map((row) => row.id));
+		await setCategory(otherIds.slice(0, 2), groceries, "user");
+		const selected = await post("/transactions/select/category/save", {
+			ids: `${ids[2]},${otherIds[2] ?? 0}`,
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(
+			selected.html.match(/Always use Groceries for [^?<]+\?/g),
+		).toHaveLength(1);
+		expect(selected.html).toContain(QUESTION);
+		// The other merchant has three picks now, so its next matching save asks.
+		await setCategory([otherIds[0]], null, null);
+		const next = await post(`/transactions/${otherIds[0]}`, edit(groceries));
+		expect(next.html).toContain("Always use Groceries for other?");
+	});
+
+	it("Yes makes the rule for a merchant with no settings row yet", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1000, 'cash-only-store', ?, 'user'), (1, ?, 1000, 'cash-only-store', ?, 'user')",
+		)
+			.bind(
+				todayIn(DEFAULT_TIME_ZONE),
+				groceries,
+				todayIn(DEFAULT_TIME_ZONE),
+				groceries,
+			)
+			.run();
+		const cash = await post("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "10.00",
+			merchant: "cash-only-store",
+			category: String(groceries),
+			note: "",
+			back: "/transactions",
+		});
+		expect(cash.html).toContain("Always use Groceries for cash-only-store?");
+		const before = await env.DB.prepare(
+			"SELECT raw_name FROM merchants WHERE raw_name = 'cash-only-store'",
+		).first();
+		expect(before).toBeNull();
+		const yes = await post("/transactions/rule-offer", {
+			merchant_key: "cash-only-store",
+			category: String(groceries),
+			count: "3",
+			back: "/transactions",
+		});
+		expect(yes.res.status).toBe(200);
+		const rule = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = 'cash-only-store'",
+		).first<{ default_category_id: number | null }>();
+		expect(rule?.default_category_id).toBe(groceries);
+	});
 });

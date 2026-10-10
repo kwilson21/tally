@@ -988,12 +988,13 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			"Pick a category from the list.",
 			true,
 		);
-	// The same write as the edit panel's category change (saveEdit).
+	// Merchants in the order their first selected row came, so two merchants that both reach three ask the same one each time.
 	const merchantRows = await c.env.DB.prepare(
-		`SELECT DISTINCT ${merchantKeySql("t")} AS merchantKey FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?))`,
+		`SELECT ${merchantKeySql("t")} AS merchantKey FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) GROUP BY ${merchantKeySql("t")} ORDER BY MIN(t.id)`,
 	)
 		.bind(JSON.stringify(ids))
 		.all<{ merchantKey: string }>();
+	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
 			c.env.DB.prepare(
@@ -2351,6 +2352,13 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 	if (!result.saved)
 		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
+	// suggestion its rows were showing when nothing was chosen (P29 A). The toast and the offer use this name.
+	const name =
+		parsed.value.displayName ??
+		(tx.nameSuggested && !parsed.value.keepBankName
+			? tx.displayName
+			: tidyName(tx.rawName));
 	const ruleOfferRecord =
 		parsed.value.categoryId === null ||
 		parsed.value.categoryId === tx.categoryId ||
@@ -2364,7 +2372,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		ruleOfferRecord && offerCategory
 			? {
 					...ruleOfferRecord,
-					merchant: tx.displayName || tidyName(tx.rawName),
+					merchant: name,
 					category: offerCategory.name,
 					back,
 				}
@@ -2391,13 +2399,6 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
-	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
-	// suggestion its rows were showing when nothing was chosen (P29 A).
-	const name =
-		parsed.value.displayName ??
-		(tx.nameSuggested && !parsed.value.keepBankName
-			? tx.displayName
-			: tidyName(tx.rawName));
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;
