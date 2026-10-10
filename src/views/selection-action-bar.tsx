@@ -96,6 +96,7 @@ export function SelectAllOnPage({
 					class="-mr-2"
 					// href always has a query (selectModeHref), so the marker joins with &.
 					hx-get={`${href}&focus=${FOCUS_SET_CATEGORY}`}
+					hx-sync="#filters:replace"
 					hx-target="#results"
 					hx-select="#results > *"
 					hx-select-oob={SELECTION_BAR_OOB}

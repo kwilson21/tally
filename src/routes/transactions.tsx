@@ -566,6 +566,8 @@ async function renderList(
 						class="pb-40"
 						hx-get="/transactions/select/count"
 						hx-trigger="load, change"
+						// A list change (filter, page or Select all) replaces any count in flight, so an older count can't overwrite the newer list's bar. Known gap: a tick made while a list request is loading queues a count from the old page's ids, which lands after the list (a follow-up; closing it means disabling the checkboxes while a list request runs).
+						hx-sync="#filters:queue last"
 						hx-target="#selected-count"
 						hx-swap="innerHTML"
 					>
