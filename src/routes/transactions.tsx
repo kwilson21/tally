@@ -20,6 +20,7 @@ import {
 	removeSplit,
 	saveEdit,
 	saveSplit,
+	setMerchantRule,
 	type TransactionDetail,
 } from "../db/transactions";
 import { formatCents } from "../money";
@@ -50,7 +51,10 @@ import {
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
-import { categoryRuleOffer, setMerchantRule } from "../transactions/rule-offer";
+import {
+	categoryRuleOffer,
+	ruleOfferForTransaction,
+} from "../transactions/rule-offer";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
@@ -79,7 +83,11 @@ import {
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
-import { RuleOffer, type RuleOfferValue } from "../views/rule-offer";
+import {
+	RuleOffer,
+	type RuleOfferValue,
+	ruleOfferAnnouncement,
+} from "../views/rule-offer";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
@@ -997,12 +1005,6 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	for (const row of merchantRows.results) {
 		const offer = await categoryRuleOffer(c.env.DB, row.merchantKey, cat.id);
 		if (!offer) continue;
-		const hasRule = await c.env.DB.prepare(
-			"SELECT default_category_id FROM merchants WHERE raw_name = ? AND default_category_id IS NOT NULL",
-		)
-			.bind(row.merchantKey)
-			.first();
-		if (hasRule) continue;
 		const matching = await c.env.DB.prepare(
 			`SELECT t.id FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${merchantKeySql("t")} = ? LIMIT 1`,
 		)
@@ -1016,7 +1018,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			category: cat.name,
 			back,
 		};
-		const announce = `Saved as ${cat.name}. ${cat.name} for ${value.merchant}? You've picked ${cat.name} for ${value.merchant} ${offer.count} times.`;
+		const announce = ruleOfferAnnouncement(value);
 		c.header(
 			"HX-Trigger",
 			JSON.stringify({ toast: { message, type: "success" }, announce }),
@@ -1096,7 +1098,6 @@ type SheetProps = {
 	 * after the delete question. A field's error and the question itself are known from the props.
 	 */
 	still?: boolean;
-	ruleOffer?: RuleOfferValue;
 };
 
 function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
@@ -1121,7 +1122,6 @@ function EditSheet({
 	namePick = null,
 	nameWas = null,
 	still = false,
-	ruleOffer,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -1582,7 +1582,6 @@ function EditSheet({
 						</p>
 					)}
 				</fieldset>
-				{ruleOffer && <RuleOffer value={ruleOffer} />}
 				{/* An error keeps the section, even when no purchase is offered any more. */}
 				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
 					<details
@@ -1907,32 +1906,27 @@ transactions.post("/transactions/cash", async (c) => {
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
-	const offerRecord =
-		saved.id !== null
-			? await categoryRuleOffer(
-					c.env.DB,
-					saved.merchant,
-					parsed.value.categoryId,
-				)
-			: null;
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-	const offer = offerRecord
-		? {
-				...offerRecord,
-				merchant: saved.merchant,
-				category:
-					categories.find((category) => category.id === parsed.value.categoryId)
-						?.name ?? "",
-				back,
-			}
-		: undefined;
-	if (offer?.category) {
-		const message = `Added ${saved.merchant}`;
+	const offerRecord = await categoryRuleOffer(
+		c.env.DB,
+		saved.merchant,
+		saved.categoryId,
+	);
+	const categoryName = categories.find(
+		(category) => category.id === saved.categoryId,
+	)?.name;
+	if (offerRecord && categoryName) {
+		const offer: RuleOfferValue = {
+			...offerRecord,
+			merchant: saved.merchant,
+			category: categoryName,
+			back,
+		};
 		c.header(
 			"HX-Trigger",
 			JSON.stringify({
-				toast: { message, type: "success" },
-				announce: `Saved as ${offer.category}. ${offer.category} for ${offer.merchant}? You've picked ${offer.category} for ${offer.merchant} ${offer.count} times.`,
+				toast: { message: `Added ${saved.merchant}`, type: "success" },
+				announce: ruleOfferAnnouncement(offer),
 			}),
 		);
 		c.header("HX-Push-Url", back);
@@ -2362,11 +2356,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		parsed.value.categoryId === tx.categoryId ||
 		parsed.value.alwaysForMerchant
 			? null
-			: await categoryRuleOffer(
-					c.env.DB,
-					result.merchantKey,
-					parsed.value.categoryId,
-				);
+			: await ruleOfferForTransaction(c.env.DB, tx.id, parsed.value.categoryId);
 	const offerCategory = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	);
@@ -2435,27 +2425,13 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 				type: "success",
 			},
 			announce: ruleOffer
-				? `Saved as ${ruleOffer.category}. ${ruleOffer.category} for ${ruleOffer.merchant}? You've picked ${ruleOffer.category} for ${ruleOffer.merchant} ${ruleOffer.count} times.`
+				? ruleOfferAnnouncement(ruleOffer)
 				: (keptDetails ? `Kept the details for ${name}.` : saved) + exclusion,
 		}),
 	);
 	c.header("HX-Push-Url", back);
 	return ruleOffer
-		? renderList(c, today, filters, {
-				sheet: (all, today) => (
-					<EditSheet
-						tx={tx}
-						back={back}
-						categories={all}
-						people={people}
-						values={{ ...parsed.value, categoryId: parsed.value.categoryId }}
-						refunds={refunds}
-						today={today}
-						ruleOffer={ruleOffer}
-						still
-					/>
-				),
-			})
+		? renderRuleOffer(c, today, back, ruleOffer)
 		: renderList(c, today, filters, { focusId: tx.id });
 });
 
@@ -2470,13 +2446,6 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	)
 		.bind(categoryId)
 		.first<{ id: number; name: string }>();
-	const existingRule = merchantKey
-		? await c.env.DB.prepare(
-				"SELECT default_category_id AS categoryId FROM merchants WHERE raw_name = ?",
-			)
-				.bind(merchantKey)
-				.first<{ categoryId: number | null }>()
-		: null;
 	const merchantName = merchantKey
 		? await c.env.DB.prepare(
 				"SELECT display_name AS displayName FROM merchants WHERE raw_name = ?",
@@ -2491,8 +2460,10 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	const message =
 		yes && offer && validCategory
 			? `Always use ${validCategory.name} for ${merchantName?.displayName || tidyName(merchantKey)}.`
-			: "Saved.";
-	if (yes && offer && validCategory && existingRule?.categoryId == null)
+			: validCategory
+				? `Saved as ${validCategory.name}.`
+				: "Saved.";
+	if (yes && offer && validCategory)
 		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(

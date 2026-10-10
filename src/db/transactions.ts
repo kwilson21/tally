@@ -621,11 +621,19 @@ const EXCLUDE =
 	"excluded_source = CASE WHEN excluded = ? THEN excluded_source ELSE 'user' END, excluded = ?";
 
 /**
+ * Gives a merchant's rule category to every transaction a person hasn't chosen (§7). Binds the
+ * category, the actor and the merchant key; callers add their own last condition.
+ */
+const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+	updated_by = ?, updated_at = datetime('now')
+WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'`;
+
+/**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
  * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left.
  */
 export type SaveEditResult =
-	| { saved: true; merchantKey: string }
+	| { saved: true }
 	| { saved: false; refundLeftCents: number };
 
 /**
@@ -976,12 +984,12 @@ export async function saveEdit(
 		);
 		if (ruleChange.recategorize)
 			statements.push(
-				gated(
-					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
-					updated_by = ?, updated_at = datetime('now')
-				WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
-					[edit.categoryId, actor, current.merchantKey, id],
-				),
+				gated(`${APPLY_MERCHANT_RULE_SQL} AND id != ?`, [
+					edit.categoryId,
+					actor,
+					current.merchantKey,
+					id,
+				]),
 			);
 	} else if (ruleChange.action === "clear" && edit.merchantRuleWas != null) {
 		statements.push(
@@ -1001,10 +1009,13 @@ export async function saveEdit(
 			saved: false,
 			refundLeftCents: await refundLeftCents(db, purchase, id),
 		};
-	return { saved: true, merchantKey: current.merchantKey };
+	return { saved: true };
 }
 
-/** Sets a merchant's category rule and applies it without replacing a person's own choices. */
+/**
+ * Sets a merchant's category rule the way "Always for this merchant" does, for a save that has no
+ * row of its own to skip: the rule reaches every transaction a person hasn't chosen.
+ */
 export async function setMerchantRule(
 	db: D1Database,
 	merchantKey: string,
@@ -1018,16 +1029,7 @@ export async function setMerchantRule(
 			ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id`,
 			)
 			.bind(merchantKey, categoryId),
-		db
-			.prepare(
-				`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
-				split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now')
-			WHERE ${merchantKeySql("transactions")} = ? AND id NOT IN (
-				SELECT id FROM transactions WHERE ${merchantKeySql("transactions")} = ?
-					AND category_source = 'user' AND category_id = ?
-			) AND COALESCE(category_source, '') != 'user'`,
-			)
-			.bind(categoryId, actor, merchantKey, merchantKey, categoryId),
+		db.prepare(APPLY_MERCHANT_RULE_SQL).bind(categoryId, actor, merchantKey),
 	]);
 }
 

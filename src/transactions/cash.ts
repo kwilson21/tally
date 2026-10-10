@@ -87,7 +87,7 @@ export async function saveCash(
 	},
 	by: string,
 	entryKey: string | null = null,
-): Promise<{ merchant: string; amountCents: number; id: number | null }> {
+): Promise<{ merchant: string; amountCents: number; categoryId: number }> {
 	await db.batch([
 		db.prepare(
 			"INSERT INTO accounts (name,type) VALUES ('Cash','cash') ON CONFLICT(type) WHERE type='cash' DO NOTHING",
@@ -110,16 +110,16 @@ export async function saveCash(
 	const stored = entryKey
 		? await db
 				.prepare(
-					"SELECT raw_name AS merchant, amount_cents AS amountCents, id FROM transactions WHERE entry_key = ?",
+					"SELECT raw_name AS merchant, amount_cents AS amountCents, category_id AS categoryId FROM transactions WHERE entry_key = ?",
 				)
 				.bind(entryKey)
-				.first<{ merchant: string; amountCents: number; id: number }>()
+				.first<{ merchant: string; amountCents: number; categoryId: number }>()
 		: null;
 	return (
 		stored ?? {
 			merchant: value.merchant,
 			amountCents: value.amountCents,
-			id: null,
+			categoryId: value.categoryId,
 		}
 	);
 }

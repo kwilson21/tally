@@ -1,13 +1,10 @@
 import { merchantKeySql } from "../db/merchant-key";
-import { setMerchantRule } from "../db/transactions";
 
 export type RuleOffer = {
 	merchantKey: string;
 	categoryId: number;
 	count: number;
 };
-
-export { setMerchantRule };
 
 /** Counts a person's picks in the merchant's own transaction history, using its history index. */
 export async function categoryRuleOffer(
@@ -32,4 +29,22 @@ export async function categoryRuleOffer(
 	const count = rows?.count ?? 0;
 	if (count < 3) return null;
 	return { merchantKey, categoryId, count };
+}
+
+/**
+ * The offer after a person saved `categoryId` on one transaction. The merchant comes from the stored
+ * row, so the answer follows what was saved, whatever the form carried.
+ */
+export async function ruleOfferForTransaction(
+	db: D1Database,
+	transactionId: number,
+	categoryId: number,
+): Promise<RuleOffer | null> {
+	const row = await db
+		.prepare(
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions WHERE id = ?`,
+		)
+		.bind(transactionId)
+		.first<{ merchantKey: string }>();
+	return row ? categoryRuleOffer(db, row.merchantKey, categoryId) : null;
 }

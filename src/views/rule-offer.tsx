@@ -10,6 +10,11 @@ export type RuleOfferValue = {
 	back: string;
 };
 
+/** What the screen reader hears when the offer appears: the save, then the question. */
+export function ruleOfferAnnouncement(value: RuleOfferValue): string {
+	return `Saved as ${value.category}. Always use ${value.category} for ${value.merchant}? You've picked ${value.category} for ${value.merchant} ${value.count} times.`;
+}
+
 /** The one yes-or-no question after a person has chosen a merchant's category three times. */
 export function RuleOffer({
 	value,
@@ -19,27 +24,24 @@ export function RuleOffer({
 	focus?: boolean;
 }) {
 	return (
-		<section
-			class="mt-5 border-t border-rule pt-4"
-			aria-labelledby="rule-offer-title"
-		>
-			<p role="status" class="flex items-center gap-2 text-sm text-muted">
+		<div class="flex flex-col gap-3">
+			<p role="status" class="flex items-center gap-2 text-muted">
 				<Icon name="check" class="size-5" />
 				Saved as {value.category}
 			</p>
-			<h3
+			<h2
 				id="rule-offer-title"
 				tabindex={focus ? -1 : undefined}
 				autofocus={focus || undefined}
 				class="font-serif text-4xl font-semibold tracking-tight"
 			>
 				Always use {value.category} for {value.merchant}?
-			</h3>
-			<p class="mt-2 text-muted">
+			</h2>
+			<p>
 				You've picked {value.category} for {value.merchant} {value.count} times.
 				Say yes and Tally sorts the next one for you.
 			</p>
-			<div class="mt-4 grid grid-cols-2 gap-3">
+			<div class="grid grid-cols-2 gap-3">
 				<form
 					method="post"
 					action="/transactions/rule-offer/dismiss"
@@ -81,6 +83,6 @@ export function RuleOffer({
 					</Button>
 				</form>
 			</div>
-		</section>
+		</div>
 	);
 }
