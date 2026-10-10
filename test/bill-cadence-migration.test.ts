@@ -46,7 +46,7 @@ async function cleanup() {
 afterEach(cleanup);
 
 describe("migration 0035: bill cadence", () => {
-	it("preserves every pre-migration bill column, row value, and payment indexes", async () => {
+	it("preserves existing bill and payment rows and widens cadence checks", async () => {
 		const oldBills = `CREATE TABLE ${prefix}bills (
 			id INTEGER PRIMARY KEY, name TEXT NOT NULL,
 			amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents > 0),
@@ -64,6 +64,7 @@ describe("migration 0035: bill cadence", () => {
 			db.prepare(
 				`CREATE TABLE ${prefix}transactions(id INTEGER PRIMARY KEY, category_id INTEGER, category_source TEXT, category_confidence REAL, jev_category_id INTEGER, jev_none_fit INTEGER, category_suggestion_id INTEGER)`,
 			),
+			db.prepare(`INSERT INTO ${prefix}transactions(id) VALUES(992),(993)`),
 			db.prepare(oldBills),
 			db.prepare(
 				`ALTER TABLE ${prefix}bills ADD COLUMN merchant_raw_text INTEGER NOT NULL DEFAULT 0 CHECK (merchant_raw_text IN (0, 1))`,
@@ -86,6 +87,10 @@ describe("migration 0035: bill cadence", () => {
 			),
 			db.prepare(
 				`INSERT INTO ${prefix}bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,active,merchant_raw_text) VALUES(991,'Migration bill',12345,21,'monthly',NULL,NULL,'MIGRATION MERCHANT',0,1)`,
+			),
+			db.prepare(`INSERT INTO ${prefix}transactions(id) VALUES(991)`),
+			db.prepare(
+				`INSERT INTO ${prefix}bill_payments(id,bill_id,period,transaction_id,matched_by,status,created_at) VALUES(991,991,'2026-10',991,'user','linked','2026-10-01 00:00:00')`,
 			),
 		]);
 		expect(migration).toBeDefined();
@@ -110,6 +115,36 @@ describe("migration 0035: bill cadence", () => {
 			merchant_raw_text: 1,
 			active: 0,
 		});
+		expect(
+			await db
+				.prepare(`SELECT * FROM ${prefix}bill_payments WHERE id=991`)
+				.first(),
+		).toEqual({
+			id: 991,
+			bill_id: 991,
+			period: "2026-10",
+			transaction_id: 991,
+			matched_by: "user",
+			status: "linked",
+			created_at: "2026-10-01 00:00:00",
+		});
+		await db.batch([
+			db.prepare(
+				`INSERT INTO ${prefix}bills(id,name,amount_cents,due_day,frequency,anchor_date,merchant_raw_name) VALUES(992,'Biweekly',100,5,'biweekly','2026-10-02','BIWEEKLY')`,
+			),
+			db.prepare(
+				`INSERT INTO ${prefix}bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name) VALUES(993,'Quarterly',100,15,'quarterly',11,'QUARTERLY')`,
+			),
+			db.prepare(
+				`INSERT INTO ${prefix}bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(994,'Weekly',100,5,'weekly','WEEKLY')`,
+			),
+			db.prepare(
+				`INSERT INTO ${prefix}bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(992,'2026-10-16',992,'auto','linked')`,
+			),
+			db.prepare(
+				`INSERT INTO ${prefix}bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(993,'2026-Q4',993,'auto','linked')`,
+			),
+		]);
 		const columns = await db
 			.prepare(`PRAGMA table_info(${prefix}bills)`)
 			.all<{ name: string }>();
