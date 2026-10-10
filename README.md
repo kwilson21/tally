@@ -50,3 +50,17 @@ Then, in a second terminal, run this as one command. It stops at the first failu
 **Check it** on a phone and a laptop: the page loads over HTTPS, Home shows the Rivera household, every nav link works, and the browser console shows no errors.
 
 **Undo.** `npx wrangler rollback --env demo` puts back the previous version of the code. `npx wrangler d1 time-travel restore tally-demo --env demo --timestamp=<time>` puts back the data as it was at that time. D1 keeps 30 days of history on Workers Paid and 7 days on Workers Free.
+
+## Versions and releases
+
+Each production deploy is a release named by its date, `vYYYY.MM.DD` (a second one the same day adds `.2`), decision 98. Deploys are owner-approved. From a clean checkout of `origin/main`, after `npm run build`:
+
+    npx wrangler d1 migrations apply DB --env production --remote
+    npx wrangler deploy --env production --message "vYYYY.MM.DD main <short sha>"
+
+Then publish the release on the same commit, with notes that list the PRs merged since the previous release and the migrations applied:
+
+    git log --first-parent --format='- %s' <previous tag>..<sha>
+    gh release create vYYYY.MM.DD --target <full sha> --title vYYYY.MM.DD --notes-file <notes>
+
+A demo deploy uses the same message with `demo` in place of the release name, and gets no tag. Before applying migrations, `npx wrangler d1 time-travel info <database> --env <env>` prints a bookmark to restore to.
