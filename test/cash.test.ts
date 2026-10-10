@@ -240,6 +240,89 @@ describe("adding cash", () => {
 });
 
 describe("cash lifecycle", () => {
+	const createBillLinkedCash = async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today,
+				amount: "18.50",
+				merchant: "Bill-linked cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Bill-linked cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9600,'Linked cash bill',1850,5,'monthly',1,'BILL-LINKED CASH')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9600,?,?,'user','linked')",
+		)
+			.bind(month, id)
+			.run();
+
+		return { id, today, month };
+	};
+	const saveCashEdit = (id: number, date: string, amount: string) =>
+		request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ date, amount, back: "/transactions" }),
+		});
+	const linkedPayment = (id: number) =>
+		env.DB.prepare(
+			"SELECT bill_id,period,transaction_id,status FROM bill_payments WHERE transaction_id=?",
+		)
+			.bind(id)
+			.first();
+
+	it("date edit keeps the bill link", async () => {
+		const { id, today, month } = await createBillLinkedCash();
+		const earlierDate =
+			today.slice(8) === "01"
+				? `${today.slice(0, 7)}-02`
+				: `${today.slice(0, 7)}-01`;
+		const saved = await saveCashEdit(id, earlierDate, "18.50");
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT date FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ date: earlierDate });
+		expect(await linkedPayment(id)).toEqual({
+			bill_id: 9600,
+			period: month,
+			transaction_id: id,
+			status: "linked",
+		});
+	});
+
+	it("amount edit keeps the bill link", async () => {
+		const { id, today, month } = await createBillLinkedCash();
+		const saved = await saveCashEdit(id, today, "20.00");
+		expect(saved.res.status).toBe(200);
+		expect(await linkedPayment(id)).toEqual({
+			bill_id: 9600,
+			period: month,
+			transaction_id: id,
+			status: "linked",
+		});
+	});
+
 	it("edits a cash entry's date and amount in the edit panel", async () => {
 		const created = await request("/transactions/cash", {
 			method: "POST",
