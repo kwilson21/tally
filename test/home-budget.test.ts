@@ -8,9 +8,16 @@ import {
 } from "../src/dates";
 import { lastMonthSpentCents } from "../src/db/budgets";
 import { resetDemo } from "../src/demo/reset";
-import { formatCents } from "../src/money";
+import { formatCents, toCents } from "../src/money";
 
 const BASE = "http://tally.test";
+/** A transaction row's amount in integer cents: "$50.00" is money out, "+$15.00" money in (negative). */
+const rowCents = (row: string) => {
+	const text =
+		row.match(/shrink-0 text-lg">([^<]+)<\/span>/)?.[1]?.trim() ?? "";
+	const cents = toCents(text.replace(/^\+/, ""));
+	return text.startsWith("+") ? -cents : cents;
+};
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
 	return { res, html: await res.text() };
@@ -160,6 +167,59 @@ describe("GET /budget/:id", () => {
 		expect(rows.map((row) => row[1])).not.toContain("919");
 		expect(list).not.toContain("EXCLUDED");
 		expect(textOf(sheet)).toContain("$106.00 spent");
+	});
+
+	it("opens a list of exactly the rows the sheet counts: a linked refund in both, an unreviewed credit in neither", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const nextMonth = monthsBefore(month, -1);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded)
+				VALUES (940, 1, ?, 5000, 'GROCER A', 1, 'user', 0),
+				(941, 1, ?, 3000, 'GROCER B', 1, 'user', 0)`).bind(
+				`${month}-03`,
+				`${month}-04`,
+			),
+			// A reviewed refund of 940, dated next month and filed under Eating Out: it counts in 940's
+			// month and category (spec §6).
+			env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded, refund_of_id, credit_reviewed, credit_reviewed_by)
+				VALUES (942, 1, ?, -1500, 'RETURN A', 2, 'user', 0, 940, 1, 'user')`).bind(
+				`${nextMonth}-02`,
+			),
+			// A credit with a category from a merchant rule that nobody has reviewed: it counts in neither
+			// Spent nor the list until it is reviewed (spec §6, decision 70).
+			env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded, credit_reviewed)
+				VALUES (943, 1, ?, -2000, 'CREDIT B', 1, 'merchant_rule', 0, 0)`).bind(
+				`${month}-05`,
+			),
+		]);
+		const { html: sheet } = await get("/budget/1");
+		const linked = Number(
+			sheet.match(
+				new RegExp(
+					`<a[^>]*href="/transactions\\?category=1&amp;month=${month}&amp;show=spending"[^>]*>(\\d+) transactions`,
+				),
+			)?.[1],
+		);
+		expect(linked).toBe(3);
+		expect(textOf(sheet)).toContain("$65.00 spent so far");
+
+		const { html: list } = await get(
+			`/transactions?month=${month}&category=1&show=spending`,
+		);
+		const rows = [
+			...list.matchAll(/<li data-transaction="(\d+)">([\s\S]*?)<\/li>/g),
+		];
+		expect(rows).toHaveLength(linked);
+		expect(rows.map((row) => row[1]).sort()).toEqual(["940", "941", "942"]);
+		expect(rows.reduce((sum, row) => sum + rowCents(row[2] ?? ""), 0)).toBe(
+			6500,
+		);
+		expect(textOf(list)).toContain("3 spending transactions in Groceries");
+
+		const { html: home } = await get("/");
+		expect(textOf(home)).toContain("Groceries $65 of $700");
 	});
 
 	it("does not show a transactions button when none count", async () => {

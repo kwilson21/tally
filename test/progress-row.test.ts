@@ -41,6 +41,13 @@ describe("ProgressRow", () => {
 		expect(html).toMatch(/\$36\.50 over<span class="sr-only"> budget<\/span>/);
 	});
 
+	it("$200.01 reads $0.01 over", async () => {
+		const html = await row(20001, 20000);
+		expect(html).toMatch(/\$0\.01 over<span class="sr-only"> budget<\/span>/);
+		expect(html).toContain("fill-over");
+		expect(html).not.toContain("fill-near-limit");
+	});
+
 	it.each([
 		[16000, 20000, true],
 		[15999, 20000, false],
