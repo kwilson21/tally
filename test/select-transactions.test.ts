@@ -323,6 +323,7 @@ describe("select several transactions", () => {
 			"#selected-count:innerHTML",
 			"#set-category-selection:outerHTML",
 			"#exclude-selection:outerHTML",
+			"#select-all-page:outerHTML",
 		])
 			expect(oob).toContain(part);
 		const pageOob = html.match(/rel="next"[^>]*hx-select-oob="([^"]*)"/)?.[1];
@@ -486,5 +487,135 @@ describe("select several transactions", () => {
 			/role="alert"[^>]*>Select 100 or fewer transactions\./,
 		);
 		expect(await snapshot()).toEqual(before);
+	});
+
+	type SnapshotRow = {
+		id: number;
+		category_id: number | null;
+		category_source: string | null;
+		excluded: number;
+		excluded_source: string | null;
+	};
+
+	const pageHtml = async (query: string, htmx = false) =>
+		(
+			await request(
+				`/transactions?${query}`,
+				htmx ? { headers: { "HX-Request": "true" } } : undefined,
+			)
+		).text();
+	/** The rows on the page that can be ticked, in order. */
+	const rowIds = (html: string) =>
+		[...html.matchAll(/name="ids" value="(\d+)"/g)].map((m) => Number(m[1]));
+	const tickedIds = (html: string) =>
+		[...html.matchAll(/name="ids" value="(\d+)" checked/g)].map((m) =>
+			Number(m[1]),
+		);
+	const selectAllLabel = (html: string) =>
+		html.match(/>Select all (\d+)<\/a>/)?.[1];
+	/** The link's address as a browser follows it (its ampersands are escaped in the HTML). */
+	const selectAllHref = (html: string) =>
+		html
+			.match(/<a href="([^"]*)"[^>]*>Select all \d+<\/a>/)?.[1]
+			?.replaceAll("&amp;", "&");
+	/** The count's fragment for these ticked ids, on a page whose selectable rows are `pageIds`. */
+	const countFragment = async (ids: number[], pageIds: number[]) =>
+		(
+			await request(
+				`/transactions/select/count?${new URLSearchParams([
+					...ids.map((id) => ["ids", String(id)]),
+					["page-ids", pageIds.join(",")],
+					["back", "/transactions?month=all"],
+				])}`,
+			)
+		).text();
+
+	it("offers Select all for the page's selectable rows, with none or some ticked", async () => {
+		const html = await pageHtml("month=all&select=1");
+		const ids = rowIds(html);
+		expect(ids.length).toBeGreaterThan(1);
+		expect(html).toContain('id="select-all-page"');
+		expect(selectAllLabel(html)).toBe(String(ids.length));
+		const some = await pageHtml(`month=all&select=1&ids=${ids[0]}`);
+		expect(selectAllLabel(some)).toBe(String(ids.length));
+	});
+
+	it("ticks every row on the page from the link, and the count says so", async () => {
+		const html = await pageHtml("month=all&select=1");
+		const ids = rowIds(html);
+		const href = selectAllHref(html);
+		expect(href).toBeDefined();
+		const after = await pageHtml(href ?? "", true);
+		expect(tickedIds(after)).toEqual(ids);
+		expect(after).toMatch(/id="selected-count"[^>]*aria-live="polite"/);
+		expect(after).toMatch(
+			new RegExp(`id="selected-count"[^>]*>${ids.length} selected<`),
+		);
+		expect(selectAllLabel(after)).toBeUndefined();
+	});
+
+	it("brings the link back when a row is unticked, and hides it once every row is ticked", async () => {
+		const ids = rowIds(await pageHtml("month=all&select=1"));
+		const all = await countFragment(ids, ids);
+		expect(all).toMatch(
+			/<span id="select-all-page"[^>]*hx-swap-oob="outerHTML"/,
+		);
+		expect(selectAllLabel(all)).toBeUndefined();
+		const oneOff = await countFragment(ids.slice(1), ids);
+		expect(oneOff).toContain(`${ids.length - 1} selected`);
+		expect(selectAllLabel(oneOff)).toBe(String(ids.length));
+	});
+
+	it("leaves a split parent out of the rows the link ticks", async () => {
+		const before = rowIds(await pageHtml("month=all&select=1"));
+		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
+			.bind(before[0])
+			.run();
+		const html = await pageHtml("month=all&select=1");
+		const ids = rowIds(html);
+		expect(ids).toEqual(before.slice(1));
+		expect(selectAllLabel(html)).toBe(String(before.length - 1));
+		const href = selectAllHref(html) ?? "";
+		expect(
+			new URL(href, "http://tally.test").searchParams.get("ids")?.split(","),
+		).toEqual(before.slice(1).map(String));
+	});
+
+	it("counts only the rows of the filtered page", async () => {
+		const html = await pageHtml("select=1&q=Local+Bakery");
+		const ids = rowIds(html);
+		expect(ids.length).toBeGreaterThan(0);
+		expect(selectAllLabel(html)).toBe(String(ids.length));
+	});
+
+	it("has no link on a page with no rows to tick", async () => {
+		const html = await pageHtml("select=1&q=zz-no-such-words-zz");
+		expect(rowIds(html)).toEqual([]);
+		expect(html).not.toMatch(/>Select all \d+<\/a>/);
+	});
+
+	it("ticks the page on a full page load too, without JavaScript", async () => {
+		const page = await pageHtml("month=all&select=1");
+		const ids = rowIds(page);
+		const html = await (await request(selectAllHref(page) ?? "")).text();
+		expect(tickedIds(html)).toEqual(ids);
+		expect(selectAllLabel(html)).toBeUndefined();
+	});
+
+	it("changes exactly the rows the link ticked when an action follows", async () => {
+		const ids = rowIds(await pageHtml("month=all&select=1"));
+		const before = (await snapshot()) as SnapshotRow[];
+		const res = await post(
+			"/transactions/select/category/save",
+			form(ids, { category: "1", back: "/transactions?month=all" }),
+		);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
+			`Set ${ids.length} transactions to Groceries.`,
+		);
+		const beforeById = new Map(before.map((row) => [row.id, row]));
+		for (const row of (await snapshot()) as SnapshotRow[]) {
+			if (ids.includes(row.id)) expect(row.category_id).toBe(1);
+			else expect(row).toEqual(beforeById.get(row.id));
+		}
 	});
 });

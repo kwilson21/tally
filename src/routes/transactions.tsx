@@ -78,6 +78,12 @@ import {
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
+import {
+	SELECTION_BAR_OOB,
+	SelectAllOnPage,
+	SelectionActionBar,
+	SelectionActionButtons,
+} from "../views/selection-action-bar";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
@@ -329,6 +335,9 @@ async function renderList(
 	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
 	// shows the no-JS hint, and htmx re-counts on load.
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
+	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
+	const tickedOnPage = new Set(ticked.map((row) => row.id));
 	const htmx = c.req.header("HX-Request") === "true";
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
@@ -550,7 +559,7 @@ async function renderList(
 						id="selection-form"
 						aria-label="Select transactions"
 						method="post"
-						class="pb-28"
+						class="pb-40"
 						hx-get="/transactions/select/count"
 						hx-trigger="load, change"
 						hx-target="#selected-count"
@@ -601,20 +610,17 @@ async function renderList(
 						<div
 							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
 						>
-							<div class="flex flex-wrap items-center gap-2">
-								<span
-									id="selected-count"
-									aria-live="polite"
-									class="mr-auto text-lg"
-								>
-									{htmx
+							<SelectionActionBar
+								label={
+									htmx
 										? selectedLabel(ticked.length)
-										: "Choose rows, then an action"}
-								</span>
-								<SelectionActionButtons
-									disabled={htmx && ticked.length === 0}
-								/>
-							</div>
+										: "Choose rows, then an action"
+								}
+								href={selectModeHref(back, pageIds)}
+								pageIds={pageIds}
+								ticked={tickedOnPage}
+								disabled={htmx && ticked.length === 0}
+							/>
 						</div>
 					</form>
 				) : (
@@ -704,9 +710,7 @@ const LIST_OOB = [
 	"#add-cash:outerHTML",
 	"#select-toggle:outerHTML",
 	"#selection-back:outerHTML",
-	"#selected-count:innerHTML",
-	"#set-category-selection:outerHTML",
-	"#exclude-selection:outerHTML",
+	SELECTION_BAR_OOB,
 	"#view-links:outerHTML",
 ].join(", ");
 
@@ -730,54 +734,6 @@ function parseIds(values: (string | File)[]) {
 	return [...ids];
 }
 
-function SelectionActionButtons({
-	disabled = false,
-	oob = false,
-}: {
-	disabled?: boolean;
-	oob?: boolean;
-}) {
-	// Only the count fragment's copy swaps itself in out of band; each button's own request
-	// keeps its normal swap.
-	const oobSwap = oob ? "outerHTML" : undefined;
-	return (
-		<>
-			<Button
-				id="set-category-selection"
-				kind="secondary"
-				type="submit"
-				class="px-3"
-				formaction="/transactions/select/category"
-				formmethod="post"
-				disabled={disabled}
-				hx-post="/transactions/select/category"
-				hx-target="#sheet"
-				hx-select="#sheet"
-				hx-swap="outerHTML"
-				hx-swap-oob={oobSwap}
-			>
-				Set category
-			</Button>
-			<Button
-				id="exclude-selection"
-				kind="secondary"
-				type="submit"
-				class="px-3"
-				formaction="/transactions/select/exclude"
-				formmethod="post"
-				disabled={disabled}
-				hx-post="/transactions/select/exclude"
-				hx-target="#main"
-				hx-select="#main > *"
-				hx-swap="innerHTML"
-				hx-swap-oob={oobSwap}
-			>
-				Exclude
-			</Button>
-		</>
-	);
-}
-
 async function selectableIds(db: D1Database, ids: number[]) {
 	if (ids.length === 0 || ids.length > MAX_SELECTED) return [];
 	const marks = ids.map(() => "?").join(",");
@@ -792,11 +748,20 @@ async function selectableIds(db: D1Database, ids: number[]) {
 
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
 transactions.get("/transactions/select/count", (c) => {
-	const count = parseIds(new URL(c.req.url).searchParams.getAll("ids")).length;
+	const params = new URL(c.req.url).searchParams;
+	const ticked = new Set(parseIds(params.getAll("ids")));
+	const pageIds = parseIds(params.getAll("page-ids"));
+	const back = safeBack(params.get("back"));
 	return c.html(
 		<>
-			{selectedLabel(count)}
-			<SelectionActionButtons disabled={count === 0} oob />
+			{selectedLabel(ticked.size)}
+			<SelectionActionButtons disabled={ticked.size === 0} oob />
+			<SelectAllOnPage
+				href={selectModeHref(back, pageIds)}
+				pageIds={pageIds}
+				ticked={ticked}
+				oob
+			/>
 		</>,
 	);
 });

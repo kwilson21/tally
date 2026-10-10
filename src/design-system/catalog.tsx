@@ -68,6 +68,7 @@ import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
+import { SelectionActionBar } from "../views/selection-action-bar";
 import { SplitForm } from "../views/split-form";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
@@ -1070,6 +1071,9 @@ function HomeTopGroup() {
 	);
 }
 
+/** The sample page's selectable rows, 25 to a page as the list draws it. */
+const SAMPLE_PAGE_IDS = Array.from({ length: 25 }, (_, i) => 101 + i);
+
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
@@ -1567,6 +1571,50 @@ function Rows() {
 							suggestion={CATEGORY_SUGGESTION}
 							ticked={[31, 32, 33]}
 							notes={{ 34: "Birthday present" }}
+						/>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="selection-action-bar"
+				title="SelectionActionBar"
+				tier="visual"
+				components={[
+					"SelectionActionBar",
+					"SelectAllOnPage",
+					"SelectionActionButtons",
+					"Button",
+				]}
+				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it that ticks every row on the page (“Select all 25”) until every row is ticked, and Set category and Exclude on a second line (P70 A and P81 A)."
+			>
+				<State label="Some rows ticked: the link offers the page">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							label="3 selected"
+							href="/transactions?select=1"
+							pageIds={SAMPLE_PAGE_IDS}
+							ticked={new Set([101, 103, 104])}
+						/>
+					</div>
+				</State>
+				<State label="Every row ticked: the link is gone">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							label="25 selected"
+							href="/transactions?select=1"
+							pageIds={SAMPLE_PAGE_IDS}
+							ticked={new Set(SAMPLE_PAGE_IDS)}
+						/>
+					</div>
+				</State>
+				<State label="Nothing ticked: the actions wait, the link still offers the page">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							label="0 selected"
+							href="/transactions?select=1"
+							pageIds={SAMPLE_PAGE_IDS}
+							ticked={new Set()}
+							disabled
 						/>
 					</div>
 				</State>
