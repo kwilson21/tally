@@ -26,12 +26,9 @@ SELECT
   id, name, amount_cents, due_day, frequency, anchor_month, NULL, category_id,
   merchant_raw_name, merchant_raw_text, active
 FROM bills;
-DROP TABLE bills;
-ALTER TABLE bills_new RENAME TO bills;
-
 CREATE TABLE bill_payments_new (
 	 id INTEGER PRIMARY KEY,
-	 bill_id INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
+	 bill_id INTEGER NOT NULL REFERENCES bills_new(id) ON DELETE CASCADE,
 	 period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]' OR period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' OR period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR period GLOB '[0-9][0-9][0-9][0-9]-Q[1-4]'),
 	 transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
 	 matched_by TEXT NOT NULL CHECK (matched_by IN ('auto', 'user')),
@@ -40,6 +37,8 @@ CREATE TABLE bill_payments_new (
 );
 INSERT INTO bill_payments_new SELECT * FROM bill_payments;
 DROP TABLE bill_payments;
+DROP TABLE bills;
+ALTER TABLE bills_new RENAME TO bills;
 ALTER TABLE bill_payments_new RENAME TO bill_payments;
 CREATE UNIQUE INDEX bill_payments_one_per_period ON bill_payments(bill_id, period) WHERE status = 'linked';
 CREATE UNIQUE INDEX bill_payments_one_bill_per_transaction ON bill_payments(transaction_id) WHERE status = 'linked';

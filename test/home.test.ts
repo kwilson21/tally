@@ -495,7 +495,7 @@ describe("GET / with the demo seed", () => {
 		const withBills = dollars((await home()).html);
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const withoutBills = dollars((await home()).html);
-		expect(withoutBills - withBills).toBe(702);
+		expect(withoutBills - withBills).toBe(942);
 	});
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
@@ -549,18 +549,21 @@ describe("GET / with the demo seed", () => {
 		const dueBills = billData.rows.reduce(
 			(sum, bill) =>
 				sum +
-				bill.totalOccurrences
-					.filter(
-						(occurrence) =>
-							occurrence.dueDate.startsWith(month) &&
-							(occurrence.status === "due" || occurrence.status === "overdue"),
-					)
-					.reduce(
-						(total, occurrence) =>
-							total +
-							Math.max(0, occurrence.amountCents - occurrence.paidCents),
-						0,
-					),
+				(bill.active
+					? bill.totalOccurrences
+							.filter(
+								(occurrence) =>
+									occurrence.dueDate.startsWith(month) &&
+									(occurrence.status === "due" ||
+										occurrence.status === "overdue"),
+							)
+							.reduce(
+								(total, occurrence) =>
+									total +
+									Math.max(0, occurrence.amountCents - occurrence.paidCents),
+								0,
+							)
+					: 0),
 			0,
 		);
 		const safe = summarizeMonth({
