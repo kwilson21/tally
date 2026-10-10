@@ -480,6 +480,24 @@ assert.deepEqual(
 );
 step("Move up in Settings moves Gas up one place");
 
+// Select all from the keyboard: its link leaves with the reply, so focus must land on Set category, not the page top (#215).
+await goto(`${BASE}/transactions?uncategorized=1`, {
+	waitUntil: "networkidle",
+});
+await page.getByRole("link", { name: "Select" }).click();
+await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
+const selectAll = page.getByRole("link", { name: /^Select all \d+$/ });
+await selectAll.focus();
+await page.keyboard.press("Enter");
+await selectAll.waitFor({ state: "detached" });
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"set-category-selection",
+	"Select all must leave focus on Set category",
+);
+await page.getByText(/^\d+ selected$/).waitFor();
+step("Select all from the keyboard keeps focus on Set category");
+
 // Select several uncategorized rows, then set their category in one action (P20 A).
 assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);
 await goto(`${BASE}/transactions?uncategorized=1`, {

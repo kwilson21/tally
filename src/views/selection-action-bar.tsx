@@ -8,13 +8,22 @@ import { Button } from "./button";
 export const SELECTION_BAR_OOB =
 	"#selected-count:innerHTML, #set-category-selection:outerHTML, #exclude-selection:outerHTML, #select-all-page:outerHTML";
 
+/**
+ * The `focus` value the Select all link asks its reply for: the reply focuses Set category, since
+ * the link leaves with that reply (a focused element that is removed drops focus to the page).
+ */
+export const FOCUS_SET_CATEGORY = "set-category-selection";
+
 /** The bar's two actions. Out of band, a count's reply swaps them in place; each keeps its own request otherwise. */
 export function SelectionActionButtons({
 	disabled = false,
 	oob = false,
+	focusSetCategory = false,
 }: {
 	disabled?: boolean;
 	oob?: boolean;
+	/** Set category takes focus when it is drawn (only a Select all reply asks for it, and only when enabled). */
+	focusSetCategory?: boolean;
 }) {
 	const oobSwap = oob ? "outerHTML" : undefined;
 	return (
@@ -27,6 +36,7 @@ export function SelectionActionButtons({
 				formaction="/transactions/select/category"
 				formmethod="post"
 				disabled={disabled}
+				autofocus={focusSetCategory && !disabled}
 				hx-post="/transactions/select/category"
 				hx-target="#sheet"
 				hx-select="#sheet"
@@ -57,9 +67,10 @@ export function SelectionActionButtons({
 
 /**
  * The text link that ticks every selectable row on this page (P70 A). It is a plain link to the
- * same select-mode list with those rows ticked, so it works without JavaScript too. It shows until
- * every row on the page is ticked. The wrapper always stays, carrying the page's ids, so a count
- * can swap the link in or out.
+ * same select-mode list with those rows ticked, so it works without JavaScript too. Its htmx
+ * request asks the reply to focus Set category (FOCUS_SET_CATEGORY), while the pushed address stays
+ * the plain list. It shows until every row on the page is ticked. The wrapper always stays,
+ * carrying the page's ids, so a count can swap the link in or out.
  */
 export function SelectAllOnPage({
 	href,
@@ -83,12 +94,13 @@ export function SelectAllOnPage({
 					kind="text"
 					href={href}
 					class="-mr-2"
-					hx-get={href}
+					// href always has a query (selectModeHref), so the marker joins with &.
+					hx-get={`${href}&focus=${FOCUS_SET_CATEGORY}`}
 					hx-target="#results"
 					hx-select="#results > *"
 					hx-select-oob={SELECTION_BAR_OOB}
 					hx-swap="innerHTML"
-					hx-push-url="true"
+					hx-push-url={href}
 				>
 					{`Select all ${pageIds.length}`}
 				</Button>
@@ -107,6 +119,7 @@ export function SelectionActionBar({
 	pageIds,
 	ticked,
 	disabled = false,
+	focusSetCategory = false,
 }: {
 	label: string;
 	/** The select-mode list with the page's rows ticked. */
@@ -114,6 +127,8 @@ export function SelectionActionBar({
 	pageIds: number[];
 	ticked: Set<number>;
 	disabled?: boolean;
+	/** The reply to Select all: Set category takes focus (see FOCUS_SET_CATEGORY). */
+	focusSetCategory?: boolean;
 }) {
 	return (
 		<div class="flex flex-col gap-1">
@@ -124,7 +139,10 @@ export function SelectionActionBar({
 				<SelectAllOnPage href={href} pageIds={pageIds} ticked={ticked} />
 			</div>
 			<div class="flex gap-2">
-				<SelectionActionButtons disabled={disabled} />
+				<SelectionActionButtons
+					disabled={disabled}
+					focusSetCategory={focusSetCategory}
+				/>
 			</div>
 		</div>
 	);

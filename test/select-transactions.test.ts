@@ -618,4 +618,55 @@ describe("select several transactions", () => {
 			else expect(row).toEqual(beforeById.get(row.id));
 		}
 	});
+
+	/** The page's Select all link, whole, so its attributes can be read. */
+	const selectAllTag = (html: string) =>
+		html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0] ?? "";
+	/** One attribute of a tag, with its ampersands unescaped. */
+	const attribute = (tag: string, name: string) =>
+		tag.match(new RegExp(` ${name}="([^"]*)"`))?.[1]?.replaceAll("&amp;", "&");
+	/** Whether a reply's Set category button takes focus when it is swapped in. */
+	const setCategoryFocused = (html: string) =>
+		/<button[^>]*id="set-category-selection"[^>]*autofocus/.test(html);
+
+	it("focuses Set category in the reply to Select all, since the link leaves with that reply", async () => {
+		const page = await pageHtml("month=all&select=1");
+		const hxGet = attribute(selectAllTag(page), "hx-get") ?? "";
+		const reply = await (
+			await request(hxGet, { headers: { "HX-Request": "true" } })
+		).text();
+		const setCategory =
+			reply.match(/<button[^>]*id="set-category-selection"[^>]*>/)?.[0] ?? "";
+		expect(setCategory).toContain("autofocus");
+		// The class list has disabled:opacity-40, so look for the attribute itself.
+		expect(setCategory).not.toMatch(/\sdisabled(=|\s|>)/);
+		// autofocus="" also contains focus=, so look for the query parameter only.
+		expect(reply).not.toMatch(/[?&]focus=/);
+	});
+
+	it("keeps the focus marker out of the pushed address, and only on the link's request", async () => {
+		const page = await pageHtml("month=all&select=1");
+		const link = selectAllTag(page);
+		expect(attribute(link, "hx-push-url")).toBe(selectAllHref(page));
+		expect(attribute(link, "hx-get")).toBe(
+			`${selectAllHref(page)}&focus=set-category-selection`,
+		);
+	});
+
+	it("never focuses Set category for a tick, a filter change, a plain reload or a Select all with nothing ticked", async () => {
+		const ids = rowIds(await pageHtml("month=all&select=1"));
+		expect(setCategoryFocused(await countFragment(ids.slice(0, 1), ids))).toBe(
+			false,
+		);
+		expect(
+			setCategoryFocused(
+				await pageHtml(`month=all&select=1&ids=${ids.join(",")}`, true),
+			),
+		).toBe(false);
+		expect(
+			setCategoryFocused(
+				await pageHtml("month=all&select=1&focus=set-category-selection", true),
+			),
+		).toBe(false);
+	});
 });

@@ -79,6 +79,7 @@ import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
+	FOCUS_SET_CATEGORY,
 	SELECTION_BAR_OOB,
 	SelectAllOnPage,
 	SelectionActionBar,
@@ -121,6 +122,8 @@ type ListOptions = {
 	checkedIds?: Set<number>;
 	selectionError?: string;
 	focusHeading?: boolean;
+	/** The reply to Select all: focus Set category (the link leaves with the reply), when rows are ticked. */
+	focusSetCategory?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -185,6 +188,7 @@ async function renderList(
 		checkedIds = new Set<number>(),
 		selectionError,
 		focusHeading = false,
+		focusSetCategory = false,
 	}: ListOptions = {},
 ) {
 	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
@@ -620,6 +624,7 @@ async function renderList(
 								pageIds={pageIds}
 								ticked={tickedOnPage}
 								disabled={htmx && ticked.length === 0}
+								focusSetCategory={focusSetCategory && ticked.length > 0}
 							/>
 						</div>
 					</form>
@@ -696,6 +701,7 @@ transactions.get("/transactions", async (c) => {
 		{
 			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 			selecting,
+			focusSetCategory: selecting && params.get("focus") === FOCUS_SET_CATEGORY,
 			checkedIds: selecting
 				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
 				: undefined,
