@@ -118,7 +118,15 @@ type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
 	/** Move focus here after a swap: a row's summary, the Archived summary, or the Time zone row. */
-	focus?: number | "archived" | "zone";
+	focus?:
+		| number
+		| "archived"
+		| "zone"
+		| "reminder-save"
+		| "reminder-summary"
+		| "reminder-remove";
+	remindersOpen?: boolean;
+	removedEmail?: string;
 	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
 	focusRuleIndex?: number;
 	focusMerchantHeading?: boolean;
@@ -686,7 +694,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						checked={bankEmailsOn}
 					/>
 					<div class="pb-4">
-						<Button type="submit">Save</Button>
+						<Button type="submit" autofocus={view.focus === "reminder-save"}>
+							Save
+						</Button>
 					</div>
 				</form>
 				<p class="mt-2 text-sm text-muted">
@@ -701,8 +711,14 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						)
 						.join(" · ")}
 				</p>
-				<details class="mt-2 border-y border-rule">
-					<summary class="flex min-h-11 cursor-pointer items-center">
+				<details
+					class="mt-2 border-y border-rule"
+					open={Boolean(view.remindersOpen)}
+				>
+					<summary
+						class="flex min-h-11 cursor-pointer items-center"
+						autofocus={view.focus === "reminder-summary"}
+					>
 						Addresses{" "}
 						<span class="ml-auto text-muted">{members.results.length}</span>
 					</summary>
@@ -723,6 +739,14 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 										type="submit"
 										kind="text"
 										aria-label={`Remove ${email}`}
+										autofocus={
+											view.focus === "reminder-remove" &&
+											email ===
+												members.results.find(
+													({ email: candidate }) =>
+														candidate !== view.removedEmail,
+												)?.email
+										}
 									>
 										Remove
 									</Button>
@@ -1022,7 +1046,7 @@ settings.post("/settings/bank-sign-in-emails", async (c) => {
 		c,
 		"Saved bank sign-in emails",
 		`Bank sign-in emails ${form.get("enabled") === "on" ? "On" : "Off"}.`,
-		{ hash: "reminders" },
+		{ hash: "reminders", focus: "reminder-save", remindersOpen: true },
 	);
 });
 
@@ -1040,16 +1064,25 @@ settings.post("/settings/household-members/remove", async (c) => {
 		.first();
 	if (!member) return reminderError(c, "Address not found.", 404);
 	await removeHouseholdMember(c.env.DB, email);
+	const remaining = await reconnectRecipients(c.env.DB);
 	return done(
 		c,
 		"Removed address",
 		"Removed this sign-in address from bank sign-in emails.",
-		{ hash: "reminders" },
+		{
+			hash: "reminders",
+			focus: remaining.results.length ? "reminder-remove" : "reminder-summary",
+			remindersOpen: true,
+			removedEmail: email,
+		},
 	);
 });
 
 function reminderError(c: Context<App>, message: string, status: 400 | 404) {
-	c.header("HX-Trigger", JSON.stringify({ announce: message }));
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "error" }, announce: message }),
+	);
 	return renderSettings(c, { reminderError: message, status });
 }
 

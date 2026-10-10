@@ -294,8 +294,13 @@ app.use("*", async (c, next) => {
 	});
 	if (!identity) return c.text("Sign in through Cloudflare Access.", 403);
 	c.set("actor", identity.email);
-	if (c.env.DEMO !== "true")
-		await noteHouseholdMember(c.env.DB, identity.email, identity.issuedAt);
+	if (c.env.DEMO !== "true" && path !== "/feedback") {
+		try {
+			await noteHouseholdMember(c.env.DB, identity.email, identity.issuedAt);
+		} catch {
+			console.error("household member bookkeeping failed");
+		}
+	}
 	return next();
 });
 // Only inject the first-party, opt-in diagnostics collector when an operator enables it.

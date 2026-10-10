@@ -392,15 +392,34 @@ describe("verified Access identity and household members", () => {
 		);
 		await noteHouseholdMember(env.DB, "family.member@example.com", 100);
 		await removeHouseholdMember(env.DB, "family.member@example.com");
-		const jwt = await token(privateKey, team, { iat: 101 });
+		const earlier = await token(privateKey, team, {
+			iat: Math.floor(Date.now() / 1000) - 60,
+		});
+		const oldIdentity = await verifiedAccessIdentity(request(earlier), {
+			ACCESS_TEAM_DOMAIN: team,
+			ACCESS_AUD: "test-aud",
+		});
+		if (!oldIdentity)
+			throw new Error("Expected a verified old Access identity");
+		await noteHouseholdMember(env.DB, oldIdentity.email, oldIdentity.issuedAt);
+		let row = await env.DB.prepare(
+			"SELECT removed_at FROM household_members WHERE email = ?",
+		)
+			.bind(oldIdentity.email)
+			.first<{ removed_at: string | null }>();
+		expect(row?.removed_at).not.toBeNull();
+
+		const jwt = await token(privateKey, team, {
+			iat: Math.floor(Date.now() / 1000) + 1,
+		});
 		const identity = await verifiedAccessIdentity(request(jwt), {
 			ACCESS_TEAM_DOMAIN: team,
 			ACCESS_AUD: "test-aud",
 		});
 		if (!identity) throw new Error("Expected a verified Access identity");
-		expect(identity?.issuedAt).toBe(101);
+		expect(identity?.issuedAt).toBe(Math.floor(Date.now() / 1000) + 1);
 		await noteHouseholdMember(env.DB, identity.email, identity.issuedAt);
-		let row = await env.DB.prepare(
+		row = await env.DB.prepare(
 			"SELECT removed_at FROM household_members WHERE email = ?",
 		)
 			.bind(identity.email)

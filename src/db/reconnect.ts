@@ -26,9 +26,9 @@ export async function noteHouseholdMember(
 ) {
 	await db
 		.prepare(
-			"INSERT INTO household_members (email, session_issued_at) VALUES (?, COALESCE(?, 0)) ON CONFLICT(email) DO UPDATE SET last_seen_at = datetime('now'), session_issued_at = excluded.session_issued_at, removed_at = NULL WHERE ? IS NOT NULL AND household_members.session_issued_at < excluded.session_issued_at",
+			"INSERT INTO household_members (email, session_issued_at) VALUES (?, COALESCE(?, 0)) ON CONFLICT(email) DO UPDATE SET last_seen_at = datetime('now'), session_issued_at = excluded.session_issued_at, removed_at = NULL WHERE ? IS NOT NULL AND household_members.session_issued_at < excluded.session_issued_at AND (household_members.removed_at IS NULL OR ? > unixepoch(household_members.removed_at))",
 		)
-		.bind(email, issuedAt, issuedAt)
+		.bind(email, issuedAt, issuedAt, issuedAt)
 		.run();
 }
 

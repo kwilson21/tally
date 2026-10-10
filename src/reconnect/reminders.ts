@@ -3,7 +3,7 @@ import { readBankSignInEmails } from "../db/reconnect";
 import { renderReconnectEmail } from "./email";
 
 const REMINDER_DAYS = 3;
-const FROM = "Tally <bank-sign-in@thesuperhuman.us>";
+const FROM = "Tally <tally@notifs.thesuperhuman.us>";
 
 type ReminderEnv = {
 	DB: D1Database;
@@ -32,6 +32,7 @@ export async function runReconnectReminders(
 	env: ReminderEnv,
 	fetchImpl: typeof fetch = fetch,
 	now: Date = new Date(),
+	timeoutSignal: (milliseconds: number) => AbortSignal = AbortSignal.timeout,
 ) {
 	if (env.DEMO === "true" || !(await readBankSignInEmails(env.DB))) return;
 	const zone = await householdTimeZone(env.DB);
@@ -59,6 +60,10 @@ export async function runReconnectReminders(
 	if (!banks.length) return;
 	const recipients = await reconnectRecipients(env.DB);
 	if (!recipients.results.length) return;
+	let sentCount = 0;
+	let failedCount = 0;
+	const failureKinds = new Set<string>();
+	let failedRecipientCount = 0;
 	for (const bank of banks) {
 		const claimedAt = now.toISOString().replace("T", " ").slice(0, 19);
 		// A partial delivery keeps the claim; a failed recipient waits for the next three-day pass.
@@ -78,11 +83,14 @@ export async function runReconnectReminders(
 		};
 		const email = renderReconnectEmail(input, zone);
 		let sent = false;
+		let failedRecipient = false;
 		for (const { email: recipient } of recipients.results) {
 			let delivered = false;
+			let providerStatus = "unavailable";
 			if (env.RESEND_API_KEY) {
 				const response = await fetchImpl("https://api.resend.com/emails", {
 					method: "POST",
+					signal: timeoutSignal(10_000),
 					headers: {
 						Authorization: `Bearer ${env.RESEND_API_KEY}`,
 						"Content-Type": "application/json",
@@ -90,6 +98,9 @@ export async function runReconnectReminders(
 					body: JSON.stringify({ from: FROM, to: recipient, ...email }),
 				}).catch(() => null);
 				delivered = response?.ok ?? false;
+				providerStatus = response
+					? `resend ${response.status}`
+					: "resend timeout/error";
 			}
 			if (!delivered && env.EMAIL) {
 				try {
@@ -100,7 +111,14 @@ export async function runReconnectReminders(
 				}
 			}
 			sent = sent || delivered;
+			if (!delivered) {
+				failedRecipient = true;
+				failureKinds.add(providerStatus);
+			}
 		}
+		if (sent) sentCount += 1;
+		else failedCount += 1;
+		if (failedRecipient) failedRecipientCount += 1;
 		if (!sent)
 			await env.DB.prepare(
 				"UPDATE plaid_items SET reconnect_emailed_at = ? WHERE id = ? AND reconnect_emailed_at = ? AND status = 'needs_attention' AND disconnected_at IS NULL",
@@ -108,4 +126,10 @@ export async function runReconnectReminders(
 				.bind(bank.reconnect_emailed_at, bank.id, claimedAt)
 				.run();
 	}
+	const outcome = failureKinds.size
+		? `${failedRecipientCount} recipients failed (${[...failureKinds].join(", ")})`
+		: "ok";
+	console.log(
+		`reconnect reminders: ${sentCount} sent, ${failedCount} banks failed (${outcome})`,
+	);
 }
