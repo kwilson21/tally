@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
-import { calculateBillTotals } from "../bills/totals";
+import { billTotalsForRows } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
@@ -150,29 +150,7 @@ async function renderHome(
 				),
 			)
 		: [];
-	const billTotals = current
-		? calculateBillTotals({
-				month,
-				bills: activeBills.map(({ id, amountCents, frequency }) => ({
-					id,
-					amountCents,
-					frequency,
-					active: true,
-				})),
-				displayedOccurrences: activeBills.map((bill) => ({
-					billId: bill.id,
-					dueDate: bill.dueDate,
-					status: bill.status,
-					amountCents: bill.amountCents,
-					paidCents: bill.paidCents,
-				})),
-				thisMonthOccurrences: activeBills.flatMap((bill) =>
-					bill.totalOccurrences
-						.filter((occurrence) => occurrence.dueDate.startsWith(month))
-						.map((occurrence) => ({ billId: bill.id, ...occurrence })),
-				),
-			})
-		: null;
+	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
 	const unpaidBillsCents = billTotals?.soonCents ?? 0;
 	const summary = summarizeMonth({
 		month,

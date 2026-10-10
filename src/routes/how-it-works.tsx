@@ -8,6 +8,7 @@ import {
 	BILL_FIND_MONTHS,
 } from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
+import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
 import { accountsByBank } from "../db/accounts";
@@ -165,31 +166,8 @@ howItWorks.get("/how-it-works", async (c) => {
 	const trendsExampleText = trendsExample(buildTrends(trendsData));
 	const hasTransactions =
 		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
-	const unpaidDueBillsCents = billData.rows.reduce((sum, bill) => {
-		if (!bill.active) return sum;
-		if (["weekly", "biweekly", "quarterly"].includes(bill.frequency))
-			return (
-				sum +
-				bill.totalOccurrences
-					.filter(
-						(occurrence) =>
-							occurrence.dueDate.startsWith(month) &&
-							(occurrence.status === "due" || occurrence.status === "overdue"),
-					)
-					.reduce(
-						(total, occurrence) =>
-							total +
-							Math.max(0, occurrence.amountCents - occurrence.paidCents),
-						0,
-					)
-			);
-		return (
-			sum +
-			(["due", "overdue"].includes(bill.status)
-				? Math.max(0, bill.amountCents - bill.paidCents)
-				: 0)
-		);
-	}, 0);
+	// The same totals Home and Bills show, so this page's set-aside amount is theirs.
+	const unpaidDueBillsCents = billTotalsForRows(month, billData.rows).soonCents;
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
 	const budgeted = new Set(summary.categories.map((category) => category.id));
 	const unbudgetedCents = data.transactions

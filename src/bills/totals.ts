@@ -54,6 +54,52 @@ type BillTotalInput = {
 	}[];
 };
 
+/** A bill as Bills' rows give it: what the month's totals need, from `loadBillRows`. */
+export type BillTotalsRow = {
+	id: number;
+	active: boolean;
+	amountCents: number;
+	frequency: BillTotalFrequency;
+	dueDate: string;
+	status: BillStatus;
+	paidCents: number;
+	totalOccurrences: {
+		dueDate: string;
+		status: BillStatus;
+		amountCents: number;
+		paidCents: number;
+	}[];
+};
+
+/**
+ * The month's bill totals from Bills' rows. Bills, Home and How Tally works all call this, so they agree
+ * on what is set aside (`soonCents`) and what is still to pay.
+ */
+export function billTotalsForRows(month: string, rows: BillTotalsRow[]) {
+	const active = rows.filter((row) => row.active);
+	return calculateBillTotals({
+		month,
+		bills: active.map(({ id, amountCents, frequency }) => ({
+			id,
+			amountCents,
+			frequency,
+			active: true,
+		})),
+		displayedOccurrences: active.map((row) => ({
+			billId: row.id,
+			dueDate: row.dueDate,
+			status: row.status,
+			amountCents: row.amountCents,
+			paidCents: row.paidCents,
+		})),
+		thisMonthOccurrences: active.flatMap((row) =>
+			row.totalOccurrences
+				.filter((occurrence) => occurrence.dueDate.startsWith(month))
+				.map((occurrence) => ({ billId: row.id, ...occurrence })),
+		),
+	});
+}
+
 export function calculateBillTotals({
 	month,
 	bills,

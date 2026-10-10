@@ -8,6 +8,28 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
 import { loadBillRows } from "../src/routes/bills";
+import appCss from "../src/styles/app.css?raw";
+
+/** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */
+const cssRules = [
+	...appCss.replace(/\s+/g, " ").matchAll(/([^{}]+)\{([^{}]*)\}/g),
+].flatMap(([, selectors = "", body = ""]) =>
+	selectors.split(",").map((selector) => ({ selector: selector.trim(), body })),
+);
+const hidesWith = (selector: string) =>
+	cssRules.some(
+		(rule) => rule.selector === selector && /display:\s*none/.test(rule.body),
+	);
+const endsWithRule = (ending: string, display: RegExp) =>
+	cssRules.some(
+		(rule) => rule.selector.endsWith(ending) && display.test(rule.body),
+	);
+
+/** The page's row for one occurrence: its `<li>` block, found by its label as a whole (not "Fri, Oct 2" in "Fri, Oct 23"). */
+const occurrenceRow = (html: string, label: string) =>
+	(html.split("<li").find((item) => item.includes(`>${label}<`)) ?? "").split(
+		"</li>",
+	)[0] ?? "";
 
 describe("Bills", () => {
 	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
@@ -357,6 +379,77 @@ describe("Bills", () => {
 		expect(await response.text()).toContain(
 			"Then every two weeks from that date. Next: Oct 16.",
 		);
+	});
+
+	it("shows the yearly month only for yearly bills and the due day only where a bill has one", () => {
+		expect(hidesWith(".bill-year-label")).toBe(true);
+		expect(
+			endsWithRule(
+				'.bill-form:has(input[name="frequency"][value="yearly"]:checked) .bill-year-label',
+				/display:\s*inline/,
+			),
+		).toBe(true);
+		expect(
+			endsWithRule(
+				'.bill-form:has(input[name="frequency"][value="biweekly"]:checked) .bill-due-day',
+				/display:\s*none/,
+			),
+		).toBe(true);
+		expect(
+			endsWithRule(
+				'.bill-form:has(input[name="frequency"][value="weekly"]:checked) .bill-due-day',
+				/display:\s*none/,
+			),
+		).toBe(true);
+	});
+
+	it("asks a biweekly bill only for its date, never for a due day", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					name: "Undated fixture",
+					amount: "10.00",
+					due_day: "",
+					frequency: "biweekly",
+					anchor_date: "",
+					category_id: "1",
+					merchant_raw_name: "UNDATED FIXTURE",
+				}),
+			})
+		).text();
+		expect(html).toContain("Choose a date.");
+		expect(html).not.toContain("Enter a day from 1 to 31.");
+	});
+
+	it("saves a biweekly bill's due day as the weekday of its anchor date", async () => {
+		const response = await exports.default.fetch("http://tally.test/bills", {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Every two weeks fixture",
+				amount: "10.00",
+				due_day: "",
+				frequency: "biweekly",
+				anchor_date: "2026-10-02",
+				category_id: "1",
+				merchant_raw_name: "EVERY TWO WEEKS FIXTURE",
+			}),
+		});
+		expect(response.status).toBe(303);
+		expect(
+			await env.DB.prepare(
+				"SELECT due_day, anchor_date FROM bills WHERE name='Every two weeks fixture'",
+			).first(),
+		).toEqual({ due_day: 5, anchor_date: "2026-10-02" });
 	});
 
 	it("adds a bill and returns htmx feedback", async () => {
@@ -975,6 +1068,41 @@ describe("Bills", () => {
 		).toBe(3);
 	});
 
+	it("refuses to move a weekly bill with linked payments to another day of the week", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='weekly',due_day=5,anchor_month=NULL,anchor_date=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,'2026-10-09',id,'user','linked' FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
+			),
+		]);
+		const res = await exports.default.fetch("http://tally.test/bills/1", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Streaming",
+				amount: "2.99",
+				weekly_day: "1",
+				frequency: "weekly",
+				category_id: "5",
+				merchant_raw_name: "APPLE.COM/BILL",
+			}),
+		});
+		expect(await res.text()).toContain(
+			"To change when it&#39;s due, deactivate it and add a new bill.",
+		);
+		expect(
+			await env.DB.prepare("SELECT due_day FROM bills WHERE id=1").first(
+				"due_day",
+			),
+		).toBe(5);
+	});
+
 	it("keeps an unpaid recent month before a newer linked month", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
@@ -992,6 +1120,40 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain(`occurrences/${period}/link`);
 		expect(html).toContain("Not paid");
+	});
+
+	describe("a weekly bill's missed occurrences on its page", () => {
+		/** A Friday bill with no payments, as the page sees it on `today` (a household date). */
+		async function fridayPage(today: string) {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date(`${today}T16:00:00Z`));
+			await resetDemo(env.DB, today);
+			await env.DB.prepare("DELETE FROM bills").run();
+			await env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9501,'Friday fixture',24000,5,'weekly',5,'FRIDAY FIXTURE')",
+			).run();
+			return (
+				await exports.default.fetch("http://tally.test/bills/9501")
+			).text();
+		}
+
+		it("says Not paid for an unpaid Friday from an earlier month, and Bills shows the next one", async () => {
+			const html = await fridayPage("2026-11-02");
+			expect(occurrenceRow(html, "Fri, Oct 30")).toContain("Not paid");
+			expect(occurrenceRow(html, "Fri, Nov 6")).toContain("Due");
+			const bills = await (
+				await exports.default.fetch("http://tally.test/bills")
+			).text();
+			expect(bills).toContain("Due Nov 6 · every Friday");
+		});
+
+		it("keeps each unpaid Friday this month overdue, and says Not paid only from an earlier month", async () => {
+			const html = await fridayPage("2026-10-16");
+			expect(occurrenceRow(html, "Fri, Oct 2")).toContain("Overdue");
+			expect(occurrenceRow(html, "Fri, Oct 9")).toContain("Overdue");
+			expect(occurrenceRow(html, "Fri, Oct 16")).toContain("Due");
+			expect(occurrenceRow(html, "Fri, Sep 25")).toContain("Not paid");
+		});
 	});
 
 	it("lists and accepts only payments within three days of a weekly occurrence", async () => {

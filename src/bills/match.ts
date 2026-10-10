@@ -1,9 +1,17 @@
 import { householdToday } from "../dates";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
-import { billOccurrenceForMonth, WEEKLY_BILL_DATE_WINDOW_DAYS } from "./status";
+import {
+	type BillFrequency,
+	billOccurrenceForMonth,
+	WEEKLY_BILL_DATE_WINDOW_DAYS,
+} from "./status";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
 export const BILL_DATE_WINDOW_DAYS = 5;
+
+/** Spec §6.1 rule 3: a weekly bill's date window is ±3 days, so two weeks' windows never overlap; the others ±5. */
+export const billDateWindowDays = (frequency: BillFrequency) =>
+	frequency === "weekly" ? WEEKLY_BILL_DATE_WINDOW_DAYS : BILL_DATE_WINDOW_DAYS;
 
 export type MatchCandidate = { id: number; date: string; amountCents: number };
 
@@ -115,11 +123,7 @@ export async function matchBillPayments(
 						((new Date(`${first.date}T00:00:00Z`).getUTCDay() + 6) % 7) +
 						(bill.due_day - 1)
 					: dayNumber(bill.anchor_date ?? today);
-			// §6.1 rule 3: ±3 days for weekly only, so two weeks' windows never overlap; ±5 for the others.
-			const window =
-				bill.frequency === "weekly"
-					? WEEKLY_BILL_DATE_WINDOW_DAYS
-					: BILL_DATE_WINDOW_DAYS;
+			const window = billDateWindowDays(bill.frequency);
 			// The first occurrence whose window reaches the first transaction, not only one falling on or
 			// after it, so a payment the day after a due date still links to that due date.
 			const firstOccurrence =

@@ -586,7 +586,7 @@ export function buildSeed(today: string): Seed {
 			defaultCategoryId: null,
 		},
 		{
-			key: "LITTLE SPROUTS DAYCARE",
+			key: seedMerchantKey("LITTLE SPROUTS DAYCARE"),
 			displayName: "Little Sprouts Daycare",
 			defaultCategoryId: null,
 			notABill: true,

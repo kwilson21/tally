@@ -22,7 +22,7 @@ import {
 	billOccurrencesForMonth,
 	manualLinkWindowDays,
 } from "../bills/status";
-import { type BillTotalFrequency, calculateBillTotals } from "../bills/totals";
+import { type BillTotalFrequency, billTotalsForRows } from "../bills/totals";
 import {
 	activateBill,
 	type BillFields,
@@ -269,32 +269,7 @@ async function page(
 	});
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
-	const totals = calculateBillTotals({
-		month: today.slice(0, 7),
-		bills: active.map((bill) => ({
-			id: bill.id,
-			amountCents: bill.amountCents,
-			frequency: bill.frequency,
-			active: true,
-		})),
-		displayedOccurrences: active.map((bill) => ({
-			billId: bill.id,
-			dueDate: bill.dueDate,
-			status: bill.status,
-			amountCents: bill.amountCents,
-			paidCents: bill.paidCents,
-		})),
-		thisMonthOccurrences: active.flatMap((bill) =>
-			bill.totalOccurrences
-				.filter((occurrence) =>
-					occurrence.dueDate.startsWith(today.slice(0, 7)),
-				)
-				.map((occurrence) => ({
-					billId: bill.id,
-					...occurrence,
-				})),
-		),
-	});
+	const totals = billTotalsForRows(today.slice(0, 7), active);
 	return c.html(
 		<Layout
 			title="Bills · Tally"
@@ -540,6 +515,11 @@ function BillSheet({
 								</option>
 							))}
 						</select>
+						{values.frequency === "weekly" && errors.due_day && (
+							<span role="alert" class="text-sm text-over">
+								{errors.due_day}
+							</span>
+						)}
 					</label>
 					<div class="bill-due-day">
 						<TextInput
@@ -547,7 +527,7 @@ function BillSheet({
 							name="due_day"
 							label="Due day"
 							value={values.due_day}
-							error={errors.due_day}
+							error={values.frequency === "weekly" ? undefined : errors.due_day}
 							surface="paper"
 							class="w-24"
 							inputmode="numeric"
@@ -838,13 +818,12 @@ async function save(c: Context<App>, id?: number) {
 		values.frequency === "biweekly" && validAnchorDate
 			? ((new Date(`${anchorDate}T00:00:00Z`).getUTCDay() + 6) % 7) + 1
 			: Number(values.due_day);
+	// A biweekly bill has no due day field: its weekday comes from its date, so only that date is checked.
 	if (
-		!Number.isInteger(due) ||
-		due < 1 ||
-		due >
-			(values.frequency === "weekly" || values.frequency === "biweekly"
-				? 7
-				: 31)
+		values.frequency !== "biweekly" &&
+		(!Number.isInteger(due) ||
+			due < 1 ||
+			due > (values.frequency === "weekly" ? 7 : 31))
 	)
 		errors.due_day =
 			values.frequency === "weekly"
@@ -888,7 +867,8 @@ async function save(c: Context<App>, id?: number) {
 		if (!bigAmount.confirmed)
 			errors.amount = `${formatCents(cents)} is a lot for a bill.`;
 	}
-	// Linked payments are budget history, so a bill that has them keeps its schedule.
+	// Linked payments are budget history, so a bill that has them keeps its schedule. A weekly bill's
+	// due day is its weekday, which names its occurrences, so moving it is a change of schedule too.
 	const periodKeysChanged =
 		!!bill &&
 		(bill.frequency !== values.frequency ||
@@ -897,7 +877,8 @@ async function save(c: Context<App>, id?: number) {
 					? anchor
 					: null) ||
 			bill.anchor_date !==
-				(values.frequency === "biweekly" ? anchorDate : null));
+				(values.frequency === "biweekly" ? anchorDate : null) ||
+			(values.frequency === "weekly" && bill.due_day !== due));
 	const protectedScheduleChanged = periodKeysChanged;
 	if (protectedScheduleChanged) {
 		const linked = await c.env.DB.prepare(
@@ -905,13 +886,21 @@ async function save(c: Context<App>, id?: number) {
 		)
 			.bind(id)
 			.first();
-		if (linked)
-			errors[
-				bill.frequency === values.frequency ? "anchor_month" : "frequency"
-			] =
+		if (linked) {
+			// The message goes under the field that changed, so it is visible on the form.
+			const field =
+				bill.frequency !== values.frequency
+					? "frequency"
+					: values.frequency === "weekly"
+						? "due_day"
+						: values.frequency === "biweekly"
+							? "anchor_date"
+							: "anchor_month";
+			errors[field] =
 				bill.frequency === values.frequency
 					? "This bill has payments linked. To change when it's due, deactivate it and add a new bill."
 					: "This bill has payments linked. To change how often it's due, deactivate it and add a new bill.";
+		}
 	}
 	if (Object.keys(errors).length)
 		return page(c, { bill: bill ?? undefined, values, errors, bigAmount });
@@ -1229,12 +1218,19 @@ async function billPage(
 					{periods.map((period) => {
 						const payment = byPeriod.get(period);
 						const due = occurrenceDate(bill, period);
+						// A missed weekly Friday from this month is overdue and set aside (Bills' totals count it so);
+						// only one from an earlier month reads Not paid.
+						const missedThisMonth =
+							["weekly", "biweekly"].includes(bill.frequency) &&
+							due.slice(0, 7) === today.slice(0, 7);
 						const status = payment
 							? "paid"
 							: period === current.period
 								? current.status
 								: due < today
-									? "not-paid"
+									? missedThisMonth
+										? "overdue"
+										: "not-paid"
 									: "upcoming";
 						return (
 							<BillOccurrenceRow
@@ -1474,6 +1470,7 @@ function offerBill(
 		id: bill.id,
 		active: !!bill.active,
 		status: occurrence.status,
+		frequency: bill.frequency,
 		amountCents: bill.amount_cents,
 		merchantRawName: bill.merchant_raw_name,
 		merchantRawText: bill.merchant_raw_text,

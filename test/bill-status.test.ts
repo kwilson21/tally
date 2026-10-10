@@ -85,9 +85,16 @@ describe("bill status", () => {
 		expect(
 			billOccurrence(bill, "2026-10-12", new Set(["2026-10-09"])),
 		).toMatchObject({ dueDate: "2026-10-16", status: "due" });
-		expect(billOccurrence(bill, "2026-11-02", false)).toMatchObject({
+		// Still this month: the missed Friday stays overdue, whatever day of the month it is.
+		expect(billOccurrence(bill, "2026-10-31", false)).toMatchObject({
 			dueDate: "2026-10-30",
 			status: "overdue",
+		});
+		// Next month: Oct 30 is last month's, so it is not the one shown (it reads Not paid on the page),
+		// and the next Friday takes its place.
+		expect(billOccurrence(bill, "2026-11-02", false)).toMatchObject({
+			dueDate: "2026-11-06",
+			status: "due",
 		});
 	});
 
