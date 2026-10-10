@@ -589,7 +589,6 @@ export function buildSeed(today: string): Seed {
 			key: seedMerchantKey("LITTLE SPROUTS DAYCARE"),
 			displayName: "Little Sprouts Daycare",
 			defaultCategoryId: null,
-			notABill: true,
 		},
 		...subscriptions.map(([rawName]) => ({
 			key: rawName,

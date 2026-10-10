@@ -137,6 +137,12 @@ export async function loadBillRows(db: D1Database, today: string) {
 			amountCents: number;
 			paidCents: number;
 		}[];
+		nextOccurrence?: {
+			dueDate: string;
+			status: BillStatus;
+			amountCents: number;
+			paidCents: number;
+		};
 		/** The occurrence the row shows, as bill_payments keys it, and the merchant it's matched on. */
 		period: string;
 		merchantRawName: string;
@@ -148,6 +154,15 @@ export async function loadBillRows(db: D1Database, today: string) {
 		if (list) list.push(row);
 		else byBill.set(row.id, [row]);
 	}
+	// An occurrence's status in the month's totals: paid once linked, else overdue, due within seven days, or upcoming.
+	const occurrenceStatus = (dueDate: string, linked: boolean): BillStatus =>
+		linked
+			? "paid"
+			: dueDate < today
+				? "overdue"
+				: dueDate <= daysBefore(today, -7)
+					? "due"
+					: "upcoming";
 	for (const billRows of byBill.values()) {
 		const b = billRows[0] as DbBill;
 		const payments = new Map(
@@ -197,20 +212,30 @@ export async function loadBillRows(db: D1Database, today: string) {
 		);
 		for (const current of monthOccurrences)
 			if (!totalOccurrences.some((item) => item.dueDate === current.dueDate)) {
-				const linked = payments.has(current.period);
 				totalOccurrences.push({
 					dueDate: current.dueDate,
-					status: linked
-						? "paid"
-						: current.dueDate < today
-							? "overdue"
-							: current.dueDate <= daysBefore(today, -7)
-								? "due"
-								: "upcoming",
+					status: occurrenceStatus(
+						current.dueDate,
+						payments.has(current.period),
+					),
 					amountCents: b.amount_cents,
 					paidCents: paymentsByPeriod.get(current.period) ?? 0,
 				});
 			}
+		// A weekly or every-two-weeks bill's next occurrence is set aside once it falls due, even when it is in
+		// next month (an unpaid Friday on Oct 30 with Nov 6 due in a week). Only that one is needed beyond the month.
+		const stepDays =
+			b.frequency === "weekly" ? 7 : b.frequency === "biweekly" ? 14 : 0;
+		const nextDue = stepDays ? daysBefore(occurrence.dueDate, -stepDays) : "";
+		const nextOccurrence =
+			nextDue && !nextDue.startsWith(today.slice(0, 7))
+				? {
+						dueDate: nextDue,
+						status: occurrenceStatus(nextDue, payments.has(nextDue)),
+						amountCents: b.amount_cents,
+						paidCents: paymentsByPeriod.get(nextDue) ?? 0,
+					}
+				: undefined;
 		result.push({
 			id: b.id,
 			name: b.name,
@@ -228,6 +253,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			dueDay: b.due_day,
 			paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
 			totalOccurrences,
+			nextOccurrence,
 		});
 	}
 	return { today, rows: result };

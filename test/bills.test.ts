@@ -734,6 +734,43 @@ describe("Bills", () => {
 		expect(home).toContain("Bills due soon");
 	});
 
+	it("counts the next Friday in November when it falls due before the month ends", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-30T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-30");
+		await env.DB.prepare("DELETE FROM bills").run();
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9397,'Friday fixture',24000,5,'weekly',5,'FRIDAY FIXTURE')",
+		).run();
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		// October's five Fridays are unpaid (the 2nd to the 23rd overdue, the 30th due), and Nov 6 is due in a week.
+		expect(html.match(/\d+ bills? to pay soon, \$[\d,.]+ in all/)?.[0]).toBe(
+			"6 bills to pay soon, $1,440.00 in all",
+		);
+	});
+
+	it("lists on Home a monthly bill whose next due date is in November, once October is paid", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-30T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-30");
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9398,'Rent fixture',120000,6,'monthly',5,'RENT FIXTURE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 9398,'2026-10',id,'user','linked' FROM transactions LIMIT 1",
+			),
+		]);
+		const home = await (
+			await exports.default.fetch("http://tally.test/")
+		).text();
+		expect(home).toContain("Bills due soon");
+		expect(home).toContain("Rent fixture");
+	});
+
 	it("refuses to save, deactivate or reactivate a missing bill", async () => {
 		const post = (path: string, body = "") =>
 			exports.default.fetch(`http://tally.test${path}`, {

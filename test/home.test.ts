@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { billTotalsForRows } from "../src/bills/totals";
 import { budgetForMonth, summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { setBudget } from "../src/db/budgets";
@@ -552,26 +553,8 @@ describe("GET / with the demo seed", () => {
 		const month = today.slice(0, 7);
 		const data = await loadMonth(env.DB, month);
 		const billData = await loadBillRows(env.DB, today);
-		const dueBills = billData.rows.reduce(
-			(sum, bill) =>
-				sum +
-				(bill.active
-					? bill.totalOccurrences
-							.filter(
-								(occurrence) =>
-									occurrence.dueDate.startsWith(month) &&
-									(occurrence.status === "due" ||
-										occurrence.status === "overdue"),
-							)
-							.reduce(
-								(total, occurrence) =>
-									total +
-									Math.max(0, occurrence.amountCents - occurrence.paidCents),
-								0,
-							)
-					: 0),
-			0,
-		);
+		// The same bills total Home's Safe to spend subtracts, not a copy of its rule.
+		const dueBills = billTotalsForRows(month, billData.rows).soonCents;
 		const safe = summarizeMonth({
 			month,
 			...data,

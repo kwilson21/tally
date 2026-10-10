@@ -8,6 +8,7 @@ import {
 	BILL_FIND_MONTHS,
 } from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
+import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../bills/status";
 import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
@@ -496,8 +497,9 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							A match has the same merchant, is within{" "}
 							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% of the bill amount, and
-							is within 3 days of its due date for a weekly bill, or{" "}
-							{BILL_DATE_WINDOW_DAYS} days for the other bills.
+							is within {WEEKLY_BILL_DATE_WINDOW_DAYS} days of its due date for
+							a weekly bill, or {BILL_DATE_WINDOW_DAYS} days for the other
+							bills.
 						</li>
 						<li>
 							Tally suggests a possible bill when at least two money-out charges
@@ -519,11 +521,12 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>A payment links to exactly one bill occurrence.</li>
 						<li>
 							Bills can repeat monthly, yearly, weekly, every two weeks or
-							quarterly. Bills shows the next unpaid occurrence; a missed
-							occurrence stays overdue until it is paid or the next one is due.
-							Safe to spend sets aside each due or overdue occurrence this month
-							that is unpaid. An unpaid occurrence from an earlier month says
-							“Not paid” and is no longer set aside.
+							quarterly. Bills shows each bill's next unpaid occurrence. A
+							missed weekly or every-two-weeks occurrence stays overdue until it
+							is paid; a missed monthly, yearly or quarterly one stays overdue
+							until it is paid or the next one is due. On a bill's page, an
+							unpaid occurrence from an earlier month says “Not paid”. Safe to
+							spend sets aside every due or overdue occurrence that is unpaid.
 						</li>
 						<li>
 							A late payment counts in the month of the bill it paid, instead of

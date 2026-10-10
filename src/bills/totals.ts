@@ -7,11 +7,8 @@ export type BillTotalFrequency =
 	| "biweekly"
 	| "quarterly";
 
-const cadenceFrequencies = new Set<BillTotalFrequency>([
-	"weekly",
-	"biweekly",
-	"quarterly",
-]);
+/** Bills whose occurrences fall every 7 or 14 days: each one is judged on its own, so several can be set aside. */
+const dayStepFrequencies = new Set<BillTotalFrequency>(["weekly", "biweekly"]);
 
 export function monthlyBillShare(
 	amountCents: number,
@@ -69,11 +66,18 @@ export type BillTotalsRow = {
 		amountCents: number;
 		paidCents: number;
 	}[];
+	/** A weekly or every-two-weeks bill's occurrence after the shown one, when it falls in a later month. */
+	nextOccurrence?: {
+		dueDate: string;
+		status: BillStatus;
+		amountCents: number;
+		paidCents: number;
+	};
 };
 
 /**
  * The month's bill totals from Bills' rows. Bills, Home and How Tally works all call this, so they agree
- * on what is set aside (`soonCents`) and what is still to pay.
+ * on what is set aside (`soonCents`), which Home's "Bills due soon" list also follows, and what is still to pay.
  */
 export function billTotalsForRows(month: string, rows: BillTotalsRow[]) {
 	const active = rows.filter((row) => row.active);
@@ -92,11 +96,14 @@ export function billTotalsForRows(month: string, rows: BillTotalsRow[]) {
 			amountCents: row.amountCents,
 			paidCents: row.paidCents,
 		})),
-		thisMonthOccurrences: active.flatMap((row) =>
-			row.totalOccurrences
+		thisMonthOccurrences: active.flatMap((row) => [
+			...row.totalOccurrences
 				.filter((occurrence) => occurrence.dueDate.startsWith(month))
 				.map((occurrence) => ({ billId: row.id, ...occurrence })),
-		),
+			...(row.nextOccurrence
+				? [{ billId: row.id, ...row.nextOccurrence }]
+				: []),
+		]),
 	});
 }
 
@@ -123,20 +130,9 @@ export function calculateBillTotals({
 		paidCents: 0,
 	};
 	let stillToPayCents = 0;
-	let soonCount = 0;
-	let soonCents = 0;
 	for (const occurrence of displayedOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
 		const left = Math.max(0, occurrence.amountCents - occurrence.paidCents);
-		if (
-			!cadenceFrequencies.has(
-				frequencyById.get(occurrence.billId) ?? "monthly",
-			) &&
-			(occurrence.status === "due" || occurrence.status === "overdue")
-		) {
-			soonCount += 1;
-			soonCents += left;
-		}
 		const key =
 			`${occurrence.status === "paid" ? "paid" : occurrence.status}Cents` as keyof typeof groups;
 		if (
@@ -145,23 +141,41 @@ export function calculateBillTotals({
 		)
 			groups[key] += left;
 	}
+	// Safe to spend and "to pay soon" set aside each due or overdue occurrence once (spec §6): the shown one of
+	// every bill, and for a weekly or every-two-weeks bill its other occurrences this month and the next, each
+	// judged on its own (decision 62). A monthly bill's handed-off occurrence is not set aside.
+	const soon = new Map<string, number>();
+	for (const occurrence of [
+		...displayedOccurrences,
+		...thisMonthOccurrences.filter((occurrence) =>
+			dayStepFrequencies.has(frequencyById.get(occurrence.billId) ?? "monthly"),
+		),
+	]) {
+		if (!activeIds.has(occurrence.billId)) continue;
+		if (occurrence.status !== "due" && occurrence.status !== "overdue")
+			continue;
+		soon.set(
+			`${occurrence.billId}:${occurrence.dueDate}`,
+			Math.max(0, occurrence.amountCents - occurrence.paidCents),
+		);
+	}
 	for (const occurrence of thisMonthOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
-		if (
-			cadenceFrequencies.has(
-				frequencyById.get(occurrence.billId) ?? "monthly",
-			) &&
-			occurrence.dueDate.startsWith(month) &&
-			(occurrence.status === "due" || occurrence.status === "overdue")
-		) {
-			soonCount += 1;
-			soonCents += Math.max(0, occurrence.amountCents - occurrence.paidCents);
-		}
 		if (occurrence.dueDate.startsWith(month))
 			stillToPayCents += Math.max(
 				0,
 				occurrence.amountCents - occurrence.paidCents,
 			);
 	}
-	return { monthlyCents, stillToPayCents, soonCount, soonCents, groups };
+	const soonCents = [...soon.values()].reduce(
+		(total, cents) => total + cents,
+		0,
+	);
+	return {
+		monthlyCents,
+		stillToPayCents,
+		soonCount: soon.size,
+		soonCents,
+		groups,
+	};
 }

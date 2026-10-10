@@ -141,13 +141,10 @@ async function renderHome(
 	const data = await loadMonth(c.env.DB, month);
 	const billData = current ? await loadBillRows(c.env.DB, today) : null;
 	const activeBills = billData?.rows.filter((bill) => bill.active) ?? [];
+	// The list is the bills Safe to spend sets aside, judged by the same totals, so the list and the figure agree.
 	const dueBills = current
-		? activeBills.filter((bill) =>
-				bill.totalOccurrences.some(
-					(o) =>
-						o.dueDate.startsWith(month) &&
-						(o.status === "due" || o.status === "overdue"),
-				),
+		? activeBills.filter(
+				(bill) => billTotalsForRows(month, [bill]).soonCount > 0,
 			)
 		: [];
 	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
