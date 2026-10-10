@@ -2984,7 +2984,7 @@ function SettingsGroup() {
 				title="Reconnect reminders"
 				tier="interactive"
 				components={["Switch"]}
-				sentence="After Categories, Settings shows Household people, Reminders, then Tally's rules. Reminders has one household switch, with recent addresses shown beneath it and removable by anyone in the family."
+				sentence="After Categories, Settings shows Tally's rules, then Reminders, then Household people. Reminders has one household switch, with recent addresses shown beneath it and removable by anyone in the family."
 			>
 				<State label="On, with two household addresses">
 					<div class="max-w-xl border-y border-rule">

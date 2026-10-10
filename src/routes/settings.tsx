@@ -117,7 +117,7 @@ const chevron = (
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
-	/** Move focus here after a swap: a row's summary, the Archived summary, or the Time zone row. */
+	/** Move focus here after a swap: a row's summary, the Archived summary, the Time zone row, or a Reminders control. */
 	focus?:
 		| number
 		| "archived"
@@ -125,8 +125,10 @@ type View = {
 		| "reminder-save"
 		| "reminder-summary"
 		| "reminder-remove";
+	/** Keeps the Reminders addresses disclosure open after a swap. */
 	remindersOpen?: boolean;
-	removedEmail?: string;
+	/** The address whose Remove button takes focus after a swap. */
+	reminderFocusEmail?: string;
 	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
 	focusRuleIndex?: number;
 	focusMerchantHeading?: boolean;
@@ -634,34 +636,19 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					)}
 				</div>
 			</section>
-			<section
-				id="household"
-				aria-labelledby="household-title"
-				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
-			>
-				<h2 id="household-title" class="font-serif text-3xl font-semibold">
-					Household
-				</h2>
-				<div class="mt-3 border-t border-rule">
-					<TimeZoneRow
-						zone={timeZone}
-						error={view.zoneError}
-						focus={view.focus === "zone"}
-					/>
-				</div>
-				<HouseholdPeople
-					people={people.results}
-					openId={view.peopleOpen}
-					addOpen={view.peopleAddOpen}
-					error={view.peopleError}
-					errorPersonId={view.peopleErrorPersonId}
-					value={view.peopleValue}
-					focus={
-						view.peopleFocus ||
-						new URL(c.req.url).searchParams.get("peopleFocus") === "1"
-					}
-				/>
-			</section>
+			<MerchantRules
+				rules={visibleRules.map((rule) => ({
+					...rule,
+					archived: rule.archived === 1,
+				}))}
+				total={ruleData.total}
+				focusRuleIndex={view.focusRuleIndex}
+				focusHeading={view.focusMerchantHeading}
+				error={view.merchantRuleError}
+				search={
+					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
+				}
+			/>
 			<section
 				id="reminders"
 				aria-labelledby="reminders-title"
@@ -741,11 +728,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 										aria-label={`Remove ${email}`}
 										autofocus={
 											view.focus === "reminder-remove" &&
-											email ===
-												members.results.find(
-													({ email: candidate }) =>
-														candidate !== view.removedEmail,
-												)?.email
+											email === view.reminderFocusEmail
 										}
 									>
 										Remove
@@ -756,19 +739,34 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					</ul>
 				</details>
 			</section>
-			<MerchantRules
-				rules={visibleRules.map((rule) => ({
-					...rule,
-					archived: rule.archived === 1,
-				}))}
-				total={ruleData.total}
-				focusRuleIndex={view.focusRuleIndex}
-				focusHeading={view.focusMerchantHeading}
-				error={view.merchantRuleError}
-				search={
-					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
-				}
-			/>
+			<section
+				id="household"
+				aria-labelledby="household-title"
+				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
+			>
+				<h2 id="household-title" class="font-serif text-3xl font-semibold">
+					Household
+				</h2>
+				<div class="mt-3 border-t border-rule">
+					<TimeZoneRow
+						zone={timeZone}
+						error={view.zoneError}
+						focus={view.focus === "zone"}
+					/>
+				</div>
+				<HouseholdPeople
+					people={people.results}
+					openId={view.peopleOpen}
+					addOpen={view.peopleAddOpen}
+					error={view.peopleError}
+					errorPersonId={view.peopleErrorPersonId}
+					value={view.peopleValue}
+					focus={
+						view.peopleFocus ||
+						new URL(c.req.url).searchParams.get("peopleFocus") === "1"
+					}
+				/>
+			</section>
 			<AiSuggestions switches={aiSwitches} saved={Boolean(view.aiSaved)} />
 			<section
 				aria-labelledby="your-data-title"
@@ -1064,16 +1062,21 @@ settings.post("/settings/household-members/remove", async (c) => {
 		.first();
 	if (!member) return reminderError(c, "Address not found.", 404);
 	await removeHouseholdMember(c.env.DB, email);
-	const remaining = await reconnectRecipients(c.env.DB);
+	// The list is in address order: the address that takes the removed row's place is the next one, else the one before it.
+	const remaining = (await reconnectRecipients(c.env.DB)).results.map(
+		({ email: address }) => address,
+	);
+	const before = remaining.filter((address) => address < email).length;
+	const focusEmail = remaining[before] ?? remaining[before - 1];
 	return done(
 		c,
 		"Removed address",
 		"Removed this sign-in address from bank sign-in emails.",
 		{
 			hash: "reminders",
-			focus: remaining.results.length ? "reminder-remove" : "reminder-summary",
+			focus: focusEmail ? "reminder-remove" : "reminder-summary",
 			remindersOpen: true,
-			removedEmail: email,
+			reminderFocusEmail: focusEmail,
 		},
 	);
 });

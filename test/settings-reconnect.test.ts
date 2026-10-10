@@ -309,8 +309,10 @@ describe("reconnect reminder schedule", () => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (911, 'Chase', X'', 'dana@example.com', 'needs_attention')",
 		).run();
-		const fallback = vi.fn();
-		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const fallback = vi.fn(async () => {
+			throw new Error("fallback unavailable");
+		});
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 		const stalledFetch = vi.fn(
 			(_input: RequestInfo | URL, init?: RequestInit) =>
 				new Promise<Response>((_resolve, reject) => {
@@ -339,12 +341,36 @@ describe("reconnect reminder schedule", () => {
 		const claim = await env.DB.prepare(
 			"SELECT reconnect_emailed_at FROM plaid_items WHERE id = 911",
 		).first<{ reconnect_emailed_at: string | null }>();
-		expect(claim?.reconnect_emailed_at).toBe("2026-10-07 13:00:00");
+		expect(claim?.reconnect_emailed_at).toBeNull();
 		expect(log).toHaveBeenCalledOnce();
-		expect(log.mock.calls[0]?.[0]).toContain(
-			"reconnect reminders: 1 sent, 0 banks failed (ok)",
+		expect(log.mock.calls[0]?.[0]).toBe(
+			"reconnect reminders: 0 sent, 1 failed (resend timeout or error, email fallback error)",
 		);
 		expect(log.mock.calls[0]?.[0]).not.toContain("dana@example.com");
+		log.mockRestore();
+	});
+
+	it("logs one safe count line for a clean run", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email) VALUES ('dana@example.com')",
+		).run();
+		await env.DB.prepare(
+			"UPDATE household_settings SET value = 'on' WHERE key = 'bank_sign_in_emails'",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (913, 'Chase', X'', 'dana@example.com', 'needs_attention')",
+		).run();
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		await runReconnectReminders(
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			async () => new Response("{}", { status: 200 }),
+			new Date("2026-10-07T13:00:00Z"),
+			() => AbortSignal.timeout(10),
+		);
+		expect(log).toHaveBeenCalledOnce();
+		expect(log.mock.calls[0]?.[0]).toBe(
+			"reconnect reminders: 1 sent, 0 failed",
+		);
 		log.mockRestore();
 	});
 
@@ -358,7 +384,7 @@ describe("reconnect reminder schedule", () => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (912, 'Chase', X'', 'private@example.com', 'needs_attention')",
 		).run();
-		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 		await runReconnectReminders(
 			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
 			async () => new Response("{}", { status: 422 }),
@@ -369,8 +395,8 @@ describe("reconnect reminder schedule", () => {
 			"SELECT reconnect_emailed_at FROM plaid_items WHERE id = 912",
 		).first<{ reconnect_emailed_at: string | null }>();
 		expect(claim?.reconnect_emailed_at).toBeNull();
-		expect(log.mock.calls[0]?.[0]).toContain(
-			"1 recipients failed (resend 422)",
+		expect(log.mock.calls[0]?.[0]).toBe(
+			"reconnect reminders: 0 sent, 1 failed (resend 422)",
 		);
 		expect(log.mock.calls[0]?.[0]).not.toContain("private@example.com");
 		log.mockRestore();
@@ -507,6 +533,45 @@ describe("bank sign-in reminder Settings", () => {
 		expect(emptyReminders).toContain(
 			'<summary class="flex min-h-11 cursor-pointer items-center" autofocus="">',
 		);
+	});
+
+	it("focuses the address that takes the removed row's place, or the one before it when it was last", async () => {
+		await noteHouseholdMember(env.DB, "amy@example.com", 100);
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await noteHouseholdMember(env.DB, "riley@example.com", 100);
+		const middle = await post("/settings/household-members/remove", {
+			email: "dana@example.com",
+		});
+		const afterMiddle =
+			middle.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
+		expect(afterMiddle).toContain(
+			'aria-label="Remove riley@example.com" autofocus=""',
+		);
+		expect(afterMiddle).not.toContain(
+			'aria-label="Remove amy@example.com" autofocus=""',
+		);
+
+		const last = await post("/settings/household-members/remove", {
+			email: "riley@example.com",
+		});
+		const afterLast =
+			last.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
+		expect(afterLast).toContain(
+			'aria-label="Remove amy@example.com" autofocus=""',
+		);
+	});
+
+	it("places Reminders after Tally's rules and before Household", async () => {
+		const response = await exports.default.fetch(`${BASE}/settings`);
+		const html = await response.text();
+		const rules = html.indexOf('id="merchant-rules"');
+		const reminders = html.indexOf('id="reminders"');
+		const household = html.indexOf('id="household"');
+		expect(html.indexOf('id="categories"')).toBeGreaterThan(-1);
+		expect(html.indexOf('id="categories"')).toBeLessThan(rules);
+		expect(rules).toBeGreaterThan(-1);
+		expect(rules).toBeLessThan(reminders);
+		expect(reminders).toBeLessThan(household);
 	});
 
 	it("restores a removed address only for a session issued after removal", async () => {

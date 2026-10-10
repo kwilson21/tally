@@ -63,6 +63,18 @@ describe("actual app diagnostics middleware", () => {
 		expect(error).not.toHaveBeenCalled();
 		error.mockRestore();
 	});
+	it("still serves a page when household-member bookkeeping fails, logging one line without an address", async () => {
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		const response = await app.fetch(
+			new Request(`${base}/__feedback-fragment-fixture`),
+			bindings({ DEMO: "false" }),
+		);
+		expect(response.status).toBe(202);
+		expect(await response.text()).toBe("<p>synthetic fragment</p>");
+		expect(error).toHaveBeenCalledOnce();
+		expect(error).toHaveBeenCalledWith("household member bookkeeping failed");
+		error.mockRestore();
+	});
 	it("preserves fragment body, status and headers", async () => {
 		const response = await app.fetch(
 			new Request(`${base}/__feedback-fragment-fixture`),

@@ -409,15 +409,14 @@ describe("verified Access identity and household members", () => {
 			.first<{ removed_at: string | null }>();
 		expect(row?.removed_at).not.toBeNull();
 
-		const jwt = await token(privateKey, team, {
-			iat: Math.floor(Date.now() / 1000) + 1,
-		});
+		const newerIat = Math.floor(Date.now() / 1000) + 1;
+		const jwt = await token(privateKey, team, { iat: newerIat });
 		const identity = await verifiedAccessIdentity(request(jwt), {
 			ACCESS_TEAM_DOMAIN: team,
 			ACCESS_AUD: "test-aud",
 		});
 		if (!identity) throw new Error("Expected a verified Access identity");
-		expect(identity?.issuedAt).toBe(Math.floor(Date.now() / 1000) + 1);
+		expect(identity.issuedAt).toBe(newerIat);
 		await noteHouseholdMember(env.DB, identity.email, identity.issuedAt);
 		row = await env.DB.prepare(
 			"SELECT removed_at FROM household_members WHERE email = ?",
