@@ -540,12 +540,34 @@ describe("select several transactions", () => {
 		expect(selectAllLabel(some)).toBe(String(ids.length));
 	});
 
+	it("puts the Select all link and the count on the list's filter queue, and leaves the buttons off it", async () => {
+		const html = await pageHtml("month=all&select=1");
+		const ids = rowIds(html);
+		const selectAll = html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0];
+		expect(selectAll).toContain('hx-sync="#filters:replace"');
+		const form = html.match(/<form[^>]*id="selection-form"[^>]*>/)?.[0];
+		expect(form).toContain('hx-sync="#filters:queue last"');
+		const oneOff = await countFragment(ids.slice(1), ids);
+		expect(oneOff.match(/<a [^>]*>Select all \d+<\/a>/)?.[0]).toContain(
+			'hx-sync="#filters:replace"',
+		);
+		for (const id of ["set-category-selection", "exclude-selection"]) {
+			const button = html.match(
+				new RegExp(`<button[^>]*id="${id}"[^>]*>`),
+			)?.[0];
+			expect(button).toBeDefined();
+			expect(button).not.toContain("hx-sync");
+		}
+	});
+
 	it("ticks every row on the page from the link, and the count says so", async () => {
 		const html = await pageHtml("month=all&select=1");
 		const ids = rowIds(html);
 		const href = selectAllHref(html);
 		expect(href).toBeDefined();
-		const after = await pageHtml(href ?? "", true);
+		const after = await (
+			await request(href ?? "", { headers: { "HX-Request": "true" } })
+		).text();
 		expect(tickedIds(after)).toEqual(ids);
 		expect(after).toMatch(/id="selected-count"[^>]*aria-live="polite"/);
 		expect(after).toMatch(
