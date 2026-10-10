@@ -60,6 +60,7 @@ Most important first. Bugs a person would hit are filed as issues now; the rest 
 19. **Add cash opens with $20.00 filled in.** **Owner's call** (question 10).
 20. **The seeded Costco split parts say Tally picked their categories** (wrong words). **Filed: #327.**
 21. **Small fixes** (an income row's split error, dead code, two How Tally works lines, a How this works link, Undo retry, the catalog's Undo toast, the matcher's query count): **Filed: #329.** Ticks lost between pages in Select mode go with #321 (question 13).
+22. **An accidental "Not this one" on a bill's page can't be undone**: the payment is never offered for that month again (data). **Owner's call** (question 8).
 
 ## Owner decisions (2026-10-10)
 
@@ -78,7 +79,7 @@ The owner answered every question from pictures of today's screen beside the opt
 | 16. Set category on a linked refund | Its purchase gets the category and the refund follows: #346 |
 | 17. Splitting a purchase with a refund | The split sheet asks which part the refund goes with: #345 |
 | 18, 19. Cash Undo and the $20.00 | Focus moves to Undo; Add cash opens empty: #342 |
-| "Not this one" (finding 9's neighbour) | Undo on the toast, and the picker keeps it under "You said not this one": #340 |
+| 22. "Not this one" | Undo on the toast, and the picker keeps it under "You said not this one": #340 |
 | Ticks across pages | Decided with #321 |
 
 ## What went well
