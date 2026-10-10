@@ -292,10 +292,9 @@ describe("cash lifecycle", () => {
 
 	it("date edit keeps the bill link", async () => {
 		const { id, today, month } = await createBillLinkedCash();
-		const earlierDate =
-			today.slice(8) === "01"
-				? `${today.slice(0, 7)}-02`
-				: `${today.slice(0, 7)}-01`;
+		const yesterday = new Date(`${today}T00:00:00Z`);
+		yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+		const earlierDate = yesterday.toISOString().slice(0, 10);
 		const saved = await saveCashEdit(id, earlierDate, "18.50");
 		expect(saved.res.status).toBe(200);
 		expect(
@@ -315,6 +314,13 @@ describe("cash lifecycle", () => {
 		const { id, today, month } = await createBillLinkedCash();
 		const saved = await saveCashEdit(id, today, "20.00");
 		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, date FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 2000, date: today });
 		expect(await linkedPayment(id)).toEqual({
 			bill_id: 9600,
 			period: month,
