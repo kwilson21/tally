@@ -624,12 +624,15 @@ const EXCLUDE =
 
 /**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
- * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left.
+ * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left. A cash
+ * amount is refused when it breaks its parts (`amountCents` is the parts' total) or its linked
+ * refunds (`refundCents` is their total, the smallest amount that would fit).
  */
 export type SaveEditResult =
 	| { saved: true }
 	| { saved: false; refundLeftCents: number }
-	| { saved: false; cashError: "split" | "refund"; amountCents: number };
+	| { saved: false; cashError: "split"; amountCents: number }
+	| { saved: false; cashError: "refund"; refundCents: number };
 
 /**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
@@ -880,14 +883,11 @@ export async function saveEdit(
 		// update changes it; one a person linked to another purchase keeps its own choice. The
 		// credit's review stays as it was.
 		statements.push(
-			db
-				.prepare(
-					"UPDATE transactions SET refund_of_id = NULL WHERE parent_id = ?1 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?1)",
-				)
-				.bind(id),
-			db
-				.prepare("UPDATE transactions SET refund_of_id = NULL WHERE id = ?")
-				.bind(id),
+			gated(
+				"UPDATE transactions SET refund_of_id = NULL WHERE parent_id = ?1 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?1)",
+				[id],
+			),
+			gated("UPDATE transactions SET refund_of_id = NULL WHERE id = ?", [id]),
 		);
 	} else if (linking) {
 		// An explicit human link is also a review of this credit as a refund. The link was written
@@ -895,12 +895,11 @@ export async function saveEdit(
 		// which a person linking a refund hasn't ticked, so the review is made again here. It stays on
 		// a split parent, so its parts inherit the reviewed link as one bank transaction.
 		statements.push(
-			db
-				.prepare(
-					`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user'
+			gated(
+				`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user'
 					WHERE id = ? AND amount_cents < 0 AND refund_of_id = ?`,
-				)
-				.bind(id, newLink),
+				[id, newLink],
+			),
 		);
 	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
@@ -1030,10 +1029,7 @@ export async function saveEdit(
 		return {
 			saved: false,
 			cashError: "refund",
-			amountCents: Math.max(
-				0,
-				(edit.cashAmountCents ?? 0) - (state?.refunds ?? 0),
-			),
+			refundCents: state?.refunds ?? 0,
 		};
 	}
 	// The statement that decides is the refund's own link, the second one, when there is a link; for a

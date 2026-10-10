@@ -1133,7 +1133,7 @@ function EditSheet({
 				{tx.displayName}
 				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}
 			</h2>
-			{tx.accountType === "cash" ? (
+			{tx.accountType === "cash" && tx.parentId === null ? (
 				<p class="text-muted">Cash · you entered this</p>
 			) : (
 				<>
@@ -1983,7 +1983,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				people={people}
 				values={values}
 				cashValues={
-					tx.accountType === "cash"
+					tx.accountType === "cash" && tx.parentId === null
 						? { date: tx.date, amount: centsToAmount(tx.amountCents) }
 						: undefined
 				}
@@ -2232,8 +2232,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
 	const refunds = await refundPurchases(c.env.DB, tx);
+	// Only a top-level cash entry has the Amount and Date fields; a split part's date and amount come from its parent.
 	const cashValues =
-		tx.accountType === "cash"
+		tx.accountType === "cash" && tx.parentId === null
 			? {
 					date: form.get("date")?.toString() ?? tx.date,
 					amount:
@@ -2369,7 +2370,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 						amount: `The parts add up to ${formatCents(result.amountCents)}. Change them to match ${formatCents(cashParsed?.amountCents ?? 0)}.`,
 					})
 				: showErrors({
-						amount: `This amount is more than what's left after linked refunds (${formatCents(result.amountCents)} left).`,
+						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;

@@ -545,6 +545,133 @@ describe("cash lifecycle", () => {
 		).toEqual([{ date: moved }]);
 	});
 
+	it("a split cash part's panel has no cash fields, and a category save on it keeps the entry", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "20.00",
+				merchant: "Split part cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Split part cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await saveSplit(
+			env.DB,
+			id,
+			[
+				{ amountCents: 900, categoryId: 1 },
+				{ amountCents: 1100, categoryId: 2 },
+			],
+			"demo",
+		);
+		const part = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id=? ORDER BY id LIMIT 1",
+			)
+				.bind(id)
+				.first<{ id: number }>()
+		)?.id as number;
+		const panel = await request(`/transactions/${part}`);
+		expect(panel.res.status).toBe(200);
+		expect(panel.html).not.toContain(`name="amount"`);
+		expect(panel.html).not.toContain(`name="date"`);
+		expect(panel.html).not.toContain("Cash · you entered this");
+		expect(panel.html).toContain("$9.00");
+		const saved = await request(`/transactions/${part}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ category: "2", back: "/transactions" }),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT category_id FROM transactions WHERE id=?")
+				.bind(part)
+				.first(),
+		).toEqual({ category_id: 2 });
+		expect(
+			await env.DB.prepare("SELECT amount_cents FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 2000 });
+	});
+
+	it("refuses an edited date more than ten years before today, and accepts the boundary", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "18.50",
+				merchant: "Ten year cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Ten year cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const tenYearsBefore = (days: number) => {
+			const day = new Date(`${today}T00:00:00Z`);
+			day.setUTCFullYear(day.getUTCFullYear() - 10);
+			day.setUTCDate(day.getUTCDate() + days);
+			return day.toISOString().slice(0, 10);
+		};
+		const tooOld = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: tenYearsBefore(-1),
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(tooOld.res.status).toBe(422);
+		expect(tooOld.html).toContain("Choose a date within the last 10 years.");
+		const boundary = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: tenYearsBefore(0),
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(boundary.res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT date FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ date: tenYearsBefore(0) });
+	});
+
 	it("counts a cash entry in the month of its edited date", async () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		const previousMonthEnd = new Date(`${today.slice(0, 7)}-01T00:00:00Z`);
@@ -636,7 +763,7 @@ describe("cash lifecycle", () => {
 		});
 		expect(tooSmall.res.status).toBe(422);
 		expect(tooSmall.html).toContain(
-			"This amount is more than what&#39;s left after linked refunds ($0.00 left).",
+			"Linked refunds add up to $15.00, so the amount can&#39;t be less than that.",
 		);
 		const yesterday = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
 		yesterday.setUTCDate(yesterday.getUTCDate() - 1);

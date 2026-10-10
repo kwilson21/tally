@@ -9,6 +9,14 @@ export type CashValues = {
 };
 export type CashErrors = Partial<Record<keyof CashValues, string>>;
 
+/** The earliest date a cash entry can have: ten years before the household's today. */
+function earliestCashDate(today: string) {
+	const earliest = new Date(`${today}T00:00:00Z`);
+	earliest.setUTCFullYear(earliest.getUTCFullYear() - 10);
+	return earliest.toISOString().slice(0, 10);
+}
+
+/** A cash entry's date and amount, as Add cash and the edit panel both check them. */
 export function parseCashDateAmount(
 	date: string,
 	amount: string,
@@ -23,6 +31,8 @@ export function parseCashDateAmount(
 		parsedDate.toISOString().slice(0, 10) === date;
 	if (!realDate || date > today)
 		errors.date = "Choose today or an earlier date.";
+	else if (date < earliestCashDate(today))
+		errors.date = "Choose a date within the last 10 years.";
 	let cents = 0;
 	try {
 		cents = toCents(amount);
@@ -43,13 +53,6 @@ export function parseCash(
 	const errors: CashErrors = {};
 	const parsedAmount = parseCashDateAmount(values.date, values.amount, today);
 	Object.assign(errors, parsedAmount.errors);
-	const earliest = new Date(`${today}T00:00:00Z`);
-	earliest.setUTCFullYear(earliest.getUTCFullYear() - 10);
-	if (
-		!parsedAmount.errors.date &&
-		values.date < earliest.toISOString().slice(0, 10)
-	)
-		errors.date = "Choose a date within the last 10 years.";
 	const merchant = values.merchant.trim();
 	if (!merchant) errors.merchant = "Enter where you spent it.";
 	else if (merchant.length > 120)
