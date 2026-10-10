@@ -145,6 +145,7 @@ export function calculateBillTotals({
 	// every bill, and for a weekly or every-two-weeks bill its other occurrences this month and the next, each
 	// judged on its own (decision 62). A monthly bill's handed-off occurrence is not set aside.
 	const soon = new Map<string, number>();
+	const soonBillIds = new Set<number>();
 	for (const occurrence of [
 		...displayedOccurrences,
 		...thisMonthOccurrences.filter((occurrence) =>
@@ -158,6 +159,7 @@ export function calculateBillTotals({
 			`${occurrence.billId}:${occurrence.dueDate}`,
 			Math.max(0, occurrence.amountCents - occurrence.paidCents),
 		);
+		soonBillIds.add(occurrence.billId);
 	}
 	for (const occurrence of thisMonthOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
@@ -174,7 +176,8 @@ export function calculateBillTotals({
 	return {
 		monthlyCents,
 		stillToPayCents,
-		soonCount: soon.size,
+		// Bills to pay soon, each bill once; soonCents still sums every occurrence set aside.
+		soonCount: soonBillIds.size,
 		soonCents,
 		groups,
 	};

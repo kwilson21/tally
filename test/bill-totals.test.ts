@@ -147,7 +147,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
-		expect(totals.soonCount).toBe(2);
+		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
 	});
 
@@ -368,7 +368,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
-		expect(totals.soonCount).toBe(2);
+		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
 	});
 
@@ -402,7 +402,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
-		expect(totals.soonCount).toBe(2);
+		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
 	});
 

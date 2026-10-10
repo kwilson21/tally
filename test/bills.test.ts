@@ -713,7 +713,7 @@ describe("Bills", () => {
 		).toBe(120000);
 	});
 
-	it("counts each unpaid due weekly occurrence in the Bills summary", async () => {
+	it("counts a weekly bill once in the Bills summary, with each unpaid due occurrence in its amount", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
 		await resetDemo(env.DB, "2026-10-07");
@@ -725,13 +725,29 @@ describe("Bills", () => {
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
 		expect(html.match(/\d+ bills? to pay soon, \$[\d.]+ in all/)?.[0]).toBe(
-			"2 bills to pay soon, $200.00 in all",
+			"1 bill to pay soon, $200.00 in all",
 		);
 		const home = await (
 			await exports.default.fetch("http://tally.test/")
 		).text();
 		expect(home).toContain("Weekly fixture");
 		expect(home).toContain("Bills due soon");
+	});
+
+	it("reads one weekly bill with two unpaid due occurrences as one bill and both amounts", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-07");
+		await env.DB.prepare("DELETE FROM bills").run();
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9395,'Weekly fixture',24000,5,'weekly',5,'WEEKLY FIXTURE')",
+		).run();
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html.match(/\d+ bills? to pay soon, \$[\d,.]+ in all/)?.[0]).toBe(
+			"1 bill to pay soon, $480.00 in all",
+		);
 	});
 
 	it("counts the next Friday in November when it falls due before the month ends", async () => {
@@ -747,7 +763,7 @@ describe("Bills", () => {
 		).text();
 		// October's five Fridays are unpaid (the 2nd to the 23rd overdue, the 30th due), and Nov 6 is due in a week.
 		expect(html.match(/\d+ bills? to pay soon, \$[\d,.]+ in all/)?.[0]).toBe(
-			"6 bills to pay soon, $1,440.00 in all",
+			"1 bill to pay soon, $1,440.00 in all",
 		);
 	});
 

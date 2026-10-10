@@ -490,8 +490,8 @@ howItWorks.get("/how-it-works", async (c) => {
 				<Section id="bills" title="Bills">
 					<p class="mt-2">
 						Tally matches at most one payment to each bill occurrence, while you
-						stay in control of every link. You can link several partial payments
-						later; for now, one payment pays exactly one occurrence.
+						stay in control of every link. You can link several payments to one
+						occurrence when a bill is paid in parts.
 					</p>
 					<ul class="mt-3 list-disc space-y-1 pl-5">
 						<li>
@@ -518,7 +518,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							once it's linked it counts in the budget, so the bill counts once.
 							Unlinking it leaves it excluded, as it was.
 						</li>
-						<li>A payment links to exactly one bill occurrence.</li>
+						<li>A payment can pay only one bill occurrence.</li>
 						<li>
 							Bills can repeat monthly, yearly, weekly, every two weeks or
 							quarterly. Bills shows each bill's next unpaid occurrence. A
