@@ -1,5 +1,5 @@
 import { CategoryIcon } from "./category";
-import { categoryRowAmount } from "./month-end";
+import { categoryRowAmount } from "./category-amount";
 
 /** A category without a budget: its counted amount sits under its name; only active rows can open a sheet. */
 export function NotBudgetedRow({

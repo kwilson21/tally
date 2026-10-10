@@ -169,7 +169,7 @@ describe("GET /budget/:id", () => {
 		expect(textOf(sheet)).toContain("$106.00 spent");
 	});
 
-	it("opens a list of exactly the rows the sheet counts: a linked refund in both, an unreviewed credit in neither", async () => {
+	it("opens a list of exactly the rows the sheet counts: a linked refund in both, an unreviewed credit and an excluded purchase in neither", async () => {
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const nextMonth = monthsBefore(month, -1);
 		await env.DB.batch([
@@ -192,6 +192,11 @@ describe("GET /budget/:id", () => {
 			env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded, credit_reviewed)
 				VALUES (943, 1, ?, -2000, 'CREDIT B', 1, 'merchant_rule', 0, 0)`).bind(
 				`${month}-05`,
+			),
+			// An excluded purchase in the category: left out of Spent and of the list (spec §6.1 rule 4).
+			env.DB.prepare(`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, excluded)
+				VALUES (944, 1, ?, 4000, 'GROCER C', 1, 'user', 1)`).bind(
+				`${month}-06`,
 			),
 		]);
 		const { html: sheet } = await get("/budget/1");
@@ -227,8 +232,10 @@ describe("GET /budget/:id", () => {
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
 		]);
-		const { html } = await get("/budget/1");
-		expect(html).not.toContain("transactions ›");
+		const { res, html } = await get("/budget/1");
+		expect(res.status).toBe(200);
+		expect(html).toContain('aria-labelledby="budget-sheet-title"');
+		expect(html).not.toMatch(/href="\/transactions\?category=1/);
 	});
 
 	it("shows the three-month average chip in the demo budget sheet", async () => {

@@ -2,25 +2,12 @@ import type { CategorySummary } from "../budget";
 import { formatCents } from "../money";
 import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
+import { categoryRowAmount } from "./category-amount";
 
 const wholeUnlessTiny = (cents: number) =>
 	formatCents(cents, {
 		wholeDollars: cents === 0 || Math.abs(cents) >= 100,
 	});
-const centsWhenAny = (cents: number) =>
-	formatCents(cents, {
-		wholeDollars: cents === 0 || (Math.abs(cents) >= 100 && cents % 100 === 0),
-	});
-
-/** One signed amount and color for Home and finished-month category rows. */
-export function categoryRowAmount(cents: number) {
-	return cents < 0
-		? {
-				text: `+${centsWhenAny(-cents)}`,
-				className: "text-right text-lg text-ok",
-			}
-		: { text: centsWhenAny(cents), className: "text-right text-lg" };
-}
 const SHORT_NAMES: Record<string, string> = {
 	Groceries: "Groc.",
 	"Eating Out": "Eating",

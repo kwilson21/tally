@@ -3,8 +3,8 @@ import { nudgeCents } from "../budgets/nudge";
 import { formatCents } from "../money";
 import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
+import { categoryRowAmount } from "./category-amount";
 import { Icon } from "./icons";
-import { categoryRowAmount } from "./month-end";
 
 type Props = {
 	name: string;
