@@ -1024,13 +1024,11 @@ export async function saveEdit(
 			)
 			.bind(id)
 			.first<{ parts: number; refunds: number }>();
-		if (state && current.isSplit && state.parts !== edit.cashAmountCents)
+		// The row is there unless it was deleted during the save, and then nothing says why it was refused.
+		if (!state) throw new Error(`No transaction ${id}`);
+		if (current.isSplit && state.parts !== edit.cashAmountCents)
 			return { saved: false, cashError: "split", amountCents: state.parts };
-		return {
-			saved: false,
-			cashError: "refund",
-			refundCents: state?.refunds ?? 0,
-		};
+		return { saved: false, cashError: "refund", refundCents: state.refunds };
 	}
 	// The statement that decides is the refund's own link, the second one, when there is a link; for a
 	// credit that counts again it is the panel's own update, the first. No change means the amount

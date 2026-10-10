@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
-import { saveSplit } from "../src/db/transactions";
+import { saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
@@ -168,6 +168,30 @@ describe("adding cash", () => {
 		expect(html).toContain("Enter an amount in dollars and cents.");
 		expect(html).not.toContain("Enter an amount greater than zero.");
 		expect(html).toContain("Enter where you spent it.");
+	});
+
+	it("refuses an amount of zero on Add cash and saves nothing", async () => {
+		const { res, html } = await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "0.00",
+				merchant: "Zero add cash",
+				category: "1",
+			}),
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain("Enter an amount greater than zero.");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name='Zero add cash'",
+			).first(),
+		).toEqual({ n: 0 });
 	});
 
 	it("refreshes Add cash with the list when filters change in place", async () => {
@@ -387,6 +411,142 @@ describe("cash lifecycle", () => {
 				.first(),
 		).toEqual({ date: "2026-10-02", amount_cents: 2000 });
 		expect((await monthSummary()) - spentBefore).toBe(150);
+	});
+
+	const createCash = async (merchant: string, amount: string) => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount,
+				merchant,
+				category: "1",
+			}),
+		});
+		return (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
+			)
+				.bind(merchant)
+				.first<{ id: number }>()
+		)?.id as number;
+	};
+
+	it("refuses an amount of zero in the edit panel and keeps the amount", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const id = await createCash("Zero edit cash", "18.50");
+		const { res, html } = await saveCashEdit(id, today, "0.00");
+		expect(res.status).toBe(422);
+		expect(html).toContain("Enter an amount greater than zero.");
+		expect(
+			await env.DB.prepare("SELECT amount_cents FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 1850 });
+	});
+
+	it("saves a cash entry's category, note, date and amount from one Save", async () => {
+		const id = await createCash("One save cash", "18.50");
+		const saved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: "2026-10-02",
+				amount: "20.00",
+				category: "5",
+				note: "One save note",
+				back: "/transactions",
+			}),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT date, amount_cents, note, category_id, category_source FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({
+			date: "2026-10-02",
+			amount_cents: 2000,
+			note: "One save note",
+			category_id: 5,
+			category_source: "user",
+		});
+	});
+
+	it("saves nothing in the panel, its category included, when the amount is refused", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const id = await createCash("Refused panel cash", "20.00");
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,?, -1500, 'Refused panel refund', ?, 1 FROM transactions WHERE id=?",
+		)
+			.bind(today, id, id)
+			.run();
+		const refused = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today,
+				amount: "10.00",
+				category: "5",
+				back: "/transactions",
+			}),
+		});
+		expect(refused.res.status).toBe(422);
+		expect(refused.html).toContain(
+			"Linked refunds add up to $15.00, so the amount can&#39;t be less than that.",
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, category_id FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 2000, category_id: 1 });
+	});
+
+	it("treats a cash entry deleted while it is being saved as an error, not a refund refusal", async () => {
+		const id = await createCash("Vanishing cash", "18.50");
+		const db = {
+			prepare: env.DB.prepare.bind(env.DB),
+			batch: async (statements: D1PreparedStatement[]) => {
+				await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
+					.bind(id)
+					.run();
+				return env.DB.batch(statements);
+			},
+		} as unknown as D1Database;
+		await expect(
+			saveEdit(
+				db,
+				id,
+				{
+					categoryId: null,
+					alwaysForMerchant: false,
+					displayName: null,
+					note: null,
+					excluded: false,
+					income: false,
+					creditReviewed: false,
+					cashDate: "2026-10-02",
+					cashAmountCents: 2000,
+				},
+				"synthetic-test",
+			),
+		).rejects.toThrow(`No transaction ${id}`);
 	});
 
 	it("refuses future cash edit dates and bank date and amount changes", async () => {
