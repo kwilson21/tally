@@ -115,6 +115,48 @@ describe("bill payment matching", () => {
 		).toEqual({ period: "2026-10-16" });
 	});
 
+	it("links a Friday bill to its own Friday when its only payment comes the next day", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='weekly',due_day=5,anchor_month=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(93,1,'2026-10-10',10000,'LANDLORD')",
+			),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-10-12")).toBe(1);
+		expect(
+			await env.DB.prepare(
+				"SELECT period,transaction_id FROM bill_payments WHERE status='linked'",
+			).all(),
+		).toMatchObject({
+			results: [{ period: "2026-10-09", transaction_id: 93 }],
+		});
+	});
+
+	it("gives a biweekly bill the five-day window, so Oct 21 links to Oct 16 and Oct 22 does not", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='biweekly',due_day=5,anchor_month=NULL,anchor_date='2026-10-02' WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(94,1,'2026-10-21',10000,'LANDLORD'),(95,1,'2026-10-22',10000,'LANDLORD')",
+			),
+		]);
+		expect(await matchBillPayments(env.DB, "2026-10-23")).toBe(1);
+		expect(
+			await env.DB.prepare(
+				"SELECT period,transaction_id FROM bill_payments WHERE status='linked'",
+			).all(),
+		).toMatchObject({
+			results: [{ period: "2026-10-16", transaction_id: 94 }],
+		});
+	});
+
 	it("keeps statement counts constant and below D1's limit for ten weekly bills", async () => {
 		const countForYears = async (years: number) => {
 			await env.DB.batch([

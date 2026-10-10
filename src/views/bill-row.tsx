@@ -138,8 +138,7 @@ export function BillRow({
 				) : (
 					<span class="block truncate leading-6 text-muted">
 						{billStatusLine(bill, today)}
-						{bill.frequency &&
-						["weekly", "biweekly", "quarterly"].includes(bill.frequency)
+						{bill.frequency && ["weekly", "biweekly"].includes(bill.frequency)
 							? ` · ${billCadenceLabel({ frequency: bill.frequency, dueDay: bill.dueDay ?? 1 })}`
 							: ""}
 					</span>

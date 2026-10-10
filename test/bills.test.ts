@@ -994,6 +994,47 @@ describe("Bills", () => {
 		expect(html).toContain("Not paid");
 	});
 
+	it("lists and accepts only payments within three days of a weekly occurrence", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='weekly',due_day=5,anchor_month=NULL,anchor_date=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9901,1,'2026-10-06',1000,'PICKER NEAR'),(9902,1,'2026-10-05',1000,'PICKER FAR')",
+			),
+		]);
+		const html = await (
+			await exports.default.fetch(
+				"http://tally.test/bills/1/occurrences/2026-10-09/link",
+			)
+		).text();
+		expect(html).toContain('value="9901"');
+		expect(html).not.toContain('value="9902"');
+
+		const res = await exports.default.fetch("http://tally.test/bills/1/link", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				transaction_id: "9902",
+				period: "2026-10-09",
+				opened_period: "2026-10-09",
+			}),
+		});
+		expect(await res.text()).toContain("isn&#39;t within 3 days of");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9902",
+			).first("n"),
+		).toBe(0);
+	});
+
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
 		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();

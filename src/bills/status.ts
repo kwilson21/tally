@@ -6,6 +6,19 @@ export type BillFrequency =
 	| "biweekly"
 	| "quarterly";
 
+/** §6.1 rule 3: a weekly occurrence's payment window is three days, so two weeks' windows never overlap. */
+export const WEEKLY_BILL_DATE_WINDOW_DAYS = 3;
+const MANUAL_LINK_WINDOW_DAYS = 30;
+
+/**
+ * §6.1 "People override": the hand-link picker lists, and accepts, a payment within this many days of the
+ * occurrence it pays. Weekly is three days, the same window the matcher uses; the other frequencies keep 30.
+ */
+export const manualLinkWindowDays = (frequency: BillFrequency) =>
+	frequency === "weekly"
+		? WEEKLY_BILL_DATE_WINDOW_DAYS
+		: MANUAL_LINK_WINDOW_DAYS;
+
 export type BillSchedule = {
 	frequency: BillFrequency;
 	dueDay: number;

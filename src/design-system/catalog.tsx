@@ -1307,6 +1307,27 @@ function Rows() {
 						</ul>
 					</div>
 				</State>
+				<State label="Weekly, due">
+					<div class="max-w-xl">
+						<BillStatusHeading status="due" />
+						<ul>
+							<BillRow
+								today="2026-10-05"
+								bill={{
+									id: 8,
+									name: "Daycare",
+									amountCents: 24000,
+									status: "due",
+									dueDate: "2026-10-09",
+									frequency: "weekly",
+									dueDay: 5,
+									icon: "kids",
+									color: "cat-ochre",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
 				<State label="Upcoming, linked row">
 					<div class="max-w-xl">
 						<BillStatusHeading status="upcoming" />

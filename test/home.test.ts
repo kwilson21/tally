@@ -483,6 +483,9 @@ describe("GET / with the demo seed", () => {
 	});
 
 	it("subtracts exactly active, unpaid due and overdue bills", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
 		const dollars = (html: string) => {
 			const match = html.match(
 				/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
@@ -542,6 +545,9 @@ describe("GET / with the demo seed", () => {
 	});
 
 	it("shows the picked negative amount and sentence, and keeps the label at exactly zero", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		const month = today.slice(0, 7);
 		const data = await loadMonth(env.DB, month);

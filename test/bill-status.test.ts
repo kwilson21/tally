@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { billOccurrence, billOccurrenceForMonth } from "../src/bills/status";
-import { billStatusLine } from "../src/views/bill-row";
+import { BillRow, billStatusLine } from "../src/views/bill-row";
 
 describe("bill status", () => {
 	it("clamps month ends and includes the seventh day", () => {
@@ -161,15 +161,12 @@ describe("bill status", () => {
 				dueDay: 15,
 				anchorMonth: 1,
 			} as const;
-			expect(billOccurrence(bill, "2026-04-20", false)).toMatchObject({
+			// The hand-off boundary: Apr 15 is still overdue on Jul 7, and Jul 15 is due on Jul 8.
+			expect(billOccurrence(bill, "2026-07-07", false)).toMatchObject({
 				dueDate: "2026-04-15",
 				status: "overdue",
 			});
-			expect(billOccurrence(bill, "2026-04-20", false)).toMatchObject({
-				dueDate: "2026-04-15",
-				status: "overdue",
-			});
-			expect(billOccurrence(bill, "2026-07-15", false)).toMatchObject({
+			expect(billOccurrence(bill, "2026-07-08", false)).toMatchObject({
 				dueDate: "2026-07-15",
 				status: "due",
 			});
@@ -242,5 +239,40 @@ describe("billStatusLine", () => {
 				today,
 			),
 		).toBe("Was due Oct 2");
+	});
+});
+
+describe("BillRow cadence", () => {
+	const daycare = {
+		id: 8,
+		name: "Daycare",
+		amountCents: 24000,
+		status: "due" as const,
+		dueDate: "2026-10-09",
+		icon: "kids",
+		color: "cat-ochre",
+	};
+	const rowText = (
+		frequency: "weekly" | "biweekly" | "quarterly" | "monthly",
+		dueDay: number,
+	) =>
+		String(
+			BillRow({
+				bill: { ...daycare, frequency, dueDay },
+				today: "2026-10-05",
+			}),
+		);
+
+	it("adds the weekday after the status sentence for a weekly bill", () => {
+		expect(rowText("weekly", 5)).toContain("Due Oct 9 · every Friday");
+	});
+
+	it("adds the interval for a bill every two weeks", () => {
+		expect(rowText("biweekly", 5)).toContain("Due Oct 9 · every two weeks");
+	});
+
+	it("leaves a quarterly or monthly row's status sentence as it is", () => {
+		expect(rowText("quarterly", 9)).not.toContain("every 3 months");
+		expect(rowText("monthly", 9)).not.toContain("· every");
 	});
 });

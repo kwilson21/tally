@@ -1,3 +1,4 @@
+import { manualLinkWindowDays } from "../bills/status";
 import { formatCents } from "../money";
 import { Button } from "./button";
 import { Chip } from "./chip";
@@ -64,6 +65,7 @@ export function BillPaymentPicker({
 	selectedTransactionId?: number;
 }) {
 	const action = `/bills/${billId}/link`;
+	const windowDays = manualLinkWindowDays(frequency);
 	const opened =
 		periods.find((period) => period.value === openedPeriod) ?? periods[0];
 	const selectedPayment = candidates.find(
@@ -82,8 +84,8 @@ export function BillPaymentPicker({
 				{formatCents(billAmountCents)}.
 			</p>
 			<p class="mt-1 text-muted">
-				Within {frequency === "weekly" ? 3 : 30} days of {dueDateLabel}, same
-				merchant first, then closest amount.
+				Within {windowDays} days of {dueDateLabel}, same merchant first, then
+				closest amount.
 			</p>
 			{candidates.length ? (
 				<form
@@ -159,7 +161,7 @@ export function BillPaymentPicker({
 				<EmptyState
 					kind="search"
 					sentence="No payments to link"
-					hint="There are no eligible, unclaimed payments within 30 days."
+					hint={`There are no eligible, unclaimed payments within ${windowDays} days.`}
 				/>
 			)}
 		</section>
