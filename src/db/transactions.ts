@@ -625,7 +625,7 @@ const EXCLUDE =
  * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left.
  */
 export type SaveEditResult =
-	| { saved: true }
+	| { saved: true; merchantKey: string }
 	| { saved: false; refundLeftCents: number };
 
 /**
@@ -1001,7 +1001,34 @@ export async function saveEdit(
 			saved: false,
 			refundLeftCents: await refundLeftCents(db, purchase, id),
 		};
-	return { saved: true };
+	return { saved: true, merchantKey: current.merchantKey };
+}
+
+/** Sets a merchant's category rule and applies it without replacing a person's own choices. */
+export async function setMerchantRule(
+	db: D1Database,
+	merchantKey: string,
+	categoryId: number,
+	actor: string,
+): Promise<void> {
+	await db.batch([
+		db
+			.prepare(
+				`INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)
+			ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id`,
+			)
+			.bind(merchantKey, categoryId),
+		db
+			.prepare(
+				`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
+				split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now')
+			WHERE ${merchantKeySql("transactions")} = ? AND id NOT IN (
+				SELECT id FROM transactions WHERE ${merchantKeySql("transactions")} = ?
+					AND category_source = 'user' AND category_id = ?
+			) AND COALESCE(category_source, '') != 'user'`,
+			)
+			.bind(categoryId, actor, merchantKey, merchantKey, categoryId),
+	]);
 }
 
 /**

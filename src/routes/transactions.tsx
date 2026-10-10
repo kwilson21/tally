@@ -4,6 +4,7 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
+import { merchantKeySql } from "../db/merchant-key";
 import {
 	type FirstVisit,
 	firstVisitState,
@@ -49,6 +50,7 @@ import {
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
+import { categoryRuleOffer, setMerchantRule } from "../transactions/rule-offer";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
@@ -77,6 +79,7 @@ import {
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
+import { RuleOffer, type RuleOfferValue } from "../views/rule-offer";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
@@ -978,6 +981,11 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			true,
 		);
 	// The same write as the edit panel's category change (saveEdit).
+	const merchantRows = await c.env.DB.prepare(
+		`SELECT DISTINCT ${merchantKeySql("t")} AS merchantKey FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?))`,
+	)
+		.bind(JSON.stringify(ids))
+		.all<{ merchantKey: string }>();
 	await c.env.DB.batch(
 		ids.map((id) =>
 			c.env.DB.prepare(
@@ -986,6 +994,36 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		),
 	);
 	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
+	for (const row of merchantRows.results) {
+		const offer = await categoryRuleOffer(c.env.DB, row.merchantKey, cat.id);
+		if (!offer) continue;
+		const hasRule = await c.env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ? AND default_category_id IS NOT NULL",
+		)
+			.bind(row.merchantKey)
+			.first();
+		if (hasRule) continue;
+		const matching = await c.env.DB.prepare(
+			`SELECT t.id FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${merchantKeySql("t")} = ? LIMIT 1`,
+		)
+			.bind(JSON.stringify(ids), row.merchantKey)
+			.first<{ id: number }>();
+		const tx = matching ? await getTransaction(c.env.DB, matching.id) : null;
+		if (!tx) continue;
+		const value: RuleOfferValue = {
+			...offer,
+			merchant: tx.displayName || tidyName(tx.rawName),
+			category: cat.name,
+			back,
+		};
+		const announce = `Saved as ${cat.name}. ${cat.name} for ${value.merchant}? You've picked ${cat.name} for ${value.merchant} ${offer.count} times.`;
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ toast: { message, type: "success" }, announce }),
+		);
+		c.header("HX-Push-Url", back);
+		return renderRuleOffer(c, today, back, value);
+	}
 	return finishSelection(c, today, back, message);
 });
 
@@ -1058,6 +1096,7 @@ type SheetProps = {
 	 * after the delete question. A field's error and the question itself are known from the props.
 	 */
 	still?: boolean;
+	ruleOffer?: RuleOfferValue;
 };
 
 function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
@@ -1082,6 +1121,7 @@ function EditSheet({
 	namePick = null,
 	nameWas = null,
 	still = false,
+	ruleOffer,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
 	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
@@ -1542,6 +1582,7 @@ function EditSheet({
 						</p>
 					)}
 				</fieldset>
+				{ruleOffer && <RuleOffer value={ruleOffer} />}
 				{/* An error keeps the section, even when no purchase is offered any more. */}
 				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
 					<details
@@ -1866,7 +1907,37 @@ transactions.post("/transactions/cash", async (c) => {
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
+	const offerRecord =
+		saved.id !== null
+			? await categoryRuleOffer(
+					c.env.DB,
+					saved.merchant,
+					parsed.value.categoryId,
+				)
+			: null;
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const offer = offerRecord
+		? {
+				...offerRecord,
+				merchant: saved.merchant,
+				category:
+					categories.find((category) => category.id === parsed.value.categoryId)
+						?.name ?? "",
+				back,
+			}
+		: undefined;
+	if (offer?.category) {
+		const message = `Added ${saved.merchant}`;
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: `Saved as ${offer.category}. ${offer.category} for ${offer.merchant}? You've picked ${offer.category} for ${offer.merchant} ${offer.count} times.`,
+			}),
+		);
+		c.header("HX-Push-Url", back);
+		return renderRuleOffer(c, today, back, offer);
+	}
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
@@ -2180,7 +2251,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const filters = filtersFrom(c, today, back);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
-	).all<{ id: number; name: string }>();
+	).all<Category>();
 	const people = (
 		await c.env.DB.prepare(
 			"SELECT id, name FROM household_people ORDER BY id",
@@ -2286,6 +2357,28 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 	if (!result.saved)
 		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+	const ruleOfferRecord =
+		parsed.value.categoryId === null ||
+		parsed.value.categoryId === tx.categoryId ||
+		parsed.value.alwaysForMerchant
+			? null
+			: await categoryRuleOffer(
+					c.env.DB,
+					result.merchantKey,
+					parsed.value.categoryId,
+				);
+	const offerCategory = categories.find(
+		(cat) => cat.id === parsed.value.categoryId,
+	);
+	const ruleOffer =
+		ruleOfferRecord && offerCategory
+			? {
+					...ruleOfferRecord,
+					merchant: tx.displayName || tidyName(tx.rawName),
+					category: offerCategory.name,
+					back,
+				}
+			: undefined;
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
@@ -2341,13 +2434,98 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 				message: keptDetails ? `Kept details for ${name}` : `Saved ${name}`,
 				type: "success",
 			},
-			announce:
-				(keptDetails ? `Kept the details for ${name}.` : saved) + exclusion,
+			announce: ruleOffer
+				? `Saved as ${ruleOffer.category}. ${ruleOffer.category} for ${ruleOffer.merchant}? You've picked ${ruleOffer.category} for ${ruleOffer.merchant} ${ruleOffer.count} times.`
+				: (keptDetails ? `Kept the details for ${name}.` : saved) + exclusion,
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filters, { focusId: tx.id });
+	return ruleOffer
+		? renderList(c, today, filters, {
+				sheet: (all, today) => (
+					<EditSheet
+						tx={tx}
+						back={back}
+						categories={all}
+						people={people}
+						values={{ ...parsed.value, categoryId: parsed.value.categoryId }}
+						refunds={refunds}
+						today={today}
+						ruleOffer={ruleOffer}
+						still
+					/>
+				),
+			})
+		: renderList(c, today, filters, { focusId: tx.id });
 });
+
+async function respondToRuleOffer(c: Context<App>, yes: boolean) {
+	const form = await c.req.formData();
+	const merchantKey = form.get("merchant_key")?.toString() ?? "";
+	const categoryId = Number(form.get("category"));
+	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
+	const validCategory = await c.env.DB.prepare(
+		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
+	)
+		.bind(categoryId)
+		.first<{ id: number; name: string }>();
+	const existingRule = merchantKey
+		? await c.env.DB.prepare(
+				"SELECT default_category_id AS categoryId FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first<{ categoryId: number | null }>()
+		: null;
+	const merchantName = merchantKey
+		? await c.env.DB.prepare(
+				"SELECT display_name AS displayName FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first<{ displayName: string | null }>()
+		: null;
+	const offer =
+		validCategory && merchantKey
+			? await categoryRuleOffer(c.env.DB, merchantKey, categoryId)
+			: null;
+	const message =
+		yes && offer && validCategory
+			? `Always use ${validCategory.name} for ${merchantName?.displayName || tidyName(merchantKey)}.`
+			: "Saved.";
+	if (yes && offer && validCategory && existingRule?.categoryId == null)
+		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusHeading: true,
+	});
+}
+
+function renderRuleOffer(
+	c: Context<App>,
+	today: string,
+	back: string,
+	value: RuleOfferValue,
+) {
+	return renderList(c, today, filtersFrom(c, today, back), {
+		sheet: () => (
+			<BottomSheet labelledBy="rule-offer-title" closeHref={back}>
+				<RuleOffer value={value} focus />
+			</BottomSheet>
+		),
+	});
+}
+
+transactions.post("/transactions/rule-offer", (c) =>
+	respondToRuleOffer(c, true),
+);
+transactions.post("/transactions/rule-offer/dismiss", (c) =>
+	respondToRuleOffer(c, false),
+);
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
