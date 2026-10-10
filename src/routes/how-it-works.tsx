@@ -522,11 +522,12 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							Bills can repeat monthly, yearly, weekly, every two weeks or
 							quarterly. Bills shows each bill's next unpaid occurrence. A
-							missed weekly or every-two-weeks occurrence stays overdue until it
-							is paid; a missed monthly, yearly or quarterly one stays overdue
-							until it is paid or the next one is due. On a bill's page, an
-							unpaid occurrence from an earlier month says “Not paid”. Safe to
-							spend sets aside every due or overdue occurrence that is unpaid.
+							missed weekly or every-two-weeks occurrence from this month stays
+							overdue until it is paid, and one from an earlier month says “Not
+							paid” and is no longer set aside. A missed monthly, yearly or
+							quarterly occurrence stays overdue until it is paid or the next
+							one is due. Safe to spend sets aside every due or overdue
+							occurrence that is unpaid.
 						</li>
 						<li>
 							A late payment counts in the month of the bill it paid, instead of
