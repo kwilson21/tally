@@ -4,7 +4,6 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
-import { merchantKeySql } from "../db/merchant-key";
 import {
 	type FirstVisit,
 	firstVisitState,
@@ -53,6 +52,7 @@ import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
 import {
 	categoryRuleOffer,
+	firstRuleOfferAmong,
 	ruleOfferForTransaction,
 } from "../transactions/rule-offer";
 import { parseSplit } from "../transactions/split";
@@ -988,12 +988,6 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			"Pick a category from the list.",
 			true,
 		);
-	// Merchants in the order their first selected row came, so two merchants that both reach three ask the same one each time.
-	const merchantRows = await c.env.DB.prepare(
-		`SELECT ${merchantKeySql("t")} AS merchantKey FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) GROUP BY ${merchantKeySql("t")} ORDER BY MIN(t.id)`,
-	)
-		.bind(JSON.stringify(ids))
-		.all<{ merchantKey: string }>();
 	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
@@ -1003,31 +997,25 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		),
 	);
 	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
-	for (const row of merchantRows.results) {
-		const offer = await categoryRuleOffer(c.env.DB, row.merchantKey, cat.id);
-		if (!offer) continue;
-		const matching = await c.env.DB.prepare(
-			`SELECT t.id FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${merchantKeySql("t")} = ? LIMIT 1`,
-		)
-			.bind(JSON.stringify(ids), row.merchantKey)
-			.first<{ id: number }>();
-		const tx = matching ? await getTransaction(c.env.DB, matching.id) : null;
-		if (!tx) continue;
-		const value: RuleOfferValue = {
-			...offer,
-			merchant: tx.displayName || tidyName(tx.rawName),
-			category: cat.name,
-			back,
-		};
-		const announce = ruleOfferAnnouncement(value);
-		c.header(
-			"HX-Trigger",
-			JSON.stringify({ toast: { message, type: "success" }, announce }),
-		);
-		c.header("HX-Push-Url", back);
-		return renderRuleOffer(c, today, back, value);
-	}
-	return finishSelection(c, today, back, message);
+	// The first merchant in the selection to reach three picks of this category is asked (decision 79).
+	const found = await firstRuleOfferAmong(c.env.DB, ids, cat.id);
+	const tx = found ? await getTransaction(c.env.DB, found.transactionId) : null;
+	if (!found || !tx) return finishSelection(c, today, back, message);
+	const value: RuleOfferValue = {
+		merchantKey: found.merchantKey,
+		categoryId: found.categoryId,
+		count: found.count,
+		merchant: tx.displayName || tidyName(tx.rawName),
+		category: cat.name,
+		back,
+	};
+	const announce = ruleOfferAnnouncement(value, message);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce }),
+	);
+	c.header("HX-Push-Url", back);
+	return renderRuleOffer(c, today, back, value);
 });
 
 transactions.post("/transactions/select/exclude", async (c) => {
@@ -1907,7 +1895,6 @@ transactions.post("/transactions/cash", async (c) => {
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	const offerRecord = await categoryRuleOffer(
 		c.env.DB,
 		saved.merchant,
@@ -1916,18 +1903,28 @@ transactions.post("/transactions/cash", async (c) => {
 	const categoryName = categories.find(
 		(category) => category.id === saved.categoryId,
 	)?.name;
-	if (offerRecord && categoryName) {
-		const offer: RuleOfferValue = {
-			...offerRecord,
-			merchant: saved.merchant,
-			category: categoryName,
-			back,
-		};
+	const offer: RuleOfferValue | null =
+		offerRecord && categoryName
+			? {
+					...offerRecord,
+					merchant: saved.merchant,
+					category: categoryName,
+					back,
+				}
+			: null;
+	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
+	if (!c.req.header("HX-Request"))
+		return offer
+			? renderRuleOffer(c, today, back, offer)
+			: c.redirect(back, 303);
+	// The save's own words come first in the announcement, with or without the question after them.
+	const savedWords = `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`;
+	if (offer) {
 		c.header(
 			"HX-Trigger",
 			JSON.stringify({
 				toast: { message: `Added ${saved.merchant}`, type: "success" },
-				announce: ruleOfferAnnouncement(offer),
+				announce: ruleOfferAnnouncement(offer, savedWords),
 			}),
 		);
 		c.header("HX-Push-Url", back);
@@ -1937,7 +1934,7 @@ transactions.post("/transactions/cash", async (c) => {
 		"HX-Trigger",
 		JSON.stringify({
 			toast: { message: `Added ${saved.merchant}`, type: "success" },
-			announce: `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`,
+			announce: savedWords,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -2397,7 +2394,11 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		parsed.value.categoryId === null
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
+	if (!c.req.header("HX-Request"))
+		return ruleOffer
+			? renderRuleOffer(c, today, back, ruleOffer)
+			: c.redirect(back, 303);
 
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,

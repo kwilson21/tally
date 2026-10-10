@@ -3,22 +3,42 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { removeMerchantRule } from "../src/db/merchant-rules";
 import { resetDemo } from "../src/demo/reset";
+import { firstRuleOfferAmong } from "../src/transactions/rule-offer";
 
 const BASE = "http://tally.test";
 const QUESTION = "Always use Groceries for rule-offer-store?";
 
-async function post(path: string, fields: Record<string, string>) {
+async function send(
+	path: string,
+	fields: Record<string, string>,
+	headers: Record<string, string>,
+) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
 		headers: {
 			Origin: BASE,
 			"content-type": "application/x-www-form-urlencoded",
-			"HX-Request": "true",
+			...headers,
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
 	return { res, html: await res.text() };
+}
+
+/** A save the way htmx sends it. */
+function post(path: string, fields: Record<string, string>) {
+	return send(path, fields, { "HX-Request": "true" });
+}
+
+/** A save with JavaScript off: no HX-Request header, so the reply is a redirect or a whole page. */
+function postPlain(path: string, fields: Record<string, string>) {
+	return send(path, fields, {});
+}
+
+/** The screen reader's words for a reply, from its HX-Trigger header. */
+function announced(res: Response): string {
+	return JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce as string;
 }
 
 /** The hidden fields of the rule offer's own form, as the page posts them back. */
@@ -49,6 +69,28 @@ async function setCategory(
 	)
 		.bind(category, source, ...ids)
 		.run();
+}
+
+/** Adds `count` Groceries picks for a new merchant, and returns their ids in order. */
+async function addPicks(name: string, count: number, category: number) {
+	await env.DB.prepare(
+		`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES ${Array.from({ length: count }, () => "(1, ?, 1000, ?, ?, ?, 'user')").join(", ")}`,
+	)
+		.bind(
+			...Array.from({ length: count }, () => [
+				todayIn(DEFAULT_TIME_ZONE),
+				name,
+				name,
+				category,
+			]).flat(),
+		)
+		.run();
+	const rows = await env.DB.prepare(
+		"SELECT id FROM transactions WHERE merchant_name = ? ORDER BY id",
+	)
+		.bind(name)
+		.all<{ id: number }>();
+	return rows.results.map((row) => row.id);
 }
 
 let merchant: string;
@@ -129,6 +171,21 @@ describe("merchant category rule offer", () => {
 		);
 	});
 
+	it("counts a pick on a row Jev flagged as a transfer once the person includes it", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_transfer = 1, excluded = 1, excluded_source = 'jev' WHERE id = ?",
+		)
+			.bind(ids[2])
+			.run();
+		// The person unticks Excluded and picks Groceries: that is a third pick, so it is asked.
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(third.html).toContain(QUESTION);
+		expect(third.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
+	});
+
 	it("does not offer for a merchant that already has a rule, even on a third save", async () => {
 		await setCategory(ids.slice(0, 3), groceries, "user");
 		await env.DB.prepare(
@@ -169,6 +226,90 @@ describe("merchant category rule offer", () => {
 			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
 		);
 		expect(selected.html).not.toContain("Always use Groceries for other?");
+	});
+
+	it("Select with no merchant at three says what it set and asks nothing", async () => {
+		const selected = await post("/transactions/select/category/save", {
+			ids: `${ids[0]},${ids[1]}`,
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(selected.html).not.toContain(QUESTION);
+		expect(
+			JSON.parse(selected.res.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Set 2 transactions to Groceries.");
+	});
+
+	it("announces each save's own words before the question, on every path that asks", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const edited = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(announced(edited.res)).toBe(
+			"Saved. rule-offer-store is now Groceries. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 3 times.",
+		);
+		await setCategory([ids[2]], null, null);
+		const selected = await post("/transactions/select/category/save", {
+			ids: String(ids[2]),
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(announced(selected.res)).toBe(
+			"Set 1 transaction to Groceries. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 3 times.",
+		);
+		await setCategory([ids[3]], null, null);
+		const cash = await post("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "10.00",
+			merchant,
+			category: String(groceries),
+			note: "",
+			back: "/transactions",
+		});
+		// The cash entry is a fourth Groceries pick, so the count is four.
+		expect(announced(cash.res)).toBe(
+			"Added $10.00 cash spending at rule-offer-store. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 4 times.",
+		);
+	});
+
+	it("without JavaScript, a second save redirects and a third save shows the question", async () => {
+		const first = await postPlain(`/transactions/${ids[0]}`, edit(groceries));
+		expect(first.res.status).toBe(303);
+		const second = await postPlain(`/transactions/${ids[1]}`, edit(groceries));
+		expect(second.res.status).toBe(303);
+		const third = await postPlain(`/transactions/${ids[2]}`, edit(groceries));
+		expect(third.res.status).toBe(200);
+		expect(third.html).toContain(QUESTION);
+	});
+
+	it("without JavaScript, a third cash save with an entry key shows the question", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const cash = await postPlain("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "10.00",
+			merchant,
+			category: String(groceries),
+			note: "",
+			back: "/transactions",
+			entry_key: "123e4567-e89b-42d3-a456-426614174001",
+		});
+		expect(cash.res.status).toBe(200);
+		expect(cash.html).toContain(QUESTION);
+	});
+
+	it("without JavaScript, Yes still makes the rule and redirects back", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const yes = await postPlain(
+			"/transactions/rule-offer",
+			offerFields(third.html),
+		);
+		expect(yes.res.status).toBe(303);
+		expect(yes.res.headers.get("Location")).toBe("/transactions");
+		const rule = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+		expect(rule?.default_category_id).toBe(groceries);
 	});
 
 	it("Yes makes the rule and recategorizes other rows, but not a person's own choice", async () => {
@@ -231,6 +372,47 @@ describe("merchant category rule offer", () => {
 			category_id: household,
 			category_source: "user",
 		});
+	});
+
+	it("the offer's two forms swap the whole main area, as the Set category sheet does", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		for (const action of [
+			"/transactions/rule-offer/dismiss",
+			"/transactions/rule-offer",
+		]) {
+			const form =
+				third.html.match(
+					new RegExp(`<form[^>]*action="${action}"[^>]*>`),
+				)?.[0] ?? "";
+			expect(form).toContain('hx-target="#main"');
+			expect(form).toMatch(/hx-select="#main (>|&gt;) \*"/);
+			expect(form).toContain('hx-swap="innerHTML"');
+		}
+	});
+
+	it("Yes and Not now answer with the transactions heading focused", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+		const dismissed = await post(
+			"/transactions/rule-offer/dismiss",
+			offerFields(third.html),
+		);
+		for (const reply of [yes.html, dismissed.html])
+			expect(reply).toMatch(
+				/<h1[^>]*id="transactions-title"[^>]*tabindex="-1"[^>]*autofocus/,
+			);
+	});
+
+	it("Yes refreshes the Needs category count, since the rule fills the merchant's uncategorized rows", async () => {
+		const needsCount = (html: string) =>
+			Number(html.match(/id="needs-count">(\d+)</)?.[1]);
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const before = needsCount(third.html);
+		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+		expect(needsCount(yes.html)).toBe(before - 1);
 	});
 
 	it("Not now closes the panel without making a rule, and a later matching save asks again", async () => {
@@ -334,8 +516,10 @@ describe("merchant category rule offer", () => {
 		});
 		const announce = JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}")
 			.announce as string;
-		expect(announce).toContain("It's excluded from the budget.");
-		expect(announce).toContain(QUESTION);
+		// The save's words, the exclusion and then the question, in that order.
+		expect(announce).toBe(
+			"Saved. rule-offer-store is now Groceries. It's excluded from the budget. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 3 times.",
+		);
 	});
 
 	it("asks after a cash entry saved without an entry key", async () => {
@@ -445,5 +629,43 @@ describe("merchant category rule offer", () => {
 			"SELECT default_category_id FROM merchants WHERE raw_name = 'cash-only-store'",
 		).first<{ default_category_id: number | null }>();
 		expect(rule?.default_category_id).toBe(groceries);
+	});
+});
+
+describe("firstRuleOfferAmong", () => {
+	it("returns the qualifying merchant whose selected row has the lower id, with its count and that row", async () => {
+		// rule-offer-store has a rule, so it is never offered, even with the lowest ids.
+		await setCategory(ids.slice(0, 3), groceries, "user");
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = ? WHERE raw_name = ?",
+		)
+			.bind(groceries, merchant)
+			.run();
+		// under-store has two picks, so it is under three; first-store and second-store each have three.
+		const under = await addPicks("under-store", 2, groceries);
+		const first = await addPicks("first-store", 3, groceries);
+		const second = await addPicks("second-store", 3, groceries);
+		// The selection lists second-store first, but first-store's selected row has the lower id.
+		const offer = await firstRuleOfferAmong(
+			env.DB,
+			[second[0] ?? 0, first[0] ?? 0, under[0] ?? 0, ids[0] ?? 0],
+			groceries,
+		);
+		expect(offer).toEqual({
+			merchantKey: "first-store",
+			categoryId: groceries,
+			count: 3,
+			transactionId: first[0],
+		});
+	});
+
+	it("returns null when no selected merchant reaches three picks", async () => {
+		const under = await addPicks("under-store", 2, groceries);
+		const offer = await firstRuleOfferAmong(
+			env.DB,
+			[under[0] ?? 0, ids[0] ?? 0],
+			groceries,
+		);
+		expect(offer).toBeNull();
 	});
 });

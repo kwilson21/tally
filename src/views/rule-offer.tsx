@@ -10,10 +10,10 @@ export type RuleOfferValue = {
 	back: string;
 };
 
-/** What the screen reader hears when the offer appears: the save, then the question. */
+/** What the screen reader hears when the offer appears: the save's own words, then the question. */
 export function ruleOfferAnnouncement(
 	value: RuleOfferValue,
-	lead = `Saved as ${value.category}.`,
+	lead: string,
 ): string {
 	return `${lead} Always use ${value.category} for ${value.merchant}? You've picked ${value.category} for ${value.merchant} ${value.count} times.`;
 }
@@ -49,9 +49,9 @@ export function RuleOffer({
 					method="post"
 					action="/transactions/rule-offer/dismiss"
 					hx-post="/transactions/rule-offer/dismiss"
-					hx-target="#page"
-					hx-select="#page"
-					hx-swap="outerHTML"
+					hx-target="#main"
+					hx-select="#main > *"
+					hx-swap="innerHTML"
 				>
 					<input type="hidden" name="merchant_key" value={value.merchantKey} />
 					<input type="hidden" name="merchant" value={value.merchant} />
@@ -70,9 +70,9 @@ export function RuleOffer({
 					method="post"
 					action="/transactions/rule-offer"
 					hx-post="/transactions/rule-offer"
-					hx-target="#page"
-					hx-select="#page"
-					hx-swap="outerHTML"
+					hx-target="#main"
+					hx-select="#main > *"
+					hx-swap="innerHTML"
 				>
 					<input type="hidden" name="merchant_key" value={value.merchantKey} />
 					<input type="hidden" name="merchant" value={value.merchant} />
