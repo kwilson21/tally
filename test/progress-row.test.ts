@@ -66,10 +66,15 @@ describe("ProgressRow", () => {
 		expect(await row(20001, 20000)).toContain("fill-over");
 	});
 
-	it("shows a net refund in green with an empty bar", async () => {
+	it("shows a net refund in green with an empty bar and its budget under the name", async () => {
 		const html = await row(-2000, 20000);
 		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
 		expect(html).toMatch(/<rect width="0%"[^>]*class="bar-fill fill-ok"/);
+		// P98: the budget stays visible under the name, as the drawing shows it.
+		expect(html).toMatch(
+			/<span class="block text-lg">Gas<\/span><span class="block text-muted">\$200 budget<\/span>/,
+		);
+		expect(html).not.toContain("of $200");
 	});
 });
 
@@ -148,5 +153,15 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 
 	it("draws no buttons day to day", async () => {
 		expect(await row(18600, 20000)).not.toContain("<button");
+	});
+
+	it("keeps a net refund's budget under its name, and its empty bar, in Adjust mode too", async () => {
+		const html = await adjusting(-2000, 20000);
+		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
+		expect(html).toMatch(/<rect width="0%"[^>]*class="fill-ok"/);
+		expect(html).toMatch(
+			/<span class="block text-lg">Gas<\/span><span class="block text-muted">\$200 budget<\/span>/,
+		);
+		expect(html).not.toContain("of $200");
 	});
 });

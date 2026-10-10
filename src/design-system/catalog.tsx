@@ -805,6 +805,43 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
 };
 
+// NotBudgetedRow's use spec (DESIGN.md, "Use"): every part answered before the owner signs it off.
+const NOT_BUDGETED_ROW_SPEC: UseSpecText = {
+	purpose:
+		"See what a category with no budget spent this month, and add a budget for it.",
+	affordance:
+		"The whole row is a link ending in terracotta “Add a budget”. In the app it opens the category's budget sheet in place; without JavaScript it is a plain link to /budget/:id. An archived category has no link and no “Add a budget”: it shows its spending only, and is not a control.",
+	states:
+		"Counted spending: the name, with “$60 spent” in muted words under it. A net refund: the name, with “+$15” in green under it and no “spent”. Nothing spent: the name alone, with “Add a budget”. Hover: no change. Focus: the app's focus-visible outline on the link, 2px terracotta with a 2px offset. The row has no bar.",
+	feedback:
+		"Opening the row swaps its budget sheet into Home in place and pushes the sheet's address (/budget/:id) into the URL. Closing the sheet brings Home back with focus on this row.",
+	input:
+		"Touch: the row is at least 44px tall, with no gestures. Keyboard: Tab reaches the row, and Enter opens its sheet. Screen reader: the name, the amount and “Add a budget”, read as one link.",
+	motion: "None.",
+	edges:
+		"Cents show only when there are some: $60, or $60.50. A long name is cut to one line with an ellipsis. Nothing spent shows only the name and “Add a budget”. An archived category keeps any amount it has but has no link and no “Add a budget”, so it is not a control.",
+	words:
+		"Not budgeted (the list's heading) · {amount} spent · +{amount} · Add a budget.",
+};
+
+// TransactionsButton's use spec (DESIGN.md, "Use"): every part answered before the owner signs it off.
+const TRANSACTIONS_BUTTON_SPEC: UseSpecText = {
+	purpose:
+		"Open the transactions behind a budget's spent amount, from the budget sheet.",
+	affordance:
+		"A 44px pill with an ink border and ink text, reading “12 transactions” with a decorative chevron. It is a plain link to Transactions, filtered to that category and month with show=spending, so it works without JavaScript. It is shown only when there are some.",
+	states:
+		"Rest: ink border and text on paper. Hover: no change. Focus: a 2px accent outline with a 2px offset. Nothing is drawn when the count is zero.",
+	feedback:
+		"No script runs and nothing is announced by Tally. The browser loads the Transactions page, which shows its count above the list, as “9 spending transactions”.",
+	input:
+		"Touch: 44px tall. Keyboard: Tab reaches it, and Enter follows it. Screen reader: “12 transactions, link”; the chevron is hidden.",
+	motion: "None.",
+	edges:
+		"Zero or fewer: nothing renders. One counted transaction reads “1 transaction”. A very large count prints in full digits with no thousands separator, so 1234 reads “1234 transactions”. A list longer than 25 rows pages, and its first page reads “Showing 1–25 of N spending transactions”. Excluded transactions are left out of both the count and the list. A late bill payment shows in the month it counts in, not the month it was paid, and a payment linked to a bill counts whatever its exclusion.",
+	words: "{n} transactions · 1 transaction.",
+};
+
 function HomeTopGroup() {
 	const forecast = (
 		<HomeForecast
@@ -1400,7 +1437,7 @@ function Rows() {
 				title="ProgressRow"
 				tier="visual"
 				components={["ProgressRow"]}
-				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet; here they don't link anywhere."
+				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar and its budget under the name, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet; here they don't link anywhere."
 			>
 				{PROGRESS_ROWS.map((s) => (
 					<State label={s.label}>
@@ -1445,6 +1482,7 @@ function Rows() {
 						</ul>
 					</div>
 				</State>
+				<UseSpec spec={NOT_BUDGETED_ROW_SPEC} />
 			</Specimen>
 			<Specimen
 				id="transactions-button"
@@ -1461,6 +1499,7 @@ function Rows() {
 						/>
 					</div>
 				</State>
+				<UseSpec spec={TRANSACTIONS_BUTTON_SPEC} />
 			</Specimen>
 			<Specimen
 				id="savings-goal-row"

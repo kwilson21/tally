@@ -141,15 +141,26 @@ export function ProgressRow({
 					{/* When name and amount don't fit on one line, the amount moves under the name; if it still
 					    doesn't fit (a narrow phone in Adjust mode), it breaks at "of", never inside a number. */}
 					<div class="flex flex-wrap items-baseline justify-between gap-x-3">
-						<span class="text-lg">{name}</span>
 						{spentCents < 0 ? (
-							<span class={categoryRowAmount(spentCents).className}>
-								{categoryRowAmount(spentCents).text}
-							</span>
+							// A net refund keeps its budget under the name, as the P98 drawing shows it.
+							<>
+								<span>
+									<span class="block text-lg">{name}</span>
+									<span class="block text-muted">
+										{whole(budgetCents)} budget
+									</span>
+								</span>
+								<span class={categoryRowAmount(spentCents).className}>
+									{categoryRowAmount(spentCents).text}
+								</span>
+							</>
 						) : (
-							<span class="ml-auto text-right text-lg">
-								{whole(spentCents)} of {whole(budgetCents)}
-							</span>
+							<>
+								<span class="text-lg">{name}</span>
+								<span class="ml-auto text-right text-lg">
+									{whole(spentCents)} of {whole(budgetCents)}
+								</span>
+							</>
 						)}
 					</div>
 					{/* SVG, not a styled div: the CSP forbids style attributes, and SVG width attributes aren't CSS. */}
