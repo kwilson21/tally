@@ -1086,7 +1086,13 @@ function reminderError(c: Context<App>, message: string, status: 400 | 404) {
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "error" }, announce: message }),
 	);
-	return renderSettings(c, { reminderError: message, status });
+	// The Remove that was pressed is gone from the swap, so the addresses stay open and focus goes to their summary.
+	return renderSettings(c, {
+		reminderError: message,
+		status,
+		remindersOpen: true,
+		focus: "reminder-summary",
+	});
 }
 
 settings.post("/settings/people", async (c) => {

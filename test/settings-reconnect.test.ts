@@ -374,6 +374,51 @@ describe("reconnect reminder schedule", () => {
 		log.mockRestore();
 	});
 
+	it("logs one zero-count line when no bank is due or no one can be emailed, and nothing with the switch Off", async () => {
+		const production = {
+			...env,
+			DEMO: "false",
+			RESEND_API_KEY: "test-key",
+		} as never;
+		const mustNotSend = async () => {
+			throw new Error("must not send");
+		};
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		await saveBankSignInEmails(env.DB, true);
+		await runReconnectReminders(
+			production,
+			mustNotSend,
+			new Date("2026-10-07T13:00:00Z"),
+			() => AbortSignal.timeout(10),
+		);
+		expect(log.mock.calls.map(([line]) => line)).toEqual([
+			"reconnect reminders: 0 sent, 0 failed",
+		]);
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (914, 'Chase', X'', 'dana@example.com', 'needs_attention')",
+		).run();
+		log.mockClear();
+		await runReconnectReminders(
+			production,
+			mustNotSend,
+			new Date("2026-10-07T13:00:00Z"),
+			() => AbortSignal.timeout(10),
+		);
+		expect(log.mock.calls.map(([line]) => line)).toEqual([
+			"reconnect reminders: 0 sent, 0 failed",
+		]);
+		await saveBankSignInEmails(env.DB, false);
+		log.mockClear();
+		await runReconnectReminders(
+			production,
+			mustNotSend,
+			new Date("2026-10-07T13:00:00Z"),
+			() => AbortSignal.timeout(10),
+		);
+		expect(log).not.toHaveBeenCalled();
+		log.mockRestore();
+	});
+
 	it("logs provider failures without recipient addresses and releases the claim", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_members (email) VALUES ('private@example.com')",
@@ -449,6 +494,27 @@ describe("reconnect reminder schedule", () => {
 			new Date("2026-10-08T13:00:00Z"),
 		);
 		expect(sentTo).toHaveLength(2);
+	});
+
+	it("says Tally hasn't synced since before it recorded a sync time when none is known or it is unreadable", () => {
+		for (const lastSyncedAt of [null, "not a time"]) {
+			const email = renderReconnectEmail(
+				{
+					bank: "Chase",
+					lastSyncedAt,
+					accounts: [{ name: "Checking", mask: "4521" }],
+				},
+				"America/New_York",
+			);
+			expect(email.html).toContain(
+				"since before Tally recorded the last sync time.",
+			);
+			expect(email.text).toContain(
+				"since before Tally recorded the last sync time.",
+			);
+			expect(email.html).not.toContain("Invalid Date");
+			expect(email.text).not.toContain("Invalid Date");
+		}
 	});
 
 	it("renders names, both account endings and last sync, never balances or dollar amounts", () => {
@@ -632,6 +698,12 @@ describe("bank sign-in reminder Settings", () => {
 				JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}"),
 			).toMatchObject({ toast: { message, type: "error" }, announce: message });
 			expect(response.html).toContain(message);
+			const reminders =
+				response.html.split('id="reminders"')[1]?.split("</section>")[0] ?? "";
+			expect(reminders).toContain('open=""');
+			expect(reminders).toContain(
+				'<summary class="flex min-h-11 cursor-pointer items-center" autofocus="">',
+			);
 			expect(
 				JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").announce,
 			).toContain(message);

@@ -2983,38 +2983,52 @@ function SettingsGroup() {
 				id="reconnect-reminders"
 				title="Reconnect reminders"
 				tier="interactive"
-				components={["Switch"]}
+				components={["Switch", "Button"]}
 				sentence="After Categories, Settings shows Tally's rules, then Reminders, then Household people. Reminders has one household switch, with recent addresses shown beneath it and removable by anyone in the family."
 			>
 				<State label="On, with two household addresses">
-					<div class="max-w-xl border-y border-rule">
-						<Switch
-							id="catalog-bank-sign-in-emails"
-							name="catalog-bank-sign-in-emails"
-							label="Bank sign-in emails"
-							checked
-						/>
-						<p class="text-sm text-muted">
-							Goes to people who signed in within the last 90 days.
+					<div class="max-w-xl">
+						<p class="mt-1 text-muted">
+							Goes to the people who have signed in within the last 90 days.
 						</p>
-						<p class="py-3">DK</p>
-						<details class="border-t border-rule">
+						<div class="mt-3 border-y border-rule">
+							<Switch
+								id="catalog-bank-sign-in-emails"
+								name="catalog-bank-sign-in-emails"
+								label="Bank sign-in emails"
+								checked
+							/>
+							<div class="pb-4">
+								<Button type="button">Save</Button>
+							</div>
+						</div>
+						<p class="mt-2 text-sm text-muted">DK · RK</p>
+						<details class="mt-2 border-y border-rule">
 							<summary class="flex min-h-11 cursor-pointer items-center">
-								2 addresses{" "}
-								<span class="ml-auto text-muted">Dana K. · Riley K.</span>
+								Addresses <span class="ml-auto text-muted">2</span>
 							</summary>
-							<p class="min-h-11 py-3">
-								dana@example.com{" "}
-								<button type="button" class="ml-4 min-h-11 text-accent">
-									Remove
-								</button>
-							</p>
-							<p class="min-h-11 py-3">
-								riley@example.com{" "}
-								<button type="button" class="ml-4 min-h-11 text-accent">
-									Remove
-								</button>
-							</p>
+							<ul class="divide-y divide-rule">
+								<li class="flex min-h-11 items-center gap-4">
+									<span class="min-w-0 flex-1">dana@example.com</span>
+									<Button
+										type="button"
+										kind="text"
+										aria-label="Remove dana@example.com"
+									>
+										Remove
+									</Button>
+								</li>
+								<li class="flex min-h-11 items-center gap-4">
+									<span class="min-w-0 flex-1">riley@example.com</span>
+									<Button
+										type="button"
+										kind="text"
+										aria-label="Remove riley@example.com"
+									>
+										Remove
+									</Button>
+								</li>
+							</ul>
 						</details>
 					</div>
 				</State>

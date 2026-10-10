@@ -57,9 +57,15 @@ export async function runReconnectReminders(
 				new Date(`${bank.reconnect_emailed_at.replace(" ", "T")}Z`),
 			) <= cutoff,
 	);
-	if (!banks.length) return;
+	if (!banks.length) {
+		logRun(0, 0, new Set());
+		return;
+	}
 	const recipients = await reconnectRecipients(env.DB);
-	if (!recipients.results.length) return;
+	if (!recipients.results.length) {
+		logRun(0, 0, new Set());
+		return;
+	}
 	// Counts are per address and bank; the failure kinds name a provider status, never an address.
 	let sentCount = 0;
 	let failedCount = 0;
@@ -126,10 +132,15 @@ export async function runReconnectReminders(
 				.bind(bank.reconnect_emailed_at, bank.id, claimedAt)
 				.run();
 	}
+	logRun(sentCount, failedCount, failureKinds);
+}
+
+// One line per run that checks for banks: counts, and the provider statuses or error kinds that failed.
+function logRun(sent: number, failed: number, failureKinds: Set<string>) {
 	const failures = failureKinds.size
 		? ` (${[...failureKinds].join(", ")})`
 		: "";
-	const summary = `reconnect reminders: ${sentCount} sent, ${failedCount} failed${failures}`;
-	if (failedCount) console.error(summary);
+	const summary = `reconnect reminders: ${sent} sent, ${failed} failed${failures}`;
+	if (failed) console.error(summary);
 	else console.log(summary);
 }
