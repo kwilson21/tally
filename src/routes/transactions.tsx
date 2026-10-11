@@ -2351,8 +2351,11 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
 	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
 	// suggestion its rows were showing when nothing was chosen (P29 A). The toast and the offer use this name.
+	// A panel that didn't rename the merchant names it as stored, not as it was drawn.
 	const name =
-		parsed.value.displayName ??
+		(parsed.value.nameChanged === false
+			? tx.merchantName
+			: parsed.value.displayName) ??
 		(tx.nameSuggested && !parsed.value.keepBankName
 			? tx.displayName
 			: tidyName(tx.rawName));

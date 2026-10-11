@@ -730,6 +730,44 @@ describe("merchant category rule offer", () => {
 		).toContain("Always use Groceries for Fresh Market?");
 	});
 
+	it("names the merchant as it is saved when the panel was opened before another tab renamed it", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		// Another tab renames the merchant after this panel was drawn with "Corner Shop".
+		await env.DB.prepare(
+			"UPDATE merchants SET display_name = 'Fresh Market' WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.run();
+		// The stale panel is saved with its name field unchanged: that is not a rename.
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			merchant: "Corner Shop",
+			merchant_was: "Corner Shop",
+		});
+		expect(third.html).toContain("Always use Groceries for Fresh Market?");
+		expect(third.html).not.toContain("Corner Shop");
+		expect(offerFields(third.html).merchant).toBe("Fresh Market");
+		expect(announced(third.res)).toContain(
+			"Always use Groceries for Fresh Market?",
+		);
+		expect(announced(third.res)).toMatch(
+			/^Saved\. Fresh Market is now Groceries\./,
+		);
+		expect(
+			JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Saved Fresh Market");
+		const stored = await env.DB.prepare(
+			"SELECT display_name FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ display_name: string | null }>();
+		expect(stored?.display_name).toBe("Fresh Market");
+		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+		expect(
+			JSON.parse(yes.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Always use Groceries for Fresh Market.");
+	});
+
 	it("asks one merchant when a Select save takes two merchants to three, and the other on its next matching save", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		await env.DB.prepare(
