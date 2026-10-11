@@ -767,6 +767,46 @@ describe("what the Jev run and the names write", () => {
 		).toBe(1);
 		expect(await logNames()).toEqual(["ORG*SHOP"]);
 	});
+
+	it("logs no kept name for a merchant in the group that another save filed first", async () => {
+		await db
+			.prepare(
+				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES
+				 ('ORG*FIRST', 'Org Pick', 'pending'), ('ORG*SECOND', 'Org Pick', 'pending')`,
+			)
+			.run();
+		await chargeAt("ORG*FIRST");
+		await chargeAt("ORG*SECOND");
+		const category = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		const groupId = category?.id as number;
+		// A first save files ORG*FIRST with no name, so its suggestion stays pending.
+		expect(
+			await saveOrganizeGroup(db, ["ORG*FIRST"], groupId, null, "test"),
+		).toBe(1);
+
+		// ORG*FIRST's charge is filed already, so only ORG*SECOND's is changed and only it is named and logged.
+		expect(
+			await saveOrganizeGroup(
+				db,
+				["ORG*FIRST", "ORG*SECOND"],
+				groupId,
+				"Org Pick",
+				"test",
+			),
+		).toBe(1);
+		expect(await logNames()).toEqual(["ORG*SECOND"]);
+		expect(
+			await db
+				.prepare(
+					"SELECT display_name FROM merchants WHERE raw_name = 'ORG*FIRST'",
+				)
+				.first<{ display_name: string | null }>(),
+		).toEqual({ display_name: null });
+	});
 });
 
 describe("the export and the demo", () => {

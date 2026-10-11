@@ -82,7 +82,8 @@ export const JEV_ANSWER_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, transacti
  * The log row for a name Tally guessed that a person is keeping (spec §8.6): parameters are the day, the
  * merchant's key and the name. It is written before the save that settles the suggestion, and only while
  * the suggestion is still pending and the name is one of its suggestions. Callers check first that the
- * name is Tally's guess and not the bank's (`nameSource`). A merchant is counted once.
+ * name is Tally's guess and not the bank's (`nameSource`). A merchant is counted once. A caller may narrow it
+ * further by appending a condition to its WHERE clause (saveOrganizeGroup adds its upsert's guard).
  */
 export const KEPT_NAME_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, merchant_raw_name, household_day)
 	SELECT 'name', m.raw_name, ? FROM merchants m

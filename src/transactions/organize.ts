@@ -142,11 +142,11 @@ export async function saveOrganizeGroup(
 	// A stale form must not alter rules after another request categorized the group.
 	if (saved === 0) return 0;
 
-	const statements: D1PreparedStatement[] = [];
+	const updates: D1PreparedStatement[] = [];
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
 		const marks = chunk.map(() => "?").join(", ");
-		statements.push(
+		updates.push(
 			db
 				.prepare(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
@@ -156,28 +156,41 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	// A guessed name a person keeps for each merchant is logged before its suggestion settles (spec §8.6).
+	// A merchant gets its rule only while one of its charges still needs a category when this batch starts, so a group
+	// another save filed first keeps its rule. The checks run ahead of the updates that file the charges.
+	// A guessed name a person keeps for each merchant is logged in this batch, just before its merchant's settling
+	// upsert (spec §8.6). The log reads the merchant as the upsert finds it, so it must come first. It has the
+	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
 	const today = displayName ? await householdToday(db) : null;
+	const settles: D1PreparedStatement[] = [];
 	for (const merchantKey of names) {
 		if (
 			today &&
 			displayName &&
 			nameSource([displayName], merchantKey) === "tally"
 		)
-			statements.push(
-				db.prepare(KEPT_NAME_LOG_SQL).bind(today, merchantKey, displayName),
+			settles.push(
+				db
+					.prepare(
+						`${KEPT_NAME_LOG_SQL} AND EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)`,
+					)
+					.bind(today, merchantKey, displayName, merchantKey),
 			);
-		statements.push(
+		settles.push(
 			db
 				.prepare(
-					`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)
+					`INSERT INTO merchants (raw_name, display_name, default_category_id)
+					SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
 					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
 						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
 						${SETTLE_SUGGESTION_SQL}`,
 				)
-				.bind(merchantKey, displayName, categoryId, displayName),
+				.bind(merchantKey, displayName, categoryId, merchantKey, displayName),
 		);
 	}
-	await db.batch(statements);
-	return saved;
+	const results = await db.batch([...settles, ...updates]);
+	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
+	return results
+		.slice(settles.length)
+		.reduce((changed, result) => changed + result.meta.changes, 0);
 }

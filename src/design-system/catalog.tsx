@@ -1,6 +1,7 @@
 // The catalog's content (decisions 42–44): every component from src/views/, imported and given
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
+import type { LikelyRow } from "../db/likely-transactions";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import {
@@ -54,6 +55,7 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
+import { LikelyPanel } from "../views/likely-transactions";
 import {
 	MaybeCategory,
 	MaybeIncome,
@@ -65,6 +67,11 @@ import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
+import {
+	NEW_CATEGORY_GROUP,
+	NewCategoryChip,
+	NewCategoryName,
+} from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
@@ -1231,6 +1238,49 @@ const SAMPLE_PAGE_IDS = Array.from({ length: 25 }, (_, i) => 101 + i);
 /** Ticks on another page: not in SAMPLE_PAGE_IDS. */
 const OFF_PAGE_IDS = Array.from({ length: 76 }, (_, i) => 201 + i);
 
+/** The transaction a category was just made from, and the likely ones after it (decision 76). */
+const LIKELY_BASE = (TRANSACTION_ROWS[0] as (typeof TRANSACTION_ROWS)[number])
+	.row;
+const LIKELY_SAVED = { id: 900, date: "2026-10-12", amountCents: 18900 };
+const LIKELY_ROWS: LikelyRow[] = [
+	{
+		...LIKELY_BASE,
+		id: 901,
+		date: "2026-10-03",
+		displayName: "Banfield Pet Hospital",
+		amountCents: 7650,
+		categoryId: null,
+		categoryName: null,
+		categoryIcon: null,
+		categoryColor: null,
+		sameMerchant: true,
+	},
+	{
+		...LIKELY_BASE,
+		id: 902,
+		date: "2026-09-14",
+		displayName: "Banfield Pet Hospital",
+		amountCents: 4800,
+		categoryId: null,
+		categoryName: null,
+		categoryIcon: null,
+		categoryColor: null,
+		sameMerchant: true,
+	},
+	{
+		...LIKELY_BASE,
+		id: 903,
+		date: "2026-10-05",
+		displayName: "Chewy",
+		amountCents: 6412,
+		categoryId: null,
+		categoryName: null,
+		categoryIcon: null,
+		categoryColor: null,
+		sameMerchant: false,
+	},
+];
+
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
@@ -1806,6 +1856,52 @@ function Rows() {
 				</State>
 			</Specimen>
 			<Specimen
+				id="likely-transactions"
+				title="LikelyTransactions"
+				tier="visual"
+				components={[
+					"LikelyTransactions",
+					"SelectableTransactionRow",
+					"WhyLink",
+					"Button",
+				]}
+				sentence="After a new category is made, the panel says so and offers the transactions that might belong in it: each row is its own tick with a reason under it. Same-merchant rows come ticked, Tally's guesses unticked with a Why?; Add counts the ticks."
+			>
+				<State label="Same merchant ticked, Tally's guess not">
+					<div class="max-w-xl" inert>
+						<LikelyPanel
+							savedId={LIKELY_SAVED.id}
+							savedDate={LIKELY_SAVED.date}
+							savedCents={LIKELY_SAVED.amountCents}
+							back="/transactions"
+							categoryId={7}
+							categoryName="Pet Care"
+							rows={LIKELY_ROWS}
+							ticked={
+								new Set([LIKELY_ROWS[0]?.id ?? 0, LIKELY_ROWS[1]?.id ?? 0])
+							}
+							today={LIKELY_SAVED.date}
+						/>
+					</div>
+				</State>
+				<State label="Nothing ticked: Add is disabled">
+					<div class="max-w-xl" inert>
+						<LikelyPanel
+							savedId={LIKELY_SAVED.id}
+							savedDate={LIKELY_SAVED.date}
+							savedCents={LIKELY_SAVED.amountCents}
+							back="/transactions"
+							categoryId={7}
+							categoryName="Pet Care"
+							rows={LIKELY_ROWS}
+							ticked={new Set()}
+							today={LIKELY_SAVED.date}
+						/>
+					</div>
+				</State>
+				<UseSpec spec={LIKELY_SPEC} />
+			</Specimen>
+			<Specimen
 				id="category-suggestion-card"
 				title="CategorySuggestionCard"
 				tier="visual"
@@ -1823,6 +1919,15 @@ function Rows() {
 							suggestion={CATEGORY_SUGGESTION}
 							ticked={[31, 32, 33]}
 							notes={{ 34: "Birthday present" }}
+						/>
+					</div>
+				</State>
+				<State label="The family already has this category: Add to Pet Care">
+					<div class="max-w-xl" inert>
+						<CategorySuggestionCard
+							suggestion={CATEGORY_SUGGESTION}
+							existing="Pet Care"
+							ticked={[31, 32, 33]}
 						/>
 					</div>
 				</State>
@@ -2082,6 +2187,44 @@ const TEXT_INPUT_SPEC: UseSpecText = {
 		"The visible label names the value; errors say what to do, for example Give the category a name.",
 };
 
+const NEW_CATEGORY_SPEC: UseSpecText = {
+	purpose:
+		"Make a category while categorizing, from the category chips, without leaving the panel.",
+	affordance:
+		"New category is one more chip, with a plus and terracotta words, so it reads as a category choice.",
+	states:
+		"Chip rest and checked apply; the name field is shown while the chip is chosen and folded away otherwise, and its empty, filled and error states apply.",
+	feedback:
+		"Choosing New category opens the name field under the chips in place; choosing another chip folds it away with no server call; a taken name, an empty name or a full list shows its error under the field, announced as an alert, and saves nothing.",
+	input:
+		"Chip and field are at least 44px tall; Tab reaches the chip, then the field while it is open; a screen reader hears New category, the field's label and its hint.",
+	motion:
+		"The field opens and folds without motion, so reduced motion changes nothing; an error shakes the field once, as any field does.",
+	edges:
+		"A typed name counts only while New category is chosen; where :has() isn't supported the field stays visible, so a name can still be typed; the name is limited to 40 characters.",
+	words:
+		"The field is labelled New category name; its hint says where the category goes, for this transaction or these transactions.",
+};
+
+const LIKELY_SPEC: UseSpecText = {
+	purpose:
+		"After a new category is made, offer the other transactions that might belong in it, so one choice files them together.",
+	affordance:
+		"Each row shows a tick and its reason under it; the Add button names the category and how many it will file.",
+	states:
+		"Ticked and unticked rows, the Add count with several or none ticked, and Not now apply; nothing else changes the panel.",
+	feedback:
+		"A tick redraws only the Add count, so the number follows the ticks; Add moves the ticked rows and the list says how many it set; Not now leaves all of them.",
+	input:
+		"Each row's tick is a keyboard-reachable checkbox named by the transaction; Add and Not now are 44px tall; the heading takes focus when the panel opens.",
+	motion:
+		"The sheet rises as any sheet does and stays still under reduced motion; the count changes without animation.",
+	edges:
+		"Only the ticked rows that are still offered move, so a row changed elsewhere is left alone; with none ticked, Add is disabled and reads Add to the category.",
+	words:
+		"Reasons are plain facts (Same merchant as Sep 14, $189.00) or Tally's guess with a Why? link; the panel never names the sorting engine.",
+};
+
 function Controls() {
 	return (
 		<Group id="controls" title="Controls">
@@ -2163,6 +2306,84 @@ function Controls() {
 					</State>
 				</div>
 				<UseSpec spec={TEXT_INPUT_SPEC} />
+			</Specimen>
+			<Specimen
+				id="new-category-choice"
+				title="NewCategoryChoice"
+				tier="interactive"
+				components={["NewCategoryChoice", "Chip", "TextInput", "CategoryIcon"]}
+				sentence="The last category chip, New category, opens a name field under the chips while it is chosen; choosing another chip folds the field away. The fold is CSS, so it works here without the server."
+			>
+				<State label="New category chosen, name empty">
+					<fieldset
+						class={`flex max-w-xl flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+					>
+						<legend class="text-base text-ink">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="radio"
+								name="ds-category-empty"
+								value="Groceries"
+								icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+							>
+								Groceries
+							</Chip>
+							<NewCategoryChip checked name="ds-category-empty" />
+						</div>
+						<NewCategoryName
+							id="ds-new-category-empty"
+							hint="Added to your categories and used for this transaction."
+						/>
+					</fieldset>
+				</State>
+				<State label="New category chosen, name taken">
+					<fieldset
+						class={`flex max-w-xl flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+					>
+						<legend class="text-base text-ink">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="radio"
+								name="ds-category-taken"
+								value="Groceries"
+								icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+							>
+								Groceries
+							</Chip>
+							<NewCategoryChip checked name="ds-category-taken" />
+						</div>
+						<NewCategoryName
+							id="ds-new-category-taken"
+							value="groceries"
+							hint="Added to your categories and used for this transaction."
+							error="That name is taken."
+						/>
+					</fieldset>
+				</State>
+				<State label="Another chip chosen: the name field folds away">
+					<fieldset
+						class={`flex max-w-xl flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+					>
+						<legend class="text-base text-ink">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="radio"
+								name="ds-category-folded"
+								value="Groceries"
+								checked
+								icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+							>
+								Groceries
+							</Chip>
+							<NewCategoryChip name="ds-category-folded" />
+						</div>
+						<NewCategoryName
+							id="ds-new-category-folded"
+							hint="Added to your categories and used for this transaction."
+						/>
+					</fieldset>
+				</State>
+				<UseSpec spec={NEW_CATEGORY_SPEC} />
 			</Specimen>
 			<Specimen
 				id="chip"
