@@ -1,10 +1,21 @@
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import transactionsRoute from "../src/routes/transactions.tsx?raw";
 import css from "../src/styles/app.css?raw";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
 	return res.text();
+}
+
+/** Attribute values as the browser reads them: Hono escapes & and > in attributes. */
+const decodeAttributes = (text: string) =>
+	text.replaceAll("&amp;", "&").replaceAll("&gt;", ">");
+
+/** The classes on #toasts, the page's toast region. */
+async function toastRegion() {
+	const html = decodeAttributes(await home());
+	return html.match(/<div id="toasts" class="([^"]*)"/)?.[1] ?? "";
 }
 
 describe("app shell", () => {
@@ -98,5 +109,48 @@ describe("app shell", () => {
 		expect(JSON.parse(content.replaceAll("&quot;", '"')).defaultTimeout).toBe(
 			0,
 		);
+	});
+});
+
+// Toasts sit in Tally's frame, never over the page (issue #348, decision 101): a phone keeps them
+// clear of the tab bar, a sheet and the Select bar; desktop keeps them beside the sidebar.
+describe("where toasts sit", () => {
+	it("sits 12 px above the tab bar and its safe area on a phone", async () => {
+		expect(await toastRegion()).toContain(
+			"bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+0.75rem)]",
+		);
+	});
+
+	it("sits 24 px from the bottom on desktop, lined up with the sidebar and no wider than it", async () => {
+		const region = await toastRegion();
+		expect(region).toContain("lg:bottom-6");
+		expect(region).toContain("lg:left-[max(2rem,calc(50%_-_34rem))]");
+		expect(region).toContain("lg:right-auto");
+		expect(region).toContain("lg:w-56");
+		expect(region).toContain("lg:items-start");
+	});
+
+	it("moves to the top edge, below the safe area, while a sheet is open on a phone", async () => {
+		const region = await toastRegion();
+		expect(region).toContain(
+			"max-lg:[body:has([role=dialog])_&]:top-[calc(0.75rem+var(--safe-area-top))]",
+		);
+		expect(region).toContain("max-lg:[body:has([role=dialog])_&]:bottom-auto");
+	});
+
+	it("sits 12 px above the Select action bar on a phone, unless a sheet is open", async () => {
+		expect(await toastRegion()).toContain(
+			"max-lg:[body:has(#selection-form):not(:has([role=dialog]))_&]:bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+var(--selection-bar-height)+0.75rem)]",
+		);
+	});
+
+	it("reads the Select bar's height from a token, so the offset and the bar agree", async () => {
+		expect(css).toMatch(/--selection-bar-height:\s*4\.3125rem;/);
+		expect(transactionsRoute).toContain("min-h-[var(--selection-bar-height)]");
+	});
+
+	it("steps the Feedback pill aside while a toast shows", async () => {
+		const html = decodeAttributes(await home());
+		expect(html).toContain("[body:has(#toasts>*)_&]:hidden");
 	});
 });

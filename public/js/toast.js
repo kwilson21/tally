@@ -35,6 +35,9 @@
 		return icon;
 	}
 
+	// The Undo toasts on screen. A newer plain or error toast never removes one of them early.
+	const undoToasts = new WeakSet();
+
 	document.body.addEventListener("toast", (event) => {
 		const {
 			message,
@@ -87,15 +90,34 @@
 		} else {
 			toast.textContent = message;
 		}
-		document.getElementById("toasts")?.append(toast);
-		if (undo) window.htmx?.process(toast);
-		if (undo)
+		// Only the newest plain or error toast shows: it takes the place of the ones before it. An Undo
+		// toast is never removed early, so a newer toast leaves it to run its own time.
+		const region = document.getElementById("toasts");
+		if (!undo)
+			for (const old of [...(region?.children ?? [])]) {
+				if (!undoToasts.has(old)) old.remove();
+			}
+		region?.append(toast);
+		if (undo) {
+			undoToasts.add(toast);
+			window.htmx?.process(toast);
 			toast.setAttribute(
 				"style",
 				`--duration-undo-toast: ${Math.min(10_000, undoExpiresInMs)}ms`,
 			);
+		}
 		setTimeout(
-			() => toast.remove(),
+			() => {
+				// Focus on Undo would be lost with the toast, so the list's result count takes it.
+				if (toast.contains(document.activeElement)) {
+					const count = document.getElementById("result-count");
+					if (count) {
+						count.setAttribute("tabindex", "-1");
+						count.focus();
+					}
+				}
+				toast.remove();
+			},
 			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
 		);
 	});
@@ -118,7 +140,7 @@
 	// couldn't be reached (502), so it's swapped in and says its own words. The words follow what
 	// was being done: a GET (a filter, opening a sheet) couldn't load; anything else couldn't save.
 	// The events go to document, because htmx sends them there when their element has left the
-	// page. Several at once (queued taps on a dead connection) show each message once, not a stack.
+	// page. Several at once (queued taps on a dead connection) show one toast, not a stack.
 	// "At once" is a second: a retry that fails again a couple of seconds later is a new failure, so
 	// it replaces the toast with a fresh alert (a screen reader hears it again) and a fresh 4 seconds.
 	const BURST_MS = 1000;
@@ -132,10 +154,6 @@
 		const now = performance.now();
 		if (now - (failedAt.get(message) ?? -Infinity) < BURST_MS) return;
 		failedAt.set(message, now);
-		const toasts = document.getElementById("toasts");
-		for (const toast of [...(toasts?.children ?? [])]) {
-			if (toast.textContent === message) toast.remove();
-		}
 		document.body.dispatchEvent(
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);

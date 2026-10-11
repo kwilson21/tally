@@ -63,21 +63,38 @@ class FakeNode extends EventTarget {
 	words(): string {
 		return this.textContent;
 	}
+	/** Whether this node is the given one or holds it, as a real node's contains() does. */
+	contains(node: unknown): boolean {
+		return node === this || this.children.some((child) => child.contains(node));
+	}
+	/** Focus is tracked by the page's activeElement; a test spies on this to see it moved. */
+	focus() {}
 }
 
 const load = Object.values(import.meta.glob("../public/js/toast.js"))[0] as
 	| (() => Promise<unknown>)
 	| undefined;
 
-/** Puts a page in place, then runs toast.js against it. */
-async function page() {
+/**
+ * Puts a page in place, then runs toast.js against it. `listed: false` is a page with no list, so no
+ * result count. Nothing has focus until a test sets document.activeElement, as a browser starts.
+ */
+async function page({ listed = true }: { listed?: boolean } = {}) {
 	const toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
+	const resultCount = new FakeNode("p");
 	const body = new EventTarget();
 	const document = Object.assign(new EventTarget(), {
 		body,
+		activeElement: body as unknown,
 		getElementById: (id: string) =>
-			id === "toasts" ? toasts : id === "announcer" ? announcer : null,
+			id === "toasts"
+				? toasts
+				: id === "announcer"
+					? announcer
+					: id === "result-count" && listed
+						? resultCount
+						: null,
 		createElement: (tag: string) => new FakeNode(tag),
 		createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
 		createTextNode: (text: string) =>
@@ -102,7 +119,7 @@ async function page() {
 	}));
 	vi.resetModules();
 	await load?.();
-	return { document, body, toasts, htmx };
+	return { document, body, toasts, htmx, resultCount };
 }
 
 const fire = (target: EventTarget, name: string, detail: unknown) =>
@@ -371,15 +388,11 @@ describe("what the toast says depends on what was being done", () => {
 		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_LOAD);
 	});
 
-	it("shows a load failure and a save failure together, each once", async () => {
+	it("shows only the newest of a load failure and a save failure", async () => {
 		const { document, toasts } = await page();
-		for (const method of ["GET", "POST", "GET", "POST"]) {
-			fire(document, "htmx:error", dropped(method));
-		}
-		expect(toasts.children.map((t) => t.words())).toEqual([
-			COULDNT_LOAD,
-			COULDNT_SAVE,
-		]);
+		fire(document, "htmx:error", dropped("GET"));
+		fire(document, "htmx:error", dropped("POST"));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_SAVE]);
 	});
 });
 
@@ -535,5 +548,112 @@ describe("the toasts the server sends", () => {
 		expect(toast.attrs.get("role")).toBe("status");
 		expect(toast.textContent).toBe("Saved Groceries' budget.");
 		expect(toast.children).toHaveLength(0);
+	});
+});
+
+// Only the newest plain or error toast shows, so a stack never covers the page. An Undo toast is
+// the one exception: it stays until its own time is up, and a newer toast never removes it early.
+describe("only the newest plain or error toast shows", () => {
+	it("replaces a plain toast with the next one", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", { message: "Saved Groceries' budget." });
+		fire(body, "toast", { message: "Saved Rent's budget." });
+		expect(toasts.children.map((t) => t.words())).toEqual([
+			"Saved Rent's budget.",
+		]);
+	});
+
+	it("lets an error and a plain toast replace each other", async () => {
+		const { body, document, toasts } = await page();
+		fire(body, "toast", { message: "Saved Groceries' budget." });
+		fire(document, "htmx:error", dropped("POST"));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_SAVE]);
+		fire(body, "toast", { message: "Saved Rent's budget." });
+		expect(toasts.children.map((t) => t.words())).toEqual([
+			"Saved Rent's budget.",
+		]);
+	});
+
+	it("never removes an Undo toast early, even when a newer toast replaces the one before", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+		const undo = toasts.children[0] as FakeNode;
+		// t=3s: a plain toast; t=5s: a newer plain toast replaces it. The Undo toast stays throughout.
+		vi.advanceTimersByTime(3000);
+		fire(body, "toast", { message: "Saved Groceries' budget." });
+		vi.advanceTimersByTime(2000);
+		fire(body, "toast", { message: "Saved Rent's budget." });
+		expect(toasts.children).toHaveLength(2);
+		expect(toasts.children[0]).toBe(undo);
+		expect((toasts.children[1] as FakeNode).words()).toBe(
+			"Saved Rent's budget.",
+		);
+		// t=9s: the newer plain toast's 4 seconds are up; the Undo toast has 1 second left.
+		vi.advanceTimersByTime(4000);
+		expect(toasts.children).toEqual([undo]);
+		vi.advanceTimersByTime(999);
+		expect(toasts.children[0]).toBe(undo);
+		// t=10s: the Undo toast's own 10 seconds are up.
+		vi.advanceTimersByTime(1);
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("keeps an Undo toast for its full 10 seconds, not the 4 of a plain toast", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+		vi.advanceTimersByTime(9999);
+		expect(toasts.children).toHaveLength(1);
+		vi.advanceTimersByTime(1);
+		expect(toasts.children).toHaveLength(0);
+	});
+});
+
+describe("focus when an Undo toast ends", () => {
+	const undoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+
+	it("moves focus to the list's result count when the Undo toast ends with focus on Undo", async () => {
+		const { body, document, toasts, resultCount } = await page();
+		const focus = vi.spyOn(resultCount, "focus");
+		undoToast(body);
+		const undo = toasts.children[0] as FakeNode;
+		document.activeElement = undo.all().find((n) => n.tag === "button");
+		vi.advanceTimersByTime(9999);
+		expect(focus).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1);
+		expect(toasts.children).toHaveLength(0);
+		expect(focus).toHaveBeenCalledTimes(1);
+		// A count that isn't focusable yet takes focus only once it says so.
+		expect(resultCount.attrs.get("tabindex")).toBe("-1");
+	});
+
+	it("leaves focus where it is when the Undo toast ends without focus", async () => {
+		const { body, document, resultCount } = await page();
+		const focus = vi.spyOn(resultCount, "focus");
+		undoToast(body);
+		vi.advanceTimersByTime(10000);
+		expect(focus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("does nothing with focus on a page with no list to count", async () => {
+		const { body, document, toasts } = await page({ listed: false });
+		undoToast(body);
+		const undo = toasts.children[0] as FakeNode;
+		document.activeElement = undo.all().find((n) => n.tag === "button");
+		expect(() => vi.advanceTimersByTime(10000)).not.toThrow();
+		expect(toasts.children).toHaveLength(0);
 	});
 });
