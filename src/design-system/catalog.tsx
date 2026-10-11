@@ -2341,68 +2341,108 @@ function Controls() {
 				title="Add cash"
 				tier="visual"
 				components={["CashForm"]}
-				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields."
+				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it."
 			>
-				<div
-					inert
-					class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
-				>
-					<Button kind="secondary" type="button" class="gap-2">
-						<Icon name="plus" class="size-5" />
-						Add cash
-					</Button>
-					<h4 class="mt-6 font-serif text-4xl font-semibold">
-						Add cash spending
-					</h4>
-					<CashForm
-						today="2026-09-29"
-						values={{
-							date: "2026-09-29",
-							amount: "20.00",
-							merchant: "Farmers market",
-							category: "1",
-							note: "Peaches and eggs",
-						}}
-						categories={[
-							{
-								id: 1,
-								name: "Groceries",
-								icon: "groceries",
-								color: "cat-blue",
-							},
-							{
-								id: 2,
-								name: "Eating Out",
-								icon: "eating-out",
-								color: "cat-plum",
-							},
-						]}
-						action="#"
-					/>
-				</div>
+				<State label="Add cash">
+					<div
+						inert
+						class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
+					>
+						<Button kind="secondary" type="button" class="gap-2">
+							<Icon name="plus" class="size-5" />
+							Add cash
+						</Button>
+						<h4 class="mt-6 font-serif text-4xl font-semibold">
+							Add cash spending
+						</h4>
+						<CashForm
+							today="2026-09-29"
+							values={{
+								date: "2026-09-29",
+								amount: "20.00",
+								merchant: "Farmers market",
+								category: "1",
+								note: "Peaches and eggs",
+							}}
+							categories={[
+								{
+									id: 1,
+									name: "Groceries",
+									icon: "groceries",
+									color: "cat-blue",
+								},
+								{
+									id: 2,
+									name: "Eating Out",
+									icon: "eating-out",
+									color: "cat-plum",
+								},
+							]}
+							action="#"
+						/>
+					</div>
+				</State>
+				<State label="Edit panel: the amount breaks its split's parts">
+					<div
+						inert
+						class="flex max-w-3xl flex-col gap-3 rounded-sheet border border-rule bg-paper p-5"
+					>
+						<MoneyInput
+							id="ds-cash-edit-amount"
+							name="amount"
+							label="Amount"
+							value="100.00"
+							error="The parts add up to $90.00. Change them to match $100.00."
+						/>
+						<Button kind="secondary" href="#" class="w-full">
+							Change the parts
+						</Button>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="split-form"
 				title="SplitForm"
 				tier="visual"
 				components={["SplitForm"]}
-				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total."
+				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total. Change the parts (a split cash entry whose amount changed) opens with the new total at the top, the saved parts filled in, the muted line about the mismatch, and the live line against the new total."
 			>
-				<div inert>
-					<SplitForm
-						id={1}
-						parentCents={18742}
-						categories={[
-							{ id: 1, name: "Groceries" },
-							{ id: 5, name: "Household" },
-						]}
-						values={[
-							{ category: "1", amount: "150.00" },
-							{ category: "5", amount: "12.00" },
-						]}
-						back="/transactions"
-					/>
-				</div>
+				<State label="A new split, with $25.42 left to assign">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={18742}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "150.00" },
+								{ category: "5", amount: "12.00" },
+							]}
+							back="/transactions"
+						/>
+					</div>
+				</State>
+				<State label="Change the parts: the new total is $100.00, the saved parts are $60.00 and $30.00">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={9000}
+							totalCents={10000}
+							amountWas={9000}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "60.00", partId: 201 },
+								{ category: "5", amount: "30.00", partId: 202 },
+							]}
+							back="/transactions"
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="money-input"
