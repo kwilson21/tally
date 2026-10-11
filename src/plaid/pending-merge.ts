@@ -21,9 +21,10 @@
  * - A split moves with its parts, which follow the posted date, when the amount is unchanged and the
  *   posted row has no split of its own; when the amount changed it is removed and the posted row says the
  *   amount changed, as for any bank correction (decision 62). It takes the category the purchase had before
- *   its split, unless a person picked the posted row's own category; a split with none leaves the posted
- *   row in Needs category with the note. A refund of one of its parts is unlinked with the purchase's
- *   date (decision 99).
+ *   its split, unless a person picked the posted row's own category, and Jev's answers on the posted row are
+ *   cleared with it, as in a same-row bank correction (they described the old amount). A split with none
+ *   leaves the posted row in Needs category with the note. A refund of one of its parts is unlinked with the
+ *   purchase's date (decision 99).
  * Every statement checks that both rows still exist and that this run still holds the Item's lock, so
  * a replay or a lost lock changes nothing.
  */
@@ -161,10 +162,15 @@ const STATEMENTS = [
 	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row),
 	// and takes the category the pending purchase had before its split, as sync does (decision 99), nulls included,
 	// so a split with no category leaves it in Needs category with the note. A person's pick on the posted row stays.
+	// Jev's answers described the old amount, so they are cleared as in a same-row bank correction, unless a person
+	// picked the posted row's category.
 	`UPDATE transactions SET split_removed_from_cents = p.amount_cents,
 		category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_id ELSE p.category_id END,
 		category_source = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_source ELSE p.category_source END,
-		category_confidence = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_confidence ELSE p.category_confidence END
+		category_confidence = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_confidence ELSE NULL END,
+		category_suggestion_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_suggestion_id ELSE NULL END,
+		jev_category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_category_id ELSE NULL END,
+		jev_none_fit = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_none_fit ELSE 0 END
 	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
 	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
 	// A refund of one of those parts is unlinked, and its row says which purchase changed, with the pending
