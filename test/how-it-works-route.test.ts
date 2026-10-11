@@ -32,12 +32,12 @@ beforeEach(async () => {
 });
 
 describe("GET /how-it-works in the demo", () => {
-	it("describes bill payments as at most one payment per occurrence, with several linkable for a part-paid bill", async () => {
+	it("describes bill payments as at most one payment per occurrence", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain(
-			"Tally matches at most one payment to each bill occurrence",
+			"Tally matches each bill occurrence to at most one payment",
 		);
-		expect(html).toContain(
+		expect(html).not.toContain(
 			"You can link several payments to one occurrence when a bill is paid in parts.",
 		);
 		expect(html).toContain("A payment can pay only one bill occurrence.");

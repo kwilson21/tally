@@ -489,9 +489,8 @@ howItWorks.get("/how-it-works", async (c) => {
 
 				<Section id="bills" title="Bills">
 					<p class="mt-2">
-						Tally matches at most one payment to each bill occurrence, while you
-						stay in control of every link. You can link several payments to one
-						occurrence when a bill is paid in parts.
+						Tally matches each bill occurrence to at most one payment, while you
+						stay in control of every link.
 					</p>
 					<ul class="mt-3 list-disc space-y-1 pl-5">
 						<li>
