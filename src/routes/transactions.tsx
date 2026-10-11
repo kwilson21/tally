@@ -131,7 +131,7 @@ export const transactions = new Hono<App>();
 
 type Category = { id: number; name: string; icon: string; color: string };
 
-/** The demo, where "Straight from the bank" (`?raw=1`) lives; the family app has no such view (spec §8.6). */
+/** The demo, where "Without Tally" (`?raw=1`) lives; the family app has no such view (spec §8.6). */
 const isDemo = (c: Context<App>) => c.env.DEMO === "true";
 
 /** Consecutive rows that share a date, in list order. */
@@ -2040,7 +2040,8 @@ const filtersFrom = (c: Context<App>, today: string, url: string) =>
 
 const cashValues = (today: string, form?: FormData): CashValues => ({
 	date: form?.get("date")?.toString() ?? today,
-	amount: form?.get("amount")?.toString() ?? "20.00",
+	// Opens blank, as Add a bill does: a missing amount is refused with its error, not saved as $20.00 (#342).
+	amount: form?.get("amount")?.toString() ?? "",
 	merchant: form?.get("merchant")?.toString() ?? "",
 	category: form?.get("category")?.toString() ?? "",
 	note: form?.get("note")?.toString() ?? "",
@@ -3187,16 +3188,18 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	if (!undoToken) return c.notFound();
 	const undoExpiresInMs = await cashDeleteUndoExpiresInMs(c.env.DB, undoToken);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const deleted = `Deleted ${tx.displayName}, ${formatCents(tx.amountCents)}.`;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: {
-				message: `Deleted ${tx.displayName}, ${formatCents(tx.amountCents)}.`,
+				message: deleted,
 				type: "success",
 				undo: undoToken,
 				undoExpiresInMs,
 			},
-			announce: `Deleted ${tx.displayName}.`,
+			// The Undo window is ten seconds by design (the token's life), so the words say so (#342).
+			announce: `${deleted} Undo for 10 seconds.`,
 		}),
 	);
 	c.header("HX-Push-Url", back);

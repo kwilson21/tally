@@ -35,7 +35,7 @@ export type Filters = {
 	uncategorized: boolean;
 	/** 1-based page of results. Changing any filter starts again at page 1. */
 	page: number;
-	/** The demo's "Straight from the bank" view (`?raw=1`, spec §8.6): the list as the bank sends it. Never set outside the demo. */
+	/** The demo's "Without Tally" view (`?raw=1`, spec §8.6): the list as the bank sends it. Never set outside the demo. */
 	raw: boolean;
 };
 

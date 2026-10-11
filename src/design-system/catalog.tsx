@@ -610,7 +610,7 @@ const TOAST_SPEC: UseSpecText = {
 	states:
 		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except that when an Undo toast ends with focus on its Undo button, focus moves to the list's result count, or to the page's title when there is no count (the first-visit page). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for two Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; while its request is in flight it is off, and a request that fails turns it back on while the toast is still up. Other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
@@ -618,7 +618,7 @@ const TOAST_SPEC: UseSpecText = {
 	edges:
 		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
-		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo. A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
+		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -659,23 +659,23 @@ const SEARCH_EVERY_MONTH_SPEC: UseSpecText = {
 		"“5 transactions matching “costco” in all months” · “2 transactions matching “42.17” (amount $42.17) in all months” · “2 transactions matching “$42” (amounts $42.00 to $42.99) in October” · “2 transactions matching “42” in October” when a row matched by name too · “3 transactions matching “groceries” (category) in all months” · “Only October”.",
 };
 
-// The demo's two view links' use spec (decisions 73 and 79, P44 A): every line answered before the owner signs it off.
+// The demo's two view links' use spec (decisions 73, 79 and 103, P44 A): every line answered before the owner signs it off.
 const VIEW_LINKS_SPEC: UseSpecText = {
 	purpose:
 		"Let a visitor to the demo see the same Transactions list as the bank sends it, next to what Tally made of it, so they can see what Tally did for them. It exists only in the demo.",
 	affordance:
-		"Two links in words under the page title with a dot between them: “Tidied by Tally · Straight from the bank”. The one you're on is ink and semibold with no underline; the other is a terracotta link, as every link is. Each is 44px tall.",
+		"Two links in words under the page title with a dot between them: “With Tally · Without Tally”. The one you're on is ink and semibold with no underline; the other is a terracotta link, as every link is. Each is 44px tall.",
 	states:
 		"Current: ink, semibold, not underlined, and aria-current=“page”, so the state is also in words for a screen reader, not weight and color alone. The other: terracotta. Hover: no change (touch has none). Focus: the focus-visible ring. Pressed: the page loads. Disabled, loading, done and error: not applicable, since a link either goes or it doesn't.",
 	feedback:
 		"A link loads the same page in the other view. The rows change, and the result count, which is the page's live line, ends “, as the bank sends them” (or stops saying it), so it always says which view is shown. The raw view adds one muted line under the count. Nothing else changes: Home's numbers never do. Search and filters stay as they were, and paging starts again at the first page. A filter change updates both links, so they never name a stale filter.",
 	input:
-		"Touch: each link is 44px tall, and the dot and the gap keep the two apart. Keyboard: Tab to each, Enter follows it. Screen reader: “View, navigation”, then “Tidied by Tally, current page, link” and “Straight from the bank, link”; the dot is hidden from it.",
+		"Touch: each link is 44px tall, and the dot and the gap keep the two apart. Keyboard: Tab to each, Enter follows it. Screen reader: “View, navigation”, then “With Tally, current page, link” and “Without Tally, link”; the dot is hidden from it.",
 	motion: "None added. Reduced motion changes nothing.",
 	edges:
 		"Demo only: the family app has neither the links nor the view, and ignores ?raw=1. No JavaScript: they are plain links. On a 320px phone both still fit on one line, and larger text wraps them onto a second line rather than cutting them off. A search or filter in the address stays when you switch. The note under the count names the demo's own transfer to Savings and paycheck, because that is what its data has.",
 	words:
-		"View (the nav's name) · Tidied by Tally · Straight from the bank · the count ends “, as the bank sends them” · “No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.” Never the name of the AI behind it.",
+		"View (the nav's name) · With Tally · Without Tally · the count ends “, as the bank sends them” · “No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.” Never the name of the AI behind it.",
 };
 
 // The time zone row's use spec (decision 72, P35 A): every line answered before the owner signs it off.
@@ -2441,9 +2441,9 @@ function Controls() {
 				title="ViewLinks"
 				tier="visual"
 				components={["ViewLinks"]}
-				sentence="The demo's “See it without AI” (decisions 73 and 79, P44 A): two plain links under the Transactions title, “Tidied by Tally · Straight from the bank”, that switch the list between what Tally made of it and the bank's own data. The current one is ink and semibold; the other is a terracotta link. They are real links to the demo's Transactions."
+				sentence="The demo's “See it without AI” (decisions 73, 79 and 103, P44 A): two plain links under the Transactions title, “With Tally · Without Tally”, that switch the list between what Tally made of it and the bank's own data. The current one is ink and semibold; the other is a terracotta link. They are real links to the demo's Transactions."
 			>
-				<State label="Tally's list: “Tidied by Tally” is current">
+				<State label="Tally's list: “With Tally” is current">
 					<ViewLinks
 						id="ds-view-made"
 						current="made"
@@ -2451,7 +2451,7 @@ function Controls() {
 						bankHref="/transactions?raw=1"
 					/>
 				</State>
-				<State label="The bank's list (?raw=1): “Straight from the bank” is current">
+				<State label="The bank's list (?raw=1): “Without Tally” is current">
 					<ViewLinks
 						id="ds-view-bank"
 						current="bank"
@@ -2795,7 +2795,7 @@ function Controls() {
 				title="Add cash"
 				tier="visual"
 				components={["CashForm"]}
-				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it."
+				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it. It opens with the amount blank, as Add a bill does (#342)."
 			>
 				<State label="Add cash">
 					<div
@@ -2817,6 +2817,39 @@ function Controls() {
 								merchant: "Farmers market",
 								category: "1",
 								note: "Peaches and eggs",
+							}}
+							categories={[
+								{
+									id: 1,
+									name: "Groceries",
+									icon: "groceries",
+									color: "cat-blue",
+								},
+								{
+									id: 2,
+									name: "Eating Out",
+									icon: "eating-out",
+									color: "cat-plum",
+								},
+							]}
+							action="#"
+						/>
+					</div>
+				</State>
+				<State label="As it opens: the amount is blank, as Add a bill's is">
+					<div
+						inert
+						class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
+					>
+						<h4 class="font-serif text-4xl font-semibold">Add cash spending</h4>
+						<CashForm
+							today="2026-09-29"
+							values={{
+								date: "2026-09-29",
+								amount: "",
+								merchant: "",
+								category: "",
+								note: "",
 							}}
 							categories={[
 								{
