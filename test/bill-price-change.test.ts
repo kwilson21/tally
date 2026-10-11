@@ -385,6 +385,17 @@ describe("bill matching and price changes", () => {
 			expect((await billRow())?.amount_cents).toBe(10000);
 		});
 
+		it("reads a price offer with the payment's own name in place of the merchant's", async () => {
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'DOG BED' WHERE id = 1",
+			).run();
+			const page = await get("/bills/1");
+			expect(page).toContain(
+				`DOG BED charged $115.00 on ${paidLabel}, not $100.00.`,
+			);
+			expect(page).not.toContain("Netflix charged");
+		});
+
 		it("asks under Overdue too, when the bill was due before the payment", async () => {
 			const overdue = daysBefore(today, 2);
 			await seed({ amount: 10000, dueDate: overdue }, [

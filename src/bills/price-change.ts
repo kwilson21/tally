@@ -11,6 +11,7 @@ import {
 	merchantColumnSql,
 	merchantTextArgs,
 } from "../db/merchant-key";
+import { ownNameSql } from "../db/own-name";
 import { tidyName } from "../transactions/tidy-name";
 import { BIG_BILL_CENTS } from "./guards";
 import {
@@ -98,7 +99,7 @@ function candidates(db: D1Database, bill: OfferBill): D1PreparedStatement {
 	return db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-			        ${merchantColumnSql("t", "display_name")} AS displayName
+			        COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName
 			 FROM transactions t
 			 WHERE ${isMerchantTextSql("t")} AND t.is_split = 0 AND t.flag_income = 0
 			   AND t.date BETWEEN ? AND ?

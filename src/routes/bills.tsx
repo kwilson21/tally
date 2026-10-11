@@ -35,6 +35,7 @@ import {
 	merchantColumnSql,
 	merchantTextArgs,
 } from "../db/merchant-key";
+import { ownNameSql } from "../db/own-name";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
@@ -1178,7 +1179,7 @@ async function billPage(
 	if (pickerPeriod && !periods.includes(pickerPeriod)) return c.notFound();
 	const payments = (
 		await c.env.DB.prepare(
-			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked' AND bp.period IN (SELECT value FROM json_each(?))`,
+			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked' AND bp.period IN (SELECT value FROM json_each(?))`,
 		)
 			.bind(id, JSON.stringify(periods))
 			.all<LinkedPayment>()
@@ -1191,7 +1192,7 @@ async function billPage(
 		const due = occurrenceDate(bill, pickerPeriod);
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),

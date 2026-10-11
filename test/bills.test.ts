@@ -1884,6 +1884,72 @@ describe("Bills", () => {
 			).status,
 		).toBe(404);
 	});
+
+	describe("a payment's own name shows as typed (decision 101)", () => {
+		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const due = `${period}-15`;
+		/** A monthly bill due on the 15th, and nothing else until a test adds the transactions it needs. */
+		const bill = [
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9400,'Streaming',1500,15,'monthly','AMAZON')",
+			),
+		];
+		const bankAmazon = (id: number, ownName: string | null, extra = "") =>
+			env.DB.prepare(
+				`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,own_name${extra ? ",is_split" : ""})
+				 SELECT ?,id,?,1500,'AMZN MKTP US*2K4',?${extra ? ", 1" : ""} FROM accounts LIMIT 1`,
+			).bind(id, due, ownName);
+		const pickerHtml = async () =>
+			(
+				await exports.default.fetch(
+					`http://tally.test/bills/9400/occurrences/${period}/link`,
+				)
+			).text();
+
+		it("shows a linked payment's own name on its occurrence row", async () => {
+			await env.DB.batch([
+				...bill,
+				bankAmazon(9401, "DOG BED"),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9400,?,9401,'user','linked')",
+				).bind(period),
+			]);
+			// The bill's page lists each occurrence with the payment that paid it.
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills/9400")
+			).text();
+			expect(html).toContain("DOG BED");
+			expect(html).not.toContain("Amzn mktp");
+		});
+
+		it("lists a candidate that has its own name by that name, exactly as typed", async () => {
+			await env.DB.batch([...bill, bankAmazon(9401, "DOG BED")]);
+			const picker = (await pickerHtml()).split(
+				'<section id="payment-picker"',
+			)[1];
+			expect(picker).toContain('value="9401"');
+			expect(picker).toContain("DOG BED");
+			expect(picker).not.toContain("Amzn mktp");
+		});
+
+		it("lists a split part with no name of its own under its purchase's own name", async () => {
+			await env.DB.batch([
+				...bill,
+				bankAmazon(9401, "DOG BED", "split"),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,parent_id) SELECT 9402,id,?,1500,'AMZN MKTP US*2K4',9401 FROM accounts LIMIT 1",
+				).bind(due),
+			]);
+			const picker = (await pickerHtml()).split(
+				'<section id="payment-picker"',
+			)[1];
+			expect(picker).toContain('value="9402"');
+			expect(picker).toContain("DOG BED");
+			expect(picker).not.toContain("Amzn mktp");
+		});
+	});
 });
 
 // Spec §8.5, decision 72 (P45 A): no two active bills share a name, and an amount over $100,000
