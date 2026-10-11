@@ -50,6 +50,8 @@ export const STORE_VALUE = "store";
 export const OWN_VALUE = "own";
 /** The class every Name row choice carries; the Rename list shows while one of them is ticked. */
 export const NAME_PICK_CLASS = "name-pick";
+/** The class of the "Type your own" radio: the field under it is shown while it is ticked. */
+export const OWN_PICK_CLASS = "name-own";
 
 /**
  * In the list, for a name Tally guessed (P87 B, decision 80): the sparkles icon, "Tally's guess" under the
@@ -84,6 +86,7 @@ function Choice({
 	value,
 	checked,
 	pick = false,
+	radioClass = "",
 	autofocus = false,
 	describedBy,
 	notes = [],
@@ -94,6 +97,8 @@ function Choice({
 	checked: boolean;
 	/** A choice of the Name row, which opens the Rename list when ticked. */
 	pick?: boolean;
+	/** Another class the radio carries, for a hook the Name group's CSS reads (OWN_PICK_CLASS). */
+	radioClass?: string;
 	autofocus?: boolean;
 	describedBy?: string;
 	notes?: string[];
@@ -108,7 +113,7 @@ function Choice({
 				checked={checked}
 				autofocus={autofocus}
 				aria-describedby={describedBy}
-				class={`mt-1 size-5 shrink-0 accent-ink ${pick ? NAME_PICK_CLASS : ""}`}
+				class={`mt-1 size-5 shrink-0 accent-ink ${pick ? NAME_PICK_CLASS : ""} ${radioClass}`}
 			/>
 			<span class="flex min-w-0 flex-col wrap-anywhere">
 				<span>{children}</span>
@@ -275,10 +280,11 @@ export function NameChoices({
 				value={OWN_VALUE}
 				checked={picked === OWN_VALUE}
 				pick
+				radioClass={OWN_PICK_CLASS}
 			>
 				Type your own
 			</Choice>
-			<div class="pl-8">
+			<div class="hidden pl-8 group-has-[.name-own:checked]:block">
 				<TextInput
 					id={`${id}-own`}
 					label="Your own name"

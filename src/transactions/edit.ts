@@ -30,6 +30,11 @@ export type Edit = {
 	 * suggestions are turned down when the name is for all of them. Its display name is then empty.
 	 */
 	keepBankName?: boolean;
+	/**
+	 * Jev answers categories now: its key is set and the categories switch is on. The route sets it; a
+	 * one-off name lets Tally guess the category again only then (src/transactions/rename.ts).
+	 */
+	jevCategories?: boolean;
 	note: string | null;
 	noteWas?: string | null;
 	noteProvided?: boolean;

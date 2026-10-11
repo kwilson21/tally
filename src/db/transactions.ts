@@ -679,11 +679,12 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
 			merchantKey: string;
+			rawName: string;
 			categoryId: number | null;
 			categorySource: string | null;
 			income: number;
@@ -866,11 +867,13 @@ export async function saveEdit(
 					" ON CONFLICT(raw_name) DO NOTHING",
 				),
 	);
+	// The store's own name has no displayName, so this row takes the bank's text tidied, which is what it
+	// shows and what the save's toast names; the merchant's own name stays as it was.
 	if (oneOnly)
 		statements.push(
 			gated(
 				"UPDATE transactions SET own_name = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
-				[edit.displayName, actor, id],
+				[edit.displayName ?? tidyName(current.rawName), actor, id],
 			),
 		);
 	if (renamesMerchant)

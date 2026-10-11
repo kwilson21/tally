@@ -413,6 +413,16 @@ describe("the edit panel's name choices", () => {
 		expect(html).toMatch(/<legend[^>]*>Name<\/legend>/);
 	});
 
+	it("draws the Your own name field only while Type your own is ticked", async () => {
+		const id = await charge("PLAIN SHOP 123");
+		const { html } = await get(`/transactions/${id}?month=all`);
+		expect(html).toMatch(/<input[^>]*value="own"[^>]*name-own/);
+		expect(html).toContain("hidden pl-8 group-has-[.name-own:checked]:block");
+		expect(html.indexOf("group-has-[.name-own:checked]:block")).toBeLessThan(
+			html.indexOf("Your own name"),
+		);
+	});
+
 	it("leaves out a name that says what the tidied bank text already says", async () => {
 		const id = await charge("NETFLIX.COM");
 		await suggest("NETFLIX.COM", "Netflix.com\nNetflix");

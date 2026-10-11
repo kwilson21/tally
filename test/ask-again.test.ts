@@ -409,6 +409,124 @@ describe("adding a clearer name to a transaction that still needs a category", (
 	});
 });
 
+// Decision 101: a one-off name makes Tally guess the category again, but only while Jev answers categories
+// (the key is set and the categories switch is on). With Jev off, the category Tally picked stays.
+describe("a one-off name on a category Tally picked (decision 101)", () => {
+	const firstCategory = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+	const pickedByTally = (categoryId: number) =>
+		db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
+			)
+			.bind(categoryId, bakery)
+			.run();
+	/** The edit panel as the browser gets it, with the bindings it is served under. */
+	const panel = async (bindings: Record<string, unknown>) =>
+		(
+			await transactions.request(
+				`/transactions/${bakery}?month=all`,
+				{},
+				{ ...env, ...bindings },
+				ctx(),
+			)
+		).text();
+
+	it("clears the category Tally picked, and Jev guesses it again from the new name", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		// Jev is unsure, so the category is left empty for the night.
+		const jev = fakeJev(() => reply(0.2));
+		await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(jev.bodies[0]?.state).toMatchObject({ merchant: "Dog bed" });
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+	});
+
+	it("leaves a category a person picked alone when the name changes", async () => {
+		const category = await firstCategory();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(category, bakery)
+			.run();
+		const jev = fakeJev();
+		await save(bakery, {
+			name_pick: "own",
+			merchant: "Gift",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "user",
+		});
+	});
+
+	it("says Tally guesses its category again while Jev answers categories", async () => {
+		await pickedByTally(await firstCategory());
+		expect(await panel({ JEV_API_KEY: "jev-key" })).toContain(
+			"Tally guesses its category again.",
+		);
+	});
+
+	it("keeps Tally's category, and says nothing of guessing again, while the categories switch is off", async () => {
+		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, categories: false });
+		const category = await firstCategory();
+		await pickedByTally(category);
+		const jev = fakeJev();
+		await save(bakery, {
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(html).toContain("This one only");
+		expect(html).not.toContain("Tally guesses its category again.");
+	});
+
+	it("keeps Tally's category, and says nothing of guessing again, without a Jev key", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		const jev = fakeJev();
+		await save(
+			bakery,
+			{ name_pick: "own", merchant: "Dog bed", name_scope: "one" },
+			{},
+		);
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(await panel({})).not.toContain("Tally guesses its category again.");
+	});
+});
+
 describe("asking again honors what everything else does", () => {
 	it("asks nothing without a Jev key", async () => {
 		const jev = fakeJev();

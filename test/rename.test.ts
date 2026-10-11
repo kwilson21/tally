@@ -13,6 +13,7 @@ describe("a one-off name makes Tally guess the category again", () => {
 		nameChanged: true,
 		nameScope: "one" as const,
 		displayName: "Dog bed",
+		jevCategories: true,
 	};
 	it("when the category is Tally's or empty, and the name is one-off", () => {
 		expect(
@@ -29,6 +30,20 @@ describe("a one-off name makes Tally guess the category again", () => {
 				postedCategory: null,
 			}),
 		).toBe(true);
+	});
+
+	it("not while Jev doesn't answer categories (no key, or the categories switch off), so the category stays", () => {
+		for (const current of [
+			{ categoryId: 4, categorySource: "jev" },
+			{ categoryId: null, categorySource: null },
+		])
+			expect(
+				oneOffGuessesAgain({
+					edit: { ...named, jevCategories: false },
+					current,
+					postedCategory: null,
+				}),
+			).toBe(false);
 	});
 
 	it("not when a person chose the category, a merchant rule gave it, or the form picks one now", () => {

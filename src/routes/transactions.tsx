@@ -4,6 +4,7 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
+import { readAiSwitches } from "../db/ai-switches";
 import {
 	type FirstVisit,
 	firstVisitState,
@@ -103,6 +104,11 @@ type Category = { id: number; name: string; icon: string; color: string };
 
 /** The demo, where "Straight from the bank" (`?raw=1`) lives; the family app has no such view (spec §8.6). */
 const isDemo = (c: Context<App>) => c.env.DEMO === "true";
+
+/** Whether Jev answers categories now: its key is set and the categories switch is on, the test settings' Jev run makes too. */
+const jevAnswersCategories = async (c: Context<App>) =>
+	Boolean((c.env as Env & { JEV_API_KEY?: string }).JEV_API_KEY) &&
+	(await readAiSwitches(c.env.DB)).categories;
 
 /** Consecutive rows that share a date, in list order. */
 function byDay(rows: ListRow[]): [string, ListRow[]][] {
@@ -1049,6 +1055,8 @@ type SheetProps = {
 	nameWas?: string | null;
 	/** The Rename list's choice as it was posted ("all" renames the merchant); "one" when first drawn. */
 	nameScope?: "one" | "all";
+	/** Jev answers categories now, so a one-off name's Rename list says Tally guesses again (decision 101). */
+	jevCategories?: boolean;
 	/**
 	 * The panel is already open and is drawn again where it is, so it isn't drawn arriving: Keep it,
 	 * after the delete question. A field's error and the question itself are known from the props.
@@ -1078,6 +1086,7 @@ function EditSheet({
 	namePick = null,
 	nameWas = null,
 	nameScope = "one",
+	jevCategories = false,
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
@@ -1293,7 +1302,7 @@ function EditSheet({
 								total: tx.nameChoices.total,
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								tallyCategory: tx.nameChoices.tallyCategory,
+								tallyCategory: tx.nameChoices.tallyCategory && jevCategories,
 								today,
 								scope: nameScope,
 							}}
@@ -1934,6 +1943,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		).all<HouseholdPerson>()
 	).results;
 	const refunds = await refundPurchases(c.env.DB, tx);
+	const jevCategories = await jevAnswersCategories(c);
 	return renderList(c, today, filters, {
 		sheet: (categories, today) => (
 			<EditSheet
@@ -1945,6 +1955,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				refunds={refunds}
 				today={today}
 				still={asksFromThisPage(c)}
+				jevCategories={jevCategories}
 			/>
 		),
 	});
@@ -2227,6 +2238,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// The store's own name turns the suggestions down only when the panel offers some: with the names switch
 	// off Tally's guesses are hidden, and a save can't turn down what a person can't see (decision 80).
 	if (parsed.ok && offered.length === 0) parsed.value.keepBankName = false;
+	const jevCategories = await jevAnswersCategories(c);
+	if (parsed.ok) parsed.value.jevCategories = jevCategories;
 
 	// The panel again, as the person left it, with what's wrong (422).
 	const showErrors = (errors: EditErrors) => {
@@ -2270,6 +2283,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					namePick={form.get("name_pick")?.toString() ?? null}
 					nameWas={form.get("merchant_was")?.toString() ?? null}
 					nameScope={form.get("name_scope") === "all" ? "all" : "one"}
+					jevCategories={jevCategories}
 				/>
 			),
 		});
@@ -2395,6 +2409,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			forPersonId: tx.forPersonId,
 		};
 		const refunds = await refundPurchases(c.env.DB, tx);
+		const jevCategories = await jevAnswersCategories(c);
 		return renderList(c, today, filtersFrom(c, today, back), {
 			sheet: (categories, today) => (
 				<EditSheet
@@ -2406,6 +2421,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 					refunds={refunds}
 					deleteConfirm
 					today={today}
+					jevCategories={jevCategories}
 				/>
 			),
 		});

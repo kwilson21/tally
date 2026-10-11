@@ -77,7 +77,8 @@ export function allNotes({
 /**
  * A one-off name makes Tally guess the category again, from the purchase's own name (decision 101), when
  * the category is Tally's (`jev`) or empty and the person didn't pick a different one in the same save.
- * A merchant-wide rename, a name that didn't change, and the store's own name (no name) ask nothing.
+ * A merchant-wide rename, a name that didn't change, and the store's own name (no name) ask nothing. Tally
+ * guesses only while Jev answers categories (`jevCategories`); with it off the category is left as it is.
  */
 export function oneOffGuessesAgain({
 	edit,
@@ -88,10 +89,12 @@ export function oneOffGuessesAgain({
 		nameChanged?: boolean;
 		nameScope?: "one" | "all";
 		displayName: string | null;
+		jevCategories?: boolean;
 	};
 	current: { categoryId: number | null; categorySource: string | null };
 	postedCategory: number | null;
 }): boolean {
+	if (edit.jevCategories !== true) return false;
 	if (edit.nameChanged === false || edit.nameScope !== "one") return false;
 	if (edit.displayName === null) return false;
 	if (postedCategory !== null && postedCategory !== current.categoryId)

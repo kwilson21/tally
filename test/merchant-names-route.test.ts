@@ -375,6 +375,12 @@ describe("GET /settings/names", () => {
 		expect(html).toMatch(/<h2[^>]*wrap-anywhere[^>]*>/);
 	});
 
+	it("says what the bank sent once: in the page's header, not again under the store's name", async () => {
+		await twoMerchants();
+		const { html } = await get("/settings/names");
+		expect(textOf(html).match(/The bank says/g)).toHaveLength(1);
+	});
+
 	it("shows the first merchant: what the bank says, the suggested names, keeping the bank's, and your own", async () => {
 		await twoMerchants();
 		const { res, html } = await get("/settings/names");

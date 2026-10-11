@@ -115,7 +115,6 @@ async function renderReview(
 								names={review.names}
 								source={review.source}
 								tidied={review.tidied}
-								rawName={review.bankText}
 								picked={values?.key === review.key ? values.picked : null}
 								own={values?.key === review.key ? values.own : ""}
 								error={error}

@@ -199,36 +199,6 @@ describe("a name for one transaction (decision 101)", () => {
 		expect((await rowOf(part?.id as number))?.displayName).toBe("Dog bed");
 	});
 
-	it("the panel posts the category it showed, and a one-off name still lets Tally guess again", async () => {
-		const category = await db
-			.prepare(
-				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-			)
-			.first<{ id: number }>();
-		const { a } = await amazon();
-		await db
-			.prepare(
-				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
-			)
-			.bind(category?.id, a)
-			.run();
-		// The edit panel posts the category it drew (the current one), as its checked chip.
-		await save(a, {
-			category: String(category?.id),
-			name_pick: "own",
-			merchant: "Dog bed",
-			name_scope: "one",
-		});
-		expect(
-			await db
-				.prepare(
-					"SELECT category_id, category_source FROM transactions WHERE id = ?",
-				)
-				.bind(a)
-				.first(),
-		).toEqual({ category_id: null, category_source: null });
-	});
-
 	it("the Name row says the bank's text only for a bank row, not for a cash entry", async () => {
 		const cash = await db
 			.prepare("SELECT id FROM accounts WHERE type = 'cash' LIMIT 1")
@@ -247,40 +217,77 @@ describe("a name for one transaction (decision 101)", () => {
 		expect(html).not.toContain("The bank says");
 	});
 
-	it("a one-off name on a category Tally picked lets Tally guess again, and a person's choice stays", async () => {
-		const category = await db
-			.prepare(
-				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-			)
-			.first<{ id: number }>();
+	it("The store's own name under This one only names this row with the bank's text, and the merchant keeps its name", async () => {
 		const { a, b } = await amazon();
-		await db
-			.prepare(
-				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
-			)
-			.bind(category?.id, a)
-			.run();
-		await db
-			.prepare(
-				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
-			)
-			.bind(category?.id, b)
-			.run();
-		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });
-		await save(b, { name_pick: "own", merchant: "Gift", name_scope: "one" });
-		expect(
-			await db
-				.prepare(
-					"SELECT category_id, category_source FROM transactions WHERE id = ?",
-				)
-				.bind(a)
-				.first(),
-		).toEqual({ category_id: null, category_source: null });
-		expect(
-			await db
-				.prepare("SELECT category_source FROM transactions WHERE id = ?")
-				.bind(b)
-				.first(),
-		).toEqual({ category_source: "user" });
+		const { res } = await post(
+			`/transactions/${a}`,
+			{
+				back: "/transactions?month=all",
+				name_pick: "store",
+				name_scope: "one",
+			},
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(toastOf(res)).toBe("Saved Amazon mktpl");
+		expect((await rowOf(a))?.displayName).toBe("Amazon mktpl");
+		expect((await rowOf(b))?.displayName).toBe("Amazon");
+		expect(await merchant("Amazon")).toMatchObject({ display_name: "Amazon" });
+	});
+
+	it("The store's own name under This one only names this row and leaves a suggested name waiting", async () => {
+		const id = await charge(RAW);
+		const other = await charge(RAW, null, "2026-09-18");
+		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+		const { res } = await post(
+			`/transactions/${id}`,
+			{
+				back: "/transactions?month=all",
+				name_pick: "store",
+				name_scope: "one",
+			},
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Blue bottle cof");
+		expect(await merchant(RAW)).toEqual({
+			display_name: null,
+			suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+			suggestion_status: "pending",
+		});
+		expect(await rowOf(id)).toMatchObject({
+			displayName: "Blue bottle cof",
+			nameSuggested: false,
+		});
+		expect(await rowOf(other)).toMatchObject({
+			displayName: "Blue Bottle Coffee",
+			nameSuggested: true,
+		});
+	});
+
+	it("The store's own name under This one only still names this row when the names switch is off, and turns no suggestion down", async () => {
+		await saveAiSwitches(db, { names: false });
+		const id = await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+		await post(
+			`/transactions/${id}`,
+			{
+				back: "/transactions?month=all",
+				name_pick: "store",
+				name_scope: "one",
+			},
+			true,
+		);
+		expect((await rowOf(id))?.displayName).toBe("Blue bottle cof");
+		expect(await merchant(RAW)).toMatchObject({
+			suggestion_status: "pending",
+		});
 	});
 });
+
+/** The toast message a save sends with its HTMX response. */
+function toastOf(res: Response): string | undefined {
+	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+		toast?: { message?: string };
+	};
+	return trigger.toast?.message;
+}
