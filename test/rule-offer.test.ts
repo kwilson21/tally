@@ -588,6 +588,67 @@ describe("merchant category rule offer", () => {
 		);
 	});
 
+	it("a save that makes income asks nothing, even at a merchant with three counted picks (decision 100)", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+		)
+			.bind(ids[3])
+			.run();
+		const save = await post(`/transactions/${ids[3]}`, {
+			...edit(groceries),
+			income: "1",
+		});
+		expect(save.html).not.toContain(QUESTION);
+		expect(announced(save.res)).not.toContain(QUESTION);
+		expect(announced(save.res)).toBe(
+			"Saved. rule-offer-store is now Groceries.",
+		);
+	});
+
+	it("a save on money in asks nothing, even at a merchant with three counted picks (decision 100)", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -1000, credit_reviewed = 1 WHERE id = ?",
+		)
+			.bind(ids[3])
+			.run();
+		const save = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(save.html).not.toContain(QUESTION);
+		expect(announced(save.res)).not.toContain(QUESTION);
+	});
+
+	it("a save that leaves a transfer out of the budget asks nothing, even at a merchant with three counted picks (decision 100)", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_transfer = 1, excluded = 1, excluded_source = 'jev' WHERE id = ?",
+		)
+			.bind(ids[3])
+			.run();
+		const save = await post(`/transactions/${ids[3]}`, {
+			...edit(groceries),
+			excluded: "1",
+		});
+		expect(save.html).not.toContain(QUESTION);
+		expect(announced(save.res)).not.toContain(QUESTION);
+	});
+
+	it("Select with only an income row asks nothing, even at a merchant with three counted picks (decision 100)", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+		)
+			.bind(ids[3])
+			.run();
+		const selected = await post("/transactions/select/category/save", {
+			ids: String(ids[3]),
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(selected.html).not.toContain(QUESTION);
+		expect(announced(selected.res)).toBe("Set 1 transaction to Groceries.");
+	});
+
 	it("the Yes toast names the merchant the question named, when the bank's text differs from the merchant key", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		// The save gives no name, so the question names the tidied bank text, not the merchant key.
@@ -763,6 +824,36 @@ describe("firstRuleOfferAmong", () => {
 			categoryId: groceries,
 			count: 3,
 			transactionId: first[0],
+		});
+	});
+
+	it("returns null when the selection holds only a row that doesn't count, even at a merchant with three counted picks (decision 100)", async () => {
+		await setCategory(ids, groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+		)
+			.bind(ids[3])
+			.run();
+		const offer = await firstRuleOfferAmong(env.DB, [ids[3] ?? 0], groceries);
+		expect(offer).toBeNull();
+	});
+
+	it("names the counted row when a row that doesn't count has a lower id for the same merchant (decision 100)", async () => {
+		await setCategory(ids, groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+		)
+			.bind(ids[0])
+			.run();
+		const offer = await firstRuleOfferAmong(
+			env.DB,
+			[ids[0] ?? 0, ids[1] ?? 0],
+			groceries,
+		);
+		expect(offer).toMatchObject({
+			categoryId: groceries,
+			count: 3,
+			transactionId: ids[1],
 		});
 	});
 

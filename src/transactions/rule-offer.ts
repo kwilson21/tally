@@ -43,7 +43,9 @@ export async function categoryRuleOffer(
 
 /**
  * The offer for the first merchant in a selection to reach three picks of `categoryId`: the merchant whose
- * lowest selected row has the lowest id, with that row. Null when no selected merchant reaches three.
+ * lowest counted selected row has the lowest id, with that row. Only counted picks in the selection start
+ * a question (spec §7, decision 100), so a selection of income, money in or a transfer left out of the
+ * budget asks nothing. Null when no selected merchant reaches three.
  * One statement, sharing `COUNTED_PICKS_SQL` with `categoryRuleOffer`, so the two can't drift apart.
  */
 export async function firstRuleOfferAmong(
@@ -54,10 +56,10 @@ export async function firstRuleOfferAmong(
 	const row = await db
 		.prepare(
 			`WITH selected AS (
-				SELECT ${merchantKeySql("t")} AS merchantKey, MIN(t.id) AS transactionId
-				FROM transactions t
-				WHERE t.id IN (SELECT value FROM json_each(?))
-				GROUP BY ${merchantKeySql("t")}
+				SELECT ${merchantKeySql("transactions")} AS merchantKey, MIN(id) AS transactionId
+				FROM transactions
+				WHERE id IN (SELECT value FROM json_each(?)) AND ${COUNTED_PICKS_SQL}
+				GROUP BY ${merchantKeySql("transactions")}
 			)
 			SELECT s.merchantKey AS merchantKey, s.transactionId AS transactionId, COUNT(*) AS count
 			FROM selected s
@@ -69,13 +71,15 @@ export async function firstRuleOfferAmong(
 			ORDER BY s.transactionId
 			LIMIT 1`,
 		)
-		.bind(JSON.stringify(ids), categoryId)
+		.bind(JSON.stringify(ids), categoryId, categoryId)
 		.first<{ merchantKey: string; transactionId: number; count: number }>();
 	return row ? { ...row, categoryId } : null;
 }
 
 /**
- * The offer after a person saved `categoryId` on one transaction. The merchant comes from the stored
+ * The offer after a person saved `categoryId` on one transaction. The question is asked only when the
+ * saved row is itself one of the counted picks (spec §7, decision 100): income, money in, a split parent
+ * or part, or a transfer still left out of the budget asks nothing. The merchant comes from the stored
  * row, so the answer follows what was saved, whatever the form carried.
  */
 export async function ruleOfferForTransaction(
@@ -85,9 +89,9 @@ export async function ruleOfferForTransaction(
 ): Promise<RuleOffer | null> {
 	const row = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions WHERE id = ? AND ${COUNTED_PICKS_SQL}`,
 		)
-		.bind(transactionId)
+		.bind(transactionId, categoryId)
 		.first<{ merchantKey: string }>();
 	return row ? categoryRuleOffer(db, row.merchantKey, categoryId) : null;
 }
