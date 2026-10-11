@@ -39,11 +39,16 @@ export function splitStatus(parentCents: number, amounts: string[]) {
 	};
 }
 
+/**
+ * Checks a split sheet's rows. A row takes an active category (`liveCategoryIds`), or the one archived
+ * category its saved part already has (`keptCategoryIds[i]`, Change the parts only); nothing else.
+ */
 export function parseSplit(
 	categories: string[],
 	amounts: string[],
 	parentCents: number,
 	liveCategoryIds: number[],
+	keptCategoryIds: (number | undefined)[] = [],
 ): SplitResult {
 	if (
 		categories.length < 2 ||
@@ -55,7 +60,10 @@ export function parseSplit(
 	const parts: SplitPart[] = [];
 	for (let i = 0; i < categories.length; i++) {
 		const categoryId = Number(categories[i]);
-		if (!liveCategoryIds.includes(categoryId))
+		if (
+			!liveCategoryIds.includes(categoryId) &&
+			categoryId !== keptCategoryIds[i]
+		)
 			return { ok: false, error: `Pick a category for part ${i + 1}.` };
 		const cents = positiveCents(amounts[i] ?? "");
 		if (cents === null)
