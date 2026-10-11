@@ -1130,9 +1130,9 @@ settings.post("/settings/time-zone", async (c) => {
 	await saveTimeZone(c.env.DB, parsed.zone);
 	const today = todayIn(parsed.zone);
 	// The month is the one thing in Settings that follows the zone (each category's amount is the
-	// month's), and the swap below replaces only #household, so every save sends those amounts along.
-	// Always, not only when the two zones' months differ: a page left open past midnight can show last
-	// month whichever zone is saved.
+	// month's), and the swap below replaces only the time zone row, so every save sends those
+	// amounts along. Always, not only when the two zones' months differ: a page left open past
+	// midnight can show last month whichever zone is saved.
 	return done(
 		c,
 		"Saved time zone",
