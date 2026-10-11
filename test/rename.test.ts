@@ -138,6 +138,15 @@ describe("the All label", () => {
 		);
 	});
 
+	it("never reads All 0: when All would reach nothing, it says the one-transaction wording", () => {
+		expect(allLabel({ count: 0, merchant: "Amazon", thisOwn: false })).toBe(
+			"This one and later ones",
+		);
+		expect(allLabel({ count: 0, merchant: "Amazon", thisOwn: true })).toBe(
+			"This one and later ones",
+		);
+	});
+
 	it("says this one too when this transaction has its own name", () => {
 		expect(allLabel({ count: 23, merchant: "Amazon", thisOwn: true })).toBe(
 			"All 23 from Amazon, this one too",

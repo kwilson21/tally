@@ -12,6 +12,7 @@ import {
 	firstVisitState,
 	getTransaction,
 	type ListRow,
+	listRowsByIds,
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
@@ -22,6 +23,8 @@ import {
 	removeSplit,
 	saveEdit,
 	saveSplit,
+	selectableTickIds,
+	setMerchantRule,
 	type TransactionDetail,
 } from "../db/transactions";
 import { centsToAmount, formatCents } from "../money";
@@ -41,6 +44,7 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	FOR_PERSON_ERROR,
 	followsPurchaseAfterSave,
 	parseEdit,
 	postedCredit,
@@ -59,7 +63,13 @@ import {
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
+import {
+	categoryRuleOffer,
+	firstRuleOfferAmong,
+	ruleOfferForTransaction,
+} from "../transactions/rule-offer";
 import { parseSplit } from "../transactions/split";
+import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -88,15 +98,30 @@ import {
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
+import {
+	RuleOffer,
+	type RuleOfferValue,
+	ruleOfferAnnouncement,
+} from "../views/rule-offer";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
 	FOCUS_SET_CATEGORY,
 	LIST_LOAD_PAUSE,
+	MAX_SELECTED,
+	NOT_ON_PAGE_FIELD,
+	NotOnPage,
+	NotOnPageCount,
 	SELECTION_BAR_OOB,
 	SelectAllOnPage,
+	SelectedCount,
 	SelectionActionBar,
 	SelectionActionButtons,
+	SelectionLimit,
+	selectAllShown,
+	selectModeHref,
+	TICKS_INCLUDE,
+	TOO_MANY,
 } from "../views/selection-action-bar";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
@@ -306,6 +331,23 @@ async function renderList(
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
+	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
+	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
+	const onPage = new Set(pageIds);
+	// A tick stays until it is unticked, Done or acted on, so a tick that isn't on this page is drawn in
+	// the bar's "not on this page" line, still ticked (#350). Only rows that still exist are counted.
+	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	const offPage = selecting
+		? await listRowsByIds(
+				c.env.DB,
+				[...checkedIds].filter((id) => !onPage.has(id)),
+			)
+		: [];
+	// Every tick the list keeps, on this page or not: the address, the links, the bar and the limit all read these.
+	// A tick to a row that is gone, or is now a split, drops out here, whichever caller drew the list (#350).
+	const kept = new Set([...ticked, ...offPage].map((row) => row.id));
+	const ticks = [...checkedIds].filter((id) => kept.has(id));
+	const tickCount = ticks.length;
 	const pageHref = (n: number) => listUrl({ ...filters, page: n });
 	// "Only October" narrows a search that runs in every month to this month, and keeps the search (#211).
 	const onlyMonthHref = listUrl({
@@ -319,14 +361,20 @@ async function renderList(
 	// its controls pause while it loads (LIST_LOAD_PAUSE).
 	const includeTicked = selecting
 		? {
-				"hx-include": "#selection-form input[name=ids]:checked",
+				...TICKS_INCLUDE,
 				...LIST_LOAD_PAUSE,
 			}
 		: {};
+	// Without JavaScript a page link's address carries the ticks, so the next page keeps them (#350). The
+	// htmx request doesn't use this address: it sends the ticks as they are when clicked, not as drawn.
+	const pageLinkHref = (n: number) =>
+		selecting && ticks.length > 0
+			? `${pageHref(n)}&ids=${ticks.join(",")}`
+			: pageHref(n);
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
 		<a
-			href={pageHref(n)}
+			href={pageLinkHref(n)}
 			rel={rel}
 			class="inline-flex min-h-11 items-center px-2 -mx-2"
 			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
@@ -338,6 +386,7 @@ async function renderList(
 			hx-select="#results > *"
 			hx-select-oob={LIST_OOB}
 			hx-swap="innerHTML show:top"
+			// In Select mode the reply's HX-Push-Url (the ticks, without the focus marker) replaces this.
 			hx-push-url={selecting ? pageHref(n) : "true"}
 			{...includeTicked}
 		>
@@ -383,16 +432,25 @@ async function renderList(
 			<WhyLink section="names" topic="suggested name" />
 		</p>
 	) : null;
-	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
-	// shows the no-JS hint, and htmx re-counts on load.
-	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
-	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
-	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
 	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
 	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
-	const tickedOnPage = new Set(ticked.map((row) => row.id));
+	// The ticks not on this page, under their day headings, in the disclosure (ticked).
+	const offPageRows = byDay(offPage).map(([date, dayRows]) => (
+		<>
+			<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
+			<ul class="divide-y divide-rule">
+				{dayRows.map((row) => (
+					<SelectableTransactionRow row={shown(row)} checked today={today} />
+				))}
+			</ul>
+		</>
+	));
 	const htmx = c.req.header("HX-Request") === "true";
-	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
+	// In Select mode the Add cash sheet's close link and Cancel keep the ticks (#350). The link carries them as
+	// drawn, for a browser without JavaScript; with it, the request sends them as they are when the link is tapped.
+	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
+	const cashHref = selecting ? selectModeHref(cashPath, ticks) : cashPath;
+	const cashGet = selecting ? selectModeHref(cashPath, []) : cashPath;
 
 	return c.html(
 		<Layout
@@ -460,7 +518,9 @@ async function renderList(
 					kind="secondary"
 					href={cashHref}
 					class="gap-2"
-					hx-get={cashHref}
+					hx-get={cashGet}
+					// htmx sends the ticks as they are when tapped, and the URL it pushes carries them (#350).
+					{...(selecting ? TICKS_INCLUDE : {})}
 					hx-target="#sheet"
 					hx-select="#sheet"
 					hx-swap="outerHTML"
@@ -573,8 +633,12 @@ async function renderList(
 							</span>
 						</Chip>
 					</div>
-					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}
+					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. The
+					    ticks ride along only in the noscript block, which a browser with JavaScript never reads: htmx
+					    sends the current ticks itself (TICKS_INCLUDE), so a stale render can't resend them (#350). */}
 					<noscript>
+						{selecting &&
+							ticks.map((id) => <input type="hidden" name="ids" value={id} />)}
 						<Button type="submit" class="self-start px-4">
 							Apply filters
 						</Button>
@@ -648,7 +712,8 @@ async function renderList(
 						<input id="selection-back" type="hidden" name="back" value={back} />
 						<section id="results" class="mt-2" aria-label="Results">
 							{suggestedNameNote}
-							{selectionError && (
+							{/* The limit's words are the bar's alone (SelectionLimit), so a refusal over 100 says them once. */}
+							{selectionError && selectionError !== TOO_MANY && (
 								<p role="alert" class="my-3 text-sm text-over">
 									{selectionError}
 								</p>
@@ -658,7 +723,11 @@ async function renderList(
 									kind="search"
 									sentence="No transactions match these filters."
 									hint="Try a wider month, or clear the search."
-									action={{ href: clearFiltersHref, label: "Clear filters" }}
+									// The filters' link keeps select mode and every tick, as a filter change does (#350).
+									action={{
+										href: selectModeHref(clearFiltersHref, ticks),
+										label: "Clear filters",
+									}}
 								/>
 							) : (
 								byDay(rows).map(([date, dayRows]) => (
@@ -693,16 +762,23 @@ async function renderList(
 							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
 						>
 							<SelectionActionBar
+								// Without JavaScript, the ticks in the address are counted in words once there are any (#350).
 								label={
-									htmx
-										? selectedLabel(ticked.length)
+									htmx || tickCount > 0
+										? undefined
 										: "Choose rows, then an action"
 								}
-								href={selectModeHref(back, pageIds)}
+								count={tickCount}
+								notOnPage={offPage.length}
+								rows={offPageRows}
+								back={back}
 								pageIds={pageIds}
-								ticked={tickedOnPage}
-								disabled={htmx && ticked.length === 0}
-								focusSetCategory={focusSetCategory && ticked.length > 0}
+								ticks={ticks}
+								// Both actions wait on every tick the list keeps, as the limit does, not only the rows it shows.
+								disabled={
+									htmx && (ticks.length === 0 || ticks.length > MAX_SELECTED)
+								}
+								focusSetCategory={focusSetCategory && tickCount > 0}
 							/>
 						</div>
 					</form>
@@ -777,33 +853,52 @@ transactions.get("/transactions", async (c) => {
 	// A search typed into an empty box looks in every month, and emptying the box goes back to this month (#211).
 	const before = pageBefore(c.req.header("HX-Current-URL"));
 	const month = monthFor(asked, before, thisMonth);
+	// Select all's reply ticks the page's rows too: they come as page-ids, since htmx would replace the
+	// ids in its own address with the ticks it includes (SelectAllOnPage).
+	const selectAll = params.get("focus") === FOCUS_SET_CATEGORY;
+	// Every tick is kept, past 100 too: the bar refuses to act on more than 100, but never trims them (#350).
+	// A tick to a row that is gone, or is now a split, drops out here, before the address and the list read it (#350).
+	const ticks = selecting
+		? await selectableTickIds(
+				c.env.DB,
+				parseIds([
+					...params.getAll("ids"),
+					...(selectAll ? params.getAll("page-ids") : []),
+				]),
+			)
+		: [];
+	const filters = { ...asked, month };
 	if (c.req.header("HX-Request") === "true") {
-		// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
-		// It is written only when the request's own address names a different month (htmx sends the form's month).
 		const named = monthParam(asked, before, month, thisMonth);
-		const address = new URL(c.req.url);
-		if (named !== address.searchParams.get("month")) {
-			address.searchParams.delete("focus");
-			if (named === null) address.searchParams.delete("month");
-			else address.searchParams.set("month", named);
-			c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+		if (selecting) {
+			// In Select mode the address is written clean (#350): the filters, the month it names (set even when that
+			// is this month, which filtersToQuery leaves out), and the ticks, with no focus marker or page-ids.
+			const query = new URLSearchParams(filtersToQuery(filters, thisMonth));
+			if (named !== null) query.set("month", named);
+			c.header(
+				"HX-Push-Url",
+				selectModeHref(`/transactions${query.size ? `?${query}` : ""}`, ticks),
+			);
+		} else {
+			// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
+			// It is written only when the request's own address names a different month (htmx sends the form's month).
+			const address = new URL(c.req.url);
+			if (named !== address.searchParams.get("month")) {
+				address.searchParams.delete("focus");
+				if (named === null) address.searchParams.delete("month");
+				else address.searchParams.set("month", named);
+				c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+			}
 		}
 	}
-	return renderList(
-		c,
-		today,
-		{ ...asked, month },
-		{
-			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
-			countFocus: params.get("focus") === "count",
-			selecting,
-			focusSetCategory: selecting && params.get("focus") === FOCUS_SET_CATEGORY,
-			focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
-			checkedIds: selecting
-				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
-				: undefined,
-		},
-	);
+	return renderList(c, today, filters, {
+		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		countFocus: params.get("focus") === "count",
+		selecting,
+		focusSetCategory: selecting && selectAll,
+		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
+		checkedIds: selecting ? new Set(ticks) : undefined,
+	});
 });
 
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
@@ -822,12 +917,7 @@ const LIST_OOB = [
 	"#only-month:innerHTML",
 ].join(", ");
 
-/** Most ids one bulk action takes (D1 binds at most 100 parameters per statement). */
-const MAX_SELECTED = 100;
-const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
 const NONE_SELECTED = "Select at least one transaction.";
-
-const selectedLabel = (count: number) => `${count} selected`;
 
 /** Positive whole-number ids, once each; each value may be one id or "1,2,3". */
 function parseIds(values: (string | File)[]) {
@@ -842,65 +932,85 @@ function parseIds(values: (string | File)[]) {
 	return [...ids];
 }
 
-async function selectableIds(db: D1Database, ids: number[]) {
-	if (ids.length === 0 || ids.length > MAX_SELECTED) return [];
-	const marks = ids.map(() => "?").join(",");
-	const rows = await db
-		.prepare(
-			`SELECT id FROM transactions WHERE is_split = 0 AND id IN (${marks})`,
-		)
-		.bind(...ids)
-		.all<{ id: number }>();
-	return rows.results.map((row) => row.id);
-}
-
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
 transactions.get("/transactions/select/count", (c) => {
 	const params = new URL(c.req.url).searchParams;
-	const ticked = new Set(parseIds(params.getAll("ids")));
+	// Every checked row in the form, on this page or not; the page's own rows come from page-ids.
+	const ticks = parseIds(params.getAll("ids"));
 	const pageIds = parseIds(params.getAll("page-ids"));
+	const onPage = new Set(pageIds);
+	const notOnPage = ticks.filter((id) => !onPage.has(id)).length;
 	const back = safeBack(params.get("back"));
+	// Each tap keeps the ticks in the address, replacing its entry rather than adding one, so a reload keeps them (#350).
+	c.header("HX-Replace-Url", selectModeHref(back, ticks));
+	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
+	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
+	const lineGone = params.has(NOT_ON_PAGE_FIELD) && notOnPage === 0;
+	const focusSelectAll = lineGone && selectAllShown(pageIds, new Set(ticks));
+	const focusCount = lineGone && !focusSelectAll;
 	return c.html(
 		<>
-			{selectedLabel(ticked.size)}
-			<SelectionActionButtons disabled={ticked.size === 0} oob />
-			<SelectAllOnPage
-				href={selectModeHref(back, pageIds)}
-				pageIds={pageIds}
-				ticked={ticked}
+			<SelectedCount
+				count={ticks.length}
+				notOnPage={notOnPage}
+				focus={focusCount}
+			/>
+			<SelectionActionButtons
+				disabled={ticks.length === 0 || ticks.length > MAX_SELECTED}
 				oob
 			/>
+			<SelectAllOnPage
+				back={back}
+				pageIds={pageIds}
+				ticks={ticks}
+				autofocus={focusSelectAll}
+				oob
+			/>
+			<SelectionLimit count={ticks.length} oob />
+			{notOnPage > 0 ? (
+				<NotOnPageCount count={notOnPage} oob />
+			) : (
+				// With none left off the page, the whole line goes, not just its words (#350).
+				<NotOnPage count={0} oob />
+			)}
 		</>,
 	);
 });
 
-/** The posted ids, or why they can't be acted on. */
+/**
+ * The posted ids, or why they can't be acted on. A tick to a row that is gone, or is now a split, drops out
+ * before the limit counts them (#350). `ticks` are the ticks the list keeps when it is drawn again: a refusal
+ * for more than 100 keeps every one of them, and trims none (#350).
+ */
 async function postedSelection(c: Context<App>, form: FormData) {
-	const posted = parseIds(form.getAll("ids"));
-	if (posted.length > MAX_SELECTED) return { ids: [], error: TOO_MANY };
-	const ids = await selectableIds(c.env.DB, posted);
-	return { ids, error: ids.length === 0 ? NONE_SELECTED : undefined };
+	const ids = await selectableTickIds(c.env.DB, parseIds(form.getAll("ids")));
+	if (ids.length > MAX_SELECTED)
+		return { ids: [], ticks: ids, error: TOO_MANY };
+	return {
+		ids,
+		ticks: ids,
+		error: ids.length === 0 ? NONE_SELECTED : undefined,
+	};
 }
-
-/** The select-mode list with these rows ticked (Cancel and close on the sheet). */
-const selectModeHref = (back: string, ids: number[]) =>
-	`${back}${back.includes("?") ? "&" : "?"}select=1${ids.length ? `&ids=${ids.join(",")}` : ""}`;
 
 function SelectCategorySheet({
 	ids,
+	ticks,
 	back,
 	categories,
 	error,
 	still,
 }: {
 	ids: number[];
+	/** Every tick the list keeps, which Cancel goes back to (a refusal keeps them all). */
+	ticks: number[];
 	back: string;
 	categories: Category[];
 	error?: string;
 	/** Its Save was refused, so the open sheet is drawn again where it is. */
 	still?: boolean;
 }) {
-	const cancelHref = selectModeHref(back, ids);
+	const cancelHref = selectModeHref(back, ticks);
 	const alert = error && (
 		<p id="select-category-error" role="alert" class="text-sm text-over">
 			{error}
@@ -980,19 +1090,30 @@ async function categorySheet(
 	c: Context<App>,
 	today: string,
 	back: string,
-	ids: number[],
-	error?: string,
-	/** Its Save was refused: the sheet is already open, so it isn't drawn arriving again. */
-	still = false,
+	{
+		ids,
+		ticks,
+		error,
+		still = false,
+	}: {
+		/** The rows the sheet's Save changes. */
+		ids: number[];
+		/** Every tick the list keeps (see postedSelection). */
+		ticks: number[];
+		error?: string;
+		/** Its Save was refused: the sheet is already open, so it isn't drawn arriving again. */
+		still?: boolean;
+	},
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
 		selecting: true,
-		checkedIds: new Set(ids),
+		checkedIds: new Set(ticks),
 		status: error ? 422 : 200,
 		pageTitle: "Set category · Tally",
 		sheet: (categories) => (
 			<SelectCategorySheet
 				ids={ids}
+				ticks={ticks}
 				back={back}
 				categories={categories}
 				error={error}
@@ -1005,8 +1126,12 @@ async function categorySheet(
 transactions.post("/transactions/select/category", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, error } = await postedSelection(c, form);
-	return categorySheet(c, await householdToday(c.env.DB), back, ids, error);
+	const { ids, ticks, error } = await postedSelection(c, form);
+	return categorySheet(c, await householdToday(c.env.DB), back, {
+		ids,
+		ticks,
+		error,
+	});
 });
 
 async function finishSelection(
@@ -1030,9 +1155,10 @@ async function finishSelection(
 transactions.post("/transactions/select/category/save", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, error } = await postedSelection(c, form);
+	const { ids, ticks, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
-	if (error) return categorySheet(c, today, back, ids, error, true);
+	if (error)
+		return categorySheet(c, today, back, { ids, ticks, error, still: true });
 	const category = Number(form.get("category"));
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
@@ -1042,14 +1168,12 @@ transactions.post("/transactions/select/category/save", async (c) => {
 				.first<{ id: number; name: string }>()
 		: null;
 	if (!cat)
-		return categorySheet(
-			c,
-			today,
-			back,
+		return categorySheet(c, today, back, {
 			ids,
-			"Pick a category from the list.",
-			true,
-		);
+			ticks,
+			error: "Pick a category from the list.",
+			still: true,
+		});
 	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
@@ -1059,18 +1183,36 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		),
 	);
 	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
-	return finishSelection(c, today, back, message);
+	// The first merchant in the selection to reach three picks of this category is asked (decision 79).
+	const found = await firstRuleOfferAmong(c.env.DB, ids, cat.id);
+	const tx = found ? await getTransaction(c.env.DB, found.transactionId) : null;
+	if (!found || !tx) return finishSelection(c, today, back, message);
+	const value: RuleOfferValue = {
+		merchantKey: found.merchantKey,
+		categoryId: found.categoryId,
+		count: found.count,
+		merchant: tx.displayName || tidyName(tx.rawName),
+		category: cat.name,
+		back,
+	};
+	const announce = ruleOfferAnnouncement(value, message);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce }),
+	);
+	c.header("HX-Push-Url", back);
+	return renderRuleOffer(c, today, back, value);
 });
 
 transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, error } = await postedSelection(c, form);
+	const { ids, ticks, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
 	if (error)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			selecting: true,
-			checkedIds: new Set(ids),
+			checkedIds: new Set(ticks),
 			status: 422,
 			selectionError: error,
 		});
@@ -1241,7 +1383,7 @@ function EditSheet({
 					count it in another month.
 				</p>
 			)}
-			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
+			{tx.splitRemovedFromCents != null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}
 					{formatCents(tx.splitRemovedFromCents, { signed: true })}, so its
@@ -1916,19 +2058,24 @@ function CashSheet({
 	values,
 	errors,
 	back,
+	ticks,
 	today,
 }: {
 	categories: Category[];
 	values: CashValues;
 	errors?: import("../transactions/cash").CashErrors;
 	back: string;
+	/** The ticks, when the sheet is open over Select mode (#350): Cancel and the backdrop go back with them. */
+	ticks?: number[];
 	today: string;
 }) {
+	// Closing (the backdrop or Cancel) returns to the list the sheet was opened from, with Select mode's ticks.
+	const closeHref = ticks ? selectModeHref(back, ticks) : back;
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
 			labelledBy="cash-title"
-			closeHref={back}
+			closeHref={closeHref}
 			still={errors !== undefined && Object.keys(errors).length > 0}
 		>
 			<h2
@@ -1945,6 +2092,8 @@ function CashSheet({
 				errors={errors}
 				today={today}
 				back={back}
+				cancelHref={closeHref}
+				ticks={ticks}
 				// Made each time the form is drawn: posting this form again records one transaction.
 				entryKey={crypto.randomUUID()}
 			/>
@@ -1953,17 +2102,25 @@ function CashSheet({
 }
 
 transactions.get("/transactions/cash/new", async (c) => {
-	const back = safeBack(
-		new URL(c.req.url).searchParams.get("back") ?? undefined,
-	);
+	const params = new URL(c.req.url).searchParams;
+	const back = safeBack(params.get("back") ?? undefined);
+	// In Select mode the ticks ride in the address (or, from a tap, in the request), and the sheet's close link
+	// and Cancel keep them, so closing the sheet leaves the ticks as they were (#350).
+	const selecting = params.get("select") === "1";
+	const ticks = selecting
+		? await selectableTickIds(c.env.DB, parseIds(params.getAll("ids")))
+		: undefined;
 	const today = await householdToday(c.env.DB);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		pageTitle: "Add cash · Tally",
+		selecting,
+		checkedIds: new Set(ticks),
 		sheet: (categories, today) => (
 			<CashSheet
 				categories={categories}
 				values={cashValues(today)}
 				back={back}
+				ticks={ticks}
 				today={today}
 			/>
 		),
@@ -1973,6 +2130,11 @@ transactions.get("/transactions/cash/new", async (c) => {
 transactions.post("/transactions/cash", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	// A form drawn in Select mode posts its ticks back, so a refused form keeps them (#350).
+	const selecting = form.get("select") === "1";
+	const ticks = selecting
+		? await selectableTickIds(c.env.DB, parseIds(form.getAll("ids")))
+		: undefined;
 	const today = await householdToday(c.env.DB);
 	const values = cashValues(today, form);
 	const { results: categories } = await c.env.DB.prepare(
@@ -1987,12 +2149,15 @@ transactions.post("/transactions/cash", async (c) => {
 		return renderList(c, today, filtersFrom(c, today, back), {
 			pageTitle: "Add cash · Tally",
 			status: 422,
+			selecting,
+			checkedIds: new Set(ticks),
 			sheet: () => (
 				<CashSheet
 					categories={categories}
 					values={values}
 					errors={parsed.errors}
 					back={back}
+					ticks={ticks}
 					today={today}
 				/>
 			),
@@ -2006,12 +2171,49 @@ transactions.post("/transactions/cash", async (c) => {
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const offerRecord = await categoryRuleOffer(
+		c.env.DB,
+		saved.merchant,
+		saved.categoryId,
+	);
+	const categoryName = categories.find(
+		(category) => category.id === saved.categoryId,
+	)?.name;
+	// The question names the merchant as the family named it, as the Select save does: the name the list
+	// shows for the saved entry, or its tidied bank text when no name is chosen.
+	const savedTx = offerRecord ? await getTransaction(c.env.DB, saved.id) : null;
+	const offer: RuleOfferValue | null =
+		offerRecord && categoryName
+			? {
+					...offerRecord,
+					merchant: savedTx?.displayName || tidyName(saved.merchant),
+					category: categoryName,
+					back,
+				}
+			: null;
+	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
+	if (!c.req.header("HX-Request"))
+		return offer
+			? renderRuleOffer(c, today, back, offer)
+			: c.redirect(back, 303);
+	// The save's own words come first in the announcement, with or without the question after them.
+	const savedWords = `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`;
+	if (offer) {
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message: `Added ${saved.merchant}`, type: "success" },
+				announce: ruleOfferAnnouncement(offer, savedWords),
+			}),
+		);
+		c.header("HX-Push-Url", back);
+		return renderRuleOffer(c, today, back, offer);
+	}
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: { message: `Added ${saved.merchant}`, type: "success" },
-			announce: `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`,
+			announce: savedWords,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -2565,7 +2767,7 @@ async function savePanel(
 	const filters = filtersFrom(c, today, back);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
-	).all<{ id: number; name: string }>();
+	).all<Category>();
 	const people = (
 		await c.env.DB.prepare(
 			"SELECT id, name FROM household_people ORDER BY id",
@@ -2645,8 +2847,13 @@ async function savePanel(
 		parsed.value.nameChanged = true;
 
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
-	// when the amount broke its parts, so the panel offers Change the parts for that amount.
-	const showErrors = (errors: EditErrors, changePartsTotalCents?: number) => {
+	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
+	// is the household as it is now, used when a For person was removed during the save.
+	const showErrors = (
+		errors: EditErrors,
+		changePartsTotalCents?: number,
+		shownPeople: HouseholdPerson[] = people,
+	) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -2679,7 +2886,7 @@ async function savePanel(
 					tx={tx}
 					back={back}
 					categories={all}
-					people={people}
+					people={shownPeople}
 					values={values}
 					refunds={refunds}
 					errors={errors}
@@ -2754,7 +2961,18 @@ async function savePanel(
 		},
 		actor(c),
 	);
-	if (!result.saved)
+	if (!result.saved) {
+		if ("personMissing" in result)
+			// Removed since this page loaded the household: the panel shows the household as it is now.
+			return showErrors(
+				{ forPerson: FOR_PERSON_ERROR },
+				undefined,
+				(
+					await c.env.DB.prepare(
+						"SELECT id, name FROM household_people ORDER BY id",
+					).all<HouseholdPerson>()
+				).results,
+			);
 		return "refundLeftCents" in result
 			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
 			: result.cashError === "split"
@@ -2762,6 +2980,36 @@ async function savePanel(
 				: showErrors({
 						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
+	}
+	// The rule offer asks about the whole store, so a name given to this one transaction ("This one only")
+	// doesn't stand in for it. An unnamed store is named by its tidied text, never the raw bank string (#93),
+	// or by the suggestion its rows were showing when nothing was chosen (P29 A). A panel that didn't rename
+	// the store names it as stored, not as it was drawn.
+	const storeName =
+		(parsed.value.nameChanged === false || parsed.value.nameScope === "one"
+			? tx.merchantName
+			: parsed.value.displayName) ??
+		(tx.nameSuggested && !parsed.value.keepBankName
+			? tx.displayName
+			: tidyName(tx.rawName));
+	const ruleOfferRecord =
+		parsed.value.categoryId === null ||
+		parsed.value.categoryId === tx.categoryId ||
+		parsed.value.alwaysForMerchant
+			? null
+			: await ruleOfferForTransaction(c.env.DB, tx.id, parsed.value.categoryId);
+	const offerCategory = categories.find(
+		(cat) => cat.id === parsed.value.categoryId,
+	);
+	const ruleOffer =
+		ruleOfferRecord && offerCategory
+			? {
+					...ruleOfferRecord,
+					merchant: storeName,
+					category: offerCategory.name,
+					back,
+				}
+			: undefined;
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
@@ -2792,19 +3040,31 @@ async function savePanel(
 		guessAgain
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
+	if (!c.req.header("HX-Request"))
+		return ruleOffer
+			? renderRuleOffer(c, today, back, ruleOffer)
+			: c.redirect(back, 303);
 
 	// The toast and the announcer say what the row reads once saved, read back from the database: its own name,
 	// else the merchant's, else the bank's text tidied (never the raw bank string, #93). A split part keeps its
 	// purchase's own name when All doesn't reach it, so the toast names that, not the name the save gave.
-	const name =
-		(await getTransaction(c.env.DB, tx.id))?.displayName ?? tx.displayName;
+	const after = await getTransaction(c.env.DB, tx.id);
+	const name = after?.displayName ?? tx.displayName;
+	// A save that chose no name while the row still shows an undecided guess named nothing: it says just "Saved.".
+	const unnamed = after?.nameSuggested === true;
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;
-	const saved = category
-		? `Saved. ${name} is now ${category}.`
-		: `Saved ${name}.`;
+	// A one-off name that made Tally guess the category again had its category cleared (saveEdit), so the
+	// category the save posted is not what the row now shows: the announcer says Tally guesses it again.
+	const saved = unnamed
+		? "Saved."
+		: guessAgain
+			? `Saved ${name}. Tally guesses its category again.`
+			: category
+				? `Saved. ${name} is now ${category}.`
+				: `Saved ${name}.`;
 	// Linking a refund includes it, whatever the Exclude chip held.
 	const excludedNow =
 		refundOfId !== null && refundOfId !== current
@@ -2818,19 +3078,33 @@ async function savePanel(
 					? " It still counts while it pays a bill."
 					: " It's excluded from the budget."
 				: " It counts in the budget again.";
+	const keptWords = unnamed
+		? "Kept the details."
+		: `Kept the details for ${name}.`;
+	const saveWords = (keptDetails ? keptWords : saved) + exclusion;
+	const toastMessage = unnamed
+		? keptDetails
+			? "Kept details."
+			: "Saved."
+		: keptDetails
+			? `Kept details for ${name}`
+			: `Saved ${name}`;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: {
-				message: keptDetails ? `Kept details for ${name}` : `Saved ${name}`,
+				message: toastMessage,
 				type: "success",
 			},
-			announce:
-				(keptDetails ? `Kept the details for ${name}.` : saved) + exclusion,
+			announce: ruleOffer
+				? ruleOfferAnnouncement(ruleOffer, saveWords)
+				: saveWords,
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filters, { focusId: tx.id });
+	return ruleOffer
+		? renderRuleOffer(c, today, back, ruleOffer)
+		: renderList(c, today, filters, { focusId: tx.id });
 }
 
 /**
@@ -2850,6 +3124,70 @@ async function savePendingEdit(
 	form.set("amount", centsToAmount(totalCents));
 	return savePanel(c, (await getTransaction(c.env.DB, tx.id)) ?? tx, form);
 }
+
+async function respondToRuleOffer(c: Context<App>, yes: boolean) {
+	const form = await c.req.formData();
+	const merchantKey = form.get("merchant_key")?.toString() ?? "";
+	const categoryId = Number(form.get("category"));
+	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
+	const validCategory = await c.env.DB.prepare(
+		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
+	)
+		.bind(categoryId)
+		.first<{ id: number; name: string }>();
+	const askedName = form.get("merchant")?.toString() ?? "";
+	const merchantName = merchantKey
+		? await c.env.DB.prepare(
+				"SELECT display_name AS displayName FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first<{ displayName: string | null }>()
+		: null;
+	const offer =
+		validCategory && merchantKey
+			? await categoryRuleOffer(c.env.DB, merchantKey, categoryId)
+			: null;
+	const message =
+		yes && offer && validCategory
+			? `Always use ${validCategory.name} for ${askedName || merchantName?.displayName || tidyName(merchantKey)}.`
+			: validCategory
+				? `Saved as ${validCategory.name}.`
+				: "Saved.";
+	if (yes && offer && validCategory)
+		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusHeading: true,
+	});
+}
+
+function renderRuleOffer(
+	c: Context<App>,
+	today: string,
+	back: string,
+	value: RuleOfferValue,
+) {
+	return renderList(c, today, filtersFrom(c, today, back), {
+		sheet: () => (
+			<BottomSheet labelledBy="rule-offer-title" closeHref={back}>
+				<RuleOffer value={value} focus />
+			</BottomSheet>
+		),
+	});
+}
+
+transactions.post("/transactions/rule-offer", (c) =>
+	respondToRuleOffer(c, true),
+);
+transactions.post("/transactions/rule-offer/dismiss", (c) =>
+	respondToRuleOffer(c, false),
+);
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));

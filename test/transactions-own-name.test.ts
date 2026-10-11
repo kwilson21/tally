@@ -369,6 +369,26 @@ describe("a name for one transaction (decision 101)", () => {
 		expect((await rowOf(id))?.displayName).toBe("Blue bottle cof");
 	});
 
+	it("a save that names nothing while the row shows an undecided guess says just Saved.", async () => {
+		const id = await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+		const { res } = await post(
+			`/transactions/${id}`,
+			{ back: "/transactions?month=all", note: "Dinner" },
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved.");
+		expect(announceOf(res)).toBe("Saved.");
+		expect(await merchant(RAW)).toMatchObject({
+			display_name: null,
+			suggestion_status: "pending",
+		});
+		expect(await rowOf(id)).toMatchObject({
+			displayName: "Blue Bottle Coffee",
+			nameSuggested: true,
+		});
+	});
+
 	it("a save with nothing ticked names a row with its own name in the toast, not the bank's text", async () => {
 		const { a } = await amazon();
 		await db

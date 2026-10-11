@@ -223,6 +223,25 @@ describe("reduced motion", () => {
 		);
 		expect(desktop?.decls.get("animation-name")).toBe("sheet-slide");
 	});
+
+	it("pauses the list's links, and dims Set category and Exclude on the round marks' 150 ms step (#350)", () => {
+		// The links take no taps while a list loads, and fade to 40% in one step after 150 ms, like the marks.
+		const links = ".selection-list.htmx-request a[hx-get]";
+		expect(decl(links, "pointer-events")).toBe("none");
+		expect(decl(links, "opacity")).toBe("0.4");
+		expect(decl(links, "transition")).toBe(
+			"opacity var(--duration-pause) step-end",
+		);
+		for (const button of [
+			".selection-list.htmx-request #set-category-selection",
+			".selection-list.htmx-request #exclude-selection",
+		]) {
+			expect(decl(button, "opacity"), button).toBe("0.4");
+			expect(decl(button, "transition"), button).toBe(
+				"opacity var(--duration-pause) step-end",
+			);
+		}
+	});
 });
 
 describe("pages", () => {

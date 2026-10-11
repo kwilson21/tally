@@ -38,8 +38,10 @@ export function allUpdateCount({
 }
 
 /**
- * The label of "All": "All 23 from Amazon", never "All 1" ("This one and later ones") or "All 2" ("Both
- * from Amazon"). A transaction with its own name that "All" reaches adds "this one too".
+ * The label of "All": "All 23 from Amazon", never "All 0" or "All 1" ("This one and later ones") or "All 2"
+ * ("Both from Amazon"). A transaction with its own name that "All" reaches adds "this one too". A count
+ * below one only happens when a split part's purchase keeps its own name, and says the same one-transaction
+ * words, with the owned names listed under it (allNotes).
  */
 export function allLabel({
 	count,
@@ -50,7 +52,7 @@ export function allLabel({
 	merchant: string;
 	thisOwn: boolean;
 }): string {
-	if (count === 1) return "This one and later ones";
+	if (count <= 1) return "This one and later ones";
 	const thisToo = thisOwn ? ", this one too" : "";
 	return count === 2
 		? `Both from ${merchant}${thisToo}`

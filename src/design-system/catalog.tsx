@@ -72,6 +72,7 @@ import { NetWorthChart } from "../views/net-worth-chart";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
+import { RuleOffer } from "../views/rule-offer";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -146,6 +147,7 @@ const SECTIONS = [
 	["settings", "Settings"],
 	["trends", "Trends"],
 	["rows", "Rows"],
+	["categorization", "Categorization"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
 	["demo", "Guidance"],
@@ -1156,6 +1158,8 @@ function HomeTopGroup() {
 
 /** The sample page's selectable rows, 25 to a page as the list draws it. */
 const SAMPLE_PAGE_IDS = Array.from({ length: 25 }, (_, i) => 101 + i);
+/** Ticks on another page: not in SAMPLE_PAGE_IDS. */
+const OFF_PAGE_IDS = Array.from({ length: 76 }, (_, i) => 201 + i);
 
 function Rows() {
 	return (
@@ -1171,7 +1175,7 @@ function Rows() {
 					"Chip",
 					"WhyLink",
 				]}
-				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate."
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
 			>
 				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
@@ -1680,7 +1684,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.” after the category it went back to, or in Needs category with none, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
 			>
 				<State label="Above the list, once only while a suggested name is shown">
 					<div class="max-w-xl">
@@ -1771,38 +1775,94 @@ function Rows() {
 					"SelectionActionBar",
 					"SelectAllOnPage",
 					"SelectionActionButtons",
+					"SelectionLimit",
+					"NotOnPage",
+					"SelectedCount",
 					"SelectableTransactionRow",
 					"Button",
 				]}
-				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it that ticks every row on the page (“Select all 25”) until every row is ticked, and Set category and Exclude on a second line (P70 A and P81 A)."
+				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it that ticks every row on the page (“Select all 25”) until every row is ticked, and Set category and Exclude on a second line (P70 A and P81 A). Ticks that aren't on this page sit on a line of their own, closed or open, and past 100 the bar says so in brick (#350)."
 			>
 				<State label="Some rows ticked: the link offers the page">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
-							label="3 selected"
-							href="/transactions?select=1"
+							count={3}
+							notOnPage={0}
+							ticks={[101, 103, 104]}
+							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set([101, 103, 104])}
 						/>
 					</div>
 				</State>
 				<State label="Every row ticked: the link is gone">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
-							label="25 selected"
-							href="/transactions?select=1"
+							count={25}
+							notOnPage={0}
+							ticks={SAMPLE_PAGE_IDS}
+							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set(SAMPLE_PAGE_IDS)}
 						/>
 					</div>
 				</State>
 				<State label="Nothing ticked: the actions wait, the link still offers the page">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
-							label="0 selected"
-							href="/transactions?select=1"
+							count={0}
+							notOnPage={0}
+							ticks={[]}
+							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set()}
+							disabled
+						/>
+					</div>
+				</State>
+				<State label="Ticks not on this page, closed: a terracotta line that opens onto them">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={4}
+							notOnPage={3}
+							ticks={[101, ...OFF_PAGE_IDS.slice(0, 3)]}
+							rows={
+								<ul class="divide-y divide-rule">
+									{TRANSACTION_ROWS.slice(0, 3).map((state) => (
+										<SelectableTransactionRow row={state.row} checked />
+									))}
+								</ul>
+							}
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+						/>
+					</div>
+				</State>
+				<State label="Ticks not on this page, open: the rows, ticked, in a list up to 40% of the screen">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={4}
+							notOnPage={3}
+							ticks={[101, ...OFF_PAGE_IDS.slice(0, 3)]}
+							openNotOnPage
+							rows={
+								<ul class="divide-y divide-rule">
+									{TRANSACTION_ROWS.slice(0, 3).map((state) => (
+										<SelectableTransactionRow row={state.row} checked />
+									))}
+								</ul>
+							}
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+						/>
+					</div>
+				</State>
+				<State label="Over 100: the words in brick, and both actions wait">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={101}
+							notOnPage={76}
+							ticks={[...SAMPLE_PAGE_IDS, ...OFF_PAGE_IDS]}
+							rows={undefined}
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
 							disabled
 						/>
 					</div>
@@ -1819,16 +1879,15 @@ function Rows() {
 						</ul>
 						<div class="border-t border-ink bg-paper py-3">
 							<SelectionActionBar
-								label="1 selected"
-								href="/transactions?select=1"
+								count={1}
+								notOnPage={0}
+								ticks={TRANSACTION_ROWS.slice(1, 2).map(
+									(state) => state.row.id,
+								)}
+								back="/transactions"
 								pageIds={TRANSACTION_ROWS.slice(0, 2).map(
 									(state) => state.row.id,
 								)}
-								ticked={
-									new Set(
-										TRANSACTION_ROWS.slice(1, 2).map((state) => state.row.id),
-									)
-								}
 								disabled
 							/>
 						</div>
@@ -1889,6 +1948,39 @@ function Rows() {
 					</div>
 				</State>
 			</Specimen>
+		</Group>
+	);
+}
+
+function Categorization() {
+	return (
+		<Group id="categorization" title="Categorization">
+			<Specimen
+				id="rule-offer"
+				title="RuleOffer"
+				tier="visual"
+				components={["RuleOffer", "Button", "Icon"]}
+				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time."
+			>
+				<div hx-ignore class="max-w-xl">
+					<RuleOffer
+						value={{
+							merchantKey: "COSTCO",
+							merchant: "Costco",
+							categoryId: 1,
+							category: "Groceries",
+							count: 3,
+							back: "/transactions",
+						}}
+					/>
+				</div>
+			</Specimen>
+			<p class="mt-4 text-muted">
+				Use: the question follows every matching save until the merchant has a
+				rule. Not now closes it without saving a rule; Yes applies the existing
+				merchant rule behavior. All answers use server forms, and every swap is
+				announced.
+			</p>
 		</Group>
 	);
 }
@@ -2399,7 +2491,7 @@ function Controls() {
 				title="NameChoices"
 				tier="interactive"
 				components={["NameChoices", "RenameChoices"]}
-				sentence="Choosing what a merchant is called when there are names for it (P29 A, decision 64): the guesses, with where they came from under them (P87 B, decision 80: “Tally's guess”, or “From your bank” for the name the bank sent), keeping the bank's tidied text, or a name of your own. Nothing is chosen to start with, so nothing is renamed until a person decides."
+				sentence="Choosing what a transaction is called (P29 A, decision 64, decision 101): one ticked list, one choice per line, with each suggested name and where it came from under it (P87 B, decision 80: “Tally's guess”, or “From your bank”), the store's own name, and “Type your own”. Nothing is ticked to start with, so nothing is renamed until a person decides. Ticking a name shows the Rename list, “This one only” or “All N from the store”, and each choice says what it changes."
 			>
 				<State label="Three guesses waiting: nothing chosen yet (tap one: it fills as it does in the edit panel)">
 					<div class="max-w-xl">
@@ -3741,6 +3833,7 @@ export function Catalog() {
 			<SettingsGroup />
 			<TrendsGroup />
 			<Rows />
+			<Categorization />
 			<Controls />
 			<Feedback />
 			<Demo />

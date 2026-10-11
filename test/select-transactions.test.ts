@@ -92,6 +92,31 @@ describe("select several transactions", () => {
 		).toMatchObject({ category_id: 1, category_source: "user" });
 	});
 
+	it("a person's category for a restored purchase clears its note and takes the person's source", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id=2, category_source='jev', split_removed_from_cents=1234 WHERE id=111",
+		).run();
+		const res = await request("/transactions/select/category/save", {
+			method: "POST",
+			body: new URLSearchParams({
+				ids: "111",
+				category: "1",
+				back: "/transactions?month=all",
+			}),
+			headers: { "HX-Request": "true" },
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id,category_source,split_removed_from_cents FROM transactions WHERE id=111",
+			).first(),
+		).toEqual({
+			category_id: 1,
+			category_source: "user",
+			split_removed_from_cents: null,
+		});
+	});
+
 	it.each(["99999", "9"])(
 		"rejects unknown or archived category %s",
 		async (category) => {
@@ -186,6 +211,17 @@ describe("select several transactions", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,parent_id,category_id) SELECT 991,account_id,date,700,raw_name,110,1 FROM transactions WHERE id=110",
 			),
 		]);
+
+	/** 101 real rows (ids 5001 to 5101), so a tick on each one exists and the bar can count it. */
+	const addHundredOneRows = async () => {
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 101)
+			INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id)
+			SELECT 5000 + n.i, src.account_id, src.date, -100 - n.i, src.raw_name, src.category_id
+			FROM n, (SELECT account_id,date,raw_name,category_id FROM transactions WHERE id=110) AS src`,
+		).run();
+		return Array.from({ length: 101 }, (_, i) => 5001 + i);
+	};
 
 	it("changes only the posted ids and leaves every other row and the split parent alone", async () => {
 		await splitParent();
@@ -475,8 +511,8 @@ describe("select several transactions", () => {
 		["/transactions/select/category", {}],
 		["/transactions/select/category/save", { category: "1" }],
 	])("rejects more than 100 ids at %s", async (path, extra) => {
-		const ids = Array.from({ length: 101 }, (_, i) => 1000 + i);
-		ids[0] = 111;
+		// 101 real rows: a missing id drops out before the limit counts (#350), so made-up ids would not reach it.
+		const ids = await addHundredOneRows();
 		const before = await snapshot();
 		const res = await post(
 			path,
@@ -484,7 +520,7 @@ describe("select several transactions", () => {
 		);
 		expect(res.status).toBe(422);
 		expect(await res.text()).toMatch(
-			/role="alert"[^>]*>Select 100 or fewer transactions\./,
+			/role="alert"[\s\S]*?Select 100 or fewer transactions\./,
 		);
 		expect(await snapshot()).toEqual(before);
 	});
@@ -518,17 +554,24 @@ describe("select several transactions", () => {
 		html
 			.match(/<a href="([^"]*)"[^>]*>Select all \d+<\/a>/)?.[1]
 			?.replaceAll("&amp;", "&");
-	/** The count's fragment for these ticked ids, on a page whose selectable rows are `pageIds`. */
-	const countFragment = async (ids: number[], pageIds: number[]) =>
-		(
-			await request(
-				`/transactions/select/count?${new URLSearchParams([
-					...ids.map((id) => ["ids", String(id)]),
-					["page-ids", pageIds.join(",")],
-					["back", "/transactions?month=all"],
-				])}`,
-			)
-		).text();
+	/**
+	 * The count's reply for these ticked ids, on a page whose selectable rows are `pageIds`. `disclosure`
+	 * sends the marker a form carries while the "not on this page" line is drawn (#350).
+	 */
+	const countReply = (ids: number[], pageIds: number[], disclosure = false) =>
+		request(
+			`/transactions/select/count?${new URLSearchParams([
+				...ids.map((id) => ["ids", String(id)]),
+				["page-ids", pageIds.join(",")],
+				["back", "/transactions?month=all"],
+				...(disclosure ? [["not-on-page", "1"]] : []),
+			])}`,
+		);
+	const countFragment = async (
+		ids: number[],
+		pageIds: number[],
+		disclosure = false,
+	) => (await countReply(ids, pageIds, disclosure)).text();
 
 	it("offers Select all for the page's selectable rows, with none or some ticked", async () => {
 		const html = await pageHtml("month=all&select=1");
@@ -654,8 +697,12 @@ describe("select several transactions", () => {
 	it("focuses Set category in the reply to Select all, since the link leaves with that reply", async () => {
 		const page = await pageHtml("month=all&select=1");
 		const hxGet = attribute(selectAllTag(page), "hx-get") ?? "";
+		// The page's rows come as page-ids, which htmx includes with the request (#350).
+		const pageRows = page.match(/name="page-ids" value="([^"]*)"/)?.[1] ?? "";
 		const reply = await (
-			await request(hxGet, { headers: { "HX-Request": "true" } })
+			await request(`${hxGet}&page-ids=${pageRows}`, {
+				headers: { "HX-Request": "true" },
+			})
 		).text();
 		const setCategory =
 			reply.match(/<button[^>]*id="set-category-selection"[^>]*>/)?.[0] ?? "";
@@ -670,8 +717,9 @@ describe("select several transactions", () => {
 		const page = await pageHtml("month=all&select=1");
 		const link = selectAllTag(page);
 		expect(attribute(link, "hx-push-url")).toBe(selectAllHref(page));
+		// Its own address has no ids: htmx would replace them with the ticks it includes (#350).
 		expect(attribute(link, "hx-get")).toBe(
-			`${selectAllHref(page)}&focus=set-category-selection`,
+			"/transactions?month=all&select=1&focus=set-category-selection",
 		);
 	});
 
@@ -782,5 +830,643 @@ describe("select several transactions", () => {
 		expect(tick).toContain(`value="${rowIds(html)[0]}"`);
 		const plain = await pageHtml("month=all&page=2&select=1", true);
 		expect(plain).not.toContain("autofocus");
+	});
+	describe("ticks across pages (#350)", () => {
+		/** Three rows on page 1, ticked as a person's taps leave them. */
+		const pageOneTicks = async () => (await firstPageIds()).slice(0, 3);
+		/** Page 2's selectable rows: none of them is on page 1, so page 1's ticks are not on this page. */
+		const pageTwoRows = async () =>
+			rowIds(await pageHtml("month=all&page=2&select=1"));
+		const ticksParam = (ids: number[]) => ids.join(",");
+		const htmxHeaders = { headers: { "HX-Request": "true" } };
+		/** The form that holds the bar, its ticks and its rows: a closed disclosure's ticks are in it too. */
+		const selectionForm = (html: string) => {
+			const start = html.indexOf('<form id="selection-form"');
+			return start < 0 ? "" : html.slice(start, html.indexOf("</form>", start));
+		};
+		/** The ids a link or an address carries, once each, in the order written. */
+		const idsIn = (url: string) => [
+			...new Set(
+				new URL(url, "http://tally.test").searchParams
+					.getAll("ids")
+					.flatMap((value) => value.split(","))
+					.filter(Boolean)
+					.map(Number),
+			),
+		];
+		const sorted = (ids: number[]) => [...ids].sort((a, b) => a - b);
+		/** The ids in the no-JS hidden fields of the filter form. */
+		const noscriptIds = (html: string) =>
+			[
+				...(html.match(/<noscript>[\s\S]*?<\/noscript>/g) ?? [])
+					.join("")
+					.matchAll(/name="ids" value="(\d+)"/g),
+			].map((m) => Number(m[1]));
+
+		it("keeps page 1's ticks on page 2, and the bar counts them as not on this page", async () => {
+			const ids = await pageOneTicks();
+			expect(ids).toHaveLength(3);
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+				true,
+			);
+			expect(html).toMatch(
+				/id="selected-count"[^>]*>3 selected<span class="sr-only">, 3 not on this page<\/span>/,
+			);
+			expect(html).toContain("3 not on this page");
+			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
+		});
+
+		it("draws the off-page ticks in a closed disclosure inside the selection form, scrolling at 40% of the screen", async () => {
+			const ids = await pageOneTicks();
+			const form = selectionForm(
+				await pageHtml(
+					`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+					true,
+				),
+			);
+			expect(form).toContain('id="not-on-page"');
+			expect(form).toMatch(/<details(?![^>]* open)[^>]*>/);
+			expect(form).toContain("max-h-[40vh]");
+			expect(form).toContain("overflow-y-auto");
+			for (const id of ids) expect(form).toContain(`name="ids" value="${id}"`);
+		});
+
+		it("leaves the disclosure out once every tick is back on the list", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&select=1&ids=${ticksParam(ids)}`,
+				true,
+			);
+			expect(html).toMatch(/id="selected-count"[^>]*>3 selected</);
+			expect(html).not.toContain("not on this page");
+			expect(html).not.toContain("<details");
+		});
+
+		it("counts the unticked rows out, and says how many ticks are not on this page", async () => {
+			const [a, b] = (await pageOneTicks()) as [number, number];
+			expect(await countFragment([a, b], [])).toContain(
+				'2 selected<span class="sr-only">, 2 not on this page</span>',
+			);
+			expect(await countFragment([a], [])).toContain(
+				'1 selected<span class="sr-only">, 1 not on this page</span>',
+			);
+			const onPage = await countFragment([a, b], [a, b]);
+			expect(onPage).toMatch(/^2 selected</);
+			expect(onPage).not.toContain('class="sr-only"');
+		});
+
+		it("takes the line away once no tick is off the page, rather than saying 0 not on this page", async () => {
+			const [a, b] = (await pageOneTicks()) as [number, number];
+			const onPage = await countFragment([a, b], [a, b]);
+			expect(onPage).toContain(
+				'<div id="not-on-page" class="empty:hidden" hx-swap-oob="outerHTML"></div>',
+			);
+			expect(onPage).not.toContain("not on this page");
+			expect(onPage).not.toContain("<details");
+		});
+
+		it.each([
+			["/transactions/select/category/save", { category: "1" }],
+			["/transactions/select/exclude", {}],
+		])(
+			"%s changes exactly the ticks that are not on this page",
+			async (path, fields) => {
+				const ids = await pageOneTicks();
+				await env.DB.prepare(
+					`UPDATE transactions SET category_id=NULL, category_source=NULL, excluded=0, excluded_source=NULL WHERE id IN (${ids.map(() => "?").join(",")})`,
+				)
+					.bind(...ids)
+					.run();
+				const before = await snapshot();
+				const res = await post(
+					path,
+					form(ids, { ...fields, back: "/transactions?month=all&page=2" }),
+				);
+				expect(res.status).toBe(200);
+				const after = await snapshot();
+				const changed = after
+					.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
+					.map((row) => row.id);
+				expect(changed.sort()).toEqual([...ids].sort());
+			},
+		);
+
+		it("says the ticks in words on a full page load without JavaScript, not Choose rows", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+			);
+			expect(html).toMatch(
+				/id="selected-count"[^>]*>3 selected<span class="sr-only">, 3 not on this page<\/span>/,
+			);
+			expect(html).not.toContain("Choose rows, then an action");
+		});
+
+		it("keeps the ticks through a filter change, and counts the rows it hides as not on this page", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam(ids)}`,
+				true,
+			);
+			expect(html).toContain("No transactions match these filters.");
+			expect(html).toMatch(
+				/id="selected-count"[^>]*>3 selected<span class="sr-only">, 3 not on this page<\/span>/,
+			);
+			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
+		});
+
+		it("keeps the ticks when Set category opens, and lists the ones not on this page behind the sheet", async () => {
+			const ids = await pageOneTicks();
+			const res = await post(
+				"/transactions/select/category",
+				form(ids, { back: "/transactions?month=all&page=2" }),
+			);
+			const html = await res.text();
+			expect(html).toContain("Set category for 3");
+			expect(html).toContain("3 not on this page");
+		});
+
+		it("sends Select all's ticks and the page's rows as parameters, not in its own address", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+				true,
+			);
+			const link = html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0] ?? "";
+			expect(link).toContain(
+				'hx-include="#selection-form input[name=ids]:checked, #select-all-page input[name=page-ids]"',
+			);
+			expect(link).toContain(
+				'hx-get="/transactions?month=all&amp;page=2&amp;select=1&amp;focus=set-category-selection"',
+			);
+		});
+
+		it("ticks the page's rows and keeps the ticks not on this page when Select all comes back", async () => {
+			const off = await pageOneTicks();
+			const pageTwo = rowIds(await pageHtml("month=all&page=2&select=1"));
+			const html = await pageHtml(
+				`month=all&page=2&select=1&focus=set-category-selection&ids=${ticksParam(off)}&page-ids=${pageTwo.join(",")}`,
+				true,
+			);
+			expect(html).toMatch(
+				new RegExp(
+					`id="selected-count"[^>]*>${off.length + pageTwo.length} selected<span class="sr-only">, ${off.length} not on this page</span>`,
+				),
+			);
+		});
+
+		it("pushes the address with the ticks in it, and leaves the focus marker out", async () => {
+			const ids = await pageOneTicks();
+			const res = await request(
+				`/transactions?month=all&page=2&select=1&focus=first-tick&ids=${ticksParam(ids)}`,
+				htmxHeaders,
+			);
+			expect(res.headers.get("HX-Push-Url")).toBe(
+				`/transactions?month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+			);
+		});
+
+		it("pushes no address for a plain page load", async () => {
+			const res = await request("/transactions?month=all&page=2&select=1");
+			expect(res.headers.get("HX-Push-Url")).toBeNull();
+		});
+
+		it("keeps the ticks on a reload, as they ride in the address", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+			);
+			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
+		});
+
+		it("drops every tick with Done, whose link carries no ticks", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+				true,
+			);
+			expect(html).toMatch(
+				/href="\/transactions\?month=all&amp;page=2" id="select-toggle"/,
+			);
+		});
+
+		it("refuses 101 ticks in words, disables both actions, and trims nothing", async () => {
+			const many = Array.from({ length: 101 }, (_, i) => 1000 + i);
+			const text = await countFragment(many, []);
+			expect(text).toContain("101 selected");
+			expect(text).toMatch(
+				/<p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p>/,
+			);
+			expect(text).toMatch(
+				/<button(?=[^>]*id="set-category-selection")[^>]*\sdisabled(?=[\s>=])/,
+			);
+			expect(text).toMatch(
+				/<button(?=[^>]*id="exclude-selection")[^>]*\sdisabled(?=[\s>=])/,
+			);
+		});
+
+		it("allows exactly 100 ticks, with the actions on and no warning", async () => {
+			const hundred = Array.from({ length: 100 }, (_, i) => 1000 + i);
+			const text = await countFragment(hundred, []);
+			expect(text).toContain("100 selected");
+			expect(text).not.toContain("Select 100 or fewer");
+			expect(text).not.toMatch(
+				/<button(?=[^>]*id="set-category-selection")[^>]*\sdisabled(?=[\s>=])/,
+			);
+		});
+
+		it("lists 101 real ticks without trimming any of them", async () => {
+			const ids = await addHundredOneRows();
+			const html = await pageHtml(
+				`month=all&select=1&ids=${ticksParam(ids)}`,
+				true,
+			);
+			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
+			expect(html).toContain("Select 100 or fewer transactions.");
+			expect(tickedIds(html)).toHaveLength(101);
+		});
+
+		it("keeps all 101 ticks when a refused Exclude redraws the list", async () => {
+			const ids = await addHundredOneRows();
+			const res = await post(
+				"/transactions/select/exclude",
+				form(ids, { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
+			expect(html).toContain("Select 100 or fewer transactions.");
+		});
+
+		it("keeps all 101 ticks in a refused Set category sheet, and in its Cancel", async () => {
+			const ids = await addHundredOneRows();
+			const res = await post(
+				"/transactions/select/category",
+				form(ids, { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
+			expect(html).toMatch(
+				/<a [^>]*href="[^"]*select=1&amp;ids=[^"]*"[^>]*>Cancel<\/a>/,
+			);
+		});
+
+		it("replaces the address with the ticks on each count, so a reload keeps them and a tap adds no history entry", async () => {
+			const ids = await pageOneTicks();
+			const res = await countReply(ids, []);
+			expect(res.headers.get("HX-Replace-Url")).toBe(
+				`/transactions?month=all&select=1&ids=${ticksParam(ids)}`,
+			);
+			expect(res.headers.get("HX-Push-Url")).toBeNull();
+		});
+
+		it("replaces the address with no ticks in it once none is ticked", async () => {
+			const res = await countReply([], []);
+			expect(res.headers.get("HX-Replace-Url")).toBe(
+				"/transactions?month=all&select=1",
+			);
+		});
+
+		it("moves focus to Select all when the last tick off the page is unticked from the disclosure", async () => {
+			const pageRows = await pageTwoRows();
+			const text = await countFragment(pageRows.slice(0, 1), pageRows, true);
+			expect(selectAllTag(text)).toContain(" autofocus");
+			expect(text.match(/ autofocus/g)?.length ?? 0).toBe(1);
+			expect(setCategoryFocused(text)).toBe(false);
+			expect(text).not.toContain('tabindex="-1"');
+		});
+
+		it("moves focus to the count when no Select all is drawn, so focus stays in the bar", async () => {
+			const pageRows = await pageTwoRows();
+			const text = await countFragment(pageRows, pageRows, true);
+			expect(selectAllTag(text)).toBe("");
+			expect(text).toMatch(
+				/^<span[^>]*tabindex="-1"[^>]*autofocus[^>]*>\d+ selected<\/span>/,
+			);
+		});
+
+		it("sends the disclosure's marker with every count only while the not-on-page line is drawn", async () => {
+			const withLine = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(await pageOneTicks())}`,
+			);
+			expect(withLine).toContain(
+				'<input type="hidden" name="not-on-page" value="1"',
+			);
+			const withoutLine = await pageHtml("month=all&page=2&select=1");
+			expect(withoutLine).not.toContain('name="not-on-page"');
+		});
+
+		it("carries the ticks in the no-JS page links and filter form, and never in the htmx requests", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+			);
+			const links = pageLinks(html);
+			expect(links.length).toBeGreaterThan(0);
+			for (const link of links) {
+				expect(attribute(link, "href")).toContain(`ids=${ticksParam(ids)}`);
+				expect(attribute(link, "hx-get")).toContain("focus=first-tick");
+				expect(attribute(link, "hx-get")).not.toContain("ids=");
+			}
+			// Without JavaScript the filter form submits these; with it, htmx ignores a noscript block.
+			const noscript = (
+				html.match(/<noscript>[\s\S]*?<\/noscript>/g) ?? []
+			).join("");
+			for (const id of ids)
+				expect(noscript).toContain(`name="ids" value="${id}"`);
+		});
+
+		it("takes no focus without the disclosure's marker, or while a tick is still off the page", async () => {
+			const pageRows = await pageTwoRows();
+			const plain = await countFragment(pageRows, pageRows);
+			expect(plain).not.toContain("autofocus");
+			expect(plain).not.toContain('tabindex="-1"');
+			const offPage = await countFragment(await pageOneTicks(), pageRows, true);
+			expect(offPage).toContain("3 not on this page");
+			expect(offPage).not.toContain("autofocus");
+		});
+
+		it("keeps select mode and every tick in Clear filters when the filters match nothing", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam(ids)}`,
+			);
+			expect(html).toContain("No transactions match these filters.");
+			const clear = html.match(/<a [^>]*>Clear filters<\/a>/)?.[0] ?? "";
+			const params = new URL(
+				attribute(clear, "href") ?? "",
+				"http://tally.test",
+			).searchParams;
+			expect(params.get("select")).toBe("1");
+			expect(params.get("ids")?.split(",").map(Number)).toEqual(ids);
+		});
+
+		it("keeps the ticks not on this page in Select all's plain link, each once", async () => {
+			const off = await pageOneTicks();
+			const pageRows = await pageTwoRows();
+			// The page's first row is ticked already, so the link must not add it twice.
+			const ticked = [...off, pageRows[0] as number];
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ticked)}`,
+			);
+			const href = selectAllHref(html) ?? "";
+			const linked =
+				new URL(href, "http://tally.test").searchParams
+					.get("ids")
+					?.split(",")
+					.map(Number) ?? [];
+			expect(new Set(linked).size).toBe(linked.length);
+			expect([...linked].sort()).toEqual([...off, ...pageRows].sort());
+			const after = await (await request(href)).text();
+			expect(after).toMatch(
+				new RegExp(
+					`id="selected-count"[^>]*>${linked.length} selected<span class="sr-only">, ${off.length} not on this page</span>`,
+				),
+			);
+		});
+
+		it("says a refused Exclude over 100 once, in the bar", async () => {
+			const ids = await addHundredOneRows();
+			const res = await post(
+				"/transactions/select/exclude",
+				form(ids, { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html.match(/Select 100 or fewer transactions\./g)).toHaveLength(1);
+			expect(html).toMatch(
+				/<div id="selection-limit"[^>]*><p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p><\/div>/,
+			);
+		});
+
+		it("keeps the ticks in the Add cash sheet's close link and Cancel, and in its address", async () => {
+			const ids = await pageOneTicks();
+			const list = await pageHtml(`month=all&select=1&ids=${ticksParam(ids)}`);
+			const addCash = list.match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+			const cashHref = attribute(addCash, "href") ?? "";
+			expect(cashHref).toBe(
+				`/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall&select=1&ids=${ticksParam(ids)}`,
+			);
+			// With JavaScript the request carries the ticks as they are when tapped, not as drawn.
+			expect(attribute(addCash, "hx-get")).toBe(
+				"/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall&select=1",
+			);
+			expect(attribute(addCash, "hx-include")).toBe(
+				"#selection-form input[name=ids]:checked",
+			);
+			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
+			const sheetUrl = `/transactions/cash/new?${new URLSearchParams([
+				["back", "/transactions?month=all"],
+				["select", "1"],
+				...ids.map((id) => ["ids", String(id)]),
+			])}`;
+			const sheet = await (await request(sheetUrl, htmxHeaders)).text();
+			const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+			expect(attribute(backdrop ?? "", "href")).toBe(close);
+			const cancel = sheet.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+			expect(attribute(cancel, "href")).toBe(close);
+			// The sheet's form still returns to the plain list, and a reload of the sheet (no JavaScript) keeps the ticks.
+			expect(sheet).toContain('name="back" value="/transactions?month=all"');
+			const reload = await (await request(cashHref)).text();
+			expect([...tickedIds(reload)].sort()).toEqual([...ids].sort());
+		});
+
+		it("keeps Select mode and the ticks when the Add cash form is refused, in its close link, Cancel and fields", async () => {
+			const ids = await pageOneTicks();
+			const res = await post(
+				"/transactions/cash",
+				form(ids, {
+					amount: "0",
+					date: todayIn(DEFAULT_TIME_ZONE),
+					merchant: "Corner shop",
+					category: "1",
+					note: "",
+					back: "/transactions?month=all",
+					select: "1",
+				}),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).toContain("Enter an amount greater than zero.");
+			expect(html).toMatch(
+				new RegExp(`id="selected-count"[^>]*>${ids.length} selected`),
+			);
+			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
+			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
+			const backdrop =
+				html.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0] ?? "";
+			expect(attribute(backdrop, "href")).toBe(close);
+			const cancel = html.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+			expect(attribute(cancel, "href")).toBe(close);
+			// The refused form carries Select mode and the ticks, so its next try keeps them too.
+			const cashForm =
+				html.match(
+					/<form[^>]*action="\/transactions\/cash"[\s\S]*?<\/form>/,
+				)?.[0] ?? "";
+			expect(cashForm).toContain('name="select" value="1"');
+			for (const id of ids)
+				expect(cashForm).toContain(`name="ids" value="${id}"`);
+		});
+
+		it("counts 100 real ticks on a full page load, past a missing one and a split parent, and carries only those into the links", async () => {
+			const real = (await addHundredOneRows()).slice(0, 100);
+			await splitParent();
+			const html = await pageHtml(
+				`month=all&select=1&ids=${ticksParam([...real, 999999, 110])}`,
+			);
+			expect(html).toMatch(/id="selected-count"[^>]*>100 selected/);
+			expect(html).not.toContain("Select 100 or fewer transactions.");
+			expect(html).not.toMatch(
+				/<button(?=[^>]*id="set-category-selection")[^>]*\sdisabled(?=[\s>=])/,
+			);
+			expect(html).not.toMatch(
+				/<button(?=[^>]*id="exclude-selection")[^>]*\sdisabled(?=[\s>=])/,
+			);
+			const links = pageLinks(html);
+			expect(links.length).toBeGreaterThan(0);
+			for (const link of links)
+				expect(sorted(idsIn(attribute(link, "href") ?? ""))).toEqual(
+					sorted(real),
+				);
+			expect(sorted(noscriptIds(html))).toEqual(sorted(real));
+			const addCash = html.match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+			expect(sorted(idsIn(attribute(addCash, "href") ?? ""))).toEqual(
+				sorted(real),
+			);
+			// Select all's address also carries this page's own rows, as it always has; no stale id is in it.
+			const selectAll = idsIn(selectAllHref(html) ?? "");
+			expect(selectAll).not.toContain(999999);
+			expect(selectAll).not.toContain(110);
+			expect(new Set(selectAll)).toEqual(new Set([...real, ...rowIds(html)]));
+		});
+
+		it("pushes only the 100 real ticks into the address on an htmx list change", async () => {
+			const real = (await addHundredOneRows()).slice(0, 100);
+			await splitParent();
+			const res = await request(
+				`/transactions?month=all&select=1&ids=${ticksParam([...real, 999999, 110])}`,
+				htmxHeaders,
+			);
+			const pushed = res.headers.get("HX-Push-Url") ?? "";
+			expect(sorted(idsIn(pushed))).toEqual(sorted(real));
+			expect(pushed).not.toMatch(/focus=|page-ids=/);
+		});
+
+		it("pushes month=all with the ticks when a search is typed into an empty box in Select mode", async () => {
+			const ids = await pageOneTicks();
+			const res = await request(
+				`/transactions?select=1&q=abc&ids=${ticksParam(ids)}`,
+				{
+					headers: {
+						"HX-Request": "true",
+						"HX-Current-URL": "http://tally.test/transactions?select=1",
+					},
+				},
+			);
+			expect(res.headers.get("HX-Push-Url")).toBe(
+				`/transactions?q=abc&month=all&select=1&ids=${ticksParam(ids)}`,
+			);
+		});
+
+		it("names this month in the pushed address when a month picked from an empty box is this one", async () => {
+			const thisMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+			const ids = await pageOneTicks();
+			const res = await request(
+				`/transactions?select=1&q=abc&month=${thisMonth}&ids=${ticksParam(ids)}`,
+				{
+					headers: {
+						"HX-Request": "true",
+						"HX-Current-URL": `http://tally.test/transactions?select=1&month=${thisMonth}`,
+					},
+				},
+			);
+			expect(res.headers.get("HX-Push-Url")).toBe(
+				`/transactions?q=abc&month=${thisMonth}&select=1&ids=${ticksParam(ids)}`,
+			);
+		});
+
+		it("acts on exactly the 100 real ticks when one of 101 posted ids is stale", async () => {
+			const real = (await addHundredOneRows()).slice(0, 100);
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/exclude",
+				form([...real, 999999], { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(200);
+			const after = (await snapshot()) as SnapshotRow[];
+			const changed = after
+				.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
+				.map((row) => row.id);
+			expect(sorted(changed)).toEqual(sorted(real));
+		});
+
+		it("refuses 101 real ticks with one stale among them, says 101 selected and the limit once, in the bar", async () => {
+			const real = await addHundredOneRows();
+			const res = await post(
+				"/transactions/select/exclude",
+				form([...real, 999999], { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
+			expect(html.match(/Select 100 or fewer transactions\./g)).toHaveLength(1);
+			expect(html).toMatch(
+				/<div id="selection-limit"[^>]*><p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p><\/div>/,
+			);
+			expect(html).not.toContain('value="999999"');
+		});
+
+		it("leaves a stale tick out of Clear filters' address when the filters match nothing", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam([...ids, 999999])}`,
+			);
+			expect(html).toContain("No transactions match these filters.");
+			const clear = html.match(/<a [^>]*>Clear filters<\/a>/)?.[0] ?? "";
+			expect(idsIn(attribute(clear, "href") ?? "")).toEqual(ids);
+		});
+
+		it("leaves a stale tick out of the Add cash sheet's close link and Cancel", async () => {
+			const ids = await pageOneTicks();
+			const sheetUrl = `/transactions/cash/new?back=${encodeURIComponent("/transactions?month=all")}&select=1&ids=${ticksParam([...ids, 999999])}`;
+			const sheet = await (await request(sheetUrl, htmxHeaders)).text();
+			const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+			expect(idsIn(attribute(backdrop ?? "", "href") ?? "")).toEqual(ids);
+			const cancel = sheet.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+			expect(idsIn(attribute(cancel, "href") ?? "")).toEqual(ids);
+			expect(sheet).not.toContain('value="999999"');
+		});
+
+		it("leaves a stale tick out of a refused Add cash form's fields", async () => {
+			const ids = await pageOneTicks();
+			const res = await post(
+				"/transactions/cash",
+				form([...ids, 999999], {
+					amount: "0",
+					date: todayIn(DEFAULT_TIME_ZONE),
+					merchant: "Corner shop",
+					category: "1",
+					note: "",
+					back: "/transactions?month=all",
+					select: "1",
+				}),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).not.toContain('value="999999"');
+			const cashForm =
+				html.match(
+					/<form[^>]*action="\/transactions\/cash"[\s\S]*?<\/form>/,
+				)?.[0] ?? "";
+			expect(
+				sorted(
+					[...cashForm.matchAll(/name="ids" value="(\d+)"/g)].map((m) =>
+						Number(m[1]),
+					),
+				),
+			).toEqual(sorted(ids));
+		});
 	});
 });

@@ -458,6 +458,23 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		});
 	});
 
+	it("announces Saved with the name, and says Tally guesses its category again, not the category the save posted", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved Dog bed. Tally guesses its category again.");
+		expect(await rowOf(bakery)).toMatchObject({ category_id: null });
+	});
+
 	it("the store's own name under This one only is a one-off name too: Jev guesses the category again", async () => {
 		const category = await firstCategory();
 		await pickedByTally(category);

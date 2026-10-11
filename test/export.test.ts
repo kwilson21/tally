@@ -180,7 +180,7 @@ describe("data exports", () => {
 		expect(csv).toContain("SPLIT CHILD");
 	});
 
-	it("a split's parts carry the purchase's own name in the CSV, since only the parts are exported; a part's own name wins", async () => {
+	it("own_name is the name a person gave that row, so a split part without one of its own leaves it empty; merchant still says the store", async () => {
 		await env.DB.prepare(
 			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, is_split, parent_id, own_name)
 			 VALUES (9011, 1, '2026-09-20', 3000, 'SPLIT PURCHASE PARENT', 1, NULL, 'Dog bed'),
@@ -195,7 +195,8 @@ describe("data exports", () => {
 			csv.split("\r\n").find((line) => line.includes(raw)) ?? "";
 
 		expect(csv).not.toContain("SPLIT PURCHASE PARENT");
-		expect(row("SPLIT PART PLAIN").split(",")[3]).toBe("Dog bed");
+		// The parent's name is not this part's own name (decision 79), so the column is empty for it.
+		expect(row("SPLIT PART PLAIN").split(",")[3]).toBe("");
 		expect(row("SPLIT PART NAMED").split(",")[3]).toBe("Cat food");
 	});
 
@@ -385,6 +386,7 @@ describe("data exports", () => {
 				"plaid_transaction_id",
 				"raw_name",
 				"refund_of_id",
+				"refund_unlinked_purchase_date",
 				"split_removed_from_cents",
 				"transfer_confidence",
 				"updated_at",

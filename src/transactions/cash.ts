@@ -103,8 +103,13 @@ export async function saveCash(
 	},
 	by: string,
 	entryKey: string | null = null,
-): Promise<{ merchant: string; amountCents: number }> {
-	await db.batch([
+): Promise<{
+	id: number;
+	merchant: string;
+	amountCents: number;
+	categoryId: number;
+}> {
+	const results = await db.batch([
 		db.prepare(
 			"INSERT INTO accounts (name,type) VALUES ('Cash','cash') ON CONFLICT(type) WHERE type='cash' DO NOTHING",
 		),
@@ -126,10 +131,24 @@ export async function saveCash(
 	const stored = entryKey
 		? await db
 				.prepare(
-					"SELECT raw_name AS merchant, amount_cents AS amountCents FROM transactions WHERE entry_key = ?",
+					"SELECT id, raw_name AS merchant, amount_cents AS amountCents, category_id AS categoryId FROM transactions WHERE entry_key = ?",
 				)
 				.bind(entryKey)
-				.first<{ merchant: string; amountCents: number }>()
+				.first<{
+					id: number;
+					merchant: string;
+					amountCents: number;
+					categoryId: number;
+				}>()
 		: null;
-	return stored ?? { merchant: value.merchant, amountCents: value.amountCents };
+	// With no entry key nothing guards the insert, so it always lands. D1 returns the batch's results in
+	// statement order, so results[1] is the transaction's own insert and its last_row_id is the new row.
+	return (
+		stored ?? {
+			id: Number(results[1]?.meta.last_row_id),
+			merchant: value.merchant,
+			amountCents: value.amountCents,
+			categoryId: value.categoryId,
+		}
+	);
 }

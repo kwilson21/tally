@@ -188,6 +188,178 @@ describe("pendingForJev", () => {
 	});
 });
 
+describe("a split purchase's category from before its split", () => {
+	// A purchase at the merchant "SPLIT STORE"; `splitRemoved` is the note's cents, `isSplit` marks a split parent.
+	const insertRow = async (over: {
+		categoryId?: number | null;
+		source?: string | null;
+		splitRemoved?: number | null;
+		isSplit?: number;
+	}) =>
+		(
+			await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, split_removed_from_cents, is_split) SELECT id, '2026-09-20', 4200, 'SPLIT STORE', ?, ?, ?, ? FROM accounts ORDER BY id LIMIT 1",
+				)
+				.bind(
+					over.categoryId ?? null,
+					over.source ?? null,
+					over.splitRemoved ?? null,
+					over.isSplit ?? 0,
+				)
+				.run()
+		).meta.last_row_id as number;
+
+	beforeEach(async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('SPLIT STORE', ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+			)
+			.bind(GROCERIES)
+			.run();
+	});
+
+	it("is not replaced by a merchant rule, and a split parent is never categorized by one", async () => {
+		const bill = await insertRow({
+			categoryId: EATING_OUT,
+			source: "bill",
+			splitRemoved: 4200,
+		});
+		const plain = await insertRow({ splitRemoved: 4200 });
+		const parent = await insertRow({ isSplit: 1 });
+		await applyMerchantRules(db);
+		expect(await row(bill)).toMatchObject({
+			category_id: EATING_OUT,
+			category_source: "bill",
+		});
+		// No earlier category: the note's purchase is sorted by its merchant's rule, as before.
+		expect(await row(plain)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "merchant_rule",
+		});
+		expect(await row(parent)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+	});
+
+	it("is not replaced by Jev's new guess", async () => {
+		const restored = await insertRow({
+			categoryId: EATING_OUT,
+			source: "jev",
+			splitRemoved: 4200,
+		});
+		expect(
+			await saveJevResult(db, restored, decision({ categoryId: GROCERIES })),
+		).toBe(false);
+		expect(await row(restored)).toMatchObject({
+			category_id: EATING_OUT,
+			category_source: "jev",
+		});
+	});
+
+	it("is not replaced when a person saves an Always rule for its merchant", async () => {
+		const restored = await insertRow({
+			categoryId: EATING_OUT,
+			source: "jev",
+			splitRemoved: 4200,
+		});
+		const parent = await insertRow({
+			categoryId: EATING_OUT,
+			source: "jev",
+			isSplit: 1,
+		});
+		const edited = await insertRow({});
+		const uncategorized = await insertRow({});
+		await saveEdit(
+			db,
+			edited,
+			{ ...personEdit, categoryId: GROCERIES, alwaysForMerchant: true },
+			"demo",
+		);
+		expect(await row(restored)).toMatchObject({
+			category_id: EATING_OUT,
+			category_source: "jev",
+		});
+		expect(await row(parent)).toMatchObject({
+			category_id: EATING_OUT,
+			category_source: "jev",
+		});
+		// The rule itself still reaches the other uncategorized purchase of the merchant.
+		expect(await row(uncategorized)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "merchant_rule",
+		});
+		expect(await row(edited)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "user",
+		});
+	});
+
+	const splitRemoved = async (id: number) =>
+		(
+			await db
+				.prepare(
+					"SELECT split_removed_from_cents AS cents FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first<{ cents: number | null }>()
+		)?.cents;
+
+	it("a person's pick sets the category, clears the note, and takes the person's source", async () => {
+		const restored = await insertRow({
+			categoryId: EATING_OUT,
+			source: "jev",
+			splitRemoved: 4200,
+		});
+		await saveEdit(
+			db,
+			restored,
+			{ ...personEdit, categoryId: GROCERIES },
+			"demo",
+		);
+		expect(await row(restored)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "user",
+		});
+		expect(await splitRemoved(restored)).toBeNull();
+	});
+
+	it("confirming the restored category keeps Jev's source and clears the note", async () => {
+		const restored = await insertRow({
+			categoryId: EATING_OUT,
+			source: "jev",
+			splitRemoved: 4200,
+		});
+		await saveEdit(
+			db,
+			restored,
+			{ ...personEdit, categoryId: EATING_OUT },
+			"demo",
+		);
+		expect(await row(restored)).toMatchObject({
+			category_id: EATING_OUT,
+			category_source: "jev",
+		});
+		expect(await splitRemoved(restored)).toBeNull();
+	});
+
+	it("an Always rule fills a purchase that has no category, and its note stays until a person decides", async () => {
+		const noted = await insertRow({ splitRemoved: 4200 });
+		await saveEdit(
+			db,
+			await insertRow({}),
+			{ ...personEdit, categoryId: GROCERIES, alwaysForMerchant: true },
+			"demo",
+		);
+		expect(await row(noted)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "merchant_rule",
+		});
+		expect(await splitRemoved(noted)).toBe(4200);
+	});
+});
+
 describe("applyMerchantRules", () => {
 	it("keeps merchant-rule credits queued for Jev's separate income classification", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");

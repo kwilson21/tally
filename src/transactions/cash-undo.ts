@@ -141,6 +141,8 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			)
 			.all<{ name: string }>();
 		const lostLinks = paymentCheck.results.map(({ name }) => `${name} payment`);
+		// A person removed since the entry was deleted is gone: the entry comes back with no one, and no guess.
+		const personKept = `(${jsonColumn("for_person_id", "mapped.")} IS NULL OR ${jsonColumn("for_person_id", "mapped.")} IN (SELECT id FROM household_people))`;
 		const insertTransactions = `WITH source AS (
 				SELECT value, CAST(json_extract(value, '$.id') AS INTEGER) AS old_id FROM json_each(?)
 			), maximum AS (
@@ -158,6 +160,10 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					if (column === "id") return "new_id";
 					if (column === "parent_id")
 						return "COALESCE((SELECT new_id FROM mapped parent WHERE parent.old_id=CAST(json_extract(mapped.value, '$.parent_id') AS INTEGER)), json_extract(mapped.value, '$.parent_id'))";
+					if (column === "for_person_id")
+						return `CASE WHEN ${personKept} THEN ${jsonColumn(column, "mapped.")} END`;
+					if (column === "for_person_guessed")
+						return `CASE WHEN ${personKept} THEN ${jsonColumn(column, "mapped.")} ELSE 0 END`;
 					return column === "refund_of_id"
 						? "NULL"
 						: jsonColumn(column, "mapped.");

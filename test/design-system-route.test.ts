@@ -408,6 +408,9 @@ describe("GET /design-system in the demo", () => {
 		);
 		expect(section).toContain('role="alert"');
 		expect(section).toContain("Type a name here, or pick one above.");
+		// The specimen's sentence describes the Name row as one ticked list, and the Rename list it opens (decision 101).
+		expect(section).toContain("one ticked list, one choice per line");
+		expect(section).toContain("Ticking a name shows the Rename list");
 		// The Rename list's words (decision 101), in its own specimens.
 		expect(section).toContain("This one only");
 		expect(section).toContain("Both from Amazon, this one too");
@@ -809,6 +812,19 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('href="/design-system#bottom-sheet"');
 		const csp = res.headers.get("content-security-policy") ?? "";
 		expect(csp).toContain("form-action 'none'");
+	});
+
+	it("shows the bar's ticks-not-on-this-page line closed and open, and the over-100 warning, in the catalog (#350)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="selection-action-bar"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toMatch(/<details(?![^>]* open)[^>]*>/);
+		expect(section).toMatch(/<details[^>]*\sopen(?=[\s>=])/);
+		expect(section).toContain("3 not on this page");
+		expect(section).toContain("101 selected");
+		expect(section).toMatch(
+			/<p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p>/,
+		);
 	});
 });
 
