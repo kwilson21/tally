@@ -72,16 +72,15 @@
 			);
 		else document.documentElement.style.removeProperty("--toasts-height");
 	}
-	// Toasts wrap to more lines when they're long, and rotating a phone changes their width. As with the
-	// bar's observer, the callback only measures again: calling observe() there would repeat its first
-	// notification every frame. This is a second observer, not barSize, since barSize is disconnected on
-	// every toast.
+	// Toasts wrap to more lines when they're long, and rotating a phone changes their width. This is a
+	// second observer, not barSize, since barSize is disconnected on every toast. Each observer follows
+	// the node on the page now: a body swap or a history restore replaces #toasts, and a list change can
+	// swap in a new Select bar. The callback only measures again, since calling observe() there would
+	// repeat its first notification every frame.
 	const toastsSize =
 		typeof ResizeObserver === "function"
 			? new ResizeObserver(measureToasts)
 			: null;
-	const toastsRegion = document.getElementById("toasts");
-	if (toastsRegion) toastsSize?.observe(toastsRegion);
 
 	document.body.addEventListener("toast", (event) => {
 		const {
@@ -146,6 +145,9 @@
 		region?.append(toast);
 		// Measured after the append, so the older toasts just replaced are gone and this one is in.
 		measureToasts();
+		// Follow the #toasts on the page now, since a body swap can have replaced it.
+		toastsSize?.disconnect();
+		if (region) toastsSize?.observe(region);
 		// Follow the bar that is on the page now, since a list change can have swapped it in.
 		barSize?.disconnect();
 		const bar = document.getElementById("selection-bar");

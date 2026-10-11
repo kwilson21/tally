@@ -124,7 +124,7 @@ async function page({
 	bar?: FakeNode;
 	resizeObserver?: boolean;
 } = {}) {
-	const toasts = new FakeNode("div");
+	let toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const resultCount = new FakeNode("p");
 	const documentElement = new FakeNode("html");
@@ -148,6 +148,11 @@ async function page({
 		createTextNode: (text: string) =>
 			Object.assign(new FakeNode("#text"), { textContent: text }),
 	});
+	// htmx replacing the body's children (a body swap, or a history restore) puts a new #toasts in place.
+	const swapBody = () => {
+		toasts = new FakeNode("div");
+		return toasts;
+	};
 	vi.stubGlobal("document", document);
 	vi.stubGlobal("location", { search: "", pathname: "/", hash: "" });
 	vi.stubGlobal("history", { replaceState: () => {} });
@@ -181,6 +186,7 @@ async function page({
 		resultCount,
 		bar,
 		resizeObservers,
+		swapBody,
 	};
 }
 
@@ -764,7 +770,8 @@ describe("Select mode's action bar", () => {
 		const { body, resizeObservers } = await page({ bar });
 		fire(body, "toast", { message: "Saved" });
 		fire(body, "toast", { message: "Saved again" });
-		// Two observers: the bar's, and #toasts' (made once, when the script loads).
+		// Two observers: the bar's, and #toasts' (made once, when the script loads; each toast then
+		// observes the #toasts on the page).
 		expect(resizeObservers).toHaveLength(2);
 		const observer = observerOf(resizeObservers, bar);
 		// Each toast disconnects, then observes the bar it just found.
@@ -840,6 +847,25 @@ describe("a phone sheet's room follows the toasts on screen", () => {
 		const calls = observer.calls.length;
 		observer.callback();
 		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("78px");
+		expect(observer.calls).toHaveLength(calls);
+	});
+
+	it("follows the new #toasts after htmx replaces the body's children", async () => {
+		const { body, documentElement, swapBody, resizeObservers } = await page();
+		fire(body, "toast", { message: "Saved" });
+		const fresh = swapBody();
+		fresh.offsetHeight = 66;
+		fire(body, "toast", { message: "Saved again" });
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("66px");
+		// The observer now watches the new node, and the old detached one is no longer observed.
+		const observer = observerOf(resizeObservers, fresh);
+		expect(observer).toBeDefined();
+		expect(observer.observed).toEqual([fresh]);
+		// Its callback measures the #toasts on the page now, and never calls observe().
+		fresh.offsetHeight = 120;
+		const calls = observer.calls.length;
+		observer.callback();
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("120px");
 		expect(observer.calls).toHaveLength(calls);
 	});
 
