@@ -437,6 +437,24 @@ describe("rowCaption", () => {
 		});
 	});
 
+	it("says a split refund's part is no longer linked after its split, following Split from", () => {
+		expect(
+			rowCaption({
+				...base,
+				amountCents: -500,
+				parentId: 9,
+				parentName: "Amazon",
+				categoryName: "Kids",
+				refundUnlinkedPurchaseDate: "2026-09-10",
+			}),
+		).toEqual({
+			kind: "category",
+			caption:
+				"Kids · Split from Amazon · The bank changed the Sep 10 purchase, so this refund is no longer linked",
+			tag: false,
+		});
+	});
+
 	it("says a refund with no category is no longer linked, and that it needs one", () => {
 		expect(
 			rowCaption({
@@ -634,6 +652,37 @@ describe("TransactionRow", () => {
 			const html = await TransactionRow({ row }).toString();
 			expect(html).not.toContain("Maybe");
 		}
+	});
+
+	it("keeps a bank-change sentence over a Maybe category on an unlinked refund, which still needs one", async () => {
+		const html = await TransactionRow({
+			row: {
+				...base,
+				amountCents: -500,
+				maybeCategoryName: "Kids",
+				refundUnlinkedPurchaseDate: "2026-09-10",
+			},
+		}).toString();
+		expect(html).toContain(
+			"The bank changed the Sep 10 purchase, so this refund is no longer linked",
+		);
+		expect(html).toContain("Needs category");
+		expect(html).not.toContain("Maybe Kids");
+	});
+
+	it("keeps the bank-change note over a Maybe category on a split-removed purchase, which still needs one", async () => {
+		const html = await TransactionRow({
+			row: {
+				...base,
+				splitRemovedFromCents: 1234,
+				maybeCategoryName: "Groceries",
+			},
+		}).toString();
+		expect(html).toContain(
+			"The bank changed this from $12.34, so its split was removed.",
+		);
+		expect(html).toContain("Needs category");
+		expect(html).not.toContain("Maybe Groceries");
 	});
 
 	it("is a plain row without a link otherwise", async () => {

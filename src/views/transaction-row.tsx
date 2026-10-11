@@ -23,6 +23,10 @@ export function rowCaption(row: ListRow): Caption {
 		: row.billName;
 	const paidBill =
 		row.paysBill && paidBillName ? `paid ${paidBillName} bill` : null;
+	// A refund the bank's change unlinked says why, with the purchase's date, until a person links it again (decision 99).
+	const unlinked = row.refundUnlinkedPurchaseDate
+		? `The bank changed the ${shortDay(row.refundUnlinkedPurchaseDate, row.date)} purchase, so this refund is no longer linked`
+		: null;
 	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
 	if (row.excluded && !row.paysBill)
 		return { kind: "excluded", caption: "Excluded", tag: false };
@@ -41,6 +45,7 @@ export function rowCaption(row: ListRow): Caption {
 			caption: [
 				row.categoryName,
 				`Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
+				unlinked,
 				refunded(row),
 				paidBill,
 			]
@@ -74,11 +79,11 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
 	// A linked refund and its purchase each say so after the category (P19). A refund the bank's change
 	// unlinked says why instead (decision 99).
-	const pair = row.refundUnlinkedPurchaseDate
-		? `The bank changed the ${shortDay(row.refundUnlinkedPurchaseDate, row.date)} purchase, so this refund is no longer linked`
-		: row.refundPurchaseDate
+	const pair =
+		unlinked ??
+		(row.refundPurchaseDate
 			? `Refund for ${shortDay(row.refundPurchaseDate, row.date)}`
-			: refunded(row);
+			: refunded(row));
 	if (row.categoryName)
 		return {
 			kind: "category",
@@ -144,11 +149,16 @@ export function TransactionRow({
 	bare?: boolean;
 }) {
 	const { kind, caption: said, tag } = rowCaption(row);
+	// A bank change's sentence keeps its place on the row over a Maybe category; the edit panel still shows the suggestion.
+	const bankChangeSaid =
+		Boolean(row.refundUnlinkedPurchaseDate) ||
+		row.splitRemovedFromCents != null;
+	const maybeCategoryName = bankChangeSaid ? null : row.maybeCategoryName;
 	const maybeCategory =
-		kind === "needs" && tag && row.maybeCategoryName?.startsWith("new:")
-			? { name: row.maybeCategoryName.slice(4), kind: "new" as const }
-			: kind === "needs" && tag && row.maybeCategoryName
-				? { name: row.maybeCategoryName, kind: "category" as const }
+		kind === "needs" && tag && maybeCategoryName?.startsWith("new:")
+			? { name: maybeCategoryName.slice(4), kind: "new" as const }
+			: kind === "needs" && tag && maybeCategoryName
+				? { name: maybeCategoryName, kind: "category" as const }
 				: null;
 	// "Counts in …" shows when a bill moved the month, except where a refund's caption already names it.
 	const countsIn =
@@ -238,7 +248,7 @@ export function TransactionRow({
 							</span>
 						)}
 						{pendingLast && <span class="shrink-0 text-muted">· Pending</span>}
-						{tag && !row.maybeCategoryName && (
+						{tag && !maybeCategory && (
 							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
 								Needs category
 							</span>
