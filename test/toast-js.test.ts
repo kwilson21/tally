@@ -69,6 +69,40 @@ class FakeNode extends EventTarget {
 	}
 	/** Focus is tracked by the page's activeElement; a test spies on this to see it moved. */
 	focus() {}
+	/** The inline style toast.js sets on #toasts: setProperty and removeProperty, backed by a Map. */
+	style = {
+		values: new Map<string, string>(),
+		setProperty(name: string, value: string) {
+			this.values.set(name, value);
+		},
+		removeProperty(name: string) {
+			this.values.delete(name);
+		},
+	};
+	/** A laid-out height, which the Select bar's measurement reads. */
+	offsetHeight = 0;
+}
+
+/** Every ResizeObserver toast.js made on the current page, so a test can see what it asked of each. */
+let resizeObservers: FakeResizeObserver[] = [];
+
+/** A ResizeObserver that records what toast.js asks of it; a test fires its callback itself. */
+class FakeResizeObserver {
+	/** Each call toast.js made, in order: observe with its node, or disconnect. */
+	calls: Array<["observe", FakeNode] | ["disconnect"]> = [];
+	/** The nodes it watches now. */
+	observed: FakeNode[] = [];
+	constructor(readonly callback: () => void) {
+		resizeObservers.push(this);
+	}
+	observe(node: FakeNode) {
+		this.calls.push(["observe", node]);
+		this.observed.push(node);
+	}
+	disconnect() {
+		this.calls.push(["disconnect"]);
+		this.observed = [];
+	}
 }
 
 const load = Object.values(import.meta.glob("../public/js/toast.js"))[0] as
@@ -77,9 +111,19 @@ const load = Object.values(import.meta.glob("../public/js/toast.js"))[0] as
 
 /**
  * Puts a page in place, then runs toast.js against it. `listed: false` is a page with no list, so no
- * result count. Nothing has focus until a test sets document.activeElement, as a browser starts.
+ * result count. `bar` is the Select mode action bar, when the page is in Select mode. `resizeObserver:
+ * false` is a browser with no ResizeObserver. Nothing has focus until a test sets document.activeElement,
+ * as a browser starts.
  */
-async function page({ listed = true }: { listed?: boolean } = {}) {
+async function page({
+	listed = true,
+	bar,
+	resizeObserver = true,
+}: {
+	listed?: boolean;
+	bar?: FakeNode;
+	resizeObserver?: boolean;
+} = {}) {
 	const toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const resultCount = new FakeNode("p");
@@ -92,9 +136,11 @@ async function page({ listed = true }: { listed?: boolean } = {}) {
 				? toasts
 				: id === "announcer"
 					? announcer
-					: id === "result-count" && listed
-						? resultCount
-						: null,
+					: id === "selection-bar"
+						? (bar ?? null)
+						: id === "result-count" && listed
+							? resultCount
+							: null,
 		createElement: (tag: string) => new FakeNode(tag),
 		createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
 		createTextNode: (text: string) =>
@@ -117,9 +163,14 @@ async function page({ listed = true }: { listed?: boolean } = {}) {
 					: "4s"
 				: "",
 	}));
+	resizeObservers = [];
+	vi.stubGlobal(
+		"ResizeObserver",
+		resizeObserver ? FakeResizeObserver : undefined,
+	);
 	vi.resetModules();
 	await load?.();
-	return { document, body, toasts, htmx, resultCount };
+	return { document, body, toasts, htmx, resultCount, bar, resizeObservers };
 }
 
 const fire = (target: EventTarget, name: string, detail: unknown) =>
@@ -655,5 +706,64 @@ describe("focus when an Undo toast ends", () => {
 		document.activeElement = undo.all().find((n) => n.tag === "button");
 		expect(() => vi.advanceTimersByTime(10000)).not.toThrow();
 		expect(toasts.children).toHaveLength(0);
+	});
+});
+
+describe("Select mode's action bar", () => {
+	const SELECTION_BAR = "--selection-bar-height";
+	const barAt = (height: number) => {
+		const bar = new FakeNode("div");
+		bar.offsetHeight = height;
+		return bar;
+	};
+
+	it("sets the bar's measured height on #toasts, so a bar of two rows is cleared", async () => {
+		const { body, toasts } = await page({ bar: barAt(113) });
+		fire(body, "toast", { message: "Saved" });
+		expect(toasts.style.values.get(SELECTION_BAR)).toBe("113px");
+	});
+
+	it("follows the bar when its height changes", async () => {
+		const bar = barAt(113);
+		const { body, toasts, resizeObservers } = await page({ bar });
+		fire(body, "toast", { message: "Saved" });
+		bar.offsetHeight = 69;
+		const observer = resizeObservers[0] as FakeResizeObserver;
+		observer.callback();
+		expect(toasts.style.values.get(SELECTION_BAR)).toBe("69px");
+	});
+
+	it("removes the height when there is no bar", async () => {
+		const { body, toasts } = await page();
+		toasts.style.setProperty(SELECTION_BAR, "113px");
+		fire(body, "toast", { message: "Saved" });
+		expect(toasts.style.values.has(SELECTION_BAR)).toBe(false);
+	});
+
+	it("observes the current bar on each toast, and the callback never calls observe", async () => {
+		const bar = barAt(113);
+		const { body, resizeObservers } = await page({ bar });
+		fire(body, "toast", { message: "Saved" });
+		fire(body, "toast", { message: "Saved again" });
+		expect(resizeObservers).toHaveLength(1);
+		const observer = resizeObservers[0] as FakeResizeObserver;
+		// Each toast disconnects, then observes the bar it just found.
+		expect(observer.calls.slice(-2)).toEqual([
+			["disconnect"],
+			["observe", bar],
+		]);
+		expect(observer.observed).toEqual([bar]);
+		const calls = observer.calls.length;
+		observer.callback();
+		expect(observer.calls).toHaveLength(calls);
+	});
+
+	it("still measures the bar in a browser with no ResizeObserver", async () => {
+		const { body, toasts } = await page({
+			bar: barAt(113),
+			resizeObserver: false,
+		});
+		fire(body, "toast", { message: "Saved" });
+		expect(toasts.style.values.get(SELECTION_BAR)).toBe("113px");
 	});
 });

@@ -281,7 +281,12 @@ describe("toasts", () => {
 		);
 		// The same animation for a drawing of a toast, which sits outside #toasts.
 		expect(selectorsOf(toast as Rule)).toContain(".toast-motion");
-		expect(toastSource).not.toMatch(/animation|transition|style\./);
+		// toast.js writes no motion. Its only style writes set and clear the Select bar's measured height.
+		expect(toastSource).not.toMatch(/animation|transition/);
+		expect(toastSource.match(/style\.\w+\(/g)).toEqual([
+			"style.setProperty(",
+			"style.removeProperty(",
+		]);
 	});
 
 	it("fades in and rises 8 px in 150 ms, holds, then fades out", () => {

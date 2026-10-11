@@ -80,8 +80,10 @@
 		--safe-area-bottom: env(safe-area-inset-bottom, 0px);
 		--safe-area-left: env(safe-area-inset-left, 0px);
 		--tabs-height: calc(3.5rem + 1px);
-		/* Select mode's action bar: its 1px rule, 12px padding and a 44px button row. Toasts sit above it. */
+		/* Select mode's action bar as it starts, before toast.js measures it. The bar is two lines (its count, then its buttons), and taller when either wraps on a narrow phone; toast.js sets the measured height on #toasts while a toast shows, so this is only the starting value. */
 		--selection-bar-height: 4.3125rem;
+		/* A phone sheet always leaves this much room at the top for a toast: a 12 px gap, a two-line toast (66 px) and 12 px. */
+		--toast-top-room: 5.625rem;
 		--feedback-bottom: 6.5rem;
 		--feedback-height: 2.75rem;
 		--focus-scroll-gap: 0.5rem;

@@ -38,6 +38,26 @@
 	// The Undo toasts on screen. A newer plain or error toast never removes one of them early.
 	const undoToasts = new WeakSet();
 
+	// Toasts clear Select mode's action bar by its measured height, set on #toasts only. htmx 4 fires
+	// HX-Trigger after `await this.swap(ctx)`, so the bar measured is the swapped-in one. The observer's
+	// callback only measures again: calling observe() there would repeat its first notification every frame.
+	function measureSelectionBar() {
+		const region = document.getElementById("toasts");
+		if (!region) return;
+		const bar = document.getElementById("selection-bar");
+		if (bar)
+			region.style.setProperty(
+				"--selection-bar-height",
+				`${bar.offsetHeight}px`,
+			);
+		else region.style.removeProperty("--selection-bar-height");
+	}
+	// The bar wraps to more rows on a narrow phone, and rotating a phone changes its width.
+	const barSize =
+		typeof ResizeObserver === "function"
+			? new ResizeObserver(measureSelectionBar)
+			: null;
+
 	document.body.addEventListener("toast", (event) => {
 		const {
 			message,
@@ -97,7 +117,12 @@
 			for (const old of [...(region?.children ?? [])]) {
 				if (!undoToasts.has(old)) old.remove();
 			}
+		measureSelectionBar();
 		region?.append(toast);
+		// Follow the bar that is on the page now, since a list change can have swapped it in.
+		barSize?.disconnect();
+		const bar = document.getElementById("selection-bar");
+		if (bar) barSize?.observe(bar);
 		if (undo) {
 			undoToasts.add(toast);
 			window.htmx?.process(toast);

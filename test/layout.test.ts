@@ -2,6 +2,7 @@ import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import transactionsRoute from "../src/routes/transactions.tsx?raw";
 import css from "../src/styles/app.css?raw";
+import { BottomSheet } from "../src/views/bottom-sheet";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
@@ -144,13 +145,34 @@ describe("where toasts sit", () => {
 		);
 	});
 
-	it("reads the Select bar's height from a token, so the offset and the bar agree", async () => {
+	it("keeps the token as a starting height, and the bar's id lets toast.js measure the bar", async () => {
 		expect(css).toMatch(/--selection-bar-height:\s*4\.3125rem;/);
-		expect(transactionsRoute).toContain("min-h-[var(--selection-bar-height)]");
+		expect(transactionsRoute).toContain('id="selection-bar"');
+		expect(transactionsRoute).not.toContain(
+			"min-h-[var(--selection-bar-height)]",
+		);
+		expect(await toastRegion()).toContain("var(--selection-bar-height)");
 	});
 
-	it("steps the Feedback pill aside while a toast shows", async () => {
+	it("steps the Feedback pill aside while a toast shows, on a phone and only when it has no focus", async () => {
 		const html = decodeAttributes(await home());
-		expect(html).toContain("[body:has(#toasts>*)_&]:hidden");
+		expect(html).toContain("max-lg:[body:has(#toasts>*)_&:not(:focus)]:hidden");
+		// Two parts, so Tailwind's scan of this file doesn't build the old, unscoped class into app.css.
+		expect(html).not.toContain(["[body:has(#toasts>*)_&", "]:hidden"].join(""));
+	});
+});
+
+describe("a phone sheet's room for a toast", () => {
+	it("is at most 90% of the screen, less the safe area and the toast's room, and the full height on desktop", () => {
+		const sheet = String(BottomSheet({ labelledBy: "t", closeHref: "/" }));
+		expect(sheet).toContain(
+			"max-h-[min(90vh,calc(100svh-var(--safe-area-top)-var(--toast-top-room)))]",
+		);
+		expect(sheet).toContain("lg:max-h-none");
+		expect(sheet).not.toContain("max-h-[90vh]");
+	});
+
+	it("leaves 12 px, a two-line toast (66 px) and 12 px at the top of a phone sheet", () => {
+		expect(css).toMatch(/--toast-top-room:\s*5\.625rem;/);
 	});
 });
