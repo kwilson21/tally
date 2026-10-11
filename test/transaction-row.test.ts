@@ -420,6 +420,31 @@ describe("rowCaption", () => {
 		});
 	});
 
+	it("says only Income on an income row whose bank change removed its split, with its restored category", () => {
+		expect(
+			rowCaption({
+				...base,
+				amountCents: -18742,
+				income: true,
+				splitRemovedFromCents: 18742,
+				categoryId: 1,
+				categoryName: "Groceries",
+			}),
+		).toEqual({ kind: "income", caption: "Income", tag: false });
+	});
+
+	it("says only Income on an income row whose bank change removed its split, with no category yet", () => {
+		expect(
+			rowCaption({
+				...base,
+				amountCents: -18742,
+				income: true,
+				splitRemovedFromCents: 18742,
+				categoryId: null,
+			}),
+		).toEqual({ kind: "income", caption: "Income", tag: false });
+	});
+
 	it("says a refund is no longer linked after the bank changed its purchase", () => {
 		expect(
 			rowCaption({

@@ -59,6 +59,8 @@ export function rowCaption(row: ListRow): Caption {
 			caption: ["Split transaction", paidBill].filter(Boolean).join(" · "),
 			tag: false,
 		};
+	// An income row says only Income, even when a bank change removed its split; its restored category and note stay in the edit panel.
+	if (row.income) return { kind: "income", caption: "Income", tag: false };
 	// The note stays on the purchase until a person changes or confirms its category (decision 99), so it
 	// is shown beside the category it went back to, or in Needs category when it has none.
 	if (
@@ -76,7 +78,6 @@ export function rowCaption(row: ListRow): Caption {
 					tag: false,
 				};
 	}
-	if (row.income) return { kind: "income", caption: "Income", tag: false };
 	// A linked refund and its purchase each say so after the category (P19). A refund the bank's change
 	// unlinked says why instead (decision 99).
 	const pair =
