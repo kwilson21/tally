@@ -307,6 +307,7 @@ describe("transaction splits", () => {
 		expect(await saveSplit(env.DB, id, stale, "test")).toEqual({
 			saved: false,
 			unlinked: [],
+			bills: [],
 		});
 		expect(
 			await env.DB.prepare(
@@ -377,5 +378,103 @@ describe("transaction splits", () => {
 				.bind(id)
 				.first(),
 		).toEqual({ is_split: 0, credit_reviewed: 1, credit_reviewed_by: "user" });
+	});
+});
+
+describe("a split change says which bill payments it unlinked (decision 99)", () => {
+	const PURCHASE = 9830;
+	const MEMBERSHIP_PART = 9831;
+	const GROCERIES_PART = 9832;
+
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('COSTCO', 'Costco')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9820, 'Costco membership', 4000, 15, 'yearly', 9, NULL, 'COSTCO', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9821, 'Water', 1000, 3, 'monthly', NULL, NULL, 'CITY WATER', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, is_split) VALUES (?, 3, '2026-09-15', 5000, 'COSTCO', 1)",
+			).bind(PURCHASE),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (?, 3, '2026-09-15', 4000, 'COSTCO', 4, 'user', ?)",
+			).bind(MEMBERSHIP_PART, PURCHASE),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, parent_id) VALUES (?, 3, '2026-09-15', 1000, 'COSTCO', 1, 'user', ?)",
+			).bind(GROCERIES_PART, PURCHASE),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9820, '2026', ?, 'auto', 'linked')",
+			).bind(MEMBERSHIP_PART),
+		]);
+	});
+
+	const trigger = async (res: Response) =>
+		JSON.parse(res.headers.get("HX-Trigger") ?? "null") as {
+			toast: { message: string };
+			announce: string;
+		};
+
+	it("says the bill is no longer paid when a split is removed", async () => {
+		const response = await post(`/transactions/${PURCHASE}/split/remove`, [
+			["back", "/transactions"],
+		]);
+		const sent = await trigger(response);
+		const message =
+			"Removed split from Costco. The Costco membership bill for 2026 is no longer paid.";
+		expect(sent.toast.message).toBe(message);
+		expect(sent.announce).toBe(message);
+	});
+
+	it("counts the bills when a split removal unlinks more than one", async () => {
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9821, '2026-09', ?, 'auto', 'linked')",
+		)
+			.bind(GROCERIES_PART)
+			.run();
+		const response = await post(`/transactions/${PURCHASE}/split/remove`, [
+			["back", "/transactions"],
+		]);
+		expect((await trigger(response)).toast.message).toBe(
+			"Removed split from Costco. 2 bills are no longer paid.",
+		);
+	});
+
+	it("says the same in the edit panel after a bank change removed the split", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(
+				PURCHASE,
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET is_split = 0, split_removed_from_cents = 5000, split_removed_bills = ? WHERE id = ?",
+			).bind('[{"name":"Costco membership","period":"2026"}]', PURCHASE),
+		]);
+		const html = await (
+			await exports.default.fetch(`${BASE}/transactions/${PURCHASE}`)
+		).text();
+		expect(html).toContain(
+			"so its split was removed. The Costco membership bill for 2026 is no longer paid.",
+		);
+	});
+
+	it("says the bill is no longer paid when the parts are replaced", async () => {
+		const response = await post(`/transactions/${PURCHASE}/split`, [
+			["part_category", "4"],
+			["part_category", "1"],
+			["part_amount", "40"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		expect(response.status).toBe(200);
+		const sent = await trigger(response);
+		expect(sent.toast.message).toBe(
+			"Split Costco. The Costco membership bill for 2026 is no longer paid.",
+		);
+		expect(sent.announce).toBe(
+			"Saved split for Costco. The Costco membership bill for 2026 is no longer paid.",
+		);
 	});
 });

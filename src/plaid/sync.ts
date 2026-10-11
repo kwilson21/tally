@@ -1,3 +1,4 @@
+import { UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
@@ -190,6 +191,31 @@ const clearStaleGuessesSql = (ownsLock: string) =>
 /** True only while this run still holds the Item's lock; every page write carries it. */
 const OWNS_LOCK =
 	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
+
+/**
+ * Before a bank change removes a split (its amount changed), the bills its parts paid are kept on the
+ * purchase for its note, and their payments are unlinked by name, not left to the parts' cascade (decision 99).
+ * Both run before the parts are deleted.
+ */
+function splitBillStatements(
+	env: SyncEnv,
+	itemRowId: number,
+	lockId: string,
+	plaidTransactionId: string,
+	cents: number,
+): D1PreparedStatement[] {
+	const purchase =
+		"(SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ?)";
+	return [
+		env.DB.prepare(
+			`UPDATE transactions SET split_removed_bills = ${UNPAID_BILLS_SQL("transactions.id")}
+			 WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ? AND ${OWNS_LOCK}`,
+		).bind(plaidTransactionId, cents, itemRowId, lockId),
+		env.DB.prepare(
+			`DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${purchase}) AND ${OWNS_LOCK}`,
+		).bind(plaidTransactionId, cents, itemRowId, lockId),
+	];
+}
 
 /**
  * A split's parts follow the bank transaction's exclusion by the same rule (spec §8.5), because the
@@ -551,6 +577,15 @@ export async function syncItem(
 					).bind(transaction.transaction_id, cents, itemRowId, lockId),
 				);
 				statements.push(
+					...splitBillStatements(
+						env,
+						itemRowId,
+						lockId,
+						transaction.transaction_id,
+						cents,
+					),
+				);
+				statements.push(
 					env.DB.prepare(`DELETE FROM transactions WHERE parent_id = (
 					SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ?
 				) AND ${OWNS_LOCK}`).bind(
@@ -631,6 +666,15 @@ export async function syncItem(
 					env.DB.prepare(
 						`UPDATE transactions SET refund_of_id=NULL, refund_unlinked_purchase_date=(SELECT p.date FROM transactions part JOIN transactions p ON p.id = part.parent_id WHERE part.id = transactions.refund_of_id) WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
 					).bind(transaction.transaction_id, cents, itemRowId, lockId),
+				);
+				statements.push(
+					...splitBillStatements(
+						env,
+						itemRowId,
+						lockId,
+						transaction.transaction_id,
+						cents,
+					),
 				);
 				statements.push(
 					env.DB.prepare(`DELETE FROM transactions WHERE parent_id = (

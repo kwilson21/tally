@@ -1467,6 +1467,33 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await refundOf(ids.posted)).toBe(b);
 	});
 
+	it("names the bill a removed split's part paid on the posted row, and unlinks it (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const parts = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9850, 'Water', 600, 3, 'monthly', NULL, NULL, 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9850, '2026-09', ?, 'auto', 'linked')",
+			).bind(parts[0]),
+		]);
+
+		await post(item, { amount: 15 });
+
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			is_split: 0,
+			split_removed_bills: '[{"name":"Water","period":"2026-09"}]',
+		});
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9850 AND status = 'linked'",
+			),
+		).toBe(0);
+	});
+
 	it("moves a split when the amount is unchanged, with its parts following the posted date", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);

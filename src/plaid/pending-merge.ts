@@ -32,6 +32,7 @@
 
 // Parameters, shared by every statement: 1 the pending id, 2 the posted id, 3 the bank's amount in
 // cents now, 4 and 5 the Item row and its lock, 6 to 8 the posted date, bank text and merchant name.
+import { UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
@@ -186,6 +187,7 @@ const STATEMENTS = [
 	// Jev's answers described the old amount, so they are cleared as in a same-row bank correction, unless a person
 	// picked the posted row's category.
 	`UPDATE transactions SET split_removed_from_cents = p.amount_cents,
+		split_removed_bills = ${UNPAID_BILLS_SQL(PENDING)},
 		category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_id ELSE p.category_id END,
 		category_source = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_source ELSE p.category_source END,
 		category_confidence = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_confidence ELSE NULL END,
@@ -200,6 +202,9 @@ const STATEMENTS = [
 	 WHERE refund_of_id IN (SELECT part.id FROM transactions part WHERE part.parent_id = ${PENDING})
 	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents != ?3)
 	 AND ${READY}`,
+	// A bill payment of a part that goes with the pending row is unlinked by name, not left to the cascade
+	// (decision 99). The parts that moved to the posted row are not its parts any more, so they keep theirs.
+	`DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${READY}`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
 	`DELETE FROM transactions WHERE id = ${PENDING} AND ${READY}`,
 ];

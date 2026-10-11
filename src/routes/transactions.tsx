@@ -1,6 +1,11 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { JEV_THRESHOLD } from "../ai/categorize";
+import {
+	type UnpaidBill,
+	unpaidBillsNote,
+	unpaidBillsSentence,
+} from "../bills/unpaid";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
@@ -1374,6 +1379,7 @@ function EditSheet({
 					The bank changed this from{" "}
 					{formatCents(tx.splitRemovedFromCents, { signed: true })}, so its
 					split was removed.
+					{unpaidBillsNote(tx.splitRemovedBills)}
 				</p>
 			)}
 			{tx.countsInMonth && (!tx.excluded || tx.paysBill) && (
@@ -2618,7 +2624,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		if (result.saved)
 			return correction.pendingEdit
 				? savePendingEdit(c, tx, correction.totalCents, correction.pendingEdit)
-				: splitSaved(c, tx, today, back, []);
+				: splitSaved(c, tx, today, back, { unlinked: [], bills: [] });
 		const error =
 			"refundPart" in result
 				? `Linked refunds add up to ${formatCents(result.refundPart.refundCents)}, so part ${result.refundPart.part} can't be less than that.`
@@ -2640,7 +2646,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		});
 	}
 	const result = await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c));
-	if (result.saved) return splitSaved(c, tx, today, back, result.unlinked);
+	if (result.saved) return splitSaved(c, tx, today, back, result);
 	// Show the bank's new amount, so the next save checks against it.
 	const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 	return renderList(c, today, filtersFrom(c, today, back), {
@@ -2659,16 +2665,19 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	});
 });
 
+/** What a split change unlinked: refunds by the date of their purchase, and bill payments by bill (decision 99). */
+type SplitChange = { unlinked: string[]; bills: UnpaidBill[] };
+
 /** A saved split: the list again with its toast and announcement, or a redirect for a browser without htmx. */
 function splitSaved(
 	c: Context<App>,
 	tx: TransactionDetail,
 	today: string,
 	back: string,
-	unlinked: string[],
+	change: SplitChange,
 ) {
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-	const sentence = unlinkedSentence(unlinked, today);
+	const sentence = unlinkedSentence(change, today);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
@@ -2685,13 +2694,25 @@ function splitSaved(
 	});
 }
 
-/** What a split change says about refunds it unlinked: " The refund on Sep 26 is no longer linked.", or "" for none. */
-function unlinkedSentence(dates: string[], today: string): string {
-	const [first] = dates;
-	if (first === undefined) return "";
-	return dates.length === 1
-		? ` The refund on ${shortDay(first, today)} is no longer linked.`
-		: ` ${dates.length} refunds are no longer linked.`;
+/**
+ * What a split change says about what it unlinked, after the toast's name: " The refund on Sep 26 is no longer
+ * linked. The Costco membership bill for 2026 is no longer paid.", or "" for none (decisions 60 and 99).
+ */
+function unlinkedSentence(
+	{ unlinked, bills }: SplitChange,
+	today: string,
+): string {
+	const [first] = unlinked;
+	const refunds =
+		first === undefined
+			? ""
+			: unlinked.length === 1
+				? `The refund on ${shortDay(first, today)} is no longer linked.`
+				: `${unlinked.length} refunds are no longer linked.`;
+	return [refunds, unpaidBillsSentence(bills)]
+		.filter(Boolean)
+		.map((sentence) => ` ${sentence}`)
+		.join("");
 }
 
 transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {

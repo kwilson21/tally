@@ -1,6 +1,7 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
+import type { UnpaidBill } from "../bills/unpaid";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import {
 	type Edit,
@@ -90,6 +91,8 @@ export type ListRow = {
 	parentBillName?: string | null;
 	isSplit?: boolean;
 	splitRemovedFromCents?: number | null;
+	/** The bills a bank change's removed split unlinked, as JSON (decision 99); read with parseUnpaidBills. */
+	splitRemovedBills?: string | null;
 	refundOfId?: number | null;
 	refundPurchaseDate?: string | null;
 	/** The purchase's date when a bank change unlinked this refund, until a person links it again (decision 99). */
@@ -297,7 +300,7 @@ export async function listTransactions(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : `CASE WHEN ${detailsOn ? "1" : "0"} = 0 AND t.note_guessed = 1 THEN NULL ELSE t.note END`} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
-				t.split_removed_from_cents AS splitRemovedFromCents,
+				t.split_removed_from_cents AS splitRemovedFromCents, t.split_removed_bills AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, ${paysBillSql("t")} AS paysBill,
@@ -614,7 +617,7 @@ export async function getTransaction(
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
 				t.for_person_id AS forPersonId, (SELECT name FROM household_people WHERE id = t.for_person_id) AS forPersonName, t.for_person_guessed AS forPersonGuessed,
 				t.is_split AS isSplit, NULL AS parentName,
-				t.split_removed_from_cents AS splitRemovedFromCents,
+				t.split_removed_from_cents AS splitRemovedFromCents, t.split_removed_bills AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, ${paysBillSql("t")} AS paysBill,
@@ -1248,17 +1251,37 @@ async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
 }
 
 /**
+ * The bills the linked payments of a purchase's parts pay, oldest payment first. Read before a change
+ * removes the parts, which unlinks those payments (decision 99).
+ */
+async function partBills(
+	db: D1Database,
+	parentId: number,
+): Promise<UnpaidBill[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT b.name AS name, bp.period AS period FROM bill_payments bp
+			JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
+			WHERE part.parent_id = ? AND bp.status = 'linked' ORDER BY bp.id`,
+		)
+		.bind(parentId)
+		.all<UnpaidBill>();
+	return results;
+}
+
+/**
  * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows
  * each new part, if the whole refund still fits its purchase (src/db/refunded.ts), and is dropped if
  * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
- * keeps its unlink date on each new part, so the parts still say why (decision 99).
+ * keeps its unlink date on each new part, so the parts still say why (decision 99). The bill payments
+ * of replaced parts are unlinked too, and the bills are returned by name (decision 99).
  */
 export async function saveSplit(
 	db: D1Database,
 	parentId: number,
 	parts: SplitPart[],
 	by: string,
-): Promise<{ saved: boolean; unlinked: string[] }> {
+): Promise<{ saved: boolean; unlinked: string[]; bills: UnpaidBill[] }> {
 	const parent = await db
 		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
 		.bind(parentId)
@@ -1273,6 +1296,7 @@ export async function saveSplit(
 	const reviewValues =
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
 	const unlinked = await linkedRefundDates(db, parentId, true);
+	const bills = await partBills(db, parentId);
 	const linkedPurchase = await db
 		.prepare(
 			"SELECT refund_of_id AS refundOfId, date FROM transactions WHERE id = ?",
@@ -1288,6 +1312,12 @@ export async function saveSplit(
 				WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ? OR id = ?) AND ${unchanged}`,
 			)
 			.bind(parentId, parentId, parentId, total),
+		// The replaced parts' bill payments are unlinked by name here, not left to the parts' cascade (decision 99).
+		db
+			.prepare(
+				`DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?) AND ${unchanged}`,
+			)
+			.bind(parentId, parentId, total),
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
 			.bind(parentId, parentId, total),
@@ -1324,7 +1354,7 @@ export async function saveSplit(
 	]);
 	const saved = (results.at(-1)?.meta.changes ?? 0) > 0;
 	// A refund's own link is kept by its new parts, unless it no longer fit: then it is the one unlinked.
-	const refundUnlinked = (results[2]?.meta.changes ?? 0) > 0;
+	const refundUnlinked = (results[3]?.meta.changes ?? 0) > 0;
 	return {
 		saved,
 		unlinked: !saved
@@ -1334,6 +1364,7 @@ export async function saveSplit(
 				: refundUnlinked
 					? [linkedPurchase.date]
 					: [],
+		bills: saved ? bills : [],
 	};
 }
 
@@ -1489,16 +1520,18 @@ export async function correctCashSplit(
 }
 
 /**
- * Deletes a split and restores its parent atomically, unlinking refunds of its parts; returns their
- * dates. A split refund's parent is whole again and counts by its own link, so that link is checked
- * like a new one (src/db/refunded.ts) and dropped if the refund no longer fits; its date is returned too.
+ * Deletes a split and restores its parent atomically, unlinking refunds of its parts and the bill payments
+ * of its parts (decision 99). Returns the refunds' dates and the bills, by name. A split refund's parent is
+ * whole again and counts by its own link, so that link is checked like a new one (src/db/refunded.ts) and
+ * dropped if the refund no longer fits; its date is returned too.
  */
 export async function removeSplit(
 	db: D1Database,
 	parentId: number,
 	by: string,
-): Promise<string[]> {
+): Promise<{ unlinked: string[]; bills: UnpaidBill[] }> {
 	const unlinked = await linkedRefundDates(db, parentId, false);
+	const bills = await partBills(db, parentId);
 	const parent = await db
 		.prepare("SELECT date FROM transactions WHERE id = ?")
 		.bind(parentId)
@@ -1507,6 +1540,11 @@ export async function removeSplit(
 		db
 			.prepare(
 				"UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=?)",
+			)
+			.bind(parentId),
+		db
+			.prepare(
+				"DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?)",
 			)
 			.bind(parentId),
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
@@ -1518,7 +1556,10 @@ export async function removeSplit(
 		db.prepare(unlinkSplitOverRefundedSql("?1")).bind(parentId),
 	]);
 	const refundUnlinked = (results.at(-1)?.meta.changes ?? 0) > 0;
-	return parent && refundUnlinked ? [...unlinked, parent.date] : unlinked;
+	return {
+		unlinked: parent && refundUnlinked ? [...unlinked, parent.date] : unlinked,
+		bills,
+	};
 }
 
 /**

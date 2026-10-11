@@ -318,6 +318,39 @@ describe("rowCaption", () => {
 		});
 	});
 
+	it("says which bill payment the bank change unlinked, after the note", () => {
+		expect(
+			rowCaption({
+				...base,
+				splitRemovedFromCents: 1234,
+				splitRemovedBills: '[{"name":"Costco membership","period":"2026"}]',
+			}),
+		).toEqual({
+			kind: "needs",
+			caption:
+				"The bank changed this from $12.34, so its split was removed. The Costco membership bill for 2026 is no longer paid.",
+			tag: true,
+		});
+	});
+
+	it("keeps the bill sentence beside the category the purchase went back to", () => {
+		expect(
+			rowCaption({
+				...base,
+				splitRemovedFromCents: 1234,
+				splitRemovedBills:
+					'[{"name":"Water","period":"2026-09"},{"name":"Costco membership","period":"2026"}]',
+				categoryId: 1,
+				categoryName: "Groceries",
+			}),
+		).toEqual({
+			kind: "category",
+			caption:
+				"Groceries · The bank changed this from $12.34, so its split was removed. 2 bills are no longer paid.",
+			tag: false,
+		});
+	});
+
 	it("names a split part's category next to its parent", () => {
 		expect(
 			rowCaption({
