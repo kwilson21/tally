@@ -409,7 +409,10 @@ async function renderHome(
 								</ul>
 							)}
 							{!current ? (
-								<PastNotBudgeted items={pastNotBudgeted} />
+								<PastNotBudgeted
+									items={pastNotBudgeted}
+									needsCategory={summary.uncategorized}
+								/>
 							) : notBudgeted.length > 0 || !hasSavingsGoal ? (
 								<>
 									<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
