@@ -112,15 +112,15 @@ export const selectAllShown = (pageIds: number[], ticked: Set<number>) =>
 
 /**
  * The text link that ticks every selectable row on the page (P70 A). It is a plain link to the
- * same select-mode list with those rows ticked, so it works without JavaScript too. Its htmx
- * request asks the reply to focus Set category (FOCUS_SET_CATEGORY), while the pushed address stays
- * the plain list. It shows until every row on the page is ticked. The wrapper always stays,
- * carrying the page's ids, so a count can swap the link in or out.
+ * same select-mode list, carrying every tick already in the address plus this page's rows, so it works
+ * without JavaScript too. Its htmx request asks the reply to focus Set category (FOCUS_SET_CATEGORY),
+ * while the pushed address stays the plain list. It shows until every row on the page is ticked. The
+ * wrapper always stays, carrying the page's ids, so a count can swap the link in or out.
  */
 export function SelectAllOnPage({
 	back,
 	pageIds,
-	ticked,
+	ticks,
 	oob = false,
 	autofocus = false,
 }: {
@@ -128,21 +128,23 @@ export function SelectAllOnPage({
 	back: string;
 	/** The selectable rows on the page (split parents have no checkbox). */
 	pageIds: number[];
-	/** The page's rows that are ticked. */
-	ticked: Set<number>;
+	/** Every ticked row, on this page or not: the link keeps them as it ticks the page (#350). */
+	ticks: number[];
 	oob?: boolean;
 	/** Takes focus when it is drawn (a count reply after the last tick off the page is unticked, #350). */
 	autofocus?: boolean;
 }) {
-	const showLink = selectAllShown(pageIds, ticked);
+	const showLink = selectAllShown(pageIds, new Set(ticks));
+	// Each id once: the ticks, then this page's rows that aren't ticked yet (the address both forms share).
+	const address = selectModeHref(back, [...new Set([...ticks, ...pageIds])]);
 	return (
 		<span id="select-all-page" hx-swap-oob={oob ? "outerHTML" : undefined}>
 			<input type="hidden" name="page-ids" value={pageIds.join(",")} />
 			{showLink && (
 				<Button
 					kind="text"
-					// Without JavaScript the link ticks this page's rows (its ids are in the address).
-					href={selectModeHref(back, pageIds)}
+					// Without JavaScript the link carries the ticks and ticks this page's rows.
+					href={address}
 					class="-mr-2"
 					// htmx replaces a URL's own ids with the ones it includes, so this address has none: the ticks
 					// and the page's rows come as parameters, and the reply ticks both (page-ids, #350).
@@ -155,7 +157,7 @@ export function SelectAllOnPage({
 					hx-select-oob={SELECTION_BAR_OOB}
 					hx-swap="innerHTML"
 					// The reply's HX-Push-Url (the ticks, without the focus marker) replaces this in Select mode.
-					hx-push-url={selectModeHref(back, pageIds)}
+					hx-push-url={address}
 					autofocus={autofocus}
 				>
 					{`Select all ${pageIds.length}`}
@@ -297,14 +299,14 @@ export function SelectionActionBar({
 	rows,
 	back,
 	pageIds,
-	ticked,
+	ticks,
 	disabled = false,
 	focusSetCategory = false,
 	openNotOnPage = false,
 }: {
 	/** The words for the count when there is no script to count with (the first load without JavaScript). */
 	label?: string;
-	/** Every ticked row, on this page or not. */
+	/** The ticked rows the list still shows, which the words count. */
 	count: number;
 	/** The ticked rows that are not in the list on screen. */
 	notOnPage: number;
@@ -313,8 +315,8 @@ export function SelectionActionBar({
 	/** The list's own address, which Select all builds on. */
 	back: string;
 	pageIds: number[];
-	/** The page's rows that are ticked. */
-	ticked: Set<number>;
+	/** Every ticked row, on this page or not: the link keeps them, and the limit counts every one (#350). */
+	ticks: number[];
 	disabled?: boolean;
 	/** The reply to Select all: Set category takes focus (see FOCUS_SET_CATEGORY). */
 	focusSetCategory?: boolean;
@@ -327,9 +329,9 @@ export function SelectionActionBar({
 				<span id="selected-count" aria-live="polite" class="text-lg">
 					{label ?? <SelectedCount count={count} notOnPage={notOnPage} />}
 				</span>
-				<SelectAllOnPage back={back} pageIds={pageIds} ticked={ticked} />
+				<SelectAllOnPage back={back} pageIds={pageIds} ticks={ticks} />
 			</div>
-			<SelectionLimit count={count} />
+			<SelectionLimit count={ticks.length} />
 			<NotOnPage count={notOnPage} rows={rows} open={openNotOnPage} />
 			<div class="flex gap-2">
 				<SelectionActionButtons

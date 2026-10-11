@@ -1113,6 +1113,8 @@ function HomeTopGroup() {
 
 /** The sample page's selectable rows, 25 to a page as the list draws it. */
 const SAMPLE_PAGE_IDS = Array.from({ length: 25 }, (_, i) => 101 + i);
+/** Ticks on another page: not in SAMPLE_PAGE_IDS. */
+const OFF_PAGE_IDS = Array.from({ length: 76 }, (_, i) => 201 + i);
 
 function Rows() {
 	return (
@@ -1741,9 +1743,9 @@ function Rows() {
 						<SelectionActionBar
 							count={3}
 							notOnPage={0}
+							ticks={[101, 103, 104]}
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set([101, 103, 104])}
 						/>
 					</div>
 				</State>
@@ -1752,9 +1754,9 @@ function Rows() {
 						<SelectionActionBar
 							count={25}
 							notOnPage={0}
+							ticks={SAMPLE_PAGE_IDS}
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set(SAMPLE_PAGE_IDS)}
 						/>
 					</div>
 				</State>
@@ -1763,9 +1765,9 @@ function Rows() {
 						<SelectionActionBar
 							count={0}
 							notOnPage={0}
+							ticks={[]}
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set()}
 							disabled
 						/>
 					</div>
@@ -1775,6 +1777,7 @@ function Rows() {
 						<SelectionActionBar
 							count={4}
 							notOnPage={3}
+							ticks={[101, ...OFF_PAGE_IDS.slice(0, 3)]}
 							rows={
 								<ul class="divide-y divide-rule">
 									{TRANSACTION_ROWS.slice(0, 3).map((state) => (
@@ -1784,7 +1787,6 @@ function Rows() {
 							}
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set([101])}
 						/>
 					</div>
 				</State>
@@ -1793,6 +1795,7 @@ function Rows() {
 						<SelectionActionBar
 							count={4}
 							notOnPage={3}
+							ticks={[101, ...OFF_PAGE_IDS.slice(0, 3)]}
 							openNotOnPage
 							rows={
 								<ul class="divide-y divide-rule">
@@ -1803,7 +1806,6 @@ function Rows() {
 							}
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set([101])}
 						/>
 					</div>
 				</State>
@@ -1812,10 +1814,10 @@ function Rows() {
 						<SelectionActionBar
 							count={101}
 							notOnPage={76}
+							ticks={[...SAMPLE_PAGE_IDS, ...OFF_PAGE_IDS]}
 							rows={undefined}
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
-							ticked={new Set(SAMPLE_PAGE_IDS)}
 							disabled
 						/>
 					</div>
@@ -1834,15 +1836,13 @@ function Rows() {
 							<SelectionActionBar
 								count={1}
 								notOnPage={0}
+								ticks={TRANSACTION_ROWS.slice(1, 2).map(
+									(state) => state.row.id,
+								)}
 								back="/transactions"
 								pageIds={TRANSACTION_ROWS.slice(0, 2).map(
 									(state) => state.row.id,
 								)}
-								ticked={
-									new Set(
-										TRANSACTION_ROWS.slice(1, 2).map((state) => state.row.id),
-									)
-								}
 								disabled
 							/>
 						</div>

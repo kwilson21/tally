@@ -375,19 +375,21 @@ async function renderList(
 	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
 	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
 	const onPage = new Set(pageIds);
+	// Every tick the list keeps, on this page or not: the address and the links carry all of them, and the
+	// limit counts all of them (#350).
+	const ticks = [...checkedIds];
 	// A tick stays until it is unticked, Done or acted on, so a tick that isn't on this page is drawn in
-	// the bar's "not on this page" line, still ticked (#350). Only ids that still exist are counted.
+	// the bar's "not on this page" line, still ticked (#350). Only rows that still exist are counted.
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
 	const offPage = selecting
 		? await listRowsByIds(
 				c.env.DB,
-				[...checkedIds].filter((id) => !onPage.has(id)),
+				ticks.filter((id) => !onPage.has(id)),
 			)
 		: [];
 	const tickCount = ticked.length + offPage.length;
 	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
 	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
-	const tickedOnPage = new Set(ticked.map((row) => row.id));
 	// The ticks not on this page, under their day headings, in the disclosure (ticked).
 	const offPageRows = byDay(offPage).map(([date, dayRows]) => (
 		<>
@@ -400,7 +402,11 @@ async function renderList(
 		</>
 	));
 	const htmx = c.req.header("HX-Request") === "true";
-	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
+	// In Select mode the Add cash sheet's close link and Cancel keep the ticks (#350). The link carries them as
+	// drawn, for a browser without JavaScript; with it, the request sends them as they are when the link is tapped.
+	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
+	const cashHref = selecting ? selectModeHref(cashPath, ticks) : cashPath;
+	const cashGet = selecting ? selectModeHref(cashPath, []) : cashPath;
 
 	return c.html(
 		<Layout
@@ -468,7 +474,9 @@ async function renderList(
 					kind="secondary"
 					href={cashHref}
 					class="gap-2"
-					hx-get={cashHref}
+					hx-get={cashGet}
+					// htmx sends the ticks as they are when tapped, and the URL it pushes carries them (#350).
+					{...(selecting ? TICKS_INCLUDE : {})}
 					hx-target="#sheet"
 					hx-select="#sheet"
 					hx-swap="outerHTML"
@@ -639,7 +647,8 @@ async function renderList(
 						<input id="selection-back" type="hidden" name="back" value={back} />
 						<section id="results" class="mt-2" aria-label="Results">
 							{suggestedNameNote}
-							{selectionError && (
+							{/* The limit's words are the bar's alone (SelectionLimit), so a refusal over 100 says them once. */}
+							{selectionError && selectionError !== TOO_MANY && (
 								<p role="alert" class="my-3 text-sm text-over">
 									{selectionError}
 								</p>
@@ -649,7 +658,11 @@ async function renderList(
 									kind="search"
 									sentence="No transactions match these filters."
 									hint="Try a wider month, or clear the search."
-									action={{ href: clearFiltersHref, label: "Clear filters" }}
+									// The filters' link keeps select mode and every tick, as a filter change does (#350).
+									action={{
+										href: selectModeHref(clearFiltersHref, ticks),
+										label: "Clear filters",
+									}}
 								/>
 							) : (
 								byDay(rows).map(([date, dayRows]) => (
@@ -694,8 +707,11 @@ async function renderList(
 								rows={offPageRows}
 								back={back}
 								pageIds={pageIds}
-								ticked={tickedOnPage}
-								disabled={htmx && (tickCount === 0 || tickCount > MAX_SELECTED)}
+								ticks={ticks}
+								// Both actions wait on every tick the list keeps, as the limit does, not only the rows it shows.
+								disabled={
+									htmx && (ticks.length === 0 || ticks.length > MAX_SELECTED)
+								}
 								focusSetCategory={focusSetCategory && tickCount > 0}
 							/>
 						</div>
@@ -861,7 +877,7 @@ transactions.get("/transactions/select/count", (c) => {
 			<SelectAllOnPage
 				back={back}
 				pageIds={pageIds}
-				ticked={new Set(ticks)}
+				ticks={ticks}
 				autofocus={focusSelectAll}
 				oob
 			/>
@@ -1940,19 +1956,22 @@ function CashSheet({
 	values,
 	errors,
 	back,
+	closeHref = back,
 	today,
 }: {
 	categories: Category[];
 	values: CashValues;
 	errors?: import("../transactions/cash").CashErrors;
 	back: string;
+	/** Where the backdrop and Cancel go: the list, with Select mode's ticks when they are open (#350). */
+	closeHref?: string;
 	today: string;
 }) {
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
 			labelledBy="cash-title"
-			closeHref={back}
+			closeHref={closeHref}
 			still={errors !== undefined && Object.keys(errors).length > 0}
 		>
 			<h2
@@ -1969,6 +1988,7 @@ function CashSheet({
 				errors={errors}
 				today={today}
 				back={back}
+				cancelHref={closeHref}
 				// Made each time the form is drawn: posting this form again records one transaction.
 				entryKey={crypto.randomUUID()}
 			/>
@@ -1977,17 +1997,24 @@ function CashSheet({
 }
 
 transactions.get("/transactions/cash/new", async (c) => {
-	const back = safeBack(
-		new URL(c.req.url).searchParams.get("back") ?? undefined,
-	);
+	const params = new URL(c.req.url).searchParams;
+	const back = safeBack(params.get("back") ?? undefined);
+	// In Select mode the ticks ride in the address (or, from a tap, in the request), and the sheet's close link
+	// and Cancel keep them, so closing the sheet leaves the ticks as they were (#350).
+	const selecting = params.get("select") === "1";
+	const ticks = selecting ? parseIds(params.getAll("ids")) : [];
+	const closeHref = selecting ? selectModeHref(back, ticks) : back;
 	const today = await householdToday(c.env.DB);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		pageTitle: "Add cash · Tally",
+		selecting,
+		checkedIds: new Set(ticks),
 		sheet: (categories, today) => (
 			<CashSheet
 				categories={categories}
 				values={cashValues(today)}
 				back={back}
+				closeHref={closeHref}
 				today={today}
 			/>
 		),

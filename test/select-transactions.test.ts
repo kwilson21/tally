@@ -484,7 +484,7 @@ describe("select several transactions", () => {
 		);
 		expect(res.status).toBe(422);
 		expect(await res.text()).toMatch(
-			/role="alert"[^>]*>Select 100 or fewer transactions\./,
+			/role="alert"[\s\S]*?Select 100 or fewer transactions\./,
 		);
 		expect(await snapshot()).toEqual(before);
 	});
@@ -1143,6 +1143,91 @@ describe("select several transactions", () => {
 			const offPage = await countFragment(await pageOneTicks(), pageRows, true);
 			expect(offPage).toContain("3 not on this page");
 			expect(offPage).not.toContain("autofocus");
+		});
+
+		it("keeps select mode and every tick in Clear filters when the filters match nothing", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam(ids)}`,
+			);
+			expect(html).toContain("No transactions match these filters.");
+			const clear = html.match(/<a [^>]*>Clear filters<\/a>/)?.[0] ?? "";
+			const params = new URL(
+				attribute(clear, "href") ?? "",
+				"http://tally.test",
+			).searchParams;
+			expect(params.get("select")).toBe("1");
+			expect(params.get("ids")?.split(",").map(Number)).toEqual(ids);
+		});
+
+		it("keeps the ticks not on this page in Select all's plain link, each once", async () => {
+			const off = await pageOneTicks();
+			const pageRows = await pageTwoRows();
+			// The page's first row is ticked already, so the link must not add it twice.
+			const ticked = [...off, pageRows[0] as number];
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ticked)}`,
+			);
+			const href = selectAllHref(html) ?? "";
+			const linked =
+				new URL(href, "http://tally.test").searchParams
+					.get("ids")
+					?.split(",")
+					.map(Number) ?? [];
+			expect(new Set(linked).size).toBe(linked.length);
+			expect([...linked].sort()).toEqual([...off, ...pageRows].sort());
+			const after = await (await request(href)).text();
+			expect(after).toMatch(
+				new RegExp(
+					`id="selected-count"[^>]*>${linked.length} selected<span class="sr-only">, ${off.length} not on this page</span>`,
+				),
+			);
+		});
+
+		it("says a refused Exclude over 100 once, in the bar", async () => {
+			const ids = await addHundredOneRows();
+			const res = await post(
+				"/transactions/select/exclude",
+				form(ids, { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html.match(/Select 100 or fewer transactions\./g)).toHaveLength(1);
+			expect(html).toMatch(
+				/<div id="selection-limit"[^>]*><p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p><\/div>/,
+			);
+		});
+
+		it("keeps the ticks in the Add cash sheet's close link and Cancel, and in its address", async () => {
+			const ids = await pageOneTicks();
+			const list = await pageHtml(`month=all&select=1&ids=${ticksParam(ids)}`);
+			const addCash = list.match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+			const cashHref = attribute(addCash, "href") ?? "";
+			expect(cashHref).toBe(
+				`/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall&select=1&ids=${ticksParam(ids)}`,
+			);
+			// With JavaScript the request carries the ticks as they are when tapped, not as drawn.
+			expect(attribute(addCash, "hx-get")).toBe(
+				"/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall&select=1",
+			);
+			expect(attribute(addCash, "hx-include")).toBe(
+				"#selection-form input[name=ids]:checked",
+			);
+			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
+			const sheetUrl = `/transactions/cash/new?${new URLSearchParams([
+				["back", "/transactions?month=all"],
+				["select", "1"],
+				...ids.map((id) => ["ids", String(id)]),
+			])}`;
+			const sheet = await (await request(sheetUrl, htmxHeaders)).text();
+			const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+			expect(attribute(backdrop ?? "", "href")).toBe(close);
+			const cancel = sheet.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+			expect(attribute(cancel, "href")).toBe(close);
+			// The sheet's form still returns to the plain list, and a reload of the sheet (no JavaScript) keeps the ticks.
+			expect(sheet).toContain('name="back" value="/transactions?month=all"');
+			const reload = await (await request(cashHref)).text();
+			expect([...tickedIds(reload)].sort()).toEqual([...ids].sort());
 		});
 	});
 });

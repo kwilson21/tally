@@ -14,6 +14,7 @@ export function CashForm({
 	today,
 	action = "/transactions/cash",
 	back = "/transactions",
+	cancelHref = back,
 	entryKey,
 	idPrefix = "cash",
 }: {
@@ -23,6 +24,8 @@ export function CashForm({
 	today: string;
 	action?: string;
 	back?: string;
+	/** Where Cancel goes, when that is not the list the form returns to (Select mode's ticks, #350). */
+	cancelHref?: string;
 	/** A one-time key (a UUID) made when the form is drawn, so posting the form twice saves once. */
 	entryKey?: string;
 	/** What every id on the form starts with, so two forms drawn on one page don't share ids. */
@@ -114,7 +117,7 @@ export function CashForm({
 				)}
 			</FormField>
 			<div class="grid grid-cols-2 gap-3">
-				<Button href={back} kind="secondary">
+				<Button href={cancelHref} kind="secondary">
 					Cancel
 				</Button>
 				<Button type="submit" busyLabel="Adding…">
