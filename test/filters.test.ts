@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	filtersToQuery,
 	likePattern,
+	monthFor,
 	parseFilters,
+	searchAmount,
+	searchBefore,
 } from "../src/transactions/filters";
 
 const parse = (qs: string) => parseFilters(new URLSearchParams(qs), "2026-09");
@@ -131,5 +134,120 @@ describe("filtersToQuery", () => {
 describe("likePattern", () => {
 	it("wraps in % and escapes LIKE wildcards", () => {
 		expect(likePattern("50%_off\\")).toBe("%50\\%\\_off\\\\%");
+	});
+});
+
+describe("searchAmount (#211)", () => {
+	it("reads a number with cents as exactly that amount, in cents", () => {
+		expect(searchAmount("42.17")).toEqual({
+			low: 4217,
+			high: 4217,
+			exact: true,
+			plain: false,
+		});
+		expect(searchAmount("$42.17")).toEqual({
+			low: 4217,
+			high: 4217,
+			exact: true,
+			plain: false,
+		});
+		// Any decimal point makes it exact: "42.1" is $42.10.
+		expect(searchAmount("42.1")?.low).toBe(4210);
+		expect(searchAmount("42.1")?.exact).toBe(true);
+	});
+
+	it("reads a whole number as every amount in that dollar", () => {
+		expect(searchAmount("42")).toEqual({
+			low: 4200,
+			high: 4299,
+			exact: false,
+			plain: true,
+		});
+		expect(searchAmount("$42")).toEqual({
+			low: 4200,
+			high: 4299,
+			exact: false,
+			plain: false,
+		});
+		expect(searchAmount("$1,284")).toEqual({
+			low: 128400,
+			high: 128499,
+			exact: false,
+			plain: false,
+		});
+		expect(searchAmount(" 42 ")?.plain).toBe(true);
+	});
+
+	it("reads any other text as no amount", () => {
+		for (const text of [
+			"costco",
+			"42.",
+			"$",
+			"-42",
+			"4 2",
+			"1,00",
+			"3.141",
+			"groceries 42",
+			"",
+		])
+			expect(searchAmount(text)).toBeNull();
+	});
+});
+
+describe("monthFor (#211)", () => {
+	const THIS = "2026-10";
+	const f = (qs: string) => parseFilters(new URLSearchParams(qs), THIS);
+
+	it("looks in every month when a search is typed into an empty box on this month", () => {
+		expect(monthFor(f("q=costco"), "", THIS)).toBe("all");
+		expect(monthFor(f("q=42.17&month=2026-10"), "", THIS)).toBe("all");
+	});
+
+	it("keeps the month a search names: one picked before typing, or one picked during it", () => {
+		expect(monthFor(f("q=costco&month=2026-09"), "", THIS)).toBe("2026-09");
+		expect(monthFor(f("q=costc&month=2026-09"), "costco", THIS)).toBe(
+			"2026-09",
+		);
+		// "Only October" and picking October both narrow, and stay while typing.
+		expect(monthFor(f("q=costco&month=2026-10"), "costc", THIS)).toBe(
+			"2026-10",
+		);
+		expect(monthFor(f("q=costco&month=2026-10"), "costco", THIS)).toBe(
+			"2026-10",
+		);
+	});
+
+	it("keeps All months while a search runs", () => {
+		expect(monthFor(f("q=costc&month=all"), "costco", THIS)).toBe("all");
+	});
+
+	it("goes back to this month when the search box is emptied", () => {
+		expect(monthFor(f("month=all"), "costco", THIS)).toBe("2026-10");
+		expect(monthFor(f("month=2026-09"), "costco", THIS)).toBe("2026-10");
+	});
+
+	it("keeps All months when no search was typed before (a category, say)", () => {
+		expect(monthFor(f("month=all&category=1"), "", THIS)).toBe("all");
+		expect(monthFor(f("month=all"), "", THIS)).toBe("all");
+	});
+
+	it("uses the month as sent when the request names no page (reload, link, no JavaScript)", () => {
+		expect(monthFor(f("q=costco"), null, THIS)).toBe("2026-10");
+		expect(monthFor(f("q=costco&month=2026-09"), null, THIS)).toBe("2026-09");
+	});
+});
+
+describe("searchBefore (#211)", () => {
+	it("reads the search the transactions page showed, from its address", () => {
+		expect(
+			searchBefore("http://tally.test/transactions?q=%20costco%20&month=all"),
+		).toBe("costco");
+		expect(searchBefore("http://tally.test/transactions?month=all")).toBe("");
+	});
+
+	it("names no earlier search without an address, for another page, or for a bad address", () => {
+		expect(searchBefore(undefined)).toBeNull();
+		expect(searchBefore("http://tally.test/home?q=costco")).toBeNull();
+		expect(searchBefore("not a url")).toBeNull();
 	});
 });

@@ -43,9 +43,11 @@ import {
 import {
 	type Filters,
 	filtersToQuery,
+	monthFor,
 	parseFilters,
 	SHOW_LABELS,
 	SHOWS,
+	searchBefore,
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
@@ -241,12 +243,19 @@ async function renderList(
 			label: `account ${filters.account}`,
 			disconnected: false,
 		});
+	// A search whose text is a category's name finds that category's rows, and the count says so (#211).
+	const categoryMatch =
+		filters.q !== "" &&
+		categories.results.some((cat) =>
+			cat.name.toLowerCase().includes(filters.q.toLowerCase()),
+		);
 	const count = resultCount(
 		{ total, first, shown: rows.length, pages },
 		filters,
 		categoryName,
 		today,
 		accountName,
+		categoryMatch,
 	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	const focusCount =
@@ -259,12 +268,19 @@ async function renderList(
 		filters.category === null &&
 		filters.account === null &&
 		filters.show === "all";
-	const pageHref = (n: number) => {
-		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
-		const params = new URLSearchParams(query);
+	// The address of this list with other filters: select mode is kept.
+	const listUrl = (next: Filters) => {
+		const params = new URLSearchParams(filtersToQuery(next, today.slice(0, 7)));
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
+	const pageHref = (n: number) => listUrl({ ...filters, page: n });
+	// "Only October" narrows a search that runs in every month to this month, and keeps the search (#211).
+	const onlyMonthHref = listUrl({
+		...filters,
+		month: today.slice(0, 7),
+		page: 1,
+	});
 	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked.
 	const includeTicked = selecting
 		? { "hx-include": "#selection-form input[name=ids]:checked" }
@@ -533,6 +549,28 @@ async function renderList(
 						{count}
 					</p>
 				)}
+				{/* Always drawn on a list, so a search that runs in every month can add or remove its link (LIST_OOB). */}
+				{firstVisit === null && (
+					<div id="only-month">
+						{filters.q !== "" && filters.month === "all" && (
+							<Button
+								kind="text"
+								href={onlyMonthHref}
+								class="-ml-2"
+								hx-get={onlyMonthHref}
+								hx-sync="#filters:replace"
+								hx-target="#results"
+								hx-select="#results > *"
+								hx-select-oob={LIST_OOB}
+								hx-swap="innerHTML show:top"
+								hx-push-url="true"
+								{...includeTicked}
+							>
+								Only {monthLabel(today.slice(0, 7), today)}
+							</Button>
+						)}
+					</div>
+				)}
 				{/* Under the count, not in it: what the raw view leaves out stays put as filters change. */}
 				{filters.raw && <p class="mt-1 text-muted">{BANK_VIEW_NOTE}</p>}
 				{/* Always drawn on a list, so a filter change can add or remove the link inside it (LIST_OOB). */}
@@ -683,10 +721,25 @@ transactions.get("/transactions", async (c) => {
 	const focus = Number(params.get("focus"));
 	const selecting = params.get("select") === "1";
 	const today = await householdToday(c.env.DB);
+	const thisMonth = today.slice(0, 7);
+	const asked = parseFilters(params, thisMonth, isDemo(c));
+	// A search typed into an empty box looks in every month, and emptying the box goes back to this month (#211).
+	const month = monthFor(
+		asked,
+		searchBefore(c.req.header("HX-Current-URL")),
+		thisMonth,
+	);
+	if (c.req.header("HX-Request") === "true" && month !== asked.month) {
+		// htmx shows this address, so a reload shows the same month the list does.
+		const address = new URL(c.req.url);
+		if (month === thisMonth) address.searchParams.delete("month");
+		else address.searchParams.set("month", month);
+		c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+	}
 	return renderList(
 		c,
 		today,
-		parseFilters(params, today.slice(0, 7), isDemo(c)),
+		{ ...asked, month },
 		{
 			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 			selecting,
@@ -708,6 +761,10 @@ const LIST_OOB = [
 	"#set-category-selection:outerHTML",
 	"#exclude-selection:outerHTML",
 	"#view-links:outerHTML",
+	// The Month choice's options follow a month a search resolves (#211); its element stays, so a
+	// keyboard user keeps focus in it.
+	"#month:innerHTML",
+	"#only-month:innerHTML",
 ].join(", ");
 
 /** Most ids one bulk action takes (D1 binds at most 100 parameters per statement). */

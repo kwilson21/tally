@@ -3,7 +3,12 @@ import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type Edit, merchantRuleChange } from "../transactions/edit";
-import { type Filters, likePattern, type Show } from "../transactions/filters";
+import {
+	type Filters,
+	likePattern,
+	type Show,
+	searchAmount,
+} from "../transactions/filters";
 import {
 	type NameSource,
 	nameSource,
@@ -192,12 +197,23 @@ export async function listTransactions(
 			// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
 			// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
 			// row says can be searched for.
-			where.push(
-				`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)})`,
-			);
+			// A search also finds a category by its name (#211), and an amount (decision 79). A plain whole
+			// number matches its amount and the words, so "42" finds "STORE 42" as well as $42.00 to $42.99;
+			// with a "$" or a decimal point the search is the amount alone.
+			const amount = searchAmount(f.q);
 			const pattern = likePattern(f.q);
-			args.push(pattern, pattern, pattern, pattern);
-			args.push(pattern);
+			const alternatives: string[] = [];
+			if (amount === null || amount.plain) {
+				alternatives.push(
+					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR c.name LIKE ? ESCAPE '\\')`,
+				);
+				args.push(pattern, pattern, pattern, pattern, pattern, pattern);
+			}
+			if (amount) {
+				alternatives.push("ABS(t.amount_cents) BETWEEN ? AND ?");
+				args.push(amount.low, amount.high);
+			}
+			where.push(`(${alternatives.join(" OR ")})`);
 		}
 	}
 

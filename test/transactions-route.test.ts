@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { SHOW_LABELS, SHOWS } from "../src/transactions/filters";
 import { FilterSelect } from "../src/views/filter-select";
@@ -341,7 +341,7 @@ describe("GET /transactions", () => {
 		).run();
 		const { html } = await get("/transactions?month=all&category=1");
 		expect(html).toMatch(
-			/<p id="result-count"[^>]*>\d+ transactions in Groceries, across all months<\/p>/,
+			/<p id="result-count"[^>]*>\d+ transactions in Groceries, all months<\/p>/,
 		);
 	});
 
@@ -457,6 +457,137 @@ describe("GET /transactions", () => {
 });
 
 // The Account and Show choices (#210, spec §8.4; P63 A and P64 B).
+describe("GET /transactions: a search looks in every month (#211)", () => {
+	const today = todayIn(DEFAULT_TIME_ZONE);
+	const THIS = today.slice(0, 7);
+	const THIS_NAME = monthLabel(THIS, today);
+	const [year, monthNumber] = THIS.split("-").map(Number) as [number, number];
+	const LAST =
+		monthNumber === 1
+			? `${year - 1}-12`
+			: `${year}-${String(monthNumber - 1).padStart(2, "0")}`;
+	/** htmx's headers for a request made from the page at `from`. */
+	const fromPage = (from: string) => ({
+		"HX-Request": "true",
+		"HX-Current-URL": `http://tally.test${from}`,
+	});
+	/** The count's text, with the quotes Hono escapes put back. */
+	const countText = (html: string) => countOf(html)?.replaceAll("&quot;", '"');
+	const selectedMonth = (html: string) =>
+		optionsOf(html, "month").find((option) => option.selected)?.value;
+	/** The "Only …" link under the count, as its text and address. */
+	const onlyLink = (html: string) => {
+		const match = html.match(/<a ([^>]*)>(Only [^<]+)<\/a>/);
+		return match
+			? {
+					text: match[2],
+					href: /href="([^"]*)"/
+						.exec(match[1] ?? "")?.[1]
+						?.replaceAll("&amp;", "&"),
+				}
+			: null;
+	};
+
+	it("looks in every month for a search typed into an empty box on this month, and says so", async () => {
+		const { res, html } = await get(
+			`/transactions?q=trader&month=${THIS}`,
+			fromPage("/transactions"),
+		);
+		expect(countText(html)).toMatch(
+			/^\d+ transactions? matching "trader" in all months$/,
+		);
+		expect(selectedMonth(html)).toBe("all");
+		// The address names the month the list shows, so a reload shows the same list.
+		expect(res.headers.get("HX-Push-Url")).toBe(
+			"/transactions?q=trader&month=all",
+		);
+		expect(onlyLink(html)).toEqual({
+			text: `Only ${THIS_NAME}`,
+			href: "/transactions?q=trader",
+		});
+	});
+
+	it("keeps the other parts of the address when it changes the month", async () => {
+		const { res } = await get(
+			`/transactions?q=trader&month=${THIS}&select=1`,
+			fromPage("/transactions"),
+		);
+		expect(res.headers.get("HX-Push-Url")).toBe(
+			"/transactions?q=trader&month=all&select=1",
+		);
+	});
+
+	it("keeps the month a search names once it has text, so a month picked while typing stays", async () => {
+		const { res, html } = await get(
+			`/transactions?q=trader&month=${LAST}`,
+			fromPage("/transactions?q=trad&month=all"),
+		);
+		expect(countText(html)).toMatch(
+			new RegExp(
+				`^\\d+ transactions? matching "trader" in ${monthLabel(LAST, today)}$`,
+			),
+		);
+		expect(selectedMonth(html)).toBe(LAST);
+		expect(res.headers.get("HX-Push-Url")).toBeNull();
+		expect(onlyLink(html)).toBeNull();
+	});
+
+	it("narrows to this month when the Only link is followed, and drops the link", async () => {
+		const { html } = await get(
+			`/transactions?q=trader&month=${THIS}`,
+			fromPage("/transactions?q=trader&month=all"),
+		);
+		expect(countText(html)).toMatch(new RegExp(`in ${THIS_NAME}$`));
+		expect(selectedMonth(html)).toBe(THIS);
+		expect(onlyLink(html)).toBeNull();
+	});
+
+	it("goes back to this month when the search box is emptied", async () => {
+		const { res, html } = await get(
+			`/transactions?month=${LAST}`,
+			fromPage("/transactions?q=trader&month=all"),
+		);
+		expect(countText(html)).toMatch(new RegExp(`in ${THIS_NAME}$`));
+		expect(selectedMonth(html)).toBe(THIS);
+		expect(res.headers.get("HX-Push-Url")).toBe("/transactions");
+	});
+
+	it("keeps All months for a category picked when no search was typed", async () => {
+		const { res, html } = await get(
+			"/transactions?month=all&category=1",
+			fromPage("/transactions?month=all"),
+		);
+		expect(countText(html)).toMatch(
+			/^\d+ transactions? in Groceries, all months$/,
+		);
+		expect(selectedMonth(html)).toBe("all");
+		expect(res.headers.get("HX-Push-Url")).toBeNull();
+		expect(onlyLink(html)).toBeNull();
+	});
+
+	it("uses the month the address names when there is no page to come from (a reload or no JavaScript)", async () => {
+		const { res, html } = await get(`/transactions?q=trader&month=${THIS}`);
+		expect(countText(html)).toMatch(new RegExp(`in ${THIS_NAME}$`));
+		expect(selectedMonth(html)).toBe(THIS);
+		expect(res.headers.get("HX-Push-Url")).toBeNull();
+		expect(onlyLink(html)).toBeNull();
+	});
+
+	it("offers Only this month under the count only while a search runs in every month", async () => {
+		const { html } = await get(
+			"/transactions?month=all",
+			fromPage("/transactions?month=all"),
+		);
+		expect(onlyLink(html)).toBeNull();
+		expect(countText(html)).toMatch(/ in all months$/);
+	});
+
+	it("swaps the Month choice out of band with the count, so it shows the month the list shows", async () => {
+		const { html } = await get("/transactions");
+		expect(html).toContain("#month:innerHTML");
+	});
+});
+
 describe("GET /transactions: Account and Show", () => {
 	it("has a labeled Account choice beside Month and Category, one entry per account, Cash reading 'Cash'", async () => {
 		const { html } = await get("/transactions");
@@ -499,7 +630,7 @@ describe("GET /transactions: Account and Show", () => {
 		).toHaveLength(1);
 		expect(rowCount(html)).toBeGreaterThan(0);
 		// The count names the account itself, not its bank's state.
-		expect(countOf(html)).toMatch(/in Credit card ••9012, across all months$/);
+		expect(countOf(html)).toMatch(/in Credit card ••9012, all months$/);
 	});
 
 	it("tells two accounts with the same name and ending apart, in the choice and in the count", async () => {
@@ -520,12 +651,12 @@ describe("GET /transactions: Account and Show", () => {
 		expect(labels).toContain("Checking ••1234 (Second Bank)");
 		expect(new Set(labels).size).toBe(labels.length);
 		expect(countOf(html)).toBe(
-			"1 transaction in Checking ••1234 (Second Bank), across all months",
+			"1 transaction in Checking ••1234 (Second Bank), all months",
 		);
 		expect(html).toMatch(/second bank coffee/i);
 		const first = (await get("/transactions?month=all&account=1")).html;
 		expect(countOf(first)).toMatch(
-			/in Checking ••1234 \(First Harbor Bank\), across all months$/,
+			/in Checking ••1234 \(First Harbor Bank\), all months$/,
 		);
 	});
 
@@ -578,7 +709,7 @@ describe("GET /transactions: Account and Show", () => {
 		const { html } = await get("/transactions?month=all&account=4");
 		expect(rowCount(html)).toBe(1);
 		expect(html).toContain("Farmers market");
-		expect(countOf(html)).toBe("1 transaction in Cash, across all months");
+		expect(countOf(html)).toBe("1 transaction in Cash, all months");
 		expect(optionsOf(html, "account").find((o) => o.selected)?.value).toBe("4");
 
 		const card = (await get("/transactions?account=3")).html;
@@ -590,9 +721,7 @@ describe("GET /transactions: Account and Show", () => {
 
 	it("names the category and the account together", async () => {
 		const { html } = await get("/transactions?month=all&account=4&category=1");
-		expect(countOf(html)).toBe(
-			"1 transaction in Groceries, Cash, across all months",
-		);
+		expect(countOf(html)).toBe("1 transaction in Groceries, Cash, all months");
 	});
 
 	it("says so for an account that isn't there, still announcing it", async () => {
@@ -636,7 +765,7 @@ describe("GET /transactions: Account and Show", () => {
 		expect(html).toContain("Paycheck, Acme Corp");
 		expect(countOf(html)).toMatch(
 			new RegExp(
-				`^(Showing 1–25 of \\d+|${n}) income transactions across all months$`,
+				`^(Showing 1–25 of \\d+|${n}) income transactions in all months$`,
 			),
 		);
 		expect(optionsOf(html, "show").find((o) => o.selected)?.value).toBe(
@@ -661,14 +790,14 @@ describe("GET /transactions: Account and Show", () => {
 		expect(html).toContain("Mystery credit");
 		expect(html).toContain("Unlinked refund");
 		expect(html).not.toContain("Paycheck, Acme Corp");
-		expect(countOf(html)).toMatch(/refund transactions across all months$/);
+		expect(countOf(html)).toMatch(/refund transactions in all months$/);
 	});
 
 	it("Show Spending names the type and leaves out income", async () => {
 		const { html } = await get("/transactions?month=all&show=spending");
 		expect(html).not.toContain("Paycheck, Acme Corp");
 		expect(countOf(html)).toMatch(
-			/^(Showing 1–25 of \d+|\d+) spending transactions across all months$/,
+			/^(Showing 1–25 of \d+|\d+) spending transactions in all months$/,
 		);
 	});
 

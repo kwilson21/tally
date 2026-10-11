@@ -211,3 +211,58 @@ describe("monthsWithTransactions", () => {
 		expect(months).toContain("2026-09");
 	});
 });
+
+describe("listTransactions: search by amount and category (#211)", () => {
+	/** One transaction on the first account, all dated the same day, so the newest id lists first. */
+	const insert = (
+		id: number,
+		amountCents: number,
+		rawName: string,
+		categoryId: number | null = null,
+	) =>
+		env.DB.prepare(
+			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT ?,id,'2026-09-15',?,?,? FROM accounts LIMIT 1",
+		).bind(id, amountCents, rawName, categoryId);
+
+	/** The ids the search finds among this test's rows, newest first. */
+	const found = async (qs: string) =>
+		(await list(qs)).rows.map((row) => row.id).filter((id) => id >= 99200);
+
+	it("finds exactly the cents a number names, money out and money in alike (decision 79)", async () => {
+		await env.DB.batch([
+			insert(99201, 4217, "PURCHASE ONE"),
+			insert(99202, -4217, "CREDIT ONE"),
+			insert(99203, 4216, "ONE CENT LESS"),
+			insert(99204, 42170, "TEN TIMES"),
+		]);
+		expect(await found("q=42.17&month=all")).toEqual([99202, 99201]);
+	});
+
+	it("finds every amount in the dollar for $42 and for 42, and nothing outside it", async () => {
+		await env.DB.batch([
+			insert(99211, 4200, "DOLLAR LOW"),
+			insert(99212, 4299, "DOLLAR HIGH"),
+			insert(99213, 4199, "JUST BELOW"),
+			insert(99214, 4300, "JUST ABOVE"),
+			insert(99215, -4250, "CREDIT IN THE DOLLAR"),
+		]);
+		expect(await found("q=%2442&month=all")).toEqual([99215, 99212, 99211]);
+		expect(await found("q=42&month=all")).toEqual([99215, 99212, 99211]);
+	});
+
+	it("matches names and notes with the digits for a plain number, but not for $42 (#211)", async () => {
+		await env.DB.batch([
+			insert(99216, -1000, "STORE 42 CAFE"),
+			insert(99217, 1000, "NOT THE DIGITS"),
+		]);
+		expect(await found("q=42&month=all")).toEqual([99216]);
+		expect(await found("q=%2442&month=all")).toEqual([]);
+	});
+
+	it("finds rows in a category by the category's name, in every month", async () => {
+		await env.DB.batch([insert(99220, 1500, "GROCER ROW", 1)]);
+		const { rows } = await list("q=groceries&month=all");
+		expect(rows.some((row) => row.id === 99220)).toBe(true);
+		expect(rows.every((row) => row.categoryName === "Groceries")).toBe(true);
+	});
+});
