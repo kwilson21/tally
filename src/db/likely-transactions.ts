@@ -237,7 +237,7 @@ export async function addLikely(
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET category_id = ?5, category_source = 'user', category_confidence = NULL,
-				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, updated_by = ?6, updated_at = datetime('now')
+				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?6, updated_at = datetime('now')
 			WHERE category_id IS NULL AND EXISTS (SELECT 1 FROM categories WHERE id = ?5 AND archived = 0) AND id IN (
 				SELECT t.id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
 				AND t.id IN (SELECT value FROM json_each(?7)))`,

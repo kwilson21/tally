@@ -178,7 +178,7 @@ const STATEMENTS = [
 	 WHERE pe.id = ${PENDING} AND ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
 	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0
 	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ne.id)`,
-	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL
+	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, split_removed_bills = NULL
 	 WHERE id = ${POSTED} AND is_split = 0 AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,
 	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row),
@@ -202,9 +202,10 @@ const STATEMENTS = [
 	 WHERE refund_of_id IN (SELECT part.id FROM transactions part WHERE part.parent_id = ${PENDING})
 	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents != ?3)
 	 AND ${READY}`,
-	// A bill payment of a part that goes with the pending row is unlinked by name, not left to the cascade
+	// A bill payment of a part that goes with the pending row is dismissed on the posted row, so the matcher does not link it again
 	// (decision 99). The parts that moved to the posted row are not its parts any more, so they keep theirs.
-	`DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${READY}`,
+	`UPDATE bill_payments SET transaction_id = ${POSTED}, status = 'dismissed', matched_by = 'auto'
+	 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND status = 'linked' AND ${READY}`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
 	`DELETE FROM transactions WHERE id = ${PENDING} AND ${READY}`,
 ];

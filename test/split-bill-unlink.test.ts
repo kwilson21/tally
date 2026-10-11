@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { matchBillPayments } from "../src/bills/match";
 import { billOccurrence } from "../src/bills/status";
 import { removeSplit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -220,5 +221,74 @@ describe("replacing a split's parts unlinks their bill payments (decision 99)", 
 
 		expect(result).toEqual({ saved: false, unlinked: [], bills: [] });
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set(["2026"]));
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
+	});
+});
+
+/** The dismissed payments of a bill, as the matcher reads them. */
+async function dismissedPayments(billId: number) {
+	const { results } = await db
+		.prepare(
+			"SELECT transaction_id, period, matched_by, status FROM bill_payments WHERE bill_id = ? AND status = 'dismissed' ORDER BY transaction_id",
+		)
+		.bind(billId)
+		.all<{
+			transaction_id: number;
+			period: string;
+			matched_by: string;
+			status: string;
+		}>();
+	return results;
+}
+
+describe("the matcher does not link a bill a split change unlinked (decision 99)", () => {
+	// The parts sum to $42.00, which the bill's tolerance accepts once they are one purchase again.
+	const smallPart = { ...groceriesPart, cents: 200 };
+
+	it("records the unlink as a dismissal on the whole purchase when the split is removed", async () => {
+		await seedSplit([membershipPart, smallPart]);
+
+		await removeSplit(db, PURCHASE, "test");
+		await matchBillPayments(db, TODAY);
+
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([
+			{
+				transaction_id: PURCHASE,
+				period: "2026",
+				matched_by: "auto",
+				status: "dismissed",
+			},
+		]);
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+	});
+
+	it("records a dismissal on each new part when the parts are replaced", async () => {
+		await seedSplit([membershipPart, smallPart]);
+
+		await saveSplit(
+			db,
+			PURCHASE,
+			[
+				{ categoryId: KIDS, amountCents: 4000 },
+				{ categoryId: GROCERIES, amountCents: 200 },
+			],
+			"test",
+		);
+		await matchBillPayments(db, TODAY);
+
+		const { results: parts } = await db
+			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+			.bind(PURCHASE)
+			.all<{ id: number }>();
+		expect(parts).toHaveLength(2);
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
+			parts.map((part) => ({
+				transaction_id: part.id,
+				period: "2026",
+				matched_by: "auto",
+				status: "dismissed",
+			})),
+		);
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
 	});
 });

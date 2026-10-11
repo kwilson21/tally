@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { matchBillPayments } from "../src/bills/match";
 import { summarizeMonth } from "../src/budget";
 import { loadMonth } from "../src/db/month";
 import { pendingForJev } from "../src/db/transactions";
@@ -1492,6 +1493,57 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9850 AND status = 'linked'",
 			),
 		).toBe(0);
+	});
+
+	it("records the unlink as a dismissal on the posted row, so the matcher does not link it again (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const parts = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9851, 'Water', 600, 28, 'monthly', NULL, NULL, 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9851, '2026-09', ?, 'auto', 'linked')",
+			).bind(parts[0]),
+		]);
+
+		// $6.10 posted on the bill's due date: the whole posted purchase is within the bill's tolerance.
+		await post(item, { amount: 6.1 });
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			is_split: 0,
+			split_removed_bills: '[{"name":"Water","period":"2026-09"}]',
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, status FROM bill_payments WHERE bill_id = 9851",
+				).all()
+			).results,
+		).toEqual([{ transaction_id: ids.posted, status: "dismissed" }]);
+	});
+
+	it("clears the note a bank change left on the posted row when the posted row takes the split (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await splitInto(ids.pending, 600, 634);
+		await env.DB.prepare(
+			"UPDATE transactions SET split_removed_from_cents = 1234, split_removed_bills = ? WHERE id = ?",
+		)
+			.bind('[{"name":"Water","period":"2026-09"}]', ids.posted)
+			.run();
+
+		await post(item);
+
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			is_split: 1,
+			split_removed_from_cents: null,
+			split_removed_bills: null,
+		});
 	});
 
 	it("moves a split when the amount is unchanged, with its parts following the posted date", async () => {

@@ -132,6 +132,25 @@ describe("GET /transactions/organize", () => {
 });
 
 describe("POST /transactions/organize", () => {
+	it("clears the bill names of a purchase the bank took out of its split when it is set a category", async () => {
+		const rawName = "SQ *LOCAL BAKERY 4432";
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = NULL, category_source = NULL, split_removed_from_cents = 5000, split_removed_bills = ? WHERE raw_name = ?",
+		)
+			.bind('[{"name":"Water","period":"2026-09"}]', rawName)
+			.run();
+
+		await post({ category: "2", group: "Local Bakery", raw_name: [rawName] });
+
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = ? AND split_removed_bills IS NOT NULL",
+			)
+				.bind(rawName)
+				.first<{ n: number }>(),
+		).toEqual({ n: 0 });
+	});
+
 	it("sets every category and source, merchant rules and rename, then redirects with announcements", async () => {
 		const rawNames = ["SQ *LOCAL BAKERY 4432"];
 		const before = await env.DB.prepare(

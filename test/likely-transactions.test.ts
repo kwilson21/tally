@@ -50,6 +50,19 @@ async function filed(id: number) {
 		}>();
 }
 
+/** The bills a bank change's removed split unlinked, or null once its note is cleared. */
+async function splitBills(id: number) {
+	return (
+		(
+			await env.DB.prepare(
+				"SELECT split_removed_bills AS bills FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first<{ bills: string | null }>()
+		)?.bills ?? null
+	);
+}
+
 /** The amount a bank change split the transaction from, or null once its note is cleared. */
 async function splitRemoved(id: number) {
 	return (
@@ -364,7 +377,7 @@ describe("addLikely", () => {
 			"Banfield Pet Hospital",
 		);
 		await env.DB.prepare(
-			"UPDATE transactions SET split_removed_from_cents = 18742 WHERE id IN (?, ?)",
+			'UPDATE transactions SET split_removed_from_cents = 18742, split_removed_bills = \'[{"name":"Water","period":"2026-09"}]\' WHERE id IN (?, ?)',
 		)
 			.bind(ticked, unticked)
 			.run();
@@ -381,6 +394,10 @@ describe("addLikely", () => {
 		expect(moved).toBe(1);
 		expect(await splitRemoved(ticked)).toBeNull();
 		expect(await splitRemoved(unticked)).toBe(18742);
+		expect(await splitBills(ticked)).toBeNull();
+		expect(await splitBills(unticked)).toBe(
+			'[{"name":"Water","period":"2026-09"}]',
+		);
 	});
 
 	it("offers and files a guess whose suggestion differs from the new category only in accented capitals", async () => {

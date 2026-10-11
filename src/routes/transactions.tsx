@@ -1189,7 +1189,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	await c.env.DB.batch(
 		ids.map((id) =>
 			c.env.DB.prepare(
-				"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, updated_by=?, updated_at=datetime('now') WHERE id=?",
+				"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, split_removed_bills=NULL, updated_by=?, updated_at=datetime('now') WHERE id=?",
 			).bind(cat.id, actor(c), id),
 		),
 	);

@@ -1,5 +1,7 @@
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { matchBillPayments } from "../src/bills/match";
+import { unpaidBillsNote } from "../src/bills/unpaid";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { saveSplit } from "../src/db/transactions";
 import { syncItem } from "../src/plaid/sync";
@@ -165,6 +167,75 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 					.first<{ split_removed_bills: string | null }>()
 			)?.split_removed_bills,
 		).toBe(MEMBERSHIP_JSON);
+	});
+
+	it("records the unlink as a dismissal on the purchase, so the matcher does not link the bill again", async () => {
+		const { item, purchase } = await splitPurchase();
+		// The bank names the merchant "Costco", the key a bill's merchant must equal to be matched.
+		await env.DB.prepare(
+			"UPDATE bills SET merchant_raw_name = 'Costco' WHERE id = ?",
+		)
+			.bind(MEMBERSHIP)
+			.run();
+
+		// $42.00 on the same day: the whole purchase is within the bill's tolerance and date window.
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 42 })] }),
+		);
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT bill_id, period, transaction_id, matched_by, status FROM bill_payments WHERE bill_id = ?",
+				)
+					.bind(MEMBERSHIP)
+					.all()
+			).results,
+		).toEqual([
+			{
+				bill_id: MEMBERSHIP,
+				period: "2026",
+				transaction_id: purchase,
+				matched_by: "auto",
+				status: "dismissed",
+			},
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT split_removed_bills FROM transactions WHERE id = ?",
+			)
+				.bind(purchase)
+				.first(),
+		).toEqual({ split_removed_bills: MEMBERSHIP_JSON });
+		expect(unpaidBillsNote(MEMBERSHIP_JSON)).toBe(
+			" The Costco membership bill for 2026 is no longer paid.",
+		);
+
+		// A person can still link the purchase to the bill by hand.
+		await exports.default.fetch(`http://tally.test/bills/${MEMBERSHIP}/link`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				Origin: "http://tally.test",
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				transaction_id: String(purchase),
+				period: "2026",
+				opened_period: "2026",
+			}),
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = ? AND period = '2026' AND status = 'linked' AND transaction_id = ?",
+			)
+				.bind(MEMBERSHIP, purchase)
+				.first<{ n: number }>(),
+		).toEqual({ n: 1 });
 	});
 
 	it("stores no bill names when the split's parts paid none", async () => {
