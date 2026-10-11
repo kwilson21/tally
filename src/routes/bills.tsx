@@ -1,4 +1,9 @@
 import { type Context, Hono } from "hono";
+import {
+	amountForMonth,
+	earlierAmount,
+	latestPriceChange,
+} from "../bills/amount";
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import {
 	BIG_BILL_CENTS,
@@ -29,7 +34,14 @@ import {
 	insertBill,
 	updateBill,
 } from "../bills/write";
-import { daysBefore, householdToday, ordinal, shortDay } from "../dates";
+import {
+	daysBefore,
+	householdToday,
+	monthLabel,
+	ordinal,
+	shortDay,
+} from "../dates";
+import { amountRowsByBill } from "../db/bill-amounts";
 import { billPeriodMonth, type CountedBill } from "../db/counted-month";
 import {
 	isMerchantTextSql,
@@ -38,6 +50,7 @@ import {
 } from "../db/merchant-key";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
+import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import {
@@ -155,6 +168,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 		if (list) list.push(row);
 		else byBill.set(row.id, [row]);
 	}
+	const amounts = await amountRowsByBill(db);
 	// An occurrence's status in the month's totals: paid once linked, else overdue, due within seven days, or upcoming.
 	const occurrenceStatus = (dueDate: string, linked: boolean): BillStatus =>
 		linked
@@ -166,6 +180,10 @@ export async function loadBillRows(db: D1Database, today: string) {
 					: "upcoming";
 	for (const billRows of byBill.values()) {
 		const b = billRows[0] as DbBill;
+		// An occurrence's amount is the one of its own month (decision 101); see src/bills/amount.ts.
+		const amountHistory = amounts.get(b.id) ?? [];
+		const amountOf = (dueDate: string) =>
+			amountForMonth(amountHistory, dueDate.slice(0, 7), b.amount_cents);
 		const payments = new Map(
 			billRows
 				.filter((row) => row.payment_period && row.payment_date)
@@ -197,7 +215,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			{
 				dueDate: occurrence.dueDate,
 				status: occurrence.status,
-				amountCents: b.amount_cents,
+				amountCents: amountOf(occurrence.dueDate),
 				paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
 			},
 		];
@@ -219,7 +237,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 						current.dueDate,
 						payments.has(current.period),
 					),
-					amountCents: b.amount_cents,
+					amountCents: amountOf(current.dueDate),
 					paidCents: paymentsByPeriod.get(current.period) ?? 0,
 				});
 			}
@@ -233,14 +251,15 @@ export async function loadBillRows(db: D1Database, today: string) {
 				? {
 						dueDate: nextDue,
 						status: occurrenceStatus(nextDue, payments.has(nextDue)),
-						amountCents: b.amount_cents,
+						amountCents: amountOf(nextDue),
 						paidCents: paymentsByPeriod.get(nextDue) ?? 0,
 					}
 				: undefined;
 		result.push({
 			id: b.id,
 			name: b.name,
-			amountCents: b.amount_cents,
+			// The shown occurrence's amount: the Bills row, its status and its totals all read this.
+			amountCents: amountOf(occurrence.dueDate),
 			status: occurrence.status,
 			dueDate: occurrence.dueDate,
 			paidDate: payments.get(occurrence.period),
@@ -387,11 +406,25 @@ async function page(
 						{...sheet}
 						categories={await categories(c)}
 						today={today}
+						keptCents={
+							sheet.bill
+								? await earlierPrice(c.env.DB, sheet.bill.id, today)
+								: undefined
+						}
 					/>
 				)}
 			</div>
 		</Layout>,
 	);
+}
+
+/**
+ * The price earlier months keep, when the bill has an earlier price (decision 101): what the edit sheet
+ * names under its amount, or undefined so the line is left out. Month is this month, as a change applies from it.
+ */
+async function earlierPrice(db: D1Database, billId: number, today: string) {
+	const history = (await amountRowsByBill(db, billId)).get(billId) ?? [];
+	return earlierAmount(history, today.slice(0, 7));
 }
 
 async function categories(c: Context<App>) {
@@ -456,6 +489,7 @@ function BillSheet({
 	bigAmount,
 	categories,
 	today,
+	keptCents,
 }: {
 	bill?: DbBill;
 	values?: Values;
@@ -463,6 +497,8 @@ function BillSheet({
 	bigAmount?: BigAmount;
 	categories: Category[];
 	today: string;
+	/** The price earlier months keep, when the bill had one (see earlierPrice); the note is left out otherwise. */
+	keptCents?: number;
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
 	// Once a name has been refused, Reactivate also sends the Name field, so renaming the bill is how
@@ -502,13 +538,22 @@ function BillSheet({
 					surface="paper"
 					required
 				/>
-				<MoneyInput
-					id="bill-amount"
-					name="amount"
-					label="Amount"
-					value={values.amount}
-					error={errors.amount}
-				/>
+				<div>
+					<MoneyInput
+						id="bill-amount"
+						name="amount"
+						label="Amount"
+						value={values.amount}
+						error={errors.amount}
+					/>
+					{/* Only a bill with an earlier price says what earlier months keep (decision 101). */}
+					{keptCents !== undefined && (
+						<AppliesNote
+							month={monthLabel(today.slice(0, 7), today)}
+							keptCents={keptCents}
+						/>
+					)}
+				</div>
 				{bigAmount && (
 					<div class="flex justify-center">
 						{/* Its value is the cents it confirms, so a changed amount isn't covered by it. Ticked
@@ -954,13 +999,15 @@ async function save(c: Context<App>, id?: number) {
 		merchantRawName: values.merchant_raw_name,
 	};
 	// Old dismissals have no meaning once the schedule changes (links can't exist here, checked above).
+	// The household's date is read once, here, and its month is what a changed amount applies from.
+	const today = await householdToday(c.env.DB);
+	const month = today.slice(0, 7);
 	const written = id
-		? await updateBill(c.env.DB, id, fields, periodKeysChanged)
-		: await insertBill(c.env.DB, fields);
+		? await updateBill(c.env.DB, id, fields, periodKeysChanged, month)
+		: await insertBill(c.env.DB, fields, month);
 	// Another save took the name since the check above, and the write refused it.
 	if (!written)
 		return nameTaken(c, { bill: bill ?? undefined, values, bigAmount });
-	const today = await householdToday(c.env.DB);
 	await matchBillPayments(c.env.DB, today);
 	const message = id ? "Bill saved" : "Bill added";
 	if (c.req.header("HX-Request")) {
@@ -1193,6 +1240,14 @@ async function billPage(
 	const byPeriod = new Map(
 		payments.map((payment) => [payment.period, payment]),
 	);
+	// Each occurrence is judged at its own month's amount (decision 101), so the page, the picker and the
+	// price offer all read the same figure for one occurrence.
+	const history = (await amountRowsByBill(c.env.DB, id)).get(id) ?? [];
+	const amountOn = (dueDate: string) =>
+		amountForMonth(history, dueDate.slice(0, 7), bill.amount_cents);
+	const pickerAmount = pickerPeriod
+		? amountOn(occurrenceDate(bill, pickerPeriod))
+		: bill.amount_cents;
 	let candidates: (LinkedPayment & { sameMerchant: number })[] = [];
 	if (pickerPeriod) {
 		const due = occurrenceDate(bill, pickerPeriod);
@@ -1206,7 +1261,7 @@ async function billPage(
 					manualLinkWindowDays(bill.frequency),
 					bill.id,
 					pickerPeriod,
-					bill.amount_cents,
+					pickerAmount,
 					due,
 				)
 				.all<LinkedPayment & { sameMerchant: number }>()
@@ -1223,12 +1278,17 @@ async function billPage(
 		new Set(payments.map((p) => p.period)),
 	);
 	// A payment at another price, offered on the occurrence the Bills row shows (P36 B, spec §8.5).
-	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
+	const currentCents = amountOn(current.dueDate);
+	const offer = await findPriceOffer(
+		c.env.DB,
+		offerBill(bill, current, currentCents),
+	);
+	const change = latestPriceChange(history);
 	const picker = pickerPeriod ? (
 		<BillPaymentPicker
 			billId={id}
 			billName={bill.name}
-			billAmountCents={bill.amount_cents}
+			billAmountCents={pickerAmount}
 			openedPeriod={pickerPeriod}
 			dueDateLabel={shortDate(occurrenceDate(bill, pickerPeriod))}
 			bill={countedBill(bill)}
@@ -1278,6 +1338,13 @@ async function billPage(
 								? "every 3 months"
 								: `${bill.frequency === "monthly" ? "a month" : "a year"}, due the ${ordinal(bill.due_day)}`}
 				</p>
+				{change && (
+					<PriceChangeLine
+						direction={change.direction}
+						amountCents={change.amountCents}
+						month={monthLabel(change.effectiveMonth, today)}
+					/>
+				)}
 				{error && (
 					<p role="alert" class="mt-3 text-over">
 						{error}
@@ -1306,14 +1373,14 @@ async function billPage(
 							<BillOccurrenceRow
 								billId={id}
 								period={period}
-								label={
+								label={`${
 									["monthly", "yearly"].includes(bill.frequency)
 										? monthName(
 												billPeriodMonth(countedBill(bill), period),
 												today,
 											)
 										: occurrenceLabel(due)
-								}
+								} · ${formatCents(amountOn(due))}`}
 								status={status}
 								payment={
 									payment
@@ -1333,7 +1400,7 @@ async function billPage(
 												merchant: offer.merchant,
 												amountCents: offer.amountCents,
 												dateLabel: shortDay(offer.date, today),
-												billAmountCents: bill.amount_cents,
+												billAmountCents: currentCents,
 												frequency: bill.frequency,
 												cadence: billCadenceLabel({
 													frequency: bill.frequency,
@@ -1535,17 +1602,21 @@ async function feedbackRedirect(
 	return c.redirect(`/bills/${id}`, 303);
 }
 
-/** The occurrence a bill's Bills row and page ask about, and the question: what `findPriceOffer` finds for it. */
+/**
+ * The occurrence a bill's Bills row and page ask about, and the question: what `findPriceOffer` finds for it.
+ * `amountCents` is that occurrence's own amount (decision 101), not the bill's current one.
+ */
 function offerBill(
 	bill: DbBill,
 	occurrence: { period: string; dueDate: string; status: BillStatus },
+	amountCents: number,
 ) {
 	return {
 		id: bill.id,
 		active: !!bill.active,
 		status: occurrence.status,
 		frequency: bill.frequency,
-		amountCents: bill.amount_cents,
+		amountCents,
 		merchantRawName: bill.merchant_raw_name,
 		merchantRawText: bill.merchant_raw_text,
 		period: occurrence.period,
@@ -1556,7 +1627,10 @@ async function currentOffer(
 	c: Context<App>,
 	bill: DbBill,
 	today: string,
-): Promise<({ period: string } & PriceOffer) | undefined> {
+): Promise<
+	| ({ period: string; dueMonth: string; billCents: number } & PriceOffer)
+	| undefined
+> {
 	const linked = (
 		await c.env.DB.prepare(
 			"SELECT period FROM bill_payments WHERE bill_id=? AND status='linked'",
@@ -1574,8 +1648,25 @@ async function currentOffer(
 		today,
 		new Set(linked.map((row) => row.period)),
 	);
-	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
-	return offer && { period: current.period, ...offer };
+	const history =
+		(await amountRowsByBill(c.env.DB, bill.id)).get(bill.id) ?? [];
+	const billCents = amountForMonth(
+		history,
+		current.dueDate.slice(0, 7),
+		bill.amount_cents,
+	);
+	const offer = await findPriceOffer(
+		c.env.DB,
+		offerBill(bill, current, billCents),
+	);
+	return (
+		offer && {
+			period: current.period,
+			dueMonth: current.dueDate.slice(0, 7),
+			billCents,
+			...offer,
+		}
+	);
 }
 
 // "Price changed?" (P36 B, decision 72): a payment from the bill's merchant at another price is offered
@@ -1607,11 +1698,20 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 	if (!offer || offer.period !== period || offer.transactionId !== transaction)
 		return gone();
 	if (verb === "accept") {
+		// The two prices the page showed: the occurrence's amount and the charge (decision 101).
 		const seenBill = wholeCents(form.bill_cents);
 		if (
-			seenBill !== bill.amount_cents ||
+			seenBill !== offer.billCents ||
 			wholeCents(form.charge_cents) !== offer.amountCents ||
-			!(await acceptPriceOffer(c.env.DB, id, period, offer, seenBill))
+			!(await acceptPriceOffer(
+				c.env.DB,
+				id,
+				period,
+				offer,
+				seenBill,
+				offer.dueMonth,
+				today.slice(0, 7),
+			))
 		)
 			return gone();
 	} else {
@@ -1624,7 +1724,8 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 			`Price change dismissed. The bill stays ${formatCents(bill.amount_cents)}.`,
 		);
 	}
-	// The new price may match other months' payments that were left over at the old one.
+	// The new price applies from this month on, so an unpaid payment at it in this month or a later one may
+	// now match; earlier months keep the price they had (decision 101).
 	await matchBillPayments(c.env.DB, today);
 	const updated = `Bill updated to ${formatCents(offer.amountCents)}`;
 	return feedbackRedirect(

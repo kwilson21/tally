@@ -20,6 +20,7 @@ import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
+import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
@@ -706,6 +707,24 @@ const TIME_ZONE_SPEC: UseSpecText = {
 };
 
 // The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
+const BILL_AMOUNT_SPEC: UseSpecText = {
+	purpose:
+		"Show a bill's amount history in the words a person needs: what its price is now, when it last changed, and what an edit applies to.",
+	affordance:
+		"The bill's page keeps its amount line, then one muted line under it, “Price went up to $17.99 in October”. Each month's label reads “October · $17.99”, so the amount is beside the month it was judged at. The edit sheet puts a centered muted line under the amount field: “Applies from October on. Earlier months keep $15.49.” It is left out for a bill with no earlier price.",
+	states:
+		"Shown: a bill with at least two amounts that differ gets the change line, for its newest change (up or down); a bill whose amount never changed gets no line. The month labels always carry their amount. The edit sheet's line shows only when the bill has an amount from an earlier month. Hidden: the change line when no amount differs, and the sheet's line for a bill whose first amount is this month. Nothing here is a control, so there are no hover or pressed states.",
+	feedback:
+		"A saved amount change says “Bill saved” as before; the change line and the month labels update in the same response. The change line is plain text, so the screen reader reads it with the rest of the bill's page, with no announcer of its own.",
+	input:
+		"No controls. Screen reader: the change line reads as one sentence, and each row reads its label with its amount, “October · $17.99, paid”. The edit sheet's line sits under the amount field and is read after it.",
+	motion: "None. Reduced motion changes nothing.",
+	edges:
+		"A price that changes twice in one month shows the month's last amount. An amount that is changed to the same figure is not a change and gets no line. A month before the first amount uses the first amount. Cents show in every amount, so $15.00 reads $15.00. A long bill name wraps above the change line instead of pushing it off.",
+	words:
+		"Price went up to {$17.99} in {October} · Price went down to {$14.99} in {October} · October · {$17.99} · Applies from {October} on. Earlier months keep {$15.49}.",
+};
+
 const BILL_PRICE_SPEC: UseSpecText = {
 	purpose:
 		"Tell a person a payment from a bill's merchant came at another price, and let them update the bill to it or say it isn't that bill's.",
@@ -1428,6 +1447,79 @@ function Rows() {
 					</div>
 				</State>
 				<UseSpec spec={BILL_PRICE_SPEC} />
+			</Specimen>
+			<Specimen
+				id="bill-amount-history"
+				title="Bill amount history"
+				tier="visual"
+				components={["PriceChangeLine", "AppliesNote"]}
+				sentence="A bill's page says when its price last changed in one muted line under the amount line, each month's label carries that month's amount, and the edit sheet says what a new amount applies to under its amount field."
+			>
+				<State label="Price went up in October, the newest month at the new amount">
+					<div inert>
+						<p class="text-lg">{formatCents(1799)} a month, due the 2nd</p>
+						<PriceChangeLine
+							direction="up"
+							amountCents={1799}
+							month="October"
+						/>
+						<ul class="mt-4 divide-y divide-rule border-y border-rule">
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-11"
+								label="November · $17.99"
+								status="upcoming"
+							/>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-10"
+								label="October · $17.99"
+								status="paid"
+								payment={{
+									displayName: "Netflix",
+									dateLabel: "Oct 2",
+									amountCents: 1799,
+									matchedBy: "auto",
+								}}
+							/>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-09"
+								label="September · $15.49"
+								status="paid"
+								payment={{
+									displayName: "Netflix",
+									dateLabel: "Sep 2",
+									amountCents: 1549,
+									matchedBy: "auto",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Price went down in October">
+					<div inert>
+						<PriceChangeLine
+							direction="down"
+							amountCents={1499}
+							month="October"
+						/>
+					</div>
+				</State>
+				<State label="Edit sheet: a bill that had an earlier price">
+					<div inert>
+						<div>
+							<MoneyInput
+								id="amount-history-amount"
+								name="amount"
+								label="Amount"
+								value="17.99"
+							/>
+							<AppliesNote month="October" keptCents={1549} />
+						</div>
+					</div>
+				</State>
+				<UseSpec spec={BILL_AMOUNT_SPEC} />
 			</Specimen>
 			<Specimen
 				id="bill-row"

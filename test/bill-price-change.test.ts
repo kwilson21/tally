@@ -14,6 +14,7 @@ import {
 	DEFAULT_TIME_ZONE,
 	daysBefore,
 	householdToday,
+	monthsBefore,
 	shortDay,
 	todayIn,
 } from "../src/dates";
@@ -478,8 +479,14 @@ describe("bill matching and price changes", () => {
 			expect((await billRow())?.amount_cents).toBe(11500);
 		});
 
-		it("lets the matcher fill the other months at the new price after an accept", async () => {
-			// Last month's charge was the new price too, and was never matched at the old one.
+		it("keeps earlier months at their own price, so last month's charge at the new price is not matched to them", async () => {
+			// The bill has its history from two months back, at the old price (migration 0044's first row).
+			await env.DB.prepare(
+				"INSERT INTO bill_amounts(bill_id,effective_month,amount_cents) VALUES(1,?,10000)",
+			)
+				.bind(monthsBefore(period, 2))
+				.run();
+			// Last month's charge is at the new price, and was never matched at the old one.
 			const earlier = daysBefore(due, 30);
 			await env.DB.prepare(
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(2,1,?,11500,'NETFLIX.COM')",
@@ -488,7 +495,20 @@ describe("bill matching and price changes", () => {
 				.run();
 			await accept(1);
 			const linked = await rows("bill_payments", "status='linked'");
-			expect(linked.map((r) => r.transaction_id).sort()).toEqual([1, 2]);
+			expect(linked.map((r) => r.transaction_id)).toEqual([1]);
+			// The new price is this month's, from this month on; the earlier row is still the old price.
+			expect(
+				await rows("bill_amounts", "bill_id=1 ORDER BY effective_month"),
+			).toEqual([
+				expect.objectContaining({
+					effective_month: monthsBefore(period, 2),
+					amount_cents: 10000,
+				}),
+				expect.objectContaining({
+					effective_month: today.slice(0, 7),
+					amount_cents: 11500,
+				}),
+			]);
 		});
 
 		it("dismissing keeps the bill and the payment as they were, and the offer doesn't come back", async () => {
@@ -668,7 +688,8 @@ describe("bill matching and price changes", () => {
 				amountCents: 11500,
 				merchant: "Netflix",
 			};
-			const accepts = () => acceptPriceOffer(env.DB, 1, period, offer, 10000);
+			const accepts = () =>
+				acceptPriceOffer(env.DB, 1, period, offer, 10000, period.slice(0, 7));
 			const unchanged = async (excluded = 1) => {
 				expect((await billRow())?.amount_cents).toBe(10000);
 				expect(

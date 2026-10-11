@@ -5,7 +5,7 @@
 // "Not this bill" stores a dismissal, the same `dismissed` row "Not this one" makes, so that payment is
 // never offered for that bill and month again. An offer never links anything by itself.
 
-import { daysBefore } from "../dates";
+import { daysBefore, householdMonth } from "../dates";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -167,18 +167,28 @@ export async function loadPriceOffers(
 }
 
 /**
+ * The amount the occurrence due in ?6 is judged at, as src/bills/amount.ts's `amountForMonth` reads it: the
+ * latest row on or before that month, else the earliest row, else the bill's own amount.
+ */
+const occurrenceAmountSql = `COALESCE(
+	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ?2 AND effective_month <= ?6 ORDER BY effective_month DESC LIMIT 1),
+	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ?2 ORDER BY effective_month LIMIT 1),
+	(SELECT amount_cents FROM bills WHERE id = ?2))`;
+
+/**
  * What must still be true for an accept to go through, as one condition every statement of it shares:
  * linking the payment to the occurrence would be new (nothing is linked to the payment, and nothing to
- * the occurrence), the payment is still the charge the person saw, and the bill is still at the amount
- * they saw. (The bill may also be at the charge already: the amount update below runs before the link and
- * moves it there, and the link is then checked against the same condition.) Numbered parameters: ?1
- * payment, ?2 bill, ?3 period, and the charge and the amount seen, named by `charge` and `seen`.
+ * the occurrence), the payment is still the charge the person saw, and the occurrence is still at the
+ * amount they saw. (It may also be at the charge already: the amount rows below run before the link and
+ * move it there, and the link is then checked against the same condition.) Numbered parameters: ?1
+ * payment, ?2 bill, ?3 period, ?6 the occurrence's month, and the charge and the amount seen, named by
+ * `charge` and `seen`.
  */
 const stillOffered = (charge: string, seen: string) =>
 	`NOT EXISTS (SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
 	   AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3)))
 	 AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ${charge})
-	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ${seen}))`;
+	 AND ${occurrenceAmountSql} IN (${charge}, ${seen})`;
 
 /**
  * A person says yes: the payment pays the occurrence (`matched_by = user`) and the bill's amount becomes
@@ -197,28 +207,43 @@ export async function acceptPriceOffer(
 	period: string,
 	offer: PriceOffer,
 	seenBillCents: number,
+	dueMonth: string,
+	/** The household's month (YYYY-MM) when the caller has it; read here otherwise. */
+	month?: string,
 ): Promise<boolean> {
+	// The new amount takes effect this month (decision 101): its row replaces this month's if there is one,
+	// and the bill's own amount is the current one. Earlier months keep the amounts they had.
 	const binds = [
 		offer.transactionId,
 		billId,
 		period,
 		offer.amountCents,
 		seenBillCents,
+		dueMonth,
+		month ?? (await householdMonth(db)),
 	];
+	// D1 wants exactly the parameters a statement names, so the two that don't use ?7 get the first six.
 	const results = await db.batch([
+		db
+			.prepare(
+				`INSERT INTO bill_amounts (bill_id, effective_month, amount_cents)
+				 SELECT ?2, ?7, ?4 WHERE ${stillOffered("?4", "?5")}
+				 ON CONFLICT (bill_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
+			)
+			.bind(...binds),
 		db
 			.prepare(
 				`UPDATE bills SET amount_cents = ?4 WHERE id = ?2 AND ${stillOffered("?4", "?5")}`,
 			)
-			.bind(...binds),
+			.bind(...binds.slice(0, 6)),
 		db
 			.prepare(
 				`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
 				 SELECT ?2, ?3, ?1, 'user', 'linked' WHERE ${stillOffered("?4", "?5")}`,
 			)
-			.bind(...binds),
+			.bind(...binds.slice(0, 6)),
 	]);
-	return (results[1]?.meta.changes ?? 0) > 0;
+	return (results[2]?.meta.changes ?? 0) > 0;
 }
 
 /**

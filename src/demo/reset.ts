@@ -19,6 +19,7 @@ const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 const TABLES_CHILD_FIRST = [
 	"cash_delete_holds",
 	"bill_payments",
+	"bill_amounts",
 	"documents",
 	"balance_history",
 	"transactions",
@@ -193,6 +194,19 @@ export async function resetDemo(
 				)
 				.bind(...bill),
 		),
+		// Each bill's first amount row (decision 101), as migration 0044 gives one: this month, so a bill has
+		// no earlier price. Netflix's is from the seed's first month instead, so its earlier price is there
+		// and its history appears once a visitor accepts the price offer.
+		db
+			.prepare(
+				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) SELECT id, ?, amount_cents FROM bills WHERE merchant_raw_name <> ?",
+			)
+			.bind(today.slice(0, 7), seedMerchantKey(NETFLIX.rawName)),
+		db
+			.prepare(
+				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) SELECT id, ?, amount_cents FROM bills WHERE merchant_raw_name = ?",
+			)
+			.bind(monthOffset(today, 5), seedMerchantKey(NETFLIX.rawName)),
 	]);
 	if (options.categoryExample) {
 		const petMonthNumber = Number(today.slice(5, 7)) - 2;

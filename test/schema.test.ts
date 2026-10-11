@@ -53,6 +53,7 @@ describe("schema", () => {
 		expect(await tables()).toEqual([
 			"accounts",
 			"balance_history",
+			"bill_amounts",
 			"bill_payments",
 			"bills",
 			"budget_amounts",
