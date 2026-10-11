@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
-import { saveEdit, saveSplit } from "../src/db/transactions";
+import { correctCashSplit, saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
@@ -2259,5 +2259,88 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			expect(res.status, testCase.name).toBe(500);
 			expect(await stateOf(id), testCase.name).toEqual(before);
 		}
+	});
+
+	it("refuses a correction when a part was added at the same moment, and writes nothing from it", async () => {
+		const { id, a, b } = await splitCash("Racing part");
+		const db = {
+			prepare: env.DB.prepare.bind(env.DB),
+			batch: async (statements: D1PreparedStatement[]) => {
+				// Another same-total correction lands first: part A is $50.00 and a $10.00 part is added.
+				await env.DB.prepare(
+					"UPDATE transactions SET amount_cents = 5000 WHERE id = ?",
+				)
+					.bind(a)
+					.run();
+				await env.DB.prepare(
+					`INSERT INTO transactions
+					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, parent_id, updated_by)
+				SELECT account_id, date, 1000, raw_name, merchant_name, 1, 'user', id, 'demo' FROM transactions WHERE id = ?`,
+				)
+					.bind(id)
+					.run();
+				return env.DB.batch(statements);
+			},
+		} as unknown as D1Database;
+		await expect(
+			correctCashSplit(
+				db,
+				id,
+				{
+					totalCents: 10000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 6000 },
+						{ id: b, categoryId: 5, amountCents: 4000 },
+					],
+				},
+				"demo",
+			),
+		).rejects.toThrow("changed while it was being corrected");
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+				)
+					.bind(id)
+					.first<{ amountCents: number }>()
+			)?.amountCents,
+		).toBe(9000);
+		expect((await partsOf(id)).map((part) => part.amountCents)).toEqual([
+			5000, 3000, 1000,
+		]);
+	});
+
+	it("saves a correction that adds two new parts at once", async () => {
+		const { id, a, b } = await splitCash("Two new parts");
+		await expect(
+			correctCashSplit(
+				env.DB,
+				id,
+				{
+					totalCents: 10000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 5000 },
+						{ id: b, categoryId: 5, amountCents: 3000 },
+						{ id: null, categoryId: 1, amountCents: 1000 },
+						{ id: null, categoryId: 5, amountCents: 1000 },
+					],
+				},
+				"demo",
+			),
+		).resolves.toEqual({ saved: true });
+		expect((await partsOf(id)).map((part) => part.amountCents)).toEqual([
+			5000, 3000, 1000, 1000,
+		]);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+				)
+					.bind(id)
+					.first<{ amountCents: number }>()
+			)?.amountCents,
+		).toBe(10000);
 	});
 });

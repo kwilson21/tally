@@ -1161,8 +1161,10 @@ export type CashSplitPart = {
  * Every statement carries the same gate, so a refusal writes nothing. The gate checks that the entry is
  * still the split it was drawn as (`amountWasCents`), that every posted saved part is still one of its
  * parts, and that the refunds linked to each part, and to the entry, still fit the new amounts
- * (src/db/refunded.ts). Nothing the gate reads changes during the batch until its last statement, the
- * entry's own amount, so every statement gets the same answer. Returns `refundPart` (the part's 1-based
+ * (src/db/refunded.ts), and that the entry has no parts but those saved and the new ones this batch has
+ * already inserted, so a part another save added in the meantime refuses it. The part count changes
+ * during the batch by design, and the gate counts the batch's own inserts; the entry's own amount changes
+ * only in the last statement. Returns `refundPart` (the part's 1-based
  * position and what its refunds take) when a part's refunds don't fit; throws when the entry or its
  * parts are no longer as they were drawn, so the save is an error.
  */
@@ -1198,6 +1200,8 @@ export async function correctCashSplit(
 		throw new Error(`Split ${parentId} changed while it was being corrected`);
 
 	// The gate's parameters are numbered from `n`, after the statement's own (as saveEdit's gated does).
+	// `inserted` is how many of this save's new parts run before the statement: the entry's parts must
+	// then be the saved ones plus exactly those, so a part another save added makes this one refuse.
 	const gate = (n: number) => `EXISTS (SELECT 1 FROM transactions cash
 			WHERE cash.id = ?${n} AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?${n + 1}
 				AND cash.account_id IN (SELECT id FROM accounts WHERE type = 'cash'))
@@ -1205,32 +1209,41 @@ export async function correctCashSplit(
 			WHERE (SELECT parent_id FROM transactions WHERE id = json_extract(saved.value, '$.id')) IS NOT ?${n})
 		AND NOT EXISTS (SELECT 1 FROM json_each(?${n + 2}) AS saved
 			WHERE ${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents'))
-		AND ${refundedByOthersSql(`?${n}`, "0")} <= ?${n + 3}`;
+		AND ${refundedByOthersSql(`?${n}`, "0")} <= ?${n + 3}
+		AND (SELECT COUNT(*) FROM transactions WHERE parent_id = ?${n}
+			AND id NOT IN (SELECT json_extract(saved.value, '$.id') FROM json_each(?${n + 2}) AS saved)) = ?${n + 4}`;
 	const gateArgs = [parentId, amountWasCents, savedJson, totalCents];
-	const gated = (sql: string, args: unknown[]) =>
+	const gated = (sql: string, args: unknown[], inserted: number) =>
 		db
 			.prepare(`${sql} AND ${gate(args.length + 1)}`)
-			.bind(...args, ...gateArgs);
+			.bind(...args, ...gateArgs, inserted);
 
-	const statements: D1PreparedStatement[] = parts.map((part) =>
-		part.id === null
-			? gated(
-					`INSERT INTO transactions
+	let inserted = 0;
+	const statements: D1PreparedStatement[] = parts.map((part) => {
+		if (part.id === null) {
+			const statement = gated(
+				`INSERT INTO transactions
 				(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by, refund_of_id, parent_id, plaid_transaction_id, updated_by)
 			SELECT account_id, date, ?, raw_name, merchant_name, ?, 'user', excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by, NULL, id, NULL, ?
 			FROM transactions WHERE id = ?`,
-					[part.amountCents, part.categoryId, by, parentId],
-				)
-			: gated(
-					"UPDATE transactions SET amount_cents = ?, category_id = ?, category_source = 'user', updated_by = ?, updated_at = datetime('now') WHERE id = ? AND parent_id = ?",
-					[part.amountCents, part.categoryId, by, part.id, parentId],
-				),
-	);
+				[part.amountCents, part.categoryId, by, parentId],
+				inserted,
+			);
+			inserted += 1;
+			return statement;
+		}
+		return gated(
+			"UPDATE transactions SET amount_cents = ?, category_id = ?, category_source = 'user', updated_by = ?, updated_at = datetime('now') WHERE id = ? AND parent_id = ?",
+			[part.amountCents, part.categoryId, by, part.id, parentId],
+			inserted,
+		);
+	});
 	// Last, so the parent's own amount is still the one drawn for every statement before it.
 	statements.push(
 		gated(
 			"UPDATE transactions SET amount_cents = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
 			[totalCents, by, parentId],
+			inserted,
 		),
 	);
 	const results = await db.batch(statements);
