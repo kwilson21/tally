@@ -14,6 +14,8 @@ export function CashForm({
 	today,
 	action = "/transactions/cash",
 	back = "/transactions",
+	cancelHref = back,
+	ticks,
 	entryKey,
 	idPrefix = "cash",
 }: {
@@ -23,6 +25,13 @@ export function CashForm({
 	today: string;
 	action?: string;
 	back?: string;
+	/** Where Cancel goes, when that is not the list the form returns to (Select mode's ticks, #350). */
+	cancelHref?: string;
+	/**
+	 * The ticks, when the form is drawn in Select mode: it posts them back, so a refused form keeps Select
+	 * mode and every tick (#350). A saved entry still returns to the plain list.
+	 */
+	ticks?: number[];
 	/** A one-time key (a UUID) made when the form is drawn, so posting the form twice saves once. */
 	entryKey?: string;
 	/** What every id on the form starts with, so two forms drawn on one page don't share ids. */
@@ -40,6 +49,10 @@ export function CashForm({
 			hx-disable="findAll button[type=submit]"
 		>
 			<input type="hidden" name="back" value={back} />
+			{ticks && <input type="hidden" name="select" value="1" />}
+			{ticks?.map((id) => (
+				<input type="hidden" name="ids" value={id} />
+			))}
 			{entryKey && <input type="hidden" name="entry_key" value={entryKey} />}
 			<MoneyInput
 				id={`${idPrefix}-amount`}
@@ -114,7 +127,7 @@ export function CashForm({
 				)}
 			</FormField>
 			<div class="grid grid-cols-2 gap-3">
-				<Button href={back} kind="secondary">
+				<Button href={cancelHref} kind="secondary">
 					Cancel
 				</Button>
 				<Button type="submit" busyLabel="Adding…">

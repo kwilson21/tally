@@ -12,13 +12,16 @@ import {
 import { loadMonth } from "../src/db/month";
 import {
 	getTransaction,
+	listTransactions,
 	monthCounts,
 	needsCategoryCount,
 	pendingForJev,
 	refundPurchases,
 	saveEdit,
+	saveSplit,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { parseFilters } from "../src/transactions/filters";
 import {
 	organizeGroups,
 	saveOrganizeGroup,
@@ -954,6 +957,130 @@ describe("linking a refund", () => {
 				}
 			}
 		}
+	});
+});
+
+describe("a refund a bank change unlinked", () => {
+	it("stops saying so once a person links it again", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		await link(REFUND, PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT refund_of_id AS r, refund_unlinked_purchase_date AS d FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ r: PURCHASE, d: null });
+	});
+
+	it("relinks a split refund's parts with it and clears their dates, but not a part linked to another purchase", async () => {
+		// The bank's change unlinked a split refund: the refund and its parts each say so.
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET is_split = 1, refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+				)
+				.bind(REFUND),
+			db.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, refund_of_id, refund_unlinked_purchase_date) VALUES
+				(9011, 3, '2026-09-10', -1000, 'REFUND SHOP', ${KIDS}, 'user', 0, ${REFUND}, NULL, '2026-09-10'),
+				(9012, 3, '2026-09-10', -1000, 'REFUND SHOP', ${GAS}, 'user', 0, ${REFUND}, ${OTHER_MERCHANT}, NULL)`),
+		]);
+
+		await saveEdit(
+			db,
+			REFUND,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: "Refund Shop",
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: false,
+				refundOfId: PURCHASE,
+			},
+			"test",
+		);
+
+		const linkOf = (id: number) =>
+			db
+				.prepare(
+					"SELECT refund_of_id AS r, refund_unlinked_purchase_date AS d FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first();
+		expect(await linkOf(REFUND)).toEqual({ r: PURCHASE, d: null });
+		expect(await linkOf(9011)).toEqual({ r: PURCHASE, d: null });
+		expect(await linkOf(9012)).toEqual({ r: OTHER_MERCHANT, d: null });
+	});
+
+	it("keeps saying so on the parts a person splits it into", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+
+		await saveSplit(
+			db,
+			REFUND,
+			[
+				{ amountCents: -1000, categoryId: KIDS },
+				{ amountCents: -1000, categoryId: GAS },
+			],
+			"test",
+		);
+
+		const parts = await db
+			.prepare(
+				"SELECT refund_unlinked_purchase_date AS d FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all<{ d: string | null }>();
+		expect(parts.results).toEqual([{ d: "2026-09-10" }, { d: "2026-09-10" }]);
+		// The list pages at 25 rows, so each part is found under its own category.
+		const listedUnder = async (category: number) =>
+			(
+				await listTransactions(
+					db,
+					parseFilters(
+						new URLSearchParams({ category: String(category) }),
+						"2026-09",
+					),
+				)
+			).rows
+				.filter((row) => row.parentId === REFUND)
+				.map((row) => row.refundUnlinkedPurchaseDate);
+		expect(await listedUnder(KIDS)).toEqual(["2026-09-10"]);
+		expect(await listedUnder(GAS)).toEqual(["2026-09-10"]);
+	});
+
+	it("gives a split refund's parts no unlink date when the refund carries none", async () => {
+		await saveSplit(
+			db,
+			REFUND,
+			[
+				{ amountCents: -1000, categoryId: KIDS },
+				{ amountCents: -1000, categoryId: GAS },
+			],
+			"test",
+		);
+
+		const parts = await db
+			.prepare(
+				"SELECT refund_unlinked_purchase_date AS d FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all<{ d: string | null }>();
+		expect(parts.results).toEqual([{ d: null }, { d: null }]);
 	});
 });
 
