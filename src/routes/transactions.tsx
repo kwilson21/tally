@@ -4,7 +4,9 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
+import { refundedByOthersSql } from "../db/refunded";
 import {
+	correctCashSplit,
 	type FirstVisit,
 	firstVisitState,
 	getTransaction,
@@ -21,12 +23,13 @@ import {
 	saveSplit,
 	type TransactionDetail,
 } from "../db/transactions";
-import { formatCents } from "../money";
+import { centsToAmount, formatCents } from "../money";
 import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
 import {
 	type CashValues,
 	entryKeyOf,
 	parseCash,
+	parseCashDateAmount,
 	saveCash,
 } from "../transactions/cash";
 import {
@@ -37,7 +40,9 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	followsPurchaseAfterSave,
 	parseEdit,
+	postedCredit,
 	safeBack,
 } from "../transactions/edit";
 import {
@@ -69,6 +74,7 @@ import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MoneyInput } from "../views/money-input";
 import {
 	KEEP_VALUE,
 	NameChoices,
@@ -78,6 +84,15 @@ import {
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
+import {
+	FOCUS_FIRST_TICK,
+	FOCUS_SET_CATEGORY,
+	LIST_LOAD_PAUSE,
+	SELECTION_BAR_OOB,
+	SelectAllOnPage,
+	SelectionActionBar,
+	SelectionActionButtons,
+} from "../views/selection-action-bar";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
@@ -115,6 +130,10 @@ type ListOptions = {
 	checkedIds?: Set<number>;
 	selectionError?: string;
 	focusHeading?: boolean;
+	/** The reply to Select all: focus Set category (the link leaves with the reply), when rows are ticked. */
+	focusSetCategory?: boolean;
+	/** The reply to Older or Newer in select mode: focus the first row's tick (FOCUS_FIRST_TICK). */
+	focusFirstTick?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -179,6 +198,8 @@ async function renderList(
 		checkedIds = new Set<number>(),
 		selectionError,
 		focusHeading = false,
+		focusSetCategory = false,
+		focusFirstTick = false,
 	}: ListOptions = {},
 ) {
 	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
@@ -265,9 +286,13 @@ async function renderList(
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
-	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked.
+	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked, and
+	// its controls pause while it loads (LIST_LOAD_PAUSE).
 	const includeTicked = selecting
-		? { "hx-include": "#selection-form input[name=ids]:checked" }
+		? {
+				"hx-include": "#selection-form input[name=ids]:checked",
+				...LIST_LOAD_PAUSE,
+			}
 		: {};
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
@@ -275,13 +300,16 @@ async function renderList(
 			href={pageHref(n)}
 			rel={rel}
 			class="inline-flex min-h-11 items-center px-2 -mx-2"
-			hx-get={pageHref(n)}
+			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
+			hx-get={
+				selecting ? `${pageHref(n)}&focus=${FOCUS_FIRST_TICK}` : pageHref(n)
+			}
 			hx-sync="#filters:replace"
 			hx-target="#results"
 			hx-select="#results > *"
 			hx-select-oob={LIST_OOB}
 			hx-swap="innerHTML show:top"
-			hx-push-url="true"
+			hx-push-url={selecting ? pageHref(n) : "true"}
 			{...includeTicked}
 		>
 			{label}
@@ -329,6 +357,11 @@ async function renderList(
 	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
 	// shows the no-JS hint, and htmx re-counts on load.
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
+	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
+	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
+	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
+	const tickedOnPage = new Set(ticked.map((row) => row.id));
 	const htmx = c.req.header("HX-Request") === "true";
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
@@ -550,9 +583,13 @@ async function renderList(
 						id="selection-form"
 						aria-label="Select transactions"
 						method="post"
-						class="pb-28"
+						class="selection-list pb-40"
 						hx-get="/transactions/select/count"
 						hx-trigger="load, change"
+						// A list change (filter, page or Select all) replaces any count in flight, so an older count can't overwrite the newer list's bar. A list load pauses the ticks, so no count can start from a page that is leaving.
+						hx-sync="#filters:queue last"
+						// The count's own indicator: marking the form would pause the ticks during every count.
+						hx-indicator="#selected-count"
 						hx-target="#selected-count"
 						hx-swap="innerHTML"
 					>
@@ -586,6 +623,7 @@ async function renderList(
 														row={shown(row)}
 														checked={checkedIds.has(row.id)}
 														today={today}
+														autofocus={row.id === firstTickId}
 													/>
 												),
 											)}
@@ -601,20 +639,18 @@ async function renderList(
 						<div
 							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
 						>
-							<div class="flex flex-wrap items-center gap-2">
-								<span
-									id="selected-count"
-									aria-live="polite"
-									class="mr-auto text-lg"
-								>
-									{htmx
+							<SelectionActionBar
+								label={
+									htmx
 										? selectedLabel(ticked.length)
-										: "Choose rows, then an action"}
-								</span>
-								<SelectionActionButtons
-									disabled={htmx && ticked.length === 0}
-								/>
-							</div>
+										: "Choose rows, then an action"
+								}
+								href={selectModeHref(back, pageIds)}
+								pageIds={pageIds}
+								ticked={tickedOnPage}
+								disabled={htmx && ticked.length === 0}
+								focusSetCategory={focusSetCategory && ticked.length > 0}
+							/>
 						</div>
 					</form>
 				) : (
@@ -690,6 +726,8 @@ transactions.get("/transactions", async (c) => {
 		{
 			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 			selecting,
+			focusSetCategory: selecting && params.get("focus") === FOCUS_SET_CATEGORY,
+			focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
 			checkedIds: selecting
 				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
 				: undefined,
@@ -704,9 +742,7 @@ const LIST_OOB = [
 	"#add-cash:outerHTML",
 	"#select-toggle:outerHTML",
 	"#selection-back:outerHTML",
-	"#selected-count:innerHTML",
-	"#set-category-selection:outerHTML",
-	"#exclude-selection:outerHTML",
+	SELECTION_BAR_OOB,
 	"#view-links:outerHTML",
 ].join(", ");
 
@@ -730,54 +766,6 @@ function parseIds(values: (string | File)[]) {
 	return [...ids];
 }
 
-function SelectionActionButtons({
-	disabled = false,
-	oob = false,
-}: {
-	disabled?: boolean;
-	oob?: boolean;
-}) {
-	// Only the count fragment's copy swaps itself in out of band; each button's own request
-	// keeps its normal swap.
-	const oobSwap = oob ? "outerHTML" : undefined;
-	return (
-		<>
-			<Button
-				id="set-category-selection"
-				kind="secondary"
-				type="submit"
-				class="px-3"
-				formaction="/transactions/select/category"
-				formmethod="post"
-				disabled={disabled}
-				hx-post="/transactions/select/category"
-				hx-target="#sheet"
-				hx-select="#sheet"
-				hx-swap="outerHTML"
-				hx-swap-oob={oobSwap}
-			>
-				Set category
-			</Button>
-			<Button
-				id="exclude-selection"
-				kind="secondary"
-				type="submit"
-				class="px-3"
-				formaction="/transactions/select/exclude"
-				formmethod="post"
-				disabled={disabled}
-				hx-post="/transactions/select/exclude"
-				hx-target="#main"
-				hx-select="#main > *"
-				hx-swap="innerHTML"
-				hx-swap-oob={oobSwap}
-			>
-				Exclude
-			</Button>
-		</>
-	);
-}
-
 async function selectableIds(db: D1Database, ids: number[]) {
 	if (ids.length === 0 || ids.length > MAX_SELECTED) return [];
 	const marks = ids.map(() => "?").join(",");
@@ -792,11 +780,20 @@ async function selectableIds(db: D1Database, ids: number[]) {
 
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
 transactions.get("/transactions/select/count", (c) => {
-	const count = parseIds(new URL(c.req.url).searchParams.getAll("ids")).length;
+	const params = new URL(c.req.url).searchParams;
+	const ticked = new Set(parseIds(params.getAll("ids")));
+	const pageIds = parseIds(params.getAll("page-ids"));
+	const back = safeBack(params.get("back"));
 	return c.html(
 		<>
-			{selectedLabel(count)}
-			<SelectionActionButtons disabled={count === 0} oob />
+			{selectedLabel(ticked.size)}
+			<SelectionActionButtons disabled={ticked.size === 0} oob />
+			<SelectAllOnPage
+				href={selectModeHref(back, pageIds)}
+				pageIds={pageIds}
+				ticked={ticked}
+				oob
+			/>
 		</>,
 	);
 });
@@ -1042,6 +1039,12 @@ type SheetProps = {
 	people: HouseholdPerson[];
 	values: Edit;
 	errors?: EditErrors;
+	cashValues?: { date: string; amount: string };
+	/**
+	 * A cash amount that broke its parts: the amount it was refused at, which "Change the parts" opens
+	 * the split with (spec §8.4). Set only for that refusal.
+	 */
+	changePartsTotalCents?: number;
 	deleteConfirm?: boolean;
 	refunds?: RefundPurchase[];
 	/** The household's date, for the transaction's "Today" label. */
@@ -1076,6 +1079,8 @@ function EditSheet({
 	people,
 	values,
 	errors = {},
+	cashValues,
+	changePartsTotalCents,
 	deleteConfirm = false,
 	refunds = [],
 	today,
@@ -1093,11 +1098,16 @@ function EditSheet({
 		"hx-push-url": back,
 	};
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
-	// A refund that follows its purchase counts in that purchase's category, so its own can't be
-	// picked until it's unlinked (or the purchase is excluded, when it counts on its own).
-	const purchase = refunds.find(
+	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
+	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
+	// "Counts in" line say how the row really counts.
+	const linkedPurchase = refunds.find(
 		(p) => p.id === values.refundOfId && !p.excluded,
 	);
+	const purchase =
+		linkedPurchase && followsPurchaseAfterSave(tx, values)
+			? linkedPurchase
+			: undefined;
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
@@ -1129,13 +1139,26 @@ function EditSheet({
 				{tx.displayName}
 				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}
 			</h2>
-			<p class="font-serif text-4xl font-semibold">
-				{formatCents(tx.amountCents, { signed: true })}
-			</p>
-			<p class="text-muted">
-				{dayLabel(tx.date, today)} · {account}
-			</p>
+			{tx.accountType === "cash" && tx.parentId === null ? (
+				<p class="text-muted">Cash · you entered this</p>
+			) : (
+				<>
+					<p class="font-serif text-4xl font-semibold">
+						{formatCents(tx.amountCents, { signed: true })}
+					</p>
+					<p class="text-muted">
+						{dayLabel(tx.date, today)} · {account}
+					</p>
+				</>
+			)}
 			{tx.pending && <PendingNote />}
+			{tx.accountType !== "cash" && tx.parentId === null && (
+				<p class="mt-2 text-sm text-muted">
+					From {tx.bankName ?? tx.accountName}. Its date and amount stay as the
+					bank sent them. If something's off, you can split it, exclude it, or
+					count it in another month.
+				</p>
+			)}
 			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}
@@ -1232,12 +1255,54 @@ function EditSheet({
 					name="displayed_name_guess"
 					value={tx.nameSuggested ? tx.displayName : ""}
 				/>
+				{cashValues && (
+					<>
+						<MoneyInput
+							id="cash-edit-amount"
+							name="amount"
+							label="Amount"
+							value={cashValues.amount}
+							error={errors.amount}
+						/>
+						{/* Its own request, with its own indicator (not Save's), and the panel's fields go with it. htmx 4
+						    sends a button's name and value only with a submit event, so hx-vals carries change_parts. */}
+						{changePartsTotalCents !== undefined && (
+							<Button
+								kind="secondary"
+								type="submit"
+								name="change_parts"
+								value="1"
+								class="w-full"
+								hx-post={`/transactions/${tx.id}`}
+								hx-vals={JSON.stringify({ change_parts: "1" })}
+								hx-target="#page"
+								hx-select="#page"
+								hx-swap="outerHTML"
+								hx-select-oob="#needs-count:innerHTML"
+							>
+								Change the parts
+							</Button>
+						)}
+						<TextInput
+							id="cash-edit-date"
+							name="date"
+							label="Date"
+							type="date"
+							value={cashValues.date}
+							max={today}
+							surface="paper"
+							error={errors.date}
+						/>
+					</>
+				)}
 				<input
 					type="hidden"
 					name="income_was"
 					value={(values.incomeWas ?? values.income) ? "1" : "0"}
 				/>
-				{!purchase && (
+				{/* The merchant rule is offered only for an unlinked row (the chip above), so a linked row posts
+				    no rule answer and a save leaves the rule alone, whatever its purchase or counting. */}
+				{tx.refundOfId == null && (
 					<>
 						<input
 							type="hidden"
@@ -1944,6 +2009,11 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				categories={categories}
 				people={people}
 				values={values}
+				cashValues={
+					tx.accountType === "cash" && tx.parentId === null
+						? { date: tx.date, amount: centsToAmount(tx.amountCents) }
+						: undefined
+				}
 				refunds={refunds}
 				today={today}
 				still={asksFromThisPage(c)}
@@ -1951,6 +2021,16 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		),
 	});
 });
+
+/**
+ * Change the parts (spec §8.4): the sheet's new total, the amount the saved parts were drawn with, and the
+ * panel's other unsaved changes (pendingEdit), which the corrected parts are saved with.
+ */
+type Correction = {
+	totalCents: number;
+	amountWas: number;
+	pendingEdit?: string;
+};
 
 function SplitSheet({
 	tx,
@@ -1960,6 +2040,7 @@ function SplitSheet({
 	error,
 	today,
 	still,
+	correction,
 }: {
 	tx: TransactionDetail;
 	back: string;
@@ -1969,6 +2050,7 @@ function SplitSheet({
 	today: string;
 	/** Add a part, or an error, draws the open sheet again, so it isn't drawn arriving. */
 	still?: boolean;
+	correction?: Correction;
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
@@ -1983,7 +2065,9 @@ function SplitSheet({
 				{tx.displayName}
 			</h2>
 			<p class="font-serif text-4xl font-semibold">
-				{formatCents(tx.amountCents, { signed: true })}
+				{formatCents(correction?.totalCents ?? tx.amountCents, {
+					signed: true,
+				})}
 			</p>
 			<p class="text-muted">
 				{dayLabel(tx.date, today)} · {account}
@@ -1991,6 +2075,9 @@ function SplitSheet({
 			<SplitForm
 				id={tx.id}
 				parentCents={tx.amountCents}
+				totalCents={correction?.totalCents}
+				amountWas={correction?.amountWas}
+				pendingEdit={correction?.pendingEdit}
 				categories={categories}
 				values={values}
 				back={back}
@@ -1998,6 +2085,44 @@ function SplitSheet({
 			/>
 		</BottomSheet>
 	);
+}
+
+/** A posted amount in cents: a whole, positive number of cents, or null. */
+function wholeCents(raw: string | null): number | null {
+	if (raw === null || !/^[1-9]\d*$/.test(raw)) return null;
+	const cents = Number(raw);
+	return Number.isSafeInteger(cents) ? cents : null;
+}
+
+/**
+ * The new total of a Change the parts sheet, in cents: only for a split top-level cash entry, and only
+ * a whole, positive amount. Null otherwise, so the route answers 404 for it.
+ */
+function correctionTotal(
+	tx: TransactionDetail,
+	raw: string | null,
+): number | null {
+	const cents = wholeCents(raw);
+	return cents !== null &&
+		tx.accountType === "cash" &&
+		tx.parentId === null &&
+		tx.isSplit
+		? cents
+		: null;
+}
+
+/**
+ * The posted part ids, in row order: undefined for a new part (an empty id), else the saved part's id.
+ * Null when one isn't a whole number, which only a tampered sheet posts.
+ */
+function partIdsOf(raw: string[]): (number | undefined)[] | null {
+	const ids: (number | undefined)[] = [];
+	for (const value of raw) {
+		if (value === "") ids.push(undefined);
+		else if (/^[1-9]\d*$/.test(value)) ids.push(Number(value));
+		else return null;
+	}
+	return ids;
 }
 
 async function splitContext(c: Context<App>) {
@@ -2008,23 +2133,99 @@ async function splitContext(c: Context<App>) {
 	return { tx, categories: categories.results };
 }
 
+/**
+ * Change the parts: each saved part of the entry whose category is archived, by part id. That category
+ * is the part's own to keep (src/transactions/split.ts), so it is read from the saved part, never from
+ * the form.
+ */
+async function archivedPartCategories(db: D1Database, parentId: number) {
+	const rows = await db
+		.prepare(
+			"SELECT part.id AS partId, cat.id, cat.name FROM transactions part JOIN categories cat ON cat.id = part.category_id WHERE part.parent_id = ? AND cat.archived = 1",
+		)
+		.bind(parentId)
+		.all<{ partId: number; id: number; name: string }>();
+	return new Map(
+		rows.results.map((row) => [row.partId, { id: row.id, name: row.name }]),
+	);
+}
+
+/**
+ * Change the parts: the entry's saved parts, each with its id and, when its category is archived, the
+ * category it keeps. The sheet's values for a correction.
+ */
+async function savedPartValues(
+	db: D1Database,
+	tx: TransactionDetail,
+): Promise<SplitValue[]> {
+	const saved = await db
+		.prepare(
+			"SELECT id, category_id AS categoryId, amount_cents AS amountCents FROM transactions WHERE parent_id = ? ORDER BY id",
+		)
+		.bind(tx.id)
+		.all<{ id: number; categoryId: number | null; amountCents: number }>();
+	const archived = await archivedPartCategories(db, tx.id);
+	return saved.results.map((part) => ({
+		category: part.categoryId === null ? "" : String(part.categoryId),
+		amount: centsToAmount(part.amountCents),
+		partId: part.id,
+		kept: archived.get(part.id),
+	}));
+}
+
+/**
+ * The Change the parts sheet at `totalCents`: the saved parts, each with its id, against the new total.
+ * GET ?total= and a panel's Change the parts both draw it here, so they always show the same sheet.
+ * `pendingEdit` is the panel's other unsaved changes, which the sheet carries to its save.
+ */
+async function changePartsList(
+	c: Context<App>,
+	tx: TransactionDetail,
+	back: string,
+	today: string,
+	totalCents: number,
+	pendingEdit?: string,
+) {
+	const values = await savedPartValues(c.env.DB, tx);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		sheet: (categories, today) => (
+			<SplitSheet
+				tx={tx}
+				back={back}
+				categories={categories}
+				values={values}
+				today={today}
+				correction={{ totalCents, amountWas: tx.amountCents, pendingEdit }}
+			/>
+		),
+	});
+}
+
 transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	// Income is never split (decision 62's review): no form for it either.
 	if (!tx || tx.parentId !== null || tx.income) return c.notFound();
-	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
+	const url = new URL(c.req.url);
+	const back = safeBack(url.searchParams.get("back"));
 	const today = await householdToday(c.env.DB);
-	const filters = filtersFrom(c, today, back);
-	return renderList(c, today, filters, {
+	// Change the parts: the saved parts filled in, each with its id, against the new total.
+	const correcting = url.searchParams.has("total");
+	const total = correcting
+		? correctionTotal(tx, url.searchParams.get("total"))
+		: null;
+	if (correcting && total === null) return c.notFound();
+	if (total !== null) return changePartsList(c, tx, back, today, total);
+	const values: SplitValue[] = [
+		{ category: "", amount: "" },
+		{ category: "", amount: "" },
+	];
+	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
 				tx={tx}
 				back={back}
 				categories={categories}
-				values={[
-					{ category: "", amount: "" },
-					{ category: "", amount: "" },
-				]}
+				values={values}
 				today={today}
 			/>
 		),
@@ -2035,10 +2236,12 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
+	// A Change the parts sheet counts against its new total, when the total posted is one for this entry.
+	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
 	return c.html(
 		<div id="split-line">
 			<SplitLine
-				parentCents={tx.amountCents}
+				parentCents={total ?? tx.amountCents}
 				amounts={form.getAll("part_amount").map(String)}
 			/>
 		</div>,
@@ -2052,59 +2255,65 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
+	// Change the parts: the posted total, and the amount the saved parts were drawn with, which the save
+	// checks. A posted total that doesn't qualify for this entry is not found.
+	const correcting = form.has("total");
+	const total = correcting
+		? correctionTotal(tx, form.get("total")?.toString() ?? null)
+		: null;
+	const amountWas = correcting
+		? wholeCents(form.get("amount_was")?.toString() ?? null)
+		: null;
+	if (correcting && (total === null || amountWas === null)) return c.notFound();
+	const correction =
+		total !== null && amountWas !== null
+			? {
+					totalCents: total,
+					amountWas,
+					pendingEdit: form.get("pending_edit")?.toString(),
+				}
+			: undefined;
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
-	const values = categoryValues.map((category, i) => ({
-		category,
-		amount: amountValues[i] ?? "",
-	}));
-	if (form.get("add") === "1") values.push({ category: "", amount: "" });
-	else {
-		const parsed = parseSplit(
-			categoryValues,
-			amountValues,
-			tx.amountCents,
-			categories.map((cat) => cat.id),
-		);
-		const result = parsed.ok
-			? await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c))
-			: null;
-		if (result && !result.saved) {
-			// Show the bank's new amount, so the next save checks against it.
-			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
-			return renderList(c, today, filtersFrom(c, today, back), {
-				status: 422,
-				sheet: (_categories, today) => (
-					<SplitSheet
-						tx={fresh}
-						back={back}
-						categories={categories}
-						values={values}
-						error="The bank just changed this amount. Check the parts and save again."
-						today={today}
-						still
-					/>
-				),
-			});
-		}
-		if (result) {
-			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-			const unlinked = unlinkedSentence(result.unlinked, today);
-			c.header(
-				"HX-Trigger",
-				JSON.stringify({
-					toast: {
-						message: `Split ${tx.displayName}${unlinked ? `.${unlinked}` : ""}`,
-						type: "success",
-					},
-					announce: `Saved split for ${tx.displayName}.${unlinked}`,
-				}),
-			);
-			c.header("HX-Push-Url", back);
-			return renderList(c, today, filtersFrom(c, today, back), {
-				focusId: tx.id,
-			});
-		}
+	const partIds = partIdsOf(form.getAll("part_id").map(String));
+	if (partIds === null) return c.notFound();
+	const archived = correction
+		? await archivedPartCategories(c.env.DB, tx.id)
+		: new Map<number, Category>();
+	const values: SplitValue[] = categoryValues.map((category, i) => {
+		const partId = partIds[i];
+		return {
+			category,
+			amount: amountValues[i] ?? "",
+			partId,
+			kept: partId === undefined ? undefined : archived.get(partId),
+		};
+	});
+	if (form.get("add") === "1") {
+		// Add a part: the open sheet again, with one more part.
+		values.push({ category: "", amount: "" });
+		return renderList(c, today, filtersFrom(c, today, back), {
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					today={today}
+					still
+					correction={correction}
+				/>
+			),
+		});
+	}
+	const parsed = parseSplit(
+		categoryValues,
+		amountValues,
+		total ?? tx.amountCents,
+		categories.map((cat) => cat.id),
+		values.map((value) => value.kept?.id),
+	);
+	if (!parsed.ok)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			status: 422,
 			sheet: (_categories, today) => (
@@ -2113,27 +2322,98 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					back={back}
 					categories={categories}
 					values={values}
-					error={parsed.ok ? undefined : parsed.error}
+					error={parsed.error}
 					today={today}
 					still
+					correction={correction}
+				/>
+			),
+		});
+	if (correction) {
+		const result = await correctCashSplit(
+			c.env.DB,
+			tx.id,
+			{
+				totalCents: correction.totalCents,
+				amountWasCents: correction.amountWas,
+				parts: parsed.parts.map((part, i) => ({
+					id: values[i]?.partId ?? null,
+					categoryId: part.categoryId,
+					amountCents: part.amountCents,
+				})),
+			},
+			actor(c),
+		);
+		// The panel's other changes (its pending edit) are saved with the corrected parts, as its own save.
+		if (result.saved)
+			return correction.pendingEdit
+				? savePendingEdit(c, tx, correction.totalCents, correction.pendingEdit)
+				: splitSaved(c, tx, today, back, []);
+		const error =
+			"refundPart" in result
+				? `Linked refunds add up to ${formatCents(result.refundPart.refundCents)}, so part ${result.refundPart.part} can't be less than that.`
+				: `Linked refunds add up to ${formatCents(result.refundTotalCents)}, so the amount can't be less than that.`;
+		return renderList(c, today, filtersFrom(c, today, back), {
+			status: 422,
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					error={error}
+					today={today}
+					still
+					correction={correction}
 				/>
 			),
 		});
 	}
-	// Add a part: the open sheet again, with one more part.
+	const result = await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c));
+	if (result.saved) return splitSaved(c, tx, today, back, result.unlinked);
+	// Show the bank's new amount, so the next save checks against it.
+	const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 	return renderList(c, today, filtersFrom(c, today, back), {
+		status: 422,
 		sheet: (_categories, today) => (
 			<SplitSheet
-				tx={tx}
+				tx={fresh}
 				back={back}
 				categories={categories}
 				values={values}
+				error="The bank just changed this amount. Check the parts and save again."
 				today={today}
 				still
 			/>
 		),
 	});
 });
+
+/** A saved split: the list again with its toast and announcement, or a redirect for a browser without htmx. */
+function splitSaved(
+	c: Context<App>,
+	tx: TransactionDetail,
+	today: string,
+	back: string,
+	unlinked: string[],
+) {
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const sentence = unlinkedSentence(unlinked, today);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: {
+				message: `Split ${tx.displayName}${sentence ? `.${sentence}` : ""}`,
+				type: "success",
+			},
+			announce: `Saved split for ${tx.displayName}.${sentence}`,
+		}),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusId: tx.id,
+	});
+}
 
 /** What a split change says about refunds it unlinked: " The refund on Sep 26 is no longer linked.", or "" for none. */
 function unlinkedSentence(dates: string[], today: string): string {
@@ -2173,7 +2453,34 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return c.notFound();
-	const form = await c.req.formData();
+	return savePanel(c, tx, await c.req.formData());
+});
+
+/**
+ * The panel's posted fields as a query string, without Change the parts' own button: what a Change the
+ * parts sheet carries until its save. Pending values travel in the POST body only, never in a URL.
+ */
+function pendingEditOf(form: FormData): string {
+	const fields = new URLSearchParams();
+	form.forEach((value, key) => {
+		if (key !== "change_parts" && typeof value === "string")
+			fields.append(key, value);
+	});
+	return fields.toString();
+}
+
+/**
+ * Saves the edit panel as `form` posted it, for `tx` (spec §8): the check, the save, the toast and the
+ * list again. Change the parts (spec §8.4) is a save that the amount breaks the parts of: it answers with
+ * the split sheet at that amount, holding the panel's other changes, which are saved with the corrected parts.
+ */
+async function savePanel(
+	c: Context<App>,
+	tx: TransactionDetail,
+	form: FormData,
+) {
+	// The panel as it was posted, before anything below changes the form: a Change the parts sheet carries it.
+	const pendingEdit = pendingEditOf(form);
 	const keptDetails = form.get("details_action") === "keep";
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
@@ -2189,15 +2496,33 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
 	const refunds = await refundPurchases(c.env.DB, tx);
+	// Only a top-level cash entry has the Amount and Date fields; a split part's date and amount come from its parent.
+	const cashValues =
+		tx.accountType === "cash" && tx.parentId === null
+			? {
+					date: form.get("date")?.toString() ?? tx.date,
+					amount:
+						form.get("amount")?.toString() ?? centsToAmount(tx.amountCents),
+				}
+			: undefined;
+	const cashParsed = cashValues
+		? parseCashDateAmount(cashValues.date, cashValues.amount, today)
+		: undefined;
 	const current = tx.refundOfId ?? null;
 	const posted = form.get("refund_of");
 	const refundOfId =
 		posted === null ? current : posted === "" ? null : Number(posted);
 	const refundOk =
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
-	// A refund that follows its purchase counts in that purchase's category, so a posted category
-	// (and a merchant rule made from it) is ignored.
-	if (refundOk && refunds.some((p) => p.id === refundOfId && !p.excluded)) {
+	// A refund that follows its purchase counts in that purchase's category, so a posted category (and a
+	// merchant rule made from it) is ignored. It follows by the counting rule on what this save will hold.
+	const linkedPurchase = refunds.find(
+		(p) => p.id === refundOfId && !p.excluded,
+	);
+	if (
+		linkedPurchase &&
+		followsPurchaseAfterSave(tx, { refundOfId, ...postedCredit(form) })
+	) {
 		form.delete("category");
 		form.delete("always");
 	}
@@ -2221,8 +2546,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		people.map((person) => person.id),
 	);
 
-	// The panel again, as the person left it, with what's wrong (422).
-	const showErrors = (errors: EditErrors) => {
+	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
+	// when the amount broke its parts, so the panel offers Change the parts for that amount.
+	const showErrors = (errors: EditErrors, changePartsTotalCents?: number) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -2262,16 +2588,54 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					today={today}
 					namePick={form.get("name_pick")?.toString() ?? null}
 					nameWas={form.get("merchant_was")?.toString() ?? null}
+					cashValues={cashValues}
+					changePartsTotalCents={changePartsTotalCents}
 				/>
 			),
 		});
 	};
+	// The amount broke its parts: the panel again, or, when Change the parts was asked for, the split sheet at
+	// that amount, holding the panel's other changes (spec §8.4).
+	const partsBroken = (amountCents: number, partsCents: number) =>
+		form.get("change_parts") === "1"
+			? changePartsList(c, tx, back, today, amountCents, pendingEdit)
+			: showErrors(
+					{
+						amount: `The parts add up to ${formatCents(partsCents)}. Change them to match ${formatCents(amountCents)}.`,
+					},
+					amountCents,
+				);
 
-	if (!parsed.ok || !refundOk)
+	if (
+		!parsed.ok ||
+		!refundOk ||
+		(cashParsed && Object.keys(cashParsed.errors).length)
+	)
 		return showErrors({
 			...(parsed.ok ? {} : parsed.errors),
 			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
+			...(cashParsed?.errors ?? {}),
 		});
+	if (cashParsed && tx.isSplit) {
+		// Refunds linked to the entry and to its parts together: moving the parts can't make them fit, so this
+		// is checked first.
+		const linked = await c.env.DB.prepare(
+			`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("part.id", "0")}) FROM transactions part WHERE part.parent_id = ?1), 0) AS cents`,
+		)
+			.bind(tx.id)
+			.first<{ cents: number }>();
+		if (linked && linked.cents > cashParsed.amountCents)
+			return showErrors({
+				amount: `Linked refunds add up to ${formatCents(linked.cents)}, so the amount can't be less than that.`,
+			});
+		const parts = await c.env.DB.prepare(
+			"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions WHERE parent_id = ?",
+		)
+			.bind(tx.id)
+			.first<{ cents: number }>();
+		if (parts && parts.cents !== cashParsed.amountCents)
+			return partsBroken(cashParsed.amountCents, parts.cents);
+	}
 
 	// The link is written only when it changes. A refund that is more than what's left of its
 	// purchase is refused by the write itself, with nothing saved (spec §8.5).
@@ -2281,11 +2645,23 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		{
 			...parsed.value,
 			refundOfId: refundOfId === current ? undefined : refundOfId,
+			...(cashParsed
+				? {
+						cashDate: cashValues?.date,
+						cashAmountCents: cashParsed.amountCents,
+					}
+				: {}),
 		},
 		actor(c),
 	);
 	if (!result.saved)
-		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+		return "refundLeftCents" in result
+			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
+			: result.cashError === "split"
+				? partsBroken(cashParsed?.amountCents ?? 0, result.amountCents)
+				: showErrors({
+						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
+					});
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
@@ -2347,7 +2723,25 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filters, { focusId: tx.id });
-});
+}
+
+/**
+ * Change the parts has saved the entry's new total and its corrected parts: the panel's pending edit is
+ * saved now too, as its own save would save it, with the amount the parts now add up to.
+ */
+async function savePendingEdit(
+	c: Context<App>,
+	tx: TransactionDetail,
+	totalCents: number,
+	pendingEdit: string,
+) {
+	const form = new FormData();
+	new URLSearchParams(pendingEdit).forEach((value, key) => {
+		form.append(key, value);
+	});
+	form.set("amount", centsToAmount(totalCents));
+	return savePanel(c, (await getTransaction(c.env.DB, tx.id)) ?? tx, form);
+}
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));

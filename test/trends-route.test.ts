@@ -108,7 +108,8 @@ describe("GET /trends with the demo seed", () => {
 		expect(text(section(html, "worth-a-look"))).toContain(
 			"Up 4 months running",
 		);
-		expect(names("others")).toEqual(["Kids"]);
+		// Childcare has no history yet, so it is in the rest with Kids.
+		expect(names("others")).toEqual(["Kids", "Childcare"]);
 		expect(text(section(html, "others"))).toMatch(/\$\d+ in /);
 		expect(text(html)).toContain("Every other category, ");
 		// In that order on the page.

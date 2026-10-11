@@ -28,7 +28,7 @@
 		"DEMO": "true"
 	},
 	"env": {
-		// The public demo (decision 26). Deploy with: npx wrangler deploy --env demo
+		// The public demo (decision 26). Deploy with: npx wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"
 		"demo": {
 			// Served only here. Cloudflare creates the DNS record and certificate on deploy.
 			"routes": [
@@ -55,7 +55,7 @@
 			// Workers AI suggests merchant names in the demo too (spec §4.1), after each nightly reset.
 			"ai": { "binding": "AI" }
 		},
-		// The family's app (#23). Deploy with: npx wrangler deploy --env production (owner-approved only).
+		// The family's app (#23). Deploy with: npx wrangler deploy --env production --message "vYYYY.MM.DD <short sha>" --var "APP_VERSION:vYYYY.MM.DD <short sha>" (owner-approved only, README "Versions and releases").
 		// Cloudflare Access guards every path but /webhooks/plaid. Secrets and Plaid settings are set with
 		// `wrangler secret put --env production`, never here.
 		"production": {

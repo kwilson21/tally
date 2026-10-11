@@ -8,6 +8,7 @@ import {
 	loadPriceOffers,
 	pickPriceOffer,
 } from "../src/bills/price-change";
+import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../src/bills/status";
 import { summarizeMonth } from "../src/budget";
 import {
 	DEFAULT_TIME_ZONE,
@@ -74,6 +75,20 @@ describe("pickPriceOffer", () => {
 		// Over $100,000 a bill's amount has to be confirmed in its own form (decision 72, P45 A).
 		expect(offer(pay(1, "2026-10-10", BIG_BILL_CENTS))?.id).toBe(1);
 		expect(offer(pay(1, "2026-10-10", BIG_BILL_CENTS + 1))).toBeUndefined();
+	});
+
+	it("uses a weekly bill's three-day window when it is given one", () => {
+		const weekly = (date: string) =>
+			pickPriceOffer(
+				[pay(1, date, 1500)],
+				"2026-10-09",
+				1000,
+				WEEKLY_BILL_DATE_WINDOW_DAYS,
+			);
+		expect(weekly("2026-10-06")?.id).toBe(1);
+		expect(weekly("2026-10-12")?.id).toBe(1);
+		expect(weekly("2026-10-05")).toBeUndefined();
+		expect(weekly("2026-10-13")).toBeUndefined();
 	});
 
 	it("picks the closest date, then the closest amount, then the earliest id", () => {
@@ -728,6 +743,7 @@ describe("bill matching and price changes", () => {
 		const bill = {
 			id: 1,
 			amountCents: 10000,
+			frequency: "monthly" as const,
 			merchantRawName: "NETFLIX.COM",
 			merchantRawText: 0,
 			period,
@@ -877,6 +893,47 @@ describe("bill matching and price changes", () => {
 			]);
 			// A key bill matches the Plaid merchant name.
 			expect(await offered()).toBe(true);
+		});
+	});
+});
+
+describe("a weekly bill's price offer", () => {
+	const friday = {
+		id: 1,
+		active: true,
+		status: "overdue" as const,
+		amountCents: 24000,
+		merchantRawName: "LITTLE SPROUTS DAYCARE",
+		merchantRawText: 1,
+		period: "2026-10-09",
+		dueDate: "2026-10-09",
+		frequency: "weekly" as const,
+	};
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare(
+				"INSERT INTO accounts(id,name,type,balance_cents) VALUES(1,'Checking','depository',0)",
+			),
+		]);
+	});
+	/** A charge at another price: $280.00 against the $240.00 Friday. */
+	const charge = (date: string) =>
+		env.DB.prepare(
+			"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,28000,'LITTLE SPROUTS DAYCARE')",
+		)
+			.bind(date)
+			.run();
+
+	it("offers a charge within three days of its Friday, not one four days out", async () => {
+		await charge("2026-10-13");
+		expect(await findPriceOffer(env.DB, friday)).toBeUndefined();
+		await charge("2026-10-12");
+		expect(await findPriceOffer(env.DB, friday)).toMatchObject({
+			date: "2026-10-12",
+			amountCents: 28000,
 		});
 	});
 });

@@ -30,7 +30,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 
 ## Commands
 - npm run dev / npm test / npm run typecheck / npm run lint / npm run format
-- Deploy (owner-approved only): `npx wrangler deploy --env <demo|production> --message "<vYYYY.MM.DD or demo> main <short sha>"`; a production deploy is also a dated release (README "Versions and releases", decision 98)
+- Deploy (owner-approved only): `npx wrangler deploy --env <demo|production> --message "<vYYYY.MM.DD or demo> <short sha>" --var "APP_VERSION:<vYYYY.MM.DD or demo> <short sha>"`; a production deploy is also a dated release (README "Versions and releases", decision 98)
 
 ## Pull requests
 - `main` only accepts PRs; required check: `check` (CI). The independent review is Codex's code review and security review through its GitHub connector (decision 102; Greptile's trial ended on Oct 11).
