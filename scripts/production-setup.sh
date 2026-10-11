@@ -88,7 +88,13 @@ step "11. Build the database tables" \
 # so a skipped step can't put Tally live without its sign-in check or its tables.
 REQUIRED="PLAID_CLIENT_ID PLAID_SECRET TOKEN_ENCRYPTION_KEY JEV_API_KEY PLAID_ENV PLAID_WEBHOOK_URL FEEDBACK_GITHUB_TOKEN ACCESS_TEAM_DOMAIN ACCESS_AUD"
 deploy_when_ready() {
-	local secrets migrations sha release missing=""
+	local secrets migrations sha base release n=2 missing=""
+	# The release is named from origin/main, so deploy only a clean checkout of it.
+	git fetch -q --tags origin || return 1
+	if [ -n "$(git status --porcelain --untracked-files=no)" ] || [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+		echo "Not deploying: check out origin/main with no changes first (git switch --detach origin/main). Then run this step again."
+		return 1
+	fi
 	secrets=$(npx wrangler secret list --env "$ENV" --format json) || return 1
 	for name in $REQUIRED; do
 		grep -q "\"$name\"" <<<"$secrets" || missing="$missing $name"
@@ -103,13 +109,19 @@ deploy_when_ready() {
 		return 1
 	fi
 	sha=$(git rev-parse --short HEAD) || return 1
-	release="v$(date +%Y.%m.%d)"
+	# The first release of a day is vYYYY.MM.DD; later ones that day add .2, .3 (decision 98).
+	base="v$(date +%Y.%m.%d)"
+	release=$base
+	while git rev-parse -q --verify "refs/tags/$release" >/dev/null; do
+		release="$base.$n"
+		n=$((n + 1))
+	done
 	echo "This deploy is release $release. Afterwards, tag and publish it as README's Versions and releases section says."
 	npx wrangler deploy --env "$ENV" --message "$release $sha" --var "APP_VERSION:$release $sha"
 }
 
 step "12. Deploy" \
-	"Checks every setting is set and the tables are built, then puts Tally live at https://$HOST. The first deploy also creates its DNS record and certificate." \
+	"Checks every setting is set, the tables are built and this is a clean checkout of origin/main, then puts Tally live at https://$HOST. The first deploy also creates its DNS record and certificate." \
 	deploy_when_ready
 
 bold "Done"
