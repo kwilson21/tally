@@ -2543,6 +2543,47 @@ function Controls() {
 						/>
 					</div>
 				</State>
+				<State label="Change the parts with part 2 on Household, now archived: it keeps that category on its own row only">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={9000}
+							totalCents={10000}
+							amountWas={9000}
+							categories={[{ id: 1, name: "Groceries" }]}
+							values={[
+								{ category: "1", amount: "60.00", partId: 201 },
+								{
+									category: "5",
+									amount: "40.00",
+									partId: 202,
+									kept: { id: 5, name: "Household" },
+								},
+							]}
+							back="/transactions"
+						/>
+					</div>
+				</State>
+				<State label="Change the parts refused: linked refunds of $85.00 are more than the new $80.00">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={9000}
+							totalCents={8000}
+							amountWas={9000}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "50.00", partId: 201 },
+								{ category: "5", amount: "30.00", partId: 202 },
+							]}
+							back="/transactions"
+							error="Linked refunds add up to $85.00, so the amount can't be less than that."
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="money-input"
