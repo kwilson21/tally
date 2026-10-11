@@ -5,6 +5,7 @@ import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import {
+	correctCashSplit,
 	type FirstVisit,
 	firstVisitState,
 	getTransaction,
@@ -21,12 +22,13 @@ import {
 	saveSplit,
 	type TransactionDetail,
 } from "../db/transactions";
-import { formatCents } from "../money";
+import { centsToAmount, formatCents } from "../money";
 import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
 import {
 	type CashValues,
 	entryKeyOf,
 	parseCash,
+	parseCashDateAmount,
 	saveCash,
 } from "../transactions/cash";
 import {
@@ -69,6 +71,7 @@ import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MoneyInput } from "../views/money-input";
 import {
 	KEEP_VALUE,
 	NameChoices,
@@ -1042,6 +1045,12 @@ type SheetProps = {
 	people: HouseholdPerson[];
 	values: Edit;
 	errors?: EditErrors;
+	cashValues?: { date: string; amount: string };
+	/**
+	 * A cash amount that broke its parts: the amount it was refused at, which "Change the parts" opens
+	 * the split with (spec §8.4). Set only for that refusal.
+	 */
+	changePartsTotalCents?: number;
 	deleteConfirm?: boolean;
 	refunds?: RefundPurchase[];
 	/** The household's date, for the transaction's "Today" label. */
@@ -1076,6 +1085,8 @@ function EditSheet({
 	people,
 	values,
 	errors = {},
+	cashValues,
+	changePartsTotalCents,
 	deleteConfirm = false,
 	refunds = [],
 	today,
@@ -1129,13 +1140,26 @@ function EditSheet({
 				{tx.displayName}
 				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}
 			</h2>
-			<p class="font-serif text-4xl font-semibold">
-				{formatCents(tx.amountCents, { signed: true })}
-			</p>
-			<p class="text-muted">
-				{dayLabel(tx.date, today)} · {account}
-			</p>
+			{tx.accountType === "cash" && tx.parentId === null ? (
+				<p class="text-muted">Cash · you entered this</p>
+			) : (
+				<>
+					<p class="font-serif text-4xl font-semibold">
+						{formatCents(tx.amountCents, { signed: true })}
+					</p>
+					<p class="text-muted">
+						{dayLabel(tx.date, today)} · {account}
+					</p>
+				</>
+			)}
 			{tx.pending && <PendingNote />}
+			{tx.accountType !== "cash" && (
+				<p class="mt-2 text-sm text-muted">
+					From {tx.bankName ?? tx.accountName}. Its date and amount stay as the
+					bank sent them. If something's off, you can split it, exclude it, or
+					count it in another month.
+				</p>
+			)}
 			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}
@@ -1232,6 +1256,36 @@ function EditSheet({
 					name="displayed_name_guess"
 					value={tx.nameSuggested ? tx.displayName : ""}
 				/>
+				{cashValues && (
+					<>
+						<MoneyInput
+							id="cash-edit-amount"
+							name="amount"
+							label="Amount"
+							value={cashValues.amount}
+							error={errors.amount}
+						/>
+						{changePartsTotalCents !== undefined && (
+							<Button
+								kind="secondary"
+								href={`/transactions/${tx.id}/split?total=${changePartsTotalCents}&back=${encodeURIComponent(back)}`}
+								class="w-full"
+							>
+								Change the parts
+							</Button>
+						)}
+						<TextInput
+							id="cash-edit-date"
+							name="date"
+							label="Date"
+							type="date"
+							value={cashValues.date}
+							max={today}
+							surface="paper"
+							error={errors.date}
+						/>
+					</>
+				)}
 				<input
 					type="hidden"
 					name="income_was"
@@ -1944,6 +1998,11 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				categories={categories}
 				people={people}
 				values={values}
+				cashValues={
+					tx.accountType === "cash" && tx.parentId === null
+						? { date: tx.date, amount: centsToAmount(tx.amountCents) }
+						: undefined
+				}
 				refunds={refunds}
 				today={today}
 				still={asksFromThisPage(c)}
@@ -1951,6 +2010,9 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		),
 	});
 });
+
+/** Change the parts (spec §8.4): the sheet's new total, and the amount the saved parts were drawn with. */
+type Correction = { totalCents: number; amountWas: number };
 
 function SplitSheet({
 	tx,
@@ -1960,6 +2022,7 @@ function SplitSheet({
 	error,
 	today,
 	still,
+	correction,
 }: {
 	tx: TransactionDetail;
 	back: string;
@@ -1969,6 +2032,7 @@ function SplitSheet({
 	today: string;
 	/** Add a part, or an error, draws the open sheet again, so it isn't drawn arriving. */
 	still?: boolean;
+	correction?: Correction;
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
@@ -1983,7 +2047,9 @@ function SplitSheet({
 				{tx.displayName}
 			</h2>
 			<p class="font-serif text-4xl font-semibold">
-				{formatCents(tx.amountCents, { signed: true })}
+				{formatCents(correction?.totalCents ?? tx.amountCents, {
+					signed: true,
+				})}
 			</p>
 			<p class="text-muted">
 				{dayLabel(tx.date, today)} · {account}
@@ -1991,6 +2057,8 @@ function SplitSheet({
 			<SplitForm
 				id={tx.id}
 				parentCents={tx.amountCents}
+				totalCents={correction?.totalCents}
+				amountWas={correction?.amountWas}
 				categories={categories}
 				values={values}
 				back={back}
@@ -1998,6 +2066,35 @@ function SplitSheet({
 			/>
 		</BottomSheet>
 	);
+}
+
+/** A posted amount in cents: a whole, positive number of cents, or null. */
+function wholeCents(raw: string | null): number | null {
+	if (raw === null || !/^[1-9]\d*$/.test(raw)) return null;
+	const cents = Number(raw);
+	return Number.isSafeInteger(cents) ? cents : null;
+}
+
+/**
+ * The new total of a Change the parts sheet, in cents: only for a split top-level cash entry, and only
+ * a whole, positive amount. Null otherwise, so the route answers 404 for it.
+ */
+function correctionTotal(
+	tx: TransactionDetail,
+	raw: string | null,
+): number | null {
+	const cents = wholeCents(raw);
+	return cents !== null &&
+		tx.accountType === "cash" &&
+		tx.parentId === null &&
+		tx.isSplit
+		? cents
+		: null;
+}
+
+/** A posted part id: undefined for a new part (an empty id), else the saved part's id. */
+function partIdOf(raw: string | undefined): number | undefined {
+	return raw === undefined || raw === "" ? undefined : Number(raw);
 }
 
 async function splitContext(c: Context<App>) {
@@ -2012,20 +2109,48 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	// Income is never split (decision 62's review): no form for it either.
 	if (!tx || tx.parentId !== null || tx.income) return c.notFound();
-	const back = safeBack(new URL(c.req.url).searchParams.get("back"));
+	const url = new URL(c.req.url);
+	const back = safeBack(url.searchParams.get("back"));
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
+	// Change the parts: the saved parts filled in, each with its id, against the new total.
+	const correcting = url.searchParams.has("total");
+	const total = correcting
+		? correctionTotal(tx, url.searchParams.get("total"))
+		: null;
+	if (correcting && total === null) return c.notFound();
+	const saved = correcting
+		? (
+				await c.env.DB.prepare(
+					"SELECT id, category_id AS categoryId, amount_cents AS amountCents FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(tx.id)
+					.all<{ id: number; categoryId: number | null; amountCents: number }>()
+			).results
+		: [];
+	const values: SplitValue[] = correcting
+		? saved.map((part) => ({
+				category: part.categoryId === null ? "" : String(part.categoryId),
+				amount: centsToAmount(part.amountCents),
+				partId: part.id,
+			}))
+		: [
+				{ category: "", amount: "" },
+				{ category: "", amount: "" },
+			];
 	return renderList(c, today, filters, {
 		sheet: (_categories, today) => (
 			<SplitSheet
 				tx={tx}
 				back={back}
 				categories={categories}
-				values={[
-					{ category: "", amount: "" },
-					{ category: "", amount: "" },
-				]}
+				values={values}
 				today={today}
+				correction={
+					total === null
+						? undefined
+						: { totalCents: total, amountWas: tx.amountCents }
+				}
 			/>
 		),
 	});
@@ -2035,10 +2160,12 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
+	// A Change the parts sheet counts against its new total, when the total posted is one for this entry.
+	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
 	return c.html(
 		<div id="split-line">
 			<SplitLine
-				parentCents={tx.amountCents}
+				parentCents={total ?? tx.amountCents}
 				amounts={form.getAll("part_amount").map(String)}
 			/>
 		</div>,
@@ -2052,59 +2179,52 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
+	// Change the parts: the posted total, and the amount the saved parts were drawn with, which the save
+	// checks. A posted total that doesn't qualify for this entry is not found.
+	const correcting = form.has("total");
+	const total = correcting
+		? correctionTotal(tx, form.get("total")?.toString() ?? null)
+		: null;
+	const amountWas = correcting
+		? wholeCents(form.get("amount_was")?.toString() ?? null)
+		: null;
+	if (correcting && (total === null || amountWas === null)) return c.notFound();
+	const correction =
+		total !== null && amountWas !== null
+			? { totalCents: total, amountWas }
+			: undefined;
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
-	const values = categoryValues.map((category, i) => ({
+	const partIds = form.getAll("part_id").map(String);
+	const values: SplitValue[] = categoryValues.map((category, i) => ({
 		category,
 		amount: amountValues[i] ?? "",
+		partId: partIdOf(partIds[i]),
 	}));
-	if (form.get("add") === "1") values.push({ category: "", amount: "" });
-	else {
-		const parsed = parseSplit(
-			categoryValues,
-			amountValues,
-			tx.amountCents,
-			categories.map((cat) => cat.id),
-		);
-		const result = parsed.ok
-			? await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c))
-			: null;
-		if (result && !result.saved) {
-			// Show the bank's new amount, so the next save checks against it.
-			const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
-			return renderList(c, today, filtersFrom(c, today, back), {
-				status: 422,
-				sheet: (_categories, today) => (
-					<SplitSheet
-						tx={fresh}
-						back={back}
-						categories={categories}
-						values={values}
-						error="The bank just changed this amount. Check the parts and save again."
-						today={today}
-						still
-					/>
-				),
-			});
-		}
-		if (result) {
-			if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-			const unlinked = unlinkedSentence(result.unlinked, today);
-			c.header(
-				"HX-Trigger",
-				JSON.stringify({
-					toast: {
-						message: `Split ${tx.displayName}${unlinked ? `.${unlinked}` : ""}`,
-						type: "success",
-					},
-					announce: `Saved split for ${tx.displayName}.${unlinked}`,
-				}),
-			);
-			c.header("HX-Push-Url", back);
-			return renderList(c, today, filtersFrom(c, today, back), {
-				focusId: tx.id,
-			});
-		}
+	if (form.get("add") === "1") {
+		// Add a part: the open sheet again, with one more part.
+		values.push({ category: "", amount: "" });
+		return renderList(c, today, filtersFrom(c, today, back), {
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					today={today}
+					still
+					correction={correction}
+				/>
+			),
+		});
+	}
+	const parsed = parseSplit(
+		categoryValues,
+		amountValues,
+		total ?? tx.amountCents,
+		categories.map((cat) => cat.id),
+	);
+	if (!parsed.ok)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			status: 422,
 			sheet: (_categories, today) => (
@@ -2113,27 +2233,91 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					back={back}
 					categories={categories}
 					values={values}
-					error={parsed.ok ? undefined : parsed.error}
+					error={parsed.error}
 					today={today}
 					still
+					correction={correction}
+				/>
+			),
+		});
+	if (correction) {
+		const result = await correctCashSplit(
+			c.env.DB,
+			tx.id,
+			{
+				totalCents: correction.totalCents,
+				amountWasCents: correction.amountWas,
+				parts: parsed.parts.map((part, i) => ({
+					id: values[i]?.partId ?? null,
+					categoryId: part.categoryId,
+					amountCents: part.amountCents,
+				})),
+			},
+			actor(c),
+		);
+		if (result.saved) return splitSaved(c, tx, today, back, []);
+		const { part, refundCents } = result.refundPart;
+		return renderList(c, today, filtersFrom(c, today, back), {
+			status: 422,
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					error={`Linked refunds add up to ${formatCents(refundCents)}, so part ${part} can't be less than that.`}
+					today={today}
+					still
+					correction={correction}
 				/>
 			),
 		});
 	}
-	// Add a part: the open sheet again, with one more part.
+	const result = await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c));
+	if (result.saved) return splitSaved(c, tx, today, back, result.unlinked);
+	// Show the bank's new amount, so the next save checks against it.
+	const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 	return renderList(c, today, filtersFrom(c, today, back), {
+		status: 422,
 		sheet: (_categories, today) => (
 			<SplitSheet
-				tx={tx}
+				tx={fresh}
 				back={back}
 				categories={categories}
 				values={values}
+				error="The bank just changed this amount. Check the parts and save again."
 				today={today}
 				still
 			/>
 		),
 	});
 });
+
+/** A saved split: the list again with its toast and announcement, or a redirect for a browser without htmx. */
+function splitSaved(
+	c: Context<App>,
+	tx: TransactionDetail,
+	today: string,
+	back: string,
+	unlinked: string[],
+) {
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const sentence = unlinkedSentence(unlinked, today);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: {
+				message: `Split ${tx.displayName}${sentence ? `.${sentence}` : ""}`,
+				type: "success",
+			},
+			announce: `Saved split for ${tx.displayName}.${sentence}`,
+		}),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusId: tx.id,
+	});
+}
 
 /** What a split change says about refunds it unlinked: " The refund on Sep 26 is no longer linked.", or "" for none. */
 function unlinkedSentence(dates: string[], today: string): string {
@@ -2189,6 +2373,18 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
 	const refunds = await refundPurchases(c.env.DB, tx);
+	// Only a top-level cash entry has the Amount and Date fields; a split part's date and amount come from its parent.
+	const cashValues =
+		tx.accountType === "cash" && tx.parentId === null
+			? {
+					date: form.get("date")?.toString() ?? tx.date,
+					amount:
+						form.get("amount")?.toString() ?? centsToAmount(tx.amountCents),
+				}
+			: undefined;
+	const cashParsed = cashValues
+		? parseCashDateAmount(cashValues.date, cashValues.amount, today)
+		: undefined;
 	const current = tx.refundOfId ?? null;
 	const posted = form.get("refund_of");
 	const refundOfId =
@@ -2221,8 +2417,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		people.map((person) => person.id),
 	);
 
-	// The panel again, as the person left it, with what's wrong (422).
-	const showErrors = (errors: EditErrors) => {
+	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
+	// when the amount broke its parts, so the panel offers Change the parts for that amount.
+	const showErrors = (errors: EditErrors, changePartsTotalCents?: number) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -2262,16 +2459,37 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					today={today}
 					namePick={form.get("name_pick")?.toString() ?? null}
 					nameWas={form.get("merchant_was")?.toString() ?? null}
+					cashValues={cashValues}
+					changePartsTotalCents={changePartsTotalCents}
 				/>
 			),
 		});
 	};
 
-	if (!parsed.ok || !refundOk)
+	if (
+		!parsed.ok ||
+		!refundOk ||
+		(cashParsed && Object.keys(cashParsed.errors).length)
+	)
 		return showErrors({
 			...(parsed.ok ? {} : parsed.errors),
 			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
+			...(cashParsed?.errors ?? {}),
 		});
+	if (cashParsed && tx.isSplit) {
+		const parts = await c.env.DB.prepare(
+			"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions WHERE parent_id = ?",
+		)
+			.bind(tx.id)
+			.first<{ cents: number }>();
+		if (parts && parts.cents !== cashParsed.amountCents)
+			return showErrors(
+				{
+					amount: `The parts add up to ${formatCents(parts.cents)}. Change them to match ${formatCents(cashParsed.amountCents)}.`,
+				},
+				cashParsed.amountCents,
+			);
+	}
 
 	// The link is written only when it changes. A refund that is more than what's left of its
 	// purchase is refused by the write itself, with nothing saved (spec §8.5).
@@ -2281,11 +2499,28 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		{
 			...parsed.value,
 			refundOfId: refundOfId === current ? undefined : refundOfId,
+			...(cashParsed
+				? {
+						cashDate: cashValues?.date,
+						cashAmountCents: cashParsed.amountCents,
+					}
+				: {}),
 		},
 		actor(c),
 	);
 	if (!result.saved)
-		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+		return "refundLeftCents" in result
+			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
+			: result.cashError === "split"
+				? showErrors(
+						{
+							amount: `The parts add up to ${formatCents(result.amountCents)}. Change them to match ${formatCents(cashParsed?.amountCents ?? 0)}.`,
+						},
+						cashParsed?.amountCents,
+					)
+				: showErrors({
+						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
+					});
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.

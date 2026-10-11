@@ -107,6 +107,21 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(/\| SavingsGoalSheet \|/);
 	});
 
+	it("shows the split correction state and the cash amount error with Change the parts", async () => {
+		const { html } = await get("/design-system");
+		const split =
+			html.split('id="split-form"')[1]?.split("</section>")[0] ?? "";
+		expect(split).toContain(
+			"The parts add up to $90.00. Change them to match $100.00.",
+		);
+		expect(split).toContain("$10.00 left to assign");
+		const cash = html.split('id="cash-form"')[1]?.split("</section>")[0] ?? "";
+		expect(cash).toContain(
+			"The parts add up to $90.00. Change them to match $100.00.",
+		);
+		expect(cash).toContain(">Change the parts</a>");
+	});
+
 	it("keeps catalog autofocus controls inside inert sample wrappers", async () => {
 		const { html } = await get("/design-system");
 		const savingsGoal = html.match(
