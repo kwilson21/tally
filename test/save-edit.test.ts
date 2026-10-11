@@ -11,6 +11,7 @@ import {
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { parseEdit } from "../src/transactions/edit";
 import { parseFilters } from "../src/transactions/filters";
 
 const db = env.DB;
@@ -417,6 +418,44 @@ describe("saveEdit", () => {
 			kind_guessed: 1,
 			for_person_id: 1,
 			for_person_guessed: 1,
+		});
+	});
+
+	it("a note saved with Details hidden keeps Jev's guessed Kind, which the form posts as Not known (#304)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'subscription', kind_guessed = 1, details_asked = 1 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		// With the Details switch off the guess is drawn as Not known, so the form posts Kind empty both ways.
+		const posted = new FormData();
+		for (const [key, value] of Object.entries({
+			details_visible: "0",
+			kind_was: "",
+			kind: "",
+			for_person_id_was: "",
+			for_person_id: "",
+			note_was: "",
+			note: "Office lunch",
+		}))
+			posted.set(key, value);
+		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+		if (!parsed.ok) throw new Error("expected the form to parse");
+		await saveEdit(db, id, parsed.value, "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT note, kind, kind_guessed, kind_cleared FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			note: "Office lunch",
+			kind: "subscription",
+			kind_guessed: 1,
+			kind_cleared: 0,
 		});
 	});
 
