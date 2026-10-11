@@ -185,6 +185,83 @@ describe("finding bills", () => {
 		).toContainEqual(expect.objectContaining({ rawName: "KEEP ME" }));
 	});
 
+	it.each([
+		["a Plaid transfer out", "plaid_category='TRANSFER_OUT'"],
+		["a Plaid transfer in", "plaid_category='TRANSFER_IN'"],
+		["a transfer Tally flagged", "flag_transfer=1"],
+	] as const)(
+		"never suggests %s that a person brought back into the budget",
+		async (_label, mutation) => {
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await insertCandidate("MOVE ME");
+			await env.DB.prepare(
+				`UPDATE transactions SET excluded=0, excluded_source='user', ${mutation} WHERE raw_name=?`,
+			)
+				.bind("MOVE ME")
+				.run();
+			expect(
+				await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+			).not.toContainEqual(expect.objectContaining({ rawName: "MOVE ME" }));
+		},
+	);
+
+	it("keeps suggesting the same steady charges when a person brought them back and they are not moves (the control)", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("NOT A MOVE");
+		await env.DB.prepare(
+			"UPDATE transactions SET excluded=0, excluded_source='user' WHERE raw_name=?",
+		)
+			.bind("NOT A MOVE")
+			.run();
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).toContainEqual(expect.objectContaining({ rawName: "NOT A MOVE" }));
+	});
+
+	it("never suggests a steady transfer to savings, once a person includes it", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await env.DB.prepare(
+			"UPDATE transactions SET excluded=0, excluded_source='user' WHERE raw_name='ONLINE TRANSFER TO SAV ...5678'",
+		).run();
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(
+			expect.objectContaining({ rawName: "ONLINE TRANSFER TO SAV ...5678" }),
+		);
+	});
+
+	it("never suggests a steady card payment that Plaid excluded as a transfer", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("CARD PAYMENT");
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category='LOAN_PAYMENTS', excluded=1, excluded_source='plaid' WHERE raw_name=?",
+		)
+			.bind("CARD PAYMENT")
+			.run();
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(expect.objectContaining({ rawName: "CARD PAYMENT" }));
+	});
+
+	it("never suggests a split part whose purchase is a transfer", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("SPLIT MOVE");
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT MOVE' ORDER BY date DESC LIMIT 1",
+		).first<{ id: number; account_id: number; date: string }>();
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET is_split=1, flag_transfer=1, excluded=0, excluded_source='user' WHERE id=?",
+			).bind(parent?.id),
+			env.DB.prepare(
+				"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,parent_id) VALUES(?,?,1000,'PART',4,?)",
+			).bind(parent?.account_id, parent?.date, parent?.id),
+		]);
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(expect.objectContaining({ rawName: "SPLIT MOVE" }));
+	});
+
 	it("names a suggestion by the merchant's chosen name, never by a name that is only suggested (decision 64)", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("SUGGESTED ONLY", 0, false);

@@ -518,6 +518,11 @@ howItWorks.get("/how-it-works", async (c) => {
 							{BILL_FIND_AMOUNT_PERCENT}% in amount.
 						</li>
 						<li>
+							Card payments and moves between your own accounts are never
+							suggested: what you bought on the card already counts, and saving
+							each month is what the savings goal on Home is for.
+						</li>
+						<li>
 							A payment from the same merchant that is outside that{" "}
 							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% is not matched. Tally
 							asks "Price changed?" on the bill instead, and nothing changes
