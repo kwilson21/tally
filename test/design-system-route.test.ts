@@ -254,7 +254,7 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('id="announcer"');
 	});
 
-	it("gives the two scrollable MonthEnd specimens unique targets across the catalog", async () => {
+	it("gives the three scrollable MonthEnd specimens unique targets across the catalog", async () => {
 		const { html } = await get("/design-system");
 		const ids = [...html.matchAll(/id="([^"]*-chart-end)"/g)].map(
 			(match) => match[1],
@@ -262,7 +262,7 @@ describe("GET /design-system in the demo", () => {
 		const links = [...html.matchAll(/href="#([^"]*-chart-end)"/g)].map(
 			(match) => match[1],
 		);
-		expect(ids).toHaveLength(2);
+		expect(ids).toHaveLength(3);
 		expect(new Set(ids).size).toBe(ids.length);
 		expect(links).toEqual(ids);
 		expect(html).toContain("bg-ink text-lg text-paper shadow-swipe-cue");
@@ -490,7 +490,7 @@ describe("GET /design-system in the demo", () => {
 		expect(section).not.toMatch(/jev/i);
 		// DESIGN.md says what it is, where it shows and that it needs no script.
 		expect(design).toMatch(
-			/\| ViewLinks \|[^\n]*Tidied by Tally · Straight from the bank[^\n]*aria-current[^\n]*demo only[^\n]*no JavaScript/,
+			/\| ViewLinks \|[^\n]*With Tally · Without Tally[^\n]*aria-current[^\n]*demo only[^\n]*no JavaScript/,
 		);
 	});
 

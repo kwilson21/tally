@@ -96,6 +96,8 @@
 		if (undo && !(undoExpiresInMs > 0)) return;
 		const toast = document.createElement("div");
 		lastToast = toast;
+		// An Undo toast's button, focused once the toast is on the page (see the undo block below).
+		let undoButton = null;
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
 		if (type === "error") {
@@ -134,6 +136,7 @@
 				button.disabled = true;
 			});
 			form.append(button);
+			undoButton = button;
 			toast.append(form);
 		} else {
 			toast.textContent = message;
@@ -163,18 +166,20 @@
 				"style",
 				`--duration-undo-toast: ${Math.min(10_000, undoExpiresInMs)}ms`,
 			);
+			// The swap that removed the delete's sheet left focus nowhere, so focus moves to Undo and a keyboard
+			// user can press it at once. The HX-Trigger runs after the swap (htmx's finally), so this wins over
+			// any autofocus the swap set.
+			undoButton?.focus();
 		}
 		setTimeout(
 			() => {
-				// Focus on Undo would be lost with the toast, so the list's result count takes it, or the
-				// page's title when the list has no count (the first-visit list).
+				// Focus on Undo would be lost with the toast, so the Transactions heading takes it (every
+				// Transactions page has one, the first-visit page too).
 				if (toast.contains(document.activeElement)) {
-					const target =
-						document.getElementById("result-count") ??
-						document.getElementById("transactions-title");
-					if (target) {
-						target.setAttribute("tabindex", "-1");
-						target.focus();
+					const heading = document.getElementById("transactions-title");
+					if (heading) {
+						heading.setAttribute("tabindex", "-1");
+						heading.focus();
 					}
 				}
 				toast.remove();
