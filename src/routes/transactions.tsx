@@ -1266,11 +1266,21 @@ function EditSheet({
 							value={cashValues.amount}
 							error={errors.amount}
 						/>
+						{/* Its own request, with its own indicator (not Save's), and the panel's fields go with it. htmx 4
+						    sends a button's name and value only with a submit event, so hx-vals carries change_parts. */}
 						{changePartsTotalCents !== undefined && (
 							<Button
 								kind="secondary"
-								href={`/transactions/${tx.id}/split?total=${changePartsTotalCents}&back=${encodeURIComponent(back)}`}
+								type="submit"
+								name="change_parts"
+								value="1"
 								class="w-full"
+								hx-post={`/transactions/${tx.id}`}
+								hx-vals={JSON.stringify({ change_parts: "1" })}
+								hx-target="#page"
+								hx-select="#page"
+								hx-swap="outerHTML"
+								hx-select-oob="#needs-count:innerHTML"
 							>
 								Change the parts
 							</Button>
@@ -2012,8 +2022,15 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	});
 });
 
-/** Change the parts (spec §8.4): the sheet's new total, and the amount the saved parts were drawn with. */
-type Correction = { totalCents: number; amountWas: number };
+/**
+ * Change the parts (spec §8.4): the sheet's new total, the amount the saved parts were drawn with, and the
+ * panel's other unsaved changes (pendingEdit), which the corrected parts are saved with.
+ */
+type Correction = {
+	totalCents: number;
+	amountWas: number;
+	pendingEdit?: string;
+};
 
 function SplitSheet({
 	tx,
@@ -2060,6 +2077,7 @@ function SplitSheet({
 				parentCents={tx.amountCents}
 				totalCents={correction?.totalCents}
 				amountWas={correction?.amountWas}
+				pendingEdit={correction?.pendingEdit}
 				categories={categories}
 				values={values}
 				back={back}
@@ -2132,6 +2150,57 @@ async function archivedPartCategories(db: D1Database, parentId: number) {
 	);
 }
 
+/**
+ * Change the parts: the entry's saved parts, each with its id and, when its category is archived, the
+ * category it keeps. The sheet's values for a correction.
+ */
+async function savedPartValues(
+	db: D1Database,
+	tx: TransactionDetail,
+): Promise<SplitValue[]> {
+	const saved = await db
+		.prepare(
+			"SELECT id, category_id AS categoryId, amount_cents AS amountCents FROM transactions WHERE parent_id = ? ORDER BY id",
+		)
+		.bind(tx.id)
+		.all<{ id: number; categoryId: number | null; amountCents: number }>();
+	const archived = await archivedPartCategories(db, tx.id);
+	return saved.results.map((part) => ({
+		category: part.categoryId === null ? "" : String(part.categoryId),
+		amount: centsToAmount(part.amountCents),
+		partId: part.id,
+		kept: archived.get(part.id),
+	}));
+}
+
+/**
+ * The Change the parts sheet at `totalCents`: the saved parts, each with its id, against the new total.
+ * GET ?total= and a panel's Change the parts both draw it here, so they always show the same sheet.
+ * `pendingEdit` is the panel's other unsaved changes, which the sheet carries to its save.
+ */
+async function changePartsList(
+	c: Context<App>,
+	tx: TransactionDetail,
+	back: string,
+	today: string,
+	totalCents: number,
+	pendingEdit?: string,
+) {
+	const values = await savedPartValues(c.env.DB, tx);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		sheet: (categories, today) => (
+			<SplitSheet
+				tx={tx}
+				back={back}
+				categories={categories}
+				values={values}
+				today={today}
+				correction={{ totalCents, amountWas: tx.amountCents, pendingEdit }}
+			/>
+		),
+	});
+}
+
 transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	// Income is never split (decision 62's review): no form for it either.
@@ -2139,37 +2208,18 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const url = new URL(c.req.url);
 	const back = safeBack(url.searchParams.get("back"));
 	const today = await householdToday(c.env.DB);
-	const filters = filtersFrom(c, today, back);
 	// Change the parts: the saved parts filled in, each with its id, against the new total.
 	const correcting = url.searchParams.has("total");
 	const total = correcting
 		? correctionTotal(tx, url.searchParams.get("total"))
 		: null;
 	if (correcting && total === null) return c.notFound();
-	const saved = correcting
-		? (
-				await c.env.DB.prepare(
-					"SELECT id, category_id AS categoryId, amount_cents AS amountCents FROM transactions WHERE parent_id = ? ORDER BY id",
-				)
-					.bind(tx.id)
-					.all<{ id: number; categoryId: number | null; amountCents: number }>()
-			).results
-		: [];
-	const archived = correcting
-		? await archivedPartCategories(c.env.DB, tx.id)
-		: new Map<number, Category>();
-	const values: SplitValue[] = correcting
-		? saved.map((part) => ({
-				category: part.categoryId === null ? "" : String(part.categoryId),
-				amount: centsToAmount(part.amountCents),
-				partId: part.id,
-				kept: archived.get(part.id),
-			}))
-		: [
-				{ category: "", amount: "" },
-				{ category: "", amount: "" },
-			];
-	return renderList(c, today, filters, {
+	if (total !== null) return changePartsList(c, tx, back, today, total);
+	const values: SplitValue[] = [
+		{ category: "", amount: "" },
+		{ category: "", amount: "" },
+	];
+	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
 				tx={tx}
@@ -2177,11 +2227,6 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 				categories={categories}
 				values={values}
 				today={today}
-				correction={
-					total === null
-						? undefined
-						: { totalCents: total, amountWas: tx.amountCents }
-				}
 			/>
 		),
 	});
@@ -2222,7 +2267,11 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	if (correcting && (total === null || amountWas === null)) return c.notFound();
 	const correction =
 		total !== null && amountWas !== null
-			? { totalCents: total, amountWas }
+			? {
+					totalCents: total,
+					amountWas,
+					pendingEdit: form.get("pending_edit")?.toString(),
+				}
 			: undefined;
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
@@ -2295,7 +2344,11 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			},
 			actor(c),
 		);
-		if (result.saved) return splitSaved(c, tx, today, back, []);
+		// The panel's other changes (its pending edit) are saved with the corrected parts, as its own save.
+		if (result.saved)
+			return correction.pendingEdit
+				? savePendingEdit(c, tx, correction.totalCents, correction.pendingEdit)
+				: splitSaved(c, tx, today, back, []);
 		const error =
 			"refundPart" in result
 				? `Linked refunds add up to ${formatCents(result.refundPart.refundCents)}, so part ${result.refundPart.part} can't be less than that.`
@@ -2400,7 +2453,34 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return c.notFound();
-	const form = await c.req.formData();
+	return savePanel(c, tx, await c.req.formData());
+});
+
+/**
+ * The panel's posted fields as a query string, without Change the parts' own button: what a Change the
+ * parts sheet carries until its save. Pending values travel in the POST body only, never in a URL.
+ */
+function pendingEditOf(form: FormData): string {
+	const fields = new URLSearchParams();
+	form.forEach((value, key) => {
+		if (key !== "change_parts" && typeof value === "string")
+			fields.append(key, value);
+	});
+	return fields.toString();
+}
+
+/**
+ * Saves the edit panel as `form` posted it, for `tx` (spec §8): the check, the save, the toast and the
+ * list again. Change the parts (spec §8.4) is a save that the amount breaks the parts of: it answers with
+ * the split sheet at that amount, holding the panel's other changes, which are saved with the corrected parts.
+ */
+async function savePanel(
+	c: Context<App>,
+	tx: TransactionDetail,
+	form: FormData,
+) {
+	// The panel as it was posted, before anything below changes the form: a Change the parts sheet carries it.
+	const pendingEdit = pendingEditOf(form);
 	const keptDetails = form.get("details_action") === "keep";
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
@@ -2508,6 +2588,17 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			),
 		});
 	};
+	// The amount broke its parts: the panel again, or, when Change the parts was asked for, the split sheet at
+	// that amount, holding the panel's other changes (spec §8.4).
+	const partsBroken = (amountCents: number, partsCents: number) =>
+		form.get("change_parts") === "1"
+			? changePartsList(c, tx, back, today, amountCents, pendingEdit)
+			: showErrors(
+					{
+						amount: `The parts add up to ${formatCents(partsCents)}. Change them to match ${formatCents(amountCents)}.`,
+					},
+					amountCents,
+				);
 
 	if (
 		!parsed.ok ||
@@ -2536,12 +2627,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			.bind(tx.id)
 			.first<{ cents: number }>();
 		if (parts && parts.cents !== cashParsed.amountCents)
-			return showErrors(
-				{
-					amount: `The parts add up to ${formatCents(parts.cents)}. Change them to match ${formatCents(cashParsed.amountCents)}.`,
-				},
-				cashParsed.amountCents,
-			);
+			return partsBroken(cashParsed.amountCents, parts.cents);
 	}
 
 	// The link is written only when it changes. A refund that is more than what's left of its
@@ -2565,12 +2651,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		return "refundLeftCents" in result
 			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
 			: result.cashError === "split"
-				? showErrors(
-						{
-							amount: `The parts add up to ${formatCents(result.amountCents)}. Change them to match ${formatCents(cashParsed?.amountCents ?? 0)}.`,
-						},
-						cashParsed?.amountCents,
-					)
+				? partsBroken(cashParsed?.amountCents ?? 0, result.amountCents)
 				: showErrors({
 						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
@@ -2635,7 +2716,25 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filters, { focusId: tx.id });
-});
+}
+
+/**
+ * Change the parts has saved the entry's new total and its corrected parts: the panel's pending edit is
+ * saved now too, as its own save would save it, with the amount the parts now add up to.
+ */
+async function savePendingEdit(
+	c: Context<App>,
+	tx: TransactionDetail,
+	totalCents: number,
+	pendingEdit: string,
+) {
+	const form = new FormData();
+	new URLSearchParams(pendingEdit).forEach((value, key) => {
+		form.append(key, value);
+	});
+	form.set("amount", centsToAmount(totalCents));
+	return savePanel(c, (await getTransaction(c.env.DB, tx.id)) ?? tx, form);
+}
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));

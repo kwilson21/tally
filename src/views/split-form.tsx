@@ -38,13 +38,15 @@ export function SplitLine({
  * The split sheet's form. In correction mode (Change the parts, spec §8.4) `totalCents` is the entry's
  * new amount, which the live line counts against, and `amountWas` is the amount the saved parts were
  * drawn with; the parts' own sum is always that amount, so the line says how far the parts are from
- * the new one.
+ * the new one. `pendingEdit` is the panel's other unsaved changes, carried through every redraw so
+ * they are saved with the corrected parts.
  */
 export function SplitForm({
 	id,
 	parentCents,
 	totalCents,
 	amountWas,
+	pendingEdit,
 	categories,
 	values,
 	back,
@@ -54,6 +56,7 @@ export function SplitForm({
 	parentCents: number;
 	totalCents?: number;
 	amountWas?: number;
+	pendingEdit?: string;
 	categories: Category[];
 	values: SplitValue[];
 	back: string;
@@ -76,6 +79,9 @@ export function SplitForm({
 				<>
 					<input type="hidden" name="total" value={String(totalCents)} />
 					<input type="hidden" name="amount_was" value={String(amountWas)} />
+					{pendingEdit !== undefined && (
+						<input type="hidden" name="pending_edit" value={pendingEdit} />
+					)}
 				</>
 			)}
 			<div class="flex items-center justify-between gap-3">

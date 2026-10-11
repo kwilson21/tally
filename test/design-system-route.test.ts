@@ -119,7 +119,7 @@ describe("GET /design-system in the demo", () => {
 		expect(cash).toContain(
 			"The parts add up to $90.00. Change them to match $100.00.",
 		);
-		expect(cash).toContain(">Change the parts</a>");
+		expect(cash).toContain(">Change the parts</button>");
 	});
 
 	it("keeps catalog autofocus controls inside inert sample wrappers", async () => {

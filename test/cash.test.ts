@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
-import { correctCashSplit, saveEdit, saveSplit } from "../src/db/transactions";
+import {
+	correctCashSplit,
+	getTransaction,
+	saveEdit,
+	saveSplit,
+} from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { syncItem } from "../src/plaid/sync";
@@ -1973,10 +1978,10 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(html).toContain(
 			"The parts add up to $90.00. Change them to match $100.00.",
 		);
-		expect(html).toContain(
-			`href="/transactions/${id}/split?total=10000&amp;back=%2Ftransactions"`,
+		expect(html).toMatch(
+			/<button(?=[^>]*name="change_parts")(?=[^>]*value="1")[^>]*>Change the parts<\/button>/,
 		);
-		expect(html).toContain(">Change the parts</a>");
+		expect(html).not.toContain("split?total=");
 		expect(await stateOf(id)).toEqual(before);
 	});
 
@@ -2008,10 +2013,10 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(answer.html).toContain(
 			"The parts add up to $100.00. Change them to match $90.00.",
 		);
-		expect(answer.html).toContain(
-			`href="/transactions/${id}/split?total=9000&amp;back=%2Ftransactions"`,
+		expect(answer.html).toMatch(
+			/<button(?=[^>]*name="change_parts")(?=[^>]*value="1")[^>]*>Change the parts<\/button>/,
 		);
-		expect(answer.html).toContain(">Change the parts</a>");
+		expect(answer.html).not.toContain("split?total=");
 		expect(await partsOf(id)).toEqual([
 			{ id: a, categoryId: 1, amountCents: 6000 },
 			{ id: b, categoryId: 5, amountCents: 4000 },
@@ -2114,6 +2119,243 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			).first(),
 		).toEqual({ refundOfId: b });
 		expect((await spentThisMonth()) - before).toBe(1000);
+	});
+
+	/** The entry's own row, as the panel's save writes it, with the name the app shows for it. */
+	const parentOf = async (id: number) => ({
+		...(await env.DB.prepare(
+			"SELECT amount_cents AS amountCents, date, note, excluded, kind FROM transactions WHERE id = ?",
+		)
+			.bind(id)
+			.first()),
+		displayName: (await getTransaction(env.DB, id))?.displayName,
+	});
+	const shiftDay = (date: string, days: number) => {
+		const shifted = new Date(`${date}T00:00:00Z`);
+		shifted.setUTCDate(shifted.getUTCDate() + days);
+		return shifted.toISOString().slice(0, 10);
+	};
+	const unescapeAttribute = (value: string) =>
+		value
+			.replaceAll("&quot;", '"')
+			.replaceAll("&#39;", "'")
+			.replaceAll("&lt;", "<")
+			.replaceAll("&gt;", ">")
+			.replaceAll("&amp;", "&");
+	/** The hidden fields in markup, as name and value, with the entities an attribute escapes undone. */
+	const hiddenFields = (html: string): [string, string][] =>
+		[
+			...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g),
+		].map(([, name = "", value = ""]): [string, string] => [
+			name,
+			unescapeAttribute(value),
+		]);
+	const pendingIn = (html: string) =>
+		hiddenFields(html)
+			.filter(([name]) => name === "pending_edit")
+			.map(([, value]) => value);
+	/** The hidden fields the edit panel of entry `id` draws, as its form posts them. */
+	const panelFields = async (id: number) => {
+		const { html } = await request(`/transactions/${id}?back=%2Ftransactions`);
+		const start = html.indexOf(`action="/transactions/${id}"`);
+		const end = html.indexOf(`action="/transactions/${id}/delete"`, start);
+		return hiddenFields(html.slice(start, end));
+	};
+	const shownTotal = (html: string) =>
+		html.match(
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+		)?.[1];
+
+	it("keeps the panel's other changes through Change the parts and saves them with the corrected parts", async () => {
+		const { id, a, b } = await splitCash("Panel changes");
+		const before = await parentOf(id);
+		const earlier = shiftDay(today(), -2);
+		const edits: [string, string][] = [
+			["date", earlier],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market\nand bakery"],
+			["excluded", "1"],
+			["kind", "one_off"],
+		];
+		const drawn = (await panelFields(id)).filter(
+			([name]) => !edits.some(([edit]) => edit === name),
+		);
+		const fields = [...drawn, ...edits];
+		const pending = new URLSearchParams(fields).toString();
+
+		const sheet = await post(`/transactions/${id}`, [
+			...fields,
+			["change_parts", "1"],
+		]);
+		expect(sheet.res.status).toBe(200);
+		expect(shownTotal(sheet.html)).toBe(formatCents(10000, { signed: true }));
+		expect(hiddenFields(sheet.html)).toEqual(
+			expect.arrayContaining([
+				["total", "10000"],
+				["amount_was", "9000"],
+				["part_id", String(a)],
+				["part_id", String(b)],
+			]),
+		);
+		expect(pendingIn(sheet.html)).toEqual([pending]);
+		expect(await parentOf(id)).toEqual(before);
+
+		const added = await correction(id, savedParts(a, b), {
+			extra: [
+				["add", "1"],
+				["pending_edit", pending],
+			],
+		});
+		expect(added.res.status).toBe(200);
+		expect(added.html).toContain(
+			`name="pending_edit" value="${pending.replaceAll("&", "&amp;")}"`,
+		);
+		expect(pendingIn(added.html)).toEqual([pending]);
+		expect(
+			hiddenFields(added.html).filter(([name]) => name === "part_id"),
+		).toHaveLength(3);
+
+		const saved = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		expect(saved.res.status).toBe(200);
+		const trigger = JSON.parse(saved.res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast).toEqual({
+			message: "Saved Corner Market",
+			type: "success",
+		});
+		expect(trigger.announce).toMatch(/^Saved Corner Market\./);
+		expect(await parentOf(id)).toEqual({
+			amountCents: 10000,
+			date: earlier,
+			note: "Farmers market\nand bakery",
+			excluded: 1,
+			kind: "one_off",
+			displayName: "Corner Market",
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT id, category_id AS categoryId, amount_cents AS amountCents, date, excluded FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(id)
+					.all()
+			).results,
+		).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000, date: earlier, excluded: 1 },
+			{ id: b, categoryId: 5, amountCents: 4000, date: earlier, excluded: 1 },
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT refund_of_id AS refundOfId FROM transactions WHERE raw_name='Part refund'",
+			).first(),
+		).toEqual({ refundOfId: b });
+	});
+
+	it("Change the parts with an amount that already matches the parts saves the panel as usual", async () => {
+		const { id } = await splitCash("Matching amount");
+		const { res, html } = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "90.00"],
+			["merchant", "Corner Market"],
+			["back", "/transactions"],
+			["change_parts", "1"],
+		]);
+		expect(res.status).toBe(200);
+		expect(html).not.toContain('id="split-title"');
+		expect(
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Saved Corner Market");
+		expect(await parentOf(id)).toMatchObject({
+			amountCents: 9000,
+			displayName: "Corner Market",
+		});
+	});
+
+	it("a refused correction keeps the pending edit", async () => {
+		const { id, a, b } = await splitCash("Refused correction");
+		const before = await parentOf(id);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", today()],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market\nand bakery"],
+			["excluded", "1"],
+		]).toString();
+
+		// The parts add up to $90.00, not the new $100.00 total.
+		const short = await correction(
+			id,
+			[
+				[String(a), "1", "60.00"],
+				[String(b), "5", "30.00"],
+			],
+			{ extra: [["pending_edit", pending]] },
+		);
+		expect(short.res.status).toBe(422);
+		expect(pendingIn(short.html)).toEqual([pending]);
+		expect(await parentOf(id)).toEqual(before);
+
+		// Part 2's linked refund ($20.00) is more than its new $10.00.
+		const refund = await correction(
+			id,
+			[
+				[String(a), "1", "90.00"],
+				[String(b), "5", "10.00"],
+			],
+			{ extra: [["pending_edit", pending]] },
+		);
+		expect(refund.res.status).toBe(422);
+		expect(refund.html).toContain(
+			"Linked refunds add up to $20.00, so part 2 can&#39;t be less than that.",
+		);
+		expect(pendingIn(refund.html)).toEqual([pending]);
+		expect(await parentOf(id)).toEqual(before);
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 3000 },
+		]);
+	});
+
+	it("a pending edit the panel then refuses reopens the panel with its error and the posted values", async () => {
+		const { id, a, b } = await splitCash("Refused panel");
+		const tomorrow = shiftDay(today(), 1);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", tomorrow],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market\nand bakery"],
+			["excluded", "1"],
+			["kind", "one_off"],
+		]).toString();
+
+		const { res, html } = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		// The correction saved the amount and the parts; the panel refused the future date.
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 10000 });
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 4000 },
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain("Choose today or an earlier date.");
+		expect(html).toContain(`value="${tomorrow}"`);
+		expect(html).toContain("Farmers market\nand bakery");
+		expect(html).toMatch(/name="merchant"[^>]*value="Corner Market"/);
+		expect(await parentOf(id)).toMatchObject({
+			date: today(),
+			excluded: 0,
+		});
 	});
 
 	it("redirects a plain browser save back to the list", async () => {

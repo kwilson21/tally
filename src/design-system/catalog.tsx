@@ -2494,7 +2494,7 @@ function Controls() {
 							value="100.00"
 							error="The parts add up to $90.00. Change them to match $100.00."
 						/>
-						<Button kind="secondary" href="#" class="w-full">
+						<Button kind="secondary" type="button" class="w-full">
 							Change the parts
 						</Button>
 					</div>
