@@ -98,6 +98,48 @@ describe("bill status", () => {
 		});
 	});
 
+	it("skips every paid weekly occurrence, not only the next one", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "weekly", dueDay: 5 },
+				"2026-10-07",
+				new Set(["2026-10-02", "2026-10-09"]),
+			),
+		).toEqual({
+			dueDate: "2026-10-16",
+			period: "2026-10-16",
+			status: "upcoming",
+		});
+	});
+
+	it("skips every paid every-two-weeks occurrence the same way", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "biweekly", dueDay: 5, anchorDate: "2026-10-02" },
+				"2026-10-07",
+				new Set(["2026-10-02", "2026-10-16"]),
+			),
+		).toEqual({
+			dueDate: "2026-10-30",
+			period: "2026-10-30",
+			status: "upcoming",
+		});
+	});
+
+	it("moves past an unpaid Friday from an earlier month and then past a paid one", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "weekly", dueDay: 5 },
+				"2026-11-03",
+				new Set(["2026-11-06"]),
+			),
+		).toEqual({
+			dueDate: "2026-11-13",
+			period: "2026-11-13",
+			status: "upcoming",
+		});
+	});
+
 	it("makes a linked occurrence paid before considering its date", () => {
 		expect(
 			billOccurrence({ frequency: "monthly", dueDay: 1 }, "2026-10-20", true)

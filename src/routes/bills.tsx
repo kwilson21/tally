@@ -1106,8 +1106,28 @@ const occurrenceDate = (bill: DbBill, period: string) => {
 };
 const occurrenceMonth = (bill: DbBill, period: string) =>
 	occurrenceDate(bill, period).slice(0, 7);
-function billPeriods(bill: DbBill, today: string) {
-	const start = addMonths(today.slice(0, 7), -6);
+/** The shape of each frequency's payment keys (bill_payments.period), so a key of another shape never sets a start. */
+const periodKeyShape: Record<DbBill["frequency"], RegExp> = {
+	monthly: /^\d{4}-\d{2}$/,
+	yearly: /^\d{4}$/,
+	weekly: /^\d{4}-\d{2}-\d{2}$/,
+	biweekly: /^\d{4}-\d{2}-\d{2}$/,
+	quarterly: /^\d{4}-Q[1-4]$/,
+};
+/** The periods a bill's page lists and accepts: back to its earliest linked payment (or six months), ahead two months (a year for yearly bills). */
+async function billPeriods(db: D1Database, bill: DbBill, today: string) {
+	const linked = await db
+		.prepare(
+			"SELECT period FROM bill_payments WHERE bill_id=? AND status='linked'",
+		)
+		.bind(bill.id)
+		.all<{ period: string }>();
+	let start = addMonths(today.slice(0, 7), -6);
+	for (const { period } of linked.results) {
+		if (!periodKeyShape[bill.frequency].test(period)) continue;
+		const month = occurrenceMonth(bill, period);
+		if (month < start) start = month;
+	}
 	const end = addMonths(
 		today.slice(0, 7),
 		bill.frequency === "yearly" ? 12 : 2,
@@ -1154,7 +1174,7 @@ async function billPage(
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
 	const today = given ?? (await householdToday(c.env.DB));
-	const periods = billPeriods(bill, today);
+	const periods = await billPeriods(c.env.DB, bill, today);
 	if (pickerPeriod && !periods.includes(pickerPeriod)) return c.notFound();
 	const payments = (
 		await c.env.DB.prepare(
@@ -1371,7 +1391,9 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 	const bill = await dbBill(c, id);
 	if (
 		!bill ||
-		!billPeriods(bill, await householdToday(c.env.DB)).includes(period)
+		!(
+			await billPeriods(c.env.DB, bill, await householdToday(c.env.DB))
+		).includes(period)
 	)
 		return c.notFound();
 	if (!Number.isInteger(transactionId))
@@ -1409,7 +1431,7 @@ bills.post("/bills/:id/link", async (c) => {
 	const today = await householdToday(c.env.DB);
 	if (
 		!(Number.isInteger(transaction) && transaction > 0) ||
-		!billPeriods(bill, today).includes(period)
+		!(await billPeriods(c.env.DB, bill, today)).includes(period)
 	)
 		return billPage(
 			c,

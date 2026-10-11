@@ -168,12 +168,19 @@ export function billOccurrence(
 		let current = occurrences[index] as ReturnType<
 			typeof billOccurrenceForMonth
 		>;
-		// The latest occurrence on or before today is the one shown. It gives way to the next once it is
-		// paid, or once it is an unpaid one from an earlier month: that one reads Not paid on the bill's page
-		// and is no longer set aside. An unpaid one from this month stays overdue until it is paid.
-		const fromEarlierMonth = current.dueDate.slice(0, 7) < today.slice(0, 7);
-		const next = occurrences[index + 1];
-		if (next && (isLinked(current.period) || fromEarlierMonth)) current = next;
+		// The latest occurrence on or before today is the one shown. Each paid one gives way to the next, and so
+		// does an unpaid one from an earlier month: that one reads Not paid on the bill's page and is no longer
+		// set aside. An unpaid one from this month stays overdue until it is paid.
+		let next = occurrences[index + 1];
+		while (
+			next &&
+			(isLinked(current.period) ||
+				current.dueDate.slice(0, 7) < today.slice(0, 7))
+		) {
+			index++;
+			current = next;
+			next = occurrences[index + 1];
+		}
 		const distance = daysBetween(today, current.dueDate);
 		const status: BillStatus = isLinked(current.period)
 			? "paid"

@@ -854,6 +854,38 @@ describe("Bills", () => {
 		expect(home).toContain("Rent fixture");
 	});
 
+	it("totals a weekly bill's every Friday this month in its group headings", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-11T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-11");
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9631,'Friday totals fixture',24000,5,'weekly',5,'FRIDAY TOTALS FIXTURE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9632,'Month totals fixture',10000,28,'monthly',5,'MONTH TOTALS FIXTURE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9641,1,'2026-10-02',24000,'Friday Totals Oct Two'),(9642,1,'2026-10-09',24000,'Friday Totals Oct Nine'),(9643,1,'2026-09-28',10000,'Month Totals Sep')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9631,'2026-10-02',9641,'user','linked'),(9631,'2026-10-09',9642,'user','linked'),(9632,'2026-09',9643,'user','linked')",
+			),
+		]);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		// Due is the shown Oct 16 Friday. Upcoming is Oct 23 and Oct 30 plus the monthly bill's Oct 28.
+		expect(html).toMatch(
+			/Due in the next 7 days<\/span><span class="ml-auto shrink-0">\$240\.00<\/span>/,
+		);
+		expect(html).toMatch(
+			/Upcoming<\/span><span class="ml-auto shrink-0">\$580\.00 this month<\/span>/,
+		);
+		expect(html).toContain("$820 still to pay in October");
+	});
+
 	it("refuses to save, deactivate or reactivate a missing bill", async () => {
 		const post = (path: string, body = "") =>
 			exports.default.fetch(`http://tally.test${path}`, {
@@ -1240,6 +1272,57 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain(`occurrences/${period}/link`);
 		expect(html).toContain("Not paid");
+	});
+
+	describe("a linked payment older than six months", () => {
+		beforeEach(async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date("2026-10-11T16:00:00Z"));
+			await resetDemo(env.DB, "2026-10-11");
+			await env.DB.prepare("DELETE FROM bills").run();
+		});
+
+		it("shows a monthly payment linked eight months back on its row, and opens its picker", async () => {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9611,'Old month fixture',12345,3,'monthly',5,'OLD MONTH FIXTURE')",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9621,1,'2026-02-03',12345,'Feb Monthly Payment')",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9611,'2026-02',9621,'user','linked')",
+				),
+			]);
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills/9611")
+			).text();
+			expect(occurrenceRow(html, "February")).toContain("Feb Monthly Payment");
+			expect(occurrenceRow(html, "February")).toContain("$123.45");
+			const picker = await exports.default.fetch(
+				"http://tally.test/bills/9611/occurrences/2026-02/link",
+			);
+			expect(picker.status).toBe(200);
+		});
+
+		it("lists a weekly payment linked to an early-February Friday on its row", async () => {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9612,'Old Friday fixture',24000,5,'weekly',5,'OLD FRIDAY FIXTURE')",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9622,1,'2026-02-06',24000,'Feb Friday Payment')",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9612,'2026-02-06',9622,'user','linked')",
+				),
+			]);
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills/9612")
+			).text();
+			expect(occurrenceRow(html, "Fri, Feb 6")).toContain("Feb Friday Payment");
+			expect(occurrenceRow(html, "Fri, Feb 6")).toContain("$240.00");
+		});
 	});
 
 	describe("a weekly bill's missed occurrences on its page", () => {

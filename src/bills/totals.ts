@@ -123,44 +123,47 @@ export function calculateBillTotals({
 			(bill.active ? monthlyBillShare(bill.amountCents, bill.frequency) : 0),
 		0,
 	);
+	// The occurrences the totals judge, each once (decision 62): the shown one of every bill, and for a weekly or
+	// every-two-weeks bill its other occurrences this month and the next, each judged on its own. The shown one
+	// wins a tie. A monthly bill's handed-off occurrence is not judged.
+	const judged = new Map<string, (typeof displayedOccurrences)[number]>();
+	for (const occurrence of displayedOccurrences)
+		judged.set(`${occurrence.billId}:${occurrence.dueDate}`, occurrence);
+	for (const occurrence of thisMonthOccurrences) {
+		const key = `${occurrence.billId}:${occurrence.dueDate}`;
+		if (
+			dayStepFrequencies.has(
+				frequencyById.get(occurrence.billId) ?? "monthly",
+			) &&
+			!judged.has(key)
+		)
+			judged.set(key, occurrence);
+	}
 	const groups = {
 		overdueCents: 0,
 		dueCents: 0,
 		upcomingCents: 0,
 		paidCents: 0,
 	};
-	let stillToPayCents = 0;
-	for (const occurrence of displayedOccurrences) {
+	// Safe to spend and "to pay soon" set aside each due or overdue occurrence once (spec §6).
+	const soon = new Map<string, number>();
+	const soonBillIds = new Set<number>();
+	for (const [key, occurrence] of judged) {
 		if (!activeIds.has(occurrence.billId)) continue;
 		const left = Math.max(0, occurrence.amountCents - occurrence.paidCents);
-		const key =
+		const groupKey =
 			`${occurrence.status === "paid" ? "paid" : occurrence.status}Cents` as keyof typeof groups;
 		if (
 			occurrence.status !== "upcoming" ||
 			occurrence.dueDate.startsWith(month)
 		)
-			groups[key] += left;
-	}
-	// Safe to spend and "to pay soon" set aside each due or overdue occurrence once (spec §6): the shown one of
-	// every bill, and for a weekly or every-two-weeks bill its other occurrences this month and the next, each
-	// judged on its own (decision 62). A monthly bill's handed-off occurrence is not set aside.
-	const soon = new Map<string, number>();
-	const soonBillIds = new Set<number>();
-	for (const occurrence of [
-		...displayedOccurrences,
-		...thisMonthOccurrences.filter((occurrence) =>
-			dayStepFrequencies.has(frequencyById.get(occurrence.billId) ?? "monthly"),
-		),
-	]) {
-		if (!activeIds.has(occurrence.billId)) continue;
+			groups[groupKey] += left;
 		if (occurrence.status !== "due" && occurrence.status !== "overdue")
 			continue;
-		soon.set(
-			`${occurrence.billId}:${occurrence.dueDate}`,
-			Math.max(0, occurrence.amountCents - occurrence.paidCents),
-		);
+		soon.set(key, left);
 		soonBillIds.add(occurrence.billId);
 	}
+	let stillToPayCents = 0;
 	for (const occurrence of thisMonthOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
 		if (occurrence.dueDate.startsWith(month))
