@@ -1683,4 +1683,45 @@ describe("a For person removed while the panel is saving", () => {
 				.first(),
 		).toEqual(before);
 	});
+
+	it("answers 422 when the panel's person is removed before the save, the order a person sees it in", async () => {
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people (name) VALUES ('Sam')",
+		).run();
+		const personId = Number(person.meta.last_row_id);
+		await env.DB.prepare(
+			"UPDATE transactions SET for_person_id = ?, for_person_guessed = 0 WHERE id = ?",
+		)
+			.bind(personId, bakery)
+			.run();
+		const before = await env.DB.prepare(
+			"SELECT note FROM transactions WHERE id = ?",
+		)
+			.bind(bakery)
+			.first();
+		await get(`/transactions/${bakery}`);
+		const removed = await post("/settings/people", {
+			action: "remove",
+			person_id: String(personId),
+		});
+		expect(removed.res.status).toBe(200);
+
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			back: "/transactions",
+			note: "Typed after removal",
+			for_person_id: String(personId),
+			for_person_id_was: String(personId),
+		});
+
+		expect(res.status).toBe(422);
+		expect(html).toMatch(
+			/<p id="for-person-error" role="alert"[^>]*>Pick a person from the household list\.<\/p>/,
+		);
+		expect(html).toContain("Typed after removal");
+		expect(
+			await env.DB.prepare("SELECT note FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first(),
+		).toEqual(before);
+	});
 });
