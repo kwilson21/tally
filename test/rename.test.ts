@@ -4,9 +4,22 @@ import {
 	allLabel,
 	allNotes,
 	allUpdateCount,
+	type JevRow,
+	jevAsksAbout,
 	oneOffGuessesAgain,
 	otherTransactionsLine,
 } from "../src/transactions/rename";
+
+type GuessArgs = Parameters<typeof oneOffGuessesAgain>[0];
+/** A row Jev can be asked about: included, not a split, not income, not a refund that follows its purchase. */
+const askable: JevRow = {
+	included: true,
+	isSplit: false,
+	income: false,
+	followsPurchase: false,
+};
+const guess = (args: Omit<GuessArgs, "row">, row: JevRow = askable) =>
+	oneOffGuessesAgain({ ...args, row });
 
 describe("a one-off name makes Tally guess the category again", () => {
 	const named = {
@@ -17,14 +30,14 @@ describe("a one-off name makes Tally guess the category again", () => {
 	};
 	it("when the category is Tally's or empty, and the name is one-off", () => {
 		expect(
-			oneOffGuessesAgain({
+			guess({
 				edit: named,
 				current: { categoryId: 4, categorySource: "jev" },
 				postedCategory: null,
 			}),
 		).toBe(true);
 		expect(
-			oneOffGuessesAgain({
+			guess({
 				edit: named,
 				current: { categoryId: null, categorySource: null },
 				postedCategory: null,
@@ -38,7 +51,7 @@ describe("a one-off name makes Tally guess the category again", () => {
 			{ categoryId: null, categorySource: null },
 		])
 			expect(
-				oneOffGuessesAgain({
+				guess({
 					edit: { ...named, jevCategories: false },
 					current,
 					postedCategory: null,
@@ -51,11 +64,9 @@ describe("a one-off name makes Tally guess the category again", () => {
 			{ categoryId: 4, categorySource: "user" },
 			{ categoryId: 4, categorySource: "merchant_rule" },
 		])
-			expect(
-				oneOffGuessesAgain({ edit: named, current, postedCategory: null }),
-			).toBe(false);
+			expect(guess({ edit: named, current, postedCategory: null })).toBe(false);
 		expect(
-			oneOffGuessesAgain({
+			guess({
 				edit: named,
 				current: { categoryId: null, categorySource: null },
 				postedCategory: 2,
@@ -66,14 +77,14 @@ describe("a one-off name makes Tally guess the category again", () => {
 	it("not for a rename of the merchant or a name that was not changed", () => {
 		const current = { categoryId: 4, categorySource: "jev" };
 		expect(
-			oneOffGuessesAgain({
+			guess({
 				edit: { ...named, nameScope: "all" },
 				current,
 				postedCategory: null,
 			}),
 		).toBe(false);
 		expect(
-			oneOffGuessesAgain({
+			guess({
 				edit: { ...named, nameChanged: false },
 				current,
 				postedCategory: null,
@@ -83,7 +94,7 @@ describe("a one-off name makes Tally guess the category again", () => {
 
 	it("also for the store's own name under This one only, which is a one-off name too", () => {
 		expect(
-			oneOffGuessesAgain({
+			guess({
 				// The store's own name has no displayName; under This one only it is still a one-off name.
 				edit: { nameChanged: true, nameScope: "one", jevCategories: true },
 				current: { categoryId: 4, categorySource: "jev" },
@@ -197,5 +208,54 @@ describe("the All notes", () => {
 				today: "2026-10-11",
 			}),
 		).toEqual(["Gift (Dec 31, 2025) keeps its own name."]);
+	});
+});
+
+describe("a split part's This one only count (decision 101)", () => {
+	it("counts the part's purchase among the others, since the part itself is not counted", () => {
+		expect(otherTransactionsLine(3, { part: true })).toBe(
+			"The other 3 stay as they are.",
+		);
+		expect(otherTransactionsLine(1, { part: true })).toBe(
+			"The other 1 stays as it is.",
+		);
+	});
+
+	it("keeps the count for a transaction that is not a part", () => {
+		expect(otherTransactionsLine(3)).toBe("The other 2 stay as they are.");
+		expect(otherTransactionsLine(1)).toBeNull();
+	});
+});
+
+describe("a row Jev can be asked about (decision 101)", () => {
+	const named = {
+		nameChanged: true,
+		nameScope: "one" as const,
+		displayName: "Dog bed",
+		jevCategories: true,
+	};
+	const jev = { categoryId: 4, categorySource: "jev" };
+
+	it("is included, not a split, not income, and not a refund that follows its purchase", () => {
+		expect(jevAsksAbout(askable)).toBe(true);
+		expect(jevAsksAbout({ ...askable, included: false })).toBe(false);
+		expect(jevAsksAbout({ ...askable, isSplit: true })).toBe(false);
+		expect(jevAsksAbout({ ...askable, income: true })).toBe(false);
+		expect(jevAsksAbout({ ...askable, followsPurchase: true })).toBe(false);
+	});
+
+	it("makes a one-off name guess again only on such a row", () => {
+		expect(guess({ edit: named, current: jev, postedCategory: null })).toBe(
+			true,
+		);
+		for (const row of [
+			{ ...askable, included: false },
+			{ ...askable, isSplit: true },
+			{ ...askable, income: true },
+			{ ...askable, followsPurchase: true },
+		])
+			expect(
+				guess({ edit: named, current: jev, postedCategory: null }, row),
+			).toBe(false);
 	});
 });

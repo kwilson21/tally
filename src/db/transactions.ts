@@ -561,6 +561,8 @@ export type TransactionDetail = ListRow & {
 	merchantName: string | null;
 	/** The name given to this transaction alone (decision 101), or null; a split part shows its purchase's. */
 	ownName: string | null;
+	/** What the store's rows read without a name of their own. */
+	storeName: string;
 	categorySource: "user" | "merchant_rule" | "bill" | "jev" | null;
 	merchantRuleCategoryId: number | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
@@ -582,7 +584,7 @@ export type NameChoices = {
 	rawName: string;
 	/** The merchant's name as the list shows it: its chosen name, else the store's own name. */
 	merchantLabel: string;
-	/** Transactions from the merchant, split purchases counted once, this one included. */
+	/** Transactions from the merchant, split purchases counted once, this one included unless it is a split part (its purchase is counted). */
 	total: number;
 	/**
 	 * The other transactions from the merchant that have a name of their own (decision 79), newest first;
@@ -685,6 +687,7 @@ export async function getTransaction(
 				| "forPersonGuessed"
 				| "creditReviewedByUser"
 				| "displayName"
+				| "storeName"
 				| "nameChoices"
 				| "isSplit"
 				| "followsPurchase"
@@ -739,6 +742,11 @@ export async function getTransaction(
 		ownName: r.ownName,
 		rawName: r.rawName,
 	});
+	const storeName = shownName({
+		...merchant,
+		chosen: r.merchantName,
+		rawName: r.rawName,
+	}).name;
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	const tidied = tidyName(r.rawName);
 	const owned = (
@@ -767,6 +775,7 @@ export async function getTransaction(
 		followsPurchase: r.followsPurchase === 1,
 		pending: r.pending === 1,
 		displayName: shown.name,
+		storeName,
 		nameSuggested: shown.suggested,
 		nameFromBank: shown.fromBank,
 		nameChoices: {
@@ -832,7 +841,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, ${paysBillSql("transactions")} AS paysBill, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -846,6 +855,9 @@ export async function saveEdit(
 			creditReviewed: number | null;
 			creditReviewedBy: string | null;
 			excluded: number;
+			paysBill: number;
+			/** The linked purchase's exclusion (1 or 0), or null when nothing is linked. */
+			purchaseExcluded: number | null;
 			refundOfId: number | null;
 			isSplit: number;
 			note: string | null;
@@ -1059,25 +1071,6 @@ export async function saveEdit(
 				[actor, id],
 			),
 		);
-	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a
-	// category Tally picked is cleared so the next answer can take its place, as an empty one is.
-	if (
-		oneOffGuessesAgain({
-			edit,
-			current: {
-				categoryId: current.categoryId,
-				categorySource: current.categorySource,
-			},
-			postedCategory: edit.categoryId,
-		}) &&
-		current.categorySource === "jev"
-	)
-		statements.push(
-			gated(
-				"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND category_source = 'jev'",
-				[actor, id],
-			),
-		);
 	// "Keep the bank's name": the tidied text stays and the suggestions are turned down, never offered again.
 	if (edit.keepBankName && edit.displayName === null && renamesMerchant)
 		statements.push(
@@ -1137,6 +1130,45 @@ export async function saveEdit(
 			),
 		);
 	}
+	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a
+	// category Tally picked is cleared so the next answer can take its place, as an empty one is. Only on a row
+	// Jev can be asked about (rename.ts jevAsksAbout), as the row stands once the writes above have run; the
+	// statement's own guard checks the same conditions on the row, so the clear and the words agree.
+	const askable = {
+		included: excluded === 0 || current.paysBill === 1,
+		isSplit: current.isSplit === 1,
+		income:
+			incomeChanged || creditReviewByUser
+				? incomeChanged && edit.income
+				: current.income === 1,
+		// A new link is taken as one that counts (the route refuses an excluded purchase); a kept link counts
+		// while its purchase isn't excluded.
+		followsPurchase:
+			(newLink === undefined
+				? current.refundOfId !== null && current.purchaseExcluded === 0
+				: newLink !== null) && followsPurchaseAfterSave(storedCredit, edit),
+	};
+	if (
+		oneOffGuessesAgain({
+			edit,
+			current: {
+				categoryId: current.categoryId,
+				categorySource: current.categorySource,
+			},
+			postedCategory: edit.categoryId,
+			row: askable,
+		}) &&
+		current.categorySource === "jev"
+	)
+		statements.push(
+			gated(
+				`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL, updated_by = ?, updated_at = datetime('now')
+				WHERE id = ? AND category_source = 'jev' AND ${INCLUDED_ROW} AND is_split = 0 AND flag_income = 0
+					AND NOT (amount_cents < 0 AND flag_income = 0 AND COALESCE(credit_reviewed, 0) = 1
+						AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id AND rp.excluded = 0))`,
+				[actor, id],
+			),
+		);
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
 	const kindChanged =

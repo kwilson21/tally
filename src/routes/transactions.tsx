@@ -61,7 +61,7 @@ import {
 	SHOWS,
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
-import { oneOffGuessesAgain } from "../transactions/rename";
+import { jevAsksAbout, oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
 import {
 	categoryRuleOffer,
@@ -1191,7 +1191,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		merchantKey: found.merchantKey,
 		categoryId: found.categoryId,
 		count: found.count,
-		merchant: tx.displayName || tidyName(tx.rawName),
+		merchant: tx.storeName,
 		category: cat.name,
 		back,
 	};
@@ -1576,9 +1576,19 @@ function EditSheet({
 							rename={{
 								merchant: tx.nameChoices.merchantLabel,
 								total: tx.nameChoices.total,
+								part: tx.parentId !== null,
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								tallyCategory: tx.nameChoices.tallyCategory && jevCategories,
+								// The note shows only where a one-off name would make Jev guess again (rename.ts).
+								tallyCategory:
+									tx.nameChoices.tallyCategory &&
+									jevCategories &&
+									jevAsksAbout({
+										included: !values.excluded || tx.paysBill === true,
+										isSplit: tx.isSplit === true,
+										income: values.income,
+										followsPurchase: purchase !== undefined,
+									}),
 								today,
 								scope: nameScope,
 							}}
@@ -2989,9 +2999,7 @@ async function savePanel(
 		(parsed.value.nameChanged === false || parsed.value.nameScope === "one"
 			? tx.merchantName
 			: parsed.value.displayName) ??
-		(tx.nameSuggested && !parsed.value.keepBankName
-			? tx.displayName
-			: tidyName(tx.rawName));
+		(parsed.value.keepBankName ? tidyName(tx.rawName) : tx.storeName);
 	const ruleOfferRecord =
 		parsed.value.categoryId === null ||
 		parsed.value.categoryId === tx.categoryId ||
@@ -3024,7 +3032,13 @@ async function savePanel(
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
-	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101).
+	// Linking a refund includes it, whatever the Exclude chip held.
+	const excludedNow =
+		refundOfId !== null && refundOfId !== current
+			? false
+			: parsed.value.excluded;
+	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
+	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
 		edit: parsed.value,
 		current: {
@@ -3032,6 +3046,14 @@ async function savePanel(
 			categorySource: tx.categorySource,
 		},
 		postedCategory: parsed.value.categoryId,
+		row: {
+			included: !excludedNow || tx.paysBill === true,
+			isSplit: tx.isSplit === true,
+			income: parsed.value.income,
+			followsPurchase:
+				refunds.some((p) => p.id === refundOfId && !p.excluded) &&
+				followsPurchaseAfterSave(tx, { ...parsed.value, refundOfId }),
+		},
 	});
 	if (
 		((addedName || addedNote || changedDetails) &&
@@ -3065,11 +3087,6 @@ async function savePanel(
 			: category
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
-	// Linking a refund includes it, whatever the Exclude chip held.
-	const excludedNow =
-		refundOfId !== null && refundOfId !== current
-			? false
-			: parsed.value.excluded;
 	const exclusion =
 		excludedNow === tx.excluded
 			? ""

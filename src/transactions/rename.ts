@@ -13,9 +13,15 @@ export const ALL_LATER_LINE = "And any that come later.";
  */
 export type OwnedRow = { name: string; date: string; part?: boolean };
 
-/** "The other 22 stay as they are." under "This one only"; null when no other transaction is from the merchant. */
-export function otherTransactionsLine(total: number): string | null {
-	const others = total - 1;
+/**
+ * "The other 22 stay as they are." under "This one only"; null when no other transaction is from the merchant.
+ * A split part is not one of the counted transactions (its purchase is), so for a part every one counted is another.
+ */
+export function otherTransactionsLine(
+	total: number,
+	{ part = false }: { part?: boolean } = {},
+): string | null {
+	const others = part ? total : total - 1;
 	if (others <= 0) return null;
 	return others === 1
 		? "The other 1 stays as it is."
@@ -80,17 +86,37 @@ export function allNotes({
 	return notes;
 }
 
+/** A row as a save leaves it, for whether Jev can be asked about its category (`jevAsksAbout`). */
+export type JevRow = {
+	/** Not excluded, or paying a bill (what's in the budget). */
+	included: boolean;
+	isSplit: boolean;
+	income: boolean;
+	/** A refund that follows its purchase (linked, reviewed, not income): it takes the purchase's category. */
+	followsPurchase: boolean;
+};
+
+/**
+ * Whether Jev can be asked about a row's category: the rows pendingForJev classifies (NEEDS_JEV_CLASSIFICATION
+ * and NOT FOLLOWS_PURCHASE in src/db/transactions.ts). Keep it in step with them, as followsPurchase in
+ * src/db/counted-month.ts is kept in step with FOLLOWS_PURCHASE.
+ */
+export function jevAsksAbout(row: JevRow): boolean {
+	return row.included && !row.isSplit && !row.income && !row.followsPurchase;
+}
+
 /**
  * A one-off name makes Tally guess the category again, from the purchase's own name (decision 101), when
  * the category is Tally's (`jev`) or empty and the person didn't pick a different one in the same save.
  * This covers the store's own name under This one only too, which is a one-off name as well. A merchant-wide
  * rename and a name that didn't change ask nothing. Tally guesses only while Jev answers categories
- * (`jevCategories`); with it off the category is left as it is.
+ * (`jevCategories`), and only on a row Jev can be asked about (`row`); otherwise the category is left as it is.
  */
 export function oneOffGuessesAgain({
 	edit,
 	current,
 	postedCategory,
+	row,
 }: {
 	edit: {
 		nameChanged?: boolean;
@@ -99,8 +125,10 @@ export function oneOffGuessesAgain({
 	};
 	current: { categoryId: number | null; categorySource: string | null };
 	postedCategory: number | null;
+	row: JevRow;
 }): boolean {
 	if (edit.jevCategories !== true) return false;
+	if (!jevAsksAbout(row)) return false;
 	if (edit.nameChanged === false || edit.nameScope !== "one") return false;
 	if (postedCategory !== null && postedCategory !== current.categoryId)
 		return false;

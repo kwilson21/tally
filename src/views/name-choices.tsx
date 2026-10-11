@@ -129,13 +129,15 @@ function Choice({
 export type RenameFacts = {
 	/** The merchant as the list shows it: its chosen name, else the store's own name. */
 	merchant: string;
-	/** Transactions from the merchant, split purchases counted once, this one included. */
+	/** Transactions from the merchant, split purchases counted once, this one included unless it is a split part (its purchase is counted). */
 	total: number;
+	/** A split part: it isn't among `total`, so "This one only" counts every one of them as another. */
+	part?: boolean;
 	/** Other transactions from the merchant that have a name of their own. */
 	owned: OwnedRow[];
 	/** This transaction's own name, when it has one. */
 	thisOwn: string | null;
-	/** Tally picked this transaction's category, or it has none: "This one only" makes Tally guess again. */
+	/** Tally picked this transaction's category, or it has none, and Jev can be asked: "This one only" makes Tally guess again. */
 	tallyCategory: boolean;
 	/** Today's date, for the dates of the other own names. */
 	today: string;
@@ -154,6 +156,7 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 	const {
 		merchant,
 		total,
+		part = false,
 		owned,
 		thisOwn,
 		tallyCategory,
@@ -161,7 +164,7 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 		scope,
 		scopeName = "name_scope",
 	} = rename;
-	const others = otherTransactionsLine(total);
+	const others = otherTransactionsLine(total, { part });
 	const count = allUpdateCount({ total, owned });
 	const allRows = count >= 2;
 	return (

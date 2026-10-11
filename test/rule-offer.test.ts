@@ -962,3 +962,42 @@ describe("firstRuleOfferAmong", () => {
 		expect(offer).toBeNull();
 	});
 });
+
+describe("the rule offer names the store, not a name a row has of its own (decision 101)", () => {
+	it("Select names the store when the lowest-id row has its own name", async () => {
+		await post(`/transactions/${ids[0]}`, {
+			...edit(groceries),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		const selected = await post("/transactions/select/category/save", {
+			ids: `${ids[0]},${ids[1]},${ids[2]}`,
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(selected.html).toContain(QUESTION);
+		expect(selected.html).not.toContain("Always use Groceries for Dog bed?");
+	});
+
+	it("an edit-panel category save on an own-named row offers the store's suggested name, not the tidied bank text", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET suggested_name = 'Pet Supplies Co', suggestion_status = 'pending' WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+		)
+			.bind(ids[0])
+			.run();
+		await setCategory([ids[1], ids[2]], groceries, "user");
+		const third = await post(`/transactions/${ids[0]}`, edit(groceries));
+		expect(third.html).toContain("Always use Groceries for Pet Supplies Co?");
+		expect(third.html).not.toContain("Always use Groceries for Dog bed?");
+		expect(third.html).not.toContain(QUESTION);
+		expect(announced(third.res)).toContain(
+			"Always use Groceries for Pet Supplies Co?",
+		);
+	});
+});

@@ -603,3 +603,24 @@ function announceOf(res: Response): string | undefined {
 	};
 	return trigger.announce;
 }
+
+describe("This one only on a split part counts the purchases (decision 101)", () => {
+	it("the edit panel on a part of one of three purchases from the same merchant says the other 3 stay as they are", async () => {
+		const { c } = await amazon();
+		await db
+			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+			.bind(c)
+			.run();
+		const part = await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
+				 VALUES (1, '2026-09-18', 325, ?, 'Amazon', ?) RETURNING id`,
+			)
+			.bind(AMAZON, c)
+			.first<{ id: number }>();
+		const html = await (
+			await exports.default.fetch(`${BASE}/transactions/${part?.id}?month=all`)
+		).text();
+		expect(html).toContain("The other 3 stay as they are.");
+	});
+});
