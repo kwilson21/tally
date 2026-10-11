@@ -52,6 +52,8 @@ export type Edit = {
 	 * counts it in the budget even if it was excluded.
 	 */
 	refundOfId?: number | null;
+	cashDate?: string;
+	cashAmountCents?: number;
 };
 
 /** The edit panel changes a merchant rule only when the person changes the toggle. */
@@ -70,7 +72,14 @@ export function merchantRuleChange(
 
 export type EditErrors = Partial<
 	Record<
-		"category" | "merchant" | "note" | "refund" | "kind" | "forPerson",
+		| "category"
+		| "merchant"
+		| "note"
+		| "refund"
+		| "kind"
+		| "forPerson"
+		| "date"
+		| "amount",
 		string
 	>
 >;
@@ -208,7 +217,7 @@ export function parseEdit(
 		: undefined;
 	const hiddenUntouched = detailsVisible === false;
 	const noteWas = text(form, "note_was");
-	const kindWas = text(form, "kind_was");
+	const kindWas = text(form, "kind_was") || null;
 	const personWasRaw = text(form, "for_person_id_was");
 	const personWas = personWasRaw ? Number(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";

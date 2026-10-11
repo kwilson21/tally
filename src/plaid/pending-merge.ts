@@ -54,6 +54,22 @@ const OWN_INCOME =
 const OWN_REVIEW = `transactions.credit_reviewed_by = 'user'
 	AND (transactions.credit_reviewed IS NOT pe.credit_reviewed OR pe.credit_reviewed_by IS NOT 'user')`;
 
+/**
+ * Whether the pending row's Kind (or For, the same way) replaces the posted row's. A Kind a person chose or
+ * cleared on the posted row always stays. Otherwise a posted row with nothing takes the pending row's, and a
+ * posted guess gives way only to a pending person's choice or clear: a pending guess, or an empty Kind with a
+ * zero guess flag, never wipes it (#315). A deliberate clear is an answer, so it moves over (#304).
+ */
+const takesDetailSql = (value: string, guessed: string, cleared: string) =>
+	`(transactions.${cleared} = 0 AND (transactions.${value} IS NULL
+		OR (transactions.${guessed} = 1 AND (p.${cleared} = 1 OR (p.${value} IS NOT NULL AND p.${guessed} = 0)))))`;
+const KIND_TAKEN = takesDetailSql("kind", "kind_guessed", "kind_cleared");
+const PERSON_TAKEN = takesDetailSql(
+	"for_person_id",
+	"for_person_guessed",
+	"for_person_cleared",
+);
+
 const STATEMENTS = [
 	// Category: a person's pick on the pending row wins over anything but a person's pick on the posted one.
 	`UPDATE transactions SET category_id = p.category_id, category_source = 'user', category_confidence = NULL
@@ -62,17 +78,27 @@ const STATEMENTS = [
 	// Note: a note the posted row already has is kept.
 	`UPDATE transactions SET note = p.note, note_guessed = p.note_guessed
 	 ${FROM_PENDING} AND COALESCE(p.note, '') != '' AND COALESCE(transactions.note, '') = ''`,
-	// Kept details beat guesses; a posted person's answer always wins.
+	// Kept details beat guesses; a posted person's answer, or a clear, always wins.
 	`UPDATE transactions SET
-		kind = CASE WHEN transactions.kind IS NULL OR (transactions.kind_guessed = 1 AND p.kind_guessed = 0) THEN p.kind ELSE transactions.kind END,
-		kind_guessed = CASE WHEN transactions.kind IS NULL OR (transactions.kind_guessed = 1 AND p.kind_guessed = 0) THEN p.kind_guessed ELSE transactions.kind_guessed END,
-		for_person_id = CASE WHEN transactions.for_person_id IS NULL OR (transactions.for_person_guessed = 1 AND p.for_person_guessed = 0) THEN p.for_person_id ELSE transactions.for_person_id END,
-		for_person_guessed = CASE WHEN transactions.for_person_id IS NULL OR (transactions.for_person_guessed = 1 AND p.for_person_guessed = 0) THEN p.for_person_guessed ELSE transactions.for_person_guessed END,
+		kind = CASE WHEN ${KIND_TAKEN} THEN p.kind ELSE transactions.kind END,
+		kind_guessed = CASE WHEN ${KIND_TAKEN} THEN p.kind_guessed ELSE transactions.kind_guessed END,
+		kind_cleared = CASE WHEN ${KIND_TAKEN} THEN p.kind_cleared ELSE transactions.kind_cleared END,
+		for_person_id = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_id ELSE transactions.for_person_id END,
+		for_person_guessed = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_guessed ELSE transactions.for_person_guessed END,
+		for_person_cleared = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_cleared ELSE transactions.for_person_cleared END,
 		details_asked = MAX(transactions.details_asked, p.details_asked),
 		note_guessed = CASE WHEN COALESCE(transactions.note, '') = '' AND COALESCE(p.note, '') != '' THEN p.note_guessed ELSE transactions.note_guessed END,
 		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
 		note_dismissed = MAX(transactions.note_dismissed, p.note_dismissed)
-	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.note_tried_at IS NOT NULL OR p.note_dismissed = 1)`,
+	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.kind_cleared = 1 OR p.for_person_cleared = 1 OR p.note_tried_at IS NOT NULL OR p.note_dismissed = 1)`,
+	// Jev's unsure transfer score goes before the exclusions below: a copied exclusion would otherwise look like
+	// the posted row's own answer, and the score would be lost (#309).
+	`UPDATE transactions SET transfer_confidence = p.transfer_confidence
+	 ${FROM_PENDING} AND p.transfer_confidence IS NOT NULL AND p.amount_cents = ?3
+	 AND NOT ${hasAnswerSql(
+			"transactions.excluded_source = 'user'",
+			"transactions.excluded_source = 'jev' OR transactions.transfer_confidence IS NOT NULL",
+		)}`,
 	// Exclusion, with the flags it came with.
 	`UPDATE transactions SET excluded = p.excluded, excluded_source = 'user',
 		flag_transfer = p.flag_transfer, flag_reimbursement = p.flag_reimbursement
@@ -109,12 +135,6 @@ const STATEMENTS = [
 	`UPDATE transactions SET income_confidence = p.income_confidence
 	 ${FROM_PENDING} AND p.income_confidence IS NOT NULL AND p.amount_cents = ?3
 		AND NOT (${hasIncomeAnswerSql("transactions")} OR transactions.income_confidence IS NOT NULL OR (COALESCE(?9 = 'INCOME', 0) AND ?3 < 0))`,
-	`UPDATE transactions SET transfer_confidence = p.transfer_confidence
-	 ${FROM_PENDING} AND p.transfer_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND NOT ${hasAnswerSql(
-			"transactions.excluded_source = 'user'",
-			"transactions.excluded_source = 'jev' OR transactions.transfer_confidence IS NOT NULL",
-		)}`,
 	`UPDATE transactions SET credit_reviewed = 1
 	 ${FROM_PENDING} AND p.amount_cents < 0 AND p.amount_cents = ?3 AND p.credit_reviewed = 1
 	 AND p.credit_reviewed_by IS NULL AND p.category_confidence IS NOT NULL

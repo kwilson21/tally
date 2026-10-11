@@ -638,6 +638,25 @@ const FILTER_SELECT_SPEC: UseSpecText = {
 		"Month: {October} · All months. Category: All categories · {the household's categories}. Account: All accounts · {Chase Card ••9921} · {Cash} · {Old Savings ••3340 · Disconnected}. Show: All · Spending · Income · Refunds · Excluded.",
 };
 
+// The search across every month's use spec (P65 A, P66 A, #211): every line answered before the owner signs it off.
+const SEARCH_EVERY_MONTH_SPEC: UseSpecText = {
+	purpose:
+		"Let a person search the whole list for a category's name, an amount or a merchant, without first finding the month it happened in. The count says what matched.",
+	affordance:
+		"The search box and Month sit as they are today. The count line above the list names the search, and under it a text link “Only October” appears while the search runs in every month.",
+	states:
+		"Typed into an empty box on this month: the list looks in every month, Month shows “All months” and the count says “in all months”. Picking a month: it narrows the search and stays while typing, from an empty box too, this month included. Emptying the box: back to this month. “Only October”: shown only while the search runs in every month; the link is 44px tall and has the focus-visible ring. Disabled, loading and error: not applicable.",
+	feedback:
+		"The count is the page's aria-live line, so each change of search or month is announced with its new text. The Month choice follows the month a search resolves, and the address follows it, so a reload shows the same list. Without JavaScript a search looks in the month the form sends, since there is no page to come from.",
+	input:
+		"Touch: the link is 44px tall. Keyboard: Tab to “Only October” and press Enter. The link goes once it has narrowed the search, and focus moves to the count, which reads the new list. Screen reader: the count reads “5 transactions matching “costco” in all months”, then “Only October, link”.",
+	motion: "None. The list swaps in place, as it does for a filter change.",
+	edges:
+		"A plain number such as 42 finds amounts from $42.00 to $42.99 and names or notes with those digits. $42 and 42.17 find amounts only, and 42.17 is exact to the cent, money out and money in alike. A plain number names its amount in the count only when every row matched by it; a row that matched a name or a note too leaves the amount out. Text that is a category's name finds its rows, and the count says “(category)”. A search across every month with a category or an account picked keeps those in the count.",
+	words:
+		"“5 transactions matching “costco” in all months” · “2 transactions matching “42.17” (amount $42.17) in all months” · “2 transactions matching “$42” (amounts $42.00 to $42.99) in October” · “2 transactions matching “42” in October” when a row matched by name too · “3 transactions matching “groceries” (category) in all months” · “Only October”.",
+};
+
 // The demo's two view links' use spec (decisions 73 and 79, P44 A): every line answered before the owner signs it off.
 const VIEW_LINKS_SPEC: UseSpecText = {
 	purpose:
@@ -2204,6 +2223,45 @@ function Controls() {
 				<UseSpec spec={FILTER_SELECT_SPEC} />
 			</Specimen>
 			<Specimen
+				id="search-every-month"
+				title="Search across every month"
+				tier="interactive"
+				components={["Button"]}
+				sentence="A search typed into an empty box looks in every month, and the count names what it matched; under the count, “Only October” narrows it to this month (P65 A, P66 A, #211)."
+			>
+				<State label="Typed into an empty box on this month: the count says in all months, and Only October is offered">
+					<div class="max-w-3xl">
+						<p class="text-sm text-muted">
+							5 transactions matching “costco” in all months
+						</p>
+						<Button kind="text" href="#search-every-month" class="-ml-2">
+							Only October
+						</Button>
+					</div>
+				</State>
+				<State label="Narrowed to October: the count says October, and the link is gone">
+					<p class="max-w-3xl text-sm text-muted">
+						1 transaction matching “costco” in October
+					</p>
+				</State>
+				<State label="An amount: a number with cents names the cents; a whole dollar names the dollar; a plain number that also matched a name names no amount">
+					<div class="max-w-3xl space-y-1 text-sm text-muted">
+						<p>2 transactions matching “42.17” (amount $42.17) in all months</p>
+						<p>
+							2 transactions matching “$42” (amounts $42.00 to $42.99) in
+							October
+						</p>
+						<p>2 transactions matching “42” in October</p>
+					</div>
+				</State>
+				<State label="A category's name: the count says (category)">
+					<p class="max-w-3xl text-sm text-muted">
+						3 transactions matching “groceries” (category) in all months
+					</p>
+				</State>
+				<UseSpec spec={SEARCH_EVERY_MONTH_SPEC} />
+			</Specimen>
+			<Specimen
 				id="view-links"
 				title="ViewLinks"
 				tier="visual"
@@ -2562,68 +2620,149 @@ function Controls() {
 				title="Add cash"
 				tier="visual"
 				components={["CashForm"]}
-				sentence="P21's secondary button and edit-panel-shaped form add cash spending."
+				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it."
 			>
-				<div
-					inert
-					class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
-				>
-					<Button kind="secondary" type="button" class="gap-2">
-						<Icon name="plus" class="size-5" />
-						Add cash
-					</Button>
-					<h4 class="mt-6 font-serif text-4xl font-semibold">
-						Add cash spending
-					</h4>
-					<CashForm
-						today="2026-09-29"
-						values={{
-							date: "2026-09-29",
-							amount: "20.00",
-							merchant: "Farmers market",
-							category: "1",
-							note: "Peaches and eggs",
-						}}
-						categories={[
-							{
-								id: 1,
-								name: "Groceries",
-								icon: "groceries",
-								color: "cat-blue",
-							},
-							{
-								id: 2,
-								name: "Eating Out",
-								icon: "eating-out",
-								color: "cat-plum",
-							},
-						]}
-						action="#"
-					/>
-				</div>
+				<State label="Add cash">
+					<div
+						inert
+						class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
+					>
+						<Button kind="secondary" type="button" class="gap-2">
+							<Icon name="plus" class="size-5" />
+							Add cash
+						</Button>
+						<h4 class="mt-6 font-serif text-4xl font-semibold">
+							Add cash spending
+						</h4>
+						<CashForm
+							today="2026-09-29"
+							values={{
+								date: "2026-09-29",
+								amount: "20.00",
+								merchant: "Farmers market",
+								category: "1",
+								note: "Peaches and eggs",
+							}}
+							categories={[
+								{
+									id: 1,
+									name: "Groceries",
+									icon: "groceries",
+									color: "cat-blue",
+								},
+								{
+									id: 2,
+									name: "Eating Out",
+									icon: "eating-out",
+									color: "cat-plum",
+								},
+							]}
+							action="#"
+						/>
+					</div>
+				</State>
+				<State label="Edit panel: the amount breaks its split's parts">
+					<div
+						inert
+						class="flex max-w-3xl flex-col gap-3 rounded-sheet border border-rule bg-paper p-5"
+					>
+						<MoneyInput
+							id="ds-cash-edit-amount"
+							name="amount"
+							label="Amount"
+							value="100.00"
+							error="The parts add up to $90.00. Change them to match $100.00."
+						/>
+						<Button kind="secondary" type="button" class="w-full">
+							Change the parts
+						</Button>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="split-form"
 				title="SplitForm"
 				tier="visual"
 				components={["SplitForm"]}
-				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total."
+				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total. Change the parts (a split cash entry whose amount changed) opens with the new total at the top, the saved parts filled in, the muted line about the mismatch, and the live line against the new total."
 			>
-				<div inert>
-					<SplitForm
-						id={1}
-						parentCents={18742}
-						categories={[
-							{ id: 1, name: "Groceries" },
-							{ id: 5, name: "Household" },
-						]}
-						values={[
-							{ category: "1", amount: "150.00" },
-							{ category: "5", amount: "12.00" },
-						]}
-						back="/transactions"
-					/>
-				</div>
+				<State label="A new split, with $25.42 left to assign">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={18742}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "150.00" },
+								{ category: "5", amount: "12.00" },
+							]}
+							back="/transactions"
+						/>
+					</div>
+				</State>
+				<State label="Change the parts: the new total is $100.00, the saved parts are $60.00 and $30.00">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={9000}
+							totalCents={10000}
+							amountWas={9000}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "60.00", partId: 201 },
+								{ category: "5", amount: "30.00", partId: 202 },
+							]}
+							back="/transactions"
+						/>
+					</div>
+				</State>
+				<State label="Change the parts with part 2 on Household, now archived: it keeps that category on its own row only">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={9000}
+							totalCents={10000}
+							amountWas={9000}
+							categories={[{ id: 1, name: "Groceries" }]}
+							values={[
+								{ category: "1", amount: "60.00", partId: 201 },
+								{
+									category: "5",
+									amount: "40.00",
+									partId: 202,
+									kept: { id: 5, name: "Household" },
+								},
+							]}
+							back="/transactions"
+						/>
+					</div>
+				</State>
+				<State label="Change the parts refused: linked refunds of $85.00 are more than the new $80.00">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={9000}
+							totalCents={8000}
+							amountWas={9000}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "50.00", partId: 201 },
+								{ category: "5", amount: "30.00", partId: 202 },
+							]}
+							back="/transactions"
+							error="Linked refunds add up to $85.00, so the amount can't be less than that."
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="money-input"
