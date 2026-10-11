@@ -20,13 +20,13 @@
 | Phase 3 part | Issue (PR) | Result |
 |---|---|---|
 | Bills screen, status rule (P15) | #25 (#151) | Done with gaps. The status rule matches §6 and decision 62; groups, add, edit, deactivate, the Safe to spend set-aside and Home's list are built and tested. Findings 2, 3, 13 and 14. |
-| Bill matching, the bill's page, a late payment's month (P16, P22) | #26 (#155) | Done with gaps. One-to-one matching, the ±10% and ±5-day windows, the tie-break, the hand-link picker and the counted-month rule match §6.1; every month reader uses the same counted-month SQL. Findings 4, 5 and 9. |
+| Bill matching, the bill's page, a late payment's month (P16, P22) | #26 (#155) | Done with gaps. One-to-one matching, the ±10% and ±5-day windows, the tie-break, the hand-link picker and the counted-month rule match §6.1; Home, Trends and refunds use the same counted-month SQL (the bill page works out its month on its own; see What went well). Findings 4, 5 and 9. |
 | Splits (P17) | #28 (#152) | Done with gaps. Create, remove, the exact-sum rule, decision 62's bank-correction removal and keeping split parents out of every count are built. Findings 6 and 7. |
 | Find bills (P18) | #156 (#161) | Done with gaps. The Band, the list, Add, Not a bill, the export and the seed match P18. Findings 10, 11 and 12. |
 | Refunds (P19) | #157 (#165) | Done with gaps. Linking from the refund, counting in the purchase's month and category, both captions and the export are built. Findings 8, 15, 16 and 17. |
 | Select several (P20) | #158 (#166) | Done with gaps. All 11 review findings on #166 are fixed; one rule from #165, merged 33 minutes after it, never reached it. Finding 16. |
 | Add cash (P21) | #159 (#162) | Done with gaps. The form, the single Cash account, positive cents for spending, dates against the household's today, and delete with a question and a 10-second Undo (decisions 84, 85). Findings 18 and 19. |
-| Seed data | #29 | Done on `main`. The demo is behind (finding 1); finding 20. |
+| Seed data | #29 | Done on `main`. The demo was behind until the Oct 10 deploy (finding 1); finding 20. |
 
 **Cross-cutting rules, checked in code across all 18 Phase 3 form posts:**
 - **Money:** amounts are integer cents everywhere, with database checks, except `split_removed_from_cents` (small fixes, #329). Split parts sum exactly; bill tolerance and finding use integer math.
@@ -86,10 +86,10 @@ The owner answered every question from pictures of today's screen beside the opt
 
 - **One counting rule for the totals.** Home, Trends and refunds count a month through the same counted-month SQL, so a bill payment or a refund counts in exactly one month in every total. The bill page works out the month it shows for a payment separately (`src/routes/bills.tsx` ~1033), so a change to the counting rule must update it too; #329's small fixes carry a note to route it through the shared helper.
 - **Decided by seeing.** Decision 62 settled the two hardest rules (a missed bill, a bank change to a split) from pictures, and the code follows them.
-- **The critical flows are covered.** All four §11 E2E flows, plus Phase 3's own, run on every pull request.
+- **The critical flows are covered.** All four §11 E2E flows, plus Phase 3's own, run on every pull request from this repository (a fork's pull request skips the screenshots job that runs them).
 
 ## Lessons for Phase 4 and 5
 
 1. **A phase isn't shown in the demo until the demo is deployed.** ROADMAP said Phase 3 was in the demo for six days while the demo ran an older build. From now on, a phase's review checks the live demo, and ROADMAP says "on `main`" until the owner has deployed it.
 2. **Two features merged the same hour can miss each other's rules.** Select several (#166) merged first; refund linking (#165), merged 33 minutes later, changed how a linked refund counts, and Select several never got the new rule, so it kept writing categories onto those refunds. When a feature adds a counting rule, its brief lists every other writer of the same columns.
-3. **Verify with CI's exact commands.** PR #318's local checks ran `npm test` but not `npm run test:feedback-integration`, which CI runs on its own, and CI went red. Decision 97's verifier now runs both.
+3. **Verify with CI's exact commands.** PR #318's local checks ran `npm test` but not `npm run test:feedback-integration`, which CI runs on its own, and CI went red. Decision 97's verifier now runs both; it should run every command in CI's `check` job, including the build and the two Wrangler deploy dry-runs, and the verifier briefs now do.
