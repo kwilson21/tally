@@ -138,6 +138,12 @@ export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.da
 const suggestedNameMatch = (namesOn: boolean) =>
 	`EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL${namesOn ? "" : " AND m.suggested_name = m.raw_name"} AND m.suggested_name LIKE ? ESCAPE '\\')`;
 
+/** The note a row shows; with the details switch off a guessed note is hidden (#314). Needs `t`. */
+const visibleNoteSql = (detailsOn: boolean) =>
+	detailsOn
+		? "t.note"
+		: "CASE WHEN t.note_guessed = 1 THEN NULL ELSE t.note END";
+
 export const PAGE_SIZE = 25;
 
 // "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
@@ -251,7 +257,7 @@ export async function listTransactions(
 			if (amount === null || amount.plain) {
 				categoryPattern = pattern;
 				alternatives.push(
-					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR c.name LIKE ? ESCAPE '\\')`,
+					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(${visibleNoteSql(detailsOn)}, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR c.name LIKE ? ESCAPE '\\')`,
 				);
 				args.push(pattern, pattern, pattern, pattern, pattern, pattern);
 			}
@@ -310,7 +316,7 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : `CASE WHEN ${detailsOn ? "1" : "0"} = 0 AND t.note_guessed = 1 THEN NULL ELSE t.note END`} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : visibleNoteSql(detailsOn)} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
