@@ -457,7 +457,10 @@ export type NameChoices = {
 	merchantLabel: string;
 	/** Transactions from the merchant, split purchases counted once, this one included. */
 	total: number;
-	/** The other transactions from the merchant that have a name of their own (decision 79), newest first. */
+	/**
+	 * The other transactions from the merchant that have a name of their own (decision 79), newest first;
+	 * a split part with its own name is among them, marked `part`.
+	 */
 	owned: OwnedRow[];
 	/** This transaction's own name, or null. */
 	thisOwn: string | null;
@@ -514,7 +517,7 @@ export async function getTransaction(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				(SELECT COUNT(*) FROM transactions m WHERE m.parent_id IS NULL AND ${merchantKeySql("m")} = ${merchantKeySql("t")}) AS merchantTotal,
-				(SELECT json_group_array(json_object('name', o.own_name, 'date', o.date)) FROM transactions o WHERE o.parent_id IS NULL AND o.id != t.id AND o.own_name IS NOT NULL AND ${merchantKeySql("o")} = ${merchantKeySql("t")}) AS ownedJson,
+				(SELECT json_group_array(json_object('name', o.own_name, 'date', o.date, 'part', o.parent_id IS NOT NULL)) FROM transactions o WHERE o.id != t.id AND o.own_name IS NOT NULL AND ${merchantKeySql("o")} = ${merchantKeySql("t")}) AS ownedJson,
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
 				t.for_person_id AS forPersonId, (SELECT name FROM household_people WHERE id = t.for_person_id) AS forPersonName, t.for_person_guessed AS forPersonGuessed,
 				t.is_split AS isSplit, NULL AS parentName,
@@ -562,7 +565,7 @@ export async function getTransaction(
 			> &
 				NameSuggestionColumns & {
 					merchantTotal: number;
-					/** A JSON array of the other own-named purchases from this merchant: their name and date. */
+					/** A JSON array of the other own-named transactions from this merchant (parts included): name, date and whether a part. */
 					ownedJson: string;
 					excluded: number;
 					paysBill: number;
@@ -608,8 +611,10 @@ export async function getTransaction(
 	});
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	const tidied = tidyName(r.rawName);
-	const owned = (JSON.parse(ownedJson) as { name: string; date: string }[])
-		.map(({ name, date }) => ({ name, date }))
+	const owned = (
+		JSON.parse(ownedJson) as { name: string; date: string; part: number }[]
+	)
+		.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
 		.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 	return {
 		...row,

@@ -2173,6 +2173,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const edits: [string, string][] = [
 			["date", earlier],
 			["amount", "100.00"],
+			// A typed name counts only with Type your own ticked (decision 101).
+			["name_pick", "own"],
 			["merchant", "Corner Market"],
 			["note", "Farmers market\nand bakery"],
 			["excluded", "1"],
@@ -2258,6 +2260,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { res, html } = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "90.00"],
+			["name_pick", "own"],
 			["merchant", "Corner Market"],
 			["back", "/transactions"],
 			["change_parts", "1"],

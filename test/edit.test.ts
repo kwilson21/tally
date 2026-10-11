@@ -65,20 +65,30 @@ describe("parseEdit and the Name row's choice (decision 101)", () => {
 		});
 	});
 
-	it("applies to one transaction unless the scope says all, and to the merchant for Looks right", () => {
+	it("applies to one transaction unless the scope says all", () => {
 		expect(read({ name_pick: "own", merchant: "New" })).toMatchObject({
 			nameScope: "one",
 		});
 		expect(
 			read({ name_pick: "own", merchant: "New", name_scope: "all" }),
 		).toMatchObject({ nameScope: "all" });
+	});
+
+	it("Looks right with a name ticked takes the posted scope, as Save does", () => {
 		expect(
 			read({
 				name_pick: "s:Blue Bottle",
 				name_scope: "one",
 				details_action: "keep",
 			}),
-		).toMatchObject({ nameScope: "all" });
+		).toMatchObject({ nameScope: "one", nameChanged: true });
+		expect(
+			read({
+				name_pick: "s:Blue Bottle",
+				name_scope: "all",
+				details_action: "keep",
+			}),
+		).toMatchObject({ nameScope: "all", nameChanged: true });
 	});
 });
 

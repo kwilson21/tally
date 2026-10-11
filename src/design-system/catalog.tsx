@@ -560,7 +560,7 @@ const RENAME_CHOICES_SPEC: UseSpecText = {
 		"Keyboard: Tab to the choices and the arrow keys move between them. Screen reader: each choice is read with its muted lines, for example “All 23 from Amazon, radio button, not checked, Dog bed is replaced.”",
 	motion: "None.",
 	edges:
-		"With no other transaction from the merchant, the “The other …” line is left out. “Tally guesses its category again.” shows only while category guesses are on (the Guess categories switch is on, and the key is set). A split purchase counts once. Other own-named transactions keep their names, and this transaction's name is replaced by All. The counts are what the change really does: All never says “All 1”. No JavaScript: the list is drawn with the Name row, and CSS shows it while a name is ticked.",
+		"With no other transaction from the merchant, the “The other …” line is left out. “Tally guesses its category again.” shows only while category guesses are on (the Categories and exclusions switch is on, and the key is set). A split purchase counts once. Other own-named transactions keep their names (a split part with its own name too, though the count leaves parts out), and this transaction's name is replaced by All. The counts are what the change really does: All never says “All 1”. No JavaScript: the list is drawn with the Name row, and CSS shows it while a name is ticked.",
 	words:
 		"Rename · This one only · The other {22} stay as they are. · The other 1 stays as it is. · Tally guesses its category again. · All {23} from {Amazon} · This one and later ones · Both from {Amazon} · this one too · {Dog bed} is replaced. · {Dog bed} ({Oct 2}) keeps its own name. · And any that come later.",
 };

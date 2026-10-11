@@ -166,7 +166,7 @@ describe("a name for one transaction (decision 101)", () => {
 		});
 	});
 
-	it("Looks right renames the merchant whatever the scope says", async () => {
+	it("Looks right with nothing ticked confirms the store's guess for all, whatever scope the hidden list posted", async () => {
 		const id = await charge(RAW);
 		const other = await charge(RAW, null, "2026-09-18");
 		await suggest(RAW, "Blue Bottle Coffee");
@@ -180,6 +180,150 @@ describe("a name for one transaction (decision 101)", () => {
 			suggestion_status: "accepted",
 		});
 		expect((await rowOf(other))?.displayName).toBe("Blue Bottle Coffee");
+	});
+
+	it("Looks right with a name ticked saves it for This one only, as Save does", async () => {
+		const id = await charge(RAW);
+		const other = await charge(RAW, null, "2026-09-18");
+		await suggest(RAW, "Blue Bottle Coffee");
+		await save(id, {
+			name_pick: "s:Blue Bottle Coffee",
+			name_scope: "one",
+			details_action: "keep",
+			displayed_name_guess: "Blue Bottle Coffee",
+		});
+		expect(await merchant(RAW)).toEqual({
+			display_name: null,
+			suggested_name: "Blue Bottle Coffee",
+			suggestion_status: "pending",
+		});
+		expect(await rowOf(id)).toMatchObject({
+			displayName: "Blue Bottle Coffee",
+			nameSuggested: false,
+		});
+		expect(await rowOf(other)).toMatchObject({
+			displayName: "Blue Bottle Coffee",
+			nameSuggested: true,
+		});
+	});
+
+	it("a guess that was drawn before the merchant was named does not rename it", async () => {
+		const id = await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+		// Another tab names the merchant after this panel was drawn with the guess showing.
+		await db
+			.prepare(
+				"UPDATE merchants SET display_name = 'Blue Bottle' WHERE raw_name = ?",
+			)
+			.bind(RAW)
+			.run();
+		await save(id, {
+			details_action: "keep",
+			displayed_name_guess: "Blue Bottle Coffee",
+			name_scope: "one",
+		});
+		expect(await merchant(RAW)).toMatchObject({
+			display_name: "Blue Bottle",
+		});
+	});
+
+	it("the toast names the store's own name for This one only, and the row shows it", async () => {
+		const { a } = await amazon();
+		const { res } = await post(
+			`/transactions/${a}`,
+			{
+				back: "/transactions?month=all",
+				name_pick: "store",
+				name_scope: "one",
+			},
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Amazon mktpl");
+		expect((await rowOf(a))?.displayName).toBe("Amazon mktpl");
+	});
+
+	it("the store's own name for All clears a named merchant, and the toast says the tidied text the rows now show", async () => {
+		const { a, b } = await amazon();
+		const { res } = await post(
+			`/transactions/${a}`,
+			{
+				back: "/transactions?month=all",
+				name_pick: "store",
+				name_scope: "all",
+			},
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Amazon mktpl");
+		expect(await merchant("Amazon")).toMatchObject({ display_name: null });
+		expect((await rowOf(a))?.displayName).toBe("Amazon mktpl");
+		expect((await rowOf(b))?.displayName).toBe("Amazon mktpl");
+	});
+
+	it("the store's own name for All turns a suggestion down and shows the tidied text", async () => {
+		const id = await charge(RAW);
+		await suggest(RAW, "Blue Bottle Coffee");
+		const { res } = await post(
+			`/transactions/${id}`,
+			{
+				back: "/transactions?month=all",
+				name_pick: "store",
+				name_scope: "all",
+			},
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Blue bottle cof");
+		expect(await merchant(RAW)).toMatchObject({
+			display_name: null,
+			suggestion_status: "rejected",
+		});
+		expect((await rowOf(id))?.displayName).toBe("Blue bottle cof");
+	});
+
+	it("a save with nothing ticked names a named merchant in the toast and announcement", async () => {
+		const { a } = await amazon();
+		const { res } = await post(
+			`/transactions/${a}`,
+			{ back: "/transactions?month=all", note: "Dinner" },
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Amazon");
+		expect(announceOf(res)).toBe("Saved Amazon.");
+	});
+
+	it("a save with nothing ticked names a row with its own name in the toast, not the bank's text", async () => {
+		const { a } = await amazon();
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(a)
+			.run();
+		const { res } = await post(
+			`/transactions/${a}`,
+			{ back: "/transactions?month=all", note: "Dinner" },
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Dog bed");
+		expect(announceOf(res)).toBe("Saved Dog bed.");
+		expect((await rowOf(a))?.displayName).toBe("Dog bed");
+	});
+
+	it("All's notes list a split part with its own name, and the count leaves the part out", async () => {
+		const { b, c } = await amazon();
+		await db
+			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+			.bind(c)
+			.run();
+		await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id, own_name)
+				 VALUES (1, '2026-09-18', 325, ?, 'Amazon', ?, 'Dog bed')`,
+			)
+			.bind(AMAZON, c)
+			.run();
+		const html = await (
+			await exports.default.fetch(`${BASE}/transactions/${b}?month=all`)
+		).text();
+		expect(html).toContain("Dog bed (Sep 18) keeps its own name.");
+		expect(html).toContain("All 3 from Amazon");
 	});
 
 	it("a split's parts show the own name of the purchase they came from", async () => {
@@ -290,4 +434,12 @@ function toastOf(res: Response): string | undefined {
 		toast?: { message?: string };
 	};
 	return trigger.toast?.message;
+}
+
+/** The announcement a save sends with its HTMX response. */
+function announceOf(res: Response): string | undefined {
+	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+		announce?: string;
+	};
+	return trigger.announce;
 }

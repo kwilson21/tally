@@ -63,7 +63,7 @@ describe("a one-off name makes Tally guess the category again", () => {
 		).toBe(false);
 	});
 
-	it("not for a rename of the merchant, a name that was not changed, or the store's own name", () => {
+	it("not for a rename of the merchant or a name that was not changed", () => {
 		const current = { categoryId: 4, categorySource: "jev" };
 		expect(
 			oneOffGuessesAgain({
@@ -79,13 +79,17 @@ describe("a one-off name makes Tally guess the category again", () => {
 				postedCategory: null,
 			}),
 		).toBe(false);
+	});
+
+	it("also for the store's own name under This one only, which is a one-off name too", () => {
 		expect(
 			oneOffGuessesAgain({
-				edit: { ...named, displayName: null },
-				current,
+				// The store's own name has no displayName; under This one only it is still a one-off name.
+				edit: { nameChanged: true, nameScope: "one", jevCategories: true },
+				current: { categoryId: 4, categorySource: "jev" },
 				postedCategory: null,
 			}),
-		).toBe(false);
+		).toBe(true);
 	});
 });
 
@@ -108,6 +112,16 @@ describe("the Rename list's counts", () => {
 				owned: [{ name: "Dog bed", date: "2026-10-02" }],
 			}),
 		).toBe(22);
+	});
+
+	it("does not count a split part with its own name, which All keeps, as one of the transactions", () => {
+		// A part is part of a purchase the total already counts once, so its own name changes the notes only.
+		expect(
+			allUpdateCount({
+				total: 23,
+				owned: [{ name: "Dog bed", date: "2026-10-02", part: true }],
+			}),
+		).toBe(23);
 	});
 });
 
@@ -156,6 +170,14 @@ describe("the All notes", () => {
 				today: "2026-10-11",
 			}),
 		).toEqual(["Dog bed (Oct 2) keeps its own name."]);
+	});
+
+	it("says a split part with its own name keeps it too, and the count stays the same", () => {
+		const owned = [{ name: "Dog bed", date: "2026-10-02", part: true }];
+		expect(allNotes({ thisOwn: null, owned, today: "2026-10-11" })).toEqual([
+			"Dog bed (Oct 2) keeps its own name.",
+		]);
+		expect(allUpdateCount({ total: 23, owned })).toBe(23);
 	});
 
 	it("adds the year to a date from an earlier year", () => {

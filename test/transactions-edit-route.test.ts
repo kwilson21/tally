@@ -1461,8 +1461,6 @@ describe("excluding a transaction (spec §6, #27)", () => {
 
 	it("excludes on save, and says so", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, {
-			name_pick: "own",
-			merchant: "Local Bakery",
 			note: "",
 			excluded: "1",
 			back: "/transactions?uncategorized=1",

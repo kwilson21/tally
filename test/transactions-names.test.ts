@@ -441,7 +441,7 @@ describe("the edit panel's name choices", () => {
 		expect(html).toMatch(
 			/<a href="\/how-it-works#names"[^>]*aria-label="Why\? Tally&#39;s guess"[^>]*>Why\?<\/a>/,
 		);
-		// Each suggested name's chip is read with it; "Keep" isn't a guess.
+		// Each suggested name's choice is read with it; "Keep" isn't a guess.
 		expect(html.match(/aria-describedby="name-source-0"/g)).toHaveLength(1);
 	});
 

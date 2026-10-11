@@ -1057,7 +1057,7 @@ type SheetProps = {
 	refunds?: RefundPurchase[];
 	/** The household's date, for the transaction's "Today" label. */
 	today: string;
-	/** The name chip that was chosen when the form was posted, shown again after an error. */
+	/** The Name row choice that was ticked when the form was posted, shown again after an error. */
 	namePick?: string | null;
 	/**
 	 * What the name field held when the panel was first drawn, which a redraw after an error carries
@@ -2536,7 +2536,7 @@ async function savePanel(
 		form.delete("category");
 		form.delete("always");
 	}
-	// A name chip counts only while it is still offered: the panel may have been opened before "Suggest store
+	// A name choice counts only while it is still offered: the panel may have been opened before "Suggest store
 	// names" went off or before the suggestion was settled elsewhere, and a person's save must not accept or
 	// turn down a guess they can no longer see. A name typed in the field is always their own.
 	const pick = form.get("name_pick")?.toString() ?? "";
@@ -2546,9 +2546,15 @@ async function savePanel(
 		pick === OWN_VALUE ||
 		offered.some((name) => pickValue(name) === pick);
 	if (pick && !stillOffered) form.delete("name_pick");
+	// "Looks right" with nothing ticked confirms Tally's guess for the store, as it does without the Rename list:
+	// it names the merchant (all), whatever scope the hidden list posted (decision 101). A guess the panel
+	// no longer offers, because the merchant was named since it was drawn, names nothing.
 	if (keptDetails && !form.has("name_pick")) {
 		const displayedGuess = form.get("displayed_name_guess")?.toString() ?? "";
-		if (displayedGuess) form.set("name_pick", pickValue(displayedGuess));
+		if (displayedGuess && offered.includes(displayedGuess)) {
+			form.set("name_pick", pickValue(displayedGuess));
+			form.set("name_scope", "all");
+		}
 	}
 	const parsed = parseEdit(
 		form,
@@ -2711,13 +2717,12 @@ async function savePanel(
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
-	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
-	// suggestion its rows were showing when nothing was chosen (P29 A).
+	// The name the save gave, or else the name the row shows (its own name first, then the merchant's, then
+	// the suggestion it was showing, or the bank's text tidied): the toast and the announcer say what the row
+	// now reads. The store's own name is the bank's text tidied, never the raw bank string (#93).
 	const name =
 		parsed.value.displayName ??
-		(tx.nameSuggested && !parsed.value.keepBankName
-			? tx.displayName
-			: tidyName(tx.rawName));
+		(pick === STORE_VALUE ? tidyName(tx.rawName) : tx.displayName);
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;

@@ -214,10 +214,11 @@ export function parseEdit(
 	const rawPerson = text(form, "for_person_id");
 	const forPersonId = rawPerson ? Number(rawPerson) : null;
 	const keepDetails = form.get("details_action") === "keep";
-	// "Rename" (decision 101): this transaction alone, unless the scope says all the merchant's. "Looks right"
-	// keeps the merchant's name as it was drawn, so it ignores the scope.
+	// "Rename" (decision 101): this transaction alone, unless the scope says all the merchant's. A ticked name
+	// under "Looks right" takes this choice like Save does; with nothing ticked, savePanel names the store's
+	// guess for all (src/routes/transactions.tsx).
 	const nameScope: "one" | "all" =
-		keepDetails || form.get("name_scope") === "all" ? "all" : "one";
+		form.get("name_scope") === "all" ? "all" : "one";
 	const nameChanged =
 		pick === "own"
 			? nameScope === "one" || fieldChanged

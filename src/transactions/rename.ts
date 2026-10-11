@@ -7,8 +7,11 @@ import { shortDay } from "../dates";
 /** The line under "All" that says it reaches the transactions that come later. */
 export const ALL_LATER_LINE = "And any that come later.";
 
-/** A transaction from the same merchant that has its own name (decision 79), other than this one. */
-export type OwnedRow = { name: string; date: string };
+/**
+ * A transaction from the same merchant that has its own name (decision 79), other than this one. `part` marks
+ * a split's part: it keeps its name under All, but a split purchase is already counted once in the total.
+ */
+export type OwnedRow = { name: string; date: string; part?: boolean };
 
 /** "The other 22 stay as they are." under "This one only"; null when no other transaction is from the merchant. */
 export function otherTransactionsLine(total: number): string | null {
@@ -21,7 +24,8 @@ export function otherTransactionsLine(total: number): string | null {
 
 /**
  * How many transactions "All" changes: every transaction from the merchant except the others that have
- * their own name (`total` counts this one; `owned` lists the others that do, not this one).
+ * their own name (`total` counts this one; `owned` lists the others that do, not this one). A split part
+ * with its own name is not counted: the purchase it belongs to is.
  */
 export function allUpdateCount({
 	total,
@@ -30,7 +34,7 @@ export function allUpdateCount({
 	total: number;
 	owned: OwnedRow[];
 }): number {
-	return total - owned.length;
+	return total - owned.filter((row) => !row.part).length;
 }
 
 /**
@@ -77,8 +81,9 @@ export function allNotes({
 /**
  * A one-off name makes Tally guess the category again, from the purchase's own name (decision 101), when
  * the category is Tally's (`jev`) or empty and the person didn't pick a different one in the same save.
- * A merchant-wide rename, a name that didn't change, and the store's own name (no name) ask nothing. Tally
- * guesses only while Jev answers categories (`jevCategories`); with it off the category is left as it is.
+ * This covers the store's own name under This one only too, which is a one-off name as well. A merchant-wide
+ * rename and a name that didn't change ask nothing. Tally guesses only while Jev answers categories
+ * (`jevCategories`); with it off the category is left as it is.
  */
 export function oneOffGuessesAgain({
 	edit,
@@ -88,7 +93,6 @@ export function oneOffGuessesAgain({
 	edit: {
 		nameChanged?: boolean;
 		nameScope?: "one" | "all";
-		displayName: string | null;
 		jevCategories?: boolean;
 	};
 	current: { categoryId: number | null; categorySource: string | null };
@@ -96,7 +100,6 @@ export function oneOffGuessesAgain({
 }): boolean {
 	if (edit.jevCategories !== true) return false;
 	if (edit.nameChanged === false || edit.nameScope !== "one") return false;
-	if (edit.displayName === null) return false;
 	if (postedCategory !== null && postedCategory !== current.categoryId)
 		return false;
 	return (

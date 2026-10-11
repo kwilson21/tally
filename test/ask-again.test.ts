@@ -458,6 +458,23 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		});
 	});
 
+	it("the store's own name under This one only is a one-off name too: Jev guesses the category again", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		const jev = fakeJev(() => reply(0.2));
+		await save(bakery, {
+			category: String(category),
+			name_pick: "store",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+	});
+
 	it("leaves a category a person picked alone when the name changes", async () => {
 		const category = await firstCategory();
 		await db

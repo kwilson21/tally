@@ -655,6 +655,8 @@ describe("transaction detail guesses", () => {
 			back: "/transactions",
 			merchant_was: "",
 			name_pick: "s:Coffee Shop",
+			// A ticked name takes the Rename list's choice, as Save does: All renames the merchant (decision 101).
+			name_scope: "all",
 			note: "Dinner",
 			kind: "one_off",
 			for_person_id: String(person?.id),
