@@ -1673,6 +1673,18 @@ describe("Bills", () => {
 				announce: "No payments to link",
 			});
 		});
+
+		it("shows only the empty state when the page opens on a month with no payments to link", async () => {
+			// The same setup as above: nothing within 30 days of November's due date can pay the bill.
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income=1 WHERE date BETWEEN '2026-10-16' AND '2026-12-15'",
+			).run();
+			const page = await (await pickerFor({}, "2026-11")).text();
+			const section = pickerSection(page);
+			expect(section).toContain("No payments to link");
+			expect(section).not.toContain('name="period"');
+			expect(section).not.toContain('id="bill-month-explanation"');
+		});
 	});
 
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
