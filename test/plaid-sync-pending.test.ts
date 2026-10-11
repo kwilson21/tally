@@ -1375,6 +1375,124 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		});
 	});
 
+	it("takes the category the pending split had over a merchant rule or Jev category on the posted row, when the amount changed", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = 3, category_source = 'jev' WHERE id = ?",
+			).bind(ids.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = 5, category_source = 'merchant_rule' WHERE id = ?",
+			).bind(ids.posted),
+		]);
+
+		await post(item, { amount: 15 });
+
+		expect(await row("posted-1")).toMatchObject({
+			category_id: 3,
+			category_source: "jev",
+			is_split: 0,
+			split_removed_from_cents: 1234,
+		});
+	});
+
+	it("keeps a person's category on the posted row when the pending split's amount changed", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = 3, category_source = 'jev' WHERE id = ?",
+			).bind(ids.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = 5, category_source = 'user' WHERE id = ?",
+			).bind(ids.posted),
+		]);
+
+		await post(item, { amount: 15 });
+
+		expect(await row("posted-1")).toMatchObject({
+			category_id: 5,
+			category_source: "user",
+			split_removed_from_cents: 1234,
+		});
+	});
+
+	it("leaves the posted row in Needs category with its note when the pending split had no category, over a Jev category on the posted row", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await splitInto(ids.pending, 600, 634);
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 5, category_source = 'jev', category_confidence = 0.9 WHERE id = ?",
+		)
+			.bind(ids.posted)
+			.run();
+
+		await post(item, { amount: 15 });
+
+		expect(await row("posted-1")).toMatchObject({
+			category_id: null,
+			category_source: null,
+			category_confidence: null,
+			split_removed_from_cents: 1234,
+		});
+	});
+
+	it("moves a refund's unlinked-purchase date onto the posted row stored without a link", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -3 });
+		await env.DB.prepare(
+			"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+		)
+			.bind(ids.pending)
+			.run();
+
+		await post(item, { amount: -3 });
+
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			refund_of_id: null,
+			refund_unlinked_purchase_date: "2026-09-10",
+		});
+		expect(await row("pending-1")).toBeNull();
+	});
+
+	it("leaves the unlinked-purchase date off a posted row that has a refund link of its own", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -3 });
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				added: [
+					postedTx({
+						transaction_id: "purchase-a",
+						pending_transaction_id: null,
+						amount: 50,
+					}),
+				],
+			}),
+		);
+		const purchase = (await row("purchase-a"))?.id as number;
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+			).bind(ids.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
+			).bind(purchase, ids.posted),
+		]);
+
+		await post(item, { amount: -3 });
+
+		expect(await row("posted-1")).toMatchObject({
+			refund_of_id: purchase,
+			refund_unlinked_purchase_date: null,
+		});
+	});
+
 	describe("a moved split's parts follow the posted row, except for a choice made on the part", () => {
 		/** September's counted spending, which counts a split through its parts and skips the parent. */
 		const spent = async () =>

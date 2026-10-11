@@ -16,11 +16,14 @@
  *   if Plaid later stops calling the posted row a transfer.
  * - A bill payment is re-pointed to the posted row unless that row already pays a bill (one bill per
  *   transaction); a refund of the pending row now refunds the posted one, and the pending row's own
- *   refund link moves unless the posted row has one.
+ *   refund link moves unless the posted row has one. The note that a bank change unlinked the pending
+ *   refund (decision 99) moves too, unless the posted row has a refund link of its own.
  * - A split moves with its parts, which follow the posted date, when the amount is unchanged and the
  *   posted row has no split of its own; when the amount changed it is removed and the posted row says the
- *   amount changed, as for any bank correction (decision 62), takes the category the purchase had before
- *   its split, and unlinks a refund of one of its parts with the purchase's date (decision 99).
+ *   amount changed, as for any bank correction (decision 62). It takes the category the purchase had before
+ *   its split, unless a person picked the posted row's own category; a split with none leaves the posted
+ *   row in Needs category with the note. A refund of one of its parts is unlinked with the purchase's
+ *   date (decision 99).
  * Every statement checks that both rows still exist and that this run still holds the Item's lock, so
  * a replay or a lost lock changes nothing.
  */
@@ -133,6 +136,9 @@ const STATEMENTS = [
 	`UPDATE transactions SET refund_of_id = p.refund_of_id
 	 ${FROM_PENDING} AND p.refund_of_id IS NOT NULL AND p.refund_of_id != transactions.id
 	 AND transactions.refund_of_id IS NULL`,
+	`UPDATE transactions SET refund_unlinked_purchase_date = p.refund_unlinked_purchase_date
+	 ${FROM_PENDING} AND p.refund_unlinked_purchase_date IS NOT NULL AND transactions.refund_of_id IS NULL
+	 AND transactions.refund_unlinked_purchase_date IS NULL`,
 	// A split: its parts move when the amount is unchanged and the posted row has none of its own. A split
 	// is one bank transaction, so a part follows the posted row's exclusion and review (the columns saving
 	// a split copies from its purchase): else a purchase a person excluded while pending but included once
@@ -153,10 +159,12 @@ const STATEMENTS = [
 	 WHERE id = ${POSTED} AND is_split = 0 AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,
 	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row),
-	// and takes the category the pending purchase had before its split, as sync does (decision 99).
+	// and takes the category the pending purchase had before its split, as sync does (decision 99), nulls included,
+	// so a split with no category leaves it in Needs category with the note. A person's pick on the posted row stays.
 	`UPDATE transactions SET split_removed_from_cents = p.amount_cents,
-		category_id = CASE WHEN transactions.category_id IS NULL THEN p.category_id ELSE transactions.category_id END,
-		category_source = CASE WHEN transactions.category_id IS NULL THEN p.category_source ELSE transactions.category_source END
+		category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_id ELSE p.category_id END,
+		category_source = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_source ELSE p.category_source END,
+		category_confidence = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_confidence ELSE p.category_confidence END
 	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
 	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
 	// A refund of one of those parts is unlinked, and its row says which purchase changed, with the pending
