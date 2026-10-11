@@ -86,6 +86,7 @@ import {
 	FOCUS_SET_CATEGORY,
 	LIST_LOAD_PAUSE,
 	MAX_SELECTED,
+	NOT_ON_PAGE_FIELD,
 	NotOnPage,
 	NotOnPageCount,
 	SELECTION_BAR_OOB,
@@ -94,6 +95,7 @@ import {
 	SelectionActionBar,
 	SelectionActionButtons,
 	SelectionLimit,
+	selectAllShown,
 	selectModeHref,
 	TICKS_INCLUDE,
 	TOO_MANY,
@@ -299,10 +301,16 @@ async function renderList(
 				...LIST_LOAD_PAUSE,
 			}
 		: {};
+	// Without JavaScript a page link's address carries the ticks, so the next page keeps them (#350). The
+	// htmx request doesn't use this address: it sends the ticks as they are when clicked, not as drawn.
+	const pageLinkHref = (n: number) =>
+		selecting && checkedIds.size > 0
+			? `${pageHref(n)}&ids=${[...checkedIds].join(",")}`
+			: pageHref(n);
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
 		<a
-			href={pageHref(n)}
+			href={pageLinkHref(n)}
 			rel={rel}
 			class="inline-flex min-h-11 items-center px-2 -mx-2"
 			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
@@ -569,8 +577,14 @@ async function renderList(
 							</span>
 						</Chip>
 					</div>
-					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. */}
+					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. The
+					    ticks ride along only in the noscript block, which a browser with JavaScript never reads: htmx
+					    sends the current ticks itself (TICKS_INCLUDE), so a stale render can't resend them (#350). */}
 					<noscript>
+						{selecting &&
+							[...checkedIds].map((id) => (
+								<input type="hidden" name="ids" value={id} />
+							))}
 						<Button type="submit" class="self-start px-4">
 							Apply filters
 						</Button>
@@ -822,9 +836,20 @@ transactions.get("/transactions/select/count", (c) => {
 	const onPage = new Set(pageIds);
 	const notOnPage = ticks.filter((id) => !onPage.has(id)).length;
 	const back = safeBack(params.get("back"));
+	// Each tap keeps the ticks in the address, replacing its entry rather than adding one, so a reload keeps them (#350).
+	c.header("HX-Replace-Url", selectModeHref(back, ticks));
+	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
+	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
+	const lineGone = params.has(NOT_ON_PAGE_FIELD) && notOnPage === 0;
+	const focusSelectAll = lineGone && selectAllShown(pageIds, new Set(ticks));
+	const focusCount = lineGone && !focusSelectAll;
 	return c.html(
 		<>
-			<SelectedCount count={ticks.length} notOnPage={notOnPage} />
+			<SelectedCount
+				count={ticks.length}
+				notOnPage={notOnPage}
+				focus={focusCount}
+			/>
 			<SelectionActionButtons
 				disabled={ticks.length === 0 || ticks.length > MAX_SELECTED}
 				oob
@@ -833,6 +858,7 @@ transactions.get("/transactions/select/count", (c) => {
 				back={back}
 				pageIds={pageIds}
 				ticked={new Set(ticks)}
+				autofocus={focusSelectAll}
 				oob
 			/>
 			<SelectionLimit count={ticks.length} oob />
@@ -846,29 +872,40 @@ transactions.get("/transactions/select/count", (c) => {
 	);
 });
 
-/** The posted ids, or why they can't be acted on. */
+/**
+ * The posted ids, or why they can't be acted on. `ticks` are the ticks the list keeps when it is drawn
+ * again: a refusal for more than 100 keeps every one of them, and trims none (#350).
+ */
 async function postedSelection(c: Context<App>, form: FormData) {
 	const posted = parseIds(form.getAll("ids"));
-	if (posted.length > MAX_SELECTED) return { ids: [], error: TOO_MANY };
+	if (posted.length > MAX_SELECTED)
+		return { ids: [], ticks: posted, error: TOO_MANY };
 	const ids = await selectableIds(c.env.DB, posted);
-	return { ids, error: ids.length === 0 ? NONE_SELECTED : undefined };
+	return {
+		ids,
+		ticks: ids,
+		error: ids.length === 0 ? NONE_SELECTED : undefined,
+	};
 }
 
 function SelectCategorySheet({
 	ids,
+	ticks,
 	back,
 	categories,
 	error,
 	still,
 }: {
 	ids: number[];
+	/** Every tick the list keeps, which Cancel goes back to (a refusal keeps them all). */
+	ticks: number[];
 	back: string;
 	categories: Category[];
 	error?: string;
 	/** Its Save was refused, so the open sheet is drawn again where it is. */
 	still?: boolean;
 }) {
-	const cancelHref = selectModeHref(back, ids);
+	const cancelHref = selectModeHref(back, ticks);
 	const alert = error && (
 		<p id="select-category-error" role="alert" class="text-sm text-over">
 			{error}
@@ -948,19 +985,30 @@ async function categorySheet(
 	c: Context<App>,
 	today: string,
 	back: string,
-	ids: number[],
-	error?: string,
-	/** Its Save was refused: the sheet is already open, so it isn't drawn arriving again. */
-	still = false,
+	{
+		ids,
+		ticks,
+		error,
+		still = false,
+	}: {
+		/** The rows the sheet's Save changes. */
+		ids: number[];
+		/** Every tick the list keeps (see postedSelection). */
+		ticks: number[];
+		error?: string;
+		/** Its Save was refused: the sheet is already open, so it isn't drawn arriving again. */
+		still?: boolean;
+	},
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
 		selecting: true,
-		checkedIds: new Set(ids),
+		checkedIds: new Set(ticks),
 		status: error ? 422 : 200,
 		pageTitle: "Set category · Tally",
 		sheet: (categories) => (
 			<SelectCategorySheet
 				ids={ids}
+				ticks={ticks}
 				back={back}
 				categories={categories}
 				error={error}
@@ -973,8 +1021,12 @@ async function categorySheet(
 transactions.post("/transactions/select/category", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, error } = await postedSelection(c, form);
-	return categorySheet(c, await householdToday(c.env.DB), back, ids, error);
+	const { ids, ticks, error } = await postedSelection(c, form);
+	return categorySheet(c, await householdToday(c.env.DB), back, {
+		ids,
+		ticks,
+		error,
+	});
 });
 
 async function finishSelection(
@@ -998,9 +1050,10 @@ async function finishSelection(
 transactions.post("/transactions/select/category/save", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, error } = await postedSelection(c, form);
+	const { ids, ticks, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
-	if (error) return categorySheet(c, today, back, ids, error, true);
+	if (error)
+		return categorySheet(c, today, back, { ids, ticks, error, still: true });
 	const category = Number(form.get("category"));
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
@@ -1010,14 +1063,12 @@ transactions.post("/transactions/select/category/save", async (c) => {
 				.first<{ id: number; name: string }>()
 		: null;
 	if (!cat)
-		return categorySheet(
-			c,
-			today,
-			back,
+		return categorySheet(c, today, back, {
 			ids,
-			"Pick a category from the list.",
-			true,
-		);
+			ticks,
+			error: "Pick a category from the list.",
+			still: true,
+		});
 	// The same write as the edit panel's category change (saveEdit).
 	await c.env.DB.batch(
 		ids.map((id) =>
@@ -1033,12 +1084,12 @@ transactions.post("/transactions/select/category/save", async (c) => {
 transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, error } = await postedSelection(c, form);
+	const { ids, ticks, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
 	if (error)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			selecting: true,
-			checkedIds: new Set(ids),
+			checkedIds: new Set(ticks),
 			status: 422,
 			selectionError: error,
 		});

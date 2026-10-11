@@ -40,6 +40,12 @@ export const LIST_LOAD_PAUSE = {
 const TICKS = "#selection-form input[name=ids]:checked";
 
 /**
+ * The form field the "not on this page" line sends while it is drawn, so a count that empties the line
+ * can tell the last tick was unticked in the disclosure, and move focus into the bar (#350).
+ */
+export const NOT_ON_PAGE_FIELD = "not-on-page";
+
+/**
  * Every ticked row rides in a list request, on this page or not, so the ticks survive a change of
  * page, search or filter (#350).
  */
@@ -100,6 +106,10 @@ export function SelectionActionButtons({
 	);
 }
 
+/** Whether Select all is drawn: the page has rows to tick, and some of them are not ticked yet. */
+export const selectAllShown = (pageIds: number[], ticked: Set<number>) =>
+	pageIds.length > 0 && !pageIds.every((id) => ticked.has(id));
+
 /**
  * The text link that ticks every selectable row on the page (P70 A). It is a plain link to the
  * same select-mode list with those rows ticked, so it works without JavaScript too. Its htmx
@@ -112,6 +122,7 @@ export function SelectAllOnPage({
 	pageIds,
 	ticked,
 	oob = false,
+	autofocus = false,
 }: {
 	/** The list's own address (no ticks), which Select all's link builds on. */
 	back: string;
@@ -120,8 +131,10 @@ export function SelectAllOnPage({
 	/** The page's rows that are ticked. */
 	ticked: Set<number>;
 	oob?: boolean;
+	/** Takes focus when it is drawn (a count reply after the last tick off the page is unticked, #350). */
+	autofocus?: boolean;
 }) {
-	const showLink = pageIds.length > 0 && !pageIds.every((id) => ticked.has(id));
+	const showLink = selectAllShown(pageIds, ticked);
 	return (
 		<span id="select-all-page" hx-swap-oob={oob ? "outerHTML" : undefined}>
 			<input type="hidden" name="page-ids" value={pageIds.join(",")} />
@@ -143,6 +156,7 @@ export function SelectAllOnPage({
 					hx-swap="innerHTML"
 					// The reply's HX-Push-Url (the ticks, without the focus marker) replaces this in Select mode.
 					hx-push-url={selectModeHref(back, pageIds)}
+					autofocus={autofocus}
 				>
 					{`Select all ${pageIds.length}`}
 				</Button>
@@ -158,17 +172,31 @@ export function SelectAllOnPage({
 export function SelectedCount({
 	count,
 	notOnPage,
+	focus = false,
 }: {
 	count: number;
 	notOnPage: number;
+	/**
+	 * Takes focus when drawn, for a count that has no Select all to take it: the last tick off the page was
+	 * unticked in its disclosure (#350). The live region's own element can't carry it, so this span does.
+	 */
+	focus?: boolean;
 }) {
-	return (
+	const words = (
 		<>
 			{count} selected
 			{notOnPage > 0 && (
 				<span class="sr-only">, {notOnPage} not on this page</span>
 			)}
 		</>
+	);
+	// As the result count and the title do: no ring around text that is only there to be read.
+	return focus ? (
+		<span tabindex={-1} autofocus class="outline-none">
+			{words}
+		</span>
+	) : (
+		words
 	);
 }
 
@@ -239,15 +267,19 @@ export function NotOnPage({
 			hx-swap-oob={oob ? "outerHTML" : undefined}
 		>
 			{count > 0 && (
-				<details class="group" open={open}>
-					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
-						<NotOnPageCount count={count} />
-						<span class="ml-auto shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none">
-							<Icon name="chevron-right" class="size-5" />
-						</span>
-					</summary>
-					<div class="max-h-[40vh] overflow-y-auto">{rows}</div>
-				</details>
+				<>
+					{/* Sent with every count while the line is drawn (NOT_ON_PAGE_FIELD). */}
+					<input type="hidden" name={NOT_ON_PAGE_FIELD} value="1" />
+					<details class="group" open={open}>
+						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
+							<NotOnPageCount count={count} />
+							<span class="ml-auto shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none">
+								<Icon name="chevron-right" class="size-5" />
+							</span>
+						</summary>
+						<div class="max-h-[40vh] overflow-y-auto">{rows}</div>
+					</details>
+				</>
 			)}
 		</div>
 	);
