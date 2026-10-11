@@ -35,6 +35,56 @@
 		return icon;
 	}
 
+	// The Undo toasts on screen. A newer plain or error toast never removes one of them early.
+	const undoToasts = new WeakSet();
+
+	// Toasts clear Select mode's action bar by its measured height, set on #toasts. (The toasts' own
+	// height goes on the root element instead: see measureToasts.) htmx 4 fires HX-Trigger after
+	// `await this.swap(ctx)`, so the bar measured is the swapped-in one. The observer's callback only
+	// measures again: calling observe() there would repeat its first notification every frame.
+	function measureSelectionBar() {
+		const region = document.getElementById("toasts");
+		if (!region) return;
+		const bar = document.getElementById("selection-bar");
+		if (bar)
+			region.style.setProperty(
+				"--selection-bar-height",
+				`${bar.offsetHeight}px`,
+			);
+		else region.style.removeProperty("--selection-bar-height");
+	}
+	// The bar wraps to more rows on a narrow phone, and rotating a phone changes its width.
+	const barSize =
+		typeof ResizeObserver === "function"
+			? new ResizeObserver(measureSelectionBar)
+			: null;
+
+	// A phone sheet leaves room above it for the toasts on screen: app.css's --toast-top-room reads
+	// --toasts-height from the root element, so the height is set there, not on #toasts or the body.
+	// It's removed when no toast shows, and the sheet keeps its floor.
+	function measureToasts() {
+		const region = document.getElementById("toasts");
+		if (!region) return;
+		if (region.children.length)
+			document.documentElement.style.setProperty(
+				"--toasts-height",
+				`${region.offsetHeight}px`,
+			);
+		else document.documentElement.style.removeProperty("--toasts-height");
+	}
+	// Toasts wrap to more lines when they're long, and rotating a phone changes their width. This is a
+	// second observer, not barSize, since barSize is disconnected on every toast. Each observer follows
+	// the node on the page now: a body swap or a history restore replaces #toasts, and a list change can
+	// swap in a new Select bar. The callback only measures again, since calling observe() there would
+	// repeat its first notification every frame.
+	const toastsSize =
+		typeof ResizeObserver === "function"
+			? new ResizeObserver(measureToasts)
+			: null;
+
+	// The toast the last "toast" event made. failed() reads it straight after dispatching, since the
+	// event is synchronous.
+	let lastToast = null;
 	document.body.addEventListener("toast", (event) => {
 		const {
 			message,
@@ -45,6 +95,7 @@
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
 		const toast = document.createElement("div");
+		lastToast = toast;
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
 		if (type === "error") {
@@ -87,15 +138,48 @@
 		} else {
 			toast.textContent = message;
 		}
-		document.getElementById("toasts")?.append(toast);
-		if (undo) window.htmx?.process(toast);
-		if (undo)
+		// Only the newest plain or error toast shows: it takes the place of the ones before it. An Undo
+		// toast is never removed early, so a newer toast leaves it to run its own time.
+		const region = document.getElementById("toasts");
+		if (!undo)
+			for (const old of [...(region?.children ?? [])]) {
+				if (!undoToasts.has(old)) old.remove();
+			}
+		measureSelectionBar();
+		region?.append(toast);
+		// Measured after the append, so the older toasts just replaced are gone and this one is in.
+		measureToasts();
+		// Follow the #toasts on the page now, since a body swap can have replaced it.
+		toastsSize?.disconnect();
+		if (region) toastsSize?.observe(region);
+		// Follow the bar that is on the page now, since a list change can have swapped it in.
+		barSize?.disconnect();
+		const bar = document.getElementById("selection-bar");
+		if (bar) barSize?.observe(bar);
+		if (undo) {
+			undoToasts.add(toast);
+			window.htmx?.process(toast);
 			toast.setAttribute(
 				"style",
 				`--duration-undo-toast: ${Math.min(10_000, undoExpiresInMs)}ms`,
 			);
+		}
 		setTimeout(
-			() => toast.remove(),
+			() => {
+				// Focus on Undo would be lost with the toast, so the list's result count takes it, or the
+				// page's title when the list has no count (the first-visit list).
+				if (toast.contains(document.activeElement)) {
+					const target =
+						document.getElementById("result-count") ??
+						document.getElementById("transactions-title");
+					if (target) {
+						target.setAttribute("tabindex", "-1");
+						target.focus();
+					}
+				}
+				toast.remove();
+				measureToasts();
+			},
 			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
 		);
 	});
@@ -118,11 +202,15 @@
 	// couldn't be reached (502), so it's swapped in and says its own words. The words follow what
 	// was being done: a GET (a filter, opening a sheet) couldn't load; anything else couldn't save.
 	// The events go to document, because htmx sends them there when their element has left the
-	// page. Several at once (queued taps on a dead connection) show each message once, not a stack.
-	// "At once" is a second: a retry that fails again a couple of seconds later is a new failure, so
-	// it replaces the toast with a fresh alert (a screen reader hears it again) and a fresh 4 seconds.
+	// page. Several at once (queued taps on a dead connection) show one toast, not a stack: an
+	// identical failure within a second is dropped only while its own toast is still on screen. Once
+	// another toast has replaced it, or a body swap has removed it, the failure is said again. So a
+	// retry that fails a couple of seconds later is a new failure too: it replaces the toast with a
+	// fresh alert (a screen reader hears it again) and a fresh 4 seconds.
 	const BURST_MS = 1000;
-	const failedAt = new Map();
+	// The newest failure: its words, when it was said, and its toast. One record is enough, since only
+	// the newest plain or error toast is ever on screen.
+	let lastFailure = null;
 	function failed(ctx) {
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
@@ -130,15 +218,16 @@
 				: COULDNT_SAVE;
 		// The page's own clock, not the device's: a clock moved back must not silence later failures.
 		const now = performance.now();
-		if (now - (failedAt.get(message) ?? -Infinity) < BURST_MS) return;
-		failedAt.set(message, now);
-		const toasts = document.getElementById("toasts");
-		for (const toast of [...(toasts?.children ?? [])]) {
-			if (toast.textContent === message) toast.remove();
-		}
+		if (
+			lastFailure?.message === message &&
+			now - lastFailure.at < BURST_MS &&
+			document.getElementById("toasts")?.contains(lastFailure.toast)
+		)
+			return;
 		document.body.dispatchEvent(
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);
+		lastFailure = { message, at: now, toast: lastToast };
 	}
 	// htmx 4 aborts a request that timed out exactly as it aborts one that was replaced (hx-sync) or
 	// cancelled (htmx:abort): ctx.request.abort(), an AbortError with no reason and no timeout event
