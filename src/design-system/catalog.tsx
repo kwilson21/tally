@@ -1931,6 +1931,15 @@ function Rows() {
 						/>
 					</div>
 				</State>
+				<State label="The family already has this category: Add to Pet Care">
+					<div class="max-w-xl" inert>
+						<CategorySuggestionCard
+							suggestion={CATEGORY_SUGGESTION}
+							existing="Pet Care"
+							ticked={[31, 32, 33]}
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="selection-action-bar"

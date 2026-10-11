@@ -450,6 +450,36 @@ describe("the likely transactions after a new category", () => {
 		expect(one.html).toContain("Add 1 to Pet Care");
 	});
 
+	it("count a ticked row the six shown no longer include, as Add files it", async () => {
+		await env.DB.prepare(
+			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'tag', 'cat-plum', 99)",
+		).run();
+		const made = await categoryNamed("Pet Care");
+		// Last month's charge ranks below every same-merchant row this month, so seven newer rows push it past the six.
+		const older = (
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432') RETURNING id",
+			)
+				.bind(`${LAST}-20`)
+				.first<{ id: number }>()
+		)?.id as number;
+		for (let day = 3; day <= 9; day++)
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1000, 'SQ *LOCAL BAKERY 4432')",
+			)
+				.bind(`${THIS}-0${day}`)
+				.run();
+
+		const count = await post(`/transactions/${bakery}/likely/count`, {
+			back: "/transactions",
+			category: String(made?.id),
+			ids: String(older),
+		});
+
+		expect(count.html).toContain("Add 1 to Pet Care");
+		expect(count.html).not.toContain("Add to Pet Care");
+	});
+
 	it("say nothing moved when a ticked row was categorized since the panel opened", async () => {
 		await post(
 			`/transactions/${bakery}`,

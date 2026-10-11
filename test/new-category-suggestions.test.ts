@@ -138,4 +138,31 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		expect(trigger.toast.message).toBe("Added 1 transaction to pet care");
 		expect(trigger.announce).toContain("Added 1 transaction to pet care.");
 	});
+
+	it("names the category as it is stored on the Add to button, whatever capitals the suggestion has", async () => {
+		await env.DB.prepare(
+			"UPDATE category_suggestions SET name = 'école' WHERE id = ?",
+		)
+			.bind(suggestion)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('École', 'tag', 'cat-plum', 99)",
+		).run();
+
+		const after = await get();
+		expect(after.html).toContain("Suggested: école");
+		expect(after.html).toContain(">Add to École<");
+		expect(after.html).not.toContain(">Add to école<");
+		expect(after.html).not.toContain(">Create école<");
+	});
+
+	it("names an ASCII category as it is stored on the Add to button", async () => {
+		await env.DB.prepare(
+			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-plum', 99)",
+		).run();
+
+		const after = await get();
+		expect(after.html).toContain(">Add to pet care<");
+		expect(after.html).not.toContain(">Add to Pet Care<");
+	});
 });

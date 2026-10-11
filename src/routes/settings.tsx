@@ -541,9 +541,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					{categorySuggestions.map((suggestion) => (
 						<CategorySuggestionCard
 							suggestion={suggestion}
-							existing={active.some((cat) =>
-								sameName(cat.name, tidyName(suggestion.name)),
-							)}
+							existing={
+								active.find((cat) =>
+									sameName(cat.name, tidyName(suggestion.name)),
+								)?.name
+							}
 							error={
 								view.suggestionValues?.id === suggestion.id
 									? view.suggestionError

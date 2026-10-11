@@ -1,7 +1,11 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
-import { addLikely, likelyTransactions } from "../src/db/likely-transactions";
+import {
+	addLikely,
+	LIKELY_LIMIT,
+	likelyTransactions,
+} from "../src/db/likely-transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -379,6 +383,109 @@ describe("addLikely", () => {
 		expect(await splitRemoved(unticked)).toBe(18742);
 	});
 
+	it("offers and files a guess whose suggestion differs from the new category only in accented capitals", async () => {
+		const ecole = (
+			await env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('École', 'tag', 'cat-plum', 98) RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		const accented = (
+			await env.DB.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('école', 'pending') RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
+			suggestionId: accented,
+		});
+
+		const rows = await likelyTransactions(env.DB, saved, "École", TODAY);
+		expect(rows.map((row) => [row.id, row.sameMerchant])).toEqual([
+			[guess, false],
+		]);
+
+		const moved = await addLikely(env.DB, {
+			savedId: saved,
+			categoryId: ecole,
+			categoryName: "École",
+			ticked: [guess],
+			today: TODAY,
+			actor: "test",
+		});
+
+		expect(moved).toBe(1);
+		expect(await filed(guess)).toEqual({
+			categoryId: ecole,
+			source: "user",
+			suggestionId: null,
+		});
+	});
+
+	it("matches a guess whose accented name is in another Unicode form than the category's", async () => {
+		// The category is composed (É as one character); the suggestion is decomposed (E and a combining accent).
+		const ecole = (
+			await env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('École', 'tag', 'cat-plum', 98) RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		const decomposed = (
+			await env.DB.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('École', 'pending') RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
+			suggestionId: decomposed,
+		});
+
+		const moved = await addLikely(env.DB, {
+			savedId: saved,
+			categoryId: ecole,
+			categoryName: "École",
+			ticked: [guess],
+			today: TODAY,
+			actor: "test",
+		});
+
+		expect(moved).toBe(1);
+		expect(await filed(guess)).toEqual({
+			categoryId: ecole,
+			source: "user",
+			suggestionId: null,
+		});
+	});
+
+	it("files a ticked row that is still eligible after newer rows push it past the six shown", async () => {
+		const older = await tx(`${LAST}-28`, 2399, "PETSMART 0412", "Petsmart", {
+			suggestionId: suggested,
+		});
+		for (let day = 1; day <= LIKELY_LIMIT + 1; day++)
+			await tx(
+				`${THIS}-0${day}`,
+				1000 + day,
+				"BANFIELD PET HOSPITAL",
+				"Banfield Pet Hospital",
+			);
+
+		// Guards the setup: the newer same-merchant rows fill the six the panel lists, so the older guess is left out.
+		const shown = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		expect(shown.map((row) => row.id)).not.toContain(older);
+
+		const moved = await addLikely(env.DB, {
+			savedId: saved,
+			categoryId: pet,
+			categoryName: "Pet Care",
+			ticked: [older],
+			today: TODAY,
+			actor: "test",
+		});
+
+		expect(moved).toBe(1);
+		expect(await filed(older)).toEqual({
+			categoryId: pet,
+			source: "user",
+			suggestionId: null,
+		});
+	});
+
 	it.each([
 		{ change: "excluded = 1", victim: "same" },
 		{ change: "flag_income = 1", victim: "same" },
@@ -444,7 +551,7 @@ describe("addLikely", () => {
 	});
 });
 
-/** The likely read's rows, then one edit to `id` before the write: the window addLikely's UPDATE must survive. */
+/** addLikely's one read (the pending suggestions the name matches), then one edit to `id` before its write: the window the UPDATE must survive. */
 function editedAfterRead(change: string, id: number): D1Database {
 	const afterRead = (statement: D1PreparedStatement): D1PreparedStatement =>
 		new Proxy(statement, {
@@ -470,7 +577,9 @@ function editedAfterRead(change: string, id: number): D1Database {
 			if (property === "prepare")
 				return (sql: string) => {
 					const statement = target.prepare(sql);
-					return sql.includes("ORDER BY sameMerchant DESC")
+					return sql.includes(
+						"FROM category_suggestions WHERE status = 'pending'",
+					)
 						? afterRead(statement)
 						: statement;
 				};

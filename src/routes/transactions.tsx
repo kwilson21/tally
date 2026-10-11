@@ -8,6 +8,7 @@ import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import {
 	addLikely,
 	type LikelyRow,
+	likelyStill,
 	likelyTransactions,
 } from "../db/likely-transactions";
 import { refundedByOthersSql } from "../db/refunded";
@@ -3169,8 +3170,8 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 			})
 		: 0;
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-	// Nothing moves when every ticked row changed since the panel opened (addLikely offers only the rows
-	// that still need a category).
+	// Nothing moves when every ticked row changed since the panel opened (addLikely files only the ticked rows
+	// the panel's rules still allow).
 	const message =
 		moved === 0 || !category
 			? "Nothing moved: those transactions changed since the panel opened."
@@ -3186,7 +3187,8 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 	return renderList(c, today, filters, { focusId: tx.id });
 });
 
-// A tick on the likely panel redraws only its Add count, so the number follows the ticks.
+// A tick on the likely panel redraws only its Add count, so the number follows the ticks: the ticked rows Add
+// would file now, not the six the panel lists.
 transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	if (!tx) return c.notFound();
@@ -3194,14 +3196,14 @@ transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const category = await liveCategory(c.env.DB, form.get("category"));
 	if (!category) return c.notFound();
-	const ticked = new Set(form.getAll("ids").map(Number));
-	const offered = await likelyTransactions(
-		c.env.DB,
-		tx.id,
-		category.name,
-		today,
-	);
-	const count = offered.filter((row) => ticked.has(row.id)).length;
+	const count = (
+		await likelyStill(c.env.DB, {
+			savedId: tx.id,
+			categoryName: category.name,
+			today,
+			ticked: form.getAll("ids").map(Number),
+		})
+	).length;
 	return c.html(<LikelyAdd count={count} categoryName={category.name} />);
 });
 
