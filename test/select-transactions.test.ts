@@ -1229,5 +1229,42 @@ describe("select several transactions", () => {
 			const reload = await (await request(cashHref)).text();
 			expect([...tickedIds(reload)].sort()).toEqual([...ids].sort());
 		});
+
+		it("keeps Select mode and the ticks when the Add cash form is refused, in its close link, Cancel and fields", async () => {
+			const ids = await pageOneTicks();
+			const res = await post(
+				"/transactions/cash",
+				form(ids, {
+					amount: "0",
+					date: todayIn(DEFAULT_TIME_ZONE),
+					merchant: "Corner shop",
+					category: "1",
+					note: "",
+					back: "/transactions?month=all",
+					select: "1",
+				}),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).toContain("Enter an amount greater than zero.");
+			expect(html).toMatch(
+				new RegExp(`id="selected-count"[^>]*>${ids.length} selected`),
+			);
+			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
+			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
+			const backdrop =
+				html.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0] ?? "";
+			expect(attribute(backdrop, "href")).toBe(close);
+			const cancel = html.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+			expect(attribute(cancel, "href")).toBe(close);
+			// The refused form carries Select mode and the ticks, so its next try keeps them too.
+			const cashForm =
+				html.match(
+					/<form[^>]*action="\/transactions\/cash"[\s\S]*?<\/form>/,
+				)?.[0] ?? "";
+			expect(cashForm).toContain('name="select" value="1"');
+			for (const id of ids)
+				expect(cashForm).toContain(`name="ids" value="${id}"`);
+		});
 	});
 });

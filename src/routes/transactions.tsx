@@ -1956,17 +1956,19 @@ function CashSheet({
 	values,
 	errors,
 	back,
-	closeHref = back,
+	ticks,
 	today,
 }: {
 	categories: Category[];
 	values: CashValues;
 	errors?: import("../transactions/cash").CashErrors;
 	back: string;
-	/** Where the backdrop and Cancel go: the list, with Select mode's ticks when they are open (#350). */
-	closeHref?: string;
+	/** The ticks, when the sheet is open over Select mode (#350): Cancel and the backdrop go back with them. */
+	ticks?: number[];
 	today: string;
 }) {
+	// Closing (the backdrop or Cancel) returns to the list the sheet was opened from, with Select mode's ticks.
+	const closeHref = ticks ? selectModeHref(back, ticks) : back;
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
@@ -1989,6 +1991,7 @@ function CashSheet({
 				today={today}
 				back={back}
 				cancelHref={closeHref}
+				ticks={ticks}
 				// Made each time the form is drawn: posting this form again records one transaction.
 				entryKey={crypto.randomUUID()}
 			/>
@@ -2002,8 +2005,7 @@ transactions.get("/transactions/cash/new", async (c) => {
 	// In Select mode the ticks ride in the address (or, from a tap, in the request), and the sheet's close link
 	// and Cancel keep them, so closing the sheet leaves the ticks as they were (#350).
 	const selecting = params.get("select") === "1";
-	const ticks = selecting ? parseIds(params.getAll("ids")) : [];
-	const closeHref = selecting ? selectModeHref(back, ticks) : back;
+	const ticks = selecting ? parseIds(params.getAll("ids")) : undefined;
 	const today = await householdToday(c.env.DB);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		pageTitle: "Add cash · Tally",
@@ -2014,7 +2016,7 @@ transactions.get("/transactions/cash/new", async (c) => {
 				categories={categories}
 				values={cashValues(today)}
 				back={back}
-				closeHref={closeHref}
+				ticks={ticks}
 				today={today}
 			/>
 		),
@@ -2024,6 +2026,9 @@ transactions.get("/transactions/cash/new", async (c) => {
 transactions.post("/transactions/cash", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+	// A form drawn in Select mode posts its ticks back, so a refused form keeps them (#350).
+	const selecting = form.get("select") === "1";
+	const ticks = selecting ? parseIds(form.getAll("ids")) : undefined;
 	const today = await householdToday(c.env.DB);
 	const values = cashValues(today, form);
 	const { results: categories } = await c.env.DB.prepare(
@@ -2038,12 +2043,15 @@ transactions.post("/transactions/cash", async (c) => {
 		return renderList(c, today, filtersFrom(c, today, back), {
 			pageTitle: "Add cash · Tally",
 			status: 422,
+			selecting,
+			checkedIds: new Set(ticks),
 			sheet: () => (
 				<CashSheet
 					categories={categories}
 					values={values}
 					errors={parsed.errors}
 					back={back}
+					ticks={ticks}
 					today={today}
 				/>
 			),
