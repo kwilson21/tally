@@ -594,7 +594,7 @@ const BOTTOM_SHEET_SPEC: UseSpecText = {
 	motion:
 		"It arrives in 200 ms, ease-out. On a phone the sheet rises from the bottom edge while its backdrop fades in; at desktop width (1024px and up) the panel slides in from the right edge while its backdrop fades in. The classes are fade-in and sheet-panel in app.css, on the rising token. Closing is at once. It plays only when it opens: a swap that draws the open sheet again (a field's error, the delete question, Add a part, Keep it) leaves it still, so an error never looks like the sheet closing and opening, and the field's own shake is seen. Reduced motion shows the sheet and backdrop at once, with nothing moving.",
 	edges:
-		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without JavaScript the sheet is a page of its own, and Cancel and the backdrop are links.",
+		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, and always leaving room at its top for the toasts on screen, an Undo toast and an error toast together included, with the floor unchanged (decision 101); the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without JavaScript the sheet is a page of its own, and Cancel and the backdrop are links.",
 	words:
 		"The backdrop's name for a screen reader is “Close”. The sheet is named by its title (the category, the transaction's name); every other word is its form's.",
 };
@@ -604,17 +604,17 @@ const TOAST_SPEC: UseSpecText = {
 	purpose:
 		"Tell a person that what they just did worked, or didn't, in one sentence, without taking them anywhere.",
 	affordance:
-		"A small paper pill with a hairline rule and the only lift Tally allows, near the bottom of the screen (above the tab bar on a phone). It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
+		"A small paper pill with a hairline rule and the only lift Tally allows. It sits in Tally's frame, never over the page: on a phone, above the tab bar, at the top edge while a sheet is open, and 12 px above the action bar in Select mode, whatever its height (the bar is two lines, and taller when either wraps on a narrow phone); on desktop, beside the sidebar at the bottom. It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
 	states:
-		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds; several at once stack with a gap.",
+		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, and taps pass through the toast, so a Save under it can be tapped again.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except that when an Undo toast ends with focus on its Undo button, focus moves to the list's result count, or to the page's title when there is no count (the first-visit page). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
 		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its remaining server token time (up to 10 seconds) and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
-		"Long words wrap inside the pill. It sits above an open sheet (z-60); Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
+		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
 		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo. A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
