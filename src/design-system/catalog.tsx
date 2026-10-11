@@ -534,7 +534,7 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 	affordance:
 		"One ticked list, one choice per line: each suggested name, with Tally's guess and a Why? under it (or “From your bank” in muted words for the name the bank sent); the store's own name, with “The bank says” and the bank's text under it; and “Type your own”, which opens a field called “Your own name”. Each line is a real radio, 44px tall. Nothing is ticked at rest, so saving the panel for another reason never renames anything. Ticking a name shows the Rename list (its own spec).",
 	states:
-		"Resting: nothing ticked, the field empty. Ticked: the radio shows an ink fill and a check, and a screen reader hears it checked, so the choice is never color alone. A typed name counts only while “Type your own” is ticked. Focus: the focus-visible ring on the radio or the field. Error: the field's message in role=alert, and the field is described by it (“Type a name here, or pick one above.”, “Keep the name under 80 characters.”); what was ticked and typed stays. Disabled and loading: not applicable; the form's Save shows its busy state.",
+		"Resting: nothing ticked, the field empty. Ticked: the radio shows an ink fill and a check, and a screen reader hears it checked, so the choice is never color alone. A typed name counts only while “Type your own” is ticked. Focus: the focus-visible ring on the radio or the field. Error: a message in role=alert. A choice error (“Pick a name, keep the bank's, or type your own.”, “Pick one of the names shown.”) sits under the list, so it shows whatever is ticked; an error about the typed name (“Type a name here, or pick one above.”, “Keep the name under 80 characters.”) sits under the field, which shows only while “Type your own” is ticked. The name group is described by the message; what was ticked and typed stays. Disabled and loading: not applicable; the form's Save shows its busy state.",
 	feedback:
 		"Saving swaps the panel back with a toast that says what was done (“Renamed 9 transactions to Blue Bottle Coffee”, “Saved Dog bed.”), and the announcer repeats it. Without JavaScript Save posts and redirects.",
 	input:
@@ -2380,7 +2380,7 @@ function Controls() {
 						/>
 					</div>
 				</State>
-				<State label="Nothing chosen, field empty, and the choice error under it">
+				<State label="Nothing chosen, and the choice error under the list, above the hidden field">
 					<div class="max-w-xl">
 						<NameChoices
 							id="ds-names-error"
@@ -2389,6 +2389,20 @@ function Controls() {
 							source="tally"
 							tidied="Craftsupply"
 							rawName="SP * CRAFTSUPPLY"
+							error="Pick a name, keep the bank's, or type your own."
+						/>
+					</div>
+				</State>
+				<State label="Type your own ticked and the field empty: the error under the field, which stays open">
+					<div class="max-w-xl">
+						<NameChoices
+							id="ds-own-error"
+							radioName="ds-own-error"
+							names={["Craft Supply Co", "Craft Supply"]}
+							source="tally"
+							tidied="Craftsupply"
+							rawName="SP * CRAFTSUPPLY"
+							picked={OWN_VALUE}
 							error="Type a name here, or pick one above."
 						/>
 					</div>

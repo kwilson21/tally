@@ -377,7 +377,7 @@ describe("GET /design-system in the demo", () => {
 		const groups = [
 			...section.matchAll(/<input[^>]*type="radio"[^>]*name="([^"]+)"/g),
 		].map((m) => m[1]);
-		expect(new Set(groups).size).toBe(12);
+		expect(new Set(groups).size).toBe(13);
 		const chosen = radios.filter(
 			(m) => /\schecked(\s|>|=)/.test(m[0]) && /name="ds-names-/.test(m[0]),
 		);

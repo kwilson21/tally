@@ -241,10 +241,17 @@ export function NameChoices({
 	rename?: RenameFacts;
 }) {
 	const sourceId = `${id}-source`;
+	// An error about the typed name sits under its field, which shows only while "Type your own" is ticked.
+	// Every other error (nothing ticked, a stale suggestion) sits under the list, where it is always visible.
+	const ownPicked = picked === OWN_VALUE;
+	const ownError = ownPicked ? error : undefined;
+	const choiceError = ownPicked ? undefined : error;
 	return (
 		<fieldset
 			class="group flex flex-col"
-			aria-describedby={error ? `${id}-own-error` : undefined}
+			aria-describedby={
+				error ? (ownPicked ? `${id}-own-error` : `${id}-error`) : undefined
+			}
 		>
 			<legend class="pb-1 text-base text-ink">Name</legend>
 			{names.map((name, index) => (
@@ -284,6 +291,11 @@ export function NameChoices({
 			>
 				Type your own
 			</Choice>
+			{choiceError && (
+				<p id={`${id}-error`} role="alert" class="text-sm text-over">
+					{choiceError}
+				</p>
+			)}
 			<div class="hidden pl-8 group-has-[.name-own:checked]:block">
 				<TextInput
 					id={`${id}-own`}
@@ -293,7 +305,7 @@ export function NameChoices({
 					maxlength={MAX_OWN_NAME}
 					autocomplete="off"
 					surface="paper"
-					error={error}
+					error={ownError}
 				/>
 			</div>
 			{rename && <RenameChoices rename={rename} />}

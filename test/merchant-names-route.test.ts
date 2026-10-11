@@ -543,7 +543,13 @@ describe("POST /settings/names", () => {
 		expect(textOf(html)).toContain(
 			"Pick a name, keep the bank's, or type your own.",
 		);
-		expect(html).toMatch(/<fieldset[^>]*aria-describedby="review-own-error"/);
+		// The choice error sits under the list, before the "Your own name" field's hidden wrapper, so it shows.
+		expect(html).toMatch(/<p id="review-error" role="alert"/);
+		expect(html).not.toContain("review-own-error");
+		expect(html.indexOf('id="review-error"')).toBeLessThan(
+			html.indexOf("group-has-[.name-own:checked]:block"),
+		);
+		expect(html).toMatch(/<fieldset[^>]*aria-describedby="review-error"/);
 		expect(html).toMatch(/name="name_pick"[^>]*autofocus/);
 		expect(await merchant(BLUE)).toMatchObject({
 			suggestion_status: "pending",
@@ -554,6 +560,11 @@ describe("POST /settings/names", () => {
 		await twoMerchants();
 		const stale = await save({ key: BLUE, name_pick: "s:Something Else" });
 		expect(stale.res.status).toBe(422);
+		expect(stale.html).toMatch(/<p id="review-error" role="alert"/);
+		expect(textOf(stale.html)).toContain("Pick one of the names shown.");
+		expect(stale.html.indexOf('id="review-error"')).toBeLessThan(
+			stale.html.indexOf("group-has-[.name-own:checked]:block"),
+		);
 		const long = await save({
 			key: BLUE,
 			name_pick: "own",
@@ -564,6 +575,22 @@ describe("POST /settings/names", () => {
 		expect(await merchant(BLUE)).toMatchObject({
 			suggestion_status: "pending",
 		});
+	});
+
+	it("an empty typed name's error sits in the field under Type your own, which stays ticked", async () => {
+		await twoMerchants();
+		const { res, html } = await save({
+			key: BLUE,
+			name_pick: "own",
+			merchant: "",
+		});
+		expect(res.status).toBe(422);
+		expect(html).toMatch(/<p id="review-own-error" role="alert"/);
+		expect(html).not.toMatch(/<p id="review-error"/);
+		expect(html.indexOf('id="review-own-error"')).toBeGreaterThan(
+			html.indexOf("group-has-[.name-own:checked]:block"),
+		);
+		expect(html).toMatch(/<input[^>]*value="own"[^>]*name-own/);
 	});
 
 	it("when the merchant was already named elsewhere, says so and shows the next one without changing it", async () => {

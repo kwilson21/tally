@@ -180,6 +180,25 @@ describe("data exports", () => {
 		expect(csv).toContain("SPLIT CHILD");
 	});
 
+	it("a split's parts carry the purchase's own name in the CSV, since only the parts are exported; a part's own name wins", async () => {
+		await env.DB.prepare(
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, is_split, parent_id, own_name)
+			 VALUES (9011, 1, '2026-09-20', 3000, 'SPLIT PURCHASE PARENT', 1, NULL, 'Dog bed'),
+			        (9012, 1, '2026-09-20', 1000, 'SPLIT PART PLAIN', 0, 9011, NULL),
+			        (9013, 1, '2026-09-20', 2000, 'SPLIT PART NAMED', 0, 9011, 'Cat food')`,
+		).run();
+
+		const csv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+		const row = (raw: string) =>
+			csv.split("\r\n").find((line) => line.includes(raw)) ?? "";
+
+		expect(csv).not.toContain("SPLIT PURCHASE PARENT");
+		expect(row("SPLIT PART PLAIN").split(",")[3]).toBe("Dog bed");
+		expect(row("SPLIT PART NAMED").split(",")[3]).toBe("Cat food");
+	});
+
 	it("downloads RFC 4180 CSV with dollar amounts in Plaid's sign convention", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET raw_name = ?, amount_cents = 12345, note = ? WHERE id = 1",
