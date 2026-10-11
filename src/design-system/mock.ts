@@ -233,6 +233,26 @@ export const PROGRESS_ROWS = [
 			budgetCents: 20000,
 		},
 	},
+	{
+		label: "Nearly spent",
+		props: {
+			name: "Gas",
+			icon: "gas",
+			color: "cat-slate",
+			spentCents: 16000,
+			budgetCents: 20000,
+		},
+	},
+	{
+		label: "Refunds outweigh spending",
+		props: {
+			name: "Groceries",
+			icon: "groceries",
+			color: "cat-blue",
+			spentCents: -2000,
+			budgetCents: 60000,
+		},
+	},
 ];
 
 /**

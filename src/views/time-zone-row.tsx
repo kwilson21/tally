@@ -10,7 +10,9 @@ export const TIME_ZONE_HINT =
 /**
  * The Household group's one row (decision 72, P35 A): "Time zone" with the saved zone's everyday
  * name at the right and a chevron, like a category row. Open, it holds a select, its hint, Save and
- * Cancel, in a form that posts without JavaScript and swaps `#household` with it. An error opens it.
+ * Cancel, in a form that posts without JavaScript and swaps only its own row (`#${id}-disclosure`)
+ * with it, so an unsaved Bank sign-in emails switch or an open Household people edit stays. An error
+ * opens it.
  */
 export function TimeZoneRow({
 	zone,
@@ -42,7 +44,11 @@ export function TimeZoneRow({
 		</option>
 	);
 	return (
-		<details class="group border-b border-rule" open={open || Boolean(error)}>
+		<details
+			id={`${id}-disclosure`}
+			class="group border-b border-rule"
+			open={open || Boolean(error)}
+		>
 			<summary
 				class="flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden"
 				autofocus={focus && !error}
@@ -60,8 +66,8 @@ export function TimeZoneRow({
 				hx-post={action}
 				hx-disable="findAll button[type=submit]"
 				hx-indicator={`#${id}-save`}
-				hx-target="#household"
-				hx-select="#household"
+				hx-target={`#${id}-disclosure`}
+				hx-select={`#${id}-disclosure`}
 				hx-swap="outerHTML"
 			>
 				{/* The summary above already says "Time zone", so the label is for screen readers. */}
@@ -96,8 +102,8 @@ export function TimeZoneRow({
 						kind="secondary"
 						// Back to the group with focus on the row, so the closing is announced.
 						hx-get={backSwap}
-						hx-target="#household"
-						hx-select="#household"
+						hx-target={`#${id}-disclosure`}
+						hx-select={`#${id}-disclosure`}
 						hx-swap="outerHTML"
 					>
 						Cancel
