@@ -805,6 +805,107 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		});
 	});
 
+	it("does not wipe a posted row's guessed Kind or For with a pending row that has no answer (#315)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.prepare(
+			"INSERT INTO household_people(id,name) VALUES (2,'Kept person') ON CONFLICT(id) DO NOTHING",
+		).run();
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET kind='subscription', kind_guessed=1, for_person_id=2, for_person_guessed=1 WHERE id=?",
+			).bind(ids.posted),
+			env.DB.prepare(
+				"UPDATE transactions SET kind=NULL, kind_guessed=0, for_person_id=NULL, for_person_guessed=0, details_asked=1 WHERE id=?",
+			).bind(ids.pending),
+		]);
+		await post(item, { amount: -42 });
+		expect(await row("posted-1")).toMatchObject({
+			kind: "subscription",
+			kind_guessed: 1,
+			for_person_id: 2,
+			for_person_guessed: 1,
+		});
+	});
+
+	it("takes a pending row's kept Kind and For over the posted row's guesses (#315)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO household_people(id,name) VALUES (2,'Kept person') ON CONFLICT(id) DO NOTHING",
+			),
+			env.DB.prepare(
+				"INSERT INTO household_people(id,name) VALUES (3,'Third person') ON CONFLICT(id) DO NOTHING",
+			),
+		]);
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET kind='subscription', kind_guessed=1, for_person_id=2, for_person_guessed=1 WHERE id=?",
+			).bind(ids.posted),
+			env.DB.prepare(
+				"UPDATE transactions SET kind='bill', kind_guessed=0, for_person_id=3, for_person_guessed=0, details_asked=1 WHERE id=?",
+			).bind(ids.pending),
+		]);
+		await post(item, { amount: -42 });
+		expect(await row("posted-1")).toMatchObject({
+			kind: "bill",
+			kind_guessed: 0,
+			for_person_id: 3,
+			for_person_guessed: 0,
+		});
+	});
+
+	it("keeps a Kind and For a person cleared on the pending row over the posted row's guesses (#304)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.prepare(
+			"INSERT INTO household_people(id,name) VALUES (2,'Kept person') ON CONFLICT(id) DO NOTHING",
+		).run();
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET kind='subscription', kind_guessed=1, for_person_id=2, for_person_guessed=1, details_asked=1 WHERE id=?",
+			).bind(ids.posted),
+			env.DB.prepare(
+				"UPDATE transactions SET kind=NULL, kind_guessed=0, kind_cleared=1, for_person_id=NULL, for_person_guessed=0, for_person_cleared=1, details_asked=1 WHERE id=?",
+			).bind(ids.pending),
+		]);
+		await post(item, { amount: -42 });
+		expect(await row("posted-1")).toMatchObject({
+			kind: null,
+			kind_guessed: 0,
+			kind_cleared: 1,
+			for_person_id: null,
+			for_person_guessed: 0,
+			for_person_cleared: 1,
+		});
+	});
+
+	it("keeps a Kind and For a person cleared on the posted row over the pending row's guesses (#304)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.prepare(
+			"INSERT INTO household_people(id,name) VALUES (2,'Kept person') ON CONFLICT(id) DO NOTHING",
+		).run();
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET kind=NULL, kind_guessed=0, kind_cleared=1, for_person_id=NULL, for_person_guessed=0, for_person_cleared=1, details_asked=1 WHERE id=?",
+			).bind(ids.posted),
+			env.DB.prepare(
+				"UPDATE transactions SET kind='bill', kind_guessed=1, for_person_id=2, for_person_guessed=1, details_asked=1 WHERE id=?",
+			).bind(ids.pending),
+		]);
+		await post(item, { amount: -42 });
+		expect(await row("posted-1")).toMatchObject({
+			kind: null,
+			kind_guessed: 0,
+			kind_cleared: 1,
+			for_person_id: null,
+			for_person_guessed: 0,
+			for_person_cleared: 1,
+		});
+	});
+
 	it("moves a person's category, note, exclusion and income choice onto it, over a machine's", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item, { amount: -42 });
@@ -942,6 +1043,41 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			expect(await answerOf("posted-1")).toMatchObject({
 				income_confidence: 0.5,
 				transfer_confidence: 0.6,
+			});
+		});
+
+		it("keeps Jev's unsure transfer score when its exclusion moves onto a posted row with no answer (#309)", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'jev', flag_reimbursement = 1, transfer_confidence = 0.4 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "jev",
+				flag_reimbursement: 1,
+				transfer_confidence: 0.4,
+			});
+		});
+
+		it("keeps the posted row's own transfer score when Jev's exclusion moves onto it (#309)", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET excluded = 1, excluded_source = 'jev', transfer_confidence = 0.4 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET transfer_confidence = 0.3 WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				excluded_source: "jev",
+				transfer_confidence: 0.3,
 			});
 		});
 
