@@ -92,6 +92,31 @@ describe("select several transactions", () => {
 		).toMatchObject({ category_id: 1, category_source: "user" });
 	});
 
+	it("a person's category for a restored purchase clears its note and takes the person's source", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id=2, category_source='jev', split_removed_from_cents=1234 WHERE id=111",
+		).run();
+		const res = await request("/transactions/select/category/save", {
+			method: "POST",
+			body: new URLSearchParams({
+				ids: "111",
+				category: "1",
+				back: "/transactions?month=all",
+			}),
+			headers: { "HX-Request": "true" },
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id,category_source,split_removed_from_cents FROM transactions WHERE id=111",
+			).first(),
+		).toEqual({
+			category_id: 1,
+			category_source: "user",
+			split_removed_from_cents: null,
+		});
+	});
+
 	it.each(["99999", "9"])(
 		"rejects unknown or archived category %s",
 		async (category) => {

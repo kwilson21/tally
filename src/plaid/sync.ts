@@ -547,7 +547,7 @@ export async function syncItem(
 				// A corrected amount invalidates a person's parts; a date-only correction follows them.
 				statements.push(
 					env.DB.prepare(
-						`UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
+						`UPDATE transactions SET refund_of_id=NULL, refund_unlinked_purchase_date=(SELECT p.date FROM transactions part JOIN transactions p ON p.id = part.parent_id WHERE part.id = transactions.refund_of_id) WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
 					).bind(transaction.transaction_id, cents, itemRowId, lockId),
 				);
 				statements.push(
@@ -589,8 +589,8 @@ export async function syncItem(
 								credit_reviewed = CASE WHEN transactions.credit_reviewed_by = 'user' THEN transactions.credit_reviewed WHEN transactions.amount_cents = excluded.amount_cents THEN transactions.credit_reviewed WHEN excluded.amount_cents < 0 THEN 0 ELSE 1 END,
 								credit_reviewed_by = CASE WHEN transactions.credit_reviewed_by = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.credit_reviewed_by END,
 							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
-							category_id = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_id END,
-							category_source = CASE WHEN ((transactions.is_split = 1 OR transactions.category_source = 'jev') AND transactions.amount_cents != excluded.amount_cents) OR (transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_source END,
+							category_id = CASE WHEN ((transactions.is_split = 0 AND transactions.category_source = 'jev' AND transactions.split_removed_from_cents IS NULL) AND transactions.amount_cents != excluded.amount_cents) OR (NOT (transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents) AND transactions.split_removed_from_cents IS NULL AND transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_id END,
+							category_source = CASE WHEN ((transactions.is_split = 0 AND transactions.category_source = 'jev' AND transactions.split_removed_from_cents IS NULL) AND transactions.amount_cents != excluded.amount_cents) OR (NOT (transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents) AND transactions.split_removed_from_cents IS NULL AND transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_source END,
 							${clearJevAnswersOnAmountChange("transactions.amount_cents != excluded.amount_cents")},
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
@@ -623,10 +623,13 @@ export async function syncItem(
 			for (const transaction of page.modified) {
 				const cents = plaidAmountToCents(transaction.amount);
 				// A corrected merchant takes its new rule, not the old merchant's (a person's or Jev's pick stays).
+				// A purchase whose split this same bank change removes, or one a bank change already took out of its
+				// split, keeps its category through a rename so it can be restored (decision 99). A split purchase
+				// that is only renamed loses an old merchant rule's category like any purchase.
 				const newKey = merchantNameOf(transaction) ?? transaction.name;
 				statements.push(
 					env.DB.prepare(
-						`UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
+						`UPDATE transactions SET refund_of_id=NULL, refund_unlinked_purchase_date=(SELECT p.date FROM transactions part JOIN transactions p ON p.id = part.parent_id WHERE part.id = transactions.refund_of_id) WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=(SELECT id FROM transactions WHERE plaid_transaction_id=? AND is_split=1 AND amount_cents!=?)) AND ${OWNS_LOCK}`,
 					).bind(transaction.transaction_id, cents, itemRowId, lockId),
 				);
 				statements.push(
@@ -657,8 +660,8 @@ export async function syncItem(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,
 							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
-							category_id = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_id END,
-							category_source = CASE WHEN ((is_split = 1 OR category_source = 'jev') AND amount_cents != ?) OR (category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_source END,
+							category_id = CASE WHEN ((is_split = 0 AND category_source = 'jev' AND split_removed_from_cents IS NULL) AND amount_cents != ?) OR (NOT (is_split = 1 AND amount_cents != ?) AND split_removed_from_cents IS NULL AND category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_id END,
+							category_source = CASE WHEN ((is_split = 0 AND category_source = 'jev' AND split_removed_from_cents IS NULL) AND amount_cents != ?) OR (NOT (is_split = 1 AND amount_cents != ?) AND split_removed_from_cents IS NULL AND category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_source END,
 							${clearJevAnswersOnAmountChange("amount_cents != ?")},
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?, merchant_name = ?,
@@ -674,7 +677,9 @@ export async function syncItem(
 						transaction.date,
 						cents,
 						cents,
+						cents,
 						newKey,
+						cents,
 						cents,
 						newKey,
 						cents,

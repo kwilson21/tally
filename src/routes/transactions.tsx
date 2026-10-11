@@ -1369,7 +1369,7 @@ function EditSheet({
 					count it in another month.
 				</p>
 			)}
-			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
+			{tx.splitRemovedFromCents != null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}
 					{formatCents(tx.splitRemovedFromCents, { signed: true })}, so its

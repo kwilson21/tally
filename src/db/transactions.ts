@@ -87,6 +87,8 @@ export type ListRow = {
 	splitRemovedFromCents?: number | null;
 	refundOfId?: number | null;
 	refundPurchaseDate?: string | null;
+	/** The purchase's date when a bank change unlinked this refund, until a person links it again (decision 99). */
+	refundUnlinkedPurchaseDate?: string | null;
 	/** A linked refund whose purchase counts, so it takes that purchase's month and category. */
 	followsPurchase?: boolean;
 	refundedCents?: number;
@@ -291,7 +293,7 @@ export async function listTransactions(
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : `CASE WHEN ${detailsOn ? "1" : "0"} = 0 AND t.note_guessed = 1 THEN NULL ELSE t.note END`} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
-				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
+				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
@@ -608,7 +610,7 @@ export async function getTransaction(
 				t.for_person_id AS forPersonId, (SELECT name FROM household_people WHERE id = t.for_person_id) AS forPersonName, t.for_person_guessed AS forPersonGuessed,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
-				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
+				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents,
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
@@ -738,12 +740,14 @@ const EXCLUDE =
 	"excluded_source = CASE WHEN excluded = ? THEN excluded_source ELSE 'user' END, excluded = ?";
 
 /**
- * Gives a merchant's rule category to every transaction a person hasn't chosen (§7). Binds the
- * category, the actor and the merchant key; callers add their own last condition.
+ * Gives a merchant's rule category to every transaction a person hasn't chosen (§7), except a split
+ * purchase and a purchase a bank change sent back to its earlier category (§6.1, decision 99). Binds
+ * the category, the actor and the merchant key; callers add their own last condition.
  */
-const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
 	updated_by = ?, updated_at = datetime('now')
-WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'`;
+WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'
+	AND is_split = 0 AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL)`;
 
 /**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
@@ -908,7 +912,7 @@ export async function saveEdit(
 		statements.push(
 			db
 				.prepare(
-					`UPDATE transactions SET refund_of_id = ?1
+					`UPDATE transactions SET refund_of_id = ?1, refund_unlinked_purchase_date = NULL
 					WHERE parent_id = ?2 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?2)
 						AND ${refundFitsSql("?2", "?1")}`,
 				)
@@ -917,7 +921,7 @@ export async function saveEdit(
 			// statement whose result says whether the link was refused.
 			db
 				.prepare(
-					`UPDATE transactions SET refund_of_id = ?1,
+					`UPDATE transactions SET refund_of_id = ?1, refund_unlinked_purchase_date = NULL,
 						credit_reviewed = CASE WHEN amount_cents < 0 THEN 1 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN amount_cents < 0 THEN 'user' ELSE credit_reviewed_by END,
 						excluded_source = CASE WHEN excluded = 1 THEN 'user' ELSE excluded_source END,
@@ -1228,7 +1232,8 @@ async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
 /**
  * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows
  * each new part, if the whole refund still fits its purchase (src/db/refunded.ts), and is dropped if
- * not; refunds linked to replaced parts are unlinked in the same batch.
+ * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
+ * keeps its unlink date on each new part, so the parts still say why (decision 99).
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1278,9 +1283,9 @@ export async function saveSplit(
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source${reviewColumns}, refund_of_id, parent_id, plaid_transaction_id, updated_by)
+			(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source${reviewColumns}, refund_of_id, refund_unlinked_purchase_date, parent_id, plaid_transaction_id, updated_by)
 			SELECT account_id, date, ?, raw_name, merchant_name, ?, 'user', excluded, excluded_source${reviewValues},
-				${inheritedRefundLink}, id, NULL, ?
+				${inheritedRefundLink}, refund_unlinked_purchase_date, id, NULL, ?
 			FROM transactions WHERE id = ? AND amount_cents = ?`)
 				.bind(
 					part.amountCents,
@@ -1417,8 +1422,8 @@ export async function correctCashSplit(
 			: [
 					gated(
 						`INSERT INTO transactions
-					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by, refund_of_id, parent_id, plaid_transaction_id, updated_by)
-				SELECT t.account_id, t.date, json_extract(p.value, '$.cents'), t.raw_name, t.merchant_name, json_extract(p.value, '$.categoryId'), 'user', t.excluded, t.excluded_source, t.income_source, t.credit_reviewed, t.credit_reviewed_by, NULL, t.id, NULL, ?1
+					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by, refund_of_id, refund_unlinked_purchase_date, parent_id, plaid_transaction_id, updated_by)
+				SELECT t.account_id, t.date, json_extract(p.value, '$.cents'), t.raw_name, t.merchant_name, json_extract(p.value, '$.categoryId'), 'user', t.excluded, t.excluded_source, t.income_source, t.credit_reviewed, t.credit_reviewed_by, NULL, t.refund_unlinked_purchase_date, t.id, NULL, ?1
 				FROM json_each(?2) AS p, transactions t
 				WHERE t.id = ?3`,
 						[by, JSON.stringify(newParts), parentId],
@@ -1512,7 +1517,8 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 			`UPDATE transactions SET
 				category_id = (${rule}),
 				category_source = 'merchant_rule', category_confidence = NULL, updated_at = datetime('now')
-			WHERE (category_id IS NULL AND category_source IS NULL OR category_source = 'bill') AND EXISTS (${rule})`,
+			WHERE is_split = 0 AND (category_id IS NULL AND category_source IS NULL OR category_source = 'bill')
+				AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL) AND EXISTS (${rule})`,
 		)
 		.run();
 }

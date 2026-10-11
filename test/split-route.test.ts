@@ -194,6 +194,38 @@ describe("transaction splits", () => {
 		});
 	});
 
+	it("keeps the purchase's category and its source when it is split, so a bank change can go back to it", async () => {
+		const bakery = await env.DB.prepare(
+			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).first<{ id: number; cents: number }>();
+		const id = bakery?.id as number;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'jev' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const first = Math.trunc((bakery?.cents as number) / 2);
+		const second = (bakery?.cents as number) - first;
+		expect(
+			await saveSplit(
+				env.DB,
+				id,
+				[
+					{ categoryId: 1, amountCents: first },
+					{ categoryId: 5, amountCents: second },
+				],
+				"synthetic-test",
+			),
+		).toMatchObject({ saved: true });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ category_id: 2, category_source: "jev" });
+	});
+
 	it("rejects a mismatch, then saves children and removes them atomically", async () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
