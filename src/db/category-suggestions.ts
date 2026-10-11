@@ -27,13 +27,17 @@ export async function noneFitTransactions(
 	if (!groups.length) return [];
 	const { results } = await db
 		.prepare(`SELECT t.id, ${theme} theme, ${merchantKeySql("t")} merchantKey,
-			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant
+			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant, ${ownNameSql("t")} ownName
 		FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 		JOIN json_each(?) selected ON selected.value = ${theme}
 		WHERE ${eligible} ORDER BY t.date DESC, t.id DESC LIMIT 500`)
 		.bind(JSON.stringify(groups.map((group) => group.theme)), JEV_THRESHOLD)
-		.all<NoneFitTransaction>();
-	return results.map((row) => ({ ...row, merchant: tidyName(row.merchant) }));
+		.all<NoneFitTransaction & { ownName: string | null }>();
+	// A one-off name is the name a person typed, so the model sees it exactly as typed; the rest are tidied.
+	return results.map(({ ownName, ...row }) => ({
+		...row,
+		merchant: ownName ?? tidyName(row.merchant),
+	}));
 }
 
 const placeholders = () => `SELECT value FROM json_each(?)`;
