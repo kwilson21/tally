@@ -171,9 +171,31 @@ describe("GET / with the demo seed", () => {
 			).bind(today, today),
 		]);
 		const { html } = await home();
-		expect(html).toContain('class="text-right text-lg text-ok">+$20</span>');
+		expect(html).toContain(
+			'class="block text-sm text-ok">+$20<span class="sr-only"> back: refunds outweigh spending</span></span>',
+		);
 		expect(html).toContain("Refunded archive");
 		expect(html).not.toContain("-$20");
+	});
+
+	it("shows an archived category that nets to $0 as $0, with no link", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO categories (id, name, icon, color, sort_order, archived, archived_on) VALUES (904, 'Netted archive', 'tag', 'cat-blue', 91, 1, '2026-01-01')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, credit_reviewed) VALUES (1, ?, 2000, 'ARCHIVED SPEND', 904, 1), (1, ?, -2000, 'ARCHIVED REFUND', 904, 1)",
+			).bind(today, today),
+		]);
+		const { html } = await home();
+		// Text with each tag as a space, so the words of separate elements don't run together.
+		const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+		expect(html).toContain("Netted archive");
+		expect(html).toContain('class="block text-sm text-muted">$0</span>');
+		expect(html).not.toContain('href="/budget/904"');
+		expect(text).toContain("Netted archive $0");
+		expect(text).not.toContain("Netted archive Add a budget");
 	});
 
 	it("keeps the finished amount equal to what Home showed at the end of that month", async () => {
