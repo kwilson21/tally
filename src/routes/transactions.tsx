@@ -37,7 +37,9 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	followsPurchaseAfterSave,
 	parseEdit,
+	postedCredit,
 	safeBack,
 } from "../transactions/edit";
 import {
@@ -1084,11 +1086,16 @@ function EditSheet({
 		"hx-push-url": back,
 	};
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
-	// A refund that follows its purchase counts in that purchase's category, so its own can't be
-	// picked until it's unlinked (or the purchase is excluded, when it counts on its own).
-	const purchase = refunds.find(
+	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
+	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
+	// "Counts in" line say how the row really counts.
+	const linkedPurchase = refunds.find(
 		(p) => p.id === values.refundOfId && !p.excluded,
 	);
+	const purchase =
+		linkedPurchase && followsPurchaseAfterSave(tx, values)
+			? linkedPurchase
+			: undefined;
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
@@ -1228,7 +1235,9 @@ function EditSheet({
 					name="income_was"
 					value={(values.incomeWas ?? values.income) ? "1" : "0"}
 				/>
-				{!purchase && (
+				{/* The merchant rule is offered only for an unlinked row (the chip above), so a linked row posts
+				    no rule answer and a save leaves the rule alone, whatever its purchase or counting. */}
+				{tx.refundOfId == null && (
 					<>
 						<input
 							type="hidden"
@@ -2186,9 +2195,15 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		posted === null ? current : posted === "" ? null : Number(posted);
 	const refundOk =
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
-	// A refund that follows its purchase counts in that purchase's category, so a posted category
-	// (and a merchant rule made from it) is ignored.
-	if (refundOk && refunds.some((p) => p.id === refundOfId && !p.excluded)) {
+	// A refund that follows its purchase counts in that purchase's category, so a posted category (and a
+	// merchant rule made from it) is ignored. It follows by the counting rule on what this save will hold.
+	const linkedPurchase = refunds.find(
+		(p) => p.id === refundOfId && !p.excluded,
+	);
+	if (
+		linkedPurchase &&
+		followsPurchaseAfterSave(tx, { refundOfId, ...postedCredit(form) })
+	) {
 		form.delete("category");
 		form.delete("always");
 	}

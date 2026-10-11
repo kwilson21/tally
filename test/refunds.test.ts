@@ -7,6 +7,7 @@ import {
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
+	followsPurchase,
 } from "../src/db/counted-month";
 import { loadMonth } from "../src/db/month";
 import {
@@ -104,6 +105,62 @@ const refundOf = async (id: number) =>
 			.bind(id)
 			.first<{ r: number | null }>()
 	)?.r;
+
+/** The opening tag of the open edit panel's Category fieldset: `disabled` there means the purchase's category is locked. */
+function categoryFieldsetTag(html: string) {
+	const sheet = html.slice(html.indexOf('aria-labelledby="edit-title"'));
+	const legend = sheet.search(/<legend[^>]*>\s*Category\b/);
+	const start = sheet.lastIndexOf("<fieldset", legend);
+	return sheet.slice(start, sheet.indexOf(">", start) + 1);
+}
+
+/**
+ * The fields the open edit panel posts as drawn, the way a browser sends its form: every hidden and text
+ * input, and each checked box or radio. Fields in a disabled fieldset are not skipped, so use this only for
+ * a panel whose fieldsets are open.
+ */
+function drawnFields(html: string, id: number): [string, string][] {
+	const start = html.indexOf(
+		`<form method="post" action="/transactions/${id}"`,
+	);
+	const form = html.slice(start, html.indexOf("</form>", start));
+	return (form.match(/<input\b[^>]*>/g) ?? []).flatMap((tag) => {
+		const name = /\sname="([^"]*)"/.exec(tag)?.[1];
+		if (!name) return [];
+		const value = (/\svalue="([^"]*)"/.exec(tag)?.[1] ?? "").replace(
+			/&amp;/g,
+			"&",
+		);
+		const type = /\stype="([^"]*)"/.exec(tag)?.[1];
+		const posted =
+			type === "checkbox" || type === "radio"
+				? /\schecked(=""|=|\s|\/|>)/.test(tag)
+				: true;
+		return posted ? [[name, value] as [string, string]] : [];
+	});
+}
+
+/** The drawn fields with some changed: a name in `changes` takes its new value, or is not posted when undefined. */
+function edited(
+	drawn: [string, string][],
+	changes: Record<string, string | undefined>,
+): [string, string][] {
+	const kept = drawn.filter(([name]) => !(name in changes));
+	const changed = Object.entries(changes).flatMap(([name, value]) =>
+		value === undefined ? [] : [[name, value] as [string, string]],
+	);
+	return [...kept, ...changed];
+}
+
+const ruleCategoryOf = async (merchant: string) =>
+	(
+		await db
+			.prepare(
+				"SELECT default_category_id AS c FROM merchants WHERE raw_name = ?",
+			)
+			.bind(merchant)
+			.first<{ c: number | null }>()
+	)?.c;
 
 const ownCategory = async (id: number) =>
 	(
@@ -679,6 +736,224 @@ describe("linking a refund", () => {
 		await link(REFUND, PURCHASE);
 		const { html } = await get(`/transactions/${REFUND}`);
 		expect(html).toContain("Counts with the Aug 20 purchase.");
+	});
+
+	it("a linked credit marked as income is unlocked, with no Counts in line", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		expect(categoryFieldsetTag(html)).not.toContain("disabled");
+		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
+		expect(html).not.toContain("with the Aug 20 purchase.");
+	});
+
+	it("a linked credit no longer reviewed is unlocked, with no Counts in line", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		expect(categoryFieldsetTag(html)).not.toContain("disabled");
+		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
+		expect(html).not.toContain("with the Aug 20 purchase.");
+	});
+
+	it("saves the category of a linked credit marked as income", async () => {
+		await save(REFUND, [
+			["refund_of", String(PURCHASE)],
+			["income", "1"],
+			["category", String(GAS)],
+		]);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("saves the category of a linked credit once it's no longer reviewed", async () => {
+		await link(REFUND, PURCHASE);
+		await save(REFUND, [
+			["creditReviewedVisible", "1"],
+			["creditReviewed_was", "1"],
+			["category", String(GAS)],
+		]);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+	});
+
+	it("a plain save of a linked credit marked as income keeps the merchant rule the panel showed", async () => {
+		await db
+			.prepare(
+				"UPDATE merchants SET default_category_id = ? WHERE raw_name = 'REFUND SHOP'",
+			)
+			.bind(GROCERIES)
+			.run();
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(`/transactions/${REFUND}`, drawnFields(html, REFUND));
+		expect(await ruleCategoryOf("REFUND SHOP")).toBe(GROCERIES);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("saves the category of a linked Jev-income credit unticked as income and not reviewed", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(
+			`/transactions/${REFUND}`,
+			edited(drawnFields(html, REFUND), {
+				income: undefined,
+				category: String(GAS),
+			}),
+		);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income AS income, credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ income: 0, reviewed: 0 });
+	});
+
+	it("a stale panel that unticks income and ticks the review drops its category, as the credit now counts with its purchase", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user', credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		// The panel was drawn before income was marked, so it had income off and the review unticked; the
+		// person then ticks the review, and the posted panel is what `edited` builds below.
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(
+			`/transactions/${REFUND}`,
+			edited(drawnFields(html, REFUND), {
+				income: undefined,
+				income_was: "0",
+				creditReviewed: "1",
+				creditReviewed_was: "0",
+				category: String(GAS),
+			}),
+		);
+		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income AS income, credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ income: 0, reviewed: 1 });
+	});
+
+	it("linking a reviewed credit with its review unticked still reviews it, so its category is dropped", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(
+			`/transactions/${REFUND}`,
+			edited(drawnFields(html, REFUND), {
+				refund_of: String(PURCHASE),
+				creditReviewed: undefined,
+				creditReviewed_was: "1",
+				category: String(GAS),
+			}),
+		);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+		expect(
+			await db
+				.prepare(
+					"SELECT credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ reviewed: 1 });
+	});
+
+	it("a stale panel that unticks a review Jev now holds drops its category, as the credit still counts with its purchase", async () => {
+		await link(REFUND, PURCHASE);
+		// The person's review is now Jev's: the row stays reviewed, and the save leaves it so.
+		await db
+			.prepare("UPDATE transactions SET credit_reviewed_by = NULL WHERE id = ?")
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(
+			`/transactions/${REFUND}`,
+			edited(drawnFields(html, REFUND), {
+				creditReviewed: undefined,
+				creditReviewed_was: "1",
+				category: String(GAS),
+			}),
+		);
+		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ reviewed: 1 });
+	});
+
+	it("the counting rule in TypeScript agrees with FOLLOWS_PURCHASE", async () => {
+		await link(REFUND, PURCHASE);
+		for (const amountCents of [-2000, 2000]) {
+			for (const flagIncome of [0, 1]) {
+				for (const creditReviewed of [0, 1]) {
+					await db
+						.prepare(
+							"UPDATE transactions SET amount_cents = ?, flag_income = ?, credit_reviewed = ? WHERE id = ?",
+						)
+						.bind(amountCents, flagIncome, creditReviewed, REFUND)
+						.run();
+					const row = await db
+						.prepare(
+							`SELECT ${FOLLOWS_PURCHASE} AS follows FROM transactions t LEFT JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?`,
+						)
+						.bind(REFUND)
+						.first<{ follows: number }>();
+					expect(
+						Boolean(row?.follows),
+						`amount ${amountCents}, income ${flagIncome}, reviewed ${creditReviewed}`,
+					).toBe(
+						followsPurchase({
+							amountCents,
+							income: flagIncome === 1,
+							creditReviewed: creditReviewed === 1,
+						}),
+					);
+				}
+			}
+		}
 	});
 });
 
