@@ -632,7 +632,7 @@ describe("creating the category", () => {
 		expect(trigger(res)).toEqual({});
 	});
 
-	it("refuses a name a category already has, with the form kept", async () => {
+	it("adds the ticked ones to the category the family already has with that name, instead of making one", async () => {
 		const { id, ids } = await petCare();
 		await db
 			.prepare(
@@ -640,10 +640,10 @@ describe("creating the category", () => {
 			)
 			.bind(id)
 			.run();
-		const { res, html } = await create(id, ids, ids);
-		expect(res.status).toBe(422);
-		expect(textOf(html)).toContain("That name is reserved for Jev.");
-		expect(await status(id)).toBe("pending");
+		const { res } = await create(id, ids, ids);
+		expect(res.status).toBe(200);
+		expect(JSON.stringify(trigger(res))).toContain("Added 4 transactions to");
+		expect(await status(id)).toBe("created");
 	});
 
 	it("says the suggestion was changed elsewhere when it was already created or dismissed, with the current list", async () => {

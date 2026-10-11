@@ -1,0 +1,327 @@
+import { env, exports } from "cloudflare:workers";
+import { Hono } from "hono";
+import { beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { resetDemo } from "../src/demo/reset";
+import { organize } from "../src/routes/organize";
+
+type TestApp = { Bindings: Env; Variables: { actor: string } };
+
+const BASE = "http://tally.test";
+const TODAY = todayIn(DEFAULT_TIME_ZONE);
+
+async function get(path = "/transactions/organize") {
+	const res = await exports.default.fetch(BASE + path);
+	return { res, html: await res.text() };
+}
+
+async function post(fields: Record<string, string | string[]>) {
+	const form = new URLSearchParams();
+	for (const [key, value] of Object.entries(fields)) {
+		for (const item of Array.isArray(value) ? value : [value])
+			form.append(key, item);
+	}
+	const res = await exports.default.fetch(`${BASE}/transactions/organize`, {
+		method: "POST",
+		redirect: "manual",
+		headers: {
+			Origin: BASE,
+			"content-type": "application/x-www-form-urlencoded",
+			"HX-Request": "true",
+		},
+		body: form.toString(),
+	});
+	return { res, html: await res.text() };
+}
+
+/** Leaves every demo transaction filed, then adds a merchant's charges that still need a category. */
+async function harborCharges(count: number) {
+	await env.DB.batch([
+		env.DB.prepare(
+			"UPDATE transactions SET category_id = 1, category_source = 'user'",
+		),
+		env.DB.prepare(
+			"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('HARBOR SUPPLY', 'Harbor Supply')",
+		),
+		...Array.from({ length: count }, (_, i) =>
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, ?, 'HARBOR SUPPLY')",
+			).bind(TODAY, 1000 + i),
+		),
+	]);
+}
+
+const filedIn = async (name: string) =>
+	(
+		await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions t JOIN categories c ON c.id = t.category_id WHERE c.name = ? AND t.category_source = 'user' AND t.raw_name = 'HARBOR SUPPLY'",
+		)
+			.bind(name)
+			.first<{ n: number }>()
+	)?.n;
+
+beforeEach(async () => {
+	await resetDemo(env.DB, TODAY);
+});
+
+/** The organize route alone, saving as the household, against `db` in place of the demo's database. */
+async function saveWith(db: D1Database, fields: Record<string, string>) {
+	const app = new Hono<TestApp>();
+	app.use("*", async (c, next) => {
+		c.set("actor", "demo");
+		await next();
+	});
+	app.route("/", organize as unknown as Hono<TestApp>);
+	const res = await app.request(
+		"/transactions/organize",
+		{
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams(fields).toString(),
+		},
+		{ ...env, DB: db },
+	);
+	return { res, html: await res.text() };
+}
+
+/**
+ * The database as another save leaves it: Harbor Supply filed in category 1, just before this save's first batch.
+ * With `onlyUnfiled`, only the charges still needing a category are filed, so older ones keep theirs.
+ */
+function otherSaveFilesFirst(onlyUnfiled = false): D1Database {
+	let raced = false;
+	const filing = `UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'${onlyUnfiled ? " AND category_id IS NULL" : ""}`;
+	return new Proxy(env.DB, {
+		get(target, property) {
+			const value = Reflect.get(target, property);
+			if (property === "batch")
+				return async (statements: D1PreparedStatement[]) => {
+					if (!raced) {
+						raced = true;
+						await env.DB.prepare(filing).run();
+					}
+					return target.batch(statements);
+				};
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	}) as D1Database;
+}
+
+/** The Harbor Supply rule as the merchants table holds it now. */
+const harborRule = () =>
+	env.DB.prepare(
+		"SELECT default_category_id AS categoryId FROM merchants WHERE raw_name = 'HARBOR SUPPLY'",
+	).first<{ categoryId: number | null }>();
+
+describe("a group another save files while this one saves", () => {
+	it("says the merchant has a category, and makes no new category and no merchant rule", async () => {
+		await harborCharges(2);
+
+		const { res } = await saveWith(otherSaveFilesFirst(), {
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Pets",
+			name: "",
+		});
+
+		expect(res.status).toBe(200);
+		const trigger = res.headers.get("HX-Trigger") ?? "";
+		expect(trigger).toContain("That merchant already has a category.");
+		expect(trigger).not.toContain("set to");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
+			).first<{ n: number }>(),
+		).toEqual({ n: 0 });
+		expect(await harborRule()).toEqual({ categoryId: null });
+	});
+
+	it("leaves the merchant rule as it was when an existing category is chosen", async () => {
+		await harborCharges(2);
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'HARBOR SUPPLY'",
+		).run();
+		const chosen = await env.DB.prepare(
+			"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+
+		const { res } = await saveWith(otherSaveFilesFirst(), {
+			group: "Harbor Supply",
+			category: String(chosen?.id),
+			name: "",
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger") ?? "").toContain(
+			"That merchant already has a category.",
+		);
+		expect(await harborRule()).toEqual({ categoryId: 1 });
+	});
+
+	it("keeps another save's merchant rule when older charges of that merchant are already in the chosen category", async () => {
+		await harborCharges(2);
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'HARBOR SUPPLY'",
+		).run();
+		const chosen = (await env.DB.prepare(
+			"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
+		).first<{ id: number }>()) as { id: number };
+		const older = (await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-01-05', 500, 'HARBOR SUPPLY', ?, 'user') RETURNING id",
+		)
+			.bind(chosen.id)
+			.first<{ id: number }>()) as { id: number };
+
+		const { res } = await saveWith(otherSaveFilesFirst(true), {
+			group: "Harbor Supply",
+			category: String(chosen.id),
+			name: "",
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger") ?? "").toContain(
+			"That merchant already has a category.",
+		);
+		expect(await harborRule()).toEqual({ categoryId: 1 });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
+			)
+				.bind(older.id)
+				.first(),
+		).toEqual({ categoryId: chosen.id });
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'HARBOR SUPPLY' AND category_id = 1",
+			).first<{ n: number }>(),
+		).toEqual({ n: 2 });
+	});
+});
+
+describe("New category in Organize", () => {
+	it("hints in the plural for a merchant with several charges, and in the singular for one", async () => {
+		await harborCharges(2);
+		const plural = await get();
+		expect(plural.html).toContain(
+			"Added to your categories and used for these transactions.",
+		);
+		expect(plural.html).toContain('name="new_category_name"');
+
+		await harborCharges(1);
+		const singular = await get();
+		expect(singular.html).toContain(
+			"Added to your categories and used for this transaction.",
+		);
+	});
+
+	it("a taken name gives its error in the field and saves nothing", async () => {
+		await harborCharges(2);
+
+		const { res, html } = await post({
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Groceries",
+			name: "",
+		});
+
+		expect(res.status).toBe(422);
+		expect(html).toMatch(
+			/id="new-category-name-error" role="alert"[^>]*>That name is taken\./,
+		);
+		const uncategorized = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'HARBOR SUPPLY' AND category_id IS NULL",
+		).first<{ n: number }>();
+		expect(uncategorized?.n).toBe(2);
+	});
+
+	it("a new name files the whole group in it, last in the list, and offers nothing more", async () => {
+		await harborCharges(2);
+
+		const { res, html } = await post({
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Pets",
+			name: "",
+		});
+
+		expect(res.status).toBe(200);
+		expect(await filedIn("Pets")).toBe(2);
+		const made = await env.DB.prepare(
+			"SELECT sort_order AS sortOrder FROM categories WHERE name = 'Pets'",
+		).first<{ sortOrder: number }>();
+		const last = await env.DB.prepare(
+			"SELECT MAX(sort_order) AS last FROM categories WHERE name <> 'Pets'",
+		).first<{ last: number }>();
+		expect(made?.sortOrder).toBeGreaterThan(last?.last ?? 0);
+		expect(html).not.toContain("These might belong too:");
+	});
+
+	it("a 51st active category gives the full message and makes nothing", async () => {
+		await harborCharges(2);
+		const active = (
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
+			).first<{ n: number }>()
+		)?.n as number;
+		for (let i = active; i < 50; i++)
+			await env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
+			)
+				.bind(`Filler ${i}`, 100 + i)
+				.run();
+
+		const { res, html } = await post({
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Pets",
+			name: "",
+		});
+
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Tally has room for 50 categories. Archive one to add another.",
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
+			).first<{ n: number }>(),
+		).toEqual({ n: 0 });
+		const uncategorized = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'HARBOR SUPPLY' AND category_id IS NULL",
+		).first<{ n: number }>();
+		expect(uncategorized?.n).toBe(2);
+	});
+
+	it("a group another save categorized first makes no category and says it already has one", async () => {
+		await harborCharges(2);
+		// Another save files the group after this request has read it and before this one counts it.
+		await env.DB.prepare(
+			`CREATE TRIGGER other_save_files_group AFTER INSERT ON categories WHEN NEW.name = 'Pets'
+			BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'; END`,
+		).run();
+		try {
+			const { res } = await post({
+				group: "Harbor Supply",
+				category: "new",
+				new_category_name: "Pets",
+				name: "",
+			});
+
+			expect(res.status).toBe(200);
+			const trigger = res.headers.get("HX-Trigger") ?? "";
+			expect(trigger).toContain("That merchant already has a category.");
+			expect(trigger).not.toContain("set to");
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
+				).first<{ n: number }>(),
+			).toEqual({ n: 0 });
+		} finally {
+			await env.DB.prepare("DROP TRIGGER other_save_files_group").run();
+		}
+	});
+});
