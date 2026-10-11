@@ -1,12 +1,18 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_TIME_ZONE, shortDay, todayIn } from "../src/dates";
+import {
+	DEFAULT_TIME_ZONE,
+	monthsBefore,
+	shortDay,
+	todayIn,
+} from "../src/dates";
 import { makeCategory, unmakeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
+const LAST = monthsBefore(THIS, 1);
 const GROCERIES = 1;
 
 async function get(path: string) {
@@ -571,4 +577,33 @@ describe("the likely transactions after a new category", () => {
 			}
 		},
 	);
+
+	it("name the date and amount a cash entry was saved with in the reason, not the ones it had", async () => {
+		// A cash entry has no merchant name, so it is the same merchant as the bakery's bank rows by its raw name.
+		const entry = (
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES ((SELECT id FROM accounts WHERE type = 'cash'), ?, 2000, 'SQ *LOCAL BAKERY 4432') RETURNING id",
+			)
+				.bind(`${LAST}-15`)
+				.first<{ id: number }>()
+		)?.id as number;
+
+		const saved = await post(
+			`/transactions/${entry}`,
+			saveFields({
+				date: TODAY,
+				amount: "25.00",
+				category: "new",
+				new_category_name: "Pet Care",
+			}),
+		);
+
+		expect(saved.res.status).toBe(200);
+		expect(saved.html).toContain(
+			`Same merchant as ${shortDay(TODAY, TODAY)} ($25.00)`,
+		);
+		expect(saved.html).not.toContain(
+			`Same merchant as ${shortDay(`${LAST}-15`, TODAY)}`,
+		);
+	});
 });

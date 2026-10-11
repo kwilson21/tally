@@ -3093,6 +3093,7 @@ async function savePanel(
 	// category made in this save has only this one.
 	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
 	// A category made here offers the transactions that might belong in it, when there are any (decision 76).
+	// Its reason names the entry as this save left it: a cash entry's date and amount may have just changed.
 	const created = made;
 	const likely = created
 		? await likelyTransactions(c.env.DB, tx.id, created.name, today)
@@ -3102,8 +3103,8 @@ async function savePanel(
 			sheet: () => (
 				<LikelySheet
 					savedId={tx.id}
-					savedDate={tx.date}
-					savedCents={tx.amountCents}
+					savedDate={cashValues?.date ?? tx.date}
+					savedCents={cashParsed?.amountCents ?? tx.amountCents}
 					back={back}
 					closeAttrs={listCloseAttrs(back, tx.id)}
 					categoryId={created.id}

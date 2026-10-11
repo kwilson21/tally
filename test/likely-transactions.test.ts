@@ -46,6 +46,19 @@ async function filed(id: number) {
 		}>();
 }
 
+/** The amount a bank change split the transaction from, or null once its note is cleared. */
+async function splitRemoved(id: number) {
+	return (
+		(
+			await env.DB.prepare(
+				"SELECT split_removed_from_cents AS cents FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first<{ cents: number | null }>()
+		)?.cents ?? null
+	);
+}
+
 const GROCERIES = 1;
 let pet: number;
 let suggested: number;
@@ -331,5 +344,38 @@ describe("addLikely", () => {
 		expect((await filed(guessLast))?.categoryId).toBeNull();
 		expect((await filed(unrelated))?.categoryId).toBeNull();
 		expect((await filed(tooOld))?.categoryId).toBeNull();
+	});
+
+	it("clears the bank-change note on a row it files, and keeps it on a row left unticked", async () => {
+		const ticked = await tx(
+			`${THIS}-03`,
+			7650,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		const unticked = await tx(
+			`${THIS}-04`,
+			4800,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		await env.DB.prepare(
+			"UPDATE transactions SET split_removed_from_cents = 18742 WHERE id IN (?, ?)",
+		)
+			.bind(ticked, unticked)
+			.run();
+
+		const moved = await addLikely(env.DB, {
+			savedId: saved,
+			categoryId: pet,
+			categoryName: "Pet Care",
+			ticked: [ticked],
+			today: TODAY,
+			actor: "test",
+		});
+
+		expect(moved).toBe(1);
+		expect(await splitRemoved(ticked)).toBeNull();
+		expect(await splitRemoved(unticked)).toBe(18742);
 	});
 });

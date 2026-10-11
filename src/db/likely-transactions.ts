@@ -164,7 +164,7 @@ export async function addLikely(
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
-				jev_none_fit = 0, category_suggestion_id = NULL, updated_by = ?, updated_at = datetime('now')
+				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, updated_by = ?, updated_at = datetime('now')
 			WHERE category_id IS NULL AND id IN (${marks})`,
 		)
 		.bind(input.categoryId, input.actor, ...ids)
