@@ -20,6 +20,9 @@ const EXPORT_COLUMNS = {
 		"id, name, amount_cents, due_day, frequency, anchor_month, anchor_date, category_id, merchant_raw_name, merchant_raw_text, active",
 	bill_payments:
 		"id, bill_id, period, transaction_id, matched_by, status, created_at",
+	// What AI did (spec §8.6): what Tally applied, by kind, transaction or merchant and household day; no amounts.
+	ai_log:
+		"id, kind, transaction_id, merchant_raw_name, household_day, created_at",
 	household_settings: "key, value",
 	household_members:
 		"email, first_seen_at, last_seen_at, session_issued_at, removed_at",

@@ -16,6 +16,7 @@ import {
 import { AccountRow } from "../views/account-row";
 import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
+import { AiTally } from "../views/ai-tally";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
@@ -3485,6 +3486,70 @@ function SettingsGroup() {
 							},
 						]}
 					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="ai-tally"
+				title="What AI did"
+				tier="visual"
+				components={["AiTally", "WhyLink"]}
+				sentence="The tally under the AI suggestions switches: a muted “In October”, three short lines and a Why?. A switched-off feature keeps its line, in muted words, so the lines never change shape."
+			>
+				<State label="This month, every feature on">
+					<div class="max-w-xl">
+						<AiTally
+							tally={{
+								month: "2026-10",
+								sorted: 84,
+								changed: 5,
+								named: 12,
+								paychecks: 2,
+							}}
+							switches={{ names: true, categories: true, income: true }}
+						/>
+					</div>
+				</State>
+				<State label="Paychecks switched off: its line says Paychecks · Off">
+					<div class="max-w-xl">
+						<AiTally
+							tally={{
+								month: "2026-10",
+								sorted: 84,
+								changed: 5,
+								named: 12,
+								paychecks: 2,
+							}}
+							switches={{ names: true, categories: true, income: false }}
+						/>
+					</div>
+				</State>
+				<State label="Early in a month with nothing yet: last month's, labelled with its name">
+					<div class="max-w-xl">
+						<AiTally
+							tally={{
+								month: "2026-09",
+								sorted: 61,
+								changed: 3,
+								named: 4,
+								paychecks: 1,
+							}}
+							switches={{ names: true, categories: true, income: true }}
+						/>
+					</div>
+				</State>
+				<State label="No AI work yet: every line is zero">
+					<div class="max-w-xl">
+						<AiTally
+							tally={{
+								month: "2026-10",
+								sorted: 0,
+								changed: 0,
+								named: 0,
+								paychecks: 0,
+							}}
+							switches={{ names: true, categories: true, income: true }}
+						/>
+					</div>
 				</State>
 			</Specimen>
 		</Group>

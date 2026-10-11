@@ -1,6 +1,7 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
+import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type Edit, merchantRuleChange } from "../transactions/edit";
 import {
@@ -19,6 +20,7 @@ import {
 } from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
+import { KEPT_NAME_LOG_SQL } from "./ai-log";
 import { readAiSwitches } from "./ai-switches";
 import {
 	COUNTED_JOINS,
@@ -959,6 +961,19 @@ export async function saveEdit(
 					[noteChanged ? 1 : 0, edit.note, ...excludeArgs, ...reviewArgs],
 				),
 	);
+	// A guessed name a person keeps is logged before the merchant's suggestion settles (spec §8.6).
+	if (
+		edit.nameChanged !== false &&
+		edit.displayName &&
+		nameSource([edit.displayName], current.merchantKey) === "tally"
+	)
+		statements.push(
+			gated(KEPT_NAME_LOG_SQL, [
+				await householdToday(db),
+				current.merchantKey,
+				edit.displayName,
+			]),
+		);
 	// A name a person gives settles the merchant's pending suggestion: accepted when it is one of the
 	// suggested names, rejected when it is their own (spec §7). A form that gave no name leaves the
 	// merchant's name and suggestion alone; its row is still made, which a rule needs.
@@ -1564,6 +1579,9 @@ export async function pendingForJev(
 		categoryOnly: boolean;
 		merchantKey: string;
 		detailsAsked: boolean;
+		/** The transaction's source before this run, so the log counts only what Tally applies now (spec §8.6). */
+		categorySource: string | null;
+		incomeSource: string | null;
 	})[]
 > {
 	const { results } = await db
@@ -1572,6 +1590,7 @@ export async function pendingForJev(
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
 				t.details_asked AS detailsAsked,
+				t.category_source AS categorySource, t.income_source AS incomeSource,
 				${CATEGORY_ONLY} AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
@@ -1600,6 +1619,8 @@ export async function pendingForJev(
 				categoryOnly: number;
 				merchantKey: string;
 				detailsAsked: number;
+				categorySource: string | null;
+				incomeSource: string | null;
 			}
 		>();
 	return results.map((transaction) => ({

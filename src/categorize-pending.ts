@@ -3,6 +3,7 @@
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { decide } from "./ai/decide";
 import { householdTimeZone, todayIn } from "./dates";
+import { recordJevAnswers } from "./db/ai-log";
 import { asksJev, readAiSwitches } from "./db/ai-switches";
 import { giveBackJevCalls, reserveJevCalls } from "./db/jev-calls";
 import {
@@ -29,8 +30,9 @@ export const jevCallLimit = (env: { DEMO?: string }) =>
  * The most calls one run makes, whatever the day's cap still allows; what's left waits for the next
  * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read
  * before it and after it, and saving its answer), plus a few for setup and one merchant-history read:
- * 300 calls is about 901 queries. So production's 09:40 run does nothing else, and the sync (09:00) and the names with the first
- * pass (09:20, where 100 names and 200 calls are about the same) are runs of their own.
+ * 300 calls is about 901 queries, and the log's two statements a run add about 2 more. So production's
+ * 09:40 run does nothing else, and the sync (09:00) and the names with the first pass (09:20, where 100
+ * names and 200 calls are about the same) are runs of their own.
  */
 export const MAX_CALLS_PER_RUN = 300;
 
@@ -141,6 +143,9 @@ export async function categorizePending(
 		kind: string | null;
 		forPersonId: number | null;
 	}[] = [];
+	// What this run applied, for the log (spec §8.6): only a transaction that had no Jev category or income
+	// before the run is counted, and the log checks each answer is still in place when it is written.
+	const applied = { categories: [] as number[], incomes: [] as number[] };
 	try {
 		const histories = start.categories
 			? await merchantCategoryHistoryForJev(env.DB, waiting)
@@ -213,6 +218,13 @@ export async function categorizePending(
 					switches: { income: now.income, categories: now.categories },
 				});
 				if (written && decision.categoryId !== null) done.applied += 1;
+				if (
+					written &&
+					decision.categoryId !== null &&
+					tx.categorySource === null
+				)
+					applied.categories.push(tx.id);
+				if (written && tx.incomeSource !== "jev") applied.incomes.push(tx.id);
 			}
 			if (detailRequested && now.details) {
 				const kind = result.answer.kind;
@@ -242,6 +254,12 @@ export async function categorizePending(
 				await saveJevDetails(env.DB, detailsAnswers);
 		} catch {
 			console.error("jev: couldn't save transaction details");
+		}
+		// What Tally applied goes in the log (spec §8.6), dated the day this run reserved.
+		try {
+			await recordJevAnswers(env.DB, day, applied);
+		} catch {
+			console.error("jev: couldn't record what Tally applied");
 		}
 		// What was reserved and not asked goes back to the day it came from. Should this fail, or the run
 		// be cut off before it gets here, those calls are only lost for the day, never over-spent.

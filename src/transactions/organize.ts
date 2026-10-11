@@ -1,3 +1,5 @@
+import { householdToday } from "../dates";
+import { KEPT_NAME_LOG_SQL } from "../db/ai-log";
 import {
 	COUNTED_JOINS,
 	countedCategorySql,
@@ -7,6 +9,7 @@ import {
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
+import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
@@ -153,7 +156,17 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
+	// A guessed name a person keeps for each merchant is logged before its suggestion settles (spec §8.6).
+	const today = displayName ? await householdToday(db) : null;
 	for (const merchantKey of names) {
+		if (
+			today &&
+			displayName &&
+			nameSource([displayName], merchantKey) === "tally"
+		)
+			statements.push(
+				db.prepare(KEPT_NAME_LOG_SQL).bind(today, merchantKey, displayName),
+			);
 		statements.push(
 			db
 				.prepare(

@@ -200,6 +200,9 @@ const STATEMENTS = [
 	 WHERE refund_of_id IN (SELECT part.id FROM transactions part WHERE part.parent_id = ${PENDING})
 	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents != ?3)
 	 AND ${READY}`,
+	// Tally's log of the pending row's answer moves to the posted row, so it is still counted and a person's
+	// later change to it is still seen (spec §5 and §8.6). A row the posted row already has stays where it is.
+	`UPDATE OR IGNORE ai_log SET transaction_id = ${POSTED} WHERE transaction_id = ${PENDING} AND ${READY}`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
 	`DELETE FROM transactions WHERE id = ${PENDING} AND ${READY}`,
 ];
