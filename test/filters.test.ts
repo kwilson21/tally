@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
 	filtersToQuery,
 	likePattern,
+	monthFor,
+	monthParam,
+	pageBefore,
 	parseFilters,
+	searchAmount,
 } from "../src/transactions/filters";
 
 const parse = (qs: string) => parseFilters(new URLSearchParams(qs), "2026-09");
@@ -131,5 +135,177 @@ describe("filtersToQuery", () => {
 describe("likePattern", () => {
 	it("wraps in % and escapes LIKE wildcards", () => {
 		expect(likePattern("50%_off\\")).toBe("%50\\%\\_off\\\\%");
+	});
+});
+
+describe("searchAmount (#211)", () => {
+	it("reads a number with cents as exactly that amount, in cents", () => {
+		expect(searchAmount("42.17")).toEqual({
+			low: 4217,
+			high: 4217,
+			exact: true,
+			plain: false,
+		});
+		expect(searchAmount("$42.17")).toEqual({
+			low: 4217,
+			high: 4217,
+			exact: true,
+			plain: false,
+		});
+		// Any decimal point makes it exact: "42.1" is $42.10.
+		expect(searchAmount("42.1")?.low).toBe(4210);
+		expect(searchAmount("42.1")?.exact).toBe(true);
+	});
+
+	it("reads a whole number as every amount in that dollar", () => {
+		expect(searchAmount("42")).toEqual({
+			low: 4200,
+			high: 4299,
+			exact: false,
+			plain: true,
+		});
+		expect(searchAmount("$42")).toEqual({
+			low: 4200,
+			high: 4299,
+			exact: false,
+			plain: false,
+		});
+		expect(searchAmount("$1,284")).toEqual({
+			low: 128400,
+			high: 128499,
+			exact: false,
+			plain: false,
+		});
+		expect(searchAmount(" 42 ")?.plain).toBe(true);
+	});
+
+	it("reads any other text as no amount", () => {
+		for (const text of [
+			"costco",
+			"42.",
+			"$",
+			"-42",
+			"4 2",
+			"1,00",
+			"3.141",
+			"groceries 42",
+			"",
+		])
+			expect(searchAmount(text)).toBeNull();
+	});
+});
+
+describe("monthFor (#211)", () => {
+	const THIS = "2026-10";
+	const f = (qs: string) => parseFilters(new URLSearchParams(qs), THIS);
+	/** A page that showed this search, and named this month in its address or not. */
+	const page = (search: string, namedMonth = false) => ({ search, namedMonth });
+
+	it("looks in every month when a search is typed into an empty box on this month", () => {
+		expect(monthFor(f("q=costco"), page(""), THIS)).toBe("all");
+		expect(monthFor(f("q=42.17&month=2026-10"), page(""), THIS)).toBe("all");
+	});
+
+	it("keeps the month a search names: one picked before typing, or one picked during it", () => {
+		expect(monthFor(f("q=costco&month=2026-09"), page("", true), THIS)).toBe(
+			"2026-09",
+		);
+		expect(
+			monthFor(f("q=costc&month=2026-09"), page("costco", true), THIS),
+		).toBe("2026-09");
+		// "Only October" and picking October both narrow, and stay while typing.
+		expect(
+			monthFor(f("q=costco&month=2026-10"), page("costc", true), THIS),
+		).toBe("2026-10");
+		expect(
+			monthFor(f("q=costco&month=2026-10"), page("costco", true), THIS),
+		).toBe("2026-10");
+	});
+
+	it("keeps this month picked before typing, even though it is the default (#211)", () => {
+		// Picked September, then October (this month), then typing from an empty box: October stays.
+		expect(monthFor(f("q=c&month=2026-10"), page("", true), THIS)).toBe(
+			"2026-10",
+		);
+		expect(monthFor(f("q=costco&month=2026-10"), page("", true), THIS)).toBe(
+			"2026-10",
+		);
+		// Without a picked month the same typing looks in every month.
+		expect(monthFor(f("q=c&month=2026-10"), page(""), THIS)).toBe("all");
+	});
+
+	it("keeps All months while a search runs", () => {
+		expect(monthFor(f("q=costc&month=all"), page("costco", true), THIS)).toBe(
+			"all",
+		);
+	});
+
+	it("goes back to this month when the search box is emptied, even from a picked month", () => {
+		expect(monthFor(f("month=all"), page("costco", true), THIS)).toBe(
+			"2026-10",
+		);
+		expect(monthFor(f("month=2026-09"), page("costco", true), THIS)).toBe(
+			"2026-10",
+		);
+		expect(monthFor(f("month=2026-10"), page("costco", true), THIS)).toBe(
+			"2026-10",
+		);
+	});
+
+	it("keeps All months when no search was typed before (a category, say)", () => {
+		expect(monthFor(f("month=all&category=1"), page(""), THIS)).toBe("all");
+		expect(monthFor(f("month=all"), page(""), THIS)).toBe("all");
+	});
+
+	it("uses the month as sent when the request names no page (reload, link, no JavaScript)", () => {
+		expect(monthFor(f("q=costco"), null, THIS)).toBe("2026-10");
+		expect(monthFor(f("q=costco&month=2026-09"), null, THIS)).toBe("2026-09");
+	});
+});
+
+describe("monthParam (#211)", () => {
+	const THIS = "2026-10";
+	const f = (qs: string) => parseFilters(new URLSearchParams(qs), THIS);
+	const page = (search: string, namedMonth = false) => ({ search, namedMonth });
+
+	it("names a month other than this one always", () => {
+		expect(monthParam(f("month=all"), null, "all", THIS)).toBe("all");
+		expect(monthParam(f("month=2026-09"), page(""), "2026-09", THIS)).toBe(
+			"2026-09",
+		);
+	});
+
+	it("leaves this month out unless a month the address named stays", () => {
+		expect(monthParam(f("q=costco"), page(""), THIS, THIS)).toBeNull();
+		expect(monthParam(f("q=costco"), null, THIS, THIS)).toBeNull();
+		expect(
+			monthParam(f("q=costco&month=2026-10"), page("", true), THIS, THIS),
+		).toBe(THIS);
+		// Emptying the box lets this month go, as it goes back to being the default.
+		expect(
+			monthParam(f("month=2026-10"), page("costco", true), THIS, THIS),
+		).toBeNull();
+	});
+});
+
+describe("pageBefore (#211)", () => {
+	it("reads the search the transactions page showed, and whether its address named a month", () => {
+		expect(
+			pageBefore("http://tally.test/transactions?q=%20costco%20&month=all"),
+		).toEqual({ search: "costco", namedMonth: true });
+		expect(pageBefore("http://tally.test/transactions?month=all")).toEqual({
+			search: "",
+			namedMonth: true,
+		});
+		expect(pageBefore("http://tally.test/transactions?q=costco")).toEqual({
+			search: "costco",
+			namedMonth: false,
+		});
+	});
+
+	it("names no earlier page without an address, for another page, or for a bad address", () => {
+		expect(pageBefore(undefined)).toBeNull();
+		expect(pageBefore("http://tally.test/home?q=costco")).toBeNull();
+		expect(pageBefore("not a url")).toBeNull();
 	});
 });

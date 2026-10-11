@@ -1,9 +1,17 @@
 // The result count above the list. It names every active filter, so any filter change changes
 // its text and the aria-live region announces it, even when the number stays the same (#56).
 import { monthLabel } from "../dates";
-import type { Filters, Show } from "./filters";
+import { formatCents } from "../money";
+import {
+	type Filters,
+	type SearchMatch,
+	type Show,
+	searchAmount,
+} from "./filters";
 
 type Page = { total: number; first: number; shown: number; pages: number };
+
+const NO_MATCH: SearchMatch = { category: false, allByAmount: false };
 
 /** The word before "transactions" for each Show choice; All says nothing. */
 const TYPE_WORDS: Record<Show, string> = {
@@ -14,32 +22,42 @@ const TYPE_WORDS: Record<Show, string> = {
 	excluded: "excluded ",
 };
 
+/**
+ * What a search matched, in brackets after its text (#211): the amount it names, to the cent or across the
+ * dollar, or "(category)" when a row matched by a category's name. A plain number names its amount only
+ * when every row matched by it, since it also finds names and notes; a mixed count names no amount.
+ */
+function matchNote(q: string, matched: SearchMatch): string {
+	const amount = searchAmount(q);
+	if (amount && (!amount.plain || matched.allByAmount)) {
+		return amount.exact
+			? ` (amount ${formatCents(amount.low)})`
+			: ` (amounts ${formatCents(amount.low)} to ${formatCents(amount.high)})`;
+	}
+	return matched.category ? " (category)" : "";
+}
+
 export function resultCount(
 	{ total, first, shown, pages }: Page,
 	f: Filters,
 	categoryName: string | null,
 	today: string,
 	accountName: string | null = null,
+	matched: SearchMatch = NO_MATCH,
 ): string {
 	const noun = `${TYPE_WORDS[f.show]}transaction${total === 1 ? "" : "s"}`;
 	const lead =
 		pages > 1
 			? `Showing ${first}–${first + shown - 1} of ${total} ${noun}`
 			: `${total} ${noun}`;
-	const month =
-		f.month === "all" ? "across all months" : monthLabel(f.month, today);
+	const month = f.month === "all" ? "all months" : monthLabel(f.month, today);
 	// The category and the account come first, then the month: "in Groceries, Chase Card ••9921, October".
 	const named = [categoryName, accountName].filter(Boolean);
-	const where =
-		named.length > 0
-			? `in ${[...named, month].join(", ")}`
-			: f.month === "all"
-				? month
-				: `in ${month}`;
+	const where = `in ${[...named, month].join(", ")}`;
 	const text = [
 		lead,
 		f.uncategorized && "needing a category",
-		f.q && `matching "${f.q}"`,
+		f.q && `matching "${f.q}"${f.raw ? "" : matchNote(f.q, matched)}`,
 		where,
 	]
 		.filter(Boolean)
