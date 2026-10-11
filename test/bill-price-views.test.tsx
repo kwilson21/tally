@@ -156,7 +156,7 @@ describe("BillPaymentPicker with an excluded payment", () => {
 				billAmountCents: 185000,
 				openedPeriod: "2026-10",
 				dueDateLabel: "Oct 1",
-				frequency: "monthly",
+				bill: { frequency: "monthly", anchorMonth: null },
 				candidates: [
 					{
 						id: 1,
@@ -167,9 +167,7 @@ describe("BillPaymentPicker with an excluded payment", () => {
 						excluded,
 					},
 				],
-				periods: [
-					{ value: "2026-10", label: "October", countedMonth: "2026-10" },
-				],
+				periods: [{ value: "2026-10", label: "October" }],
 			}),
 		);
 

@@ -612,7 +612,7 @@ const TOAST_SPEC: UseSpecText = {
 	feedback:
 		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for two Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
-		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
+		"Undo is a labeled form button, usable by touch or keyboard; while its request is in flight it is off, and a request that fails turns it back on while the toast is still up. Other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
 		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its remaining server token time (up to 10 seconds) and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
@@ -1338,7 +1338,7 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
-							frequency="monthly"
+							bill={{ frequency: "monthly", anchorMonth: null }}
 							candidates={[
 								{
 									id: 1,
@@ -1357,12 +1357,8 @@ function Rows() {
 								},
 							]}
 							periods={[
-								{
-									value: "2026-09",
-									label: "September",
-									countedMonth: "2026-09",
-								},
-								{ value: "2026-10", label: "October", countedMonth: "2026-10" },
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
 							]}
 						/>
 					</div>
@@ -1375,15 +1371,9 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
-							frequency="monthly"
+							bill={{ frequency: "monthly", anchorMonth: null }}
 							candidates={[]}
-							periods={[
-								{
-									value: "2026-09",
-									label: "September",
-									countedMonth: "2026-09",
-								},
-							]}
+							periods={[{ value: "2026-09", label: "September" }]}
 						/>
 					</div>
 				</State>
@@ -3071,6 +3061,7 @@ function Feedback() {
 						data-ds-toast="success"
 						data-ds-message="Deleted Farmers market, $20.00."
 						data-ds-undo="catalog-demo-token"
+						data-ds-undo-expires-in-ms="10000"
 					>
 						Show an Undo toast
 					</Button>

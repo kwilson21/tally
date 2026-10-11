@@ -104,3 +104,45 @@ export const COUNTED_JOINS = `${linkedPaymentJoin("bp", "t")}
 	LEFT JOIN transactions rp ON rp.id=t.refund_of_id
 	${linkedPaymentJoin("rbp", "rp")}
 	LEFT JOIN bills rb ON rb.id=rbp.bill_id`;
+
+/** A bill, as the counting rule reads it: its frequency and, for a yearly or quarterly bill, its anchor month. */
+export type CountedBill = {
+	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
+	anchorMonth: number | null;
+};
+
+/**
+ * The month a bill's period is for, in TypeScript, as billMonthSql reads it: a yearly bill's anchor month, a
+ * quarter's first month, a week's or fortnight's month (its period is the date), else the period itself. The
+ * bills page works this out before a payment is linked. Keep it in step with billMonthSql; the refunds test
+ * checks that they agree for every frequency.
+ */
+export function billPeriodMonth(bill: CountedBill, period: string): string {
+	if (bill.frequency === "yearly")
+		return `${period}-${String(bill.anchorMonth ?? 1).padStart(2, "0")}`;
+	if (bill.frequency === "weekly" || bill.frequency === "biweekly")
+		return period.slice(0, 7);
+	if (bill.frequency === "quarterly") {
+		const anchor = bill.anchorMonth ?? 1;
+		const firstQuarter = Math.floor((anchor - 1) / 3) + 1;
+		const quarter = Number(period.slice(6, 7));
+		const month =
+			((anchor - 1 + ((quarter - firstQuarter + 4) % 4) * 3) % 12) + 1;
+		return `${period.slice(0, 4)}-${String(month).padStart(2, "0")}`;
+	}
+	return period;
+}
+
+/**
+ * The month a linked bill payment counts in, in TypeScript, as countedMonthSql() reads it: the period's month
+ * when that is earlier than the bank's month, else the bank's month. `bankMonth` is YYYY-MM. Keep it in step with
+ * countedMonthSql(); the refunds test checks that they agree for every frequency, early and late payments alike.
+ */
+export function billPaymentMonth(
+	bill: CountedBill,
+	period: string,
+	bankMonth: string,
+): string {
+	const occurrence = billPeriodMonth(bill, period);
+	return occurrence < bankMonth ? occurrence : bankMonth;
+}

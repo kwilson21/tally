@@ -741,7 +741,11 @@ const categoryTick = (
 						September
 					</Chip>
 				</div>
-				<BillMonthExplanation countedMonth="2026-10" paymentDate="2026-10-01" />
+				<BillMonthExplanation
+					bill={{ frequency: "monthly", anchorMonth: null }}
+					period="2026-10"
+					paymentDate="2026-10-01"
+				/>
 			</fieldset>
 			<div class="flex gap-3">
 				<Button type="button">Link</Button>

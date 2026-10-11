@@ -1,4 +1,5 @@
 import { manualLinkWindowDays } from "../bills/status";
+import { billPaymentMonth, type CountedBill } from "../db/counted-month";
 import { formatCents } from "../money";
 import { Button } from "./button";
 import { Chip } from "./chip";
@@ -16,7 +17,6 @@ export type PaymentPickerCandidate = {
 export type PaymentPickerPeriod = {
 	value: string;
 	label: string;
-	countedMonth: string;
 };
 
 /** The count the picker's aria-live line says and a month choice announces: "2 payments to link", or none. */
@@ -30,18 +30,22 @@ const month = (value: string) =>
 		new Date(`${value}-01T00:00:00Z`),
 	);
 
+/** Which month a linked payment counts in, in words, from the same rule the totals use (billPaymentMonth). */
 export function BillMonthExplanation({
-	countedMonth,
+	bill,
+	period,
 	paymentDate,
 }: {
-	countedMonth: string;
+	bill: CountedBill;
+	period: string;
 	paymentDate: string;
 }) {
 	const bankMonth = paymentDate.slice(0, 7);
+	const countedMonth = billPaymentMonth(bill, period, bankMonth);
 	const bankName = month(bankMonth);
 	return (
 		<p class="text-sm text-muted">
-			{countedMonth < bankMonth
+			{countedMonth !== bankMonth
 				? `It counts in ${month(countedMonth)}'s spending, not ${bankName}'s. The bank's date stays ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${paymentDate}T00:00:00Z`))}.`
 				: `It counts in ${bankName}'s spending, its bank month.`}
 		</p>
@@ -55,7 +59,7 @@ export function BillPaymentPicker({
 	billAmountCents,
 	openedPeriod,
 	dueDateLabel,
-	frequency,
+	bill,
 	candidates,
 	periods,
 	selectedTransactionId,
@@ -66,7 +70,7 @@ export function BillPaymentPicker({
 	billAmountCents: number;
 	openedPeriod: string;
 	dueDateLabel: string;
-	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
+	bill: CountedBill;
 	candidates: PaymentPickerCandidate[];
 	periods: PaymentPickerPeriod[];
 	selectedTransactionId?: number;
@@ -74,7 +78,7 @@ export function BillPaymentPicker({
 	rerender?: boolean;
 }) {
 	const action = `/bills/${billId}/link`;
-	const windowDays = manualLinkWindowDays(frequency);
+	const windowDays = manualLinkWindowDays(bill.frequency);
 	const opened =
 		periods.find((period) => period.value === openedPeriod) ?? periods[0];
 	const selectedPayment = candidates.find(
@@ -158,7 +162,8 @@ export function BillPaymentPicker({
 						<span class="sr-only">{countSentence}</span>
 						{opened && selectedPayment ? (
 							<BillMonthExplanation
-								countedMonth={opened.countedMonth}
+								bill={bill}
+								period={opened.value}
 								paymentDate={selectedPayment.date}
 							/>
 						) : (
