@@ -368,17 +368,19 @@ describe("GET /design-system in the demo", () => {
 		const { html } = await get("/design-system");
 		const tag = specimens(html).find((t) => t.includes('id="name-choices"'));
 		expect(tag).toContain('data-ds-tier="interactive"');
-		expect(tag).toContain('data-ds-components="NameChoices"');
+		expect(tag).toContain('data-ds-components="NameChoices RenameChoices"');
 		const section =
 			html.split('id="name-choices"')[1]?.split("</section>")[0] ?? "";
-		// Three states, each its own radio group, and nothing posts from the catalog.
+		// Each state its own radio group (and each Rename list its own), and nothing posts from the catalog.
 		const radios = [...section.matchAll(/<input[^>]*type="radio"[^>]*>/g)];
 		expect(radios.length).toBeGreaterThanOrEqual(8);
 		const groups = [
 			...section.matchAll(/<input[^>]*type="radio"[^>]*name="([^"]+)"/g),
 		].map((m) => m[1]);
-		expect(new Set(groups).size).toBe(6);
-		const chosen = radios.filter((m) => /\schecked(\s|>|=)/.test(m[0]));
+		expect(new Set(groups).size).toBe(12);
+		const chosen = radios.filter(
+			(m) => /\schecked(\s|>|=)/.test(m[0]) && /name="ds-names-/.test(m[0]),
+		);
 		expect(chosen).toHaveLength(1);
 		expect(section).not.toContain("<form");
 		expect(section).not.toContain("<button");
@@ -387,12 +389,14 @@ describe("GET /design-system in the demo", () => {
 		expect(section).toContain('href="/how-it-works#names"');
 		// A name the bank sent says so quietly: muted words, no icon, no Why? (P87 B).
 		expect(section).toMatch(
-			/<p id="ds-names-bank-source" class="text-sm text-muted">From your bank<\/p>/,
+			/<p id="ds-names-bank-source-0" class="text-sm text-muted">From your bank<\/p>/,
 		);
 		expect(section).toContain('role="alert"');
-		expect(section).toContain(
-			"Pick a name, keep the bank&#39;s, or type your own.",
-		);
+		expect(section).toContain("Type a name here, or pick one above.");
+		// The Rename list's words (decision 101), in its own specimens.
+		expect(section).toContain("This one only");
+		expect(section).toContain("Both from Amazon, this one too");
+		expect(section).toContain("Dog bed is replaced.");
 		expect(section).toMatch(/id="ds-names-error-own"[^>]*value=""/);
 		expect(section).not.toMatch(/name="ds-names-error"[^>]*checked/);
 		expect(html).toContain('name="ds-names-narrow"');
@@ -406,23 +410,18 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain(
 			"https://example.com/this-is-a-long-unbroken-name-for-the-bank",
 		);
-		expect(section).toContain('value="keep"');
+		expect(section).toContain('value="store"');
 		expect(section).toContain("wrap-anywhere");
-		expect(section).toContain(
-			"A name typed here is used instead of any name above.",
-		);
-		expect(section).toContain('aria-describedby="ds-names-one-own-hint"');
+		expect(section).toContain("Your own name");
 		for (const [, label] of USE_SPEC_PARTS) {
 			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
 		}
 		// Never the name of the AI behind it.
 		expect(section).not.toMatch(/jev|workers ai/i);
 		expect(design).toMatch(
-			/\| NameChoices \|[^\n]*Tally's guess[^\n]*Or your own[^\n]*without JavaScript/,
+			/\| NameChoices \|[^\n]*Tally's guess[^\n]*Type your own[^\n]*without JavaScript/,
 		);
-		expect(design).toContain(
-			"A name typed here is used instead of any name above. For all 9 transactions from this merchant.",
-		);
+		expect(design).toMatch(/\| RenameChoices \|[^\n]*This one only[^\n]*/);
 	});
 
 	it("catalogs transaction detail rows and the household people list before app use (P89 A)", async () => {

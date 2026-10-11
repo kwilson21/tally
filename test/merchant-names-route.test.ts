@@ -217,7 +217,7 @@ describe("namesToReview with several bank texts for one merchant", () => {
 		);
 		const { html } = await get("/settings/names");
 		expect(textOf(html)).toContain("The bank says TGT*0099 SF");
-		expect(textOf(html)).toContain("For all 4 transactions");
+		expect(textOf(html)).toContain("Type your own");
 	});
 });
 
@@ -389,25 +389,19 @@ describe("GET /settings/names", () => {
 			"s:Blue Bottle Coffee",
 			"s:Blue Bottle",
 			"s:Blue Bottle Cafe",
-			"keep",
+			"store",
+			"own",
 		]);
-		expect(html).toContain("Keep “Blue bottle cof”");
+		// The store's own name, with what the bank says under it.
+		expect(text).toContain("Blue bottle cof");
+		expect(text).toContain("The bank says");
 		// Where the names came from, under them: the sparkles icon, "Tally's guess" and a Why? (P87 B).
 		expect(html).toMatch(
-			/<span id="review-source"[^>]*><svg[^>]*>.*?<\/svg>\s*Tally&#39;s guess<\/span>/,
+			/<span id="review-source-0"[^>]*><svg[^>]*>.*?<\/svg>\s*Tally&#39;s guess<\/span>/,
 		);
 		expect(html).toContain('href="/how-it-works#names"');
-		expect(text).toContain("Or your own");
-		expect(
-			html.match(/A name typed here is used instead of any name above\./g),
-		).toHaveLength(1);
-		const ownField = html.match(/<input[^>]*id="review-own"[^>]*>/)?.[0] ?? "";
-		const hintId = ownField.match(/aria-describedby="([^"]+)"/)?.[1];
-		expect(hintId).toBe("review-own-hint");
-		expect(html).toMatch(
-			/<label[^>]*>Or your own<\/label>[\s\S]*?A name typed here is used instead of any name above\. For all 3 transactions from this merchant\./,
-		);
-		expect(text).toContain("For all 3 transactions from this merchant.");
+		// "Type your own" has its field, named for what it is.
+		expect(html).toMatch(/<label[^>]*>Your own name<\/label>/);
 		expect(text).toContain("Save and next");
 		expect(text).toContain("Skip");
 		// Nothing is chosen to start with.
@@ -423,7 +417,7 @@ describe("GET /settings/names", () => {
 			await saveAiSwitches(db, { names: !off });
 			const { html } = await get("/settings/names");
 			expect(html).toMatch(
-				/<p id="review-source" class="text-sm text-muted">From your bank<\/p>/,
+				/<p id="review-source-0" class="text-sm text-muted">From your bank<\/p>/,
 			);
 			expect(html).toContain('value="s:Comcast"');
 			expect(html).not.toContain("Tally&#39;s guess");
@@ -508,11 +502,11 @@ describe("POST /settings/names", () => {
 		expect(textOf(html)).toContain("1 of 1 · 1 transaction");
 	});
 
-	it("a typed name is the person's own and wins over a chip", async () => {
+	it("a typed name counts under Type your own, and turns the suggestions down", async () => {
 		await twoMerchants();
 		await save({
 			key: BLUE,
-			name_pick: "s:Blue Bottle",
+			name_pick: "own",
 			merchant: "The Bottle",
 		});
 		expect(await merchant(BLUE)).toEqual({
@@ -523,7 +517,7 @@ describe("POST /settings/names", () => {
 
 	it("keeping the bank's name turns the suggestions down and keeps the tidied text", async () => {
 		await twoMerchants();
-		const { res } = await save({ key: BLUE, name_pick: "keep" });
+		const { res } = await save({ key: BLUE, name_pick: "store" });
 		expect(await merchant(BLUE)).toEqual({
 			display_name: null,
 			suggestion_status: "rejected",
@@ -535,6 +529,8 @@ describe("POST /settings/names", () => {
 
 	it("asks for a choice when none was made, and changes nothing", async () => {
 		await twoMerchants();
+		// A typed name counts only under "Type your own", so a name typed alone is no choice either.
+		expect((await save({ key: BLUE, merchant: "Typed" })).res.status).toBe(422);
 		const { res, html } = await save({ key: BLUE });
 		expect(res.status).toBe(422);
 		expect(html).toContain('role="alert"');
@@ -552,7 +548,11 @@ describe("POST /settings/names", () => {
 		await twoMerchants();
 		const stale = await save({ key: BLUE, name_pick: "s:Something Else" });
 		expect(stale.res.status).toBe(422);
-		const long = await save({ key: BLUE, merchant: "x".repeat(81) });
+		const long = await save({
+			key: BLUE,
+			name_pick: "own",
+			merchant: "x".repeat(81),
+		});
 		expect(long.res.status).toBe(422);
 		expect(textOf(long.html)).toContain("Keep the name under 80 characters.");
 		expect(await merchant(BLUE)).toMatchObject({

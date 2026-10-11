@@ -50,6 +50,7 @@ import {
 	SHOWS,
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
+import { oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
@@ -72,9 +73,10 @@ import {
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
 import {
-	KEEP_VALUE,
 	NameChoices,
+	OWN_VALUE,
 	pickValue,
+	STORE_VALUE,
 	SUGGESTED_NAME_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
@@ -90,7 +92,6 @@ import {
 	SelectionActionButtons,
 } from "../views/selection-action-bar";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
-import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
@@ -1046,6 +1047,8 @@ type SheetProps = {
 	 * through from the posted form, unchanged. Without it the panel is first drawn: the merchant's name now.
 	 */
 	nameWas?: string | null;
+	/** The Rename list's choice as it was posted ("all" renames the merchant); "one" when first drawn. */
+	nameScope?: "one" | "all";
 	/**
 	 * The panel is already open and is drawn again where it is, so it isn't drawn arriving: Keep it,
 	 * after the delete question. A field's error and the question itself are known from the props.
@@ -1074,6 +1077,7 @@ function EditSheet({
 	today,
 	namePick = null,
 	nameWas = null,
+	nameScope = "one",
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
@@ -1271,36 +1275,29 @@ function EditSheet({
 							tx.nameFromBank ? "bank" : tx.nameSuggested ? "guess" : "person"
 						}
 						guessed={tx.nameSuggested || tx.nameFromBank}
-						open={Boolean(
-							errors.merchant ||
-								namePick ||
-								values.displayName !== tx.merchantName,
-						)}
+						open={Boolean(errors.merchant || namePick)}
 					>
-						{tx.nameChoices ? (
-							<NameChoices
-								id="name"
-								names={tx.nameChoices.names}
-								source={tx.nameChoices.source}
-								tidied={tx.nameChoices.tidied}
-								count={tx.nameChoices.count}
-								picked={namePick}
-								own={values.displayName ?? ""}
-								error={errors.merchant}
-							/>
-						) : (
-							<TextInput
-								id="merchant"
-								label="Name"
-								name="merchant"
-								value={values.displayName ?? ""}
-								placeholder={tx.rawName}
-								autocomplete="off"
-								surface="paper"
-								hint="Renames every transaction from this merchant."
-								error={errors.merchant}
-							/>
-						)}
+						<NameChoices
+							id="name"
+							names={tx.nameChoices.names}
+							source={tx.nameChoices.source}
+							tidied={tx.nameChoices.tidied}
+							rawName={
+								tx.accountType === "cash" ? undefined : tx.nameChoices.rawName
+							}
+							picked={namePick}
+							own={values.displayName ?? ""}
+							error={errors.merchant}
+							rename={{
+								merchant: tx.nameChoices.merchantLabel,
+								total: tx.nameChoices.total,
+								owned: tx.nameChoices.owned,
+								thisOwn: tx.nameChoices.thisOwn,
+								tallyCategory: tx.nameChoices.tallyCategory,
+								today,
+								scope: nameScope,
+							}}
+						/>
 					</DetailRow>
 					<DetailRow
 						id="detail-note"
@@ -1919,7 +1916,8 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 			tx.merchantRuleCategoryId !== null &&
 			tx.merchantRuleCategoryId === tx.categoryId,
 		merchantRuleWas: tx.merchantRuleCategoryId,
-		displayName: tx.merchantName,
+		// Nothing is typed yet: "Type your own" starts empty (decision 101).
+		displayName: null,
 		note: tx.note,
 		excluded: tx.excluded,
 		income: tx.income,
@@ -2211,13 +2209,13 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	// names" went off or before the suggestion was settled elsewhere, and a person's save must not accept or
 	// turn down a guess they can no longer see. A name typed in the field is always their own.
 	const pick = form.get("name_pick")?.toString() ?? "";
-	const offered = tx.nameChoices?.names ?? [];
+	const offered = tx.nameChoices.names;
 	const stillOffered =
-		pick === KEEP_VALUE
-			? tx.nameChoices !== null && tx.nameChoices !== undefined
-			: offered.some((name) => pickValue(name) === pick);
+		pick === STORE_VALUE ||
+		pick === OWN_VALUE ||
+		offered.some((name) => pickValue(name) === pick);
 	if (pick && !stillOffered) form.delete("name_pick");
-	if (keptDetails && !form.has("merchant") && !form.has("name_pick")) {
+	if (keptDetails && !form.has("name_pick")) {
 		const displayedGuess = form.get("displayed_name_guess")?.toString() ?? "";
 		if (displayedGuess) form.set("name_pick", pickValue(displayedGuess));
 	}
@@ -2226,6 +2224,9 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		categories.map((cat) => cat.id),
 		people.map((person) => person.id),
 	);
+	// The store's own name turns the suggestions down only when the panel offers some: with the names switch
+	// off Tally's guesses are hidden, and a save can't turn down what a person can't see (decision 80).
+	if (parsed.ok && offered.length === 0) parsed.value.keepBankName = false;
 
 	// The panel again, as the person left it, with what's wrong (422).
 	const showErrors = (errors: EditErrors) => {
@@ -2268,6 +2269,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					today={today}
 					namePick={form.get("name_pick")?.toString() ?? null}
 					nameWas={form.get("merchant_was")?.toString() ?? null}
+					nameScope={form.get("name_scope") === "all" ? "all" : "one"}
 				/>
 			),
 		});
@@ -2306,10 +2308,20 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
+	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101).
+	const guessAgain = oneOffGuessesAgain({
+		edit: parsed.value,
+		current: {
+			categoryId: tx.categoryId,
+			categorySource: tx.categorySource,
+		},
+		postedCategory: parsed.value.categoryId,
+	});
 	if (
-		(addedName || addedNote || changedDetails) &&
-		tx.categoryId === null &&
-		parsed.value.categoryId === null
+		((addedName || addedNote || changedDetails) &&
+			tx.categoryId === null &&
+			parsed.value.categoryId === null) ||
+		guessAgain
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
@@ -2375,7 +2387,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 				tx.merchantRuleCategoryId !== null &&
 				tx.merchantRuleCategoryId === tx.categoryId,
 			merchantRuleWas: tx.merchantRuleCategoryId,
-			displayName: tx.merchantName,
+			displayName: null,
 			note: tx.note,
 			excluded: tx.excluded,
 			refundOfId: tx.refundOfId ?? null,

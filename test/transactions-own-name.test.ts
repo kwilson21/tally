@@ -1,0 +1,286 @@
+import { env, exports } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+import { saveAiSwitches } from "../src/db/ai-switches";
+import { listTransactions } from "../src/db/transactions";
+import { resetDemo } from "../src/demo/reset";
+import { parseFilters } from "../src/transactions/filters";
+
+// A name a person gives one transaction only (decision 101, spec §5 and §7): "This one only" leaves the
+// merchant's name, its suggestions and the other transactions alone; "All" renames the merchant for the
+// transactions that have no own name of their own.
+
+const db = env.DB;
+const BASE = "http://tally.test";
+const AMAZON = "AMAZON MKTPL*2K4";
+const RAW = "SQ *BLUE BOTTLE COF 0412";
+
+async function post(
+	path: string,
+	fields: Record<string, string>,
+	htmx = false,
+) {
+	const form = new URLSearchParams(fields);
+	const res = await exports.default.fetch(BASE + path, {
+		method: "POST",
+		redirect: "manual",
+		headers: {
+			Origin: BASE,
+			"content-type": "application/x-www-form-urlencoded",
+			...(htmx ? { "HX-Request": "true" } : {}),
+		},
+		body: form.toString(),
+	});
+	return { res, html: await res.text() };
+}
+
+const save = (id: number, fields: Record<string, string>) =>
+	post(`/transactions/${id}`, { back: "/transactions?month=all", ...fields });
+
+async function charge(
+	rawName: string,
+	merchantName: string | null = null,
+	date = "2026-09-20",
+): Promise<number> {
+	const row = await db
+		.prepare(
+			`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name)
+			 VALUES (?, 1, ?, 650, ?, ?) RETURNING id`,
+		)
+		.bind(`plaid-${crypto.randomUUID()}`, date, rawName, merchantName)
+		.first<{ id: number }>();
+	return row?.id as number;
+}
+
+const suggest = (key: string, names: string) =>
+	db
+		.prepare(
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
+		)
+		.bind(key, names)
+		.run();
+
+const merchant = (key: string) =>
+	db
+		.prepare(
+			"SELECT display_name, suggested_name, suggestion_status FROM merchants WHERE raw_name = ?",
+		)
+		.bind(key)
+		.first<{
+			display_name: string | null;
+			suggested_name: string | null;
+			suggestion_status: string;
+		}>();
+
+const filters = parseFilters(new URLSearchParams("month=all"), "2026-09");
+const rowOf = async (id: number) =>
+	(await listTransactions(db, filters)).rows.find((r) => r.id === id);
+
+/** The ids of the rows a search finds. */
+const found = async (q: string) =>
+	(
+		await listTransactions(
+			db,
+			parseFilters(new URLSearchParams({ month: "all", q }), "2026-09"),
+		)
+	).rows.map((r) => r.id);
+
+/** Three Amazon purchases, the merchant named Amazon: a (newest), b and c. */
+async function amazon() {
+	await db
+		.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES ('Amazon', 'Amazon')",
+		)
+		.run();
+	const a = await charge(AMAZON, "Amazon", "2026-10-02");
+	const b = await charge(AMAZON, "Amazon", "2026-09-20");
+	const c = await charge(AMAZON, "Amazon", "2026-09-18");
+	return { a, b, c };
+}
+
+beforeEach(async () => {
+	await resetDemo(db, "2026-09-22");
+	await db.batch([
+		db.prepare("DELETE FROM bill_payments"),
+		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchants"),
+	]);
+	await saveAiSwitches(db, { details: false });
+});
+
+describe("a name for one transaction (decision 101)", () => {
+	it("This one only renames one Amazon row to Dog bed, and the other Amazon rows still say Amazon", async () => {
+		const { a, b } = await amazon();
+		const { res } = await save(a, {
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		expect(res.status).toBe(303);
+		expect((await rowOf(a))?.displayName).toBe("Dog bed");
+		expect((await rowOf(b))?.displayName).toBe("Amazon");
+		expect(await merchant("Amazon")).toMatchObject({ display_name: "Amazon" });
+	});
+
+	it("All renames the merchant but not a row with its own name", async () => {
+		const { a, b, c } = await amazon();
+		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });
+		await save(c, { name_pick: "own", merchant: "Prime", name_scope: "all" });
+		expect(await merchant("Amazon")).toMatchObject({ display_name: "Prime" });
+		expect((await rowOf(a))?.displayName).toBe("Dog bed");
+		expect((await rowOf(b))?.displayName).toBe("Prime");
+		expect((await rowOf(c))?.displayName).toBe("Prime");
+	});
+
+	it("All from a row with its own name replaces that row's name too (this one too)", async () => {
+		const { a, b } = await amazon();
+		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });
+		await save(a, { name_pick: "own", merchant: "Prime", name_scope: "all" });
+		expect((await rowOf(a))?.displayName).toBe("Prime");
+		expect((await rowOf(b))?.displayName).toBe("Prime");
+	});
+
+	it("finds a row by its own name and by the bank's text", async () => {
+		const { a } = await amazon();
+		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });
+		expect(await found("dog bed")).toEqual([a]);
+		expect(await found("MKTPL")).toContain(a);
+	});
+
+	it("keeps a suggested name waiting when it is chosen for This one only", async () => {
+		const id = await charge(RAW);
+		const other = await charge(RAW, null, "2026-09-18");
+		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+		await save(id, { name_pick: "s:Blue Bottle", name_scope: "one" });
+		expect(await merchant(RAW)).toEqual({
+			display_name: null,
+			suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+			suggestion_status: "pending",
+		});
+		expect(await rowOf(id)).toMatchObject({
+			displayName: "Blue Bottle",
+			nameSuggested: false,
+		});
+		expect(await rowOf(other)).toMatchObject({
+			displayName: "Blue Bottle Coffee",
+			nameSuggested: true,
+		});
+	});
+
+	it("Looks right renames the merchant whatever the scope says", async () => {
+		const id = await charge(RAW);
+		const other = await charge(RAW, null, "2026-09-18");
+		await suggest(RAW, "Blue Bottle Coffee");
+		await save(id, {
+			details_action: "keep",
+			displayed_name_guess: "Blue Bottle Coffee",
+			name_scope: "one",
+		});
+		expect(await merchant(RAW)).toMatchObject({
+			display_name: "Blue Bottle Coffee",
+			suggestion_status: "accepted",
+		});
+		expect((await rowOf(other))?.displayName).toBe("Blue Bottle Coffee");
+	});
+
+	it("a split's parts show the own name of the purchase they came from", async () => {
+		const { a } = await amazon();
+		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });
+		await db
+			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+			.bind(a)
+			.run();
+		const part = await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id)
+				 VALUES (1, '2026-10-02', 650, ?, ?) RETURNING id`,
+			)
+			.bind(AMAZON, a)
+			.first<{ id: number }>();
+		expect((await rowOf(part?.id as number))?.displayName).toBe("Dog bed");
+	});
+
+	it("the panel posts the category it showed, and a one-off name still lets Tally guess again", async () => {
+		const category = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		const { a } = await amazon();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
+			)
+			.bind(category?.id, a)
+			.run();
+		// The edit panel posts the category it drew (the current one), as its checked chip.
+		await save(a, {
+			category: String(category?.id),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				)
+				.bind(a)
+				.first(),
+		).toEqual({ category_id: null, category_source: null });
+	});
+
+	it("the Name row says the bank's text only for a bank row, not for a cash entry", async () => {
+		const cash = await db
+			.prepare("SELECT id FROM accounts WHERE type = 'cash' LIMIT 1")
+			.first<{ id: number }>();
+		const id = (await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+				 VALUES (?, '2026-09-20', 2045, 'Farmers market') RETURNING id`,
+			)
+			.bind(cash?.id)
+			.first<{ id: number }>()) as { id: number };
+		const html = await (
+			await exports.default.fetch(`${BASE}/transactions/${id.id}?month=all`)
+		).text();
+		expect(html).toContain('value="store"');
+		expect(html).not.toContain("The bank says");
+	});
+
+	it("a one-off name on a category Tally picked lets Tally guess again, and a person's choice stays", async () => {
+		const category = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		const { a, b } = await amazon();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
+			)
+			.bind(category?.id, a)
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(category?.id, b)
+			.run();
+		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });
+		await save(b, { name_pick: "own", merchant: "Gift", name_scope: "one" });
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				)
+				.bind(a)
+				.first(),
+		).toEqual({ category_id: null, category_source: null });
+		expect(
+			await db
+				.prepare("SELECT category_source FROM transactions WHERE id = ?")
+				.bind(b)
+				.first(),
+		).toEqual({ category_source: "user" });
+	});
+});

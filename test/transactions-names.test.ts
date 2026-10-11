@@ -164,7 +164,9 @@ describe("the Transactions list", () => {
 		const { html } = await get(`/transactions/${id}?month=all`);
 		expect(html).toContain('id="edit-title"');
 		expect(html).toContain("wrap-anywhere");
-		expect(html).toContain(`Keep “${raw}”`);
+		// The bank's text is the store's own name here (lowercase text is kept as it is), so "The bank says" adds nothing.
+		expect(html).toContain(raw);
+		expect(html).not.toContain("The bank says");
 	});
 
 	it("shows the first pending suggestion in place of the tidied bank text, marked as only suggested", async () => {
@@ -384,22 +386,17 @@ describe("the edit panel's name choices", () => {
 			"s:Blue Bottle Coffee",
 			"s:Blue Bottle",
 			"s:Blue Bottle Cafe",
-			"keep",
+			"store",
+			"own",
 		]);
 		// Saving the panel for another reason must never rename the merchant.
 		for (const radio of radios) expect(radio).not.toMatch(/\schecked/);
-		expect(html).toContain("Keep “Blue bottle cof”");
-		expect(html).toMatch(/<label[^>]*>Or your own<\/label>/);
-		expect(
-			html.match(/A name typed here is used instead of any name above\./g),
-		).toHaveLength(1);
-		const ownField = html.match(/<input[^>]*id="name-own"[^>]*>/)?.[0] ?? "";
-		const hintId = ownField.match(/aria-describedby="([^"]+)"/)?.[1];
-		expect(hintId).toBe("name-own-hint");
-		expect(html).toMatch(
-			/<label[^>]*>Or your own<\/label>[\s\S]*?A name typed here is used instead of any name above\. For all 2 transactions from this merchant\./,
-		);
-		expect(html).toContain("For all 2 transactions from this merchant.");
+		expect(html).toContain("The bank says SQ *BLUE BOTTLE COF 0412");
+		expect(html).toMatch(/<label[^>]*>Your own name<\/label>/);
+		// The Rename list is there, hidden until a name is ticked; both of the merchant's purchases.
+		expect(html).toContain("This one only");
+		expect(html).toContain("Both from Blue bottle cof");
+		expect(html).toContain("And any that come later.");
 		// The title is the first suggestion, dashed like the list, and the bank's text is above it.
 		expect(html).toMatch(
 			/id="edit-title"[^>]*decoration-dashed[^>]*>Blue Bottle Coffee/,
@@ -407,11 +404,13 @@ describe("the edit panel's name choices", () => {
 		expect(html).toContain(RAW);
 	});
 
-	it("shows no choices when nothing is suggested, and keeps the rename field", async () => {
+	it("offers only the store's own name and Type your own when nothing is suggested", async () => {
 		const id = await charge("PLAIN SHOP 123");
 		const { html } = await get(`/transactions/${id}?month=all`);
-		expect(html).not.toContain('name="name_pick"');
-		expect(html).toMatch(/<label[^>]*>Name<\/label>/);
+		expect(html).not.toContain('value="s:');
+		expect(html).toContain('value="store"');
+		expect(html).toContain('value="own"');
+		expect(html).toMatch(/<legend[^>]*>Name<\/legend>/);
 	});
 
 	it("leaves out a name that says what the tidied bank text already says", async () => {
@@ -419,7 +418,7 @@ describe("the edit panel's name choices", () => {
 		await suggest("NETFLIX.COM", "Netflix.com\nNetflix");
 		const { html } = await get(`/transactions/${id}?month=all`);
 		const values = [...html.matchAll(/name="name_pick"[^>]*value="([^"]*)"/g)];
-		expect(values.map((m) => m[1])).toEqual(["s:Netflix", "keep"]);
+		expect(values.map((m) => m[1])).toEqual(["s:Netflix", "store", "own"]);
 	});
 
 	it("says under the names that they are Tally's guess, with the sparkles icon and a Why? (P87 B)", async () => {
@@ -427,13 +426,13 @@ describe("the edit panel's name choices", () => {
 		await suggest(RAW, "Blue Bottle Coffee");
 		const { html } = await get(`/transactions/${id}?month=all`);
 		expect(html).toMatch(
-			/<span id="name-source"[^>]*><svg[^>]*>.*?<\/svg>\s*Tally&#39;s guess<\/span>/,
+			/<span id="name-source-0"[^>]*><svg[^>]*>.*?<\/svg>\s*Tally&#39;s guess<\/span>/,
 		);
 		expect(html).toMatch(
 			/<a href="\/how-it-works#names"[^>]*aria-label="Why\? Tally&#39;s guess"[^>]*>Why\?<\/a>/,
 		);
 		// Each suggested name's chip is read with it; "Keep" isn't a guess.
-		expect(html.match(/aria-describedby="name-source"/g)).toHaveLength(1);
+		expect(html.match(/aria-describedby="name-source-0"/g)).toHaveLength(1);
 	});
 
 	it("says the bank's own name is from your bank, in muted words, with no icon and no Why? (P87 B)", async () => {
@@ -441,7 +440,7 @@ describe("the edit panel's name choices", () => {
 		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
 		const { html } = await get(`/transactions/${id}?month=all`);
 		expect(html).toMatch(
-			/<p id="name-source" class="text-sm text-muted">From your bank<\/p>/,
+			/<p id="name-source-0" class="text-sm text-muted">From your bank<\/p>/,
 		);
 		expect(html).toContain('value="s:Lupita&#39;s Taqueria"');
 		const nameRow =
@@ -450,7 +449,7 @@ describe("the edit panel's name choices", () => {
 		expect(nameRow).not.toContain("Tally&#39;s guess");
 		expect(html.match(/href="\/how-it-works#names"/g)).toHaveLength(1);
 		expect(html).not.toContain("M11.017 2.814");
-		expect(html.match(/aria-describedby="name-source"/g)).toHaveLength(1);
+		expect(html.match(/aria-describedby="name-source-0"/g)).toHaveLength(1);
 	});
 
 	it("with the names switch off offers the bank's name, labelled From your bank, but not Tally's guesses (decision 80)", async () => {
@@ -460,12 +459,12 @@ describe("the edit panel's name choices", () => {
 		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
 		await saveAiSwitches(db, { names: false });
 		const off = (await get(`/transactions/${guessed}`)).html;
-		expect(off).not.toContain('name="name_pick"');
+		expect(off).not.toContain('value="s:Blue Bottle Coffee"');
 		const nameRow =
 			off.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
 			"";
 		expect(nameRow).not.toContain("Tally&#39;s guess");
-		expect(off).toMatch(/<label[^>]*>Name<\/label>/);
+		expect(off).toMatch(/<legend[^>]*>Name<\/legend>/);
 		const bank = (await get(`/transactions/${banked}`)).html;
 		expect(bank).toContain('value="s:Lupita&#39;s Taqueria"');
 		expect(bank).toContain("From your bank");
@@ -479,7 +478,8 @@ describe("the edit panel's name choices", () => {
 		const save = (id: number, fields: Record<string, string>, htmx = false) =>
 			post(
 				`/transactions/${id}`,
-				{ back: "/transactions?month=all", ...fields },
+				// The merchant-wide saves these tests make: "All" is the scope they describe (decision 101).
+				{ back: "/transactions?month=all", name_scope: "all", ...fields },
 				htmx,
 			);
 
@@ -571,6 +571,7 @@ describe("the edit panel's name choices", () => {
 						.run();
 					const first = await redraw(id, {
 						merchant_was: "Old Name",
+						name_pick: "own",
 						merchant: "Old Name",
 						category: BAD_CATEGORY,
 					});
@@ -596,6 +597,7 @@ describe("the edit panel's name choices", () => {
 					await suggest(RAW, "Blue Bottle Coffee");
 					const failed = await redraw(id, {
 						merchant_was: "",
+						name_pick: "own",
 						merchant: "My Bottle",
 						category: BAD_CATEGORY,
 					});
@@ -606,6 +608,7 @@ describe("the edit panel's name choices", () => {
 					const picked = (await category())?.id;
 					await save(id, {
 						merchant_was: failed.was ?? "",
+						name_pick: "own",
 						merchant: failed.typed ?? "",
 						category: String(picked),
 					});
@@ -626,14 +629,13 @@ describe("the edit panel's name choices", () => {
 						.run();
 					const failed = await redraw(id, {
 						merchant_was: "Old Name",
-						merchant: "",
+						name_pick: "store",
 						category: BAD_CATEGORY,
 					});
 					expect(failed.was).toBe("Old Name");
-					expect(failed.typed ?? "").toBe("");
 					await save(id, {
 						merchant_was: failed.was ?? "",
-						merchant: failed.typed ?? "",
+						name_pick: "store",
 						note: "fixed",
 					});
 					expect(await merchant(RAW)).toMatchObject({ display_name: null });
@@ -648,6 +650,7 @@ describe("the edit panel's name choices", () => {
 						.bind(RAW)
 						.run();
 					const failed = await redraw(id, {
+						name_pick: "own",
 						merchant: "Current",
 						category: BAD_CATEGORY,
 					});
@@ -711,6 +714,7 @@ describe("the edit panel's name choices", () => {
 					.run();
 				await save(id, {
 					merchant_was: "Old Name",
+					name_pick: "own",
 					merchant: "Old Name",
 					note: "x",
 				});
@@ -725,16 +729,20 @@ describe("the edit panel's name choices", () => {
 					)
 					.bind(RAW)
 					.run();
-				await save(id, { merchant_was: "Old Name", merchant: "Renamed" });
+				await save(id, {
+					merchant_was: "Old Name",
+					name_pick: "own",
+					merchant: "Renamed",
+				});
 				expect(await merchant(RAW)).toMatchObject({ display_name: "Renamed" });
-				await save(id, { merchant_was: "Renamed", merchant: "" });
+				await save(id, { merchant_was: "Renamed", name_pick: "store" });
 				expect(await merchant(RAW)).toMatchObject({ display_name: null });
 			});
 
 			it("keeping the bank's name turns the suggestions down and leaves a name chosen elsewhere alone", async () => {
 				const id = await charge();
 				await suggest(RAW, "Blue Bottle Coffee");
-				await save(id, { merchant_was: "", name_pick: "keep" });
+				await save(id, { merchant_was: "", name_pick: "store" });
 				expect(await merchant(RAW)).toMatchObject({
 					display_name: null,
 					suggestion_status: "rejected",
@@ -743,7 +751,7 @@ describe("the edit panel's name choices", () => {
 
 			it("a form with no merchant_was is read as before: what the field holds is the name", async () => {
 				const id = await charge();
-				await save(id, { merchant: "Typed Name" });
+				await save(id, { name_pick: "own", merchant: "Typed Name" });
 				expect(await merchant(RAW)).toMatchObject({
 					display_name: "Typed Name",
 				});
@@ -777,7 +785,7 @@ describe("the edit panel's name choices", () => {
 				const id = await charge();
 				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
 				await saveAiSwitches(db, { names: false });
-				for (const pick of ["s:Blue Bottle Coffee", "keep"]) {
+				for (const pick of ["s:Blue Bottle Coffee", "store"]) {
 					const { res } = await save(id, { name_pick: pick });
 					expect(res.status).toBe(303);
 					expect(await merchant(RAW)).toEqual(stillPending);
@@ -824,7 +832,7 @@ describe("the edit panel's name choices", () => {
 					.prepare("UPDATE merchants SET suggestion_status = 'rejected'")
 					.run();
 				await save(id, { name_pick: "s:Other Name" });
-				await save(id, { name_pick: "keep" });
+				await save(id, { name_pick: "store" });
 				expect(await merchant(RAW)).toMatchObject({
 					display_name: null,
 					suggestion_status: "rejected",
@@ -846,7 +854,7 @@ describe("the edit panel's name choices", () => {
 				const id = await charge();
 				await suggest(RAW, "Blue Bottle Coffee");
 				await saveAiSwitches(db, { names: false });
-				await save(id, { name_pick: "s:Blue Bottle Coffee", merchant: "Mine" });
+				await save(id, { name_pick: "own", merchant: "Mine" });
 				expect(await merchant(RAW)).toMatchObject({
 					display_name: "Mine",
 					suggestion_status: "rejected",
@@ -854,11 +862,11 @@ describe("the edit panel's name choices", () => {
 			});
 		});
 
-		it("a name typed instead is the person's own: it wins over a chip and rejects the suggestions", async () => {
+		it("a name typed under Type your own is the person's own, and rejects the suggestions", async () => {
 			const id = await charge();
 			await suggest(RAW, "Blue Bottle Coffee");
 			await save(id, {
-				name_pick: "s:Blue Bottle Coffee",
+				name_pick: "own",
 				merchant: "The Bottle",
 			});
 			expect(await merchant(RAW)).toMatchObject({
@@ -870,7 +878,7 @@ describe("the edit panel's name choices", () => {
 		it("typing a name that is one of the suggestions counts as accepting it", async () => {
 			const id = await charge();
 			await suggest(RAW, "Blue Bottle Coffee");
-			await save(id, { merchant: "Blue Bottle Coffee" });
+			await save(id, { name_pick: "own", merchant: "Blue Bottle Coffee" });
 			expect(await merchant(RAW)).toMatchObject({
 				display_name: "Blue Bottle Coffee",
 				suggestion_status: "accepted",
@@ -880,7 +888,7 @@ describe("the edit panel's name choices", () => {
 		it("keeping the bank's name turns the suggestions down and leaves the name to the tidied text", async () => {
 			const id = await charge();
 			await suggest(RAW, "Blue Bottle Coffee");
-			await save(id, { name_pick: "keep" });
+			await save(id, { name_pick: "store" });
 			expect(await merchant(RAW)).toMatchObject({
 				display_name: null,
 				suggestion_status: "rejected",
@@ -891,7 +899,7 @@ describe("the edit panel's name choices", () => {
 			});
 			// It isn't suggested again, even if a later sync brings the same name.
 			expect((await get(`/transactions/${id}`)).html).not.toContain(
-				'name="name_pick"',
+				'value="s:Blue Bottle Coffee"',
 			);
 		});
 
@@ -923,7 +931,10 @@ describe("the edit panel's name choices", () => {
 		it("a name that is too long comes back with the choices and the error, nothing saved", async () => {
 			const id = await charge();
 			await suggest(RAW, "Blue Bottle Coffee");
-			const { res, html } = await save(id, { merchant: "x".repeat(81) });
+			const { res, html } = await save(id, {
+				name_pick: "own",
+				merchant: "x".repeat(81),
+			});
 			expect(res.status).toBe(422);
 			expect(html).toContain("Keep the name under 80 characters.");
 			expect(html).toContain('name="name_pick"');
@@ -932,7 +943,7 @@ describe("the edit panel's name choices", () => {
 
 		it("a rename of a merchant with no suggestion works as before", async () => {
 			const id = await charge("PLAIN SHOP 123");
-			await save(id, { merchant: "Plain Shop" });
+			await save(id, { name_pick: "own", merchant: "Plain Shop" });
 			expect(await merchant("PLAIN SHOP 123")).toMatchObject({
 				display_name: "Plain Shop",
 				suggestion_status: "none",
@@ -1003,11 +1014,11 @@ describe("saveEdit and parseEdit", () => {
 			displayName: "Blue Bottle",
 			keepBankName: false,
 		});
-		expect(parse({ name_pick: "keep" })).toMatchObject({
+		expect(parse({ name_pick: "store" })).toMatchObject({
 			displayName: null,
 			keepBankName: true,
 		});
-		expect(parse({ name_pick: "keep", merchant: "Mine" })).toMatchObject({
+		expect(parse({ name_pick: "own", merchant: "Mine" })).toMatchObject({
 			displayName: "Mine",
 			keepBankName: false,
 		});

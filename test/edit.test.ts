@@ -12,60 +12,73 @@ const form = (fields: Record<string, string>) => {
 };
 const CATEGORIES = [1, 2, 3, 4, 5];
 
-describe("parseEdit and whether a name was given (merchant_was)", () => {
+describe("parseEdit and the Name row's choice (decision 101)", () => {
 	const read = (fields: Record<string, string>) => {
 		const result = parseEdit(form(fields), CATEGORIES);
 		if (!result.ok) throw new Error("expected ok");
 		return result.value;
 	};
+	const refuse = (fields: Record<string, string>) => {
+		const result = parseEdit(form(fields), CATEGORIES);
+		if (result.ok) throw new Error("expected errors");
+		return result.errors;
+	};
 
-	it("is a rename when the field differs from what the panel drew, or has no merchant_was", () => {
+	it("reads a typed name only while Type your own is ticked", () => {
 		expect(read({ merchant: "New" })).toMatchObject({
+			displayName: null,
+			nameChanged: false,
+		});
+		expect(read({ name_pick: "own", merchant: "New" })).toMatchObject({
 			displayName: "New",
 			nameChanged: true,
 		});
-		expect(read({ merchant_was: "Old", merchant: "New" })).toMatchObject({
-			displayName: "New",
-			nameChanged: true,
-		});
-		// No merchant_was: an empty field clears the name, as it always did.
-		expect(read({ merchant: "" })).toMatchObject({
-			displayName: null,
-			nameChanged: true,
-		});
-	});
-
-	it("is not a rename when the field still holds what the panel drew", () => {
-		expect(read({ merchant_was: "Old", merchant: "Old" })).toMatchObject({
-			nameChanged: false,
-		});
-		expect(read({ merchant_was: "", merchant: "" })).toMatchObject({
-			displayName: null,
-			nameChanged: false,
-		});
-		expect(read({ merchant_was: " Old ", merchant: "Old" })).toMatchObject({
-			nameChanged: false,
-		});
-	});
-
-	it("is a clear when a name the panel drew is emptied", () => {
-		expect(read({ merchant_was: "Old", merchant: "" })).toMatchObject({
-			displayName: null,
-			nameChanged: true,
-		});
-	});
-
-	it("is a name given by a chip, and keeping the bank's name gives none", () => {
 		expect(
-			read({ merchant_was: "", merchant: "", name_pick: "s:Blue Bottle" }),
-		).toMatchObject({ displayName: "Blue Bottle", nameChanged: true });
-		expect(
-			read({ merchant_was: "", merchant: "", name_pick: "keep" }),
-		).toMatchObject({
+			read({ merchant_was: "New", name_pick: "own", merchant: "New" }),
+		).toMatchObject({ displayName: "New", nameChanged: true });
+	});
+
+	it("reads a suggestion as the name, and the store's own name as a choice of none", () => {
+		expect(read({ name_pick: "s:Blue Bottle" })).toMatchObject({
+			displayName: "Blue Bottle",
+			nameChanged: true,
+			keepBankName: false,
+		});
+		expect(read({ name_pick: "store" })).toMatchObject({
 			displayName: null,
+			nameChanged: true,
 			keepBankName: true,
-			nameChanged: false,
 		});
+	});
+
+	it("leaves the name alone when nothing is ticked", () => {
+		expect(read({ merchant_was: "Old" })).toMatchObject({
+			displayName: null,
+			nameChanged: false,
+			keepBankName: false,
+		});
+	});
+
+	it("asks for a name when Type your own is ticked and the field is empty", () => {
+		expect(refuse({ name_pick: "own", merchant: "" })).toEqual({
+			merchant: "Type a name here, or pick one above.",
+		});
+	});
+
+	it("applies to one transaction unless the scope says all, and to the merchant for Looks right", () => {
+		expect(read({ name_pick: "own", merchant: "New" })).toMatchObject({
+			nameScope: "one",
+		});
+		expect(
+			read({ name_pick: "own", merchant: "New", name_scope: "all" }),
+		).toMatchObject({ nameScope: "all" });
+		expect(
+			read({
+				name_pick: "s:Blue Bottle",
+				name_scope: "one",
+				details_action: "keep",
+			}),
+		).toMatchObject({ nameScope: "all" });
 	});
 });
 
@@ -73,7 +86,12 @@ describe("parseEdit", () => {
 	it("reads a category, name, and empty note", () => {
 		expect(
 			parseEdit(
-				form({ category: "2", merchant: "Local Bakery", note: "" }),
+				form({
+					category: "2",
+					name_pick: "own",
+					merchant: "Local Bakery",
+					note: "",
+				}),
 				CATEGORIES,
 			),
 		).toEqual({
@@ -85,6 +103,7 @@ describe("parseEdit", () => {
 				merchantRuleWas: null,
 				displayName: "Local Bakery",
 				nameChanged: true,
+				nameScope: "one",
 				keepBankName: false,
 				note: null,
 				excluded: false,
@@ -151,7 +170,10 @@ describe("parseEdit", () => {
 
 	it("limits the merchant name and note lengths", () => {
 		expect(
-			parseEdit(form({ merchant: "x".repeat(81) }), CATEGORIES),
+			parseEdit(
+				form({ name_pick: "own", merchant: "x".repeat(81) }),
+				CATEGORIES,
+			),
 		).toMatchObject({
 			ok: false,
 			errors: { merchant: "Keep the name under 80 characters." },

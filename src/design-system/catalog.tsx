@@ -62,7 +62,12 @@ import { MerchantRules } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
-import { NameChoices, pickValue } from "../views/name-choices";
+import {
+	NameChoices,
+	OWN_VALUE,
+	pickValue,
+	STORE_VALUE,
+} from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
@@ -522,23 +527,42 @@ const SWITCH_SPEC: UseSpecText = {
 		"The label is the person's word for the feature (“Categories and exclusions”, “Income”), never the name of the AI behind it. The state is exactly “On” or “Off”, never “Enabled” or “Disabled”. Save's words: Save · Saving… · Toast: Saved AI suggestions · Announced: Saved AI suggestions. Categories and exclusions on, income off.",
 };
 
-// The merchant-name choices' use spec (decision 64, P29 A, decision 80, P87 B): every line answered before the owner signs it off.
+// The Name row's use spec (decision 64, P29 A, decision 80, P87 B, decision 101): every line answered before the owner signs it off.
 const NAME_CHOICES_SPEC: UseSpecText = {
 	purpose:
-		"Let a person decide what a merchant is called when there are names for it: take one of the suggestions (Tally's guesses, or the name the bank sent), keep the bank's own text tidied, or type their own. Nothing is renamed until they do.",
+		"Let a person decide what a transaction's name is: one of the suggested names, the store's own name, or a name they type. Nothing is renamed until they choose one and save.",
 	affordance:
-		"Up to three suggested names as pill choices. Under Tally's guesses go the sparkles icon, “Tally's guess” and a Why?; under the name the bank sent goes “From your bank” in muted words, with no icon and nothing to explain. Then a pill that says Keep with the bank's text tidied, then a field called “Or your own”, then a muted line saying how many transactions the name is for. Each pill is 44px tall and a real radio button. Nothing is chosen to start with, so saving the panel for another reason never renames the merchant.",
+		"One ticked list, one choice per line: each suggested name, with Tally's guess and a Why? under it (or “From your bank” in muted words for the name the bank sent); the store's own name, with “The bank says” and the bank's text under it; and “Type your own”, which opens a field called “Your own name”. Each line is a real radio, 44px tall. Nothing is ticked at rest, so saving the panel for another reason never renames anything. Ticking a name shows the Rename list (its own spec).",
 	states:
-		"Resting: no pill chosen, the field empty. Chosen: the pill shows an ink border and a pale fill (never color alone: the choice is also the one ticked for a screen reader), and only one of the names or Keep can be chosen. Typing: a name in the field wins over a pill. Hover: no change. Focus: the focus-visible ring around the pill or the field. Error: the field's message in role=alert and the field shaking once (“Keep the name under 80 characters.”, “Pick one of the names shown.”); what was chosen and typed stays. Disabled and loading: not applicable; the form's own Save shows its busy state.",
+		"Resting: nothing ticked, the field empty. Ticked: the radio shows an ink fill and a check, and a screen reader hears it checked, so the choice is never color alone. A typed name counts only while “Type your own” is ticked. Focus: the focus-visible ring on the radio or the field. Error: the field's message in role=alert, and the field is described by it (“Type a name here, or pick one above.”, “Keep the name under 80 characters.”); what was ticked and typed stays. Disabled and loading: not applicable; the form's Save shows its busy state.",
 	feedback:
-		"Choosing changes the pill at once. Saving swaps the panel back to the list with a toast that says what was done (“Renamed 9 transactions to Blue Bottle Coffee”, “Kept the bank's name for 9 transactions”), the announcer repeats it, and focus returns to the row. In Settings the next merchant comes up with the toast and the count left, and focus moves to the bank's text above it. Without JavaScript Save posts and redirects.",
+		"Saving swaps the panel back with a toast that says what was done (“Renamed 9 transactions to Blue Bottle Coffee”, “Saved Dog bed.”), and the announcer repeats it. Without JavaScript Save posts and redirects.",
 	input:
-		"Touch: every pill and the field are 44px tall. Keyboard: Tab to the group, the arrow keys move between the pills, Tab on to the field. Screen reader: “Name, group”; each suggestion reads “Blue Bottle Coffee, radio button, not checked, Tally's guess” (or “From your bank”); the Keep pill reads without it; then “Or your own, edit”, described by the muted line that says a typed name replaces any name above and how many transactions it is for.",
+		"Touch: every line and the field are 44px tall. Keyboard: Tab to the group, the arrow keys move between the choices, Tab on to the field. Screen reader: “Blue Bottle Coffee, radio button, not checked”, then “Tally's guess”; the store's own line reads its name, then “The bank says …”; “Type your own, radio button”; then “Your own name, edit”.",
 	motion: "None added. Reduced motion changes nothing.",
 	edges:
-		"One name, two or three. A very long name wraps inside its pill and the pills wrap onto another line; they are never cut off. The Keep pill quotes the tidied text, which can be long, and wraps too. The muted line under the field says “A name typed here is used instead of any name above.” followed by how many transactions the name is for. With one transaction it says “A name typed here is used instead of any name above. For the 1 transaction from this merchant.” A typed name over 80 characters is refused. A stale page can't choose a name that isn't offered any more: each pill posts its own name, and one that isn't offered is refused. No JavaScript: plain radio buttons and a text field in a form.",
+		"A very long name wraps inside its line and is never cut off. Only the ticked choice counts: a name typed without “Type your own” is ignored, and emptying the field under it is an error, since clearing a name is the store's own name. With the names switch off, Tally's guesses are not listed, and the store's own choice turns down no guess a person can't see. A stale page can't choose a suggestion that isn't offered any more. No JavaScript: plain radio buttons and a text field in a form.",
 	words:
-		"Name · Tally's guess · From your bank · Why? · Keep “{Blue bottle cof}” · Or your own · A name typed here is used instead of any name above. · For all {9} transactions from this merchant. · For the 1 transaction from this merchant. · Errors: Keep the name under 80 characters. · Pick one of the names shown. · Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+		"Name · Tally's guess · From your bank · Why? · {Blue bottle cof} · The bank says {SQ *BLUE BOTTLE COF 0412} · Type your own · Your own name · Errors: Type a name here, or pick one above. · Keep the name under 80 characters. · Pick one of the names shown. · Settings: Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+};
+
+// The Rename list's use spec (decision 101, Name row round 2 A): every line answered before the owner signs it off.
+const RENAME_CHOICES_SPEC: UseSpecText = {
+	purpose:
+		"Let a person choose whether a name is for this one transaction or for the whole merchant, and see what that changes before they save.",
+	affordance:
+		"A second short list under the ticked name: “This one only”, ticked by default, and “All 23 from Amazon” (“Both from Amazon” for two, “This one and later ones” for one). Each choice says what it changes in muted words under it. Under This one only: “The other 22 stay as they are.”, and “Tally guesses its category again.” when the category is Tally's or empty. Under All: “Dog bed is replaced.” when this transaction has its own name, “Dog bed (Oct 2) keeps its own name.” for each other one that has, and “And any that come later.” from two up. Each choice is a real radio, 44px tall.",
+	states:
+		"Hidden until a name is ticked, so nothing shows at rest. Shown: “This one only” ticked, and “All” ticked by a tap. Focus: the focus-visible ring on each choice. Disabled, loading and error: not applicable.",
+	feedback:
+		"The toast says the name that was saved, as the Name row does. The counts are said before saving, in the words above, never afterwards.",
+	input:
+		"Keyboard: Tab to the choices and the arrow keys move between them. Screen reader: each choice is read with its muted lines, for example “All 23 from Amazon, radio button, not checked, Dog bed is replaced.”",
+	motion: "None.",
+	edges:
+		"With no other transaction from the merchant, the “The other …” line is left out. A split purchase counts once. Other own-named transactions keep their names, and this transaction's name is replaced by All. The counts are what the change really does: All never says “All 1”. No JavaScript: the list is drawn with the Name row, and CSS shows it while a name is ticked.",
+	words:
+		"Rename · This one only · The other {22} stay as they are. · The other 1 stays as it is. · Tally guesses its category again. · All {23} from {Amazon} · This one and later ones · Both from {Amazon} · this one too · {Dog bed} is replaced. · {Dog bed} ({Oct 2}) keeps its own name. · And any that come later.",
 };
 
 const DETAIL_ROW_SPEC: UseSpecText = {
@@ -2316,7 +2340,7 @@ function Controls() {
 				id="name-choices"
 				title="NameChoices"
 				tier="interactive"
-				components={["NameChoices"]}
+				components={["NameChoices", "RenameChoices"]}
 				sentence="Choosing what a merchant is called when there are names for it (P29 A, decision 64): the guesses, with where they came from under them (P87 B, decision 80: “Tally's guess”, or “From your bank” for the name the bank sent), keeping the bank's tidied text, or a name of your own. Nothing is chosen to start with, so nothing is renamed until a person decides."
 			>
 				<State label="Three guesses waiting: nothing chosen yet (tap one: it fills as it does in the edit panel)">
@@ -2327,7 +2351,7 @@ function Controls() {
 							names={["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"]}
 							source="tally"
 							tidied="Blue bottle cof"
-							count={9}
+							rawName="SQ *BLUE BOTTLE COF 0412"
 						/>
 					</div>
 				</State>
@@ -2339,7 +2363,7 @@ function Controls() {
 							names={["DoorDash"]}
 							source="tally"
 							tidied="Doordash taco"
-							count={1}
+							rawName="DOORDASH*TACO 8821"
 							picked={pickValue("DoorDash")}
 						/>
 					</div>
@@ -2352,7 +2376,7 @@ function Controls() {
 							names={["Blue Bottle Coffee"]}
 							source="bank"
 							tidied="Blue bottle cof"
-							count={9}
+							rawName="SQ *BLUE BOTTLE COF 0412"
 						/>
 					</div>
 				</State>
@@ -2364,8 +2388,8 @@ function Controls() {
 							names={["Craft Supply Co", "Craft Supply"]}
 							source="tally"
 							tidied="Craftsupply"
-							count={2}
-							error="Pick a name, keep the bank's, or type your own."
+							rawName="SP * CRAFTSUPPLY"
+							error="Type a name here, or pick one above."
 						/>
 					</div>
 				</State>
@@ -2379,7 +2403,7 @@ function Controls() {
 							]}
 							source="tally"
 							tidied="A very long tidied name the bank sent for a neighborhood market"
-							count={9}
+							rawName="SQ *A VERY LONG TIDIED NAME THE BANK SENT FOR A NEIGHBORHOOD MARKET"
 						/>
 						<NameChoices
 							id="ds-names-unbroken"
@@ -2387,11 +2411,82 @@ function Controls() {
 							names={["The Store"]}
 							source="bank"
 							tidied="https://example.com/this-is-a-long-unbroken-name-for-the-bank"
-							count={1}
+							rawName="https://example.com/this-is-a-long-unbroken-name-for-the-bank"
+						/>
+					</div>
+				</State>
+				<State label="Type your own ticked, nothing suggested: the Rename list shows, This one only ticked, with the other 22 unchanged">
+					<div class="max-w-xl">
+						<NameChoices
+							id="ds-rename-one"
+							radioName="ds-rename-one"
+							names={[]}
+							source="tally"
+							tidied="Amazon mktpl"
+							rawName="AMAZON MKTPL*2K4"
+							picked={OWN_VALUE}
+							own="Dog bed"
+							rename={{
+								merchant: "Amazon",
+								total: 23,
+								owned: [],
+								thisOwn: null,
+								tallyCategory: false,
+								today: "2026-10-11",
+								scope: "one",
+								scopeName: "ds-rename-one-scope",
+							}}
+						/>
+					</div>
+				</State>
+				<State label="A suggestion ticked on a row Tally sorted, with the All line counting the own names it keeps">
+					<div class="max-w-xl">
+						<NameChoices
+							id="ds-rename-all"
+							radioName="ds-rename-all"
+							names={["Dog bed"]}
+							source="tally"
+							tidied="Amazon mktpl"
+							rawName="AMAZON MKTPL*2K4"
+							picked={pickValue("Dog bed")}
+							rename={{
+								merchant: "Amazon",
+								total: 23,
+								owned: [{ name: "Dog bed", date: "2026-10-02" }],
+								thisOwn: null,
+								tallyCategory: true,
+								today: "2026-10-11",
+								scope: "all",
+								scopeName: "ds-rename-all-scope",
+							}}
+						/>
+					</div>
+				</State>
+				<State label="Two Amazon purchases, this one's own name is replaced by All: Both from, and no later-ones line for one">
+					<div class="max-w-xl">
+						<NameChoices
+							id="ds-rename-both"
+							radioName="ds-rename-both"
+							names={[]}
+							source="tally"
+							tidied="Amazon mktpl"
+							rawName="AMAZON MKTPL*2K4"
+							picked={STORE_VALUE}
+							rename={{
+								merchant: "Amazon",
+								total: 2,
+								owned: [],
+								thisOwn: "Dog bed",
+								tallyCategory: false,
+								today: "2026-10-11",
+								scope: "all",
+								scopeName: "ds-rename-both-scope",
+							}}
 						/>
 					</div>
 				</State>
 				<UseSpec spec={NAME_CHOICES_SPEC} />
+				<UseSpec spec={RENAME_CHOICES_SPEC} />
 			</Specimen>
 			<Specimen
 				id="detail-row"

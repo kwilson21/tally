@@ -9,10 +9,11 @@ import { Button } from "../views/button";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
 import {
-	KEEP_VALUE,
 	MAX_OWN_NAME,
 	NameChoices,
+	OWN_VALUE,
 	pickValue,
+	STORE_VALUE,
 } from "../views/name-choices";
 
 type App = { Bindings: Env };
@@ -114,7 +115,7 @@ async function renderReview(
 								names={review.names}
 								source={review.source}
 								tidied={review.tidied}
-								count={review.count}
+								rawName={review.bankText}
 								picked={values?.key === review.key ? values.picked : null}
 								own={values?.key === review.key ? values.own : ""}
 								error={error}
@@ -206,19 +207,24 @@ function stale(c: Context<App>, next: string) {
 	});
 }
 
-/** What a person chose: a typed name first, then a chip, which must be one of the names the form showed. */
+/** What a person chose on the Name row (decision 101): the typed name under "Type your own", the store's own name, or a suggestion the form showed. */
 function readChoice(
 	review: NameReview,
 	picked: string | null,
 	own: string,
 ): { ok: true; value: NameChoice } | { ok: false; error: string } {
-	if (own.length > MAX_OWN_NAME)
-		return {
-			ok: false,
-			error: `Keep the name under ${MAX_OWN_NAME} characters.`,
-		};
-	if (own) return { ok: true, value: { kind: "name", name: own } };
-	if (picked === KEEP_VALUE) return { ok: true, value: { kind: "keep" } };
+	// A typed name counts only while "Type your own" is ticked (decision 101).
+	if (picked === OWN_VALUE) {
+		if (own === "")
+			return { ok: false, error: "Type a name here, or pick one above." };
+		if (own.length > MAX_OWN_NAME)
+			return {
+				ok: false,
+				error: `Keep the name under ${MAX_OWN_NAME} characters.`,
+			};
+		return { ok: true, value: { kind: "name", name: own } };
+	}
+	if (picked === STORE_VALUE) return { ok: true, value: { kind: "keep" } };
 	const name = review.names.find((n) => pickValue(n) === picked);
 	if (name) return { ok: true, value: { kind: "name", name } };
 	return {

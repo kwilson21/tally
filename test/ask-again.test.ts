@@ -330,6 +330,7 @@ describe("adding a clearer name to a transaction that still needs a category", (
 		const jev = fakeJev();
 		await save(bakery, {
 			category: "",
+			name_pick: "own",
 			merchant: "Neighborhood Bakery",
 			note: "",
 		});
@@ -355,6 +356,7 @@ describe("adding a clearer name to a transaction that still needs a category", (
 		await save(bakery, {
 			category: "",
 			merchant_was: "Local Bakery",
+			name_pick: "own",
 			merchant: "Neighborhood Bakery",
 			note: "",
 		});

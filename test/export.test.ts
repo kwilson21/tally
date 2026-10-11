@@ -105,6 +105,31 @@ describe("data exports", () => {
 		expect(csv).toMatch(/ZETA MART 5678,Zeta Stores,/);
 	});
 
+	it("gives the CSV an own_name column right after merchant: the name a person gave that one transaction, empty otherwise", async () => {
+		await env.DB.prepare("UPDATE transactions SET raw_name = ? WHERE id = 1")
+			.bind("AMAZON MKTPL*2K4")
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)",
+		)
+			.bind("AMAZON MKTPL*2K4", "Amazon")
+			.run();
+		await env.DB.prepare("UPDATE transactions SET own_name = ? WHERE id = 1")
+			.bind("Dog bed")
+			.run();
+
+		const csv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+		const [header = "", ...rows] = csv.split("\r\n");
+
+		expect(header).toBe(
+			"date,bank name,merchant,own_name,amount (USD; positive = money out),category,excluded,kind,for,note,account",
+		);
+		expect(csv).toMatch(/,AMAZON MKTPL\*2K4,Amazon,Dog bed,/);
+		expect(rows.filter((row) => row.includes("Dog bed"))).toHaveLength(1);
+	});
+
 	it("neutralizes formulas in CSV text fields without changing numeric amounts", async () => {
 		await env.DB.prepare("UPDATE accounts SET name = ? WHERE id = 1")
 			.bind("@checking")
@@ -327,6 +352,7 @@ describe("data exports", () => {
 				"kind_guessed",
 				"for_person_id",
 				"for_person_guessed",
+				"own_name",
 				"parent_id",
 				"pending",
 				"plaid_category",

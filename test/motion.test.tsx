@@ -476,6 +476,7 @@ describe("a sheet that is already open stays still", () => {
 		const id = await firstTransaction();
 		expect(sheetIn((await send(`/transactions/${id}`)).html)).toEqual(PLAYS);
 		const refused = await send(`/transactions/${id}`, {
+			name_pick: "own",
 			merchant: "x".repeat(200),
 			back: "/transactions",
 		});
