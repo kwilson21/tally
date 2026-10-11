@@ -79,6 +79,7 @@ import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
+	FOCUS_FIRST_TICK,
 	FOCUS_SET_CATEGORY,
 	LIST_LOAD_PAUSE,
 	SELECTION_BAR_OOB,
@@ -125,6 +126,8 @@ type ListOptions = {
 	focusHeading?: boolean;
 	/** The reply to Select all: focus Set category (the link leaves with the reply), when rows are ticked. */
 	focusSetCategory?: boolean;
+	/** The reply to Older or Newer in select mode: focus the first row's tick (FOCUS_FIRST_TICK). */
+	focusFirstTick?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -190,6 +193,7 @@ async function renderList(
 		selectionError,
 		focusHeading = false,
 		focusSetCategory = false,
+		focusFirstTick = false,
 	}: ListOptions = {},
 ) {
 	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
@@ -290,13 +294,16 @@ async function renderList(
 			href={pageHref(n)}
 			rel={rel}
 			class="inline-flex min-h-11 items-center px-2 -mx-2"
-			hx-get={pageHref(n)}
+			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
+			hx-get={
+				selecting ? `${pageHref(n)}&focus=${FOCUS_FIRST_TICK}` : pageHref(n)
+			}
 			hx-sync="#filters:replace"
 			hx-target="#results"
 			hx-select="#results > *"
 			hx-select-oob={LIST_OOB}
 			hx-swap="innerHTML show:top"
-			hx-push-url="true"
+			hx-push-url={selecting ? pageHref(n) : "true"}
 			{...includeTicked}
 		>
 			{label}
@@ -346,6 +353,8 @@ async function renderList(
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
 	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
 	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
+	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
+	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
 	const tickedOnPage = new Set(ticked.map((row) => row.id));
 	const htmx = c.req.header("HX-Request") === "true";
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
@@ -608,6 +617,7 @@ async function renderList(
 														row={shown(row)}
 														checked={checkedIds.has(row.id)}
 														today={today}
+														autofocus={row.id === firstTickId}
 													/>
 												),
 											)}
@@ -711,6 +721,7 @@ transactions.get("/transactions", async (c) => {
 			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 			selecting,
 			focusSetCategory: selecting && params.get("focus") === FOCUS_SET_CATEGORY,
+			focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
 			checkedIds: selecting
 				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
 				: undefined,

@@ -15,6 +15,12 @@ export const SELECTION_BAR_OOB =
 export const FOCUS_SET_CATEGORY = "set-category-selection";
 
 /**
+ * The `focus` value Older and Newer ask their reply for: the reply focuses the first row's tick, since
+ * the page link that had focus leaves with the old list.
+ */
+export const FOCUS_FIRST_TICK = "first-tick";
+
+/**
  * The attributes a Select-mode list request carries: htmx marks the selection form while it loads (its
  * ticks pause with it, in CSS) and disables the two actions until the reply lands.
  */
