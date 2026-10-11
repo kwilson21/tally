@@ -1164,7 +1164,8 @@ export type CashSplitPart = {
  * (src/db/refunded.ts), and that the entry has no parts but those saved and the new ones this batch has
  * already inserted, so a part another save added in the meantime refuses it. The part count changes
  * during the batch by design, and the gate counts the batch's own inserts; the entry's own amount changes
- * only in the last statement. Returns `refundPart` (the part's 1-based
+ * only in the last statement. Returns `refundTotalCents` (what the refunds linked to the entry take) when
+ * those are more than the new total, which moving the parts can't fix. Returns `refundPart` (the part's 1-based
  * position and what its refunds take) when a part's refunds don't fit; throws when the entry or its
  * parts are no longer as they were drawn, so the save is an error.
  */
@@ -1175,6 +1176,7 @@ export async function correctCashSplit(
 	by: string,
 ): Promise<
 	| { saved: true }
+	| { saved: false; refundTotalCents: number }
 	| { saved: false; refundPart: { part: number; refundCents: number } }
 > {
 	const { totalCents, amountWasCents, parts } = edit;
@@ -1249,8 +1251,19 @@ export async function correctCashSplit(
 	const results = await db.batch(statements);
 	if ((results.at(-1)?.meta.changes ?? 0) > 0) return { saved: true };
 
-	// Nothing changed. If the entry is still as it was drawn, the first part whose refunds no longer fit
-	// (in the sheet's order) is the reason; otherwise the entry changed, which is an error.
+	// Nothing changed. If the entry is still as it was drawn, the refunds linked to the entry itself come
+	// first, since moving its parts can't make them fit; then the first part whose refunds no longer fit
+	// (in the sheet's order) is the reason. Otherwise the entry changed, which is an error.
+	const linked = await db
+		.prepare(
+			`SELECT ${refundedByOthersSql("?1", "0")} AS refundCents
+			FROM transactions cash
+			WHERE cash.id = ?1 AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?2`,
+		)
+		.bind(parentId, amountWasCents)
+		.first<{ refundCents: number }>();
+	if (linked && linked.refundCents > totalCents)
+		return { saved: false, refundTotalCents: linked.refundCents };
 	const misfit = `${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents')`;
 	const refused = await db
 		.prepare(

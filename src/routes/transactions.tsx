@@ -4,6 +4,7 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
+import { refundedByOthersSql } from "../db/refunded";
 import {
 	correctCashSplit,
 	type FirstVisit,
@@ -2285,7 +2286,10 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			actor(c),
 		);
 		if (result.saved) return splitSaved(c, tx, today, back, []);
-		const { part, refundCents } = result.refundPart;
+		const error =
+			"refundPart" in result
+				? `Linked refunds add up to ${formatCents(result.refundPart.refundCents)}, so part ${result.refundPart.part} can't be less than that.`
+				: `Linked refunds add up to ${formatCents(result.refundTotalCents)}, so the amount can't be less than that.`;
 		return renderList(c, today, filtersFrom(c, today, back), {
 			status: 422,
 			sheet: (_categories, today) => (
@@ -2294,7 +2298,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					back={back}
 					categories={categories}
 					values={values}
-					error={`Linked refunds add up to ${formatCents(refundCents)}, so part ${part} can't be less than that.`}
+					error={error}
 					today={today}
 					still
 					correction={correction}
@@ -2506,6 +2510,16 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 			...(cashParsed?.errors ?? {}),
 		});
 	if (cashParsed && tx.isSplit) {
+		// Refunds linked to the entry itself: moving its parts can't make them fit, so this is checked first.
+		const linked = await c.env.DB.prepare(
+			`SELECT ${refundedByOthersSql("?1", "0")} AS cents`,
+		)
+			.bind(tx.id)
+			.first<{ cents: number }>();
+		if (linked && linked.cents > cashParsed.amountCents)
+			return showErrors({
+				amount: `Linked refunds add up to ${formatCents(linked.cents)}, so the amount can't be less than that.`,
+			});
 		const parts = await c.env.DB.prepare(
 			"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions WHERE parent_id = ?",
 		)

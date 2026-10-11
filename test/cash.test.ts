@@ -2425,4 +2425,48 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			/<option value="5" selected[^>]*>Household<\/option>/,
 		);
 	});
+
+	/** A refund of $85.00 linked to the entry itself, not to a part. */
+	const linkEntryRefund = (id: number) =>
+		env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,date,-8500,'Entry refund',?,1 FROM transactions WHERE id=?",
+		)
+			.bind(id, id)
+			.run();
+
+	it("refuses a split correction whose total is below the refunds linked to the entry, with the words in the sheet and nothing saved", async () => {
+		const { id, a, b } = await splitCash("Entry refund sheet");
+		await linkEntryRefund(id);
+		const before = await stateOf(id);
+		const { res, html } = await correction(
+			id,
+			[
+				[String(a), "1", "50.00"],
+				[String(b), "5", "30.00"],
+			],
+			{ total: "8000", amountWas: "9000" },
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $85.00, so the amount can&#39;t be less than that.",
+		);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("refuses an amount below the refunds linked to the entry in the edit panel, with no Change the parts, and saves nothing", async () => {
+		const { id } = await splitCash("Entry refund panel");
+		await linkEntryRefund(id);
+		const before = await stateOf(id);
+		const { res, html } = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "80.00"],
+			["back", "/transactions"],
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $85.00, so the amount can&#39;t be less than that.",
+		);
+		expect(html).not.toContain("Change the parts");
+		expect(await stateOf(id)).toEqual(before);
+	});
 });
