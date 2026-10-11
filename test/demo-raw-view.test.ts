@@ -606,17 +606,14 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 });
 
 describe("the two links under the title", () => {
-	it("are named Tidied by Tally and Straight from the bank, 44px tall, in a nav labelled View", async () => {
+	it("are named With Tally and Without Tally, 44px tall, in a nav labelled View", async () => {
 		const { html } = await demo("/transactions");
 		const nav = viewNav(html);
 		expect(nav).toBeDefined();
 		const links = [...(nav ?? "").matchAll(/<a [^>]*>[\s\S]*?<\/a>/g)].map(
 			(m) => m[0],
 		);
-		expect(links.map(textOf)).toEqual([
-			"Tidied by Tally",
-			"Straight from the bank",
-		]);
+		expect(links.map(textOf)).toEqual(["With Tally", "Without Tally"]);
 		for (const link of links) expect(link).toContain("min-h-11");
 		// The dot between them is for the eye only.
 		expect(nav).toMatch(/<span[^>]*aria-hidden="true"[^>]*>\s*·\s*<\/span>/);
@@ -629,30 +626,30 @@ describe("the two links under the title", () => {
 		);
 	});
 
-	it("mark Tidied by Tally as the current one on the normal list: ink, semibold, not underlined", async () => {
+	it("mark With Tally as the current one on the normal list: ink, semibold, not underlined", async () => {
 		const nav = viewNav((await demo("/transactions")).html) ?? "";
-		const tidied = linkIn(nav, "Tidied by Tally") ?? "";
-		const bank = linkIn(nav, "Straight from the bank") ?? "";
-		expect(tidied).toContain('aria-current="page"');
-		expect(tidied).toContain("text-ink");
-		expect(tidied).toContain("font-semibold");
-		expect(tidied).toContain("no-underline");
+		const withTally = linkIn(nav, "With Tally") ?? "";
+		const bank = linkIn(nav, "Without Tally") ?? "";
+		expect(withTally).toContain('aria-current="page"');
+		expect(withTally).toContain("text-ink");
+		expect(withTally).toContain("font-semibold");
+		expect(withTally).toContain("no-underline");
 		expect(bank).not.toContain("aria-current");
 		// The other one is an ordinary terracotta link.
 		expect(bank).not.toContain("text-ink");
 		expect(bank).not.toContain("no-underline");
-		expect(tidied).toContain('href="/transactions"');
+		expect(withTally).toContain('href="/transactions"');
 		expect(bank).toContain('href="/transactions?raw=1"');
 	});
 
-	it("mark Straight from the bank as the current one on ?raw=1", async () => {
+	it("mark Without Tally as the current one on ?raw=1", async () => {
 		const nav = viewNav((await demo("/transactions?raw=1")).html) ?? "";
-		const tidied = linkIn(nav, "Tidied by Tally") ?? "";
-		const bank = linkIn(nav, "Straight from the bank") ?? "";
+		const withTally = linkIn(nav, "With Tally") ?? "";
+		const bank = linkIn(nav, "Without Tally") ?? "";
 		expect(bank).toContain('aria-current="page"');
 		expect(bank).toContain("font-semibold");
-		expect(tidied).not.toContain("aria-current");
-		expect(tidied).toContain('href="/transactions"');
+		expect(withTally).not.toContain("aria-current");
+		expect(withTally).toContain('href="/transactions"');
 	});
 
 	it("keep the filters when switching, and start again at the first page", async () => {
@@ -660,7 +657,7 @@ describe("the two links under the title", () => {
 			viewNav(
 				(await demo("/transactions?month=all&q=ONLINE&page=2&select=1")).html,
 			) ?? "";
-		expect(linkIn(nav, "Straight from the bank")).toContain(
+		expect(linkIn(nav, "Without Tally")).toContain(
 			'href="/transactions?q=ONLINE&amp;month=all&amp;raw=1"',
 		);
 		const back =
@@ -668,7 +665,7 @@ describe("the two links under the title", () => {
 				(await demo("/transactions?raw=1&month=all&q=ONLINE&show=excluded"))
 					.html,
 			) ?? "";
-		expect(linkIn(back, "Tidied by Tally")).toContain(
+		expect(linkIn(back, "With Tally")).toContain(
 			'href="/transactions?q=ONLINE&amp;month=all&amp;show=excluded"',
 		);
 	});
@@ -699,8 +696,8 @@ describe("the family app", () => {
 		const { res, html } = await familyApp("/transactions");
 		expect(res.status).toBe(200);
 		expect(html).not.toContain('aria-label="View"');
-		expect(html).not.toContain("Tidied by Tally");
-		expect(html).not.toContain("Straight from the bank");
+		expect(html).not.toContain("With Tally");
+		expect(html).not.toContain("Without Tally");
 		expect(html).not.toContain("as the bank sends them");
 		expect(html).not.toContain(NOTE);
 	});

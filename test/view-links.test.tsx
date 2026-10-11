@@ -14,8 +14,8 @@ describe("ViewLinks", () => {
 		expect(html).toMatch(/^<nav [^>]*aria-label="View"/);
 		expect(html).toContain('id="view-links"');
 		expect(links(html).map((a) => a.replace(/<[^>]+>/g, ""))).toEqual([
-			"Tidied by Tally",
-			"Straight from the bank",
+			"With Tally",
+			"Without Tally",
 		]);
 		expect(html).toMatch(/<span[^>]*aria-hidden="true"[^>]*>\s*·\s*<\/span>/);
 	});
@@ -52,5 +52,22 @@ describe("ViewLinks", () => {
 		expect(html).not.toContain("hx-");
 		expect(html).not.toContain("<script");
 		expect(html).not.toContain("onclick");
+	});
+});
+
+// Every source file as text: the link names changed, so no file in src keeps the old words.
+const SRC = import.meta.glob(["../src/**/*.{ts,tsx,css}"], {
+	query: "?raw",
+	import: "default",
+	eager: true,
+}) as Record<string, string>;
+
+describe("the link names in src", () => {
+	it("appear in no source file under the old words", () => {
+		expect(Object.keys(SRC).length).toBeGreaterThan(100);
+		for (const [file, text] of Object.entries(SRC)) {
+			expect(text.toLowerCase(), file).not.toContain("tidied by tally");
+			expect(text.toLowerCase(), file).not.toContain("straight from the bank");
+		}
 	});
 });
