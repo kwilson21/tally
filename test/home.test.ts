@@ -1,13 +1,22 @@
 import { env, exports } from "cloudflare:workers";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { billTotalsForRows } from "../src/bills/totals";
+import { billTotalsForRows, calculateBillTotals } from "../src/bills/totals";
 import { budgetForMonth, summarizeMonth } from "../src/budget";
-import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
+import {
+	DEFAULT_TIME_ZONE,
+	daysInMonth,
+	monthName,
+	monthsBefore,
+	todayIn,
+} from "../src/dates";
 import { setBudget } from "../src/db/budgets";
+import { homeForecastDays } from "../src/db/home-forecast";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
 import { OLDER_NEEDS_CATEGORY_SQL } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { forecastMonth } from "../src/home-forecast";
+import { formatCents } from "../src/money";
 import { loadBillRows } from "../src/routes/bills";
 import { home as homeRoute } from "../src/routes/home";
 
@@ -525,6 +534,143 @@ describe("GET / with the demo seed", () => {
 		expect(withoutBills - withBills).toBe(462);
 	});
 
+	it.each([
+		"2026-10-07T16:00:00Z",
+		"2026-10-21T16:00:00Z",
+		"2026-10-28T16:00:00Z",
+		"2026-01-07T16:00:00Z",
+	])(
+		"forecasts all unpaid occurrences due this month, as Bills does (%s)",
+		async (instant) => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date(instant));
+			const today = todayIn(DEFAULT_TIME_ZONE);
+			const month = today.slice(0, 7);
+			await resetDemo(env.DB, today);
+			const nextId = await env.DB.prepare(
+				"SELECT COALESCE(MAX(id), 0) + 1 AS id FROM bills",
+			).first<{ id: number }>();
+			const firstId = nextId?.id ?? 1000;
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?, 'Forecast due later', 10000, 28, 'monthly', 'FORECAST DUE LATER')",
+				).bind(firstId),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?, 'Forecast already paid', 20000, 28, 'monthly', 'FORECAST PAID')",
+				).bind(firstId + 1),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?, 'Forecast overdue last month', 3000, 28, 'monthly', 'FORECAST SEPTEMBER')",
+				).bind(firstId + 2),
+				env.DB.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1, ?, 20000, 'FORECAST PAID')",
+				).bind(`${month}-03`),
+			]);
+			const payment = await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'FORECAST PAID' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>();
+			if (!payment) throw new Error("Forecast payment was not inserted");
+			await env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, ?, ?, 'user', 'linked')",
+			)
+				.bind(firstId + 1, month, payment.id)
+				.run();
+
+			const { rows } = await loadBillRows(env.DB, today);
+			const active = rows.filter((bill) => bill.active);
+			const billTotals = calculateBillTotals({
+				month,
+				bills: active.map((bill) => ({
+					id: bill.id,
+					amountCents: bill.amountCents,
+					frequency: bill.frequency,
+					active: true,
+				})),
+				displayedOccurrences: active.map((bill) => ({
+					billId: bill.id,
+					dueDate: bill.dueDate,
+					status: bill.status,
+					amountCents: bill.amountCents,
+					paidCents: bill.paidCents,
+				})),
+				thisMonthOccurrences: active.flatMap((bill) =>
+					bill.totalOccurrences
+						.filter((occurrence) => occurrence.dueDate.startsWith(month))
+						.map((occurrence) => ({ billId: bill.id, ...occurrence })),
+				),
+			});
+			const expectedStillToPay = active
+				.flatMap((bill) =>
+					bill.totalOccurrences.filter((occurrence) =>
+						occurrence.dueDate.startsWith(month),
+					),
+				)
+				.reduce(
+					(sum, occurrence) =>
+						sum + Math.max(0, occurrence.amountCents - occurrence.paidCents),
+					0,
+				);
+			expect(billTotals.stillToPayCents).toBe(expectedStillToPay);
+			expect(billTotals.stillToPayCents).toBeGreaterThan(10000);
+			expect(
+				active
+					.find((bill) => bill.id === firstId)
+					?.totalOccurrences.some(
+						(occurrence) => occurrence.dueDate === `${month}-28`,
+					),
+			).toBe(true);
+			expect(
+				active
+					.find((bill) => bill.id === firstId + 1)
+					?.totalOccurrences.find((occurrence) =>
+						occurrence.dueDate.startsWith(month),
+					)?.paidCents,
+			).toBe(20000);
+			const overdueSeptember = active.find((bill) => bill.id === firstId + 2);
+			const expectedOccurrenceMonth =
+				Number(today.slice(8, 10)) >= 21 ? month : monthsBefore(month, 1);
+			const expectedDueDate = `${expectedOccurrenceMonth}-28`;
+			expect(overdueSeptember?.dueDate).toBe(expectedDueDate);
+			expect(overdueSeptember?.status).toBe(
+				today > expectedDueDate ? "overdue" : "due",
+			);
+
+			const billPage = await exports.default.fetch("http://tally.test/bills");
+			const billHtml = await billPage.text();
+			expect(billHtml).toContain(
+				`${formatCents(billTotals.stillToPayCents, { wholeDollars: true })} still to pay in ${monthName(month)}`,
+			);
+
+			const data = await loadMonth(env.DB, month);
+			const summary = summarizeMonth({
+				month,
+				...data,
+				unpaidDueBillsCents: 0,
+			});
+			const days = await homeForecastDays(env.DB, month, today);
+			const forecast = forecastMonth({
+				day: Number(today.slice(8, 10)),
+				daysInMonth: daysInMonth(month),
+				totalBudgetCents: summary.totalBudgetCents,
+				spentCents: days.reduce((sum, row) => sum + row.spentCents, 0),
+				everydayCents: days.reduce((sum, row) => sum + row.everydayCents, 0),
+				billPaymentsCents: days.reduce(
+					(sum, row) => sum + row.billPaymentsCents,
+					0,
+				),
+				refundsCents: days.reduce((sum, row) => sum + row.refundsCents, 0),
+				billsStillDueCents: billTotals.stillToPayCents,
+			});
+			const difference = summary.totalBudgetCents - forecast.endCents;
+			const shown =
+				difference >= 0
+					? Math.floor(difference / 100) * 100
+					: Math.ceil(-difference / 100) * 100;
+			const descriptor = `${formatCents(shown, { wholeDollars: true })} ${difference >= 0 ? "under" : "over"}`;
+			const homeHtml = (await home()).html;
+			expect(homeHtml).toContain(`at this pace: ${descriptor} the`);
+		},
+	);
+
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
 		const { html } = await home();
 		expect(html).toMatch(/\$395\s+of\s+\$700/);
@@ -673,6 +819,49 @@ describe("GET / with the demo seed", () => {
 			.bind(`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}%`)
 			.run();
 		expect((await home()).html).toContain("$0.30 more refunded than spent");
+	});
+
+	it("names a finished month's uncategorized spending in Not budgeted, and takes it out of the result (#310)", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare(
+				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-09', 10000)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (90011, 1, '2026-09-02', 2000, 'GROCERIES', 1), (90012, 1, '2026-09-03', 5000, 'UNCATEGORIZED', NULL)",
+			),
+		]);
+		const { html } = await homeAt("2026-09");
+		expect(html).toMatch(/whitespace-nowrap[^"]*">\$30<\/p>/);
+		expect(html).toContain("border-ok text-ok");
+		expect(html).toContain(
+			'<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>',
+		);
+		expect(html).toMatch(
+			/Needs a category<\/span><span class="text-right text-lg">\$50<\/span>/,
+		);
+		expect(html).not.toMatch(/href="\/budget\//);
+	});
+
+	it("shows a finished month's uncategorized refunds as +$ in green, and adds them to the result (#310)", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare(
+				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-09', 10000)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, credit_reviewed) VALUES (90011, 1, '2026-09-02', 2000, 'GROCERIES', 1, 0), (90012, 1, '2026-09-03', -5000, 'UNCATEGORIZED REFUND', NULL, 1)",
+			),
+		]);
+		const { html } = await homeAt("2026-09");
+		expect(html).toMatch(/whitespace-nowrap[^"]*">\$130<\/p>/);
+		expect(html).toMatch(
+			/Needs a category<\/span><span class="text-right text-lg text-ok">\+\$50<span class="sr-only"> back: refunds outweigh spending<\/span><\/span>/,
+		);
 	});
 
 	it("puts the number first: the month, budget remaining, the Band, Budget, then Things to try (#92)", async () => {
