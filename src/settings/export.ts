@@ -20,6 +20,8 @@ const EXPORT_COLUMNS = {
 	bill_payments:
 		"id, bill_id, period, transaction_id, matched_by, status, created_at",
 	household_settings: "key, value",
+	household_members:
+		"email, first_seen_at, last_seen_at, session_issued_at, removed_at",
 	household_people: "id, name",
 } as const;
 

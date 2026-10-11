@@ -18,6 +18,7 @@ import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
+import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
@@ -2979,6 +2980,36 @@ const TRENDS_TOP_STATES = [
 function SettingsGroup() {
 	return (
 		<Group id="settings" title="Settings">
+			<Specimen
+				id="reconnect-reminders"
+				title="Bank sign-in emails"
+				tier="visual"
+				components={["BankSignInEmails", "TimeZoneRow", "Switch", "Button"]}
+				sentence="Under Household, after the time zone: one household switch, the people it goes to as round initials, and a “Who gets them” disclosure listing each address with Remove."
+			>
+				<State label="On, three people">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="catalog-time-zone"
+							zone="America/New_York"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+						<BankSignInEmails
+							on
+							recipients={[
+								"alex@example.com",
+								"sam@example.com",
+								"jo@example.com",
+							]}
+							open
+							action="#"
+						/>
+					</div>
+				</State>
+				<UseSpec spec={SWITCH_SPEC} />
+			</Specimen>
 			<Specimen
 				id="merchant-rules-list"
 				title="Merchant rules"

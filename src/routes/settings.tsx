@@ -23,8 +23,14 @@ import {
 } from "../db/category-suggestions";
 import { namesToReview } from "../db/merchant-names";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
+import {
+	readBankSignInEmails,
+	removeHouseholdMember,
+	saveBankSignInEmails,
+} from "../db/reconnect";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
+import { reconnectRecipients } from "../reconnect/reminders";
 import {
 	type CategoryErrors,
 	fullMessage,
@@ -34,6 +40,7 @@ import {
 import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
 import { Band } from "../views/band";
+import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
@@ -111,8 +118,18 @@ const chevron = (
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
-	/** Move focus here after a swap: a row's summary, the Archived summary, or the Time zone row. */
-	focus?: number | "archived" | "zone";
+	/** Move focus here after a swap: a row's summary, the Archived summary, the Time zone row, or a bank sign-in email control. */
+	focus?:
+		| number
+		| "archived"
+		| "zone"
+		| "bank-sign-in-email-save"
+		| "bank-sign-in-email-summary"
+		| "bank-sign-in-email-remove";
+	/** Keeps the "Who gets them" disclosure open after a swap. */
+	bankSignInEmailsOpen?: boolean;
+	/** The address whose Remove button takes focus after a swap. */
+	bankSignInEmailFocusEmail?: string;
 	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
 	focusRuleIndex?: number;
 	focusMerchantHeading?: boolean;
@@ -144,6 +161,7 @@ type View = {
 	budgetsOob?: boolean;
 	/** Why the posted time zone wasn't saved, shown under its select. */
 	zoneError?: string;
+	bankSignInEmailError?: string;
 	peopleOpen?: number;
 	peopleAddOpen?: boolean;
 	peopleError?: string;
@@ -449,6 +467,8 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
+	const bankEmailsOn = await readBankSignInEmails(c.env.DB);
+	const members = await reconnectRecipients(c.env.DB);
 	const people = await c.env.DB.prepare(
 		"SELECT id, name FROM household_people ORDER BY id",
 	).all<{ id: number; name: string }>();
@@ -643,6 +663,14 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						zone={timeZone}
 						error={view.zoneError}
 						focus={view.focus === "zone"}
+					/>
+					<BankSignInEmails
+						on={bankEmailsOn}
+						recipients={members.results.map(({ email }) => email)}
+						error={view.bankSignInEmailError}
+						open={Boolean(view.bankSignInEmailsOpen)}
+						focus={bankSignInEmailFocus(view.focus)}
+						focusEmail={view.bankSignInEmailFocusEmail}
 					/>
 				</div>
 				<HouseholdPeople
@@ -928,6 +956,83 @@ settings.post("/settings/ai", async (c) => {
 	);
 });
 
+settings.post("/settings/bank-sign-in-emails", async (c) => {
+	const form = await c.req.formData();
+	// A Remove button posts its address as `remove`; a Remove never changes the switch.
+	if (form.has("remove"))
+		return removeBankSignInEmail(c, String(form.get("remove") ?? ""));
+	const on = form.get("enabled") === "on";
+	await saveBankSignInEmails(c.env.DB, on);
+	return done(
+		c,
+		"Saved bank sign-in emails",
+		`Bank sign-in emails ${on ? "On" : "Off"}.`,
+		{
+			hash: "household",
+			focus: "bank-sign-in-email-save",
+			bankSignInEmailsOpen: true,
+		},
+	);
+});
+
+async function removeBankSignInEmail(c: Context<App>, posted: string) {
+	const email = posted.trim().toLowerCase();
+	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+		return bankSignInEmailError(c, "Choose an address to remove.", 400);
+	const member = await c.env.DB.prepare(
+		"SELECT 1 FROM household_members WHERE email = ?",
+	)
+		.bind(email)
+		.first();
+	if (!member) return bankSignInEmailError(c, "Address not found.", 404);
+	await removeHouseholdMember(c.env.DB, email);
+	// The list is in address order: the address that takes the removed row's place is the next one, else the one before it.
+	const remaining = (await reconnectRecipients(c.env.DB)).results.map(
+		({ email: address }) => address,
+	);
+	const before = remaining.filter((address) => address < email).length;
+	const focusEmail = remaining[before] ?? remaining[before - 1];
+	return done(
+		c,
+		"Removed address",
+		"Removed this sign-in address from bank sign-in emails.",
+		{
+			hash: "household",
+			focus: focusEmail
+				? "bank-sign-in-email-remove"
+				: "bank-sign-in-email-summary",
+			bankSignInEmailsOpen: true,
+			bankSignInEmailFocusEmail: focusEmail,
+		},
+	);
+}
+
+function bankSignInEmailError(
+	c: Context<App>,
+	message: string,
+	status: 400 | 404,
+) {
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "error" }, announce: message }),
+	);
+	// The Remove that was pressed is gone from the swap, so the addresses stay open and focus goes to their summary.
+	return renderSettings(c, {
+		bankSignInEmailError: message,
+		status,
+		bankSignInEmailsOpen: true,
+		focus: "bank-sign-in-email-summary",
+	});
+}
+
+/** Which control of the bank sign-in emails block takes focus after a swap, from the page's focus. */
+function bankSignInEmailFocus(focus: View["focus"]) {
+	if (focus === "bank-sign-in-email-save") return "save";
+	if (focus === "bank-sign-in-email-summary") return "summary";
+	if (focus === "bank-sign-in-email-remove") return "remove";
+	return undefined;
+}
+
 settings.post("/settings/people", async (c) => {
 	const form = await c.req.formData();
 	const action = form.has("remove")
@@ -1025,9 +1130,9 @@ settings.post("/settings/time-zone", async (c) => {
 	await saveTimeZone(c.env.DB, parsed.zone);
 	const today = todayIn(parsed.zone);
 	// The month is the one thing in Settings that follows the zone (each category's amount is the
-	// month's), and the swap below replaces only #household, so every save sends those amounts along.
-	// Always, not only when the two zones' months differ: a page left open past midnight can show last
-	// month whichever zone is saved.
+	// month's), and the swap below replaces only the time zone row, so every save sends those
+	// amounts along. Always, not only when the two zones' months differ: a page left open past
+	// midnight can show last month whichever zone is saved.
 	return done(
 		c,
 		"Saved time zone",

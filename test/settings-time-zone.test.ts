@@ -34,10 +34,9 @@ const trigger = (res: Response) =>
 		announce?: string;
 	};
 
-/** The Household section's markup. */
+/** The Household section's time zone row: from the section to the bank sign-in emails block after it. */
 const group = (html: string) =>
-	html.split('id="household"')[1]?.split('<section id="household-people"')[0] ??
-	"";
+	html.split('id="household"')[1]?.split('<div id="household-emails"')[0] ?? "";
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")
@@ -157,8 +156,8 @@ describe("GET /settings: the Household group", () => {
 		expect(form).toContain('method="post"');
 		expect(form).toContain('action="/settings/time-zone"');
 		expect(form).toContain('hx-post="/settings/time-zone"');
-		expect(form).toContain('hx-target="#household"');
-		expect(form).toContain('hx-select="#household"');
+		expect(form).toContain('hx-target="#time-zone-disclosure"');
+		expect(form).toContain('hx-select="#time-zone-disclosure"');
 		expect(form).toContain('hx-swap="outerHTML"');
 		expect(form).toContain("hx-disable");
 		expect(group(html).match(/<form/g)).toHaveLength(1);
@@ -168,13 +167,36 @@ describe("GET /settings: the Household group", () => {
 		expect(group(html)).toContain("Save");
 		expect(group(html)).toContain("Saving…");
 		// Cancel is a link back to the group: it closes the row without JavaScript, and with it
-		// swaps the group back with focus on the row.
+		// swaps only the row back, with focus on it.
 		const cancel = group(html).match(/<a[^>]*>\s*Cancel\s*<\/a>/)?.[0] ?? "";
 		expect(cancel).toContain('href="/settings#household"');
 		expect(cancel).toContain('hx-get="/settings?focus=zone"');
-		expect(cancel).toContain('hx-target="#household"');
-		expect(cancel).toContain('hx-select="#household"');
+		expect(cancel).toContain('hx-target="#time-zone-disclosure"');
+		expect(cancel).toContain('hx-select="#time-zone-disclosure"');
 		expect(cancel).toContain('hx-swap="outerHTML"');
+	});
+
+	it("Save and Cancel swap only the time zone row, so the bank sign-in emails block and the people list are left alone", async () => {
+		const { html } = await get("/settings");
+		const form = group(html).match(/<form[^>]*>/)?.[0] ?? "";
+		expect(form).toContain('hx-target="#time-zone-disclosure"');
+		expect(form).toContain('hx-select="#time-zone-disclosure"');
+		const cancel = group(html).match(/<a[^>]*>\s*Cancel\s*<\/a>/)?.[0] ?? "";
+		expect(cancel).toContain('hx-target="#time-zone-disclosure"');
+		expect(cancel).toContain('hx-select="#time-zone-disclosure"');
+		// One row, and it is a <details>; the row holds no other <details>, so its first close ends it.
+		expect(html.match(/id="time-zone-disclosure"/g)).toHaveLength(1);
+		const row =
+			html.match(
+				/<details[^>]*\sid="time-zone-disclosure"[^>]*>[\s\S]*?<\/details>/,
+			)?.[0] ?? "";
+		expect(row).not.toBe("");
+		expect(row).toContain("<select");
+		expect(row).toContain('name="time_zone"');
+		expect(row).toContain('id="time-zone-save"');
+		expect(row).not.toContain('id="household-emails"');
+		expect(row).not.toContain('name="enabled"');
+		expect(row).not.toContain('id="household-people"');
 	});
 
 	it("never names Jev, and shows no error before anything was refused", async () => {
@@ -452,7 +474,7 @@ describe("a save that moves the household into another month", () => {
 		});
 		expect(res.status).toBe(200);
 		// htmx 4 takes each element with hx-swap-oob from the response and swaps it into the page by
-		// its id, before the main swap picks #household out of what's left.
+		// its id, before the main swap picks the time zone row out of what's left.
 		const ids = await activeIds();
 		expect(ids.length).toBeGreaterThan(1);
 		expect(oob(html)).toEqual(

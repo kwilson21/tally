@@ -12,6 +12,13 @@ async function tables() {
 	return results.map((r) => r.name);
 }
 
+async function columns(table: string) {
+	const { results } = await db
+		.prepare(`PRAGMA table_info(${table})`)
+		.all<{ name: string }>();
+	return results.map((column) => column.name);
+}
+
 beforeEach(async () => {
 	await db.batch([
 		db.prepare("DELETE FROM bill_payments"),
@@ -54,6 +61,7 @@ describe("schema", () => {
 			"category_suggestions",
 			"documents",
 			"feedback",
+			"household_members",
 			"household_people",
 			"household_settings",
 			"merchants",
@@ -72,6 +80,34 @@ describe("schema", () => {
 		).toMatchObject({
 			notnull: 0,
 		});
+	});
+
+	it("keeps the transaction details and reconnect migration columns", async () => {
+		expect(await columns("transactions")).toEqual(
+			expect.arrayContaining([
+				"kind",
+				"for_person_id",
+				"note_guessed",
+				"kind_guessed",
+				"for_person_guessed",
+				"details_asked",
+				"note_tried_at",
+				"note_dismissed",
+			]),
+		);
+		expect(await columns("household_people")).toEqual(
+			expect.arrayContaining(["id", "name"]),
+		);
+		expect(await columns("household_members")).toEqual(
+			expect.arrayContaining([
+				"email",
+				"first_seen_at",
+				"last_seen_at",
+				"session_issued_at",
+				"removed_at",
+			]),
+		);
+		expect(await columns("plaid_items")).toContain("reconnect_emailed_at");
 	});
 
 	it("rejects duplicate Plaid item ids", async () => {

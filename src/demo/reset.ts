@@ -31,6 +31,7 @@ const TABLES_CHILD_FIRST = [
 	"categories",
 	"accounts",
 	"plaid_items",
+	"household_members",
 ];
 
 /**
