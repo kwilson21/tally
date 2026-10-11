@@ -182,10 +182,9 @@ merchantNames.post("/settings/names", async (c) => {
 		return stale(c, next);
 
 	const left = (await namesToReview(c.env.DB)).length;
-	const message =
-		choice.value.kind === "keep"
-			? `Kept the bank's name for ${review.count} ${transactions(review.count)}`
-			: `Renamed ${review.count} ${transactions(review.count)} to ${choice.value.name}`;
+	// A charge with its own name keeps it when the merchant is named, so only the others change (decision 101).
+	const changed = review.count - review.owned;
+	const message = savedMessage(choice.value, changed);
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	return renderReview(c, {
 		focus: true,
@@ -196,6 +195,20 @@ merchantNames.post("/settings/names", async (c) => {
 		},
 	});
 });
+
+/**
+ * The toast's words for a saved choice, counting only the charges whose shown name changed. When every charge
+ * keeps its own name, nothing is counted and the words say the choice is for the transactions that come later.
+ */
+function savedMessage(choice: NameChoice, changed: number): string {
+	if (changed === 0)
+		return choice.kind === "keep"
+			? "Kept the bank's name for the transactions that come later"
+			: `Saved ${choice.name} for the transactions that come later`;
+	return choice.kind === "keep"
+		? `Kept the bank's name for ${changed} ${transactions(changed)}`
+		: `Renamed ${changed} ${transactions(changed)} to ${choice.name}`;
+}
 
 function stale(c: Context<App>, next: string) {
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
