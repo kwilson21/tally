@@ -745,6 +745,7 @@ const EXCLUDE =
 export type SaveEditResult =
 	| { saved: true }
 	| { saved: false; refundLeftCents: number }
+	| { saved: false; personMissing: true }
 	| { saved: false; cashError: "split"; amountCents: number }
 	| { saved: false; cashError: "refund"; refundCents: number };
 
@@ -754,12 +755,13 @@ export type SaveEditResult =
  * recategorizes the merchant's other transactions except ones a person chose (spec §7).
  *
  * Linking a refund to a purchase (spec §6, §8.5) is the one write that can be refused, and so is
- * turning off "Count as income" on a credit that stays linked, which makes it count against its
- * purchase. The check is an UPDATE that changes nothing unless what moves with the refund fits what's
+ * turning off "Count as income", or reviewing the credit as not income, on a credit that stays linked,
+ * which makes it count against its purchase. The check is an UPDATE that changes nothing unless what moves with the refund fits what's
  * left of the purchase (src/db/refunded.ts), so two saves at once can't both fit; every other write
  * in the batch applies only once it has, so a refusal saves nothing, and an error anywhere rolls the
  * link back too. A person linking a refund includes it in the budget, even when it was excluded
- * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone.
+ * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone. A For person
+ * removed since the panel loaded the household list is refused the same way (`personMissing`).
  */
 export async function saveEdit(
 	db: D1Database,
@@ -804,14 +806,30 @@ export async function saveEdit(
 			? edit.refundOfId
 			: undefined;
 	const linking = typeof newLink === "number";
-	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so
-	// turning that off, with the link staying, makes it count: that is checked like a link. (A split
-	// parent never counts, only its parts do, and the cap ignores whether a refund is excluded or
-	// reviewed, so income is the one flag that changes what counts.)
+	const incomeChanged =
+		edit.incomeWas === undefined
+			? (edit.income ? 1 : 0) !== current.income
+			: edit.income !== edit.incomeWas;
+	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
+	const creditReviewChanged =
+		edit.creditReviewedProvided === false
+			? false
+			: edit.creditReviewedWas === undefined
+				? edit.creditReviewed !== (current.creditReviewedBy === "user")
+				: edit.creditReviewed !== edit.creditReviewedWas;
+	const creditReviewByUser =
+		creditReviewChanged && !edit.income && creditReviewChoice === 1;
+	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so a save
+	// that clears that, with the link staying, makes it count: that is checked like a link. The panel's
+	// own update also clears the income when a person reviews the credit as not income
+	// (creditReviewByUser), so that counts too. A panel that still shows income off, saving only a note,
+	// clears nothing. (A split parent never counts, only its parts do, and the cap ignores whether a
+	// refund is excluded or reviewed, so income is the one flag that changes what counts.)
 	const recounting =
 		newLink === undefined &&
 		current.refundOfId !== null &&
 		current.income === 1 &&
+		(incomeChanged || creditReviewByUser) &&
 		!edit.income &&
 		current.isSplit === 0
 			? current.refundOfId
@@ -849,19 +867,6 @@ export async function saveEdit(
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
-	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
-	const incomeChanged =
-		edit.incomeWas === undefined
-			? (edit.income ? 1 : 0) !== current.income
-			: edit.income !== edit.incomeWas;
-	const creditReviewChanged =
-		edit.creditReviewedProvided === false
-			? false
-			: edit.creditReviewedWas === undefined
-				? edit.creditReviewed !== (current.creditReviewedBy === "user")
-				: edit.creditReviewed !== edit.creditReviewedWas;
-	const creditReviewByUser =
-		creditReviewChanged && !edit.income && creditReviewChoice === 1;
 	// Changing the exclusion makes it a person's choice, which Jev never overrides. A refund being
 	// linked counts, whatever the panel's Exclude chip held (it was drawn from the old state).
 	const excluded = edit.excluded && !linking ? 1 : 0;
@@ -1134,7 +1139,21 @@ export async function saveEdit(
 			),
 		);
 	}
-	const results = await db.batch(statements);
+	// A For person removed after the panel's household list loaded fails the details write on its foreign
+	// key. The batch is atomic, so that failure saved nothing: it is a refusal, and the person is named.
+	const results = await db.batch(statements).catch(async (error: unknown) => {
+		if (
+			personChanged &&
+			typeof edit.forPersonId === "number" &&
+			!(await db
+				.prepare("SELECT 1 FROM household_people WHERE id = ?")
+				.bind(edit.forPersonId)
+				.first())
+		)
+			return null;
+		throw error;
+	});
+	if (!results) return { saved: false, personMissing: true };
 	if (cashChangeIndex !== null && !results[cashChangeIndex]?.meta.changes) {
 		const state = await db
 			.prepare(
