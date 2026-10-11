@@ -1356,6 +1356,108 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await row("posted-1")).toMatchObject({ own_name: "Prime" });
 	});
 
+	describe("a This one only name moving onto a posted row with Tally's answer (decision 101)", () => {
+		const answer = (plaidId: string) =>
+			env.DB.prepare(
+				`SELECT own_name, category_id, category_source, category_confidence, jev_category_id, jev_none_fit
+				 FROM transactions WHERE plaid_transaction_id = ?`,
+			)
+				.bind(plaidId)
+				.first<Record<string, unknown>>();
+
+		it("moves the pending row's name and its Tally answer, replacing the posted row's Jev answer for the old name", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed', category_id = 2, category_source = 'jev', category_confidence = 0.93, jev_category_id = 2 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = 3, category_source = 'jev', category_confidence = 0.9, jev_category_id = 3 WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				category_id: 2,
+				category_source: "jev",
+				category_confidence: 0.93,
+				jev_category_id: 2,
+			});
+		});
+
+		it("clears the posted row's Jev answer when the pending row's name came with none, so the night run asks again with the name", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed', category_id = NULL, category_source = NULL, category_confidence = NULL, jev_category_id = NULL WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET category_id = 3, category_source = 'jev', category_confidence = 0.9, jev_category_id = 3, jev_none_fit = 1 WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				category_id: null,
+				category_source: null,
+				category_confidence: null,
+				jev_category_id: null,
+				jev_none_fit: 0,
+			});
+			expect((await pendingForJev(env.DB, 10)).map((r) => r.id)).toContain(
+				ids.posted,
+			);
+		});
+
+		it.each([
+			{ source: "user", category: 4 },
+			{ source: "merchant_rule", category: 4 },
+		])(
+			"keeps the posted row's $source category when the pending row's name moves",
+			async ({ source, category }) => {
+				const item = await addItem();
+				const ids = await bothStored(item, { amount: -42 });
+				await env.DB.batch([
+					env.DB.prepare(
+						"UPDATE transactions SET own_name = 'Dog bed', category_id = 2, category_source = 'jev', category_confidence = 0.93, jev_category_id = 2 WHERE id = ?",
+					).bind(ids.pending),
+					env.DB.prepare(
+						"UPDATE transactions SET category_id = ?, category_source = ?, category_confidence = NULL WHERE id = ?",
+					).bind(category, source, ids.posted),
+				]);
+				await post(item, { amount: -42 });
+				expect(await answer("posted-1")).toMatchObject({
+					own_name: "Dog bed",
+					category_id: category,
+					category_source: source,
+				});
+			},
+		);
+
+		it("keeps the posted row's own name, and its Jev answer, when it already has one of its own", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed', category_id = 2, category_source = 'jev', category_confidence = 0.93, jev_category_id = 2 WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					"UPDATE transactions SET own_name = 'Prime', category_id = 3, category_source = 'jev', category_confidence = 0.9, jev_category_id = 3 WHERE id = ?",
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Prime",
+				category_id: 3,
+				category_source: "jev",
+				category_confidence: 0.9,
+				jev_category_id: 3,
+			});
+		});
+	});
+
 	it("moves a bill payment onto it", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
