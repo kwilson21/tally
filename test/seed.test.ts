@@ -9,45 +9,50 @@ import { buildSeed, monthOffset } from "../src/demo/seed";
 import { chartStart, netWorthSeries, netWorthView } from "../src/net-worth";
 
 describe("buildSeed", () => {
-	it.each(["2026-09-22", "2026-09-01", "2026-02-28", "2027-01-31"])(
-		"designed totals hold on %s",
-		(today) => {
-			const seed = buildSeed(today);
-			const month = today.slice(0, 7);
-			// A linked refund counts in its purchase's month (spec §6).
-			const countedDate = (t: (typeof seed.transactions)[number]) =>
-				seed.transactions.find((p) => p.id === t.refundOfId)?.date ?? t.date;
-			const counted = seed.transactions.filter(
-				(t) => countedDate(t).startsWith(month) && !t.excluded && !t.isSplit,
-			);
+	// Childcare is Daycare's $240 on each Friday of the month up to today (paid, so spent and not set aside).
+	it.each([
+		["2026-09-22", 72000],
+		["2026-09-01", 0],
+		["2026-02-28", 96000],
+		["2027-01-31", 120000],
+	])("designed totals hold on %s", (today, childcareCents) => {
+		const seed = buildSeed(today);
+		const month = today.slice(0, 7);
+		// A linked refund counts in its purchase's month (spec §6).
+		const countedDate = (t: (typeof seed.transactions)[number]) =>
+			seed.transactions.find((p) => p.id === t.refundOfId)?.date ?? t.date;
+		const counted = seed.transactions.filter(
+			(t) => countedDate(t).startsWith(month) && !t.excluded && !t.isSplit,
+		);
 
-			const summary = summarizeMonth({
-				month,
-				categories: seed.categories,
-				amounts: seed.budgetAmounts,
-				transactions: counted.map((t) => ({
-					categoryId: t.categoryId,
-					amountCents: t.amountCents,
-					income: t.flagIncome,
-				})),
-				unpaidDueBillsCents: 0,
-			});
+		const summary = summarizeMonth({
+			month,
+			categories: seed.categories,
+			amounts: seed.budgetAmounts,
+			transactions: counted.map((t) => ({
+				categoryId: t.categoryId,
+				amountCents: t.amountCents,
+				income: t.flagIncome,
+			})),
+			unpaidDueBillsCents: 0,
+		});
 
-			const spent = Object.fromEntries(
-				summary.categories.map((c) => [c.name, c.spentCents]),
-			);
-			expect(spent).toEqual({
-				Groceries: 39458,
-				"Eating Out": 28600,
-				Gas: 18600,
-				Kids: 21000,
-				Household: 15041,
-			});
-			expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
-			expect(summary.incomeCents).toBe(490000);
-			expect(summary.safeToSpendCents).toBe(24500);
-		},
-	);
+		const spent = Object.fromEntries(
+			summary.categories.map((c) => [c.name, c.spentCents]),
+		);
+		expect(spent).toEqual({
+			Groceries: 39458,
+			"Eating Out": 28600,
+			Gas: 18600,
+			Kids: 21000,
+			Household: 15041,
+			Childcare: childcareCents,
+		});
+		expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
+		expect(summary.incomeCents).toBe(490000);
+		// Childcare's $1,040 budget adds to what is budgeted; its paid Fridays are spent.
+		expect(summary.safeToSpendCents).toBe(24500 + 104000 - childcareCents);
+	});
 
 	it.each(["2026-09-22", "2026-09-01", "2026-03-31", "2027-01-31"])(
 		"links the Target refund to a purchase last month on %s",
@@ -448,7 +453,8 @@ describe("resetDemo", () => {
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		expect(summary.safeToSpendCents).toBe(24500);
+		// Childcare's $1,040 budget less the three Fridays paid so far in September ($720).
+		expect(summary.safeToSpendCents).toBe(24500 + 104000 - 72000);
 		expect(summary.uncategorized.count).toBe(10);
 
 		const { results } = await env.DB.prepare(
