@@ -994,8 +994,10 @@ export async function saveEdit(
 				`UPDATE transactions SET
 					kind = CASE WHEN ? = 1 THEN ? ELSE kind END,
 					kind_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE kind_guessed END,
+					kind_cleared = CASE WHEN ? = 1 THEN ? ELSE kind_cleared END,
 					for_person_id = CASE WHEN ? = 1 THEN ? ELSE for_person_id END,
 					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
+					for_person_cleared = CASE WHEN ? = 1 THEN ? ELSE for_person_cleared END,
 					note = CASE WHEN ? = 1 THEN ? ELSE note END,
 					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
 					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
@@ -1007,10 +1009,14 @@ export async function saveEdit(
 					edit.kind ?? null,
 					kindChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
+					kindChanged ? 1 : 0,
+					edit.kind === null ? 1 : 0,
 					personChanged ? 1 : 0,
 					edit.forPersonId ?? null,
 					personChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
+					personChanged ? 1 : 0,
+					edit.forPersonId === null ? 1 : 0,
 					noteChanged ? 1 : 0,
 					edit.note,
 					noteChanged ? 1 : 0,
@@ -1634,7 +1640,10 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
 		.run();
 }
 
-/** Stores only Jev's valid detail choices, and records that this transaction was asked once. */
+/**
+ * Stores only Jev's valid detail choices, and records that this transaction was asked once. A Kind or For a
+ * person cleared (`kind_cleared`, `for_person_cleared`) is a deliberate empty choice, so Jev doesn't fill it (#304).
+ */
 export async function saveJevDetails(
 	db: D1Database,
 	details: { id: number; kind: string | null; forPersonId: number | null }[],
@@ -1649,10 +1658,10 @@ export async function saveJevDetails(
 				FROM json_each(?)
 			)
 			UPDATE transactions SET
-				kind = CASE WHEN kind IS NULL THEN (SELECT kind FROM answers WHERE answers.id = transactions.id) ELSE kind END,
-				kind_guessed = CASE WHEN kind IS NULL AND (SELECT kind FROM answers WHERE answers.id = transactions.id) IS NOT NULL THEN 1 ELSE kind_guessed END,
-				for_person_id = CASE WHEN for_person_id IS NULL AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN (SELECT forPersonId FROM answers WHERE answers.id = transactions.id) ELSE for_person_id END,
-				for_person_guessed = CASE WHEN for_person_id IS NULL AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
+				kind = CASE WHEN kind IS NULL AND kind_cleared = 0 THEN (SELECT kind FROM answers WHERE answers.id = transactions.id) ELSE kind END,
+				kind_guessed = CASE WHEN kind IS NULL AND kind_cleared = 0 AND (SELECT kind FROM answers WHERE answers.id = transactions.id) IS NOT NULL THEN 1 ELSE kind_guessed END,
+				for_person_id = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN (SELECT forPersonId FROM answers WHERE answers.id = transactions.id) ELSE for_person_id END,
+				for_person_guessed = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
 				details_asked = 1, updated_at = datetime('now')
 			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)`,
 		)
