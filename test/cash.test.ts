@@ -52,6 +52,54 @@ describe("adding cash", () => {
 		);
 	});
 
+	it("opens Add cash with an empty amount, as Add a bill does", async () => {
+		const { html } = await request("/transactions/cash/new");
+		const amount = html.match(/<input [^>]*id="cash-amount"[^>]*>/)?.[0] ?? "";
+		expect(amount).toContain('name="amount"');
+		expect(amount).toContain('value=""');
+		expect(html).not.toContain('value="20.00"');
+	});
+
+	it("refuses Add cash with no amount, saying so in role=alert, and saves nothing", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const post = (body: string) =>
+			request("/transactions/cash", {
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body,
+			});
+		const missing = await post(
+			new URLSearchParams({
+				date: today,
+				merchant: "No amount market",
+				category: "1",
+			}).toString(),
+		);
+		const blank = await post(
+			new URLSearchParams({
+				date: today,
+				amount: "",
+				merchant: "No amount market",
+				category: "1",
+			}).toString(),
+		);
+		for (const { res, html } of [missing, blank]) {
+			expect(res.status).toBe(422);
+			expect(html).toMatch(
+				/<p id="cash-amount-error" role="alert"[^>]*>Enter an amount in dollars and cents\.<\/p>/,
+			);
+		}
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name='No amount market'",
+			).first(),
+		).toEqual({ n: 0 });
+	});
+
 	it("creates one guarded Cash account and inserts integer cents with the Access actor", async () => {
 		await env.DB.prepare(
 			"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE type='cash')",
@@ -1016,6 +1064,9 @@ describe("cash lifecycle", () => {
 		const feedback = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}");
 		expect(deleted.res.status).toBe(200);
 		expect(feedback.toast.message).toBe("Deleted Split market, $20.00.");
+		expect(feedback.announce).toBe(
+			"Deleted Split market, $20.00. Undo for 10 seconds.",
+		);
 		expect(feedback.toast.undo).toEqual(expect.any(String));
 
 		const restored = await request("/transactions/undo-cash-delete", {
@@ -1204,6 +1255,10 @@ describe("cash lifecycle", () => {
 			message: "Deleted Farmers market, $20.00.",
 			undo: expect.any(String),
 		});
+		// The announcer says what was deleted and how long Undo lasts; focus goes to Undo (toast.js).
+		expect(feedback.announce).toBe(
+			"Deleted Farmers market, $20.00. Undo for 10 seconds.",
+		);
 		expect(
 			await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
 				.bind(cash?.id)
@@ -2043,6 +2098,23 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const panel = await request(`/transactions/${id}?back=%2Ftransactions`);
 		expect(panel.res.status).toBe(200);
 		expect(panel.html).not.toContain("Change the parts");
+	});
+
+	it("keeps the Change the parts sheet, with its new total, when a save is refused because the entry became income", async () => {
+		const { id, a, b } = await splitCash("Income refusal");
+		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+			.bind(id)
+			.run();
+		const { res, html } = await correction(id, savedParts(a, b));
+		expect(res.status).toBe(422);
+		expect(html).toContain("Income can&#39;t be split.");
+		expect(html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
+		expect(html).toMatch(/<input[^>]*name="amount_was"[^>]*value="9000"/);
+		// The amount under the title is the new total, as on the sheet that was posted.
+		const shown = html.match(
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+		)?.[1];
+		expect(shown).toBe(formatCents(10000, { signed: true }));
 	});
 
 	it("opens the split with the new total, the saved parts and the mismatch and live lines", async () => {

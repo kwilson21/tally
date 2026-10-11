@@ -12,6 +12,7 @@ document.addEventListener("click", (event) => {
 				message,
 				type: button.dataset.dsToast,
 				undo: button.dataset.dsUndo,
+				undoExpiresInMs: Number(button.dataset.dsUndoExpiresInMs),
 			},
 		}),
 	);
