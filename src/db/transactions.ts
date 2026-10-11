@@ -3,7 +3,14 @@ import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type Edit, merchantRuleChange } from "../transactions/edit";
-import { type Filters, likePattern, type Show } from "../transactions/filters";
+import {
+	type AmountSearch,
+	type Filters,
+	likePattern,
+	type SearchMatch,
+	type Show,
+	searchAmount,
+} from "../transactions/filters";
 import {
 	type NameSource,
 	nameSource,
@@ -22,6 +29,7 @@ import {
 	INCLUDED,
 	INCLUDED_ROW,
 	includedSql,
+	markedTransferSql,
 	PAYS_A_BILL,
 	paysBillSql,
 } from "./counted-month";
@@ -155,7 +163,14 @@ const RAW_SHOW_SQL: Record<Show, string | null> = {
 export async function listTransactions(
 	db: D1Database,
 	f: Filters,
-): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
+): Promise<{
+	rows: ListRow[];
+	total: number;
+	page: number;
+	pages: number;
+	/** What the rows matched the search by, for the count's note (#211). */
+	matched: SearchMatch;
+}> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
 	const {
@@ -183,6 +198,10 @@ export async function listTransactions(
 	if (f.raw) where.push("t.parent_id IS NULL");
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
+	// The search's pattern when it looks in categories too (#211), so the count can say whether one matched.
+	let categoryPattern: string | null = null;
+	// The search's amount, when it looks at amounts, so the count can say whether every row matched by one.
+	let amountSearch: AmountSearch | null = null;
 	if (f.q) {
 		if (f.raw) {
 			where.push("t.raw_name LIKE ? ESCAPE '\\'");
@@ -192,12 +211,25 @@ export async function listTransactions(
 			// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
 			// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
 			// row says can be searched for.
-			where.push(
-				`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)})`,
-			);
+			// A search also finds a category by its name (#211), and an amount (decision 79). A plain whole
+			// number matches its amount and the words, so "42" finds "STORE 42" as well as $42.00 to $42.99;
+			// with a "$" or a decimal point the search is the amount alone.
+			const amount = searchAmount(f.q);
+			amountSearch = amount;
 			const pattern = likePattern(f.q);
-			args.push(pattern, pattern, pattern, pattern);
-			args.push(pattern);
+			const alternatives: string[] = [];
+			if (amount === null || amount.plain) {
+				categoryPattern = pattern;
+				alternatives.push(
+					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR c.name LIKE ? ESCAPE '\\')`,
+				);
+				args.push(pattern, pattern, pattern, pattern, pattern, pattern);
+			}
+			if (amount) {
+				alternatives.push("ABS(t.amount_cents) BETWEEN ? AND ?");
+				args.push(amount.low, amount.high);
+			}
+			where.push(`(${alternatives.join(" OR ")})`);
 		}
 	}
 
@@ -210,11 +242,39 @@ export async function listTransactions(
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
+	// What the rows matched, in the same statement as the count (#211): whether any counted row matched by its
+	// category's name (an archived category counts too, as the search does), and, for a plain number, whether
+	// every counted row matched by its amount. A row that matched by its words alone breaks the second; with no
+	// row counted it holds, as it does for an amount-only search, so the count names the amount then.
+	const countColumns = ["COUNT(*) AS n"];
+	const countArgs: (string | number)[] = [];
+	if (amountSearch?.plain) {
+		countColumns.push(
+			"COALESCE(MIN(CASE WHEN ABS(t.amount_cents) BETWEEN ? AND ? THEN 1 ELSE 0 END), 1) AS allAmount",
+		);
+		countArgs.push(amountSearch.low, amountSearch.high);
+	}
+	if (categoryPattern !== null) {
+		countColumns.push(
+			"MAX(CASE WHEN c.name LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) AS categoryHit",
+		);
+		countArgs.push(categoryPattern);
+	}
 	const counted = await db
-		.prepare(`SELECT COUNT(*) AS n ${from}`)
-		.bind(...args)
-		.first<{ n: number }>();
+		.prepare(`SELECT ${countColumns.join(", ")} ${from}`)
+		.bind(...countArgs, ...args)
+		.first<{
+			n: number;
+			allAmount?: number | null;
+			categoryHit?: number | null;
+		}>();
 	const total = counted?.n ?? 0;
+	const matched: SearchMatch = {
+		category: counted?.categoryHit === 1,
+		allByAmount:
+			amountSearch !== null &&
+			(!amountSearch.plain || counted?.allAmount === 1),
+	};
 	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 	const page = Math.min(f.page, pages);
 
@@ -322,7 +382,7 @@ export async function listTransactions(
 			};
 		},
 	);
-	return { rows, total, page, pages };
+	return { rows, total, page, pages, matched };
 }
 
 /** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */
@@ -625,6 +685,14 @@ const EXCLUDE =
 	"excluded_source = CASE WHEN excluded = ? THEN excluded_source ELSE 'user' END, excluded = ?";
 
 /**
+ * Gives a merchant's rule category to every transaction a person hasn't chosen (§7). Binds the
+ * category, the actor and the merchant key; callers add their own last condition.
+ */
+const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+	updated_by = ?, updated_at = datetime('now')
+WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'`;
+
+/**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
  * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left. A cash
  * amount is refused when it breaks its parts (`amountCents` is the parts' total) or its linked
@@ -633,6 +701,7 @@ const EXCLUDE =
 export type SaveEditResult =
 	| { saved: true }
 	| { saved: false; refundLeftCents: number }
+	| { saved: false; personMissing: true }
 	| { saved: false; cashError: "split"; amountCents: number }
 	| { saved: false; cashError: "refund"; refundCents: number };
 
@@ -642,12 +711,13 @@ export type SaveEditResult =
  * recategorizes the merchant's other transactions except ones a person chose (spec §7).
  *
  * Linking a refund to a purchase (spec §6, §8.5) is the one write that can be refused, and so is
- * turning off "Count as income" on a credit that stays linked, which makes it count against its
- * purchase. The check is an UPDATE that changes nothing unless what moves with the refund fits what's
+ * turning off "Count as income", or reviewing the credit as not income, on a credit that stays linked,
+ * which makes it count against its purchase. The check is an UPDATE that changes nothing unless what moves with the refund fits what's
  * left of the purchase (src/db/refunded.ts), so two saves at once can't both fit; every other write
  * in the batch applies only once it has, so a refusal saves nothing, and an error anywhere rolls the
  * link back too. A person linking a refund includes it in the budget, even when it was excluded
- * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone.
+ * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone. A For person
+ * removed since the panel loaded the household list is refused the same way (`personMissing`).
  */
 export async function saveEdit(
 	db: D1Database,
@@ -692,14 +762,30 @@ export async function saveEdit(
 			? edit.refundOfId
 			: undefined;
 	const linking = typeof newLink === "number";
-	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so
-	// turning that off, with the link staying, makes it count: that is checked like a link. (A split
-	// parent never counts, only its parts do, and the cap ignores whether a refund is excluded or
-	// reviewed, so income is the one flag that changes what counts.)
+	const incomeChanged =
+		edit.incomeWas === undefined
+			? (edit.income ? 1 : 0) !== current.income
+			: edit.income !== edit.incomeWas;
+	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
+	const creditReviewChanged =
+		edit.creditReviewedProvided === false
+			? false
+			: edit.creditReviewedWas === undefined
+				? edit.creditReviewed !== (current.creditReviewedBy === "user")
+				: edit.creditReviewed !== edit.creditReviewedWas;
+	const creditReviewByUser =
+		creditReviewChanged && !edit.income && creditReviewChoice === 1;
+	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so a save
+	// that clears that, with the link staying, makes it count: that is checked like a link. The panel's
+	// own update also clears the income when a person reviews the credit as not income
+	// (creditReviewByUser), so that counts too. A panel that still shows income off, saving only a note,
+	// clears nothing. (A split parent never counts, only its parts do, and the cap ignores whether a
+	// refund is excluded or reviewed, so income is the one flag that changes what counts.)
 	const recounting =
 		newLink === undefined &&
 		current.refundOfId !== null &&
 		current.income === 1 &&
+		(incomeChanged || creditReviewByUser) &&
 		!edit.income &&
 		current.isSplit === 0
 			? current.refundOfId
@@ -737,19 +823,6 @@ export async function saveEdit(
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
-	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
-	const incomeChanged =
-		edit.incomeWas === undefined
-			? (edit.income ? 1 : 0) !== current.income
-			: edit.income !== edit.incomeWas;
-	const creditReviewChanged =
-		edit.creditReviewedProvided === false
-			? false
-			: edit.creditReviewedWas === undefined
-				? edit.creditReviewed !== (current.creditReviewedBy === "user")
-				: edit.creditReviewed !== edit.creditReviewedWas;
-	const creditReviewByUser =
-		creditReviewChanged && !edit.income && creditReviewChoice === 1;
 	// Changing the exclusion makes it a person's choice, which Jev never overrides. A refund being
 	// linked counts, whatever the panel's Exclude chip held (it was drawn from the old state).
 	const excluded = edit.excluded && !linking ? 1 : 0;
@@ -926,8 +999,10 @@ export async function saveEdit(
 				`UPDATE transactions SET
 					kind = CASE WHEN ? = 1 THEN ? ELSE kind END,
 					kind_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE kind_guessed END,
+					kind_cleared = CASE WHEN ? = 1 THEN ? ELSE kind_cleared END,
 					for_person_id = CASE WHEN ? = 1 THEN ? ELSE for_person_id END,
 					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
+					for_person_cleared = CASE WHEN ? = 1 THEN ? ELSE for_person_cleared END,
 					note = CASE WHEN ? = 1 THEN ? ELSE note END,
 					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
 					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
@@ -939,10 +1014,14 @@ export async function saveEdit(
 					edit.kind ?? null,
 					kindChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
+					kindChanged ? 1 : 0,
+					edit.kind === null ? 1 : 0,
 					personChanged ? 1 : 0,
 					edit.forPersonId ?? null,
 					personChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
+					personChanged ? 1 : 0,
+					edit.forPersonId === null ? 1 : 0,
 					noteChanged ? 1 : 0,
 					edit.note,
 					noteChanged ? 1 : 0,
@@ -987,12 +1066,12 @@ export async function saveEdit(
 		);
 		if (ruleChange.recategorize)
 			statements.push(
-				gated(
-					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
-					updated_by = ?, updated_at = datetime('now')
-				WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
-					[edit.categoryId, actor, current.merchantKey, id],
-				),
+				gated(`${APPLY_MERCHANT_RULE_SQL} AND id != ?`, [
+					edit.categoryId,
+					actor,
+					current.merchantKey,
+					id,
+				]),
 			);
 	} else if (ruleChange.action === "clear" && edit.merchantRuleWas != null) {
 		statements.push(
@@ -1016,7 +1095,21 @@ export async function saveEdit(
 			),
 		);
 	}
-	const results = await db.batch(statements);
+	// A For person removed after the panel's household list loaded fails the details write on its foreign
+	// key. The batch is atomic, so that failure saved nothing: it is a refusal, and the person is named.
+	const results = await db.batch(statements).catch(async (error: unknown) => {
+		if (
+			personChanged &&
+			typeof edit.forPersonId === "number" &&
+			!(await db
+				.prepare("SELECT 1 FROM household_people WHERE id = ?")
+				.bind(edit.forPersonId)
+				.first())
+		)
+			return null;
+		throw error;
+	});
+	if (!results) return { saved: false, personMissing: true };
 	if (cashChangeIndex !== null && !results[cashChangeIndex]?.meta.changes) {
 		const state = await db
 			.prepare(
@@ -1042,6 +1135,27 @@ export async function saveEdit(
 			refundLeftCents: await refundLeftCents(db, purchase, id),
 		};
 	return { saved: true };
+}
+
+/**
+ * Sets a merchant's category rule the way "Always for this merchant" does, for a save that has no
+ * row of its own to skip: the rule reaches every transaction a person hasn't chosen.
+ */
+export async function setMerchantRule(
+	db: D1Database,
+	merchantKey: string,
+	categoryId: number,
+	actor: string,
+): Promise<void> {
+	await db.batch([
+		db
+			.prepare(
+				`INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)
+			ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id`,
+			)
+			.bind(merchantKey, categoryId),
+		db.prepare(APPLY_MERCHANT_RULE_SQL).bind(categoryId, actor, merchantKey),
+	]);
 }
 
 /**
@@ -1545,7 +1659,10 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
 		.run();
 }
 
-/** Stores only Jev's valid detail choices, and records that this transaction was asked once. */
+/**
+ * Stores only Jev's valid detail choices, and records that this transaction was asked once. A Kind or For a
+ * person cleared (`kind_cleared`, `for_person_cleared`) is a deliberate empty choice, so Jev doesn't fill it (#304).
+ */
 export async function saveJevDetails(
 	db: D1Database,
 	details: { id: number; kind: string | null; forPersonId: number | null }[],
@@ -1560,10 +1677,10 @@ export async function saveJevDetails(
 				FROM json_each(?)
 			)
 			UPDATE transactions SET
-				kind = CASE WHEN kind IS NULL THEN (SELECT kind FROM answers WHERE answers.id = transactions.id) ELSE kind END,
-				kind_guessed = CASE WHEN kind IS NULL AND (SELECT kind FROM answers WHERE answers.id = transactions.id) IS NOT NULL THEN 1 ELSE kind_guessed END,
-				for_person_id = CASE WHEN for_person_id IS NULL AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN (SELECT forPersonId FROM answers WHERE answers.id = transactions.id) ELSE for_person_id END,
-				for_person_guessed = CASE WHEN for_person_id IS NULL AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
+				kind = CASE WHEN kind IS NULL AND kind_cleared = 0 THEN (SELECT kind FROM answers WHERE answers.id = transactions.id) ELSE kind END,
+				kind_guessed = CASE WHEN kind IS NULL AND kind_cleared = 0 AND (SELECT kind FROM answers WHERE answers.id = transactions.id) IS NOT NULL THEN 1 ELSE kind_guessed END,
+				for_person_id = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN (SELECT forPersonId FROM answers WHERE answers.id = transactions.id) ELSE for_person_id END,
+				for_person_guessed = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
 				details_asked = 1, updated_at = datetime('now')
 			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)`,
 		)
@@ -1755,7 +1872,7 @@ export async function excludedBreakdown(
 				COALESCE(SUM(NOT person AND NOT moved AND reimbursement), 0) AS reimbursement,
 				COALESCE(SUM(person OR (NOT moved AND NOT reimbursement)), 0) AS byPerson
 			FROM (SELECT COALESCE(t.excluded_source = 'user', 0) AS person,
-					t.flag_transfer = 1 OR COALESCE(t.excluded_source = 'plaid', 0) AS moved,
+					${markedTransferSql("t")} AS moved,
 					t.flag_reimbursement = 1 AS reimbursement
 				FROM transactions t
 				${COUNTED_JOINS}

@@ -318,7 +318,9 @@ howItWorks.get("/how-it-works", async (c) => {
 							uncategorized.
 						</li>
 						<li>
-							Search matches the merchant name, the bank's name, and the note.
+							Search matches the merchant name, the bank's name, the note, and a
+							category's name. A number such as 42.17 or $42 finds amounts, and
+							a search looks in every month.
 						</li>
 					</ul>
 					{hasTransactions ? (
@@ -416,6 +418,11 @@ howItWorks.get("/how-it-works", async (c) => {
 								: `An AI model, which each night picks a category for what's left. Tally applies its pick only when it is at least ${threshold} sure, and never when it says none of the categories fit; anything else waits for a person.`}
 						</li>
 					</ol>
+					<p class="mt-3">
+						After a person picks the same category for the same merchant three
+						times, Tally asks whether to always use it. Yes makes it the
+						merchant's rule, and Not now changes nothing.
+					</p>
 					<p class="mt-3">
 						See every rule in Settings under Tally's rules. Removing a rule
 						doesn't change transactions it already sorted.

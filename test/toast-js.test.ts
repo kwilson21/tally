@@ -63,26 +63,100 @@ class FakeNode extends EventTarget {
 	words(): string {
 		return this.textContent;
 	}
+	/** Whether this node is the given one or holds it, as a real node's contains() does. */
+	contains(node: unknown): boolean {
+		return node === this || this.children.some((child) => child.contains(node));
+	}
+	/** Focus is tracked by the page's activeElement; a test spies on this to see it moved. */
+	focus() {}
+	/** The inline style toast.js sets on #toasts: setProperty and removeProperty, backed by a Map. */
+	style = {
+		values: new Map<string, string>(),
+		setProperty(name: string, value: string) {
+			this.values.set(name, value);
+		},
+		removeProperty(name: string) {
+			this.values.delete(name);
+		},
+	};
+	/** A laid-out height, which the Select bar's measurement reads. */
+	offsetHeight = 0;
+}
+
+/** Every ResizeObserver toast.js made on the current page, so a test can see what it asked of each. */
+let resizeObservers: FakeResizeObserver[] = [];
+
+/** A ResizeObserver that records what toast.js asks of it; a test fires its callback itself. */
+class FakeResizeObserver {
+	/** Each call toast.js made, in order: observe with its node, or disconnect. */
+	calls: Array<["observe", FakeNode] | ["disconnect"]> = [];
+	/** The nodes it watches now. */
+	observed: FakeNode[] = [];
+	constructor(readonly callback: () => void) {
+		resizeObservers.push(this);
+	}
+	observe(node: FakeNode) {
+		this.calls.push(["observe", node]);
+		this.observed.push(node);
+	}
+	disconnect() {
+		this.calls.push(["disconnect"]);
+		this.observed = [];
+	}
 }
 
 const load = Object.values(import.meta.glob("../public/js/toast.js"))[0] as
 	| (() => Promise<unknown>)
 	| undefined;
 
-/** Puts a page in place, then runs toast.js against it. */
-async function page() {
-	const toasts = new FakeNode("div");
+/**
+ * Puts a page in place, then runs toast.js against it. `listed: false` is a page with no list, so no
+ * result count. `bar` is the Select mode action bar, when the page is in Select mode. `resizeObserver:
+ * false` is a browser with no ResizeObserver. Nothing has focus until a test sets document.activeElement,
+ * as a browser starts.
+ */
+async function page({
+	listed = true,
+	bar,
+	resizeObserver = true,
+}: {
+	listed?: boolean;
+	bar?: FakeNode;
+	resizeObserver?: boolean;
+} = {}) {
+	let toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
+	const resultCount = new FakeNode("p");
+	// Every Transactions state renders the page's title, listed or not.
+	const heading = new FakeNode("h1");
+	const documentElement = new FakeNode("html");
 	const body = new EventTarget();
 	const document = Object.assign(new EventTarget(), {
 		body,
+		documentElement,
+		activeElement: body as unknown,
 		getElementById: (id: string) =>
-			id === "toasts" ? toasts : id === "announcer" ? announcer : null,
+			id === "toasts"
+				? toasts
+				: id === "announcer"
+					? announcer
+					: id === "selection-bar"
+						? (bar ?? null)
+						: id === "transactions-title"
+							? heading
+							: id === "result-count" && listed
+								? resultCount
+								: null,
 		createElement: (tag: string) => new FakeNode(tag),
 		createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
 		createTextNode: (text: string) =>
 			Object.assign(new FakeNode("#text"), { textContent: text }),
 	});
+	// htmx replacing the body's children (a body swap, or a history restore) puts a new #toasts in place.
+	const swapBody = () => {
+		toasts = new FakeNode("div");
+		return toasts;
+	};
 	vi.stubGlobal("document", document);
 	vi.stubGlobal("location", { search: "", pathname: "/", hash: "" });
 	vi.stubGlobal("history", { replaceState: () => {} });
@@ -100,10 +174,34 @@ async function page() {
 					: "4s"
 				: "",
 	}));
+	resizeObservers = [];
+	vi.stubGlobal(
+		"ResizeObserver",
+		resizeObserver ? FakeResizeObserver : undefined,
+	);
 	vi.resetModules();
 	await load?.();
-	return { document, body, toasts, htmx };
+	return {
+		document,
+		documentElement,
+		body,
+		toasts,
+		htmx,
+		resultCount,
+		heading,
+		bar,
+		resizeObservers,
+		swapBody,
+	};
 }
+
+/** The observer that watches a node: toast.js has one for the Select bar and one for #toasts. */
+const observerOf = (observers: FakeResizeObserver[], node: FakeNode) =>
+	observers.find((observer) =>
+		observer.calls.some(
+			([call, target]) => call === "observe" && target === node,
+		),
+	) as FakeResizeObserver;
 
 const fire = (target: EventTarget, name: string, detail: unknown) =>
 	target.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
@@ -371,15 +469,11 @@ describe("what the toast says depends on what was being done", () => {
 		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_LOAD);
 	});
 
-	it("shows a load failure and a save failure together, each once", async () => {
+	it("shows only the newest of a load failure and a save failure", async () => {
 		const { document, toasts } = await page();
-		for (const method of ["GET", "POST", "GET", "POST"]) {
-			fire(document, "htmx:error", dropped(method));
-		}
-		expect(toasts.children.map((t) => t.words())).toEqual([
-			COULDNT_LOAD,
-			COULDNT_SAVE,
-		]);
+		fire(document, "htmx:error", dropped("GET"));
+		fire(document, "htmx:error", dropped("POST"));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_SAVE]);
 	});
 });
 
@@ -441,6 +535,35 @@ describe("several failures at once", () => {
 		// The first toast's timer fires at t=4000; the burst's one toast has its own 4 seconds.
 		vi.advanceTimersByTime(500);
 		expect(toasts.children).toHaveLength(1);
+	});
+
+	it("says the newest failure when a load and a save failure alternate within a second", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:error", dropped("GET"));
+		fire(document, "htmx:error", dropped("POST"));
+		fire(document, "htmx:error", dropped("GET"));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_LOAD]);
+		expect((toasts.children[0] as FakeNode).attrs.get("role")).toBe("alert");
+	});
+
+	it("says a failure again when a success toast replaced its toast within a second", async () => {
+		const { document, body, toasts } = await page();
+		fire(document, "htmx:response:error", status(500));
+		fire(body, "toast", { message: "Saved." });
+		expect(toasts.children.map((t) => t.words())).toEqual(["Saved."]);
+		fire(document, "htmx:response:error", status(500));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_SAVE]);
+		expect((toasts.children[0] as FakeNode).attrs.get("role")).toBe("alert");
+	});
+
+	it("says a failure again on the new #toasts after htmx replaces the body within a second", async () => {
+		const { document, toasts, swapBody } = await page();
+		fire(document, "htmx:response:error", status(500));
+		expect(toasts.children).toHaveLength(1);
+		const next = swapBody();
+		fire(document, "htmx:response:error", status(500));
+		expect(next.children).toHaveLength(1);
+		expect((next.children[0] as FakeNode).words()).toBe(COULDNT_SAVE);
 	});
 });
 
@@ -535,5 +658,265 @@ describe("the toasts the server sends", () => {
 		expect(toast.attrs.get("role")).toBe("status");
 		expect(toast.textContent).toBe("Saved Groceries' budget.");
 		expect(toast.children).toHaveLength(0);
+	});
+});
+
+// Only the newest plain or error toast shows, so a stack never covers the page. An Undo toast is
+// the one exception: it stays until its own time is up, and a newer toast never removes it early.
+describe("only the newest plain or error toast shows", () => {
+	it("replaces a plain toast with the next one", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", { message: "Saved Groceries' budget." });
+		fire(body, "toast", { message: "Saved Rent's budget." });
+		expect(toasts.children.map((t) => t.words())).toEqual([
+			"Saved Rent's budget.",
+		]);
+	});
+
+	it("lets an error and a plain toast replace each other", async () => {
+		const { body, document, toasts } = await page();
+		fire(body, "toast", { message: "Saved Groceries' budget." });
+		fire(document, "htmx:error", dropped("POST"));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_SAVE]);
+		fire(body, "toast", { message: "Saved Rent's budget." });
+		expect(toasts.children.map((t) => t.words())).toEqual([
+			"Saved Rent's budget.",
+		]);
+	});
+
+	it("never removes an Undo toast early, even when a newer toast replaces the one before", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+		const undo = toasts.children[0] as FakeNode;
+		// t=3s: a plain toast; t=5s: a newer plain toast replaces it. The Undo toast stays throughout.
+		vi.advanceTimersByTime(3000);
+		fire(body, "toast", { message: "Saved Groceries' budget." });
+		vi.advanceTimersByTime(2000);
+		fire(body, "toast", { message: "Saved Rent's budget." });
+		expect(toasts.children).toHaveLength(2);
+		expect(toasts.children[0]).toBe(undo);
+		expect((toasts.children[1] as FakeNode).words()).toBe(
+			"Saved Rent's budget.",
+		);
+		// t=9s: the newer plain toast's 4 seconds are up; the Undo toast has 1 second left.
+		vi.advanceTimersByTime(4000);
+		expect(toasts.children).toEqual([undo]);
+		vi.advanceTimersByTime(999);
+		expect(toasts.children[0]).toBe(undo);
+		// t=10s: the Undo toast's own 10 seconds are up.
+		vi.advanceTimersByTime(1);
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("keeps an Undo toast for its full 10 seconds, not the 4 of a plain toast", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+		vi.advanceTimersByTime(9999);
+		expect(toasts.children).toHaveLength(1);
+		vi.advanceTimersByTime(1);
+		expect(toasts.children).toHaveLength(0);
+	});
+});
+
+describe("focus when an Undo toast ends", () => {
+	const undoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+
+	it("moves focus to the list's result count when the Undo toast ends with focus on Undo", async () => {
+		const { body, document, toasts, resultCount, heading } = await page();
+		const focus = vi.spyOn(resultCount, "focus");
+		const headingFocus = vi.spyOn(heading, "focus");
+		undoToast(body);
+		const undo = toasts.children[0] as FakeNode;
+		document.activeElement = undo.all().find((n) => n.tag === "button");
+		vi.advanceTimersByTime(9999);
+		expect(focus).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1);
+		expect(toasts.children).toHaveLength(0);
+		expect(focus).toHaveBeenCalledTimes(1);
+		// The count wins over the title when the list has one.
+		expect(headingFocus).not.toHaveBeenCalled();
+		// A count that isn't focusable yet takes focus only once it says so.
+		expect(resultCount.attrs.get("tabindex")).toBe("-1");
+	});
+
+	it("moves focus to the page's title when the Undo toast ends with focus on Undo and there is no result count (the first-visit list)", async () => {
+		const { body, document, toasts, heading } = await page({ listed: false });
+		const focus = vi.spyOn(heading, "focus");
+		undoToast(body);
+		const undo = toasts.children[0] as FakeNode;
+		document.activeElement = undo.all().find((n) => n.tag === "button");
+		vi.advanceTimersByTime(10000);
+		expect(focus).toHaveBeenCalledTimes(1);
+		expect(heading.attrs.get("tabindex")).toBe("-1");
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("leaves focus where it is when the Undo toast ends without focus", async () => {
+		const { body, document, resultCount, heading } = await page();
+		const focus = vi.spyOn(resultCount, "focus");
+		const headingFocus = vi.spyOn(heading, "focus");
+		undoToast(body);
+		vi.advanceTimersByTime(10000);
+		expect(focus).not.toHaveBeenCalled();
+		expect(headingFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(body);
+	});
+});
+
+describe("Select mode's action bar", () => {
+	const SELECTION_BAR = "--selection-bar-height";
+	const barAt = (height: number) => {
+		const bar = new FakeNode("div");
+		bar.offsetHeight = height;
+		return bar;
+	};
+
+	it("sets the bar's measured height on #toasts, so a bar of two rows is cleared", async () => {
+		const { body, toasts } = await page({ bar: barAt(113) });
+		fire(body, "toast", { message: "Saved" });
+		expect(toasts.style.values.get(SELECTION_BAR)).toBe("113px");
+	});
+
+	it("follows the bar when its height changes", async () => {
+		const bar = barAt(113);
+		const { body, toasts, resizeObservers } = await page({ bar });
+		fire(body, "toast", { message: "Saved" });
+		bar.offsetHeight = 69;
+		const observer = observerOf(resizeObservers, bar);
+		observer.callback();
+		expect(toasts.style.values.get(SELECTION_BAR)).toBe("69px");
+	});
+
+	it("removes the height when there is no bar", async () => {
+		const { body, toasts } = await page();
+		toasts.style.setProperty(SELECTION_BAR, "113px");
+		fire(body, "toast", { message: "Saved" });
+		expect(toasts.style.values.has(SELECTION_BAR)).toBe(false);
+	});
+
+	it("observes the current bar on each toast, and the callback never calls observe", async () => {
+		const bar = barAt(113);
+		const { body, resizeObservers } = await page({ bar });
+		fire(body, "toast", { message: "Saved" });
+		fire(body, "toast", { message: "Saved again" });
+		// Two observers: the bar's, and #toasts' (made once, when the script loads; each toast then
+		// observes the #toasts on the page).
+		expect(resizeObservers).toHaveLength(2);
+		const observer = observerOf(resizeObservers, bar);
+		// Each toast disconnects, then observes the bar it just found.
+		expect(observer.calls.slice(-2)).toEqual([
+			["disconnect"],
+			["observe", bar],
+		]);
+		expect(observer.observed).toEqual([bar]);
+		const calls = observer.calls.length;
+		observer.callback();
+		expect(observer.calls).toHaveLength(calls);
+	});
+
+	it("still measures the bar in a browser with no ResizeObserver", async () => {
+		const { body, toasts } = await page({
+			bar: barAt(113),
+			resizeObserver: false,
+		});
+		fire(body, "toast", { message: "Saved" });
+		expect(toasts.style.values.get(SELECTION_BAR)).toBe("113px");
+	});
+});
+
+// A phone sheet leaves room above it for the toasts on screen (app.css's --toast-top-room reads
+// --toasts-height from the root element), so an Undo toast and an error toast together are never
+// covered by the sheet's heading.
+describe("a phone sheet's room follows the toasts on screen", () => {
+	const TOASTS_HEIGHT = "--toasts-height";
+	const undoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+
+	it("measures both toasts on screen, the Undo toast first and the error second, on the root element", async () => {
+		const { body, document, toasts, documentElement } = await page();
+		undoToast(body);
+		toasts.offsetHeight = 146;
+		fire(document, "htmx:error", dropped("POST"));
+		const [undo, error] = toasts.children as FakeNode[];
+		expect(toasts.children).toHaveLength(2);
+		expect(undo?.className).toMatch(/\bundo-toast\b/);
+		expect(error?.words()).toBe(COULDNT_SAVE);
+		expect(error?.attrs.get("role")).toBe("alert");
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("146px");
+		expect(toasts.style.values.has(TOASTS_HEIGHT)).toBe(false);
+	});
+
+	it("takes the height away once no toast is on screen: the error's 4 seconds, then the Undo toast's 10", async () => {
+		const { body, document, toasts, documentElement } = await page();
+		undoToast(body);
+		toasts.offsetHeight = 146;
+		fire(document, "htmx:error", dropped("POST"));
+		vi.advanceTimersByTime(4000);
+		expect(toasts.children).toHaveLength(1);
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("146px");
+		vi.advanceTimersByTime(6000);
+		expect(toasts.children).toHaveLength(0);
+		expect(documentElement.style.values.has(TOASTS_HEIGHT)).toBe(false);
+	});
+
+	it("follows the toasts when they change height, and the observer's callback never calls observe", async () => {
+		const { body, document, toasts, documentElement, resizeObservers } =
+			await page();
+		undoToast(body);
+		toasts.offsetHeight = 146;
+		fire(document, "htmx:error", dropped("POST"));
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("146px");
+		// The toasts wrap or the phone turns: the observer on #toasts measures again.
+		const observer = observerOf(resizeObservers, toasts);
+		toasts.offsetHeight = 78;
+		const calls = observer.calls.length;
+		observer.callback();
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("78px");
+		expect(observer.calls).toHaveLength(calls);
+	});
+
+	it("follows the new #toasts after htmx replaces the body's children", async () => {
+		const { body, documentElement, swapBody, resizeObservers } = await page();
+		fire(body, "toast", { message: "Saved" });
+		const fresh = swapBody();
+		fresh.offsetHeight = 66;
+		fire(body, "toast", { message: "Saved again" });
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("66px");
+		// The observer now watches the new node, and the old detached one is no longer observed.
+		const observer = observerOf(resizeObservers, fresh);
+		expect(observer).toBeDefined();
+		expect(observer.observed).toEqual([fresh]);
+		// Its callback measures the #toasts on the page now, and never calls observe().
+		fresh.offsetHeight = 120;
+		const calls = observer.calls.length;
+		observer.callback();
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("120px");
+		expect(observer.calls).toHaveLength(calls);
+	});
+
+	it("still measures the toasts in a browser with no ResizeObserver", async () => {
+		const { body, toasts, documentElement } = await page({
+			resizeObserver: false,
+		});
+		toasts.offsetHeight = 66;
+		fire(body, "toast", { message: "Saved" });
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("66px");
 	});
 });

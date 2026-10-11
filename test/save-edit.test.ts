@@ -7,9 +7,11 @@ import {
 	listTransactions,
 	needsCategoryCount,
 	saveEdit,
+	saveJevDetails,
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { parseEdit } from "../src/transactions/edit";
 import { parseFilters } from "../src/transactions/filters";
 
 const db = env.DB;
@@ -359,5 +361,243 @@ describe("saveEdit", () => {
 			),
 		).rejects.toThrow();
 		expect(await row(id)).toMatchObject({ category_id: null, note: null });
+	});
+
+	it("keeps a Kind and For a person cleared, when Jev answers later (#304)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		const untouched = (
+			await db
+				.prepare(
+					"SELECT id FROM transactions WHERE id != ? ORDER BY id LIMIT 1",
+				)
+				.bind(id)
+				.first<{ id: number }>()
+		)?.id as number;
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET kind = 'bill', kind_guessed = 0, for_person_id = 1, for_person_guessed = 0, details_asked = 0 WHERE id = ?",
+				)
+				.bind(id),
+			db
+				.prepare(
+					"UPDATE transactions SET kind = NULL, kind_guessed = 0, for_person_id = NULL, for_person_guessed = 0, details_asked = 0 WHERE id = ?",
+				)
+				.bind(untouched),
+		]);
+
+		await saveEdit(
+			db,
+			id,
+			edit({ kind: null, forPersonId: null, noteProvided: false }),
+			"demo",
+		);
+		expect(
+			await db
+				.prepare(
+					"SELECT kind_cleared, for_person_cleared FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({ kind_cleared: 1, for_person_cleared: 1 });
+
+		await saveJevDetails(db, [
+			{ id, kind: "subscription", forPersonId: 1 },
+			{ id: untouched, kind: "subscription", forPersonId: 1 },
+		]);
+		const details =
+			"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?";
+		expect(await db.prepare(details).bind(id).first()).toEqual({
+			kind: null,
+			kind_guessed: 0,
+			for_person_id: null,
+			for_person_guessed: 0,
+		});
+		expect(await db.prepare(details).bind(untouched).first()).toEqual({
+			kind: "subscription",
+			kind_guessed: 1,
+			for_person_id: 1,
+			for_person_guessed: 1,
+		});
+	});
+
+	it("a note saved with Details hidden keeps Jev's guessed Kind, which the form posts as Not known (#304)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'subscription', kind_guessed = 1, details_asked = 1 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		// With the Details switch off the guess is drawn as Not known, so the form posts Kind empty both ways.
+		const posted = new FormData();
+		for (const [key, value] of Object.entries({
+			details_visible: "0",
+			kind_was: "",
+			kind: "",
+			for_person_id_was: "",
+			for_person_id: "",
+			note_was: "",
+			note: "Office lunch",
+		}))
+			posted.set(key, value);
+		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+		if (!parsed.ok) throw new Error("expected the form to parse");
+		await saveEdit(db, id, parsed.value, "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT note, kind, kind_guessed, kind_cleared FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			note: "Office lunch",
+			kind: "subscription",
+			kind_guessed: 1,
+			kind_cleared: 0,
+		});
+	});
+
+	it("a Kind a person chooses after clearing it is no longer a clear", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'bill', kind_guessed = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveEdit(db, id, edit({ kind: null, noteProvided: false }), "demo");
+		expect(
+			await db
+				.prepare("SELECT kind_cleared FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ kind_cleared: 1 });
+		await saveEdit(
+			db,
+			id,
+			edit({ kind: "one_off", noteProvided: false }),
+			"demo",
+		);
+		expect(
+			await db
+				.prepare("SELECT kind, kind_cleared FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ kind: "one_off", kind_cleared: 0 });
+	});
+});
+
+describe("saveEdit recounts a linked credit only when this save clears its income", () => {
+	const PURCHASE = 9401;
+	const REFUND = 9402;
+	const INCOME_CREDIT = 9403;
+
+	beforeEach(async () => {
+		const bank = await db
+			.prepare("SELECT id FROM accounts WHERE type != 'cash' LIMIT 1")
+			.first<{ id: number }>();
+		if (!bank) throw new Error("bank account missing");
+		// A $50 purchase whose whole $50 is already refunded by REFUND, and a $20 credit linked to it
+		// that is marked as income, so it doesn't count against the purchase.
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, refund_of_id, flag_income, credit_reviewed, updated_by) VALUES
+				(?, ?, '2026-09-01', 5000, 'CAP SHOP', 1, 'user', 0, NULL, NULL, 0, 0, 'test'),
+				(?, ?, '2026-09-03', -5000, 'CAP SHOP', 1, 'user', 0, NULL, ?, 0, 1, 'test'),
+				(?, ?, '2026-09-04', -2000, 'CAP SHOP', 1, 'user', 0, NULL, ?, 1, 0, 'test')`,
+			)
+			.bind(
+				PURCHASE,
+				bank.id,
+				REFUND,
+				bank.id,
+				PURCHASE,
+				INCOME_CREDIT,
+				bank.id,
+				PURCHASE,
+			)
+			.run();
+	});
+
+	const creditRow = () =>
+		db
+			.prepare(
+				"SELECT note, flag_income, refund_of_id FROM transactions WHERE id = ?",
+			)
+			.bind(INCOME_CREDIT)
+			.first<{
+				note: string | null;
+				flag_income: number;
+				refund_of_id: number | null;
+			}>();
+
+	it("saves a note from a panel that showed income off, leaving the income flag and the cap alone", async () => {
+		expect(
+			await saveEdit(
+				db,
+				INCOME_CREDIT,
+				{
+					...edit(),
+					note: "Note only",
+					income: false,
+					incomeWas: false,
+					creditReviewedProvided: false,
+				},
+				"test",
+			),
+		).toEqual({ saved: true });
+		expect(await creditRow()).toEqual({
+			note: "Note only",
+			flag_income: 1,
+			refund_of_id: PURCHASE,
+		});
+	});
+
+	it("refuses reviewing a linked credit as not income when the purchase has no room left, since the review clears its income", async () => {
+		expect(
+			await saveEdit(
+				db,
+				INCOME_CREDIT,
+				{
+					...edit(),
+					note: "Reviewed only",
+					income: false,
+					incomeWas: false,
+					creditReviewed: true,
+					creditReviewedWas: false,
+					creditReviewedProvided: true,
+				},
+				"test",
+			),
+		).toEqual({ saved: false, refundLeftCents: 0 });
+		expect(await creditRow()).toEqual({
+			note: null,
+			flag_income: 1,
+			refund_of_id: PURCHASE,
+		});
+	});
+
+	it("still refuses clearing income on a linked credit when the purchase has no room left", async () => {
+		expect(
+			await saveEdit(
+				db,
+				INCOME_CREDIT,
+				{
+					...edit(),
+					note: "Clearing income",
+					income: false,
+					incomeWas: true,
+					creditReviewedProvided: false,
+				},
+				"test",
+			),
+		).toEqual({ saved: false, refundLeftCents: 0 });
+		expect(await creditRow()).toEqual({
+			note: null,
+			flag_income: 1,
+			refund_of_id: PURCHASE,
+		});
 	});
 });

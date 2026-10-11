@@ -67,6 +67,7 @@ import { NetWorthChart } from "../views/net-worth-chart";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
+import { RuleOffer } from "../views/rule-offer";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -141,6 +142,7 @@ const SECTIONS = [
 	["settings", "Settings"],
 	["trends", "Trends"],
 	["rows", "Rows"],
+	["categorization", "Categorization"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
 	["demo", "Guidance"],
@@ -594,7 +596,7 @@ const BOTTOM_SHEET_SPEC: UseSpecText = {
 	motion:
 		"It arrives in 200 ms, ease-out. On a phone the sheet rises from the bottom edge while its backdrop fades in; at desktop width (1024px and up) the panel slides in from the right edge while its backdrop fades in. The classes are fade-in and sheet-panel in app.css, on the rising token. Closing is at once. It plays only when it opens: a swap that draws the open sheet again (a field's error, the delete question, Add a part, Keep it) leaves it still, so an error never looks like the sheet closing and opening, and the field's own shake is seen. Reduced motion shows the sheet and backdrop at once, with nothing moving.",
 	edges:
-		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without JavaScript the sheet is a page of its own, and Cancel and the backdrop are links.",
+		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, and always leaving room at its top for the toasts on screen, an Undo toast and an error toast together included, with the floor unchanged (decision 101); the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without JavaScript the sheet is a page of its own, and Cancel and the backdrop are links.",
 	words:
 		"The backdrop's name for a screen reader is “Close”. The sheet is named by its title (the category, the transaction's name); every other word is its form's.",
 };
@@ -604,17 +606,17 @@ const TOAST_SPEC: UseSpecText = {
 	purpose:
 		"Tell a person that what they just did worked, or didn't, in one sentence, without taking them anywhere.",
 	affordance:
-		"A small paper pill with a hairline rule and the only lift Tally allows, near the bottom of the screen (above the tab bar on a phone). It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
+		"A small paper pill with a hairline rule and the only lift Tally allows. It sits in Tally's frame, never over the page: on a phone, above the tab bar, at the top edge while a sheet is open, and 12 px above the action bar in Select mode, whatever its height (the bar is two lines, and taller when either wraps on a narrow phone); on desktop, beside the sidebar at the bottom. It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
 	states:
-		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds; several at once stack with a gap.",
+		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, and taps pass through the toast, so a Save under it can be tapped again.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except that when an Undo toast ends with focus on its Undo button, focus moves to the list's result count, or to the page's title when there is no count (the first-visit page). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
 		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its remaining server token time (up to 10 seconds) and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
-		"Long words wrap inside the pill. It sits above an open sheet (z-60); Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
+		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
 		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo. A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
@@ -636,6 +638,25 @@ const FILTER_SELECT_SPEC: UseSpecText = {
 		"A long option shortens inside its pill (max width is its row), so a long account name never pushes the page sideways; at 320px the pills wrap to the next row. A disconnected bank's account says “· Disconnected” in words after its name. A saved link to an account that's since been removed keeps it as the choice, named by its id (“account 999”), so the pill shows the filter the list is using. Month lists only months with transactions, then “All months”. Without JavaScript it is a plain select inside a form that submits.",
 	words:
 		"Month: {October} · All months. Category: All categories · {the household's categories}. Account: All accounts · {Chase Card ••9921} · {Cash} · {Old Savings ••3340 · Disconnected}. Show: All · Spending · Income · Refunds · Excluded.",
+};
+
+// The search across every month's use spec (P65 A, P66 A, #211): every line answered before the owner signs it off.
+const SEARCH_EVERY_MONTH_SPEC: UseSpecText = {
+	purpose:
+		"Let a person search the whole list for a category's name, an amount or a merchant, without first finding the month it happened in. The count says what matched.",
+	affordance:
+		"The search box and Month sit as they are today. The count line above the list names the search, and under it a text link “Only October” appears while the search runs in every month.",
+	states:
+		"Typed into an empty box on this month: the list looks in every month, Month shows “All months” and the count says “in all months”. Picking a month: it narrows the search and stays while typing, from an empty box too, this month included. Emptying the box: back to this month. “Only October”: shown only while the search runs in every month; the link is 44px tall and has the focus-visible ring. Disabled, loading and error: not applicable.",
+	feedback:
+		"The count is the page's aria-live line, so each change of search or month is announced with its new text. The Month choice follows the month a search resolves, and the address follows it, so a reload shows the same list. Without JavaScript a search looks in the month the form sends, since there is no page to come from.",
+	input:
+		"Touch: the link is 44px tall. Keyboard: Tab to “Only October” and press Enter. The link goes once it has narrowed the search, and focus moves to the count, which reads the new list. Screen reader: the count reads “5 transactions matching “costco” in all months”, then “Only October, link”.",
+	motion: "None. The list swaps in place, as it does for a filter change.",
+	edges:
+		"A plain number such as 42 finds amounts from $42.00 to $42.99 and names or notes with those digits. $42 and 42.17 find amounts only, and 42.17 is exact to the cent, money out and money in alike. A plain number names its amount in the count only when every row matched by it; a row that matched a name or a note too leaves the amount out. Text that is a category's name finds its rows, and the count says “(category)”. A search across every month with a category or an account picked keeps those in the count.",
+	words:
+		"“5 transactions matching “costco” in all months” · “2 transactions matching “42.17” (amount $42.17) in all months” · “2 transactions matching “$42” (amounts $42.00 to $42.99) in October” · “2 transactions matching “42” in October” when a row matched by name too · “3 transactions matching “groceries” (category) in all months” · “Only October”.",
 };
 
 // The demo's two view links' use spec (decisions 73 and 79, P44 A): every line answered before the owner signs it off.
@@ -1850,6 +1871,39 @@ function Rows() {
 	);
 }
 
+function Categorization() {
+	return (
+		<Group id="categorization" title="Categorization">
+			<Specimen
+				id="rule-offer"
+				title="RuleOffer"
+				tier="visual"
+				components={["RuleOffer", "Button", "Icon"]}
+				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time."
+			>
+				<div hx-ignore class="max-w-xl">
+					<RuleOffer
+						value={{
+							merchantKey: "COSTCO",
+							merchant: "Costco",
+							categoryId: 1,
+							category: "Groceries",
+							count: 3,
+							back: "/transactions",
+						}}
+					/>
+				</div>
+			</Specimen>
+			<p class="mt-4 text-muted">
+				Use: the question follows every matching save until the merchant has a
+				rule. Not now closes it without saving a rule; Yes applies the existing
+				merchant rule behavior. All answers use server forms, and every swap is
+				announced.
+			</p>
+		</Group>
+	);
+}
+
 const BUTTON_SPEC: UseSpecText = {
 	purpose:
 		"Do the main action, a secondary alternative, or a quiet text action.",
@@ -2202,6 +2256,45 @@ function Controls() {
 					</div>
 				</State>
 				<UseSpec spec={FILTER_SELECT_SPEC} />
+			</Specimen>
+			<Specimen
+				id="search-every-month"
+				title="Search across every month"
+				tier="interactive"
+				components={["Button"]}
+				sentence="A search typed into an empty box looks in every month, and the count names what it matched; under the count, “Only October” narrows it to this month (P65 A, P66 A, #211)."
+			>
+				<State label="Typed into an empty box on this month: the count says in all months, and Only October is offered">
+					<div class="max-w-3xl">
+						<p class="text-sm text-muted">
+							5 transactions matching “costco” in all months
+						</p>
+						<Button kind="text" href="#search-every-month" class="-ml-2">
+							Only October
+						</Button>
+					</div>
+				</State>
+				<State label="Narrowed to October: the count says October, and the link is gone">
+					<p class="max-w-3xl text-sm text-muted">
+						1 transaction matching “costco” in October
+					</p>
+				</State>
+				<State label="An amount: a number with cents names the cents; a whole dollar names the dollar; a plain number that also matched a name names no amount">
+					<div class="max-w-3xl space-y-1 text-sm text-muted">
+						<p>2 transactions matching “42.17” (amount $42.17) in all months</p>
+						<p>
+							2 transactions matching “$42” (amounts $42.00 to $42.99) in
+							October
+						</p>
+						<p>2 transactions matching “42” in October</p>
+					</div>
+				</State>
+				<State label="A category's name: the count says (category)">
+					<p class="max-w-3xl text-sm text-muted">
+						3 transactions matching “groceries” (category) in all months
+					</p>
+				</State>
+				<UseSpec spec={SEARCH_EVERY_MONTH_SPEC} />
 			</Specimen>
 			<Specimen
 				id="view-links"
@@ -3574,6 +3667,7 @@ export function Catalog() {
 			<SettingsGroup />
 			<TrendsGroup />
 			<Rows />
+			<Categorization />
 			<Controls />
 			<Feedback />
 			<Demo />
