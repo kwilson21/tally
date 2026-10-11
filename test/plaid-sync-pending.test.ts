@@ -1902,6 +1902,98 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		});
 	});
 
+	describe("a This one only name moving onto a posted row Plaid or a person took out of the budget (decision 101)", () => {
+		const TRANSFER_IN = {
+			personal_finance_category: { primary: "TRANSFER_IN" },
+		};
+		const answer = (plaidId: string) =>
+			env.DB.prepare(
+				`SELECT own_name, excluded, excluded_source, flag_income, category_id, category_source, category_confidence, jev_category_id
+				 FROM transactions WHERE plaid_transaction_id = ?`,
+			)
+				.bind(plaidId)
+				.first<Record<string, unknown>>();
+		/** Jev's answer on the posted row, made for the name it had before the pending row's name came. */
+		const jevAnswer = (id: number) =>
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = 3, category_source = 'jev', category_confidence = 0.9, jev_category_id = 3 WHERE id = ?",
+			)
+				.bind(id)
+				.run();
+		const keptAnswer = {
+			category_id: 3,
+			category_source: "jev",
+			category_confidence: 0.9,
+			jev_category_id: 3,
+		};
+
+		it("keeps the posted row's Jev answer when Plaid excluded it as a transfer, and still takes the name", async () => {
+			const item = await addItem();
+			const ids = await bothStored(
+				item,
+				{ amount: -42 },
+				{ amount: -42, ...TRANSFER_IN },
+			);
+			expect(await row("posted-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "plaid",
+			});
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await jevAnswer(ids.posted);
+			await post(item, { amount: -42, ...TRANSFER_IN });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				excluded: 1,
+				excluded_source: "plaid",
+				...keptAnswer,
+			});
+		});
+
+		it("keeps the posted row's Jev answer when the posted row is marked income, and still takes the name", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'jev' WHERE id = ?",
+			)
+				.bind(ids.posted)
+				.run();
+			await jevAnswer(ids.posted);
+			await post(item, { amount: -42 });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				flag_income: 1,
+				...keptAnswer,
+			});
+		});
+
+		it("keeps the posted row's Jev answer when a person excluded the pending row, and the exclusion moves over", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed', excluded = 1, excluded_source = 'user' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await jevAnswer(ids.posted);
+			await post(item, { amount: -42 });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				excluded: 1,
+				excluded_source: "user",
+				...keptAnswer,
+			});
+		});
+	});
+
 	describe("a moved split's parts follow the posted row, except for a choice made on the part", () => {
 		/** September's counted spending, which counts a split through its parts and skips the parent. */
 		const spent = async () =>

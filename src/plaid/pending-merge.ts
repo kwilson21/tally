@@ -10,8 +10,10 @@
  * - Tally's own answer (Jev's category pick and how sure it was, its transfer, reimbursement and income
  *   answers, decision 79) moves too, when the amount is unchanged and the posted row has no answer or
  *   choice of its own, so the posted row isn't asked again for nothing. A name the pending row alone got
- *   clears the posted row's Jev answer first, since that answer was for the old name, so the night run asks
- *   again with the name. A merchant rule's pick doesn't move: rules run on the posted row as on any new one.
+ *   clears the posted row's Jev answer, since that answer was for the old name, so the night run asks again
+ *   with the name; it clears only where Jev can be asked about the row (jevAsksAboutSql), so a row a person or
+ *   Plaid took out of the budget keeps its answer. A merchant rule's pick doesn't move: rules run on the posted
+ *   row as on any new one.
  *   An exclusion Plaid put on the posted row is not an answer of its own (spec section 8.5): Jev's exclusion
  *   of the pending row moves over it and
  *   keeps its source, as it does when the pending row simply takes the posted id, so it still holds
@@ -34,6 +36,7 @@
 
 // Parameters, shared by every statement: 1 the pending id, 2 the posted id, 3 the bank's amount in
 // cents now, 4 and 5 the Item row and its lock, 6 to 8 the posted date, bank text and merchant name.
+import { jevAsksAboutSql } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
@@ -86,17 +89,6 @@ const STATEMENTS = [
 	// Note: a note the posted row already has is kept.
 	`UPDATE transactions SET note = p.note, note_guessed = p.note_guessed
 	 ${FROM_PENDING} AND COALESCE(p.note, '') != '' AND COALESCE(transactions.note, '') = ''`,
-	// A name a person gave the pending row alone cleared Tally's answer there, so the posted row's Jev answer (made
-	// for the old name) goes too and the night run asks again. Only Jev's pick and an unsure one: a person's pick and
-	// a merchant rule's stay. It runs before the name moves, since moving the name is the condition it reads.
-	`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
-		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0
-	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL
-	 AND (transactions.category_source = 'jev' OR (transactions.category_id IS NULL
-		AND transactions.category_source IS NULL AND transactions.category_confidence IS NOT NULL))`,
-	// This one only (decision 101): a name a person gave the pending row alone is kept, unless the posted row has its own.
-	`UPDATE transactions SET own_name = p.own_name
-	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL`,
 	// Kept details beat guesses; a posted person's answer, or a clear, always wins.
 	`UPDATE transactions SET
 		kind = CASE WHEN ${KIND_TAKEN} THEN p.kind ELSE transactions.kind END,
@@ -127,6 +119,20 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.income_source = 'user' AND COALESCE(transactions.income_source, '') != 'user'`,
 	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = 'user'
 	 ${FROM_PENDING} AND p.credit_reviewed_by = 'user' AND COALESCE(transactions.credit_reviewed_by, '') != 'user'`,
+	// A name a person gave the pending row alone clears Tally's answer on the posted row, which was made for the old
+	// name, so the night run asks again with it. Only Jev's pick and an unsure one: a person's pick and a merchant
+	// rule's stay. Only where Jev can be asked about the posted row and the pending one as they now stand, after the
+	// person's exclusion, income and review moves above: a row taken out of the budget keeps its answer. It runs
+	// before the name moves, since moving the name is the condition it reads.
+	`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
+		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0
+	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL
+	 AND (transactions.category_source = 'jev' OR (transactions.category_id IS NULL
+		AND transactions.category_source IS NULL AND transactions.category_confidence IS NOT NULL))
+	 AND ${jevAsksAboutSql("transactions")} AND ${jevAsksAboutSql("p")}`,
+	// This one only (decision 101): a name a person gave the pending row alone is kept, unless the posted row has its own.
+	`UPDATE transactions SET own_name = p.own_name
+	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL`,
 	// Tally's own answer, after the person's choices above, so it only fills what's still unanswered. Each
 	// answer was made for the pending amount, so it moves only while the amount is unchanged; a changed
 	// amount is a new question, as for any bank correction.

@@ -98,8 +98,8 @@ export type JevRow = {
 
 /**
  * Whether Jev can be asked about a row's category: the rows pendingForJev classifies (NEEDS_JEV_CLASSIFICATION
- * and NOT FOLLOWS_PURCHASE in src/db/transactions.ts). Keep it in step with them, as followsPurchase in
- * src/db/counted-month.ts is kept in step with FOLLOWS_PURCHASE.
+ * and NOT FOLLOWS_PURCHASE in src/db/transactions.ts). Keep it in step with them, and with its SQL twin
+ * jevAsksAboutSql in src/db/counted-month.ts, as followsPurchase in that file is kept in step with FOLLOWS_PURCHASE.
  */
 export function jevAsksAbout(row: JevRow): boolean {
 	return row.included && !row.isSplit && !row.income && !row.followsPurchase;
