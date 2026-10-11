@@ -205,6 +205,61 @@ describe("an archived category on Home", () => {
 	});
 });
 
+describe("category archive periods", () => {
+	const periods = async (id: number) =>
+		(
+			await db
+				.prepare(
+					"SELECT archived_on, restored_on FROM category_archive_periods WHERE category_id = ? ORDER BY id",
+				)
+				.bind(id)
+				.all<{ archived_on: string; restored_on: string | null }>()
+		).results;
+
+	it("opens a period on archive and closes it on restore, keeping the dates", async () => {
+		await setArchived(db, 5, true, "2026-09-15");
+		expect(await periods(5)).toEqual([
+			{ archived_on: "2026-09-15", restored_on: null },
+		]);
+		await setArchived(db, 5, false, "2026-10-01");
+		expect(await periods(5)).toEqual([
+			{ archived_on: "2026-09-15", restored_on: "2026-10-01" },
+		]);
+	});
+
+	it("keeps one open period, so an overlapping archive adds none", async () => {
+		await setArchived(db, 5, true, "2026-09-30");
+		await setArchived(db, 5, true, "2026-10-01");
+		expect(await periods(5)).toEqual([
+			{ archived_on: "2026-09-30", restored_on: null },
+		]);
+	});
+
+	it("starts a new period on each later archive", async () => {
+		await setArchived(db, 5, true, "2026-08-20");
+		await setArchived(db, 5, false, "2026-10-05");
+		await setArchived(db, 5, true, "2026-10-20");
+		expect(await periods(5)).toEqual([
+			{ archived_on: "2026-08-20", restored_on: "2026-10-05" },
+			{ archived_on: "2026-10-20", restored_on: null },
+		]);
+	});
+
+	it("leaves the period open when a restore is refused because the list is full", async () => {
+		await setArchived(db, 2, true, "2026-09-15");
+		await db
+			.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 46)
+				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
+			)
+			.run();
+		expect(await setArchived(db, 2, false, "2026-10-01")).toBe(false);
+		expect(await periods(2)).toEqual([
+			{ archived_on: "2026-09-15", restored_on: null },
+		]);
+	});
+});
+
 describe("the 50-category limit, checked in the same write", () => {
 	// The demo has 6 active (Childcare included); fill up to 50, as if other saves landed first.
 	const fill = () =>

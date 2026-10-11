@@ -145,6 +145,8 @@ describe("monthsBefore", () => {
 		["2026-03", 5, "2025-10"],
 		["2026-01", 13, "2024-12"],
 		["2026-12", -1, "2027-01"],
+		["0100-01", 1, "0099-12"],
+		["0100-01", -1, "0100-02"],
 	])("%s minus %i months is %s", (month, n, expected) =>
 		expect(monthsBefore(month, n)).toBe(expected),
 	);
