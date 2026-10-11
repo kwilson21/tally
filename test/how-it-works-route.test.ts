@@ -46,6 +46,38 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toContain("Each bill gets at most one payment per period");
 	});
 
+	it("states the possible-bill rule the finder applies: the latest charge repeats an earlier one 25–35 days before it, within 10%", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"Tally suggests a possible bill when a merchant's latest money-out charge in the last 3 months repeats an earlier one 25–35 days before it, within 10% of that earlier charge's amount.",
+		);
+		expect(html).not.toContain("are 25–35 days apart");
+	});
+
+	it("gives a linked refund its exception in the spec's words, when its purchase is excluded", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"A refund linked to its purchase counts in that purchase's month and category while the purchase counts; if the purchase is excluded, the refund counts on its own date and category.",
+		);
+	});
+
+	it("says in the Bills section, right after the finding-bills rule, that card payments and moves are never suggested while they're left out of the budget", async () => {
+		const sentence =
+			"Card payments and moves between your own accounts are never suggested while they're left out of the budget: what you bought on the card already counts, and saving each month is what the savings goal on Home is for.";
+		const demoHtml = decodeHtml((await get("/how-it-works")).html);
+		const familyHtml = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		for (const html of [demoHtml, familyHtml]) {
+			const bills =
+				html.match(/<section[^>]*id="bills"[\s\S]*?<\/section>/)?.[0] ?? "";
+			expect(bills).toContain(sentence);
+			expect(bills).toMatch(
+				/Tally suggests a possible bill[\s\S]*?<\/li>\s*<li>Card payments and moves between your own accounts are never suggested while they're left out of the budget:/,
+			);
+		}
+	});
+
 	it("has the architecture and the Phase 1 feature sections", async () => {
 		const { res, html } = await get("/how-it-works");
 		expect(res.status).toBe(200);

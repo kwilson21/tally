@@ -2,7 +2,7 @@ import type { CategorySummary } from "../budget";
 import { formatCents } from "../money";
 import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
-import { categoryRowAmount } from "./category-amount";
+import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
 
 const wholeUnlessTiny = (cents: number) =>
 	formatCents(cents, {
@@ -85,7 +85,12 @@ function uniqueLabels(labels: string[]): string[] {
 }
 
 // At text-sm, 8 SVG units per Unicode code point is a conservative width estimate.
-const labelNeedsCap = (text: string) => Array.from(text).length * 8 > 62;
+const labelNeedsCap = (text: string, cap = 62) =>
+	Array.from(text).length * 8 > cap;
+// Home's lg:max-w-2xl column is 672px; the wide copy of a ten-category chart stays within #300's 667px.
+const WIDE_COPY_MAX = 667;
+// The wide copy's room after its last bar: 6 units, then the budget word at the same estimate.
+const BUDGET_WORD_ROOM = 6 + Array.from("budget").length * 8;
 
 function EndBars({
 	rows,
@@ -98,10 +103,6 @@ function EndBars({
 	const scrollsAtLg = rows.length > 10;
 	const phoneOnlyCue = scrolls && !scrollsAtLg;
 	const left = scrolls ? 31 : 4;
-	const width = Math.max(
-		350,
-		left + Math.max(0, rows.length - 1) * 66 + 42 + (scrolls ? 44 : 0),
-	);
 	const areaRight = 292;
 	const unit = 72;
 	const barWidth = 42;
@@ -110,6 +111,11 @@ function EndBars({
 		rows.length > 1 && !scrolls
 			? Math.min(66, (areaRight - left - barWidth) / (rows.length - 1))
 			: 66;
+	// The wide copy of six to ten categories tightens its spacing so it fits WIDE_COPY_MAX with the budget word.
+	const wideStep = Math.min(
+		66,
+		(WIDE_COPY_MAX - left - barWidth - BUDGET_WORD_ROOM) / (rows.length - 1),
+	);
 	const x0 = !scrolls
 		? left + (areaRight - left - ((rows.length - 1) * step + barWidth)) / 2
 		: left;
@@ -119,87 +125,106 @@ function EndBars({
 				`${row.name} ${wholeUnlessTiny(row.spentCents)} of ${wholeUnlessTiny(row.budgetCents)}`,
 		)
 		.join(", ");
-	const chart = (
-		<svg
-			viewBox={`0 0 ${width} 142`}
-			width={scrolls ? width : undefined}
-			class={scrolls ? "block max-w-none" : "block w-full"}
-			role="img"
-			aria-label={`Spent against each budget: ${names || "no budgeted categories"}`}
-		>
-			<line
-				x1={left}
-				x2={scrolls ? width : areaRight}
-				y1="40"
-				y2="40"
-				class="stroke-muted"
-				stroke-width="1"
-				stroke-dasharray="4 4"
-			/>
-			<text
-				x={scrolls ? width - 4 : 298}
-				y="45"
-				text-anchor={scrolls ? "end" : undefined}
-				class="fill-muted text-sm"
-			>
-				budget
-			</text>
-			{rows.map((row, index) => {
-				const base = 112;
-				const over = row.spentCents > row.budgetCents;
-				const height = Math.max(
-					3,
-					Math.round(endBarRatio(row.spentCents, row.budgetCents).ratio * unit),
+	// The 44px of trailing space is the phone cue's room. Only a copy where the cue shows reserves it.
+	const chart = (cueSpace: boolean) => {
+		// The wide copy has no cue: it ends at its last bar and keeps only the budget word's room.
+		const wide = scrolls && !cueSpace;
+		const barStep = wide ? wideStep : step;
+		const lastBarEnd = x0 + Math.max(0, rows.length - 1) * barStep + barWidth;
+		const width = wide
+			? lastBarEnd + BUDGET_WORD_ROOM
+			: Math.max(
+					350,
+					left + Math.max(0, rows.length - 1) * 66 + 42 + (cueSpace ? 44 : 0),
 				);
-				const x = x0 + index * step;
-				return (
-					<g>
-						<rect
-							x={x}
-							y={base - height}
-							width={barWidth}
-							height={height}
-							rx="3"
-							class={over ? "fill-over" : "fill-muted/60"}
-						/>
-						{over && (
+		const lineEnd = wide ? lastBarEnd : scrolls ? width : areaRight;
+		const wordX = wide ? lastBarEnd + 6 : scrolls ? width - 4 : areaRight + 6;
+		const labelCap = wide ? Math.min(62, barStep - 4) : 62;
+		return (
+			<svg
+				viewBox={`0 0 ${width} 142`}
+				width={scrolls ? width : undefined}
+				class={scrolls ? "block max-w-none" : "block w-full"}
+				role="img"
+				aria-label={`Spent against each budget: ${names || "no budgeted categories"}`}
+			>
+				<line
+					x1={left}
+					x2={lineEnd}
+					y1="40"
+					y2="40"
+					class="stroke-muted"
+					stroke-width="1"
+					stroke-dasharray="4 4"
+				/>
+				<text
+					x={wordX}
+					y="45"
+					text-anchor={scrolls && !wide ? "end" : undefined}
+					class="fill-muted text-sm"
+				>
+					budget
+				</text>
+				{rows.map((row, index) => {
+					const base = 112;
+					const over = row.spentCents > row.budgetCents;
+					const height = Math.max(
+						3,
+						Math.round(
+							endBarRatio(row.spentCents, row.budgetCents).ratio * unit,
+						),
+					);
+					const x = x0 + index * barStep;
+					return (
+						<g>
+							<rect
+								x={x}
+								y={base - height}
+								width={barWidth}
+								height={height}
+								rx="3"
+								class={over ? "fill-over" : "fill-muted/60"}
+							/>
+							{over && (
+								<text
+									x={x + barWidth / 2}
+									y={base - height - 6}
+									text-anchor="middle"
+									class="fill-over text-sm font-semibold"
+									aria-label={`Over budget by ${wholeUnlessTiny(row.spentCents - row.budgetCents)}`}
+									{...(labelNeedsCap(
+										`+${wholeUnlessTiny(row.spentCents - row.budgetCents)}`,
+										labelCap,
+									)
+										? { textLength: labelCap, lengthAdjust: "spacingAndGlyphs" }
+										: {})}
+								>
+									<title>
+										+{wholeUnlessTiny(row.spentCents - row.budgetCents)}
+									</title>
+									+{wholeUnlessTiny(row.spentCents - row.budgetCents)}
+								</text>
+							)}
 							<text
 								x={x + barWidth / 2}
-								y={base - height - 6}
+								y={base + 20}
 								text-anchor="middle"
-								class="fill-over text-sm font-semibold"
-								aria-label={`Over budget by ${wholeUnlessTiny(row.spentCents - row.budgetCents)}`}
-								{...(labelNeedsCap(
-									`+${wholeUnlessTiny(row.spentCents - row.budgetCents)}`,
-								)
-									? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
+								class="fill-muted text-sm"
+								aria-label={row.name}
+								{...(labelNeedsCap(labels[index] ?? "", labelCap)
+									? { textLength: labelCap, lengthAdjust: "spacingAndGlyphs" }
 									: {})}
 							>
-								<title>
-									+{wholeUnlessTiny(row.spentCents - row.budgetCents)}
-								</title>
-								+{wholeUnlessTiny(row.spentCents - row.budgetCents)}
+								<title>{row.name}</title>
+								{labels[index]}
 							</text>
-						)}
-						<text
-							x={x + barWidth / 2}
-							y={base + 20}
-							text-anchor="middle"
-							class="fill-muted text-sm"
-							aria-label={row.name}
-							{...(labelNeedsCap(labels[index] ?? "")
-								? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
-								: {})}
-						>
-							<title>{row.name}</title>
-							{labels[index]}
-						</text>
-					</g>
-				);
-			})}
-		</svg>
-	);
-	if (!scrolls) return <div class="mt-4">{chart}</div>;
+						</g>
+					);
+				})}
+			</svg>
+		);
+	};
+	if (!scrolls) return <div class="mt-4">{chart(false)}</div>;
 	return (
 		<div class="relative mt-4">
 			{/* biome-ignore lint/a11y/useSemanticElements: this scroll container must expose role=region explicitly */}
@@ -214,7 +239,7 @@ function EndBars({
 				}
 			>
 				<div class="flex w-max">
-					{chart}
+					{chart(scrolls)}
 					<span class="month-end-chart-tail" aria-hidden="true" />
 					<span
 						id={`${chartId}-chart-end`}
@@ -291,7 +316,9 @@ function EndBars({
 					→
 				</span>
 			</p>
-			{phoneOnlyCue && <div class="mt-4 hidden lg:block">{chart}</div>}
+			{phoneOnlyCue && (
+				<div class="mt-4 hidden lg:block">{chart(scrollsAtLg)}</div>
+			)}
 		</div>
 	);
 }
@@ -312,7 +339,7 @@ export function MonthEnd({
 	return (
 		<section aria-label={`${monthName} ended`}>
 			<p class="mt-4 text-lg text-muted">{monthName} ended</p>
-			<div class="flex items-center gap-4">
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<p
 					class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight ${over ? "text-over" : ""}`}
 				>
@@ -333,10 +360,18 @@ export function MonthEnd({
 /** A finished month's unbudgeted spending is information, without a budget action. */
 export function PastNotBudgeted({
 	items,
+	needsCategory,
 }: {
 	items: { name: string; icon: string; color: string; spentCents: number }[];
+	/** The month's uncategorized money, named once as the list's last row (#310). */
+	needsCategory?: { spentCents: number; count: number };
 }) {
-	if (items.length === 0) return null;
+	// Shown when the result includes uncategorized money: a non-zero amount, or transactions that net to $0.
+	const needs =
+		needsCategory && (needsCategory.count > 0 || needsCategory.spentCents !== 0)
+			? needsCategory
+			: undefined;
+	if (items.length === 0 && !needs) return null;
 	return (
 		<>
 			<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
@@ -347,9 +382,26 @@ export function PastNotBudgeted({
 						<span class="min-w-0 flex-1 truncate text-lg">{item.name}</span>
 						<span class={categoryRowAmount(item.spentCents).className}>
 							{categoryRowAmount(item.spentCents).text}
+							{item.spentCents < 0 && (
+								<span class="sr-only">{REFUND_WORDS}</span>
+							)}
 						</span>
 					</li>
 				))}
+				{needs && (
+					<li class="flex min-h-11 items-center gap-4 py-2">
+						<CategoryIcon icon="list" color="" />
+						<span class="min-w-0 flex-1 truncate text-lg">
+							Needs a category
+						</span>
+						<span class={categoryRowAmount(needs.spentCents).className}>
+							{categoryRowAmount(needs.spentCents).text}
+							{needs.spentCents < 0 && (
+								<span class="sr-only">{REFUND_WORDS}</span>
+							)}
+						</span>
+					</li>
+				)}
 			</ul>
 		</>
 	);

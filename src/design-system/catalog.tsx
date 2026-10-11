@@ -611,15 +611,15 @@ const TOAST_SPEC: UseSpecText = {
 	states:
 		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except that when an Undo toast ends with focus on its Undo button, focus moves to the list's result count, or to the page's title when there is no count (the first-visit page). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for two Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
-		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
+		"Undo is a labeled form button, usable by touch or keyboard; while its request is in flight it is off, and a request that fails turns it back on while the toast is still up. Other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
 		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its remaining server token time (up to 10 seconds) and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
 		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
-		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo. A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
+		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -660,23 +660,23 @@ const SEARCH_EVERY_MONTH_SPEC: UseSpecText = {
 		"“5 transactions matching “costco” in all months” · “2 transactions matching “42.17” (amount $42.17) in all months” · “2 transactions matching “$42” (amounts $42.00 to $42.99) in October” · “2 transactions matching “42” in October” when a row matched by name too · “3 transactions matching “groceries” (category) in all months” · “Only October”.",
 };
 
-// The demo's two view links' use spec (decisions 73 and 79, P44 A): every line answered before the owner signs it off.
+// The demo's two view links' use spec (decisions 73, 79 and 103, P44 A): every line answered before the owner signs it off.
 const VIEW_LINKS_SPEC: UseSpecText = {
 	purpose:
 		"Let a visitor to the demo see the same Transactions list as the bank sends it, next to what Tally made of it, so they can see what Tally did for them. It exists only in the demo.",
 	affordance:
-		"Two links in words under the page title with a dot between them: “Tidied by Tally · Straight from the bank”. The one you're on is ink and semibold with no underline; the other is a terracotta link, as every link is. Each is 44px tall.",
+		"Two links in words under the page title with a dot between them: “With Tally · Without Tally”. The one you're on is ink and semibold with no underline; the other is a terracotta link, as every link is. Each is 44px tall.",
 	states:
 		"Current: ink, semibold, not underlined, and aria-current=“page”, so the state is also in words for a screen reader, not weight and color alone. The other: terracotta. Hover: no change (touch has none). Focus: the focus-visible ring. Pressed: the page loads. Disabled, loading, done and error: not applicable, since a link either goes or it doesn't.",
 	feedback:
 		"A link loads the same page in the other view. The rows change, and the result count, which is the page's live line, ends “, as the bank sends them” (or stops saying it), so it always says which view is shown. The raw view adds one muted line under the count. Nothing else changes: Home's numbers never do. Search and filters stay as they were, and paging starts again at the first page. A filter change updates both links, so they never name a stale filter.",
 	input:
-		"Touch: each link is 44px tall, and the dot and the gap keep the two apart. Keyboard: Tab to each, Enter follows it. Screen reader: “View, navigation”, then “Tidied by Tally, current page, link” and “Straight from the bank, link”; the dot is hidden from it.",
+		"Touch: each link is 44px tall, and the dot and the gap keep the two apart. Keyboard: Tab to each, Enter follows it. Screen reader: “View, navigation”, then “With Tally, current page, link” and “Without Tally, link”; the dot is hidden from it.",
 	motion: "None added. Reduced motion changes nothing.",
 	edges:
 		"Demo only: the family app has neither the links nor the view, and ignores ?raw=1. No JavaScript: they are plain links. On a 320px phone both still fit on one line, and larger text wraps them onto a second line rather than cutting them off. A search or filter in the address stays when you switch. The note under the count names the demo's own transfer to Savings and paycheck, because that is what its data has.",
 	words:
-		"View (the nav's name) · Tidied by Tally · Straight from the bank · the count ends “, as the bank sends them” · “No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.” Never the name of the AI behind it.",
+		"View (the nav's name) · With Tally · Without Tally · the count ends “, as the bank sends them” · “No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.” Never the name of the AI behind it.",
 };
 
 // The time zone row's use spec (decision 72, P35 A): every line answered before the owner signs it off.
@@ -820,13 +820,13 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	feedback:
 		"A link loads that month's own Home URL. The browser announces the new page title and the selected month; no in-place swap or JavaScript is needed.",
 	input:
-		"Touch targets are 44px. The arrow circle is 34px; its paper arrow and accent focus ring each contrast at least 3:1 against ink. Keyboard Tab reaches each available arrow and month link in order; Enter follows it. Screen readers hear Previous month, August; Next month, October; and a month name with this month where applicable. Unavailable arrows are hidden because they are not controls.",
+		"Touch targets are 44px. The arrow circle is 34px; its paper arrow and accent focus ring each contrast at least 3:1 against ink. Keyboard Tab reaches each available arrow and month link in order; Enter follows it. Screen readers hear Previous month, August; Next month, October; and a month name with this month where applicable. Unavailable arrows are hidden because they are not controls. A refund under Not budgeted, including Needs a category, is heard as “+$14 back: refunds outweigh spending”.",
 	motion:
 		"When more than five categories need a sideways cue, its arrows nudge three times at 1.2 seconds per nudge, then rest. Reduced motion leaves them still. The page uses the shell's browser page transition.",
 	edges:
-		"The strip shows at most 36 available months and always contains the viewed month. Near the first month it starts there and extends later to fill the strip when history allows; an older window ends at the viewed month. Earlier and Later open the month before or after the visible window. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either history end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month budget counts only for a category active during that month; an archived category with counted spending remains as a spending-only row. A finished-month chart with more than five budgeted categories is one 42px-bar row inside its own keyboard-scrollable region; at `lg`, the fade, arrow, hint and scrolling region appear only above ten categories, when the row exceeds the 672px Home content width (main column 696px at 1024px; 824px at 1280px and wider). Its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. Nonzero finished amounts and bar overages retain cents when whole-dollar rounding would hide them. A future or pre-history month address opens this month's Home.",
+		"The strip shows at most 36 available months and always contains the viewed month. Near the first month it starts there and extends later to fill the strip when history allows; an older window ends at the viewed month. Earlier and Later open the month before or after the visible window. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either history end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month budget counts only for a category active during that month; an archived category with counted spending remains as a spending-only row. A finished-month chart with more than five budgeted categories is one 42px-bar row inside its own keyboard-scrollable region; at `lg`, the fade, arrow, hint and scrolling region appear only above ten categories, when the row exceeds the 672px Home content width (main column 696px at 1024px; 824px at 1280px and wider). Its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units (56 in a ten-category wide copy) are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. Nonzero finished amounts and bar overages retain cents when whole-dollar rounding would hide them. Uncategorized money in a finished month is one read-only last row under Not budgeted: the grey list icon, “Needs a category”, and its amount (+$ in green when refunds outweigh spending); the row shows when that amount isn't $0 or transactions need a category, and when no category is Not budgeted, the heading stands above just this row. At 320px a large result's stamp drops beneath its amount when both don't fit one line. At `lg`, the wide copy of a six-to-ten-category chart ends its dashed line at the last bar and puts the budget word 6px to its right, reserving only the word's room. Six to nine categories keep 66px spacing; ten narrow to 60px (labels capped at 56) so the chart stays 667px inside Home's 672px column. The phone cue's 44px is reserved only where the cue shows. A future or pre-history month address opens this month's Home.",
 	words:
-		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
+		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · Needs a category · back: refunds outweigh spending (screen readers only) · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
 };
 
 // NotBudgetedRow's use spec (DESIGN.md, "Use"): every part answered before the owner signs it off.
@@ -937,7 +937,7 @@ function HomeTopGroup() {
 					"PastNotBudgeted",
 					"ProgressRow",
 				]}
-				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94)."
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94). Uncategorized spending is named last under Not budgeted as Needs a category, the owner's pick for #310 (Oct 11); a large result's stamp wraps under it at 320px (#311)."
 			>
 				<State label="September ended under overall, with Eating Out over its own budget">
 					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">
@@ -1014,6 +1014,69 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
+				<State label="Uncategorized spending: the result takes it out, and Needs a category names it once">
+					<Picture label="$100 budget, $20 categorized and $50 uncategorized: $30 under, with Needs a category at the end of Not budgeted">
+						<div class="max-w-2xl">
+							<MonthEnd
+								chartId="catalog-needs-category"
+								monthName="September"
+								amountCents={3000}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 10000,
+										spentCents: 2000,
+										leftCents: 8000,
+										over: false,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								items={[]}
+								needsCategory={{ spentCents: 5000, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="Uncategorized refunds outweigh spending: +$14 in green, as Not budgeted rows show it (heard as +$14 back: refunds outweigh spending)">
+					<Picture label="Needs a category at +$14 in green, last under a Not budgeted category">
+						<div class="max-w-2xl">
+							<PastNotBudgeted
+								items={[
+									{
+										name: "Kids",
+										icon: "kids",
+										color: "cat-ochre",
+										spentCents: 3000,
+									},
+								]}
+								needsCategory={{ spentCents: -1400, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="A $1,000,000 result at 320px: the stamp wraps under the amount">
+					<Picture label="A seven-figure finished amount at 320px, with its Under stamp dropping beneath it">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-large-result"
+								monthName="September"
+								amountCents={100_000_000}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 100_000_000,
+										spentCents: 0,
+										leftCents: 100_000_000,
+										over: false,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
 				<State label="At 320px wide, month links wrap instead of overflowing">
 					<Picture label="Month navigation at 320px wide, with links wrapping instead of overflowing">
 						<div class="w-[320px] max-w-full">
@@ -1039,6 +1102,36 @@ function HomeTopGroup() {
 									spentCents: 8000,
 									leftCents: 2000,
 									over: false,
+								}))}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="Ten budgeted categories, the last one over its budget: at lg the budget word sits right of the last bar">
+					<Picture label="Ten categories at lg, the last one over budget, with the budget word clear of its bar">
+						<div class="max-w-2xl">
+							<MonthEnd
+								chartId="catalog-ten-wide"
+								monthName="September"
+								amountCents={16000}
+								rows={[
+									"Groceries",
+									"Eating Out",
+									"Gas",
+									"Kids",
+									"Household",
+									"Utilities",
+									"Clothing",
+									"Gifts",
+									"Pets",
+									"Travel",
+								].map((name, index) => ({
+									id: index + 1,
+									name,
+									budgetCents: 10000,
+									spentCents: index === 9 ? 12000 : 8000,
+									leftCents: index === 9 ? -2000 : 2000,
+									over: index === 9,
 								}))}
 							/>
 						</div>
@@ -1246,7 +1339,7 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
-							frequency="monthly"
+							bill={{ frequency: "monthly", anchorMonth: null }}
 							candidates={[
 								{
 									id: 1,
@@ -1265,12 +1358,8 @@ function Rows() {
 								},
 							]}
 							periods={[
-								{
-									value: "2026-09",
-									label: "September",
-									countedMonth: "2026-09",
-								},
-								{ value: "2026-10", label: "October", countedMonth: "2026-10" },
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
 							]}
 						/>
 					</div>
@@ -1283,15 +1372,9 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
-							frequency="monthly"
+							bill={{ frequency: "monthly", anchorMonth: null }}
 							candidates={[]}
-							periods={[
-								{
-									value: "2026-09",
-									label: "September",
-									countedMonth: "2026-09",
-								},
-							]}
+							periods={[{ value: "2026-09", label: "September" }]}
 						/>
 					</div>
 				</State>
@@ -2359,9 +2442,9 @@ function Controls() {
 				title="ViewLinks"
 				tier="visual"
 				components={["ViewLinks"]}
-				sentence="The demo's “See it without AI” (decisions 73 and 79, P44 A): two plain links under the Transactions title, “Tidied by Tally · Straight from the bank”, that switch the list between what Tally made of it and the bank's own data. The current one is ink and semibold; the other is a terracotta link. They are real links to the demo's Transactions."
+				sentence="The demo's “See it without AI” (decisions 73, 79 and 103, P44 A): two plain links under the Transactions title, “With Tally · Without Tally”, that switch the list between what Tally made of it and the bank's own data. The current one is ink and semibold; the other is a terracotta link. They are real links to the demo's Transactions."
 			>
-				<State label="Tally's list: “Tidied by Tally” is current">
+				<State label="Tally's list: “With Tally” is current">
 					<ViewLinks
 						id="ds-view-made"
 						current="made"
@@ -2369,7 +2452,7 @@ function Controls() {
 						bankHref="/transactions?raw=1"
 					/>
 				</State>
-				<State label="The bank's list (?raw=1): “Straight from the bank” is current">
+				<State label="The bank's list (?raw=1): “Without Tally” is current">
 					<ViewLinks
 						id="ds-view-bank"
 						current="bank"
@@ -2713,7 +2796,7 @@ function Controls() {
 				title="Add cash"
 				tier="visual"
 				components={["CashForm"]}
-				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it."
+				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it. It opens with the amount blank, as Add a bill does (#342)."
 			>
 				<State label="Add cash">
 					<div
@@ -2735,6 +2818,39 @@ function Controls() {
 								merchant: "Farmers market",
 								category: "1",
 								note: "Peaches and eggs",
+							}}
+							categories={[
+								{
+									id: 1,
+									name: "Groceries",
+									icon: "groceries",
+									color: "cat-blue",
+								},
+								{
+									id: 2,
+									name: "Eating Out",
+									icon: "eating-out",
+									color: "cat-plum",
+								},
+							]}
+							action="#"
+						/>
+					</div>
+				</State>
+				<State label="As it opens: the amount is blank, as Add a bill's is">
+					<div
+						inert
+						class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
+					>
+						<h4 class="font-serif text-4xl font-semibold">Add cash spending</h4>
+						<CashForm
+							today="2026-09-29"
+							values={{
+								date: "2026-09-29",
+								amount: "",
+								merchant: "",
+								category: "",
+								note: "",
 							}}
 							categories={[
 								{
@@ -2946,6 +3062,7 @@ function Feedback() {
 						data-ds-toast="success"
 						data-ds-message="Deleted Farmers market, $20.00."
 						data-ds-undo="catalog-demo-token"
+						data-ds-undo-expires-in-ms="10000"
 					>
 						Show an Undo toast
 					</Button>

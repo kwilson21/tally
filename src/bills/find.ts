@@ -110,7 +110,11 @@ const chargeMerchant = (column: "display_name" | "default_category_id") =>
 /**
  * Suggests bills from the last three months of charges, one per merchant key. A charge is left out when
  * its key is marked Not a bill, or an existing bill covers it: by its key, or by its raw name for a bill
- * saved under the bank's raw text, before the key existed.
+ * saved under the bank's raw text, before the key existed. A charge excluded from the budget is never
+ * suggested, which is where card payments and moves between the family's own accounts go, whether Plaid,
+ * Jev or a person excluded it; one a person brought back into the budget counts as spending and can be
+ * suggested. The stored Plaid category is not checked: its main category alone can't tell a move between
+ * the family's own accounts from a payment to someone else, or a card payment from a loan payment.
  */
 export async function loadBillSuggestions(
 	db: D1Database,
