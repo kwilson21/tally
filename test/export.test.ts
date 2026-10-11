@@ -188,6 +188,9 @@ describe("data exports", () => {
 
 	it("includes every specified table while exposing only safe bank and document fields", async () => {
 		await env.DB.prepare(
+			"INSERT INTO household_members (email, session_issued_at) VALUES ('person@example.com', 1)",
+		).run();
+		await env.DB.prepare(
 			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-10', 50000)",
 		).run();
 		await env.DB.batch([
@@ -245,6 +248,7 @@ describe("data exports", () => {
 			"plaid_items",
 			"documents",
 			"household_settings",
+			"household_members",
 			"household_people",
 		]) {
 			expect(data[table], table).toBeInstanceOf(Array);
@@ -358,6 +362,13 @@ describe("data exports", () => {
 			plaid_items: ["institution_name", "status"],
 			documents: ["filename", "uploaded_at"],
 			household_settings: ["key", "value"],
+			household_members: [
+				"email",
+				"first_seen_at",
+				"last_seen_at",
+				"session_issued_at",
+				"removed_at",
+			],
 			household_people: ["id", "name"],
 		} as const;
 		for (const [table, columns] of Object.entries(exportedColumns)) {

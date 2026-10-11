@@ -37,16 +37,14 @@ import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
-import {
-	categoryRowAmount,
-	MonthEnd,
-	PastNotBudgeted,
-} from "../views/month-end";
+import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
+import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { ThingsToTry } from "../views/things-to-try";
+import { TransactionsButton } from "../views/transactions-button";
 import { loadBillRows } from "./bills";
 
 type App = { Bindings: Env };
@@ -107,6 +105,7 @@ type HomeOptions = {
 	sheet?: (
 		spentCents: (id: number) => number,
 		savingsGoalCents: number | null,
+		transactionCount: (id: number) => number,
 	) => Child;
 	/** Move focus to this category's row: after a save, or when the sheet closes. */
 	focusId?: number;
@@ -273,6 +272,8 @@ async function renderHome(
 		data.transactions
 			.filter((t) => t.categoryId === id && !t.income)
 			.reduce((sum, t) => sum + t.amountCents, 0);
+	const transactionCount = (id: number) =>
+		data.transactions.filter((t) => t.categoryId === id && !t.income).length;
 	const pastNotBudgeted = notBudgeted.map((cat) => ({
 		...cat,
 		spentCents: spent(cat.id),
@@ -441,36 +442,21 @@ async function renderHome(
 												autofocus={focusSavingsGoal}
 											/>
 										)}
-										{notBudgeted.map((cat) =>
-											cat.archived ? (
-												<li class="flex min-h-11 items-center gap-4 py-2 text-ink">
-													<CategoryIcon icon={cat.icon} color={cat.color} />
-													<span class="min-w-0 flex-1 truncate text-lg">
-														{cat.name}
-													</span>
-													<span
-														class={categoryRowAmount(spent(cat.id)).className}
-													>
-														{categoryRowAmount(spent(cat.id)).text}
-													</span>
-												</li>
-											) : (
-												<li>
-													<a
-														href={`/budget/${cat.id}`}
-														autofocus={cat.id === focusId}
-														class="flex min-h-11 items-center gap-4 py-2 text-ink no-underline"
-														{...openAttrs(`/budget/${cat.id}`)}
-													>
-														<CategoryIcon icon={cat.icon} color={cat.color} />
-														<span class="min-w-0 flex-1 truncate text-lg">
-															{cat.name}
-														</span>
-														<span class="text-accent">Add a budget</span>
-													</a>
-												</li>
-											),
-										)}
+										{notBudgeted.map((cat) => (
+											<NotBudgetedRow
+												name={cat.name}
+												icon={cat.icon}
+												color={cat.color}
+												spentCents={spent(cat.id)}
+												href={cat.archived ? undefined : `/budget/${cat.id}`}
+												attrs={
+													cat.archived
+														? undefined
+														: openAttrs(`/budget/${cat.id}`)
+												}
+												autofocus={cat.id === focusId}
+											/>
+										))}
 									</ul>
 								</>
 							) : null}
@@ -513,7 +499,9 @@ async function renderHome(
 							</div>
 						)}
 					</div>
-					<div id="sheet">{sheet?.(spent, data.savingsGoalCents)}</div>
+					<div id="sheet">
+						{sheet?.(spent, data.savingsGoalCents, transactionCount)}
+					</div>
 				</div>
 			</div>
 		</Layout>,
@@ -529,6 +517,7 @@ function BudgetSheet({
 	spentCents,
 	lastMonthCents,
 	averageCents,
+	transactionCount,
 	month: monthPeriod,
 }: {
 	category: BudgetCategory;
@@ -537,10 +526,16 @@ function BudgetSheet({
 	spentCents: number;
 	lastMonthCents: number;
 	averageCents: number | null;
+	transactionCount: number;
 	/** The household's current month, YYYY-MM. */
 	month: string;
 }) {
 	const month = monthName(monthPeriod);
+	const transactionsHref = `/transactions?${new URLSearchParams({
+		category: String(category.id),
+		month: monthPeriod,
+		show: "spending",
+	})}`;
 	// Closing swaps Home back in with focus on the row, so the change is announced.
 	const closeAttrs = {
 		"hx-get": `/?focus=${category.id}`,
@@ -573,6 +568,7 @@ function BudgetSheet({
 					? `${formatCents(-spentCents)} more refunded than spent in ${month}`
 					: `${formatCents(spentCents)} spent so far in ${month}`}
 			</p>
+			<TransactionsButton href={transactionsHref} count={transactionCount} />
 			<form
 				method="post"
 				action={`/budget/${category.id}`}
@@ -671,7 +667,7 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 		month,
 	);
 	return renderHome(c, today, {
-		sheet: (spent) => (
+		sheet: (spent, _savingsGoal, transactionCount) => (
 			<BudgetSheet
 				category={category}
 				value={
@@ -682,6 +678,7 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 				spentCents={spent(category.id)}
 				lastMonthCents={lastMonth}
 				averageCents={average}
+				transactionCount={transactionCount(category.id)}
 				month={month}
 			/>
 		),
@@ -774,7 +771,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 		);
 		return renderHome(c, today, {
 			status: 422,
-			sheet: (spent) => (
+			sheet: (spent, _savingsGoal, transactionCount) => (
 				<BudgetSheet
 					category={category}
 					value={typed}
@@ -782,6 +779,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 					spentCents={spent(category.id)}
 					lastMonthCents={lastMonth}
 					averageCents={average}
+					transactionCount={transactionCount(category.id)}
 					month={month}
 				/>
 			),
