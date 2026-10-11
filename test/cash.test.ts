@@ -2343,4 +2343,86 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			)?.amountCents,
 		).toBe(10000);
 	});
+
+	/** Archives a category, as Settings does: entries that already use it keep it. */
+	const archive = (categoryId: number) =>
+		env.DB.prepare(
+			"UPDATE categories SET archived = 1, archived_on = ? WHERE id = ?",
+		)
+			.bind(today(), categoryId)
+			.run();
+	/** The category select of part `index` (0-based) in the sheet's HTML. */
+	const selectOf = (html: string, index: number) =>
+		html.match(
+			new RegExp(`<select id="part-category-${index}"[\\s\\S]*?</select>`),
+		)?.[0] ?? "";
+
+	it("keeps a saved part's archived category in its own select, and in no other row's", async () => {
+		const { id, b } = await splitCash("Archived sheet");
+		await archive(5);
+		const { res, html } = await request(
+			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
+		);
+		expect(res.status).toBe(200);
+		expect(selectOf(html, 0)).not.toMatch(/<option value="5"/);
+		expect(selectOf(html, 1)).toMatch(
+			/<option value="5" selected[^>]*>Household<\/option>/,
+		);
+		expect(html).toMatch(
+			new RegExp(`<input[^>]*name="part_id"[^>]*value="${b}"`),
+		);
+	});
+
+	it("saves a correction that still has a saved part on its archived category, which it keeps", async () => {
+		const { id, a, b } = await splitCash("Keeps archived");
+		await archive(5);
+		const { res } = await correction(id, savedParts(a, b));
+		expect(res.status).toBe(200);
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 4000 },
+		]);
+	});
+
+	it("refuses an archived category on a part that doesn't keep it, and on a new part, with nothing saved", async () => {
+		const { id, a, b } = await splitCash("Archived refused");
+		await archive(5);
+		const before = await stateOf(id);
+		const onSaved = await correction(id, [
+			[String(a), "5", "60.00"],
+			[String(b), "5", "40.00"],
+		]);
+		expect(onSaved.res.status).toBe(422);
+		expect(onSaved.html).toContain("Pick a category for part 1.");
+		const onNew = await correction(id, [
+			[String(a), "1", "60.00"],
+			[String(b), "5", "30.00"],
+			["", "5", "10.00"],
+		]);
+		expect(onNew.res.status).toBe(422);
+		expect(onNew.html).toContain("Pick a category for part 3.");
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("keeps B's archived option when the sheet is drawn again with Add a part or with an error", async () => {
+		const { id, a, b } = await splitCash("Redrawn archived");
+		await archive(5);
+		const added = await correction(id, savedParts(a, b), {
+			extra: [["add", "1"]],
+		});
+		expect(added.res.status).toBe(200);
+		expect(selectOf(added.html, 1)).toMatch(
+			/<option value="5" selected[^>]*>Household<\/option>/,
+		);
+		expect(selectOf(added.html, 2)).not.toMatch(/<option value="5"/);
+		const failed = await correction(id, [
+			[String(a), "1", "60.00"],
+			[String(b), "5", "30.00"],
+			["", "", "10.00"],
+		]);
+		expect(failed.res.status).toBe(422);
+		expect(selectOf(failed.html, 1)).toMatch(
+			/<option value="5" selected[^>]*>Household<\/option>/,
+		);
+	});
 });

@@ -5,8 +5,16 @@ import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 
 type Category = { id: number; name: string };
-/** A part row. `partId` is the saved part a correction updates; a new row has none. */
-export type SplitValue = { category: string; amount: string; partId?: number };
+/**
+ * A part row. `partId` is the saved part a correction updates; a new row has none. `kept` is that part's
+ * own category when it is archived: the row's select offers it, and no other row does.
+ */
+export type SplitValue = {
+	category: string;
+	amount: string;
+	partId?: number;
+	kept?: Category;
+};
 
 export function SplitLine({
 	parentCents,
@@ -113,7 +121,7 @@ export function SplitForm({
 						required
 					>
 						<option value="">Pick a category</option>
-						{categories.map((cat) => (
+						{[...categories, ...(value.kept ? [value.kept] : [])].map((cat) => (
 							<option
 								value={cat.id}
 								selected={value.category === String(cat.id)}

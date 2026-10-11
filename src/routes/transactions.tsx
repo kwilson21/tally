@@ -2105,6 +2105,23 @@ async function splitContext(c: Context<App>) {
 	return { tx, categories: categories.results };
 }
 
+/**
+ * Change the parts: each saved part of the entry whose category is archived, by part id. That category
+ * is the part's own to keep (src/transactions/split.ts), so it is read from the saved part, never from
+ * the form.
+ */
+async function archivedPartCategories(db: D1Database, parentId: number) {
+	const rows = await db
+		.prepare(
+			"SELECT part.id AS partId, cat.id, cat.name FROM transactions part JOIN categories cat ON cat.id = part.category_id WHERE part.parent_id = ? AND cat.archived = 1",
+		)
+		.bind(parentId)
+		.all<{ partId: number; id: number; name: string }>();
+	return new Map(
+		rows.results.map((row) => [row.partId, { id: row.id, name: row.name }]),
+	);
+}
+
 transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	// Income is never split (decision 62's review): no form for it either.
@@ -2128,11 +2145,15 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 					.all<{ id: number; categoryId: number | null; amountCents: number }>()
 			).results
 		: [];
+	const archived = correcting
+		? await archivedPartCategories(c.env.DB, tx.id)
+		: new Map<number, Category>();
 	const values: SplitValue[] = correcting
 		? saved.map((part) => ({
 				category: part.categoryId === null ? "" : String(part.categoryId),
 				amount: centsToAmount(part.amountCents),
 				partId: part.id,
+				kept: archived.get(part.id),
 			}))
 		: [
 				{ category: "", amount: "" },
@@ -2196,11 +2217,18 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
 	const partIds = form.getAll("part_id").map(String);
-	const values: SplitValue[] = categoryValues.map((category, i) => ({
-		category,
-		amount: amountValues[i] ?? "",
-		partId: partIdOf(partIds[i]),
-	}));
+	const archived = correction
+		? await archivedPartCategories(c.env.DB, tx.id)
+		: new Map<number, Category>();
+	const values: SplitValue[] = categoryValues.map((category, i) => {
+		const partId = partIdOf(partIds[i]);
+		return {
+			category,
+			amount: amountValues[i] ?? "",
+			partId,
+			kept: partId === undefined ? undefined : archived.get(partId),
+		};
+	});
 	if (form.get("add") === "1") {
 		// Add a part: the open sheet again, with one more part.
 		values.push({ category: "", amount: "" });
@@ -2223,6 +2251,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		amountValues,
 		total ?? tx.amountCents,
 		categories.map((cat) => cat.id),
+		values.map((value) => value.kept?.id),
 	);
 	if (!parsed.ok)
 		return renderList(c, today, filtersFrom(c, today, back), {
