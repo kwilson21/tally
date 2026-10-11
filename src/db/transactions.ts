@@ -22,6 +22,7 @@ import {
 	INCLUDED,
 	INCLUDED_ROW,
 	includedSql,
+	markedTransferSql,
 	PAYS_A_BILL,
 	paysBillSql,
 } from "./counted-month";
@@ -1593,7 +1594,7 @@ export async function excludedBreakdown(
 				COALESCE(SUM(NOT person AND NOT moved AND reimbursement), 0) AS reimbursement,
 				COALESCE(SUM(person OR (NOT moved AND NOT reimbursement)), 0) AS byPerson
 			FROM (SELECT COALESCE(t.excluded_source = 'user', 0) AS person,
-					t.flag_transfer = 1 OR COALESCE(t.excluded_source = 'plaid', 0) AS moved,
+					${markedTransferSql("t")} AS moved,
 					t.flag_reimbursement = 1 AS reimbursement
 				FROM transactions t
 				${COUNTED_JOINS}

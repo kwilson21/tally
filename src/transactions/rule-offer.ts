@@ -1,3 +1,4 @@
+import { INCLUDED_ROW, markedTransferSql } from "../db/counted-month";
 import { merchantKeySql } from "../db/merchant-key";
 
 export type RuleOffer = {
@@ -8,13 +9,15 @@ export type RuleOffer = {
 
 /**
  * The picks that count toward an offer (decision 79): a person's own pick of the category, on a whole
- * unsplit purchase of money out, for a merchant without a rule. Nothing counts a store's categories or
- * months (decision 90), so a store that also has other categories' picks is still offered. It names the
- * table `transactions`, so the query it is in reads that table without an alias. Binds the category id.
+ * unsplit purchase of money out, for a merchant without a rule. A pick on a transfer counts only once it
+ * is back in the budget. Nothing counts a store's categories or months (decision 90), so a store that
+ * also has other categories' picks is still offered. It names the table `transactions`, so the query it
+ * is in reads that table without an alias. Binds the category id.
  */
 const COUNTED_PICKS_SQL = `parent_id IS NULL AND amount_cents > 0
 	AND category_source = 'user' AND category_id = ? AND flag_income = 0 AND is_split = 0
-	AND NOT EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("transactions")} AND m.default_category_id IS NOT NULL)`;
+	AND NOT EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("transactions")} AND m.default_category_id IS NOT NULL)
+	AND (${INCLUDED_ROW} OR NOT ${markedTransferSql("transactions")})`;
 
 /**
  * Counts a person's picks of `categoryId` for the merchant, in its own transaction history, using its

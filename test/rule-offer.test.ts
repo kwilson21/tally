@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { removeMerchantRule } from "../src/db/merchant-rules";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { firstRuleOfferAmong } from "../src/transactions/rule-offer";
 
@@ -185,6 +186,33 @@ describe("merchant category rule offer", () => {
 			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
 		);
 	});
+
+	it.each([
+		{
+			source: "Jev",
+			index: 2,
+			mark: "flag_transfer = 1, excluded = 1, excluded_source = 'jev'",
+		},
+		{
+			source: "Plaid",
+			index: 3,
+			mark: "excluded = 1, excluded_source = 'plaid', flag_transfer = 0",
+		},
+	])(
+		"a pick on a transfer still left out of the budget doesn't count ($source)",
+		async ({ index, mark }) => {
+			await setCategory([ids[0], ids[1]], groceries, "user");
+			await env.DB.prepare(`UPDATE transactions SET ${mark} WHERE id = ?`)
+				.bind(ids[index])
+				.run();
+			// Two picks and this one: were the transfer counted, this would be the third and be asked.
+			const save = await post(`/transactions/${ids[index]}`, {
+				...edit(groceries),
+				excluded: "1",
+			});
+			expect(save.html).not.toContain(QUESTION);
+		},
+	);
 
 	it("does not offer for a merchant that already has a rule, even on a third save", async () => {
 		await setCategory(ids.slice(0, 3), groceries, "user");
@@ -448,6 +476,7 @@ describe("merchant category rule offer", () => {
 			name: merchant,
 		});
 		expect(organized.res.status).toBe(200);
+		expect(organized.html).not.toContain(QUESTION);
 		const picked = await env.DB.prepare(
 			"SELECT category_id, category_source FROM transactions WHERE id = ?",
 		)
@@ -457,12 +486,13 @@ describe("merchant category rule offer", () => {
 			category_id: groceries,
 			category_source: "user",
 		});
-		// A rule made, then removed in Settings: the earlier picks still count.
-		await env.DB.prepare(
-			"UPDATE merchants SET default_category_id = ? WHERE raw_name = ?",
+		// Organize made the group's rule itself. Removed in Settings, the earlier picks still count.
+		const rule = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
-			.bind(groceries, merchant)
-			.run();
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+		expect(rule?.default_category_id).toBe(groceries);
 		expect(await removeMerchantRule(env.DB, merchant)).toBe(merchant);
 		const panel = await post(`/transactions/${ids[1]}`, edit(groceries));
 		expect(panel.html).not.toContain(QUESTION);
@@ -477,6 +507,83 @@ describe("merchant category rule offer", () => {
 		});
 		expect(cash.html).toContain(QUESTION);
 		expect(cash.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
+	});
+
+	it("an Organize save that makes the third pick never asks, because Organize makes the rule", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		// ids[2] and ids[3] are uncategorized, so Organize lists the group, and its save makes the rule.
+		const organized = await post("/transactions/organize", {
+			category: String(groceries),
+			group: merchant,
+			name: merchant,
+		});
+		expect(organized.res.status).toBe(200);
+		expect(organized.html).not.toMatch(/Always use Groceries for/);
+		const rule = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+		expect(rule?.default_category_id).toBe(groceries);
+		// The rule is there now, so a later save of this merchant never asks either.
+		await setCategory([ids[3]], null, null);
+		const later = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(later.html).not.toContain(QUESTION);
+	});
+
+	it("a split trip counts only as its whole purchase: neither its parent nor its parts count", async () => {
+		// The parent keeps its own Groceries pick, so only its split keeps it out of the count.
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const split = await saveSplit(
+			env.DB,
+			ids[1] ?? 0,
+			[
+				{ categoryId: groceries, amountCents: 500 },
+				{ categoryId: groceries, amountCents: 500 },
+			],
+			"test",
+		);
+		expect(split.saved).toBe(true);
+		// Counted: ids[0] and this save, 2. If the parent and its parts counted, it would be 5.
+		const second = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(second.html).not.toContain(QUESTION);
+		const third = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(third.html).toContain(QUESTION);
+		expect(third.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
+	});
+
+	it("income picked as Groceries doesn't count toward the offer", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+		)
+			.bind(ids[1])
+			.run();
+		const second = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(second.html).not.toContain(QUESTION);
+		const third = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(third.html).toContain(QUESTION);
+		expect(third.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
+	});
+
+	it("money in picked as Groceries doesn't count toward the offer", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -1000, credit_reviewed = 1 WHERE id = ?",
+		)
+			.bind(ids[1])
+			.run();
+		const second = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(second.html).not.toContain(QUESTION);
+		const third = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(third.html).toContain(QUESTION);
+		expect(third.html).toContain(
 			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
 		);
 	});

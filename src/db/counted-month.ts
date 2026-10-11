@@ -33,6 +33,10 @@ export const paysBillSql = (alias: string) =>
 export const includedSql = (alias: string) =>
 	`(${alias}.excluded = 0 OR ${paysBillSql(alias)})`;
 
+/** Tally or the bank marked it as a transfer. */
+export const markedTransferSql = (alias: string) =>
+	`(${alias}.flag_transfer = 1 OR COALESCE(${alias}.excluded_source = 'plaid', 0))`;
+
 export const INCLUDED = includedSql("t");
 
 /** True when the row pays a bill (see `paysBillSql`), for an UPDATE or subquery on `transactions` itself. */
