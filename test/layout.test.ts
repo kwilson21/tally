@@ -172,7 +172,11 @@ describe("a phone sheet's room for a toast", () => {
 		expect(sheet).not.toContain("max-h-[90vh]");
 	});
 
-	it("leaves 12 px, a two-line toast (66 px) and 12 px at the top of a phone sheet", () => {
-		expect(css).toMatch(/--toast-top-room:\s*5\.625rem;/);
+	it("leaves at least 12 px, a two-line toast (66 px) and 12 px at the top of a phone sheet, more when the toasts on screen are taller", () => {
+		// toast.js measures the toasts on screen onto the root element; the floor is 5.625rem.
+		expect(css).toMatch(/--toasts-height:\s*0px;/);
+		expect(css).toMatch(
+			/--toast-top-room:\s*max\(5\.625rem,\s*calc\(var\(--toasts-height\)\s*\+\s*1\.5rem\)\);/,
+		);
 	});
 });

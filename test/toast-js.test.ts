@@ -127,9 +127,11 @@ async function page({
 	const toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const resultCount = new FakeNode("p");
+	const documentElement = new FakeNode("html");
 	const body = new EventTarget();
 	const document = Object.assign(new EventTarget(), {
 		body,
+		documentElement,
 		activeElement: body as unknown,
 		getElementById: (id: string) =>
 			id === "toasts"
@@ -170,8 +172,25 @@ async function page({
 	);
 	vi.resetModules();
 	await load?.();
-	return { document, body, toasts, htmx, resultCount, bar, resizeObservers };
+	return {
+		document,
+		documentElement,
+		body,
+		toasts,
+		htmx,
+		resultCount,
+		bar,
+		resizeObservers,
+	};
 }
+
+/** The observer that watches a node: toast.js has one for the Select bar and one for #toasts. */
+const observerOf = (observers: FakeResizeObserver[], node: FakeNode) =>
+	observers.find((observer) =>
+		observer.calls.some(
+			([call, target]) => call === "observe" && target === node,
+		),
+	) as FakeResizeObserver;
 
 const fire = (target: EventTarget, name: string, detail: unknown) =>
 	target.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
@@ -728,7 +747,7 @@ describe("Select mode's action bar", () => {
 		const { body, toasts, resizeObservers } = await page({ bar });
 		fire(body, "toast", { message: "Saved" });
 		bar.offsetHeight = 69;
-		const observer = resizeObservers[0] as FakeResizeObserver;
+		const observer = observerOf(resizeObservers, bar);
 		observer.callback();
 		expect(toasts.style.values.get(SELECTION_BAR)).toBe("69px");
 	});
@@ -745,8 +764,9 @@ describe("Select mode's action bar", () => {
 		const { body, resizeObservers } = await page({ bar });
 		fire(body, "toast", { message: "Saved" });
 		fire(body, "toast", { message: "Saved again" });
-		expect(resizeObservers).toHaveLength(1);
-		const observer = resizeObservers[0] as FakeResizeObserver;
+		// Two observers: the bar's, and #toasts' (made once, when the script loads).
+		expect(resizeObservers).toHaveLength(2);
+		const observer = observerOf(resizeObservers, bar);
 		// Each toast disconnects, then observes the bar it just found.
 		expect(observer.calls.slice(-2)).toEqual([
 			["disconnect"],
@@ -765,5 +785,70 @@ describe("Select mode's action bar", () => {
 		});
 		fire(body, "toast", { message: "Saved" });
 		expect(toasts.style.values.get(SELECTION_BAR)).toBe("113px");
+	});
+});
+
+// A phone sheet leaves room above it for the toasts on screen (app.css's --toast-top-room reads
+// --toasts-height from the root element), so an Undo toast and an error toast together are never
+// covered by the sheet's heading.
+describe("a phone sheet's room follows the toasts on screen", () => {
+	const TOASTS_HEIGHT = "--toasts-height";
+	const undoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+
+	it("measures both toasts on screen, the Undo toast first and the error second, on the root element", async () => {
+		const { body, document, toasts, documentElement } = await page();
+		undoToast(body);
+		toasts.offsetHeight = 146;
+		fire(document, "htmx:error", dropped("POST"));
+		const [undo, error] = toasts.children as FakeNode[];
+		expect(toasts.children).toHaveLength(2);
+		expect(undo?.className).toMatch(/\bundo-toast\b/);
+		expect(error?.words()).toBe(COULDNT_SAVE);
+		expect(error?.attrs.get("role")).toBe("alert");
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("146px");
+		expect(toasts.style.values.has(TOASTS_HEIGHT)).toBe(false);
+	});
+
+	it("takes the height away once no toast is on screen: the error's 4 seconds, then the Undo toast's 10", async () => {
+		const { body, document, toasts, documentElement } = await page();
+		undoToast(body);
+		toasts.offsetHeight = 146;
+		fire(document, "htmx:error", dropped("POST"));
+		vi.advanceTimersByTime(4000);
+		expect(toasts.children).toHaveLength(1);
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("146px");
+		vi.advanceTimersByTime(6000);
+		expect(toasts.children).toHaveLength(0);
+		expect(documentElement.style.values.has(TOASTS_HEIGHT)).toBe(false);
+	});
+
+	it("follows the toasts when they change height, and the observer's callback never calls observe", async () => {
+		const { body, document, toasts, documentElement, resizeObservers } =
+			await page();
+		undoToast(body);
+		toasts.offsetHeight = 146;
+		fire(document, "htmx:error", dropped("POST"));
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("146px");
+		// The toasts wrap or the phone turns: the observer on #toasts measures again.
+		const observer = observerOf(resizeObservers, toasts);
+		toasts.offsetHeight = 78;
+		const calls = observer.calls.length;
+		observer.callback();
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("78px");
+		expect(observer.calls).toHaveLength(calls);
+	});
+
+	it("still measures the toasts in a browser with no ResizeObserver", async () => {
+		const { body, toasts, documentElement } = await page({
+			resizeObserver: false,
+		});
+		toasts.offsetHeight = 66;
+		fire(body, "toast", { message: "Saved" });
+		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("66px");
 	});
 });

@@ -38,9 +38,10 @@
 	// The Undo toasts on screen. A newer plain or error toast never removes one of them early.
 	const undoToasts = new WeakSet();
 
-	// Toasts clear Select mode's action bar by its measured height, set on #toasts only. htmx 4 fires
-	// HX-Trigger after `await this.swap(ctx)`, so the bar measured is the swapped-in one. The observer's
-	// callback only measures again: calling observe() there would repeat its first notification every frame.
+	// Toasts clear Select mode's action bar by its measured height, set on #toasts. (The toasts' own
+	// height goes on the root element instead: see measureToasts.) htmx 4 fires HX-Trigger after
+	// `await this.swap(ctx)`, so the bar measured is the swapped-in one. The observer's callback only
+	// measures again: calling observe() there would repeat its first notification every frame.
 	function measureSelectionBar() {
 		const region = document.getElementById("toasts");
 		if (!region) return;
@@ -57,6 +58,30 @@
 		typeof ResizeObserver === "function"
 			? new ResizeObserver(measureSelectionBar)
 			: null;
+
+	// A phone sheet leaves room above it for the toasts on screen: app.css's --toast-top-room reads
+	// --toasts-height from the root element, so the height is set there, not on #toasts or the body.
+	// It's removed when no toast shows, and the sheet keeps its floor.
+	function measureToasts() {
+		const region = document.getElementById("toasts");
+		if (!region) return;
+		if (region.children.length)
+			document.documentElement.style.setProperty(
+				"--toasts-height",
+				`${region.offsetHeight}px`,
+			);
+		else document.documentElement.style.removeProperty("--toasts-height");
+	}
+	// Toasts wrap to more lines when they're long, and rotating a phone changes their width. As with the
+	// bar's observer, the callback only measures again: calling observe() there would repeat its first
+	// notification every frame. This is a second observer, not barSize, since barSize is disconnected on
+	// every toast.
+	const toastsSize =
+		typeof ResizeObserver === "function"
+			? new ResizeObserver(measureToasts)
+			: null;
+	const toastsRegion = document.getElementById("toasts");
+	if (toastsRegion) toastsSize?.observe(toastsRegion);
 
 	document.body.addEventListener("toast", (event) => {
 		const {
@@ -119,6 +144,8 @@
 			}
 		measureSelectionBar();
 		region?.append(toast);
+		// Measured after the append, so the older toasts just replaced are gone and this one is in.
+		measureToasts();
 		// Follow the bar that is on the page now, since a list change can have swapped it in.
 		barSize?.disconnect();
 		const bar = document.getElementById("selection-bar");
@@ -142,6 +169,7 @@
 					}
 				}
 				toast.remove();
+				measureToasts();
 			},
 			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
 		);
