@@ -19,7 +19,7 @@ export type PaymentPickerPeriod = {
 	label: string;
 };
 
-/** The count the picker's aria-live line says and a month choice announces: "2 payments to link", or none. */
+/** The count a month choice announces: "2 payments to link", or none. */
 export const paymentCountSentence = (count: number) =>
 	count === 0
 		? "No payments to link"
@@ -84,7 +84,6 @@ export function BillPaymentPicker({
 	const selectedPayment = candidates.find(
 		(candidate) => candidate.id === selectedTransactionId,
 	);
-	const countSentence = paymentCountSentence(candidates.length);
 	const emptyState = (
 		<EmptyState
 			kind="search"
@@ -166,7 +165,6 @@ export function BillPaymentPicker({
 							))}
 						</div>
 						<div id="bill-month-explanation" aria-live="polite">
-							<span class="sr-only">{countSentence}</span>
 							{opened && selectedPayment ? (
 								<BillMonthExplanation
 									bill={bill}

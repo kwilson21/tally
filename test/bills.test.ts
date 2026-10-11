@@ -1625,24 +1625,35 @@ describe("Bills", () => {
 		});
 
 		it("still autofocuses the section when the page opens on its picker", async () => {
-			const page = await (await pickerFor()).text();
+			const res = await pickerFor();
+			const page = await res.text();
 			expect(page.match(/<section id="payment-picker"[^>]*>/)?.[0]).toContain(
 				"autofocus",
 			);
 			expect(pickerSection(page)).not.toMatch(/<input[^>]*autofocus/);
+			// A full page open announces nothing; only a month choice's swap does.
+			const trigger = res.headers.get("HX-Trigger");
+			expect(trigger === null ? {} : JSON.parse(trigger)).not.toHaveProperty(
+				"announce",
+			);
 		});
 
-		it("announces the new candidate count through the picker's aria-live line and the announcer", async () => {
+		it("announces the new candidate count once, through the announcer", async () => {
 			const res = await pickerFor(monthChipRequest);
 			const html = await res.text();
 			const count = (html.match(/name="transaction_id" value="/g) ?? []).length;
 			expect(count).toBeGreaterThanOrEqual(2);
+			// The picker arrives whole, so a live line inside it isn't reliably spoken: the count goes to the announcer only.
+			expect(html).not.toContain(`${count} payments to link`);
+			expect(html).not.toContain("payments to link");
+			expect(html).toContain(
+				'<div id="bill-month-explanation" aria-live="polite">',
+			);
 			const line =
 				html.match(
 					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
 				)?.[1] ?? "";
-			expect(line).toContain(`${count} payments to link`);
-			// The aria-live line arrives with the swap, so the announcer gets the same words from the header.
+			expect(line).not.toContain('class="sr-only"');
 			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 				announce: `${count} payments to link`,
 			});
@@ -1666,9 +1677,16 @@ describe("Bills", () => {
 			const focused = html.match(/<input[^>]*autofocus[^>]*>/g) ?? [];
 			expect(focused).toHaveLength(1);
 			expect(focused[0]).toContain(`name="period" value="${chosen}"`);
+			// The visible empty state says it once; the count reaches screen readers through the announcer only.
+			expect(html.match(/No payments to link/g)).toHaveLength(1);
 			expect(html).toContain(
-				'<div id="bill-month-explanation" aria-live="polite"><span class="sr-only">No payments to link</span>',
+				'<div id="bill-month-explanation" aria-live="polite">',
 			);
+			const line =
+				html.match(
+					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
+				)?.[1] ?? "";
+			expect(line).not.toContain("No payments to link");
 			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 				announce: "No payments to link",
 			});

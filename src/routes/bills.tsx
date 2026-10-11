@@ -1255,7 +1255,7 @@ async function billPage(
 		/>
 	) : null;
 	if (picker && rerender) {
-		// A live region that arrives with its own text is not always spoken, so the count also goes to the announcer.
+		// The picker arrives whole, so a live line inside it isn't reliably spoken; the count goes to the announcer instead.
 		c.header(
 			"HX-Trigger",
 			JSON.stringify({ announce: paymentCountSentence(candidates.length) }),
