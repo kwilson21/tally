@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { lastMonthSpentCents } from "../src/db/budgets";
 import {
+	billPaymentMonth,
 	COUNTED_JOINS,
+	type CountedBill,
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
@@ -202,7 +204,7 @@ describe("counted month and category (one shared expression)", () => {
 		amount?: number;
 		income?: boolean;
 		period?: string | null;
-		frequency?: "monthly" | "yearly";
+		frequency?: CountedBill["frequency"];
 		anchor?: number | null;
 		excluded?: boolean;
 		reviewed?: boolean;
@@ -324,6 +326,109 @@ describe("counted month and category (one shared expression)", () => {
 			await counted({ date: "2026-10-02", category: 4, period: "2026-09" }),
 		).toMatchObject({ month: "2026-09", category: 4 });
 	});
+
+	// The bills page explains a payment's month with billPaymentMonth, the TypeScript twin of countedMonthSql().
+	// Each frequency, paid late (counts in its bill's month) and early (counts in its bank month), must agree.
+	it.each<{
+		label: string;
+		schedule: CountedBill;
+		period: string;
+		bankDate: string;
+		month: string;
+	}>([
+		{
+			label: "monthly, late",
+			schedule: { frequency: "monthly", anchorMonth: null },
+			period: "2026-08",
+			bankDate: "2026-09-03",
+			month: "2026-08",
+		},
+		{
+			label: "monthly, early",
+			schedule: { frequency: "monthly", anchorMonth: null },
+			period: "2026-10",
+			bankDate: "2026-09-28",
+			month: "2026-09",
+		},
+		{
+			label: "yearly anchored in March, late",
+			schedule: { frequency: "yearly", anchorMonth: 3 },
+			period: "2026",
+			bankDate: "2026-04-02",
+			month: "2026-03",
+		},
+		{
+			label: "yearly anchored in March, early",
+			schedule: { frequency: "yearly", anchorMonth: 3 },
+			period: "2027",
+			bankDate: "2026-12-20",
+			month: "2026-12",
+		},
+		{
+			label: "weekly, late",
+			schedule: { frequency: "weekly", anchorMonth: null },
+			period: "2026-09-25",
+			bankDate: "2026-10-02",
+			month: "2026-09",
+		},
+		{
+			label: "weekly, early",
+			schedule: { frequency: "weekly", anchorMonth: null },
+			period: "2026-11-06",
+			bankDate: "2026-10-30",
+			month: "2026-10",
+		},
+		{
+			label: "biweekly, late",
+			schedule: { frequency: "biweekly", anchorMonth: null },
+			period: "2026-09-18",
+			bankDate: "2026-10-01",
+			month: "2026-09",
+		},
+		{
+			label: "biweekly, early",
+			schedule: { frequency: "biweekly", anchorMonth: null },
+			period: "2026-11-13",
+			bankDate: "2026-10-30",
+			month: "2026-10",
+		},
+		{
+			label: "quarterly from January, late",
+			schedule: { frequency: "quarterly", anchorMonth: 1 },
+			period: "2026-Q2",
+			bankDate: "2026-05-02",
+			month: "2026-04",
+		},
+		{
+			label: "quarterly from January, early",
+			schedule: { frequency: "quarterly", anchorMonth: 1 },
+			period: "2026-Q4",
+			bankDate: "2026-09-30",
+			month: "2026-09",
+		},
+		{
+			label: "quarterly from February, wrapping into the next year, late",
+			schedule: { frequency: "quarterly", anchorMonth: 11 },
+			period: "2026-Q1",
+			bankDate: "2026-03-02",
+			month: "2026-02",
+		},
+	])(
+		"counts a $label payment as countedMonthSql() does, and the TypeScript twin agrees",
+		async ({ schedule, period, bankDate, month }) => {
+			const sql = await counted({
+				date: bankDate,
+				category: 4,
+				period,
+				frequency: schedule.frequency,
+				anchor: schedule.anchorMonth,
+			});
+			expect(sql?.month).toBe(month);
+			expect(billPaymentMonth(schedule, period, bankDate.slice(0, 7))).toBe(
+				sql?.month,
+			);
+		},
+	);
 
 	it("names every alias its joins provide", () => {
 		for (const alias of ["bp", "b", "rp", "rbp", "rb"])

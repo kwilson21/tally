@@ -2100,6 +2100,23 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(panel.html).not.toContain("Change the parts");
 	});
 
+	it("keeps the Change the parts sheet, with its new total, when a save is refused because the entry became income", async () => {
+		const { id, a, b } = await splitCash("Income refusal");
+		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+			.bind(id)
+			.run();
+		const { res, html } = await correction(id, savedParts(a, b));
+		expect(res.status).toBe(422);
+		expect(html).toContain("Income can&#39;t be split.");
+		expect(html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
+		expect(html).toMatch(/<input[^>]*name="amount_was"[^>]*value="9000"/);
+		// The amount under the title is the new total, as on the sheet that was posted.
+		const shown = html.match(
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+		)?.[1];
+		expect(shown).toBe(formatCents(10000, { signed: true }));
+	});
+
 	it("opens the split with the new total, the saved parts and the mismatch and live lines", async () => {
 		const { id, a, b } = await splitCash("Sheet");
 		const { res, html } = await request(

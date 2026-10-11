@@ -24,6 +24,32 @@ export const dayNumber = (date: string) =>
 		) / 86_400_000,
 	);
 
+/** The date `shift` days from `date` (YYYY-MM-DD). */
+const shiftDay = (date: string, shift: number) =>
+	new Date((dayNumber(date) + shift) * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * The payments a bill could match, dated from `start` to `finish` (both included): one statement, whatever
+ * the range, and it leaves out any payment already linked to a bill.
+ */
+async function candidatesBetween(
+	db: D1Database,
+	bill: Bill,
+	start: string,
+	finish: string,
+): Promise<MatchCandidate[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
+				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
+				 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user') AND t.date BETWEEN ? AND ?
+				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')`,
+		)
+		.bind(...merchantTextArgs(bill), start, finish)
+		.all<MatchCandidate>();
+	return results;
+}
+
 /** Spec §6.1 rule 2: a payment within ±10% of the bill's amount, both ends included. */
 export const withinBillAmount = (paymentCents: number, billCents: number) =>
 	10 * Math.abs(paymentCents - billCents) <= billCents;
@@ -155,15 +181,12 @@ export async function matchBillPayments(
 				)
 					.toISOString()
 					.slice(0, 10);
-				const candidates = (
-					await db
-						.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
-				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
-				 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user') AND t.date BETWEEN ? AND ?
-				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')`)
-						.bind(...merchantTextArgs(bill), startDate, finishDate)
-						.all<MatchCandidate>()
-				).results;
+				const candidates = await candidatesBetween(
+					db,
+					bill,
+					startDate,
+					finishDate,
+				);
 				for (const { due, period, day } of occurrenceDates) {
 					for (const candidate of candidates) {
 						if (
@@ -189,6 +212,8 @@ export async function matchBillPayments(
 		firstMonth.setUTCMonth(firstMonth.getUTCMonth() - 1);
 		let year = firstMonth.getUTCFullYear();
 		let month = firstMonth.getUTCMonth() + 1;
+		// The occurrences still waiting on a payment, earliest first, read in one statement below.
+		const occurrences: { due: string; period: string }[] = [];
 		while (year < Number(today.slice(0, 4)) + 2) {
 			if (bill.frequency === "yearly" && month !== bill.anchor_month) {
 				month += 1;
@@ -228,47 +253,39 @@ export async function matchBillPayments(
 				}
 				continue;
 			}
-			const start = new Date(`${due}T00:00:00Z`);
-			const finish = new Date(start);
-			start.setUTCDate(start.getUTCDate() - BILL_DATE_WINDOW_DAYS);
-			finish.setUTCDate(finish.getUTCDate() + BILL_DATE_WINDOW_DAYS);
-			const candidates = (
-				await db
-					.prepare(
-						`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
-				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
-					 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user')
-					 AND t.date BETWEEN ? AND ?
-					 AND NOT EXISTS (SELECT 1 FROM bill_payments occurrence WHERE occurrence.bill_id=? AND occurrence.period=? AND occurrence.status='linked')
-					 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
-					 AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed')`,
-					)
-					.bind(
-						...merchantTextArgs(bill),
-						start.toISOString().slice(0, 10),
-						finish.toISOString().slice(0, 10),
-						bill.id,
-						period,
-						bill.id,
-						period,
-					)
-					.all<MatchCandidate>()
-			).results;
-			for (const candidate of candidates) {
-				if (!pickBillPayment([candidate], due, bill.amount_cents)) continue;
-				pairs.push({
-					bill,
-					period,
-					candidate,
-					dateDistance: Math.abs(dayNumber(candidate.date) - dayNumber(due)),
-					amountDistance: Math.abs(candidate.amountCents - bill.amount_cents),
-				});
-			}
+			occurrences.push({ due, period });
 			month += bill.frequency === "yearly" ? 12 : 1;
 			while (month > 12) {
 				month -= 12;
 				year += 1;
 			}
+		}
+		const firstDue = occurrences[0];
+		const lastDue = occurrences.at(-1);
+		if (firstDue && lastDue) {
+			// One statement for the whole bill, however many months of history it spans; each occurrence then
+			// takes only the candidates inside its own date window.
+			const candidates = await candidatesBetween(
+				db,
+				bill,
+				shiftDay(firstDue.due, -BILL_DATE_WINDOW_DAYS),
+				shiftDay(lastDue.due, BILL_DATE_WINDOW_DAYS),
+			);
+			for (const { due, period } of occurrences)
+				for (const candidate of candidates) {
+					if (
+						!pickBillPayment([candidate], due, bill.amount_cents) ||
+						dismissed.has(`${bill.id}:${period}:${candidate.id}`)
+					)
+						continue;
+					pairs.push({
+						bill,
+						period,
+						candidate,
+						dateDistance: Math.abs(dayNumber(candidate.date) - dayNumber(due)),
+						amountDistance: Math.abs(candidate.amountCents - bill.amount_cents),
+					});
+				}
 		}
 	}
 	pairs.sort(

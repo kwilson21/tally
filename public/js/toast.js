@@ -37,6 +37,9 @@
 
 	// The Undo toasts on screen. A newer plain or error toast never removes one of them early.
 	const undoToasts = new WeakSet();
+	// Each Undo form's button and toast, so a failed Undo request can turn its button back on while its
+	// toast is still up (the error toast says to try again).
+	const undoButtons = new WeakMap();
 
 	// Toasts clear Select mode's action bar by its measured height, set on #toasts. (The toasts' own
 	// height goes on the root element instead: see measureToasts.) htmx 4 fires HX-Trigger after
@@ -135,6 +138,7 @@
 			form.addEventListener("submit", () => {
 				button.disabled = true;
 			});
+			undoButtons.set(form, { button, toast });
 			form.append(button);
 			undoButton = button;
 			toast.append(form);
@@ -217,6 +221,11 @@
 	// the newest plain or error toast is ever on screen.
 	let lastFailure = null;
 	function failed(ctx) {
+		// An Undo request that failed turns its button back on while its toast is still up: the error toast
+		// says to try again. The request's source element is the Undo form (htmx 4's ctx.sourceElement).
+		const undo = undoButtons.get(ctx?.sourceElement);
+		if (undo && document.getElementById("toasts")?.contains(undo.toast))
+			undo.button.disabled = false;
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
 				? COULDNT_LOAD
