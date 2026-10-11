@@ -4,6 +4,7 @@ import { JEV_URL } from "../src/ai/categorize";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, householdToday, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { pendingSuggestions } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 
@@ -558,6 +559,108 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			category_source: "jev",
 		});
 		expect(await panel({})).not.toContain("Tally guesses its category again.");
+	});
+	/** The row behind a pending new-category suggestion, as a none-fit answer leaves it: Jev was sure, and no category was chosen. */
+	const behindSuggestion = async () => {
+		await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Bakery supplies', 'pending')",
+			)
+			.run();
+		await db
+			.prepare(
+				`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = 0.93,
+					jev_none_fit = 1, jev_category_id = NULL,
+					category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Bakery supplies')
+				 WHERE id = ?`,
+			)
+			.bind(bakery)
+			.run();
+	};
+	const answerColumns = (id: number) =>
+		db
+			.prepare(
+				"SELECT category_id, category_source, category_confidence, category_suggestion_id, jev_category_id, jev_none_fit FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<Record<string, unknown>>();
+	/** The ids of the rows the Settings page lists behind pending suggestions. */
+	const listedRows = async () =>
+		(await pendingSuggestions(db)).flatMap((suggestion) =>
+			suggestion.rows.map((listed) => listed.id),
+		);
+
+	it("releases the pending suggestion when a one-off name makes Jev guess again, and asks Jev with the name", async () => {
+		await behindSuggestion();
+		expect(await listedRows()).toContain(bakery);
+		const jev = fakeJev(() => new Response("{}", { status: 503 }));
+		await save(bakery, {
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(jev.bodies[0]?.state).toMatchObject({ merchant: "Dog bed" });
+		expect(await answerColumns(bakery)).toEqual({
+			category_id: null,
+			category_source: null,
+			category_confidence: null,
+			category_suggestion_id: null,
+			jev_category_id: null,
+			jev_none_fit: 0,
+		});
+		expect(await listedRows()).not.toContain(bakery);
+	});
+
+	it.each(["user", "merchant_rule"])(
+		"keeps every column of a row whose %s category is set, suggestion and all",
+		async (source) => {
+			await behindSuggestion();
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = ? WHERE id = ?",
+				)
+				.bind(await firstCategory(), source, bakery)
+				.run();
+			const before = await answerColumns(bakery);
+			const jev = fakeJev();
+			await save(bakery, {
+				name_pick: "own",
+				merchant: "Dog bed",
+				name_scope: "one",
+			});
+			await background();
+			expect(jev.bodies).toHaveLength(0);
+			expect(await answerColumns(bakery)).toEqual(before);
+		},
+	);
+
+	it("keeps the suggestion link of an excluded row, which a one-off name doesn't re-guess", async () => {
+		await behindSuggestion();
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		const before = await answerColumns(bakery);
+		expect(before).toMatchObject({
+			category_suggestion_id: expect.any(Number),
+		});
+		const jev = fakeJev();
+		await save(bakery, {
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+			excluded: "1",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await answerColumns(bakery)).toMatchObject({
+			category_suggestion_id: before?.category_suggestion_id,
+			jev_none_fit: 1,
+		});
 	});
 });
 

@@ -35,6 +35,7 @@ import {
 	INCLUDED,
 	INCLUDED_ROW,
 	includedSql,
+	jevAsksAboutSql,
 	markedTransferSql,
 	PAYS_A_BILL,
 	paysBillSql,
@@ -1130,10 +1131,11 @@ export async function saveEdit(
 			),
 		);
 	}
-	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a
-	// category Tally picked is cleared so the next answer can take its place, as an empty one is. Only on a row
-	// Jev can be asked about (rename.ts jevAsksAbout), as the row stands once the writes above have run; the
-	// statement's own guard checks the same conditions on the row, so the clear and the words agree.
+	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a category
+	// Tally picked, or an unsure answer, is cleared so the next answer can take its place, as an empty one is. A
+	// pending new-category suggestion the row is behind is released with it, so the row leaves the suggestion and
+	// Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands once the writes
+	// above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
 	const askable = {
 		included: excluded === 0 || current.paysBill === 1,
 		isSplit: current.isSplit === 1,
@@ -1157,15 +1159,14 @@ export async function saveEdit(
 			},
 			postedCategory: edit.categoryId,
 			row: askable,
-		}) &&
-		current.categorySource === "jev"
+		})
 	)
 		statements.push(
 			gated(
-				`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL, updated_by = ?, updated_at = datetime('now')
-				WHERE id = ? AND category_source = 'jev' AND ${INCLUDED_ROW} AND is_split = 0 AND flag_income = 0
-					AND NOT (amount_cents < 0 AND flag_income = 0 AND COALESCE(credit_reviewed, 0) = 1
-						AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id AND rp.excluded = 0))`,
+				`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
+					category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0, updated_by = ?, updated_at = datetime('now')
+				WHERE id = ? AND (category_source = 'jev' OR (category_id IS NULL AND category_source IS NULL AND category_confidence IS NOT NULL))
+					AND ${jevAsksAboutSql("transactions")}`,
 				[actor, id],
 			),
 		);
