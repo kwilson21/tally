@@ -60,6 +60,17 @@ export type AmountSearch = {
 	plain: boolean;
 };
 
+/** What a search's rows matched by, over every month the count covers (#211). */
+export type SearchMatch = {
+	/** Some row matched by its category's name. */
+	category: boolean;
+	/**
+	 * The search has an amount and every row matched by it. A plain number also finds names and notes, so
+	 * a row may match by words alone, and then this is false.
+	 */
+	allByAmount: boolean;
+};
+
 export function searchAmount(q: string): AmountSearch | null {
 	const text = q.trim();
 	if (text.startsWith("-")) return null;
@@ -81,37 +92,67 @@ export function searchAmount(q: string): AmountSearch | null {
 			};
 }
 
-/**
- * The month a list shows (#211). A search typed into an empty box while the month is this month looks in
- * every month; emptying the box goes back to this month; any other request shows the month it names, so a
- * month picked during a search stays while typing. `before` is the search the page showed before this
- * request, or null when the request came with no page to come from (a reload, a link, or no JavaScript),
- * and then the month is the one the address names.
- */
-export function monthFor(
-	f: Filters,
-	before: string | null,
-	thisMonth: string,
-): string {
-	if (before === "" && f.q !== "" && f.month === thisMonth) return "all";
-	if (before !== null && before !== "" && f.q === "") return thisMonth;
-	return f.month;
-}
+/** The transactions page a list request came from, as its address showed it (htmx sends HX-Current-URL) (#211). */
+export type PageBefore = {
+	/** The search the page showed. */
+	search: string;
+	/** Whether the page's address named a month: a month picked, or "Only October", is in it; the default is not. */
+	namedMonth: boolean;
+};
 
-/**
- * The search the transactions page showed before a request, read from the page's address (htmx sends it as
- * HX-Current-URL). Null when there is no such address or it is another page's.
- */
-export function searchBefore(address: string | undefined): string | null {
+/** The page before a request, or null when there is no such address or it is another page's. */
+export function pageBefore(address: string | undefined): PageBefore | null {
 	if (!address) return null;
 	try {
 		const url = new URL(address);
 		return url.pathname === "/transactions"
-			? searchText(url.searchParams.get("q"))
+			? {
+					search: searchText(url.searchParams.get("q")),
+					namedMonth: url.searchParams.has("month"),
+				}
 			: null;
 	} catch {
 		return null;
 	}
+}
+
+/** The request emptied the search box: it had text on the page before and has none now. */
+const emptied = (f: Filters, before: PageBefore) =>
+	f.q === "" && before.search !== "";
+
+/**
+ * The month a list shows (#211). A search typed into an empty box on this month looks in every month, and
+ * emptying the box goes back to this month. A month the page's address named stays while typing, so a month
+ * picked during a search stays, and so does one picked from an empty box, even this month. `before` is the
+ * page the request came from, or null when there was none (a reload, a link, or no JavaScript), and then the
+ * month is the one the request sends.
+ */
+export function monthFor(
+	f: Filters,
+	before: PageBefore | null,
+	thisMonth: string,
+): string {
+	if (before === null) return f.month;
+	if (emptied(f, before)) return thisMonth;
+	if (before.namedMonth) return f.month;
+	if (before.search === "" && f.q !== "" && f.month === thisMonth) return "all";
+	return f.month;
+}
+
+/**
+ * The `month` an address shows for a list request (#211): a month other than this one always, and this one
+ * only while the page's address named a month and the box was not emptied, so a picked month stays in the
+ * address. Null leaves the parameter out. htmx pushes the form's own month into the address, so the server
+ * writes the address this way.
+ */
+export function monthParam(
+	f: Filters,
+	before: PageBefore | null,
+	month: string,
+	thisMonth: string,
+): string | null {
+	if (month !== thisMonth) return month;
+	return before?.namedMonth && !emptied(f, before) ? month : null;
 }
 
 /** `allowRaw` is true only in the demo: the family app ignores `?raw=1`. */

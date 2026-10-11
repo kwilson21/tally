@@ -209,7 +209,12 @@ describe("resultCount", () => {
 		expect(resultCount(one, { ...base, q: "$42" }, null, TODAY)).toBe(
 			'12 transactions matching "$42" (amounts $42.00 to $42.99) in September',
 		);
-		expect(resultCount(one, { ...base, q: "42" }, null, TODAY)).toBe(
+		expect(
+			resultCount(one, { ...base, q: "42" }, null, TODAY, null, {
+				category: false,
+				allByAmount: true,
+			}),
+		).toBe(
 			'12 transactions matching "42" (amounts $42.00 to $42.99) in September',
 		);
 		expect(resultCount(one, { ...base, q: "$1,284" }, null, TODAY)).toBe(
@@ -219,18 +224,29 @@ describe("resultCount", () => {
 
 	it("says a search matched a category, and says nothing more for other text (#211)", () => {
 		expect(
-			resultCount(one, { ...base, q: "groceries" }, null, TODAY, null, true),
+			resultCount(one, { ...base, q: "groceries" }, null, TODAY, null, {
+				category: true,
+				allByAmount: false,
+			}),
 		).toBe('12 transactions matching "groceries" (category) in September');
 		expect(
-			resultCount(
-				one,
-				{ ...base, q: "costco", month: "all" },
-				null,
-				TODAY,
-				null,
-				false,
-			),
+			resultCount(one, { ...base, q: "costco", month: "all" }, null, TODAY),
 		).toBe('12 transactions matching "costco" in all months');
+	});
+
+	it("names a plain number's amount only when every row matched by amount, so a mixed count says nothing more (#211)", () => {
+		const twoRows = { total: 2, first: 1, shown: 2, pages: 1 };
+		// STORE 42 CAFE matched by its name and a $42.50 purchase by its amount: the count names no amount.
+		expect(
+			resultCount(twoRows, { ...base, q: "42" }, null, TODAY, null, {
+				category: false,
+				allByAmount: false,
+			}),
+		).toBe('2 transactions matching "42" in September');
+		// $42 searches amounts alone, so its rows all matched by amount, whatever the flags say.
+		expect(resultCount(twoRows, { ...base, q: "$42" }, null, TODAY)).toBe(
+			'2 transactions matching "$42" (amounts $42.00 to $42.99) in September',
+		);
 	});
 
 	it("reads the search's amount with the category and the account, the month last (#211)", () => {

@@ -537,6 +537,31 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 		expect(onlyLink(html)).toBeNull();
 	});
 
+	it("keeps a month picked earlier, even this month, when typing starts from an empty box (#211)", async () => {
+		// The address after picking September and then October, which is this month.
+		const { res, html } = await get(
+			`/transactions?q=costco&month=${THIS}`,
+			fromPage(`/transactions?q=&month=${THIS}`),
+		);
+		expect(countText(html)).toMatch(new RegExp(`in ${THIS_NAME}$`));
+		expect(selectedMonth(html)).toBe(THIS);
+		expect(res.headers.get("HX-Push-Url")).toBeNull();
+	});
+
+	it("leaves this month out of the address when no month was picked, so typing from an empty box looks in every month", async () => {
+		// A category picked from the default list: the form sends this month, which the address leaves out.
+		const { res } = await get(
+			`/transactions?category=1&month=${THIS}`,
+			fromPage("/transactions"),
+		);
+		expect(res.headers.get("HX-Push-Url")).toBe("/transactions?category=1");
+		const { html } = await get(
+			`/transactions?q=trader&month=${THIS}&category=1`,
+			fromPage("/transactions?category=1"),
+		);
+		expect(selectedMonth(html)).toBe("all");
+	});
+
 	it("narrows to this month when the Only link is followed, and drops the link", async () => {
 		const { html } = await get(
 			`/transactions?q=trader&month=${THIS}`,
@@ -619,6 +644,37 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			)
 		).html;
 		expect(plain).not.toMatch(/<p id="result-count"[^>]*autofocus/);
+	});
+
+	it("names no amount when a plain number matched a name as well as an amount, and names the amount when it matched only amounts (#211)", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99330, 1, '${THIS}-01', -1000, 'STORE 42 CAFE', 1)`,
+			),
+			env.DB.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99331, 1, '${THIS}-02', -4250, 'BIG PURCHASE', 1)`,
+			),
+		]);
+		const mixed = await get(
+			`/transactions?q=42&month=${THIS}`,
+			fromPage("/transactions"),
+		);
+		// Typed into an empty box on this month, so every month is searched. The demo's own rows may match
+		// too, so only the note is pinned: no amount, since STORE 42 CAFE matched by its name.
+		expect(countText(mixed.html)).toMatch(
+			/^\d+ transactions matching "42" in all months$/,
+		);
+		// A number the demo's rows don't use: when only its amount matches, the count names the amount.
+		await env.DB.prepare(
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99332, 1, '${THIS}-03', -913750, 'NINE ROW', 1)`,
+		).run();
+		const amountsOnly = await get(
+			`/transactions?q=9137&month=${THIS}`,
+			fromPage("/transactions"),
+		);
+		expect(countText(amountsOnly.html)).toBe(
+			'1 transaction matching "9137" (amounts $9,137.00 to $9,137.99) in all months',
+		);
 	});
 
 	it("says (category) only when a row in that category matched, not when a merchant's name does", async () => {

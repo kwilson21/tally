@@ -3,9 +3,10 @@ import {
 	filtersToQuery,
 	likePattern,
 	monthFor,
+	monthParam,
+	pageBefore,
 	parseFilters,
 	searchAmount,
-	searchBefore,
 } from "../src/transactions/filters";
 
 const parse = (qs: string) => parseFilters(new URLSearchParams(qs), "2026-09");
@@ -197,38 +198,63 @@ describe("searchAmount (#211)", () => {
 describe("monthFor (#211)", () => {
 	const THIS = "2026-10";
 	const f = (qs: string) => parseFilters(new URLSearchParams(qs), THIS);
+	/** A page that showed this search, and named this month in its address or not. */
+	const page = (search: string, namedMonth = false) => ({ search, namedMonth });
 
 	it("looks in every month when a search is typed into an empty box on this month", () => {
-		expect(monthFor(f("q=costco"), "", THIS)).toBe("all");
-		expect(monthFor(f("q=42.17&month=2026-10"), "", THIS)).toBe("all");
+		expect(monthFor(f("q=costco"), page(""), THIS)).toBe("all");
+		expect(monthFor(f("q=42.17&month=2026-10"), page(""), THIS)).toBe("all");
 	});
 
 	it("keeps the month a search names: one picked before typing, or one picked during it", () => {
-		expect(monthFor(f("q=costco&month=2026-09"), "", THIS)).toBe("2026-09");
-		expect(monthFor(f("q=costc&month=2026-09"), "costco", THIS)).toBe(
+		expect(monthFor(f("q=costco&month=2026-09"), page("", true), THIS)).toBe(
 			"2026-09",
 		);
+		expect(
+			monthFor(f("q=costc&month=2026-09"), page("costco", true), THIS),
+		).toBe("2026-09");
 		// "Only October" and picking October both narrow, and stay while typing.
-		expect(monthFor(f("q=costco&month=2026-10"), "costc", THIS)).toBe(
+		expect(
+			monthFor(f("q=costco&month=2026-10"), page("costc", true), THIS),
+		).toBe("2026-10");
+		expect(
+			monthFor(f("q=costco&month=2026-10"), page("costco", true), THIS),
+		).toBe("2026-10");
+	});
+
+	it("keeps this month picked before typing, even though it is the default (#211)", () => {
+		// Picked September, then October (this month), then typing from an empty box: October stays.
+		expect(monthFor(f("q=c&month=2026-10"), page("", true), THIS)).toBe(
 			"2026-10",
 		);
-		expect(monthFor(f("q=costco&month=2026-10"), "costco", THIS)).toBe(
+		expect(monthFor(f("q=costco&month=2026-10"), page("", true), THIS)).toBe(
 			"2026-10",
 		);
+		// Without a picked month the same typing looks in every month.
+		expect(monthFor(f("q=c&month=2026-10"), page(""), THIS)).toBe("all");
 	});
 
 	it("keeps All months while a search runs", () => {
-		expect(monthFor(f("q=costc&month=all"), "costco", THIS)).toBe("all");
+		expect(monthFor(f("q=costc&month=all"), page("costco", true), THIS)).toBe(
+			"all",
+		);
 	});
 
-	it("goes back to this month when the search box is emptied", () => {
-		expect(monthFor(f("month=all"), "costco", THIS)).toBe("2026-10");
-		expect(monthFor(f("month=2026-09"), "costco", THIS)).toBe("2026-10");
+	it("goes back to this month when the search box is emptied, even from a picked month", () => {
+		expect(monthFor(f("month=all"), page("costco", true), THIS)).toBe(
+			"2026-10",
+		);
+		expect(monthFor(f("month=2026-09"), page("costco", true), THIS)).toBe(
+			"2026-10",
+		);
+		expect(monthFor(f("month=2026-10"), page("costco", true), THIS)).toBe(
+			"2026-10",
+		);
 	});
 
 	it("keeps All months when no search was typed before (a category, say)", () => {
-		expect(monthFor(f("month=all&category=1"), "", THIS)).toBe("all");
-		expect(monthFor(f("month=all"), "", THIS)).toBe("all");
+		expect(monthFor(f("month=all&category=1"), page(""), THIS)).toBe("all");
+		expect(monthFor(f("month=all"), page(""), THIS)).toBe("all");
 	});
 
 	it("uses the month as sent when the request names no page (reload, link, no JavaScript)", () => {
@@ -237,17 +263,49 @@ describe("monthFor (#211)", () => {
 	});
 });
 
-describe("searchBefore (#211)", () => {
-	it("reads the search the transactions page showed, from its address", () => {
-		expect(
-			searchBefore("http://tally.test/transactions?q=%20costco%20&month=all"),
-		).toBe("costco");
-		expect(searchBefore("http://tally.test/transactions?month=all")).toBe("");
+describe("monthParam (#211)", () => {
+	const THIS = "2026-10";
+	const f = (qs: string) => parseFilters(new URLSearchParams(qs), THIS);
+	const page = (search: string, namedMonth = false) => ({ search, namedMonth });
+
+	it("names a month other than this one always", () => {
+		expect(monthParam(f("month=all"), null, "all", THIS)).toBe("all");
+		expect(monthParam(f("month=2026-09"), page(""), "2026-09", THIS)).toBe(
+			"2026-09",
+		);
 	});
 
-	it("names no earlier search without an address, for another page, or for a bad address", () => {
-		expect(searchBefore(undefined)).toBeNull();
-		expect(searchBefore("http://tally.test/home?q=costco")).toBeNull();
-		expect(searchBefore("not a url")).toBeNull();
+	it("leaves this month out unless a month the address named stays", () => {
+		expect(monthParam(f("q=costco"), page(""), THIS, THIS)).toBeNull();
+		expect(monthParam(f("q=costco"), null, THIS, THIS)).toBeNull();
+		expect(
+			monthParam(f("q=costco&month=2026-10"), page("", true), THIS, THIS),
+		).toBe(THIS);
+		// Emptying the box lets this month go, as it goes back to being the default.
+		expect(
+			monthParam(f("month=2026-10"), page("costco", true), THIS, THIS),
+		).toBeNull();
+	});
+});
+
+describe("pageBefore (#211)", () => {
+	it("reads the search the transactions page showed, and whether its address named a month", () => {
+		expect(
+			pageBefore("http://tally.test/transactions?q=%20costco%20&month=all"),
+		).toEqual({ search: "costco", namedMonth: true });
+		expect(pageBefore("http://tally.test/transactions?month=all")).toEqual({
+			search: "",
+			namedMonth: true,
+		});
+		expect(pageBefore("http://tally.test/transactions?q=costco")).toEqual({
+			search: "costco",
+			namedMonth: false,
+		});
+	});
+
+	it("names no earlier page without an address, for another page, or for a bad address", () => {
+		expect(pageBefore(undefined)).toBeNull();
+		expect(pageBefore("http://tally.test/home?q=costco")).toBeNull();
+		expect(pageBefore("not a url")).toBeNull();
 	});
 });

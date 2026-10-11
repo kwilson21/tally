@@ -4,8 +4,10 @@ import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type Edit, merchantRuleChange } from "../transactions/edit";
 import {
+	type AmountSearch,
 	type Filters,
 	likePattern,
+	type SearchMatch,
 	type Show,
 	searchAmount,
 } from "../transactions/filters";
@@ -165,8 +167,8 @@ export async function listTransactions(
 	total: number;
 	page: number;
 	pages: number;
-	/** Whether a row matched the search by its category's name (#211). */
-	categoryMatched: boolean;
+	/** What the rows matched the search by, for the count's note (#211). */
+	matched: SearchMatch;
 }> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
@@ -197,6 +199,8 @@ export async function listTransactions(
 	if (shown) where.push(shown);
 	// The search's pattern when it looks in categories too (#211), so the count can say whether one matched.
 	let categoryPattern: string | null = null;
+	// The search's amount, when it looks at amounts, so the count can say whether every row matched by one.
+	let amountSearch: AmountSearch | null = null;
 	if (f.q) {
 		if (f.raw) {
 			where.push("t.raw_name LIKE ? ESCAPE '\\'");
@@ -210,6 +214,7 @@ export async function listTransactions(
 			// number matches its amount and the words, so "42" finds "STORE 42" as well as $42.00 to $42.99;
 			// with a "$" or a decimal point the search is the amount alone.
 			const amount = searchAmount(f.q);
+			amountSearch = amount;
 			const pattern = likePattern(f.q);
 			const alternatives: string[] = [];
 			if (amount === null || amount.plain) {
@@ -236,18 +241,39 @@ export async function listTransactions(
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
-	// Whether any counted row matched by its category's name, in the same statement (#211): the count says
-	// "(category)" only then, and an archived category counts too, as the search does.
-	const categoryHit =
-		categoryPattern === null
-			? "0"
-			: "MAX(CASE WHEN c.name LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)";
+	// What the rows matched, in the same statement as the count (#211): whether any counted row matched by its
+	// category's name (an archived category counts too, as the search does), and, for a plain number, whether
+	// every counted row matched by its amount. A row that matched by its words alone breaks the second; with no
+	// row counted it holds, as it does for an amount-only search, so the count names the amount then.
+	const countColumns = ["COUNT(*) AS n"];
+	const countArgs: (string | number)[] = [];
+	if (amountSearch?.plain) {
+		countColumns.push(
+			"COALESCE(MIN(CASE WHEN ABS(t.amount_cents) BETWEEN ? AND ? THEN 1 ELSE 0 END), 1) AS allAmount",
+		);
+		countArgs.push(amountSearch.low, amountSearch.high);
+	}
+	if (categoryPattern !== null) {
+		countColumns.push(
+			"MAX(CASE WHEN c.name LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) AS categoryHit",
+		);
+		countArgs.push(categoryPattern);
+	}
 	const counted = await db
-		.prepare(`SELECT COUNT(*) AS n, ${categoryHit} AS categoryHit ${from}`)
-		.bind(...(categoryPattern === null ? args : [categoryPattern, ...args]))
-		.first<{ n: number; categoryHit: number | null }>();
+		.prepare(`SELECT ${countColumns.join(", ")} ${from}`)
+		.bind(...countArgs, ...args)
+		.first<{
+			n: number;
+			allAmount?: number | null;
+			categoryHit?: number | null;
+		}>();
 	const total = counted?.n ?? 0;
-	const categoryMatched = counted?.categoryHit === 1;
+	const matched: SearchMatch = {
+		category: counted?.categoryHit === 1,
+		allByAmount:
+			amountSearch !== null &&
+			(!amountSearch.plain || counted?.allAmount === 1),
+	};
 	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 	const page = Math.min(f.page, pages);
 
@@ -355,7 +381,7 @@ export async function listTransactions(
 			};
 		},
 	);
-	return { rows, total, page, pages, categoryMatched };
+	return { rows, total, page, pages, matched };
 }
 
 /** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */

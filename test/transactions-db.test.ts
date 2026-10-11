@@ -259,6 +259,24 @@ describe("listTransactions: search by amount and category (#211)", () => {
 		expect(await found("q=%2442&month=all")).toEqual([]);
 	});
 
+	it("says every row matched by amount for a plain number only when every row did (#211)", async () => {
+		await env.DB.batch([
+			insert(99240, 1000, "STORE 42 CAFE"),
+			insert(99241, 4250, "BIG PURCHASE"),
+		]);
+		// STORE 42 CAFE matched by its name, so the count may not claim every row matched by amount.
+		const mixed = await list("q=42&month=all");
+		expect(await found("q=42&month=all")).toEqual([99241, 99240]);
+		expect(mixed.matched.allByAmount).toBe(false);
+		// The demo's own rows match "42" by their words too, so an amount-only check uses a number they don't.
+		await env.DB.batch([insert(99242, 913750, "NINE ROW")]);
+		expect((await list("q=9137&month=all")).matched.allByAmount).toBe(true);
+		// $42 searches amounts alone, so every row it finds matched by amount.
+		expect((await list("q=%2442&month=all")).matched.allByAmount).toBe(true);
+		// A search of words alone has no amount to match.
+		expect((await list("q=stor&month=all")).matched.allByAmount).toBe(false);
+	});
+
 	it("finds rows in a category by the category's name, in every month", async () => {
 		await env.DB.batch([insert(99220, 1500, "GROCER ROW", 1)]);
 		const { rows } = await list("q=groceries&month=all");
@@ -271,18 +289,18 @@ describe("listTransactions: search by amount and category (#211)", () => {
 			"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (99300, 'Zebra Care', 'gas', 'cat-slate', 99)",
 		).run();
 		await insert(99230, 1200, "ZEBRA SHOP", 1).run();
-		expect((await list("q=zebra&month=all")).categoryMatched).toBe(false);
+		expect((await list("q=zebra&month=all")).matched.category).toBe(false);
 		await insert(99231, 1300, "NOT THE NAME", 99300).run();
-		expect((await list("q=zebra&month=all")).categoryMatched).toBe(true);
+		expect((await list("q=zebra&month=all")).matched.category).toBe(true);
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE id = 99300",
 		).run();
-		expect((await list("q=zebra&month=all")).categoryMatched).toBe(true);
+		expect((await list("q=zebra&month=all")).matched.category).toBe(true);
 	});
 
 	it("never reports a category match for an amount or a raw-view search (#211)", async () => {
 		await insert(99232, 4217, "AMOUNT ROW", 1).run();
-		expect((await list("q=42.17&month=all")).categoryMatched).toBe(false);
+		expect((await list("q=42.17&month=all")).matched.category).toBe(false);
 		const raw = await listTransactions(
 			env.DB,
 			parseFilters(
@@ -291,6 +309,6 @@ describe("listTransactions: search by amount and category (#211)", () => {
 				true,
 			),
 		);
-		expect(raw.categoryMatched).toBe(false);
+		expect(raw.matched.category).toBe(false);
 	});
 });

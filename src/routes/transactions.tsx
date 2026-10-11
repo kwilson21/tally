@@ -44,10 +44,11 @@ import {
 	type Filters,
 	filtersToQuery,
 	monthFor,
+	monthParam,
+	pageBefore,
 	parseFilters,
 	SHOW_LABELS,
 	SHOWS,
-	searchBefore,
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
@@ -202,7 +203,7 @@ async function renderList(
 	}: ListOptions = {},
 ) {
 	const [
-		{ rows, total, page, pages, categoryMatched },
+		{ rows, total, page, pages, matched },
 		months,
 		needs,
 		categories,
@@ -272,7 +273,7 @@ async function renderList(
 		categoryName,
 		today,
 		accountName,
-		categoryMatched,
+		matched,
 	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
 	// The count takes focus when the row a save was about has left the list, or when "Only October" asked (#211).
@@ -760,17 +761,19 @@ transactions.get("/transactions", async (c) => {
 	const thisMonth = today.slice(0, 7);
 	const asked = parseFilters(params, thisMonth, isDemo(c));
 	// A search typed into an empty box looks in every month, and emptying the box goes back to this month (#211).
-	const month = monthFor(
-		asked,
-		searchBefore(c.req.header("HX-Current-URL")),
-		thisMonth,
-	);
-	if (c.req.header("HX-Request") === "true" && month !== asked.month) {
-		// htmx shows this address, so a reload shows the same month the list does.
+	const before = pageBefore(c.req.header("HX-Current-URL"));
+	const month = monthFor(asked, before, thisMonth);
+	if (c.req.header("HX-Request") === "true") {
+		// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
+		// It is written only when the request's own address names a different month (htmx sends the form's month).
+		const named = monthParam(asked, before, month, thisMonth);
 		const address = new URL(c.req.url);
-		if (month === thisMonth) address.searchParams.delete("month");
-		else address.searchParams.set("month", month);
-		c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+		if (named !== address.searchParams.get("month")) {
+			address.searchParams.delete("focus");
+			if (named === null) address.searchParams.delete("month");
+			else address.searchParams.set("month", named);
+			c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+		}
 	}
 	return renderList(
 		c,
