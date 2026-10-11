@@ -15,6 +15,19 @@ export const FOLLOWS_PURCHASE =
 	"(rp.id IS NOT NULL AND rp.excluded = 0 AND t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(t.credit_reviewed, 0) = 1)";
 
 /**
+ * FOLLOWS_PURCHASE for a linked credit, in TypeScript, for the edit panel and the route, which decide before a
+ * save. It is the credit's own part: the purchase must still be linked and not excluded, which the caller checks.
+ * Keep it in step with FOLLOWS_PURCHASE (the tests check that they agree).
+ */
+export function followsPurchase(credit: {
+	amountCents: number;
+	income: boolean;
+	creditReviewed: boolean;
+}): boolean {
+	return credit.amountCents < 0 && !credit.income && credit.creditReviewed;
+}
+
+/**
  * True when a bill's payment is linked to the transaction `alias` names, or, for a split part, to its
  * parent: the bank transaction that paid the bill was split afterwards, so the whole of it, every part,
  * is that payment. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). A part with
@@ -60,7 +73,8 @@ export const COUNTED_TRANSACTION = `${INCLUDED} AND t.is_split = 0
 /** The month a transaction's own date and bill payment put it in. */
 function billMonthSql(transaction: string, payment: string, bill: string) {
 	const bankMonth = `substr(${transaction}.date,1,7)`;
-	const occurrenceMonth = `CASE WHEN ${bill}.frequency='yearly' THEN ${payment}.period || '-' || printf('%02d',${bill}.anchor_month) ELSE ${payment}.period END`;
+	const quarterMonth = `printf('%s-%02d',substr(${payment}.period,1,4),(((${bill}.anchor_month-1+(((CAST(substr(${payment}.period,7,1) AS INTEGER)-(((${bill}.anchor_month-1)/3)+1)+4)%4)*3))%12)+1))`;
+	const occurrenceMonth = `CASE WHEN ${bill}.frequency='yearly' THEN ${payment}.period || '-' || printf('%02d',${bill}.anchor_month) WHEN ${bill}.frequency IN ('weekly','biweekly') THEN substr(${payment}.period,1,7) WHEN ${bill}.frequency='quarterly' THEN ${quarterMonth} ELSE ${payment}.period END`;
 	return `CASE WHEN ${payment}.period IS NOT NULL AND (${occurrenceMonth}) < ${bankMonth} THEN (${occurrenceMonth}) ELSE ${bankMonth} END`;
 }
 

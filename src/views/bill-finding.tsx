@@ -48,7 +48,7 @@ export function BillFindingRow({
 				</span>
 			</p>
 			<p class="text-sm text-muted">
-				{suggestion.rawName} · {suggestion.chargeCount} charges, around the{" "}
+				{suggestion.bankText} · {suggestion.chargeCount} charges, around the{" "}
 				{ordinal(suggestion.dueDay)}
 			</p>
 			<div class="mt-2 flex items-center gap-3">

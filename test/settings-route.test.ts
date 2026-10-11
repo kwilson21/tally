@@ -55,6 +55,7 @@ describe("GET /settings", () => {
 			"Gas",
 			"Kids",
 			"Household",
+			"Childcare",
 		]);
 		expect(textOf(html)).toContain("$700 a month");
 		// Budgets are changed on Home (decision 38); each row links there.
@@ -464,7 +465,7 @@ describe("GET /settings", () => {
 		const { html } = await get("/settings");
 		expect(html).toContain("No active categories.");
 		expect(html).toContain("Add one below, or restore an archived category.");
-		expect(html).toContain("Archived (5)");
+		expect(html).toContain("Archived (6)");
 	});
 
 	it("does not suggest restoring when there are no archived categories", async () => {
@@ -726,6 +727,6 @@ describe("archiving, restoring and moving", () => {
 		]);
 		expect(html).toMatch(/<details[^>]*data-row="3"[^>]*\bopen/);
 		expect(html).toMatch(/<summary data-category="3"[^>]*autofocus/);
-		expect(trigger(res).announce).toBe("Moved Gas up. It's now 2 of 5.");
+		expect(trigger(res).announce).toBe("Moved Gas up. It's now 2 of 6.");
 	});
 });

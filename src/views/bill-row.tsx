@@ -1,4 +1,8 @@
-import type { BillStatus } from "../bills/status";
+import {
+	type BillFrequency,
+	type BillStatus,
+	billCadenceLabel,
+} from "../bills/status";
 import { dayLabel, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
@@ -15,6 +19,8 @@ export type BillRowData = {
 	priceOffer?: { amountCents: number; date: string } | null;
 	icon: string;
 	color: string;
+	frequency?: BillFrequency;
+	dueDay?: number;
 };
 
 const STATUS_HEADING = {
@@ -132,6 +138,9 @@ export function BillRow({
 				) : (
 					<span class="block truncate leading-6 text-muted">
 						{billStatusLine(bill, today)}
+						{bill.frequency && ["weekly", "biweekly"].includes(bill.frequency)
+							? ` · ${billCadenceLabel({ frequency: bill.frequency, dueDay: bill.dueDay ?? 1 })}`
+							: ""}
 					</span>
 				)}
 			</span>

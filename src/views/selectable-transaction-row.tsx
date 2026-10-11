@@ -9,12 +9,15 @@ import { TransactionRow } from "./transaction-row";
 export function SelectableTransactionRow({
 	row,
 	checked = false,
+	autofocus = false,
 	today = todayIn(DEFAULT_TIME_ZONE),
 	after,
 }: {
 	row: ListRow;
 	/** Ticked already (coming back from the Set category sheet). */
 	checked?: boolean;
+	/** Takes focus when its list is drawn: the first row's tick after Older or Newer (FOCUS_FIRST_TICK). */
+	autofocus?: boolean;
 	/** The household's date. Pages pass it; the catalog, which has no household, takes Eastern's. */
 	today?: string;
 	/** Optional content below the row, shown when this row is unchecked. */
@@ -31,6 +34,7 @@ export function SelectableTransactionRow({
 					name="ids"
 					value={row.id}
 					checked={checked}
+					autofocus={autofocus}
 					aria-labelledby={nameId}
 				/>
 				<span class="selection-mark flex size-7 shrink-0 items-center justify-center rounded-full border border-muted peer-checked:border-ink peer-checked:bg-band">
