@@ -1,7 +1,11 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
-import { type AiTallyCounts, readAiTally } from "../src/db/ai-log";
+import {
+	type AiTallyCounts,
+	readAiTally,
+	recordJevAnswers,
+} from "../src/db/ai-log";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { settleSuggestion } from "../src/db/merchant-names";
 import { saveEdit } from "../src/db/transactions";
@@ -360,6 +364,119 @@ describe("the tally's counts", () => {
 			sorted: 1,
 			changed: 0,
 		});
+	});
+});
+
+describe("a deleted transaction's log row", () => {
+	/** A purchase inserted last, so it is the newest row: SQLite gives the next insert its id. */
+	const insertPurchase = (plaidId: string, accountId: number) =>
+		db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, updated_by)
+				 VALUES (?, ?, 1200, 'CORNER COFFEE', ?, 'test') RETURNING id`,
+			)
+			.bind(accountId, TODAY, plaidId)
+			.first<{ id: number }>()
+			.then((row) => row?.id as number);
+
+	/** A purchase Jev sorts the way a run does: its category is set, then the run logs it. */
+	const sortedByJev = async (id: number) => {
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = 1, category_source = 'jev', category_confidence = 0.9, jev_category_id = 1 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await recordJevAnswers(db, TODAY, { categories: [id], incomes: [] });
+	};
+
+	it("forgets the id of a pending row the bank drops, so the next purchase that takes it is still logged", async () => {
+		const item = await db
+			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE plaid_items SET sync_lock_id = 'lock-drop' WHERE id = ?")
+			.bind(item?.id)
+			.run();
+		const droppedId = await insertPurchase("drop-1", 1);
+		await logCategory(droppedId, TODAY);
+		// The statement sync.ts runs for a row the bank drops: the delete runs only under the sync's lock.
+		await db
+			.prepare(
+				`DELETE FROM transactions WHERE plaid_transaction_id = ? AND EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)`,
+			)
+			.bind("drop-1", item?.id, "lock-drop")
+			.run();
+		const nextId = await insertPurchase("next-1", 1);
+		expect(nextId).toBe(droppedId);
+		await sortedByJev(nextId);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 2,
+			changed: 0,
+		});
+		expect(await logIds("category")).toEqual([null, nextId]);
+		// A person's change to the new purchase counts; the dropped purchase's row is not read from it.
+		await db
+			.prepare("UPDATE transactions SET category_source = 'user' WHERE id = ?")
+			.bind(nextId)
+			.run();
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 2,
+			changed: 1,
+		});
+	});
+
+	it("forgets the ids of a disconnected bank's deleted transactions, so a later purchase is still logged", async () => {
+		const itemId = (
+			await db
+				.prepare(
+					"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (X'00', 'Old Bank', 'demo') RETURNING id",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+		const accountId = (
+			await db
+				.prepare(
+					"INSERT INTO accounts (plaid_item_id, name, type) VALUES (?, 'Old checking', 'depository') RETURNING id",
+				)
+				.bind(itemId)
+				.first<{ id: number }>()
+		)?.id as number;
+		const goneId = await insertPurchase("old-1", accountId);
+		await logCategory(goneId, TODAY);
+		// The disconnect that also deletes the bank's history (accounts.tsx) deletes its transactions.
+		await db
+			.prepare(
+				"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id = ?)",
+			)
+			.bind(itemId)
+			.run();
+		// Deleted work still counts, with no transaction behind it.
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
+		});
+		const nextId = await insertPurchase("next-2", 1);
+		expect(nextId).toBe(goneId);
+		await sortedByJev(nextId);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 2,
+			changed: 0,
+		});
+	});
+
+	it("exports a deleted transaction's log row with no transaction id, and still counts it", async () => {
+		const droppedId = await insertPurchase("gone-3", 1);
+		await logCategory(droppedId, TODAY);
+		await db
+			.prepare("DELETE FROM transactions WHERE id = ?")
+			.bind(droppedId)
+			.run();
+		const data = (await tallyExport(db)) as unknown as Record<string, unknown>;
+		expect(data.ai_log).toEqual([
+			expect.objectContaining({ kind: "category", transaction_id: null }),
+		]);
+		expect(await readAiTally(db, TODAY)).toMatchObject({ sorted: 1 });
 	});
 });
 
