@@ -37,7 +37,9 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	followsPurchaseAfterSave,
 	parseEdit,
+	postedCredit,
 	safeBack,
 } from "../transactions/edit";
 import {
@@ -78,6 +80,15 @@ import {
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
+import {
+	FOCUS_FIRST_TICK,
+	FOCUS_SET_CATEGORY,
+	LIST_LOAD_PAUSE,
+	SELECTION_BAR_OOB,
+	SelectAllOnPage,
+	SelectionActionBar,
+	SelectionActionButtons,
+} from "../views/selection-action-bar";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
@@ -115,6 +126,10 @@ type ListOptions = {
 	checkedIds?: Set<number>;
 	selectionError?: string;
 	focusHeading?: boolean;
+	/** The reply to Select all: focus Set category (the link leaves with the reply), when rows are ticked. */
+	focusSetCategory?: boolean;
+	/** The reply to Older or Newer in select mode: focus the first row's tick (FOCUS_FIRST_TICK). */
+	focusFirstTick?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -179,6 +194,8 @@ async function renderList(
 		checkedIds = new Set<number>(),
 		selectionError,
 		focusHeading = false,
+		focusSetCategory = false,
+		focusFirstTick = false,
 	}: ListOptions = {},
 ) {
 	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
@@ -265,9 +282,13 @@ async function renderList(
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
-	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked.
+	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked, and
+	// its controls pause while it loads (LIST_LOAD_PAUSE).
 	const includeTicked = selecting
-		? { "hx-include": "#selection-form input[name=ids]:checked" }
+		? {
+				"hx-include": "#selection-form input[name=ids]:checked",
+				...LIST_LOAD_PAUSE,
+			}
 		: {};
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
@@ -275,13 +296,16 @@ async function renderList(
 			href={pageHref(n)}
 			rel={rel}
 			class="inline-flex min-h-11 items-center px-2 -mx-2"
-			hx-get={pageHref(n)}
+			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
+			hx-get={
+				selecting ? `${pageHref(n)}&focus=${FOCUS_FIRST_TICK}` : pageHref(n)
+			}
 			hx-sync="#filters:replace"
 			hx-target="#results"
 			hx-select="#results > *"
 			hx-select-oob={LIST_OOB}
 			hx-swap="innerHTML show:top"
-			hx-push-url="true"
+			hx-push-url={selecting ? pageHref(n) : "true"}
 			{...includeTicked}
 		>
 			{label}
@@ -329,6 +353,11 @@ async function renderList(
 	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
 	// shows the no-JS hint, and htmx re-counts on load.
 	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
+	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
+	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
+	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
+	const tickedOnPage = new Set(ticked.map((row) => row.id));
 	const htmx = c.req.header("HX-Request") === "true";
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
@@ -550,9 +579,13 @@ async function renderList(
 						id="selection-form"
 						aria-label="Select transactions"
 						method="post"
-						class="pb-28"
+						class="selection-list pb-40"
 						hx-get="/transactions/select/count"
 						hx-trigger="load, change"
+						// A list change (filter, page or Select all) replaces any count in flight, so an older count can't overwrite the newer list's bar. A list load pauses the ticks, so no count can start from a page that is leaving.
+						hx-sync="#filters:queue last"
+						// The count's own indicator: marking the form would pause the ticks during every count.
+						hx-indicator="#selected-count"
 						hx-target="#selected-count"
 						hx-swap="innerHTML"
 					>
@@ -586,6 +619,7 @@ async function renderList(
 														row={shown(row)}
 														checked={checkedIds.has(row.id)}
 														today={today}
+														autofocus={row.id === firstTickId}
 													/>
 												),
 											)}
@@ -601,20 +635,18 @@ async function renderList(
 						<div
 							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
 						>
-							<div class="flex flex-wrap items-center gap-2">
-								<span
-									id="selected-count"
-									aria-live="polite"
-									class="mr-auto text-lg"
-								>
-									{htmx
+							<SelectionActionBar
+								label={
+									htmx
 										? selectedLabel(ticked.length)
-										: "Choose rows, then an action"}
-								</span>
-								<SelectionActionButtons
-									disabled={htmx && ticked.length === 0}
-								/>
-							</div>
+										: "Choose rows, then an action"
+								}
+								href={selectModeHref(back, pageIds)}
+								pageIds={pageIds}
+								ticked={tickedOnPage}
+								disabled={htmx && ticked.length === 0}
+								focusSetCategory={focusSetCategory && ticked.length > 0}
+							/>
 						</div>
 					</form>
 				) : (
@@ -690,6 +722,8 @@ transactions.get("/transactions", async (c) => {
 		{
 			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 			selecting,
+			focusSetCategory: selecting && params.get("focus") === FOCUS_SET_CATEGORY,
+			focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
 			checkedIds: selecting
 				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
 				: undefined,
@@ -704,9 +738,7 @@ const LIST_OOB = [
 	"#add-cash:outerHTML",
 	"#select-toggle:outerHTML",
 	"#selection-back:outerHTML",
-	"#selected-count:innerHTML",
-	"#set-category-selection:outerHTML",
-	"#exclude-selection:outerHTML",
+	SELECTION_BAR_OOB,
 	"#view-links:outerHTML",
 ].join(", ");
 
@@ -730,54 +762,6 @@ function parseIds(values: (string | File)[]) {
 	return [...ids];
 }
 
-function SelectionActionButtons({
-	disabled = false,
-	oob = false,
-}: {
-	disabled?: boolean;
-	oob?: boolean;
-}) {
-	// Only the count fragment's copy swaps itself in out of band; each button's own request
-	// keeps its normal swap.
-	const oobSwap = oob ? "outerHTML" : undefined;
-	return (
-		<>
-			<Button
-				id="set-category-selection"
-				kind="secondary"
-				type="submit"
-				class="px-3"
-				formaction="/transactions/select/category"
-				formmethod="post"
-				disabled={disabled}
-				hx-post="/transactions/select/category"
-				hx-target="#sheet"
-				hx-select="#sheet"
-				hx-swap="outerHTML"
-				hx-swap-oob={oobSwap}
-			>
-				Set category
-			</Button>
-			<Button
-				id="exclude-selection"
-				kind="secondary"
-				type="submit"
-				class="px-3"
-				formaction="/transactions/select/exclude"
-				formmethod="post"
-				disabled={disabled}
-				hx-post="/transactions/select/exclude"
-				hx-target="#main"
-				hx-select="#main > *"
-				hx-swap="innerHTML"
-				hx-swap-oob={oobSwap}
-			>
-				Exclude
-			</Button>
-		</>
-	);
-}
-
 async function selectableIds(db: D1Database, ids: number[]) {
 	if (ids.length === 0 || ids.length > MAX_SELECTED) return [];
 	const marks = ids.map(() => "?").join(",");
@@ -792,11 +776,20 @@ async function selectableIds(db: D1Database, ids: number[]) {
 
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
 transactions.get("/transactions/select/count", (c) => {
-	const count = parseIds(new URL(c.req.url).searchParams.getAll("ids")).length;
+	const params = new URL(c.req.url).searchParams;
+	const ticked = new Set(parseIds(params.getAll("ids")));
+	const pageIds = parseIds(params.getAll("page-ids"));
+	const back = safeBack(params.get("back"));
 	return c.html(
 		<>
-			{selectedLabel(count)}
-			<SelectionActionButtons disabled={count === 0} oob />
+			{selectedLabel(ticked.size)}
+			<SelectionActionButtons disabled={ticked.size === 0} oob />
+			<SelectAllOnPage
+				href={selectModeHref(back, pageIds)}
+				pageIds={pageIds}
+				ticked={ticked}
+				oob
+			/>
 		</>,
 	);
 });
@@ -1093,11 +1086,16 @@ function EditSheet({
 		"hx-push-url": back,
 	};
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
-	// A refund that follows its purchase counts in that purchase's category, so its own can't be
-	// picked until it's unlinked (or the purchase is excluded, when it counts on its own).
-	const purchase = refunds.find(
+	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
+	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
+	// "Counts in" line say how the row really counts.
+	const linkedPurchase = refunds.find(
 		(p) => p.id === values.refundOfId && !p.excluded,
 	);
+	const purchase =
+		linkedPurchase && followsPurchaseAfterSave(tx, values)
+			? linkedPurchase
+			: undefined;
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
@@ -1237,7 +1235,9 @@ function EditSheet({
 					name="income_was"
 					value={(values.incomeWas ?? values.income) ? "1" : "0"}
 				/>
-				{!purchase && (
+				{/* The merchant rule is offered only for an unlinked row (the chip above), so a linked row posts
+				    no rule answer and a save leaves the rule alone, whatever its purchase or counting. */}
+				{tx.refundOfId == null && (
 					<>
 						<input
 							type="hidden"
@@ -2195,9 +2195,15 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		posted === null ? current : posted === "" ? null : Number(posted);
 	const refundOk =
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
-	// A refund that follows its purchase counts in that purchase's category, so a posted category
-	// (and a merchant rule made from it) is ignored.
-	if (refundOk && refunds.some((p) => p.id === refundOfId && !p.excluded)) {
+	// A refund that follows its purchase counts in that purchase's category, so a posted category (and a
+	// merchant rule made from it) is ignored. It follows by the counting rule on what this save will hold.
+	const linkedPurchase = refunds.find(
+		(p) => p.id === refundOfId && !p.excluded,
+	);
+	if (
+		linkedPurchase &&
+		followsPurchaseAfterSave(tx, { refundOfId, ...postedCredit(form) })
+	) {
 		form.delete("category");
 		form.delete("always");
 	}

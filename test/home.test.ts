@@ -1,12 +1,14 @@
 import { env, exports } from "cloudflare:workers";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { budgetForMonth } from "../src/budget";
+import { billTotalsForRows } from "../src/bills/totals";
+import { budgetForMonth, summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { setBudget } from "../src/db/budgets";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
 import { OLDER_NEEDS_CATEGORY_SQL } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { loadBillRows } from "../src/routes/bills";
 import { home as homeRoute } from "../src/routes/home";
 
 async function home() {
@@ -423,6 +425,9 @@ describe("GET / with the demo seed", () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-06T16:00:00Z"));
 		await resetDemo(env.DB, "2026-10-06");
+		await env.DB.prepare(
+			"UPDATE budget_amounts SET amount_cents = amount_cents + 100000",
+		).run();
 		expect((await home()).html).not.toContain('aria-label="Spending in Oct');
 		expect((await home()).html).toContain("a day for 26 days left");
 		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
@@ -481,14 +486,14 @@ describe("GET / with the demo seed", () => {
 		expect(statements).toBeLessThanOrEqual(20);
 	});
 
-	it("leads with safe to spend and the status sentence", async () => {
+	it("leads with a positive safe to spend, and no over-budget explanation", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
 		expect(html).toMatch(/Safe to spend[\s\S]*?<\/p><p[^>]*>\$[\d,]+/);
 		expect(html).toContain('href="/how-it-works#budget"');
 		expect(html).toContain('aria-label="Why? safe to spend"');
-		expect(html).toContain(
-			"Eating Out is $36 over. Everything else is on track.",
+		expect(html).not.toContain(
+			"Over budget this month. Spending more takes it further over.",
 		);
 	});
 
@@ -501,17 +506,23 @@ describe("GET / with the demo seed", () => {
 	});
 
 	it("subtracts exactly active, unpaid due and overdue bills", async () => {
-		const dollars = (html: string) =>
-			Number(
-				html
-					.match(/class="font-serif text-6xl[^"]*">(?:−)?\$([\d,]+)/)?.[1]
-					?.replaceAll(",", "") ?? Number.NaN,
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
+		const dollars = (html: string) => {
+			const match = html.match(
+				/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
 			);
+			return (
+				Number(match?.[2]?.replaceAll(",", "") ?? Number.NaN) *
+				(match?.[1] ? -1 : 1)
+			);
+		};
 		const withBills = dollars((await home()).html);
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const withoutBills = dollars((await home()).html);
-		// The demo's only unpaid active due/overdue bills are $142 + $65 + $15.49 (Netflix, overdue with a price change on offer).
-		expect(withoutBills - withBills).toBe(222);
+		// Electric $142, Netflix $15.49, Internet $65 and Daycare's next Friday $240 (the paid ones are spent).
+		expect(withoutBills - withBills).toBe(462);
 	});
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
@@ -557,6 +568,88 @@ describe("GET / with the demo seed", () => {
 		expect(html).not.toContain("Uncategorized");
 	});
 
+	it("shows the picked negative amount and sentence, and keeps the label at exactly zero", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		const data = await loadMonth(env.DB, month);
+		const billData = await loadBillRows(env.DB, today);
+		// The same bills total Home's Safe to spend subtracts, not a copy of its rule.
+		const dueBills = billTotalsForRows(month, billData.rows).soonCents;
+		const safe = summarizeMonth({
+			month,
+			...data,
+			unpaidDueBillsCents: dueBills,
+		}).safeToSpendCents;
+		const budget = await env.DB.prepare(
+			"SELECT category_id AS categoryId, amount_cents AS amountCents FROM budget_amounts ORDER BY category_id LIMIT 1",
+		).first<{ categoryId: number; amountCents: number }>();
+		if (!budget) throw new Error("Demo budget is missing");
+		await env.DB.prepare(
+			"UPDATE budget_amounts SET amount_cents = amount_cents - ? WHERE category_id = ?",
+		)
+			.bind(safe + 12000, budget.categoryId)
+			.run();
+		const negative = (await home()).html;
+		expect(negative).toContain("−$120");
+		expect(negative).toContain(
+			"Over budget this month. Spending more takes it further over.",
+		);
+		expect(negative).not.toContain("Everything is on track.");
+		expect(negative).not.toContain("cut back");
+		expect(negative).toContain("Safe to spend");
+		await env.DB.prepare(
+			"UPDATE budget_amounts SET amount_cents = amount_cents + 12000 WHERE category_id = ?",
+		)
+			.bind(budget.categoryId)
+			.run();
+		const zero = (await home()).html;
+		expect(zero).toContain("Safe to spend");
+		expect(zero).toContain(">$0</p>");
+	});
+
+	it("shows older uncategorized transactions in the Band chip", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const olderMonth = monthsBefore(month, 1);
+		await env.DB.prepare(
+			`UPDATE transactions SET date = ? WHERE id IN (
+				SELECT id FROM transactions WHERE category_id IS NULL AND date LIKE ? AND excluded = 0 AND flag_income = 0 LIMIT 6
+			)`,
+		)
+			.bind(`${olderMonth}-01`, `${month}%`)
+			.run();
+		const html = (await home()).html;
+		expect(html).toContain("+6 older");
+		expect(html).toMatch(/of this month&#39;s spending/);
+	});
+
+	it("keeps the Band for older-only uncategorized transactions and hides it when none remain", async () => {
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const olderMonth = monthsBefore(month, 1);
+		await env.DB.prepare(
+			`UPDATE transactions SET date = ? WHERE id IN (
+				SELECT id FROM transactions WHERE category_id IS NULL AND date LIKE ? AND excluded = 0 AND flag_income = 0 LIMIT 6
+			)`,
+		)
+			.bind(`${olderMonth}-01`, `${month}%`)
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL AND date LIKE ? AND excluded = 0 AND flag_income = 0",
+		)
+			.bind(`${month}%`)
+			.run();
+		const olderOnly = (await home()).html;
+		expect(olderOnly).toMatch(
+			/6 transactions from earlier months need a category/,
+		);
+		expect(olderOnly).not.toContain("of this month's spending");
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
+		).run();
+		expect((await home()).html).not.toContain("need a category");
+	});
 	it("says the uncategorized amount even when refunds are more than the spending", async () => {
 		// Make the uncategorized transactions net to −$50: refunds more than purchases.
 		await env.DB.prepare(
@@ -626,7 +719,8 @@ describe("GET / with no data", () => {
 		const { html } = await home();
 		expect(html.match(/No budgets/g)?.length).toBe(1);
 		expect(html).toMatch(/<h3[^>]*>Not budgeted<\/h3>/);
-		expect(html.match(/Add a budget/g)?.length).toBe(5);
+		// Six seeded categories, Childcare included.
+		expect(html.match(/Add a budget/g)?.length).toBe(6);
 		expect(html).toMatch(/<a href="\/budget\/1"/);
 	});
 });

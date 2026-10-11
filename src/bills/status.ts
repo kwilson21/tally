@@ -1,10 +1,38 @@
 export type BillStatus = "paid" | "overdue" | "due" | "upcoming";
+export type BillFrequency =
+	| "monthly"
+	| "yearly"
+	| "weekly"
+	| "biweekly"
+	| "quarterly";
+
+/** §6.1 rule 3: a weekly occurrence's payment window is three days, so two weeks' windows never overlap. */
+export const WEEKLY_BILL_DATE_WINDOW_DAYS = 3;
+const MANUAL_LINK_WINDOW_DAYS = 30;
+
+/**
+ * §6.1 "People override": the hand-link picker lists, and accepts, a payment within this many days of the
+ * occurrence it pays. Weekly is three days, the same window the matcher uses; the other frequencies keep 30.
+ */
+export const manualLinkWindowDays = (frequency: BillFrequency) =>
+	frequency === "weekly"
+		? WEEKLY_BILL_DATE_WINDOW_DAYS
+		: MANUAL_LINK_WINDOW_DAYS;
 
 export type BillSchedule = {
-	frequency: "monthly" | "yearly";
+	frequency: BillFrequency;
 	dueDay: number;
 	anchorMonth?: number | null;
+	anchorDate?: string | null;
 };
+
+export function billCadenceLabel(bill: BillSchedule) {
+	if (bill.frequency === "weekly")
+		return `every ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][bill.dueDay - 1]}`;
+	if (bill.frequency === "biweekly") return "every two weeks";
+	if (bill.frequency === "quarterly") return "every 3 months";
+	return bill.frequency === "yearly" ? "a year" : "a month";
+}
 
 function leap(year: number) {
 	return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
@@ -16,6 +44,11 @@ function daysInMonth(year: number, month: number) {
 	] as number;
 }
 
+const dateNumber = (date: string) =>
+	Math.floor(Date.parse(`${date}T00:00:00Z`) / 86_400_000);
+const fromNumber = (day: number) =>
+	new Date(day * 86_400_000).toISOString().slice(0, 10);
+
 export function billOccurrenceForMonth(
 	bill: BillSchedule,
 	year: number,
@@ -23,10 +56,55 @@ export function billOccurrenceForMonth(
 ) {
 	const day = Math.min(bill.dueDay, daysInMonth(year, month));
 	const dueDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+	const quarter = Math.floor((month - 1) / 3) + 1;
 	return {
 		dueDate,
-		period: bill.frequency === "yearly" ? String(year) : dueDate.slice(0, 7),
+		period:
+			bill.frequency === "yearly"
+				? String(year)
+				: bill.frequency === "quarterly"
+					? `${year}-Q${quarter}`
+					: dueDate.slice(0, 7),
 	};
+}
+
+export function billOccurrencesForMonth(
+	bill: BillSchedule,
+	year: number,
+	month: number,
+) {
+	const days = daysInMonth(year, month);
+	const result: ReturnType<typeof billOccurrenceForMonth>[] = [];
+	for (let day = 1; day <= days; day++) {
+		const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+		if (bill.frequency === "monthly")
+			result.push(billOccurrenceForMonth(bill, year, month));
+		else if (bill.frequency === "yearly" && month === bill.anchorMonth)
+			result.push(billOccurrenceForMonth(bill, year, month));
+		else if (
+			bill.frequency === "quarterly" &&
+			(month - (bill.anchorMonth ?? 1) + 12) % 3 === 0
+		)
+			result.push(billOccurrenceForMonth(bill, year, month));
+		else if (
+			bill.frequency === "weekly" &&
+			((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7) + 1 === bill.dueDay
+		)
+			result.push({ dueDate: date, period: date });
+		else if (
+			bill.frequency === "biweekly" &&
+			bill.anchorDate &&
+			(dateNumber(date) - dateNumber(bill.anchorDate)) % 14 === 0
+		)
+			result.push({ dueDate: date, period: date });
+		if (
+			bill.frequency === "monthly" ||
+			bill.frequency === "yearly" ||
+			bill.frequency === "quarterly"
+		)
+			break;
+	}
+	return result;
 }
 
 function addMonth(year: number, month: number) {
@@ -34,56 +112,108 @@ function addMonth(year: number, month: number) {
 }
 
 function daysBetween(from: string, to: string) {
-	const utc = (date: string) =>
-		Date.UTC(
-			Number(date.slice(0, 4)),
-			Number(date.slice(5, 7)) - 1,
-			Number(date.slice(8, 10)),
-		);
-	return Math.round((utc(to) - utc(from)) / 86_400_000);
+	return dateNumber(to) - dateNumber(from);
 }
 
-/**
- * The occurrence a person needs to act on (decision 62): the latest one due by a
- * week from now. A missed bill stays overdue until it is paid or the next one is
- * due, which then takes its place. A paid occurrence from an earlier month gives
- * way to the next one, so "Paid" always means paid this month.
- */
+function periodicOccurrences(bill: BillSchedule, today: string) {
+	const todayNumber = dateNumber(today);
+	if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
+		const anchor =
+			bill.frequency === "weekly"
+				? fromNumber(
+						dateNumber(today) -
+							((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7) +
+							((bill.dueDay - 1) % 7),
+					)
+				: (bill.anchorDate ?? today);
+		const step = bill.frequency === "weekly" ? 7 : 14;
+		const anchorNumber = dateNumber(anchor);
+		const firstIndex = Math.floor((todayNumber - 35 - anchorNumber) / step);
+		return Array.from({ length: 16 }, (_, i) => {
+			const dueDate = fromNumber(anchorNumber + (firstIndex + i) * step);
+			return { dueDate, period: dueDate };
+		});
+	}
+	const occurrences: ReturnType<typeof billOccurrenceForMonth>[] = [];
+	let year = Number(today.slice(0, 4)) - 1;
+	let month = 1;
+	while (year <= Number(today.slice(0, 4)) + 2) {
+		if (bill.frequency === "yearly" && month === (bill.anchorMonth ?? 1))
+			occurrences.push(billOccurrenceForMonth(bill, year, month));
+		else if (
+			bill.frequency === "quarterly" &&
+			(month - (bill.anchorMonth ?? 1) + 12) % 3 === 0
+		)
+			occurrences.push(billOccurrenceForMonth(bill, year, month));
+		else if (bill.frequency === "monthly")
+			occurrences.push(billOccurrenceForMonth(bill, year, month));
+		[year, month] = addMonth(year, month) as [number, number];
+	}
+	return occurrences;
+}
+
+/** The occurrence a person needs to act on (decision 62). */
 export function billOccurrence(
 	bill: BillSchedule,
 	today: string,
 	linked: boolean | ReadonlySet<string>,
 ): { dueDate: string; period: string; status: BillStatus } {
-	const year = Number(today.slice(0, 4));
-	const month = Number(today.slice(5, 7));
-	let occurrences: ReturnType<typeof billOccurrenceForMonth>[];
-	if (bill.frequency === "monthly") {
-		const [previousYear, previousMonth] =
-			month === 1 ? [year - 1, 12] : [year, month - 1];
-		const [nextYear, nextMonth] = addMonth(year, month) as [number, number];
-		occurrences = [
-			billOccurrenceForMonth(bill, previousYear, previousMonth),
-			billOccurrenceForMonth(bill, year, month),
-			billOccurrenceForMonth(bill, nextYear, nextMonth),
-		];
-	} else {
-		const anchor = bill.anchorMonth ?? 1;
-		occurrences = [year - 1, year, year + 1].map((y) =>
-			billOccurrenceForMonth(bill, y, anchor),
-		);
+	const occurrences = periodicOccurrences(bill, today);
+	const isLinked = (period: string) =>
+		typeof linked === "boolean" ? linked : linked.has(period);
+	if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
+		let index = occurrences.findIndex((o) => o.dueDate >= today);
+		if (index < 0) index = occurrences.length - 1;
+		if (index > 0 && occurrences[index]?.dueDate !== today) index--;
+		let current = occurrences[index] as ReturnType<
+			typeof billOccurrenceForMonth
+		>;
+		// The latest occurrence on or before today is the one shown. Each paid one gives way to the next, and so
+		// does an unpaid one from an earlier month: that one reads Not paid on the bill's page and is no longer
+		// set aside. An unpaid one from this month stays overdue until it is paid.
+		let next = occurrences[index + 1];
+		while (
+			next &&
+			(isLinked(current.period) ||
+				current.dueDate.slice(0, 7) < today.slice(0, 7))
+		) {
+			index++;
+			current = next;
+			next = occurrences[index + 1];
+		}
+		const distance = daysBetween(today, current.dueDate);
+		const status: BillStatus = isLinked(current.period)
+			? "paid"
+			: distance < 0
+				? "overdue"
+				: distance <= 7
+					? "due"
+					: "upcoming";
+		return { ...current, status };
 	}
-	const isLinked = (period: string) => isLinkedPeriod(linked, period);
-	// The latest occurrence due by a week from now; the one after it is upcoming.
-	let index = 0;
-	occurrences.forEach((o, i) => {
-		if (daysBetween(today, o.dueDate) <= 7) index = i;
-	});
-	const shown = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
-	if (isLinked(shown.period) && shown.dueDate.slice(0, 7) < today.slice(0, 7))
-		index += 1;
-	const current = occurrences[index] as ReturnType<
-		typeof billOccurrenceForMonth
-	>;
+	// Monthly, yearly and quarterly schedules use the same seven-day handoff as decision 62.
+	let index = occurrences.findIndex((o) => daysBetween(today, o.dueDate) > 7);
+	if (index < 0) index = occurrences.length - 1;
+	// Include the last missed occurrence until its successor enters the seven-day due window.
+	if (index > 0) index--;
+	let current = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
+	if (
+		isLinked(current.period) &&
+		current.dueDate.slice(0, 7) < today.slice(0, 7)
+	) {
+		index++;
+		current = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
+	}
+	if (
+		isLinked(current.period) ||
+		(current.dueDate < today && daysBetween(today, current.dueDate) < -7)
+	) {
+		const next = occurrences[index + 1];
+		if (next && daysBetween(today, next.dueDate) <= 7) {
+			index++;
+			current = next;
+		}
+	}
 	const distance = daysBetween(today, current.dueDate);
 	const status: BillStatus = isLinked(current.period)
 		? "paid"
@@ -93,8 +223,4 @@ export function billOccurrence(
 				? "due"
 				: "upcoming";
 	return { ...current, status };
-}
-
-function isLinkedPeriod(linked: boolean | ReadonlySet<string>, period: string) {
-	return typeof linked === "boolean" ? linked : linked.has(period);
 }

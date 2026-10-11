@@ -147,7 +147,7 @@ describe("bill writes", () => {
 		});
 
 		describe("bills that already share a name", () => {
-			// Two active Rent bills, as a family's data may already hold. Ids 8 and 9.
+			// Two active Rent bills, as a family's data may already hold. Ids 9 and 10 (Daycare is 8).
 			beforeEach(async () => {
 				for (const merchant of ["LANDLORD", "LANDLORD 2"])
 					await env.DB.prepare(
@@ -158,7 +158,7 @@ describe("bill writes", () => {
 						.run();
 			});
 
-			it.each([8, 9])(
+			it.each([9, 10])(
 				"still saves bill %i with its name unchanged",
 				async (id) => {
 					expect(
@@ -178,12 +178,12 @@ describe("bill writes", () => {
 
 			it("counts a name that differs only by case or surrounding spaces as unchanged", async () => {
 				expect(
-					await updateBill(env.DB, 8, fields({ name: " rent " }), false),
+					await updateBill(env.DB, 9, fields({ name: " rent " }), false),
 				).toBe(true);
-				expect(await row(8)).toMatchObject({ name: " rent " });
+				expect(await row(9)).toMatchObject({ name: " rent " });
 			});
 
-			it.each([8, 9])(
+			it.each([9, 10])(
 				"still refuses renaming bill %i to a third bill's name",
 				async (id) => {
 					expect(
@@ -198,29 +198,29 @@ describe("bill writes", () => {
 					"SELECT id FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
 				).first<{ id: number }>();
 				await env.DB.prepare(
-					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(8,'2020-01',?,'user','dismissed')",
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9,'2020-01',?,'user','dismissed')",
 				)
 					.bind(transaction?.id)
 					.run();
 				expect(
 					await updateBill(
 						env.DB,
-						8,
+						9,
 						fields({ name: "Rent", frequency: "yearly", anchorMonth: 3 }),
 						true,
 					),
 				).toBe(true);
 				expect(
 					await env.DB.prepare(
-						"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=8",
+						"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=9",
 					).first("n"),
 				).toBe(0);
 			});
 
 			it("does not let a new bill or a reactivation take the shared name", async () => {
 				expect(await insertBill(env.DB, fields({ name: "rent" }))).toBe(false);
-				await env.DB.prepare("UPDATE bills SET active=0 WHERE id=9").run();
-				expect(await activateBill(env.DB, 9, "Rent")).toBe(false);
+				await env.DB.prepare("UPDATE bills SET active=0 WHERE id=10").run();
+				expect(await activateBill(env.DB, 10, "Rent")).toBe(false);
 			});
 		});
 

@@ -30,6 +30,7 @@ describe("settingsCategories", () => {
 			["Eating Out", 25000],
 			["Gas", 20000],
 			["Kids", 30000],
+			["Childcare", 104000],
 		]);
 		expect(archived.map((c) => c.name)).toEqual(["Household"]);
 	});
@@ -41,7 +42,8 @@ describe("addCategory", () => {
 		expect((await settingsCategories(db, MONTH)).active.at(-1)).toMatchObject({
 			name: "Travel",
 			icon: "tag",
-			color: "cat-blue",
+			// With Childcare the demo has six categories, and the colors cycle by count: the next is the second.
+			color: "cat-plum",
 			budgetCents: null,
 		});
 	});
@@ -82,6 +84,7 @@ describe("moveCategory", () => {
 			"Eating Out",
 			"Kids",
 			"Household",
+			"Childcare",
 		]);
 		await moveCategory(db, 3, "down");
 		expect(await names()).toEqual([
@@ -90,15 +93,17 @@ describe("moveCategory", () => {
 			"Gas",
 			"Kids",
 			"Household",
+			"Childcare",
 		]);
 		await moveCategory(db, 1, "up");
-		await moveCategory(db, 5, "down");
+		await moveCategory(db, 6, "down");
 		expect(await names()).toEqual([
 			"Groceries",
 			"Eating Out",
 			"Gas",
 			"Kids",
 			"Household",
+			"Childcare",
 		]);
 	});
 });
@@ -113,6 +118,7 @@ describe("restoring after a move", () => {
 			"Gas",
 			"Household",
 			"Kids",
+			"Childcare",
 			"Eating Out",
 		]);
 		const orders = await db
@@ -200,11 +206,11 @@ describe("an archived category on Home", () => {
 });
 
 describe("the 50-category limit, checked in the same write", () => {
-	// The demo has 5 active; fill up to 50, as if other saves landed first.
+	// The demo has 6 active (Childcare included); fill up to 50, as if other saves landed first.
 	const fill = () =>
 		db
 			.prepare(
-				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 45)
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 44)
 				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
 			)
 			.run();
