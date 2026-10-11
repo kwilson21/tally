@@ -34,7 +34,8 @@ export type JevResult =
 
 /**
  * Asked only with the details, in the same call (decision 103): whether a "what it was" line could say
- * more than the store's name. Workers AI writes a line only for a yes, so an unclear answer is a no.
+ * more than the store's name. Workers AI writes a line only for a yes, so a missing or unclear answer is a no
+ * and never fails the rest of Jev's answer.
  */
 const NOTE_WORTH_QUESTION =
 	"Could a short \"what it was\" line say something useful that the store's name doesn't already say? Yes for a purchase whose store name hides what it was, such as an app or iCloud subscription from APPLE.COM/BILL; no when the store's name already says it, such as CVS Pharmacy.";
@@ -223,7 +224,6 @@ function parseAnswer(
 	const noteWorth = (
 		answers?.note_worth_writing as { noul?: unknown } | undefined
 	)?.noul;
-	if (asksNote && !isProbability(noteWorth)) return null;
 	return {
 		category: category
 			? {

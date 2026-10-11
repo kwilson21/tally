@@ -1777,20 +1777,37 @@ export async function saveJevDetails(
 /**
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
- * before that answer existed are never sent.
+ * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
+ * text, Plaid's merchant name, and the merchant's chosen and suggested names. Only the bank text is sent.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
 	limit: number,
-): Promise<{ id: number; rawName: string; merchantName: string | null }[]> {
+): Promise<
+	{
+		id: number;
+		rawName: string;
+		merchantName: string | null;
+		displayName: string | null;
+		suggestedNames: string | null;
+	}[]
+> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName FROM transactions t
+			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
+				${merchantColumnSql("t", "display_name")} AS displayName, ${merchantColumnSql("t", "suggested_name")} AS suggestedNames
+			 FROM transactions t
 			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
 			 ORDER BY t.note_tried_at IS NOT NULL, t.note_tried_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
-		.all<{ id: number; rawName: string; merchantName: string | null }>();
+		.all<{
+			id: number;
+			rawName: string;
+			merchantName: string | null;
+			displayName: string | null;
+			suggestedNames: string | null;
+		}>();
 	return results;
 }
 

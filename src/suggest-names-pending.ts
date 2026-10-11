@@ -52,11 +52,11 @@ export async function suggestTransactionNotes(
 			if (pastDeadline(time)) break;
 			done.asked += 1;
 			attempted.push(transaction.id);
-			const result = await suggestNote(
-				env.AI,
-				transaction.rawName,
+			const result = await suggestNote(env.AI, transaction.rawName, [
 				transaction.merchantName,
-			);
+				transaction.displayName,
+				transaction.suggestedNames,
+			]);
 			if (!result.ok) {
 				failuresInARow += 1;
 				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;

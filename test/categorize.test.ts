@@ -324,20 +324,35 @@ describe("askJev", () => {
 			});
 		});
 
-		it("rejects an answer that omits the requested question, as it does a missing kind", async () => {
-			// JSON.stringify drops an undefined field, so Jev's answer simply has no question.
-			const { fetchImpl } = fakeFetch(() =>
-				ok({
-					answers: { ...detailAnswers, note_worth_writing: undefined },
-				}),
-			);
-			expect(
-				await askJev(input, categories, "k", fetchImpl, {
+		it.each([
+			["omits it", undefined],
+			["gives a word", { noul: "yes" }],
+			["gives a number above one", { noul: 2 }],
+		])(
+			"treats an answer that %s as a no and keeps the rest of the answer",
+			async (_case, worth) => {
+				// JSON.stringify drops an undefined field, so Jev's answer simply has no question.
+				const { fetchImpl } = fakeFetch(() =>
+					ok({
+						answers: { ...detailAnswers, note_worth_writing: worth },
+					}),
+				);
+				const result = await askJev(input, categories, "k", fetchImpl, {
 					details: true,
 					people,
-				}),
-			).toMatchObject({ ok: false, status: 200 });
-		});
+				});
+				expect(result).toMatchObject({
+					ok: true,
+					answer: {
+						category: { label: "Eating Out" },
+						flags: { transfer: 0.02, reimbursement: 0.01, income: 0.03 },
+						kind: { label: "one_off" },
+						forPerson: { label: "none" },
+					},
+				});
+				expect(result.ok && "noteWorthWriting" in result.answer).toBe(false);
+			},
+		);
 
 		it("leaves the answer without a what-it-was field when details are not asked", async () => {
 			const { fetchImpl } = fakeFetch(() => ok(goodBody));

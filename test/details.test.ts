@@ -226,6 +226,103 @@ describe("transaction detail guesses", () => {
 		});
 	});
 
+	it("treats a missing what-it-was answer as a no and keeps the rest of Jev's answer", async () => {
+		const id = await charge();
+		const person = await db
+			.prepare(
+				"INSERT INTO household_people (name) VALUES ('Morgan') RETURNING id",
+			)
+			.first<{ id: number }>();
+		// Jev's answer has no note_worth_writing at all, as when it leaves the question out.
+		const fakeJev = async () =>
+			new Response(
+				JSON.stringify({
+					answers: {
+						category: { choice: "Eating Out", confidence: 0.99 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+						kind: { choice: "one_off", confidence: 0.99 },
+						for_person: { choice: `person:${person?.id}`, confidence: 0.99 },
+					},
+				}),
+				{ status: 200 },
+			);
+		await categorizePending({ DB: db, JEV_API_KEY: "test-key" }, fakeJev, {
+			onlyIds: [id],
+		});
+		const ai = {
+			run: vi.fn(async () => ({ response: "Coffee with a friend" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		const eatingOut = await db
+			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
+			.first<{ id: number }>();
+		const row = await db
+			.prepare(
+				"SELECT category_id, category_source, kind, kind_guessed, for_person_id, for_person_guessed, details_asked, note_worth_writing, note FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<Record<string, unknown>>();
+		expect(row).toMatchObject({
+			category_id: eatingOut?.id,
+			category_source: "jev",
+			kind: "one_off",
+			kind_guessed: 1,
+			for_person_id: person?.id,
+			for_person_guessed: 1,
+			details_asked: 1,
+			note_worth_writing: 0,
+			note: null,
+		});
+		expect(ai.run).not.toHaveBeenCalled();
+		const panel = (await get(`/transactions/${id}`)).html;
+		const whatItWas =
+			panel
+				.split(">What it was</span>")[1]
+				?.split('<span class="block font-medium">')[0] ?? "";
+		expect(whatItWas).toContain('<span class="truncate">Add</span>');
+	});
+
+	it("drops a guess that repeats a name the row shows, without sending that name to Workers AI", async () => {
+		// The first row's name is its merchant's chosen name; the second's is only a pending suggestion.
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('BL BTTL COF', 'Blue Bottle Coffee')",
+			),
+			db.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('BLUE BTL CO', 'Blue Bottle Coffee', 'pending')",
+			),
+			db.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing) VALUES
+				(1, '2026-10-01', 1299, 'BL BTTL COF', NULL, 1, 1),
+				(1, '2026-10-02', 1299, 'BL BTTL COF', 'BLUE BTL CO', 1, 1)`,
+			),
+		]);
+		const ai = {
+			run: vi.fn(async () => ({ response: "Blue Bottle Coffee purchase" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		const asked = ai.run.mock.calls.map(
+			([, input]) =>
+				(input as { messages: { content: string }[] }).messages[1]?.content,
+		);
+		expect(asked).toEqual(["Bank text: BL BTTL COF", "Bank text: BL BTTL COF"]);
+		const { results } = await db
+			.prepare(
+				"SELECT note, note_guessed, note_tried_at FROM transactions ORDER BY id",
+			)
+			.all<{
+				note: string | null;
+				note_guessed: number;
+				note_tried_at: string | null;
+			}>();
+		expect(results).toEqual([
+			{ note: null, note_guessed: 0, note_tried_at: expect.any(String) },
+			{ note: null, note_guessed: 0, note_tried_at: expect.any(String) },
+		]);
+	});
+
 	it("asks Workers AI for a what-it-was line only where Jev says one could say more than the store's name", async () => {
 		const purchase = async (rawName: string, merchantName: string) =>
 			(

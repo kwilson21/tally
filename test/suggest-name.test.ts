@@ -193,7 +193,7 @@ describe("suggestNote", () => {
 			await suggestNote(
 				fakeAi("App or iCloud subscription"),
 				"APPLE.COM/BILL",
-				"Apple",
+				["Apple"],
 			),
 		).toEqual({ ok: true, note: "App or iCloud subscription" });
 	});
@@ -207,15 +207,35 @@ describe("suggestNote", () => {
 		"drops %j for %j, since it only restates the store and a generic noun",
 		async (answer, rawName) => {
 			expect(
-				await suggestNote(fakeAi(answer), rawName, "CVS Pharmacy"),
+				await suggestNote(fakeAi(answer), rawName, ["CVS Pharmacy"]),
 			).toEqual({ ok: true, note: null });
 		},
 	);
 
 	it("drops a line that restates the store when there is no merchant name", async () => {
-		expect(await suggestNote(fakeAi("Blue Bottle"), RAW, null)).toEqual({
+		expect(await suggestNote(fakeAi("Blue Bottle"), RAW, [null])).toEqual({
 			ok: true,
 			note: null,
 		});
+	});
+
+	it("drops a line that repeats a name the row shows, when the bank sent no merchant name", async () => {
+		expect(
+			await suggestNote(fakeAi("Blue Bottle Coffee purchase"), "BL BTTL COF", [
+				null,
+				"Blue Bottle Coffee",
+				null,
+			]),
+		).toEqual({ ok: true, note: null });
+	});
+
+	it("drops a line that repeats a name in a newline-separated suggestion list", async () => {
+		expect(
+			await suggestNote(fakeAi("Blue Bottle Coffee purchase"), "BL BTTL COF", [
+				null,
+				null,
+				"Blue Bottle Coffee\nBlue Bottle",
+			]),
+		).toEqual({ ok: true, note: null });
 	});
 });
