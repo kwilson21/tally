@@ -2602,9 +2602,10 @@ async function savePanel(
 			...(cashParsed?.errors ?? {}),
 		});
 	if (cashParsed && tx.isSplit) {
-		// Refunds linked to the entry itself: moving its parts can't make them fit, so this is checked first.
+		// Refunds linked to the entry and to its parts together: moving the parts can't make them fit, so this
+		// is checked first.
 		const linked = await c.env.DB.prepare(
-			`SELECT ${refundedByOthersSql("?1", "0")} AS cents`,
+			`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("part.id", "0")}) FROM transactions part WHERE part.parent_id = ?1), 0) AS cents`,
 		)
 			.bind(tx.id)
 			.first<{ cents: number }>();

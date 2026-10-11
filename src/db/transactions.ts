@@ -1160,15 +1160,15 @@ export type CashSplitPart = {
  *
  * Every statement carries the same gate, so a refusal writes nothing. The gate checks that the entry is
  * still the split it was drawn as (`amountWasCents`, or the new total once the parent statement has set
- * it), that every posted saved part is still one of its parts, that the refunds linked to each part, and
- * to the entry, still fit the new amounts (src/db/refunded.ts), and that the entry has no parts but the
- * saved ones. The parent's amount is set first and the new parts are inserted last, in one statement, so
- * nothing the gate reads changes under an earlier statement: a part another save added in the meantime
- * refuses every statement, and no statement can pass after an earlier one refused. Returns
- * `refundTotalCents` (what the refunds linked to the entry take) when
- * those are more than the new total, which moving the parts can't fix. Returns `refundPart` (the part's 1-based
- * position and what its refunds take) when a part's refunds don't fit; throws when the entry or its
- * parts are no longer as they were drawn, so the save is an error.
+ * it), that every posted saved part is still one of its parts, that the refunds linked to the entry and to
+ * its parts together fit the new total, that the refunds linked to each part still fit its new amount
+ * (src/db/refunded.ts), and that the entry has no parts but the saved ones. The parent's amount is set
+ * first and the new parts are inserted last, in one statement, so nothing the gate reads changes under an
+ * earlier statement: a part another save added in the meantime refuses every statement, and no statement
+ * can pass after an earlier one refused. Returns `refundTotalCents` (what the refunds linked to the entry
+ * and its parts together take) when those are more than the new total, which moving the parts can't fix.
+ * Returns `refundPart` (the part's 1-based position and what its refunds take) when a part's refunds don't
+ * fit; throws when the entry or its parts are no longer as they were drawn, so the save is an error.
  */
 export async function correctCashSplit(
 	db: D1Database,
@@ -1212,7 +1212,8 @@ export async function correctCashSplit(
 			WHERE (SELECT parent_id FROM transactions WHERE id = json_extract(saved.value, '$.id')) IS NOT ?${n})
 		AND NOT EXISTS (SELECT 1 FROM json_each(?${n + 3}) AS saved
 			WHERE ${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents'))
-		AND ${refundedByOthersSql(`?${n}`, "0")} <= ?${n + 2}
+		AND (${refundedByOthersSql(`?${n}`, "0")}
+			+ COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?${n + 3}) AS saved), 0)) <= ?${n + 2}
 		AND NOT EXISTS (SELECT 1 FROM transactions WHERE parent_id = ?${n}
 			AND id NOT IN (SELECT json_extract(saved.value, '$.id') FROM json_each(?${n + 3}) AS saved))`;
 	const gateArgs = [parentId, amountWasCents, totalCents, savedJson];
@@ -1262,16 +1263,16 @@ export async function correctCashSplit(
 	]);
 	if ((results[0]?.meta.changes ?? 0) > 0) return { saved: true };
 
-	// Nothing changed. If the entry is still as it was drawn, the refunds linked to the entry itself come
-	// first, since moving its parts can't make them fit; then the first part whose refunds no longer fit
-	// (in the sheet's order) is the reason. Otherwise the entry changed, which is an error.
+	// Nothing changed. If the entry is still as it was drawn, the refunds linked to the entry and to its
+	// parts together come first, since moving its parts can't make them fit; then the first part whose
+	// refunds no longer fit (in the sheet's order) is the reason. Otherwise the entry changed, which is an error.
 	const linked = await db
 		.prepare(
-			`SELECT ${refundedByOthersSql("?1", "0")} AS refundCents
+			`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?2) AS saved), 0) AS refundCents
 			FROM transactions cash
-			WHERE cash.id = ?1 AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?2`,
+			WHERE cash.id = ?1 AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?3`,
 		)
-		.bind(parentId, amountWasCents)
+		.bind(parentId, savedJson, amountWasCents)
 		.first<{ refundCents: number }>();
 	if (linked && linked.refundCents > totalCents)
 		return { saved: false, refundTotalCents: linked.refundCents };
