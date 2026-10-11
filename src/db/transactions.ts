@@ -22,6 +22,7 @@ import {
 	INCLUDED,
 	INCLUDED_ROW,
 	includedSql,
+	markedTransferSql,
 	PAYS_A_BILL,
 	paysBillSql,
 } from "./counted-month";
@@ -621,6 +622,14 @@ const EXCLUDE =
 	"excluded_source = CASE WHEN excluded = ? THEN excluded_source ELSE 'user' END, excluded = ?";
 
 /**
+ * Gives a merchant's rule category to every transaction a person hasn't chosen (§7). Binds the
+ * category, the actor and the merchant key; callers add their own last condition.
+ */
+const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+	updated_by = ?, updated_at = datetime('now')
+WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'`;
+
+/**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
  * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left.
  */
@@ -976,12 +985,12 @@ export async function saveEdit(
 		);
 		if (ruleChange.recategorize)
 			statements.push(
-				gated(
-					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
-					updated_by = ?, updated_at = datetime('now')
-				WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'`,
-					[edit.categoryId, actor, current.merchantKey, id],
-				),
+				gated(`${APPLY_MERCHANT_RULE_SQL} AND id != ?`, [
+					edit.categoryId,
+					actor,
+					current.merchantKey,
+					id,
+				]),
 			);
 	} else if (ruleChange.action === "clear" && edit.merchantRuleWas != null) {
 		statements.push(
@@ -1002,6 +1011,27 @@ export async function saveEdit(
 			refundLeftCents: await refundLeftCents(db, purchase, id),
 		};
 	return { saved: true };
+}
+
+/**
+ * Sets a merchant's category rule the way "Always for this merchant" does, for a save that has no
+ * row of its own to skip: the rule reaches every transaction a person hasn't chosen.
+ */
+export async function setMerchantRule(
+	db: D1Database,
+	merchantKey: string,
+	categoryId: number,
+	actor: string,
+): Promise<void> {
+	await db.batch([
+		db
+			.prepare(
+				`INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)
+			ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id`,
+			)
+			.bind(merchantKey, categoryId),
+		db.prepare(APPLY_MERCHANT_RULE_SQL).bind(categoryId, actor, merchantKey),
+	]);
 }
 
 /**
@@ -1564,7 +1594,7 @@ export async function excludedBreakdown(
 				COALESCE(SUM(NOT person AND NOT moved AND reimbursement), 0) AS reimbursement,
 				COALESCE(SUM(person OR (NOT moved AND NOT reimbursement)), 0) AS byPerson
 			FROM (SELECT COALESCE(t.excluded_source = 'user', 0) AS person,
-					t.flag_transfer = 1 OR COALESCE(t.excluded_source = 'plaid', 0) AS moved,
+					${markedTransferSql("t")} AS moved,
 					t.flag_reimbursement = 1 AS reimbursement
 				FROM transactions t
 				${COUNTED_JOINS}

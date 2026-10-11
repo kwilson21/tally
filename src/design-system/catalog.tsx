@@ -65,6 +65,7 @@ import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
+import { RuleOffer } from "../views/rule-offer";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -137,6 +138,7 @@ const SECTIONS = [
 	["settings", "Settings"],
 	["trends", "Trends"],
 	["rows", "Rows"],
+	["categorization", "Categorization"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
 	["demo", "Guidance"],
@@ -1625,6 +1627,39 @@ function Rows() {
 					</div>
 				</State>
 			</Specimen>
+		</Group>
+	);
+}
+
+function Categorization() {
+	return (
+		<Group id="categorization" title="Categorization">
+			<Specimen
+				id="rule-offer"
+				title="RuleOffer"
+				tier="visual"
+				components={["RuleOffer", "Button", "Icon"]}
+				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time."
+			>
+				<div hx-ignore class="max-w-xl">
+					<RuleOffer
+						value={{
+							merchantKey: "COSTCO",
+							merchant: "Costco",
+							categoryId: 1,
+							category: "Groceries",
+							count: 3,
+							back: "/transactions",
+						}}
+					/>
+				</div>
+			</Specimen>
+			<p class="mt-4 text-muted">
+				Use: the question follows every matching save until the merchant has a
+				rule. Not now closes it without saving a rule; Yes applies the existing
+				merchant rule behavior. All answers use server forms, and every swap is
+				announced.
+			</p>
 		</Group>
 	);
 }
@@ -3242,6 +3277,7 @@ export function Catalog() {
 			<SettingsGroup />
 			<TrendsGroup />
 			<Rows />
+			<Categorization />
 			<Controls />
 			<Feedback />
 			<Demo />
