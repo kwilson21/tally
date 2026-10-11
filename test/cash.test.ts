@@ -5,6 +5,7 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { correctCashSplit, saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { formatCents } from "../src/money";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { entryKeyOf } from "../src/transactions/cash";
@@ -1979,6 +1980,51 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(await stateOf(id)).toEqual(before);
 	});
 
+	it("offers Change the parts when the parts change between the check and the save, and saves nothing more", async () => {
+		const { id, a, b } = await splitCash("Parts change in save");
+		const realBatch = env.DB.batch.bind(env.DB);
+		// Another save moves part B to $40.00 after the check, in the save's own batch.
+		const spy = vi
+			.spyOn(env.DB, "batch")
+			.mockImplementationOnce(async (statements) => {
+				await env.DB.prepare(
+					"UPDATE transactions SET amount_cents = 4000 WHERE id = ?",
+				)
+					.bind(b)
+					.run();
+				return realBatch(statements);
+			});
+		let batches = 0;
+		const answer = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "90.00"],
+			["back", "/transactions"],
+		]).finally(() => {
+			batches = spy.mock.calls.length;
+			spy.mockRestore();
+		});
+		expect(batches).toBe(1);
+		expect(answer.res.status).toBe(422);
+		expect(answer.html).toContain(
+			"The parts add up to $100.00. Change them to match $90.00.",
+		);
+		expect(answer.html).toContain(
+			`href="/transactions/${id}/split?total=9000&amp;back=%2Ftransactions"`,
+		);
+		expect(answer.html).toContain(">Change the parts</a>");
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 4000 },
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 9000 });
+	});
+
 	it("offers no Change the parts for another amount error, or on a split entry that isn't refused", async () => {
 		const { id } = await splitCash("No parts link");
 		const zero = await post(`/transactions/${id}`, [
@@ -2000,7 +2046,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
 		);
 		expect(res.status).toBe(200);
-		expect(html).toContain("$100.00");
+		// The amount under the title is the new total, not the saved $90.00.
+		const shown = html.match(
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+		)?.[1];
+		expect(shown).toBe(formatCents(10000, { signed: true }));
+		expect(shown).not.toBe(formatCents(9000, { signed: true }));
 		expect(html).toMatch(/<option value="1" selected[^>]*>Groceries<\/option>/);
 		expect(html).toMatch(/<option value="5" selected[^>]*>Household<\/option>/);
 		expect(html).toContain('value="60.00"');
