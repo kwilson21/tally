@@ -2264,6 +2264,20 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(await stateOf(id)).toEqual(before);
 	});
 
+	it("is not found when a posted part id isn't a whole number, in the save or in Add a part, and saves nothing", async () => {
+		const { id, a } = await splitCash("Bad part id");
+		const before = await stateOf(id);
+		const tampered: [string, string, string][] = [
+			[String(a), "1", "60.00"],
+			["abc", "5", "40.00"],
+		];
+		expect((await correction(id, tampered)).res.status).toBe(404);
+		expect(
+			(await correction(id, tampered, { extra: [["add", "1"]] })).res.status,
+		).toBe(404);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
 	it("saves nothing when the posted parts or the amount are out of date, and the save is an error", async () => {
 		const { id, a, b } = await splitCash("Out of date");
 		const before = await stateOf(id);

@@ -2093,9 +2093,18 @@ function correctionTotal(
 		: null;
 }
 
-/** A posted part id: undefined for a new part (an empty id), else the saved part's id. */
-function partIdOf(raw: string | undefined): number | undefined {
-	return raw === undefined || raw === "" ? undefined : Number(raw);
+/**
+ * The posted part ids, in row order: undefined for a new part (an empty id), else the saved part's id.
+ * Null when one isn't a whole number, which only a tampered sheet posts.
+ */
+function partIdsOf(raw: string[]): (number | undefined)[] | null {
+	const ids: (number | undefined)[] = [];
+	for (const value of raw) {
+		if (value === "") ids.push(undefined);
+		else if (/^[1-9]\d*$/.test(value)) ids.push(Number(value));
+		else return null;
+	}
+	return ids;
 }
 
 async function splitContext(c: Context<App>) {
@@ -2217,12 +2226,13 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			: undefined;
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
-	const partIds = form.getAll("part_id").map(String);
+	const partIds = partIdsOf(form.getAll("part_id").map(String));
+	if (partIds === null) return c.notFound();
 	const archived = correction
 		? await archivedPartCategories(c.env.DB, tx.id)
 		: new Map<number, Category>();
 	const values: SplitValue[] = categoryValues.map((category, i) => {
-		const partId = partIdOf(partIds[i]);
+		const partId = partIds[i];
 		return {
 			category,
 			amount: amountValues[i] ?? "",
