@@ -1154,7 +1154,7 @@ function EditSheet({
 				</>
 			)}
 			{tx.pending && <PendingNote />}
-			{tx.accountType !== "cash" && (
+			{tx.accountType !== "cash" && tx.parentId === null && (
 				<p class="mt-2 text-sm text-muted">
 					From {tx.bankName ?? tx.accountName}. Its date and amount stay as the
 					bank sent them. If something's off, you can split it, exclude it, or

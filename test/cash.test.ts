@@ -2470,3 +2470,38 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(await stateOf(id)).toEqual(before);
 	});
 });
+
+describe("a bank transaction split into parts", () => {
+	it("shows the bank's notice on the transaction, not on its parts", async () => {
+		const bank = await env.DB.prepare(
+			"SELECT t.id, t.amount_cents AS amountCents, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id WHERE t.parent_id IS NULL AND t.is_split = 0 AND a.type <> 'cash' AND ABS(t.amount_cents) >= 2 ORDER BY t.id LIMIT 1",
+		).first<{ id: number; amountCents: number; bank: string }>();
+		const amount = bank?.amountCents as number;
+		const half = Math.trunc(amount / 2);
+		await saveSplit(
+			env.DB,
+			bank?.id as number,
+			[
+				{ amountCents: half, categoryId: 1 },
+				{ amountCents: amount - half, categoryId: 5 },
+			],
+			"demo",
+		);
+		const [part] = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+				.bind(bank?.id)
+				.all<{ id: number }>()
+		).results;
+		const parentPanel = await request(`/transactions/${bank?.id}`);
+		expect(parentPanel.html).toContain(
+			`From ${bank?.bank}. Its date and amount stay as the bank sent them.`,
+		);
+		const partPanel = await request(`/transactions/${part?.id}`);
+		expect(partPanel.res.status).toBe(200);
+		expect(partPanel.html).not.toContain(
+			"Its date and amount stay as the bank sent them",
+		);
+	});
+});
