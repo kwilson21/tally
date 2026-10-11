@@ -131,7 +131,7 @@ export const transactions = new Hono<App>();
 
 type Category = { id: number; name: string; icon: string; color: string };
 
-/** The demo, where "Straight from the bank" (`?raw=1`) lives; the family app has no such view (spec §8.6). */
+/** The demo, where "Without Tally" (`?raw=1`) lives; the family app has no such view (spec §8.6). */
 const isDemo = (c: Context<App>) => c.env.DEMO === "true";
 
 /** Consecutive rows that share a date, in list order. */

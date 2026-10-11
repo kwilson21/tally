@@ -1,4 +1,4 @@
-// The demo's "Straight from the bank" list (spec §8.6, decision 79; P44 A): what the bank sent, with
+// The demo's "Without Tally" list (spec §8.6, decisions 79 and 103; P44 A): what the bank sent, with
 // nothing Tally or a person decided. It only changes how a row is drawn; every number stays as it is.
 import type { ListRow } from "../db/transactions";
 
