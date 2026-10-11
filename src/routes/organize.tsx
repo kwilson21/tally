@@ -1,12 +1,19 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { formatCents } from "../money";
+import { nameForm, parseCategory } from "../settings/category-form";
 import { organizeGroups, saveOrganizeGroup } from "../transactions/organize";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
+import {
+	NEW_CATEGORY_GROUP,
+	NewCategoryChip,
+	NewCategoryName,
+} from "../views/new-category-choice";
 import { TextInput } from "../views/text-input";
 
 type App = { Bindings: Env };
@@ -15,7 +22,11 @@ type Values = {
 	categoryId: number | null;
 	name: string;
 	groupName: string;
+	/** New category was chosen, with the name typed under the chips. */
+	newCategory?: boolean;
+	newCategoryName?: string;
 	categoryError?: string;
+	newCategoryError?: string;
 	nameError?: string;
 };
 
@@ -97,7 +108,7 @@ async function renderOrganize(
 						>
 							<input type="hidden" name="group" value={group.name} />
 							<fieldset
-								class="flex flex-col gap-2"
+								class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
 								aria-describedby={
 									values?.categoryError ? "category-error" : undefined
 								}
@@ -120,7 +131,16 @@ async function renderOrganize(
 											{category.name}
 										</Chip>
 									))}
+									<NewCategoryChip checked={values?.newCategory === true} />
 								</div>
+								{/* Opens under the chips while New category is chosen (CSS, decision 101). One
+								    charge reads in the singular, a merchant with more in the plural. */}
+								<NewCategoryName
+									id="new-category-name"
+									value={values?.newCategoryName ?? ""}
+									hint={`Added to your categories and used for ${group.count === 1 ? "this transaction" : "these transactions"}.`}
+									error={values?.newCategoryError}
+								/>
 								{values?.categoryError && (
 									<p id="category-error" role="alert" class="text-sm text-over">
 										{values.categoryError}
@@ -188,7 +208,7 @@ organize.post("/transactions/organize", async (c) => {
 	const next = url.pathname + url.search;
 	// Another tab already finished this merchant: show the next one with a fresh form,
 	// so the stale choices can't carry over to it.
-	if (!group) {
+	const alreadyCategorized = () => {
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		const message = "That merchant already has a category.";
 		c.header(
@@ -196,24 +216,63 @@ organize.post("/transactions/organize", async (c) => {
 			JSON.stringify({ toast: { message, type: "info" }, announce: message }),
 		);
 		return renderOrganize(c, undefined, 200, true);
-	}
-	const values: Values = { categoryId: categoryId || null, name, groupName };
-	if (!category) values.categoryError = "Pick a category from the list.";
+	};
+	if (!group) return alreadyCategorized();
+	// "New category" (decision 101) is the choice when it's chosen: its name is checked first, and the
+	// category is made only once the rest passes, so a taken name saves nothing.
+	const choseNew = form.get("category") === "new";
+	const named = choseNew
+		? parseCategory(
+				nameForm(form.get("new_category_name")),
+				await categoryNames(c.env.DB),
+				null,
+			)
+		: null;
+	const values: Values = {
+		categoryId: categoryId || null,
+		name,
+		groupName,
+		newCategory: choseNew,
+		newCategoryName: String(form.get("new_category_name") ?? ""),
+	};
+	if (named && !named.ok) values.newCategoryError = named.errors.name;
+	else if (!choseNew && !category)
+		values.categoryError = "Pick a category from the list.";
 	if (name.length > 80)
 		values.nameError = "Name must be 80 characters or fewer.";
-	if (values.categoryError || values.nameError)
+	if (values.categoryError || values.newCategoryError || values.nameError)
 		return renderOrganize(c, values, 422);
 
+	let chosen = category;
+	let madeId: number | null = null;
+	if (named?.ok) {
+		const made = await makeCategory(c.env.DB, named.value);
+		if (!made.ok)
+			return renderOrganize(
+				c,
+				{ ...values, newCategoryError: made.error },
+				422,
+			);
+		chosen = { id: made.id, name: named.value.name };
+		madeId = made.id;
+	}
+	if (!chosen) return renderOrganize(c, values, 422);
+
 	const currentGroup = group;
-	const selectedCategory = category as NonNullable<typeof category>;
 	const count = await saveOrganizeGroup(
 		c.env.DB,
 		currentGroup.merchantKeys,
-		selectedCategory.id,
+		chosen.id,
 		name && name !== currentGroup.name ? name : null,
 		actor(c),
 	);
-	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${selectedCategory.name}.`;
+	if (count === 0) {
+		// Another request categorized this group after it was read, so nothing was filed: a category made
+		// here goes too, and the answer is the one for a merchant that already has a category.
+		if (madeId !== null) await unmakeCategory(c.env.DB, madeId);
+		return alreadyCategorized();
+	}
+	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	c.header(
 		"HX-Trigger",

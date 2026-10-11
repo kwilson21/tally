@@ -281,6 +281,19 @@ describe("Bills", () => {
 		expect(html).toContain('href="/how-it-works#bills"');
 	});
 
+	it("puts How this works under Possible bills' title, as on Bills", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/find")
+		).text();
+		const link =
+			/<a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a>/;
+		expect(html).toMatch(link);
+		const at = (text: string | RegExp) =>
+			typeof text === "string" ? html.indexOf(text) : html.search(text);
+		expect(at("Possible bills</h1>")).toBeLessThan(at(link));
+		expect(at(link)).toBeLessThan(at("About the same amount"));
+	});
+
 	// DESIGN.md Type roles: a page title is 5xl, so the title does not shrink on the Bills tab.
 	it.each([
 		["/bills", "Bills"],
@@ -1357,6 +1370,35 @@ describe("Bills", () => {
 			expect(occurrenceRow(html, "Fri, Oct 16")).toContain("Due");
 			expect(occurrenceRow(html, "Fri, Sep 25")).toContain("Not paid");
 		});
+	});
+
+	it("explains a linked payment's month the way the totals count it: a late payment in its bill's month, an early one in its bank month", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='monthly',due_day=10,anchor_month=NULL,anchor_date=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9921,1,'2026-10-02',1000,'LATE PAYER'),(9922,1,'2026-10-20',1000,'EARLY PAYER')",
+			),
+		]);
+		const explain = async (period: string, transactionId: number) =>
+			(
+				await exports.default.fetch(
+					`http://tally.test/bills/1/month-explanation?period=${period}&transaction_id=${transactionId}`,
+				)
+			).text();
+		// September's bill, paid on October 2: it counts in September, not the bank's October.
+		expect(await explain("2026-09", 9921)).toContain(
+			"It counts in September&#39;s spending, not October&#39;s.",
+		);
+		// November's bill, paid on October 20: an early payment stays in the month the bank dated it.
+		expect(await explain("2026-11", 9922)).toContain(
+			"It counts in October&#39;s spending, its bank month.",
+		);
 	});
 
 	it("lists and accepts only payments within three days of a weekly occurrence", async () => {

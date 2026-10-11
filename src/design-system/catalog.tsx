@@ -1,6 +1,7 @@
 // The catalog's content (decisions 42–44): every component from src/views/, imported and given
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
+import type { LikelyRow } from "../db/likely-transactions";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import {
@@ -53,6 +54,7 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
+import { LikelyPanel } from "../views/likely-transactions";
 import {
 	MaybeCategory,
 	MaybeIncome,
@@ -64,6 +66,11 @@ import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { NameChoices, pickValue } from "../views/name-choices";
 import { NetWorthChart } from "../views/net-worth-chart";
+import {
+	NEW_CATEGORY_GROUP,
+	NewCategoryChip,
+	NewCategoryName,
+} from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
@@ -610,15 +617,15 @@ const TOAST_SPEC: UseSpecText = {
 	states:
 		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except that when an Undo toast ends with focus on its Undo button, focus moves to the list's result count, or to the page's title when there is no count (the first-visit page). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for two Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
-		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
+		"Undo is a labeled form button, usable by touch or keyboard; while its request is in flight it is off, and a request that fails turns it back on while the toast is still up. Other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
 		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its remaining server token time (up to 10 seconds) and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
 		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
-		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo. A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
+		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -659,23 +666,23 @@ const SEARCH_EVERY_MONTH_SPEC: UseSpecText = {
 		"“5 transactions matching “costco” in all months” · “2 transactions matching “42.17” (amount $42.17) in all months” · “2 transactions matching “$42” (amounts $42.00 to $42.99) in October” · “2 transactions matching “42” in October” when a row matched by name too · “3 transactions matching “groceries” (category) in all months” · “Only October”.",
 };
 
-// The demo's two view links' use spec (decisions 73 and 79, P44 A): every line answered before the owner signs it off.
+// The demo's two view links' use spec (decisions 73, 79 and 103, P44 A): every line answered before the owner signs it off.
 const VIEW_LINKS_SPEC: UseSpecText = {
 	purpose:
 		"Let a visitor to the demo see the same Transactions list as the bank sends it, next to what Tally made of it, so they can see what Tally did for them. It exists only in the demo.",
 	affordance:
-		"Two links in words under the page title with a dot between them: “Tidied by Tally · Straight from the bank”. The one you're on is ink and semibold with no underline; the other is a terracotta link, as every link is. Each is 44px tall.",
+		"Two links in words under the page title with a dot between them: “With Tally · Without Tally”. The one you're on is ink and semibold with no underline; the other is a terracotta link, as every link is. Each is 44px tall.",
 	states:
 		"Current: ink, semibold, not underlined, and aria-current=“page”, so the state is also in words for a screen reader, not weight and color alone. The other: terracotta. Hover: no change (touch has none). Focus: the focus-visible ring. Pressed: the page loads. Disabled, loading, done and error: not applicable, since a link either goes or it doesn't.",
 	feedback:
 		"A link loads the same page in the other view. The rows change, and the result count, which is the page's live line, ends “, as the bank sends them” (or stops saying it), so it always says which view is shown. The raw view adds one muted line under the count. Nothing else changes: Home's numbers never do. Search and filters stay as they were, and paging starts again at the first page. A filter change updates both links, so they never name a stale filter.",
 	input:
-		"Touch: each link is 44px tall, and the dot and the gap keep the two apart. Keyboard: Tab to each, Enter follows it. Screen reader: “View, navigation”, then “Tidied by Tally, current page, link” and “Straight from the bank, link”; the dot is hidden from it.",
+		"Touch: each link is 44px tall, and the dot and the gap keep the two apart. Keyboard: Tab to each, Enter follows it. Screen reader: “View, navigation”, then “With Tally, current page, link” and “Without Tally, link”; the dot is hidden from it.",
 	motion: "None added. Reduced motion changes nothing.",
 	edges:
 		"Demo only: the family app has neither the links nor the view, and ignores ?raw=1. No JavaScript: they are plain links. On a 320px phone both still fit on one line, and larger text wraps them onto a second line rather than cutting them off. A search or filter in the address stays when you switch. The note under the count names the demo's own transfer to Savings and paycheck, because that is what its data has.",
 	words:
-		"View (the nav's name) · Tidied by Tally · Straight from the bank · the count ends “, as the bank sends them” · “No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.” Never the name of the AI behind it.",
+		"View (the nav's name) · With Tally · Without Tally · the count ends “, as the bank sends them” · “No clean names or categories, and the transfer to Savings and the paycheck both count in Spent.” Never the name of the AI behind it.",
 };
 
 // The time zone row's use spec (decision 72, P35 A): every line answered before the owner signs it off.
@@ -1230,6 +1237,49 @@ const SAMPLE_PAGE_IDS = Array.from({ length: 25 }, (_, i) => 101 + i);
 /** Ticks on another page: not in SAMPLE_PAGE_IDS. */
 const OFF_PAGE_IDS = Array.from({ length: 76 }, (_, i) => 201 + i);
 
+/** The transaction a category was just made from, and the likely ones after it (decision 76). */
+const LIKELY_BASE = (TRANSACTION_ROWS[0] as (typeof TRANSACTION_ROWS)[number])
+	.row;
+const LIKELY_SAVED = { id: 900, date: "2026-10-12", amountCents: 18900 };
+const LIKELY_ROWS: LikelyRow[] = [
+	{
+		...LIKELY_BASE,
+		id: 901,
+		date: "2026-10-03",
+		displayName: "Banfield Pet Hospital",
+		amountCents: 7650,
+		categoryId: null,
+		categoryName: null,
+		categoryIcon: null,
+		categoryColor: null,
+		sameMerchant: true,
+	},
+	{
+		...LIKELY_BASE,
+		id: 902,
+		date: "2026-09-14",
+		displayName: "Banfield Pet Hospital",
+		amountCents: 4800,
+		categoryId: null,
+		categoryName: null,
+		categoryIcon: null,
+		categoryColor: null,
+		sameMerchant: true,
+	},
+	{
+		...LIKELY_BASE,
+		id: 903,
+		date: "2026-10-05",
+		displayName: "Chewy",
+		amountCents: 6412,
+		categoryId: null,
+		categoryName: null,
+		categoryIcon: null,
+		categoryColor: null,
+		sameMerchant: false,
+	},
+];
+
 function Rows() {
 	return (
 		<Group id="rows" title="Rows">
@@ -1338,7 +1388,7 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
-							frequency="monthly"
+							bill={{ frequency: "monthly", anchorMonth: null }}
 							candidates={[
 								{
 									id: 1,
@@ -1357,12 +1407,8 @@ function Rows() {
 								},
 							]}
 							periods={[
-								{
-									value: "2026-09",
-									label: "September",
-									countedMonth: "2026-09",
-								},
-								{ value: "2026-10", label: "October", countedMonth: "2026-10" },
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
 							]}
 						/>
 					</div>
@@ -1375,15 +1421,9 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
-							frequency="monthly"
+							bill={{ frequency: "monthly", anchorMonth: null }}
 							candidates={[]}
-							periods={[
-								{
-									value: "2026-09",
-									label: "September",
-									countedMonth: "2026-09",
-								},
-							]}
+							periods={[{ value: "2026-09", label: "September" }]}
 						/>
 					</div>
 				</State>
@@ -1815,6 +1855,52 @@ function Rows() {
 				</State>
 			</Specimen>
 			<Specimen
+				id="likely-transactions"
+				title="LikelyTransactions"
+				tier="visual"
+				components={[
+					"LikelyTransactions",
+					"SelectableTransactionRow",
+					"WhyLink",
+					"Button",
+				]}
+				sentence="After a new category is made, the panel says so and offers the transactions that might belong in it: each row is its own tick with a reason under it. Same-merchant rows come ticked, Tally's guesses unticked with a Why?; Add counts the ticks."
+			>
+				<State label="Same merchant ticked, Tally's guess not">
+					<div class="max-w-xl" inert>
+						<LikelyPanel
+							savedId={LIKELY_SAVED.id}
+							savedDate={LIKELY_SAVED.date}
+							savedCents={LIKELY_SAVED.amountCents}
+							back="/transactions"
+							categoryId={7}
+							categoryName="Pet Care"
+							rows={LIKELY_ROWS}
+							ticked={
+								new Set([LIKELY_ROWS[0]?.id ?? 0, LIKELY_ROWS[1]?.id ?? 0])
+							}
+							today={LIKELY_SAVED.date}
+						/>
+					</div>
+				</State>
+				<State label="Nothing ticked: Add is disabled">
+					<div class="max-w-xl" inert>
+						<LikelyPanel
+							savedId={LIKELY_SAVED.id}
+							savedDate={LIKELY_SAVED.date}
+							savedCents={LIKELY_SAVED.amountCents}
+							back="/transactions"
+							categoryId={7}
+							categoryName="Pet Care"
+							rows={LIKELY_ROWS}
+							ticked={new Set()}
+							today={LIKELY_SAVED.date}
+						/>
+					</div>
+				</State>
+				<UseSpec spec={LIKELY_SPEC} />
+			</Specimen>
+			<Specimen
 				id="category-suggestion-card"
 				title="CategorySuggestionCard"
 				tier="visual"
@@ -1832,6 +1918,15 @@ function Rows() {
 							suggestion={CATEGORY_SUGGESTION}
 							ticked={[31, 32, 33]}
 							notes={{ 34: "Birthday present" }}
+						/>
+					</div>
+				</State>
+				<State label="The family already has this category: Add to Pet Care">
+					<div class="max-w-xl" inert>
+						<CategorySuggestionCard
+							suggestion={CATEGORY_SUGGESTION}
+							existing="Pet Care"
+							ticked={[31, 32, 33]}
 						/>
 					</div>
 				</State>
@@ -2091,6 +2186,44 @@ const TEXT_INPUT_SPEC: UseSpecText = {
 		"The visible label names the value; errors say what to do, for example Give the category a name.",
 };
 
+const NEW_CATEGORY_SPEC: UseSpecText = {
+	purpose:
+		"Make a category while categorizing, from the category chips, without leaving the panel.",
+	affordance:
+		"New category is one more chip, with a plus and terracotta words, so it reads as a category choice.",
+	states:
+		"Chip rest and checked apply; the name field is shown while the chip is chosen and folded away otherwise, and its empty, filled and error states apply.",
+	feedback:
+		"Choosing New category opens the name field under the chips in place; choosing another chip folds it away with no server call; a taken name, an empty name or a full list shows its error under the field, announced as an alert, and saves nothing.",
+	input:
+		"Chip and field are at least 44px tall; Tab reaches the chip, then the field while it is open; a screen reader hears New category, the field's label and its hint.",
+	motion:
+		"The field opens and folds without motion, so reduced motion changes nothing; an error shakes the field once, as any field does.",
+	edges:
+		"A typed name counts only while New category is chosen; where :has() isn't supported the field stays visible, so a name can still be typed; the name is limited to 40 characters.",
+	words:
+		"The field is labelled New category name; its hint says where the category goes, for this transaction or these transactions.",
+};
+
+const LIKELY_SPEC: UseSpecText = {
+	purpose:
+		"After a new category is made, offer the other transactions that might belong in it, so one choice files them together.",
+	affordance:
+		"Each row shows a tick and its reason under it; the Add button names the category and how many it will file.",
+	states:
+		"Ticked and unticked rows, the Add count with several or none ticked, and Not now apply; nothing else changes the panel.",
+	feedback:
+		"A tick redraws only the Add count, so the number follows the ticks; Add moves the ticked rows and the list says how many it set; Not now leaves all of them.",
+	input:
+		"Each row's tick is a keyboard-reachable checkbox named by the transaction; Add and Not now are 44px tall; the heading takes focus when the panel opens.",
+	motion:
+		"The sheet rises as any sheet does and stays still under reduced motion; the count changes without animation.",
+	edges:
+		"Only the ticked rows that are still offered move, so a row changed elsewhere is left alone; with none ticked, Add is disabled and reads Add to the category.",
+	words:
+		"Reasons are plain facts (Same merchant as Sep 14, $189.00) or Tally's guess with a Why? link; the panel never names the sorting engine.",
+};
+
 function Controls() {
 	return (
 		<Group id="controls" title="Controls">
@@ -2172,6 +2305,84 @@ function Controls() {
 					</State>
 				</div>
 				<UseSpec spec={TEXT_INPUT_SPEC} />
+			</Specimen>
+			<Specimen
+				id="new-category-choice"
+				title="NewCategoryChoice"
+				tier="interactive"
+				components={["NewCategoryChoice", "Chip", "TextInput", "CategoryIcon"]}
+				sentence="The last category chip, New category, opens a name field under the chips while it is chosen; choosing another chip folds the field away. The fold is CSS, so it works here without the server."
+			>
+				<State label="New category chosen, name empty">
+					<fieldset
+						class={`flex max-w-xl flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+					>
+						<legend class="text-base text-ink">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="radio"
+								name="ds-category-empty"
+								value="Groceries"
+								icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+							>
+								Groceries
+							</Chip>
+							<NewCategoryChip checked name="ds-category-empty" />
+						</div>
+						<NewCategoryName
+							id="ds-new-category-empty"
+							hint="Added to your categories and used for this transaction."
+						/>
+					</fieldset>
+				</State>
+				<State label="New category chosen, name taken">
+					<fieldset
+						class={`flex max-w-xl flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+					>
+						<legend class="text-base text-ink">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="radio"
+								name="ds-category-taken"
+								value="Groceries"
+								icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+							>
+								Groceries
+							</Chip>
+							<NewCategoryChip checked name="ds-category-taken" />
+						</div>
+						<NewCategoryName
+							id="ds-new-category-taken"
+							value="groceries"
+							hint="Added to your categories and used for this transaction."
+							error="That name is taken."
+						/>
+					</fieldset>
+				</State>
+				<State label="Another chip chosen: the name field folds away">
+					<fieldset
+						class={`flex max-w-xl flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+					>
+						<legend class="text-base text-ink">Category</legend>
+						<div class="flex flex-wrap gap-2">
+							<Chip
+								type="radio"
+								name="ds-category-folded"
+								value="Groceries"
+								checked
+								icon={<CategoryIcon icon="groceries" color="cat-blue" />}
+							>
+								Groceries
+							</Chip>
+							<NewCategoryChip name="ds-category-folded" />
+						</div>
+						<NewCategoryName
+							id="ds-new-category-folded"
+							hint="Added to your categories and used for this transaction."
+						/>
+					</fieldset>
+				</State>
+				<UseSpec spec={NEW_CATEGORY_SPEC} />
 			</Specimen>
 			<Specimen
 				id="chip"
@@ -2451,9 +2662,9 @@ function Controls() {
 				title="ViewLinks"
 				tier="visual"
 				components={["ViewLinks"]}
-				sentence="The demo's “See it without AI” (decisions 73 and 79, P44 A): two plain links under the Transactions title, “Tidied by Tally · Straight from the bank”, that switch the list between what Tally made of it and the bank's own data. The current one is ink and semibold; the other is a terracotta link. They are real links to the demo's Transactions."
+				sentence="The demo's “See it without AI” (decisions 73, 79 and 103, P44 A): two plain links under the Transactions title, “With Tally · Without Tally”, that switch the list between what Tally made of it and the bank's own data. The current one is ink and semibold; the other is a terracotta link. They are real links to the demo's Transactions."
 			>
-				<State label="Tally's list: “Tidied by Tally” is current">
+				<State label="Tally's list: “With Tally” is current">
 					<ViewLinks
 						id="ds-view-made"
 						current="made"
@@ -2461,7 +2672,7 @@ function Controls() {
 						bankHref="/transactions?raw=1"
 					/>
 				</State>
-				<State label="The bank's list (?raw=1): “Straight from the bank” is current">
+				<State label="The bank's list (?raw=1): “Without Tally” is current">
 					<ViewLinks
 						id="ds-view-bank"
 						current="bank"
@@ -2805,7 +3016,7 @@ function Controls() {
 				title="Add cash"
 				tier="visual"
 				components={["CashForm"]}
-				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it."
+				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it. It opens with the amount blank, as Add a bill does (#342)."
 			>
 				<State label="Add cash">
 					<div
@@ -2827,6 +3038,39 @@ function Controls() {
 								merchant: "Farmers market",
 								category: "1",
 								note: "Peaches and eggs",
+							}}
+							categories={[
+								{
+									id: 1,
+									name: "Groceries",
+									icon: "groceries",
+									color: "cat-blue",
+								},
+								{
+									id: 2,
+									name: "Eating Out",
+									icon: "eating-out",
+									color: "cat-plum",
+								},
+							]}
+							action="#"
+						/>
+					</div>
+				</State>
+				<State label="As it opens: the amount is blank, as Add a bill's is">
+					<div
+						inert
+						class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
+					>
+						<h4 class="font-serif text-4xl font-semibold">Add cash spending</h4>
+						<CashForm
+							today="2026-09-29"
+							values={{
+								date: "2026-09-29",
+								amount: "",
+								merchant: "",
+								category: "",
+								note: "",
 							}}
 							categories={[
 								{
@@ -3038,6 +3282,7 @@ function Feedback() {
 						data-ds-toast="success"
 						data-ds-message="Deleted Farmers market, $20.00."
 						data-ds-undo="catalog-demo-token"
+						data-ds-undo-expires-in-ms="10000"
 					>
 						Show an Undo toast
 					</Button>

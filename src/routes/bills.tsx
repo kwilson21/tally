@@ -30,6 +30,7 @@ import {
 	updateBill,
 } from "../bills/write";
 import { daysBefore, householdToday, ordinal, shortDay } from "../dates";
+import { billPeriodMonth, type CountedBill } from "../db/counted-month";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -749,6 +750,7 @@ bills.get("/bills/find", async (c) => {
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Possible bills
 				</h1>
+				<HowLink section="bills" />
 				<p class="mt-2 text-muted">
 					About the same amount, about a month apart. Nothing becomes a bill
 					until you add it.
@@ -1106,6 +1108,11 @@ const occurrenceDate = (bill: DbBill, period: string) => {
 };
 const occurrenceMonth = (bill: DbBill, period: string) =>
 	occurrenceDate(bill, period).slice(0, 7);
+/** The bill as the counting rule reads it, so the month a payment counts in is worked out one way (src/db/counted-month.ts). */
+const countedBill = (bill: DbBill): CountedBill => ({
+	frequency: bill.frequency,
+	anchorMonth: bill.anchor_month,
+});
 /** The shape of each frequency's payment keys (bill_payments.period), so a key of another shape never sets a start. */
 const periodKeyShape: Record<DbBill["frequency"], RegExp> = {
 	monthly: /^\d{4}-\d{2}$/,
@@ -1217,10 +1224,6 @@ async function billPage(
 	);
 	// A payment at another price, offered on the occurrence the Bills row shows (P36 B, spec §8.5).
 	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
-	const countedMonth = (period: string) =>
-		bill.frequency === "yearly"
-			? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
-			: occurrenceMonth(bill, period);
 	const picker = pickerPeriod ? (
 		<BillPaymentPicker
 			billId={id}
@@ -1228,7 +1231,7 @@ async function billPage(
 			billAmountCents={bill.amount_cents}
 			openedPeriod={pickerPeriod}
 			dueDateLabel={shortDate(occurrenceDate(bill, pickerPeriod))}
-			frequency={bill.frequency}
+			bill={countedBill(bill)}
 			selectedTransactionId={selectedTransactionId}
 			candidates={candidates.map((t) => ({
 				id: t.transaction_id,
@@ -1243,9 +1246,8 @@ async function billPage(
 				.map((period) => ({
 					value: period,
 					label: ["monthly", "yearly"].includes(bill.frequency)
-						? monthName(countedMonth(period), today)
+						? monthName(billPeriodMonth(countedBill(bill), period), today)
 						: occurrenceLabel(occurrenceDate(bill, period)),
-					countedMonth: countedMonth(period),
 				}))}
 		/>
 	) : null;
@@ -1306,7 +1308,10 @@ async function billPage(
 								period={period}
 								label={
 									["monthly", "yearly"].includes(bill.frequency)
-										? monthName(countedMonth(period), today)
+										? monthName(
+												billPeriodMonth(countedBill(bill), period),
+												today,
+											)
 										: occurrenceLabel(due)
 								}
 								status={status}
@@ -1411,11 +1416,8 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 	if (!payment) return c.notFound();
 	return c.html(
 		<BillMonthExplanation
-			countedMonth={
-				bill.frequency === "yearly"
-					? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
-					: occurrenceMonth(bill, period)
-			}
+			bill={countedBill(bill)}
+			period={period}
 			paymentDate={payment.date}
 		/>,
 	);

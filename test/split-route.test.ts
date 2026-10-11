@@ -129,7 +129,42 @@ describe("transaction splits", () => {
 		const response = await post(`/transactions/${income?.id}/split`, [
 			["back", "/transactions"],
 		]);
-		expect(response.status).toBe(400);
+		expect(response.status).toBe(422);
+		const html = await response.text();
+		expect(html).toContain('id="split-title"');
+		expect(html).toMatch(
+			/<p role="alert" class="text-sm text-over">Income can&#39;t be split\.<\/p>/,
+		);
+	});
+
+	it("refuses a split posted for a row a bank change made income, on the sheet with a field error", async () => {
+		const bakery = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).first<{ id: number }>();
+		const id = bakery?.id as number;
+		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+			.bind(id)
+			.run();
+		const response = await post(`/transactions/${id}/split`, [
+			["part_category", "1"],
+			["part_category", "5"],
+			["part_amount", "5"],
+			["part_amount", "7"],
+			["back", "/transactions"],
+		]);
+		expect(response.status).toBe(422);
+		const html = await response.text();
+		expect(html).toContain("Income can&#39;t be split.");
+		expect(html).toContain('role="alert"');
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?",
+				)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(0);
 	});
 
 	it("copies current parent date, exclusion and credit review from inside the batch", async () => {

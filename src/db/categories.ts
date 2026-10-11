@@ -1,6 +1,10 @@
 // The household's categories, as Settings shows and changes them (spec §5, §7, §8). Budgets: db/budgets.ts.
 import { budgetForMonth } from "../budget";
-import { type CategoryValue, MAX_ACTIVE } from "../settings/category-form";
+import {
+	type CategoryValue,
+	fullMessage,
+	MAX_ACTIVE,
+} from "../settings/category-form";
 
 export type SettingsCategory = {
 	id: number;
@@ -85,6 +89,51 @@ export async function addCategory(
 		)
 		.run();
 	return inserted.meta.changes ? Number(inserted.meta.last_row_id) : null;
+}
+
+/**
+ * Makes a category a person named in a form, or says why it can't be made: the name is taken (ignoring
+ * case, and the form has already refused archived names), or the list is full. Nothing is made on a refusal.
+ */
+export async function makeCategory(
+	db: D1Database,
+	value: CategoryValue,
+): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+	try {
+		const id = await addCategory(db, value);
+		if (id !== null) return { ok: true, id };
+	} catch (error) {
+		// The unique name index settles two saves at once (migration 0005).
+		if (!(error instanceof Error && /UNIQUE/i.test(error.message))) throw error;
+	}
+	const taken = (await categoryNames(db)).some(
+		(category) => category.name.toLowerCase() === value.name.toLowerCase(),
+	);
+	return {
+		ok: false,
+		error: taken ? "That name is taken." : fullMessage("add"),
+	};
+}
+
+/**
+ * Takes back a category made for a save that was then refused, so a refusal leaves no category behind. It
+ * goes only while nothing uses it: a category another save has already filed transactions in stays.
+ */
+export async function unmakeCategory(
+	db: D1Database,
+	id: number,
+): Promise<void> {
+	await db
+		.prepare(
+			`DELETE FROM categories WHERE id = ?1
+				AND NOT EXISTS (SELECT 1 FROM transactions WHERE category_id = ?1 OR jev_category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM merchants WHERE default_category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM bills WHERE category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM budget_amounts WHERE category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM category_archive_periods WHERE category_id = ?1)`,
+		)
+		.bind(id)
+		.run();
 }
 
 /** Renames a category. */

@@ -37,6 +37,9 @@
 
 	// The Undo toasts on screen. A newer plain or error toast never removes one of them early.
 	const undoToasts = new WeakSet();
+	// Each Undo form's button and toast, so a failed Undo request can turn its button back on while its
+	// toast is still up (the error toast says to try again).
+	const undoButtons = new WeakMap();
 
 	// Toasts clear Select mode's action bar by its measured height, set on #toasts. (The toasts' own
 	// height goes on the root element instead: see measureToasts.) htmx 4 fires HX-Trigger after
@@ -96,6 +99,8 @@
 		if (undo && !(undoExpiresInMs > 0)) return;
 		const toast = document.createElement("div");
 		lastToast = toast;
+		// An Undo toast's button, focused once the toast is on the page (see the undo block below).
+		let undoButton = null;
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
 		if (type === "error") {
@@ -133,7 +138,9 @@
 			form.addEventListener("submit", () => {
 				button.disabled = true;
 			});
+			undoButtons.set(form, { button, toast });
 			form.append(button);
+			undoButton = button;
 			toast.append(form);
 		} else {
 			toast.textContent = message;
@@ -163,18 +170,20 @@
 				"style",
 				`--duration-undo-toast: ${Math.min(10_000, undoExpiresInMs)}ms`,
 			);
+			// The swap that removed the delete's sheet left focus nowhere, so focus moves to Undo and a keyboard
+			// user can press it at once. The HX-Trigger runs after the swap (htmx's finally), so this wins over
+			// any autofocus the swap set.
+			undoButton?.focus();
 		}
 		setTimeout(
 			() => {
-				// Focus on Undo would be lost with the toast, so the list's result count takes it, or the
-				// page's title when the list has no count (the first-visit list).
+				// Focus on Undo would be lost with the toast, so the Transactions heading takes it (every
+				// Transactions page has one, the first-visit page too).
 				if (toast.contains(document.activeElement)) {
-					const target =
-						document.getElementById("result-count") ??
-						document.getElementById("transactions-title");
-					if (target) {
-						target.setAttribute("tabindex", "-1");
-						target.focus();
+					const heading = document.getElementById("transactions-title");
+					if (heading) {
+						heading.setAttribute("tabindex", "-1");
+						heading.focus();
 					}
 				}
 				toast.remove();
@@ -212,6 +221,11 @@
 	// the newest plain or error toast is ever on screen.
 	let lastFailure = null;
 	function failed(ctx) {
+		// An Undo request that failed turns its button back on while its toast is still up: the error toast
+		// says to try again. The request's source element is the Undo form (htmx 4's ctx.sourceElement).
+		const undo = undoButtons.get(ctx?.sourceElement);
+		if (undo && document.getElementById("toasts")?.contains(undo.toast))
+			undo.button.disabled = false;
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
 				? COULDNT_LOAD

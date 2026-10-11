@@ -215,7 +215,7 @@ export const DECIDED: readonly {
 	{
 		title: "P44 · See it without AI",
 		outcome:
-			"Option A: two links under the Transactions title, “Tidied by Tally · Straight from the bank” (decisions 73 and 79).",
+			"Option A: two links under the Transactions title, “With Tally · Without Tally” (decisions 73, 79 and 103).",
 	},
 	{
 		title: "P46–P53 · Home",

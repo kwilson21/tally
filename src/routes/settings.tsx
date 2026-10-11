@@ -36,9 +36,11 @@ import {
 	fullMessage,
 	parseCategory,
 	restoreProblem,
+	sameName,
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
+import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
@@ -535,9 +537,15 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							last={i === active.length - 1}
 						/>
 					))}
+					{/* A suggestion whose name an active category already has is added to it, not made again (decision 101). */}
 					{categorySuggestions.map((suggestion) => (
 						<CategorySuggestionCard
 							suggestion={suggestion}
+							existing={
+								active.find((cat) =>
+									sameName(cat.name, tidyName(suggestion.name)),
+								)?.name
+							}
 							error={
 								view.suggestionValues?.id === suggestion.id
 									? view.suggestionError
@@ -810,7 +818,10 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		);
 	const out = result.leftOut.length;
 	const count = result.moved;
-	const message = `Created ${result.name} with ${count} transaction${count === 1 ? "" : "s"}`;
+	const transactions = `${count} transaction${count === 1 ? "" : "s"}`;
+	const message = result.attached
+		? `Added ${transactions} to ${result.name}`
+		: `Created ${result.name} with ${transactions}`;
 	return done(
 		c,
 		message,

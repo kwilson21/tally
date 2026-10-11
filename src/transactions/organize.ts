@@ -139,11 +139,11 @@ export async function saveOrganizeGroup(
 	// A stale form must not alter rules after another request categorized the group.
 	if (saved === 0) return 0;
 
-	const statements: D1PreparedStatement[] = [];
+	const updates: D1PreparedStatement[] = [];
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
 		const marks = chunk.map(() => "?").join(", ");
-		statements.push(
+		updates.push(
 			db
 				.prepare(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
@@ -153,18 +153,21 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	for (const merchantKey of names) {
-		statements.push(
-			db
-				.prepare(
-					`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)
-					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
-						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
-						${SETTLE_SUGGESTION_SQL}`,
-				)
-				.bind(merchantKey, displayName, categoryId, displayName),
-		);
-	}
-	await db.batch(statements);
-	return saved;
+	// A merchant gets its rule only while this batch still has one of its charges to file, so a group another save
+	// filed first keeps its rule (the batch runs in order, so each check sees the charges just before the update that files them).
+	const upserts = names.map((merchantKey) =>
+		db
+			.prepare(
+				`INSERT INTO merchants (raw_name, display_name, default_category_id)
+				SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
+				ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
+					display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
+					${SETTLE_SUGGESTION_SQL}`,
+			)
+			.bind(merchantKey, displayName, categoryId, merchantKey, displayName),
+	);
+	const results = await db.batch([...upserts, ...updates]);
+	return results
+		.slice(upserts.length)
+		.reduce((changed, result) => changed + result.meta.changes, 0);
 }

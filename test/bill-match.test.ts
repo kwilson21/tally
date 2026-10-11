@@ -218,6 +218,42 @@ describe("bill payment matching", () => {
 		expect(threeYears).toBeLessThan(1_000);
 	});
 
+	it("reads a monthly bill's candidates in one statement, so its statement count is the same with a year of history", async () => {
+		const countForMonths = async (months: number) => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare("DELETE FROM transactions"),
+			]);
+			// One LANDLORD payment on the 10th of each of the last `months` months, ending in April 2026.
+			await env.DB.batch(
+				Array.from({ length: months }, (_, back) =>
+					env.DB.prepare(
+						"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,10000,'LANDLORD')",
+					).bind(
+						new Date(Date.UTC(2026, 3 - back, 10)).toISOString().slice(0, 10),
+					),
+				),
+			);
+			let statements = 0;
+			const counted = new Proxy(env.DB, {
+				get(target, property) {
+					if (property === "prepare")
+						return (sql: string) => {
+							statements++;
+							return target.prepare(sql);
+						};
+					const value = Reflect.get(target, property, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			}) as D1Database;
+			expect(await matchBillPayments(counted, "2026-04-20")).toBeGreaterThan(0);
+			return statements;
+		};
+		const quarter = await countForMonths(3);
+		const year = await countForMonths(12);
+		expect(year).toBe(quarter);
+	});
+
 	it("gives Jev and earlier bill categories to a matched payment, but preserves user and merchant rule choices", async () => {
 		await env.DB.batch([
 			env.DB.prepare("UPDATE bills SET category_id=1 WHERE id=1"),
