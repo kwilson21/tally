@@ -46,9 +46,9 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toContain("Each bill gets at most one payment per period");
 	});
 
-	it("says in the Bills section, right after the finding-bills rule, that card payments and moves are never suggested", async () => {
+	it("says in the Bills section, right after the finding-bills rule, that card payments and moves are never suggested while they're left out of the budget", async () => {
 		const sentence =
-			"Card payments and moves between your own accounts are never suggested: what you bought on the card already counts, and saving each month is what the savings goal on Home is for.";
+			"Card payments and moves between your own accounts are never suggested while they're left out of the budget: what you bought on the card already counts, and saving each month is what the savings goal on Home is for.";
 		const demoHtml = decodeHtml((await get("/how-it-works")).html);
 		const familyHtml = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
@@ -58,7 +58,7 @@ describe("GET /how-it-works in the demo", () => {
 				html.match(/<section[^>]*id="bills"[\s\S]*?<\/section>/)?.[0] ?? "";
 			expect(bills).toContain(sentence);
 			expect(bills).toMatch(
-				/Tally suggests a possible bill[\s\S]*?<\/li>\s*<li>Card payments and moves between your own accounts are never suggested:/,
+				/Tally suggests a possible bill[\s\S]*?<\/li>\s*<li>Card payments and moves between your own accounts are never suggested while they're left out of the budget:/,
 			);
 		}
 	});

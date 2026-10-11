@@ -519,8 +519,9 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>
 							Card payments and moves between your own accounts are never
-							suggested: what you bought on the card already counts, and saving
-							each month is what the savings goal on Home is for.
+							suggested while they're left out of the budget: what you bought on
+							the card already counts, and saving each month is what the savings
+							goal on Home is for.
 						</li>
 						<li>
 							A payment from the same merchant that is outside that{" "}
