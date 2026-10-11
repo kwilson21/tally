@@ -162,12 +162,15 @@
 		}
 		setTimeout(
 			() => {
-				// Focus on Undo would be lost with the toast, so the list's result count takes it.
+				// Focus on Undo would be lost with the toast, so the list's result count takes it, or the
+				// page's title when the list has no count (the first-visit list).
 				if (toast.contains(document.activeElement)) {
-					const count = document.getElementById("result-count");
-					if (count) {
-						count.setAttribute("tabindex", "-1");
-						count.focus();
+					const target =
+						document.getElementById("result-count") ??
+						document.getElementById("transactions-title");
+					if (target) {
+						target.setAttribute("tabindex", "-1");
+						target.focus();
 					}
 				}
 				toast.remove();

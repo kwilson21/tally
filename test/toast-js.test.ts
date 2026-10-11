@@ -127,6 +127,8 @@ async function page({
 	let toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const resultCount = new FakeNode("p");
+	// Every Transactions state renders the page's title, listed or not.
+	const heading = new FakeNode("h1");
 	const documentElement = new FakeNode("html");
 	const body = new EventTarget();
 	const document = Object.assign(new EventTarget(), {
@@ -140,9 +142,11 @@ async function page({
 					? announcer
 					: id === "selection-bar"
 						? (bar ?? null)
-						: id === "result-count" && listed
-							? resultCount
-							: null,
+						: id === "transactions-title"
+							? heading
+							: id === "result-count" && listed
+								? resultCount
+								: null,
 		createElement: (tag: string) => new FakeNode(tag),
 		createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
 		createTextNode: (text: string) =>
@@ -184,6 +188,7 @@ async function page({
 		toasts,
 		htmx,
 		resultCount,
+		heading,
 		bar,
 		resizeObservers,
 		swapBody,
@@ -701,8 +706,9 @@ describe("focus when an Undo toast ends", () => {
 		});
 
 	it("moves focus to the list's result count when the Undo toast ends with focus on Undo", async () => {
-		const { body, document, toasts, resultCount } = await page();
+		const { body, document, toasts, resultCount, heading } = await page();
 		const focus = vi.spyOn(resultCount, "focus");
+		const headingFocus = vi.spyOn(heading, "focus");
 		undoToast(body);
 		const undo = toasts.children[0] as FakeNode;
 		document.activeElement = undo.all().find((n) => n.tag === "button");
@@ -711,26 +717,33 @@ describe("focus when an Undo toast ends", () => {
 		vi.advanceTimersByTime(1);
 		expect(toasts.children).toHaveLength(0);
 		expect(focus).toHaveBeenCalledTimes(1);
+		// The count wins over the title when the list has one.
+		expect(headingFocus).not.toHaveBeenCalled();
 		// A count that isn't focusable yet takes focus only once it says so.
 		expect(resultCount.attrs.get("tabindex")).toBe("-1");
 	});
 
-	it("leaves focus where it is when the Undo toast ends without focus", async () => {
-		const { body, document, resultCount } = await page();
-		const focus = vi.spyOn(resultCount, "focus");
-		undoToast(body);
-		vi.advanceTimersByTime(10000);
-		expect(focus).not.toHaveBeenCalled();
-		expect(document.activeElement).toBe(body);
-	});
-
-	it("does nothing with focus on a page with no list to count", async () => {
-		const { body, document, toasts } = await page({ listed: false });
+	it("moves focus to the page's title when the Undo toast ends with focus on Undo and there is no result count (the first-visit list)", async () => {
+		const { body, document, toasts, heading } = await page({ listed: false });
+		const focus = vi.spyOn(heading, "focus");
 		undoToast(body);
 		const undo = toasts.children[0] as FakeNode;
 		document.activeElement = undo.all().find((n) => n.tag === "button");
-		expect(() => vi.advanceTimersByTime(10000)).not.toThrow();
+		vi.advanceTimersByTime(10000);
+		expect(focus).toHaveBeenCalledTimes(1);
+		expect(heading.attrs.get("tabindex")).toBe("-1");
 		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("leaves focus where it is when the Undo toast ends without focus", async () => {
+		const { body, document, resultCount, heading } = await page();
+		const focus = vi.spyOn(resultCount, "focus");
+		const headingFocus = vi.spyOn(heading, "focus");
+		undoToast(body);
+		vi.advanceTimersByTime(10000);
+		expect(focus).not.toHaveBeenCalled();
+		expect(headingFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(body);
 	});
 });
 
