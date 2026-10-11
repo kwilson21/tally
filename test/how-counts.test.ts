@@ -75,7 +75,8 @@ describe("monthCounts", () => {
 				.prepare("SELECT category_source FROM transactions WHERE id=904")
 				.first(),
 		).toEqual({ category_source: "bill" });
-		expect(await monthCounts(db, MONTH)).toMatchObject({ bill: 3 });
+		// The demo's three Daycare Fridays this month are linked to bills too, so they add to the two others.
+		expect(await monthCounts(db, MONTH)).toMatchObject({ bill: 6 });
 	});
 	it("counts the month's transactions and who categorized them, matching Home", async () => {
 		const counts = await monthCounts(db, MONTH);
@@ -84,7 +85,8 @@ describe("monthCounts", () => {
 			needsCategory: await needsCategoryCount(db, MONTH),
 			user: 1,
 			merchantRule: 0,
-			bill: 2,
+			// Two seeded bill payments, and the three Daycare Fridays this month.
+			bill: 5,
 			jev: await countWhere("category_source = 'jev'"),
 			unsure: 0,
 			noneFit: 0,

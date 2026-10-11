@@ -153,9 +153,10 @@ describe("GET /how-it-works in the demo", () => {
 			/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
 		);
 		expect(shown).not.toBeNull();
-		const shownCents =
-			Number(shown?.[2]?.replaceAll(",", "")) * 100 * (shown?.[1] ? -1 : 1);
-		expect(shownCents).toBe(Math.trunc(safeCents / 100) * 100);
+		// Home's headline is formatCents in whole dollars, so the example is rounded the same way.
+		expect(`${shown?.[1] ?? ""}$${shown?.[2]}`).toBe(
+			formatCents(safeCents, { wholeDollars: true }).replace("-", "−"),
+		);
 	});
 
 	it("explains exclusions with this month's excluded count", async () => {

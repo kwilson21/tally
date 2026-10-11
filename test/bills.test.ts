@@ -381,6 +381,34 @@ describe("Bills", () => {
 		);
 	});
 
+	it("says the next every-two-weeks date after today, however old the anchor is", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+		try {
+			const response = await exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					name: "Biweekly fixture",
+					amount: "bad",
+					due_day: "5",
+					frequency: "biweekly",
+					anchor_date: "2026-09-04",
+					category_id: "1",
+					merchant_raw_name: "BIWEEKLY FIXTURE",
+				}),
+			});
+			expect(await response.text()).toContain(
+				"Then every two weeks from that date. Next: Oct 16.",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("shows the yearly month only for yearly bills and the due day only where a bill has one", () => {
 		expect(hidesWith(".bill-year-label")).toBe(true);
 		expect(
@@ -686,9 +714,11 @@ describe("Bills", () => {
 		expect(bill).toEqual({ id: 8, amount_cents: 24000, frequency: "weekly" });
 		const { rows } = await loadBillRows(env.DB, "2026-10-31");
 		const daycare = rows.find((row) => row.name === "Daycare");
-		expect(
-			daycare?.totalOccurrences.map((occurrence) => occurrence.dueDate).sort(),
-		).toEqual([
+		// Every October Friday is paid by now, so the next one (November's first) is shown too; October's are the total.
+		const october = (daycare?.totalOccurrences ?? []).filter((occurrence) =>
+			occurrence.dueDate.startsWith("2026-10"),
+		);
+		expect(october.map((occurrence) => occurrence.dueDate).sort()).toEqual([
 			"2026-10-02",
 			"2026-10-09",
 			"2026-10-16",
@@ -696,21 +726,58 @@ describe("Bills", () => {
 			"2026-10-30",
 		]);
 		expect(
-			daycare?.totalOccurrences.reduce(
-				(sum, occurrence) => sum + occurrence.amountCents,
-				0,
-			),
+			october.reduce((sum, occurrence) => sum + occurrence.amountCents, 0),
 		).toBe(120000);
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
 		expect(html).toContain("Daycare");
 		expect(
-			daycare?.totalOccurrences.reduce(
-				(sum, occurrence) => sum + occurrence.amountCents,
-				0,
-			),
+			october.reduce((sum, occurrence) => sum + occurrence.amountCents, 0),
 		).toBe(120000);
+	});
+
+	it("pays the demo's past Daycare Fridays from its own Childcare budget", async () => {
+		await resetDemo(env.DB, "2026-10-10");
+		const category = await env.DB.prepare(
+			"SELECT c.name AS name, b.amount_cents AS budget FROM bills d JOIN categories c ON c.id = d.category_id JOIN budget_amounts b ON b.category_id = c.id WHERE d.name = 'Daycare'",
+		).first<{ name: string; budget: number }>();
+		expect(category).toEqual({ name: "Childcare", budget: 120000 });
+		const { rows } = await loadBillRows(env.DB, "2026-10-10");
+		const daycare = rows.find((row) => row.name === "Daycare");
+		expect(
+			Object.fromEntries(
+				(daycare?.totalOccurrences ?? []).map((occurrence) => [
+					occurrence.dueDate,
+					occurrence.status,
+				]),
+			),
+		).toEqual({
+			"2026-10-02": "paid",
+			"2026-10-09": "paid",
+			"2026-10-16": "due",
+			"2026-10-23": "upcoming",
+			"2026-10-30": "upcoming",
+		});
+	});
+
+	it("keeps the demo's Safe to spend positive on a fixed day, with Eating Out the one category over", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+		try {
+			await resetDemo(env.DB, "2026-10-10");
+			const html = await (
+				await exports.default.fetch("http://tally.test/")
+			).text();
+			const headline =
+				html.match(/class="font-serif text-6xl[^"]*">([^<]*)</)?.[1] ?? "";
+			expect(headline).toMatch(/^\$\d/);
+			expect(html).toContain(
+				"Eating Out is $36 over. Everything else is on track.",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("counts a weekly bill once in the Bills summary, with each unpaid due occurrence in its amount", async () => {

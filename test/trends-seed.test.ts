@@ -46,7 +46,12 @@ describe("Trends with the demo seed", () => {
 			["Eating Out", "Up 4 months running"],
 		]);
 		expect(page.others.map((r) => r.name)).toEqual(
-			earlyOctober ? ["Kids", "Household"] : ["Kids"],
+			// Childcare has no history, so it is in the rest once a Friday is paid (not on October 1).
+			today === "2026-10-01"
+				? ["Kids", "Household"]
+				: earlyOctober
+					? ["Kids", "Household", "Childcare"]
+					: ["Kids", "Childcare"],
 		);
 		// Six months drawn, this one still going, and none of them a part month.
 		const months = page.goingWell[0]?.months ?? [];

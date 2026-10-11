@@ -358,7 +358,7 @@ function demoBills(
 			5,
 			"weekly",
 			null,
-			4,
+			6,
 			seedMerchantKey("LITTLE SPROUTS DAYCARE"),
 			1,
 		],

@@ -80,6 +80,7 @@ const CHECKING = 1;
 const SAVINGS = 2;
 const CARD = 3;
 const CASH = 4;
+const CHILDCARE = 6;
 
 const CATEGORIES: SeedCategory[] = [
 	{
@@ -104,6 +105,13 @@ const CATEGORIES: SeedCategory[] = [
 		icon: "household",
 		color: "cat-brown",
 		sortOrder: 5,
+	},
+	{
+		id: CHILDCARE,
+		name: "Childcare",
+		icon: "kids",
+		color: "cat-blue",
+		sortOrder: 6,
 	},
 ];
 
@@ -282,6 +290,17 @@ function day(month: string, d: number): string {
 	return `${month}-${String(d).padStart(2, "0")}`;
 }
 
+/** The Fridays of today's month, up to and including today. */
+function fridaysUpTo(today: string): string[] {
+	const month = today.slice(0, 7);
+	const dates: string[] = [];
+	for (let d = 1; d <= Number(today.slice(8, 10)); d++) {
+		const date = day(month, d);
+		if (new Date(`${date}T00:00:00Z`).getUTCDay() === 5) dates.push(date);
+	}
+	return dates;
+}
+
 function spend(
 	accountId: number,
 	date: string,
@@ -377,7 +396,8 @@ export function buildSeed(today: string): Seed {
 	// fair (spec §8.3). From the 23rd on they fall on 5, 14 and 23 as written.
 	for (let monthsAgo = 5; monthsAgo >= 1; monthsAgo--) {
 		const month = monthOffset(today, monthsAgo);
-		for (const category of CATEGORIES) {
+		// Childcare has no history of its own: its Fridays are only this month's Daycare charges.
+		for (const category of CATEGORIES.filter((c) => HISTORY[c.id])) {
 			const total = HISTORY[category.id]?.[5 - monthsAgo] ?? 0;
 			const merchants = MERCHANTS[category.id] ?? [];
 			const third = Math.floor(total / 3);
@@ -511,6 +531,12 @@ export function buildSeed(today: string): Seed {
 			refundOfId: targetPurchaseId,
 		},
 	);
+	// Daycare: $240 on each Friday so far this month, from Checking and categorized as Childcare. Added
+	// before Netflix, so Netflix stays last.
+	for (const friday of fridaysUpTo(today))
+		transactions.push(
+			spend(CHECKING, friday, "LITTLE SPROUTS DAYCARE", CHILDCARE, 24000),
+		);
 	// P36 B (decision 72): a subscription whose price went up, so the demo shows "Price changed?" on
 	// one bill. Netflix charged $17.99 yesterday (today, on the 1st, to stay in this month). Its bill,
 	// $15.49, is due the day before the charge (see demoBills): the charge is inside the matcher's date
@@ -542,6 +568,12 @@ export function buildSeed(today: string): Seed {
 		{ categoryId: GAS, effectiveMonth: startMonth, amountCents: 20000 },
 		{ categoryId: KIDS, effectiveMonth: startMonth, amountCents: 30000 },
 		{ categoryId: HOUSEHOLD, effectiveMonth: startMonth, amountCents: 25000 },
+		// $1,200 is five Fridays of Daycare, the most a month can have.
+		{
+			categoryId: CHILDCARE,
+			effectiveMonth: monthOffset(today, 0),
+			amountCents: 120000,
+		},
 	];
 
 	const merchantRows: SeedMerchant[] = [

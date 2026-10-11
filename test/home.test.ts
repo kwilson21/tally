@@ -486,13 +486,13 @@ describe("GET / with the demo seed", () => {
 		expect(statements).toBeLessThanOrEqual(20);
 	});
 
-	it("leads with safe to spend and the over-budget explanation", async () => {
+	it("leads with a positive safe to spend, and no over-budget explanation", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
-		expect(html).toMatch(/Safe to spend[\s\S]*?<\/p><p[^>]*>[−-]?\$[\d,]+/);
+		expect(html).toMatch(/Safe to spend[\s\S]*?<\/p><p[^>]*>\$[\d,]+/);
 		expect(html).toContain('href="/how-it-works#budget"');
 		expect(html).toContain('aria-label="Why? safe to spend"');
-		expect(html).toContain(
+		expect(html).not.toContain(
 			"Over budget this month. Spending more takes it further over.",
 		);
 	});
@@ -521,7 +521,8 @@ describe("GET / with the demo seed", () => {
 		const withBills = dollars((await home()).html);
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const withoutBills = dollars((await home()).html);
-		expect(withoutBills - withBills).toBe(942);
+		// Electric $142, Netflix $15.49, Internet $65 and Daycare's next Friday $240 (the paid ones are spent).
+		expect(withoutBills - withBills).toBe(462);
 	});
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
@@ -718,7 +719,8 @@ describe("GET / with no data", () => {
 		const { html } = await home();
 		expect(html.match(/No budgets/g)?.length).toBe(1);
 		expect(html).toMatch(/<h3[^>]*>Not budgeted<\/h3>/);
-		expect(html.match(/Add a budget/g)?.length).toBe(5);
+		// Six seeded categories, Childcare included.
+		expect(html.match(/Add a budget/g)?.length).toBe(6);
 		expect(html).toMatch(/<a href="\/budget\/1"/);
 	});
 });

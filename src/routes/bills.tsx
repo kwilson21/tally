@@ -381,7 +381,13 @@ async function page(
 				)}
 			</div>
 			<div id="sheet">
-				{sheet && <BillSheet {...sheet} categories={await categories(c)} />}
+				{sheet && (
+					<BillSheet
+						{...sheet}
+						categories={await categories(c)}
+						today={today}
+					/>
+				)}
 			</div>
 		</Layout>,
 	);
@@ -448,12 +454,14 @@ function BillSheet({
 	errors = {},
 	bigAmount,
 	categories,
+	today,
 }: {
 	bill?: DbBill;
 	values?: Values;
 	errors?: Record<string, string>;
 	bigAmount?: BigAmount;
 	categories: Category[];
+	today: string;
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
 	// Once a name has been refused, Reactivate also sends the Name field, so renaming the bill is how
@@ -644,7 +652,7 @@ function BillSheet({
 						error={errors.anchor_date}
 						hint={
 							values.anchor_date && validDateString(values.anchor_date)
-								? `Then every two weeks from that date. Next: ${shortDate(new Date(Date.parse(`${values.anchor_date}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10))}.`
+								? `Then every two weeks from that date. Next: ${shortDate(nextTwoWeeksAfter(values.anchor_date, today))}.`
 								: "Then every two weeks from that date."
 						}
 						surface="paper"
@@ -1035,6 +1043,20 @@ const shortDate = (date: string) =>
 		day: "numeric",
 		timeZone: "UTC",
 	}).format(new Date(`${date}T00:00:00Z`));
+
+/** The first date after `today` in the every-two-weeks series from `anchor` (anchor + 14k). */
+function nextTwoWeeksAfter(anchor: string, today: string): string {
+	const dayNumber = (date: string) =>
+		Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+	const steps = Math.max(
+		0,
+		Math.floor((dayNumber(today) - dayNumber(anchor)) / 14) + 1,
+	);
+	return new Date((dayNumber(anchor) + 14 * steps) * 86_400_000)
+		.toISOString()
+		.slice(0, 10);
+}
+
 const occurrenceLabel = (date: string) =>
 	new Intl.DateTimeFormat("en-US", {
 		weekday: "short",
