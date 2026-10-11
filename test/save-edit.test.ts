@@ -489,7 +489,7 @@ describe("saveEdit", () => {
 	});
 });
 
-describe("saveEdit recounts a linked credit only when this save clears its income", () => {
+describe("saveEdit recounts a linked credit when this save makes it count with its purchase", () => {
 	const PURCHASE = 9401;
 	const REFUND = 9402;
 	const INCOME_CREDIT = 9403;
