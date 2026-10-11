@@ -479,6 +479,19 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it.each(["not-budgeted-row", "transactions-button"])(
+		"gives %s its whole use spec, as a visual component (DESIGN.md section 3)",
+		async (id) => {
+			const { html } = await get("/design-system");
+			const tag = specimens(html).find((t) => t.includes(`id="${id}"`));
+			expect(tag).toContain('data-ds-tier="visual"');
+			const section = html.split(`id="${id}"`)[1]?.split("</section>")[0] ?? "";
+			for (const [, label] of USE_SPEC_PARTS) {
+				expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+			}
+		},
+	);
+
 	it("shows a guessed name in TransactionRow with the sparkles icon, dashed, and says so in DESIGN.md", async () => {
 		const { html } = await get("/design-system");
 		const section =

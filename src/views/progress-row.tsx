@@ -3,6 +3,7 @@ import { nudgeCents } from "../budgets/nudge";
 import { formatCents } from "../money";
 import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
+import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
 import { Icon } from "./icons";
 
 type Props = {
@@ -109,6 +110,11 @@ export function ProgressRow({
 	nudge,
 }: Props) {
 	const over = spentCents > budgetCents;
+	const nearLimit =
+		!over &&
+		budgetCents > 0 &&
+		spentCents >= 0 &&
+		spentCents * 5 >= budgetCents * 4;
 	const { fillPct } = barGeometry(spentCents, budgetCents);
 	// Cents only when there are some, as the status sentence says it: "$36 over", "$36.50 over".
 	const overBy = spentCents - budgetCents;
@@ -135,10 +141,29 @@ export function ProgressRow({
 					{/* When name and amount don't fit on one line, the amount moves under the name; if it still
 					    doesn't fit (a narrow phone in Adjust mode), it breaks at "of", never inside a number. */}
 					<div class="flex flex-wrap items-baseline justify-between gap-x-3">
-						<span class="text-lg">{name}</span>
-						<span class="ml-auto text-right text-lg">
-							{whole(spentCents)} of {whole(budgetCents)}
-						</span>
+						{spentCents < 0 ? (
+							// A net refund keeps its budget under the name, as the P98 drawing shows it.
+							<>
+								<span>
+									<span class="block text-lg">{name}</span>
+									<span class="block text-muted">
+										{whole(budgetCents)} budget
+									</span>
+								</span>
+								<span class={categoryRowAmount(spentCents).className}>
+									{categoryRowAmount(spentCents).text}
+									<span class="sr-only">{REFUND_WORDS}</span>
+								</span>
+							</>
+						) : (
+							<>
+								<span class="text-lg">{name}</span>
+								<span class="ml-auto text-right text-lg">
+									{whole(spentCents)} of {whole(budgetCents)}
+									{nearLimit && <span class="sr-only">, nearly spent</span>}
+								</span>
+							</>
+						)}
 					</div>
 					{/* SVG, not a styled div: the CSP forbids style attributes, and SVG width attributes aren't CSS. */}
 					{/* 4px, no limit marker (decision 46): over budget is a full brick bar plus the words. */}
@@ -149,7 +174,7 @@ export function ProgressRow({
 							height="100%"
 							rx="2"
 							// In Adjust mode each tap redraws the list; replaying every fill would make it jump.
-							class={`${nudge ? "" : "bar-fill "}${over ? "fill-over" : "fill-ok"}`}
+							class={`${nudge ? "" : "bar-fill "}${over ? "fill-over" : nearLimit ? "fill-near-limit" : "fill-ok"}`}
 						/>
 					</svg>
 					{over && (

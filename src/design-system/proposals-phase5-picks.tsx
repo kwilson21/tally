@@ -987,7 +987,7 @@ const rowStates = (
 			</>
 		}
 	>
-		{/* Nearly spent: 80% or more and not over, so the bar is amber (cat-ochre stands in for the new token). */}
+		{/* Nearly spent: 80% or more and not over, so the bar is amber. */}
 		<StateRow
 			cat={CATS.groceries}
 			amount={
@@ -997,7 +997,7 @@ const rowStates = (
 				</>
 			}
 			pct={barGeometry(55300, 65000).fillPct}
-			fill="fill-cat-ochre"
+			fill="fill-near-limit"
 		/>
 		{/* Refunds outweigh spending: "+$20" in green and an empty bar. */}
 		<StateRow
@@ -1034,7 +1034,7 @@ const behindBudget = (
 				</>
 			}
 			pct={barGeometry(55300, 65000).fillPct}
-			fill="fill-cat-ochre"
+			fill="fill-near-limit"
 		/>
 		<ProgressRow
 			{...row(CATS.eatingOut, 15000, 25000)}

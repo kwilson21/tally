@@ -58,6 +58,13 @@ export const COLOR_TOKENS = [
 		contrast: "6.3",
 	},
 	{
+		name: "near-limit",
+		hex: "#8a5a00",
+		swatch: "bg-near-limit",
+		use: "nearly spent budget bar",
+		contrast: "5.6",
+	},
+	{
 		name: "cat-blue",
 		hex: "#3f6c9a",
 		swatch: "bg-cat-blue",
