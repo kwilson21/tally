@@ -1701,6 +1701,40 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await row("pending-1")).toBeNull();
 	});
 
+	it("drops a stale unlinked-purchase date from a posted row that takes the pending row's refund link", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -3 });
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				added: [
+					postedTx({
+						transaction_id: "purchase-a",
+						pending_transaction_id: null,
+						amount: 50,
+					}),
+				],
+			}),
+		);
+		const purchase = (await row("purchase-a"))?.id as number;
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
+			).bind(purchase, ids.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+			).bind(ids.posted),
+		]);
+
+		await post(item, { amount: -3 });
+
+		expect(await row("posted-1")).toMatchObject({
+			refund_of_id: purchase,
+			refund_unlinked_purchase_date: null,
+		});
+	});
+
 	it("leaves the unlinked-purchase date off a posted row that has a refund link of its own", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item, { amount: -3 });

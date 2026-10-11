@@ -16,8 +16,9 @@
  *   if Plaid later stops calling the posted row a transfer.
  * - A bill payment is re-pointed to the posted row unless that row already pays a bill (one bill per
  *   transaction); a refund of the pending row now refunds the posted one, and the pending row's own
- *   refund link moves unless the posted row has one. The note that a bank change unlinked the pending
- *   refund (decision 99) moves too, unless the posted row has a refund link of its own.
+ *   refund link moves unless the posted row has one. A posted row that takes that link drops its own
+ *   note that a bank change unlinked a refund (decision 99). The pending row's note moves too, unless
+ *   the posted row has a refund link of its own.
  * - A split moves with its parts, which follow the posted date, when the amount is unchanged and the
  *   posted row has no split of its own; when the amount changed it is removed and the posted row says the
  *   amount changed, as for any bank correction (decision 62). It takes the category the purchase had before
@@ -154,7 +155,7 @@ const STATEMENTS = [
 	// Refunds, both ways.
 	`UPDATE transactions SET refund_of_id = ${POSTED}
 	 WHERE refund_of_id = ${PENDING} AND id != ${POSTED} AND ${READY}`,
-	`UPDATE transactions SET refund_of_id = p.refund_of_id
+	`UPDATE transactions SET refund_of_id = p.refund_of_id, refund_unlinked_purchase_date = NULL
 	 ${FROM_PENDING} AND p.refund_of_id IS NOT NULL AND p.refund_of_id != transactions.id
 	 AND transactions.refund_of_id IS NULL`,
 	`UPDATE transactions SET refund_unlinked_purchase_date = p.refund_unlinked_purchase_date
