@@ -37,6 +37,7 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	FOR_PERSON_ERROR,
 	parseEdit,
 	safeBack,
 } from "../transactions/edit";
@@ -2213,7 +2214,10 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	);
 
 	// The panel again, as the person left it, with what's wrong (422).
-	const showErrors = (errors: EditErrors) => {
+	const showErrors = (
+		errors: EditErrors,
+		shownPeople: HouseholdPerson[] = people,
+	) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -2246,7 +2250,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 					tx={tx}
 					back={back}
 					categories={all}
-					people={people}
+					people={shownPeople}
 					values={values}
 					refunds={refunds}
 					errors={errors}
@@ -2275,8 +2279,19 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		},
 		actor(c),
 	);
-	if (!result.saved)
+	if (!result.saved) {
+		if ("personMissing" in result)
+			// Removed since this page loaded the household: the panel shows the household as it is now.
+			return showErrors(
+				{ forPerson: FOR_PERSON_ERROR },
+				(
+					await c.env.DB.prepare(
+						"SELECT id, name FROM household_people ORDER BY id",
+					).all<HouseholdPerson>()
+				).results,
+			);
 		return showErrors({ refund: refundTooBigMessage(result.refundLeftCents) });
+	}
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.

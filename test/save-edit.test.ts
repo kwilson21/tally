@@ -361,3 +361,92 @@ describe("saveEdit", () => {
 		expect(await row(id)).toMatchObject({ category_id: null, note: null });
 	});
 });
+
+describe("saveEdit recounts a linked credit only when this save clears its income", () => {
+	const PURCHASE = 9401;
+	const REFUND = 9402;
+	const INCOME_CREDIT = 9403;
+
+	beforeEach(async () => {
+		const bank = await db
+			.prepare("SELECT id FROM accounts WHERE type != 'cash' LIMIT 1")
+			.first<{ id: number }>();
+		if (!bank) throw new Error("bank account missing");
+		// A $50 purchase whose whole $50 is already refunded by REFUND, and a $20 credit linked to it
+		// that is marked as income, so it doesn't count against the purchase.
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, refund_of_id, flag_income, credit_reviewed, updated_by) VALUES
+				(?, ?, '2026-09-01', 5000, 'CAP SHOP', 1, 'user', 0, NULL, NULL, 0, 0, 'test'),
+				(?, ?, '2026-09-03', -5000, 'CAP SHOP', 1, 'user', 0, NULL, ?, 0, 1, 'test'),
+				(?, ?, '2026-09-04', -2000, 'CAP SHOP', 1, 'user', 0, NULL, ?, 1, 0, 'test')`,
+			)
+			.bind(
+				PURCHASE,
+				bank.id,
+				REFUND,
+				bank.id,
+				PURCHASE,
+				INCOME_CREDIT,
+				bank.id,
+				PURCHASE,
+			)
+			.run();
+	});
+
+	const creditRow = () =>
+		db
+			.prepare(
+				"SELECT note, flag_income, refund_of_id FROM transactions WHERE id = ?",
+			)
+			.bind(INCOME_CREDIT)
+			.first<{
+				note: string | null;
+				flag_income: number;
+				refund_of_id: number | null;
+			}>();
+
+	it("saves a note from a panel that showed income off, leaving the income flag and the cap alone", async () => {
+		expect(
+			await saveEdit(
+				db,
+				INCOME_CREDIT,
+				{
+					...edit(),
+					note: "Note only",
+					income: false,
+					incomeWas: false,
+					creditReviewedProvided: false,
+				},
+				"test",
+			),
+		).toEqual({ saved: true });
+		expect(await creditRow()).toEqual({
+			note: "Note only",
+			flag_income: 1,
+			refund_of_id: PURCHASE,
+		});
+	});
+
+	it("still refuses clearing income on a linked credit when the purchase has no room left", async () => {
+		expect(
+			await saveEdit(
+				db,
+				INCOME_CREDIT,
+				{
+					...edit(),
+					note: "Clearing income",
+					income: false,
+					incomeWas: true,
+					creditReviewedProvided: false,
+				},
+				"test",
+			),
+		).toEqual({ saved: false, refundLeftCents: 0 });
+		expect(await creditRow()).toEqual({
+			note: null,
+			flag_income: 1,
+			refund_of_id: PURCHASE,
+		});
+	});
+});

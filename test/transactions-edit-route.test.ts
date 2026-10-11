@@ -1,4 +1,5 @@
 import { env, exports } from "cloudflare:workers";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { decide, NONE_FIT } from "../src/ai/decide";
@@ -7,8 +8,10 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { getTransaction, saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { transactions } from "../src/routes/transactions";
 
 const BASE = "http://tally.test";
+type TestApp = { Bindings: Env; Variables: { actor: string } };
 const rowCount = (html: string) =>
 	(html.match(/<li data-transaction=/g) ?? []).length;
 
@@ -1600,5 +1603,83 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 		const sheet = html.slice(html.indexOf('id="edit-title"'));
 		expect((sheet.match(/>How this works<\/a>/g) ?? []).length).toBe(1);
 		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(2);
+	});
+});
+
+describe("a For person removed while the panel is saving", () => {
+	it("answers 422 on the For field and keeps what was typed, saving nothing", async () => {
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people (name) VALUES ('Sam')",
+		).run();
+		const personId = Number(person.meta.last_row_id);
+		const before = await env.DB.prepare(
+			"SELECT note, for_person_id FROM transactions WHERE id = ?",
+		)
+			.bind(bakery)
+			.first();
+		// The panel's list still holds Sam when the save starts; Sam is removed just before the save's
+		// batch writes, the way settings removes a person between this page's load and its write.
+		let removed = false;
+		const removingDb = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						if (!removed) {
+							removed = true;
+							await env.DB.batch([
+								env.DB.prepare(
+									"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0 WHERE for_person_id = ?",
+								).bind(personId),
+								env.DB.prepare(
+									"DELETE FROM household_people WHERE id = ?",
+								).bind(personId),
+							]);
+						}
+						return target.batch(statements);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+		const editRoute = new Hono<TestApp>();
+		editRoute.use("*", async (c, next) => {
+			c.set("actor", "demo");
+			await next();
+		});
+		editRoute.route("/", transactions as unknown as Hono<TestApp>);
+
+		const res = await editRoute.request(
+			`/transactions/${bakery}`,
+			{
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({
+					back: "/transactions",
+					note: "Kept note",
+					for_person_id: String(personId),
+					for_person_id_was: "",
+				}).toString(),
+			},
+			{ ...env, DB: removingDb },
+		);
+		const html = await res.text();
+
+		expect(removed).toBe(true);
+		expect(res.status).toBe(422);
+		expect(html).toMatch(
+			/<p id="for-person-error" role="alert"[^>]*>Pick a person from the household list\.<\/p>/,
+		);
+		expect(html).toContain("Kept note");
+		expect(
+			await env.DB.prepare(
+				"SELECT note, for_person_id FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual(before);
 	});
 });

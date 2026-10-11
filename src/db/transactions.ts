@@ -626,7 +626,8 @@ const EXCLUDE =
  */
 export type SaveEditResult =
 	| { saved: true }
-	| { saved: false; refundLeftCents: number };
+	| { saved: false; refundLeftCents: number }
+	| { saved: false; personMissing: true };
 
 /**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
@@ -639,7 +640,8 @@ export type SaveEditResult =
  * left of the purchase (src/db/refunded.ts), so two saves at once can't both fit; every other write
  * in the batch applies only once it has, so a refusal saves nothing, and an error anywhere rolls the
  * link back too. A person linking a refund includes it in the budget, even when it was excluded
- * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone.
+ * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone. A For person
+ * removed since the panel loaded the household list is refused the same way (`personMissing`).
  */
 export async function saveEdit(
 	db: D1Database,
@@ -684,14 +686,20 @@ export async function saveEdit(
 			? edit.refundOfId
 			: undefined;
 	const linking = typeof newLink === "number";
-	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so
-	// turning that off, with the link staying, makes it count: that is checked like a link. (A split
-	// parent never counts, only its parts do, and the cap ignores whether a refund is excluded or
-	// reviewed, so income is the one flag that changes what counts.)
+	const incomeChanged =
+		edit.incomeWas === undefined
+			? (edit.income ? 1 : 0) !== current.income
+			: edit.income !== edit.incomeWas;
+	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so this
+	// save clearing that, with the link staying, makes it count: that is checked like a link. A panel
+	// that still shows income off, saving only a note, clears nothing. (A split parent never counts,
+	// only its parts do, and the cap ignores whether a refund is excluded or reviewed, so income is the
+	// one flag that changes what counts.)
 	const recounting =
 		newLink === undefined &&
 		current.refundOfId !== null &&
 		current.income === 1 &&
+		incomeChanged &&
 		!edit.income &&
 		current.isSplit === 0
 			? current.refundOfId
@@ -723,10 +731,6 @@ export async function saveEdit(
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
 	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
-	const incomeChanged =
-		edit.incomeWas === undefined
-			? (edit.income ? 1 : 0) !== current.income
-			: edit.income !== edit.incomeWas;
 	const creditReviewChanged =
 		edit.creditReviewedProvided === false
 			? false
@@ -991,7 +995,21 @@ export async function saveEdit(
 			]),
 		);
 	}
-	const results = await db.batch(statements);
+	// A For person removed after the panel's household list loaded fails the details write on its foreign
+	// key. The batch is atomic, so that failure saved nothing: it is a refusal, and the person is named.
+	const results = await db.batch(statements).catch(async (error: unknown) => {
+		if (
+			personChanged &&
+			typeof edit.forPersonId === "number" &&
+			!(await db
+				.prepare("SELECT 1 FROM household_people WHERE id = ?")
+				.bind(edit.forPersonId)
+				.first())
+		)
+			return null;
+		throw error;
+	});
+	if (!results) return { saved: false, personMissing: true };
 	// The statement that decides is the refund's own link, the second one, when there is a link; for a
 	// credit that counts again it is the panel's own update, the first. No change means the amount
 	// didn't fit, and then none of the others applied either.
