@@ -91,6 +91,8 @@ describe("schema", () => {
 				"note_guessed",
 				"kind_guessed",
 				"for_person_guessed",
+				"kind_cleared",
+				"for_person_cleared",
 				"details_asked",
 				"note_tried_at",
 				"note_dismissed",

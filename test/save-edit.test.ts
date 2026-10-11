@@ -7,9 +7,11 @@ import {
 	listTransactions,
 	needsCategoryCount,
 	saveEdit,
+	saveJevDetails,
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { parseEdit } from "../src/transactions/edit";
 import { parseFilters } from "../src/transactions/filters";
 
 const db = env.DB;
@@ -359,5 +361,130 @@ describe("saveEdit", () => {
 			),
 		).rejects.toThrow();
 		expect(await row(id)).toMatchObject({ category_id: null, note: null });
+	});
+
+	it("keeps a Kind and For a person cleared, when Jev answers later (#304)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		const untouched = (
+			await db
+				.prepare(
+					"SELECT id FROM transactions WHERE id != ? ORDER BY id LIMIT 1",
+				)
+				.bind(id)
+				.first<{ id: number }>()
+		)?.id as number;
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET kind = 'bill', kind_guessed = 0, for_person_id = 1, for_person_guessed = 0, details_asked = 0 WHERE id = ?",
+				)
+				.bind(id),
+			db
+				.prepare(
+					"UPDATE transactions SET kind = NULL, kind_guessed = 0, for_person_id = NULL, for_person_guessed = 0, details_asked = 0 WHERE id = ?",
+				)
+				.bind(untouched),
+		]);
+
+		await saveEdit(
+			db,
+			id,
+			edit({ kind: null, forPersonId: null, noteProvided: false }),
+			"demo",
+		);
+		expect(
+			await db
+				.prepare(
+					"SELECT kind_cleared, for_person_cleared FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({ kind_cleared: 1, for_person_cleared: 1 });
+
+		await saveJevDetails(db, [
+			{ id, kind: "subscription", forPersonId: 1 },
+			{ id: untouched, kind: "subscription", forPersonId: 1 },
+		]);
+		const details =
+			"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?";
+		expect(await db.prepare(details).bind(id).first()).toEqual({
+			kind: null,
+			kind_guessed: 0,
+			for_person_id: null,
+			for_person_guessed: 0,
+		});
+		expect(await db.prepare(details).bind(untouched).first()).toEqual({
+			kind: "subscription",
+			kind_guessed: 1,
+			for_person_id: 1,
+			for_person_guessed: 1,
+		});
+	});
+
+	it("a note saved with Details hidden keeps Jev's guessed Kind, which the form posts as Not known (#304)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'subscription', kind_guessed = 1, details_asked = 1 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		// With the Details switch off the guess is drawn as Not known, so the form posts Kind empty both ways.
+		const posted = new FormData();
+		for (const [key, value] of Object.entries({
+			details_visible: "0",
+			kind_was: "",
+			kind: "",
+			for_person_id_was: "",
+			for_person_id: "",
+			note_was: "",
+			note: "Office lunch",
+		}))
+			posted.set(key, value);
+		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+		if (!parsed.ok) throw new Error("expected the form to parse");
+		await saveEdit(db, id, parsed.value, "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT note, kind, kind_guessed, kind_cleared FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			note: "Office lunch",
+			kind: "subscription",
+			kind_guessed: 1,
+			kind_cleared: 0,
+		});
+	});
+
+	it("a Kind a person chooses after clearing it is no longer a clear", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'bill', kind_guessed = 0 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await saveEdit(db, id, edit({ kind: null, noteProvided: false }), "demo");
+		expect(
+			await db
+				.prepare("SELECT kind_cleared FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ kind_cleared: 1 });
+		await saveEdit(
+			db,
+			id,
+			edit({ kind: "one_off", noteProvided: false }),
+			"demo",
+		);
+		expect(
+			await db
+				.prepare("SELECT kind, kind_cleared FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ kind: "one_off", kind_cleared: 0 });
 	});
 });
