@@ -80,6 +80,12 @@
 		--safe-area-bottom: env(safe-area-inset-bottom, 0px);
 		--safe-area-left: env(safe-area-inset-left, 0px);
 		--tabs-height: calc(3.5rem + 1px);
+		/* Select mode's action bar as it starts, before toast.js measures it. The bar is two lines (its count, then its buttons), and taller when either wraps on a narrow phone; toast.js sets the measured height on #toasts while a toast shows, so this is only the starting value. */
+		--selection-bar-height: 4.3125rem;
+		/* The height of the toasts on screen, measured by toast.js on the root element; 0 when none. */
+		--toasts-height: 0px;
+		/* A phone sheet always leaves room at the top for the toasts on screen: at least a 12 px gap, a two-line toast (66 px) and 12 px. More when the toasts on screen are taller, such as an Undo toast and an error toast together. */
+		--toast-top-room: max(5.625rem, calc(var(--toasts-height) + 1.5rem));
 		--feedback-bottom: 6.5rem;
 		--feedback-height: 2.75rem;
 		--focus-scroll-gap: 0.5rem;

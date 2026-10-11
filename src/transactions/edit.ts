@@ -84,6 +84,9 @@ export type EditErrors = Partial<
 	>
 >;
 
+/** The For field's error when the chosen person is not in the household (the form or the save). */
+export const FOR_PERSON_ERROR = "Pick a person from the household list.";
+
 const MAX_NAME = 80;
 const MAX_NOTE = 500;
 
@@ -236,7 +239,7 @@ export function parseEdit(
 		(!Number.isInteger(forPersonId) ||
 			(peopleIds && !peopleIds.includes(forPersonId as number)))
 	)
-		errors.forPerson = "Pick a person from the household list.";
+		errors.forPerson = FOR_PERSON_ERROR;
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };
 	return {
