@@ -1,9 +1,17 @@
 import { householdToday } from "../dates";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
-import { billOccurrenceForMonth } from "./status";
+import {
+	type BillFrequency,
+	billOccurrenceForMonth,
+	WEEKLY_BILL_DATE_WINDOW_DAYS,
+} from "./status";
 
 export const BILL_AMOUNT_TOLERANCE = 0.1;
 export const BILL_DATE_WINDOW_DAYS = 5;
+
+/** Spec §6.1 rule 3: a weekly bill's date window is ±3 days, so two weeks' windows never overlap; the others ±5. */
+export const billDateWindowDays = (frequency: BillFrequency) =>
+	frequency === "weekly" ? WEEKLY_BILL_DATE_WINDOW_DAYS : BILL_DATE_WINDOW_DAYS;
 
 export type MatchCandidate = { id: number; date: string; amountCents: number };
 
@@ -25,12 +33,12 @@ export function pickBillPayment(
 	candidates: MatchCandidate[],
 	dueDate: string,
 	amountCents: number,
+	windowDays = BILL_DATE_WINDOW_DAYS,
 ): MatchCandidate | undefined {
 	const due = dayNumber(dueDate);
 	return candidates
 		.filter(
-			(candidate) =>
-				Math.abs(dayNumber(candidate.date) - due) <= BILL_DATE_WINDOW_DAYS,
+			(candidate) => Math.abs(dayNumber(candidate.date) - due) <= windowDays,
 		)
 		.filter((candidate) => withinBillAmount(candidate.amountCents, amountCents))
 		.sort(
@@ -46,8 +54,9 @@ type Bill = {
 	id: number;
 	amount_cents: number;
 	due_day: number;
-	frequency: "monthly" | "yearly";
+	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
 	anchor_month: number | null;
+	anchor_date: string | null;
 	/** The bill's merchant key, which a payment's merchant key (or its raw name, for a bill flagged below) must equal (spec §6.1 rule 1). */
 	merchant_raw_name: string;
 	/** 1 for a bill saved under the bank's raw text, before a merchant key existed. */
@@ -70,7 +79,7 @@ export async function matchBillPayments(
 	const bills = (
 		await db
 			.prepare(
-				"SELECT id,amount_cents,due_day,frequency,anchor_month,merchant_raw_name,merchant_raw_text FROM bills WHERE active=1",
+				"SELECT id,amount_cents,due_day,frequency,anchor_month,anchor_date,merchant_raw_name,merchant_raw_text FROM bills WHERE active=1",
 			)
 			.all<Bill>()
 	).results;
@@ -83,6 +92,7 @@ export async function matchBillPayments(
 		amountDistance: number;
 	};
 	const pairs: Pair[] = [];
+	const firstDay = dayNumber(first.date);
 	const linkedRows = (
 		await db
 			.prepare("SELECT bill_id,period FROM bill_payments WHERE status='linked'")
@@ -91,14 +101,107 @@ export async function matchBillPayments(
 	const linked = new Set(
 		linkedRows.map((row) => `${row.bill_id}:${row.period}`),
 	);
+	const dismissedRows = (
+		await db
+			.prepare(
+				"SELECT bill_id,period,transaction_id FROM bill_payments WHERE status='dismissed'",
+			)
+			.all<{ bill_id: number; period: string; transaction_id: number }>()
+	).results;
+	const dismissed = new Set(
+		dismissedRows.map(
+			(row) => `${row.bill_id}:${row.period}:${row.transaction_id}`,
+		),
+	);
 	const reserved = new Set<number>();
 	for (const bill of bills) {
+		if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
+			const step = bill.frequency === "weekly" ? 7 : 14;
+			const anchorDay =
+				bill.frequency === "weekly"
+					? firstDay -
+						((new Date(`${first.date}T00:00:00Z`).getUTCDay() + 6) % 7) +
+						(bill.due_day - 1)
+					: dayNumber(bill.anchor_date ?? today);
+			const window = billDateWindowDays(bill.frequency);
+			// The first occurrence whose window reaches the first transaction, not only one falling on or
+			// after it, so a payment the day after a due date still links to that due date.
+			const firstOccurrence =
+				anchorDay + Math.ceil((firstDay - window - anchorDay) / step) * step;
+			let occurrenceDay = firstOccurrence;
+			const occurrenceDates: { due: string; period: string; day: number }[] =
+				[];
+			while (occurrenceDay <= endDay + window) {
+				const due = new Date(occurrenceDay * 86_400_000)
+					.toISOString()
+					.slice(0, 10);
+				const period = due;
+				if (!linked.has(`${bill.id}:${period}`)) {
+					occurrenceDates.push({ due, period, day: occurrenceDay });
+				}
+				occurrenceDay += step;
+			}
+			if (occurrenceDates.length) {
+				const firstOccurrenceDate = occurrenceDates[0];
+				const lastOccurrenceDate = occurrenceDates.at(-1);
+				if (!firstOccurrenceDate || !lastOccurrenceDate) continue;
+				const startDate = new Date(
+					(firstOccurrenceDate.day - window) * 86_400_000,
+				)
+					.toISOString()
+					.slice(0, 10);
+				const finishDate = new Date(
+					(lastOccurrenceDate.day + window) * 86_400_000,
+				)
+					.toISOString()
+					.slice(0, 10);
+				const candidates = (
+					await db
+						.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
+				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
+				 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user') AND t.date BETWEEN ? AND ?
+				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')`)
+						.bind(...merchantTextArgs(bill), startDate, finishDate)
+						.all<MatchCandidate>()
+				).results;
+				for (const { due, period, day } of occurrenceDates) {
+					for (const candidate of candidates) {
+						if (
+							!pickBillPayment([candidate], due, bill.amount_cents, window) ||
+							dismissed.has(`${bill.id}:${period}:${candidate.id}`)
+						)
+							continue;
+						pairs.push({
+							bill,
+							period,
+							candidate,
+							dateDistance: Math.abs(dayNumber(candidate.date) - day),
+							amountDistance: Math.abs(
+								candidate.amountCents - bill.amount_cents,
+							),
+						});
+					}
+				}
+			}
+			continue;
+		}
 		const firstMonth = new Date(`${first.date.slice(0, 7)}-01T00:00:00Z`);
 		firstMonth.setUTCMonth(firstMonth.getUTCMonth() - 1);
 		let year = firstMonth.getUTCFullYear();
 		let month = firstMonth.getUTCMonth() + 1;
 		while (year < Number(today.slice(0, 4)) + 2) {
 			if (bill.frequency === "yearly" && month !== bill.anchor_month) {
+				month += 1;
+				if (month === 13) {
+					month = 1;
+					year += 1;
+				}
+				continue;
+			}
+			if (
+				bill.frequency === "quarterly" &&
+				(month - (bill.anchor_month ?? 1) + 12) % 3 !== 0
+			) {
 				month += 1;
 				if (month === 13) {
 					month = 1;
@@ -179,21 +282,23 @@ export async function matchBillPayments(
 	// whatever its exclusion (spec §8.5), which linking never writes. One a person excluded is theirs: the
 	// matcher leaves it, and only their hand link takes it. Income is never a bill payment (the candidate
 	// query leaves `flag_income` ones out, as the hand-link picker does).
-	const statements: D1PreparedStatement[] = [];
-	for (const pair of assignPairs(pairs, reserved))
-		statements.push(
-			db
-				.prepare(
-					"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'auto','linked')",
-				)
-				.bind(pair.bill.id, pair.period, pair.candidate.id),
-		);
-	if (!statements.length) return 0;
-	const results = await db.batch(statements);
-	return results.reduce(
-		(total, result) => total + (result.meta.changes ?? 0),
-		0,
-	);
+	const assignments = assignPairs(pairs, reserved);
+	if (!assignments.length) return 0;
+	const result = await db
+		.prepare(
+			"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT json_extract(value,'$.billId'),json_extract(value,'$.period'),json_extract(value,'$.transactionId'),'auto','linked' FROM json_each(?)",
+		)
+		.bind(
+			JSON.stringify(
+				assignments.map((pair) => ({
+					billId: pair.bill.id,
+					period: pair.period,
+					transactionId: pair.candidate.id,
+				})),
+			),
+		)
+		.run();
+	return result.meta.changes ?? 0;
 }
 
 type Pair = {

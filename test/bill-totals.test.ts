@@ -65,6 +65,92 @@ describe("bill totals", () => {
 		expect(totals.stillToPayCents).toBe(5000);
 	});
 
+	it("sets aside each weekly occurrence this month, but not last month's Not paid occurrence", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-09-25",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-09",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-16",
+					status: "due",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-23",
+					status: "upcoming",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.stillToPayCents).toBe(96000);
+	});
+
+	it("counts each due or overdue weekly occurrence in the shared soon summary", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-09",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-16",
+					status: "upcoming",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-23",
+					status: "upcoming",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(48000);
+	});
+
 	it("uses displayed occurrences for headings and all October occurrences for still to pay", () => {
 		const upcomingBill = { ...bill(5000), id: 2 };
 		const bills = [bill(10000), upcomingBill];
@@ -162,6 +248,68 @@ describe("bill totals", () => {
 		},
 	);
 
+	it("groups every weekly occurrence this month, not only the shown one", () => {
+		const friday = (
+			dueDate: string,
+			status: "paid" | "due" | "upcoming",
+			paidCents = 0,
+		) => ({ billId: 24000, dueDate, status, amountCents: 24000, paidCents });
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [friday("2026-10-16", "due")],
+			thisMonthOccurrences: [
+				friday("2026-10-02", "paid", 24000),
+				friday("2026-10-09", "paid", 24000),
+				friday("2026-10-16", "due"),
+				friday("2026-10-23", "upcoming"),
+				friday("2026-10-30", "upcoming"),
+			],
+		});
+		expect(totals.groups.dueCents).toBe(24000);
+		expect(totals.groups.upcomingCents).toBe(48000);
+		expect(totals.stillToPayCents).toBe(72000);
+		expect(totals.groups.overdueCents + totals.groups.dueCents).toBe(
+			totals.soonCents,
+		);
+	});
+
+	it("groups every unpaid weekly Friday this month as overdue, not only the shown one", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-09",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-09",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.groups.overdueCents).toBe(48000);
+		expect(totals.groups.overdueCents + totals.groups.dueCents).toBe(
+			totals.soonCents,
+		);
+	});
+
 	it("counts only this month's occurrences in Upcoming", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
@@ -223,6 +371,167 @@ describe("bill totals", () => {
 		});
 		expect(totals.monthlyCents).toBe(0);
 		expect(totals.stillToPayCents).toBe(0);
+	});
+
+	it("counts a weekly occurrence due in November, after this month's last Friday was paid", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-11-06",
+					status: "due",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-30",
+					status: "paid",
+					amountCents: 24000,
+					paidCents: 24000,
+				},
+			],
+		});
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(24000);
+	});
+
+	it("counts an unpaid Friday this month and the next Friday when it falls due before the month ends", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-30",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-30",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-11-06",
+					status: "due",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(48000);
+	});
+
+	it("counts a weekly occurrence once when it is both the shown row and this month's list", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-09",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-02",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-10-09",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(48000);
+	});
+
+	it("sets aside a quarterly bill's shown overdue occurrence, as the overdue group does", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "quarterly")],
+			displayedOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-08-01",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [],
+		});
+		expect(totals.groups.overdueCents).toBe(24000);
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(24000);
+	});
+
+	it("counts a quarterly bill due in November when it is shown", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "quarterly")],
+			displayedOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-11-01",
+					status: "due",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [],
+		});
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(24000);
+	});
+
+	it("leaves a monthly bill's handed-off earlier occurrence out of the soon total", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(10000)],
+			displayedOccurrences: [
+				{
+					billId: 10000,
+					dueDate: "2026-11-01",
+					status: "due",
+					amountCents: 10000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 10000,
+					dueDate: "2026-10-01",
+					status: "overdue",
+					amountCents: 10000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(10000);
 	});
 
 	it("counts a part-paid occurrence in full monthly and by its remainder in the group", () => {

@@ -1222,6 +1222,7 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
+							frequency="monthly"
 							candidates={[
 								{
 									id: 1,
@@ -1258,6 +1259,7 @@ function Rows() {
 							billAmountCents={14200}
 							openedPeriod="2026-09"
 							dueDateLabel="Sep 24"
+							frequency="monthly"
 							candidates={[]}
 							periods={[
 								{
@@ -1349,6 +1351,27 @@ function Rows() {
 						</ul>
 					</div>
 				</State>
+				<State label="Weekly, due">
+					<div class="max-w-xl">
+						<BillStatusHeading status="due" />
+						<ul>
+							<BillRow
+								today="2026-10-05"
+								bill={{
+									id: 8,
+									name: "Daycare",
+									amountCents: 24000,
+									status: "due",
+									dueDate: "2026-10-09",
+									frequency: "weekly",
+									dueDay: 5,
+									icon: "kids",
+									color: "cat-ochre",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
 				<State label="Upcoming, linked row">
 					<div class="max-w-xl">
 						<BillStatusHeading status="upcoming" />
@@ -1382,6 +1405,27 @@ function Rows() {
 									status: "paid",
 									dueDate: "2026-10-02",
 									paidDate: "2026-10-02",
+									icon: "household",
+									color: "cat-blue",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Weekly (every Friday)">
+					<div class="max-w-xl">
+						<BillStatusHeading status="due" />
+						<ul>
+							<BillRow
+								today="2026-10-04"
+								bill={{
+									id: 8,
+									name: "Daycare",
+									amountCents: 24000,
+									status: "due",
+									dueDate: "2026-10-09",
+									frequency: "weekly",
+									dueDay: 5,
 									icon: "household",
 									color: "cat-blue",
 								}}

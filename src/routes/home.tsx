@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
-import { calculateBillTotals } from "../bills/totals";
+import { billTotalsForRows } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
@@ -138,40 +138,20 @@ async function renderHome(
 	const month = viewMonth ?? currentMonth;
 	const current = month === currentMonth;
 	const data = await loadMonth(c.env.DB, month);
-	const billData =
-		month === currentMonth ? await loadBillRows(c.env.DB, today) : null;
-	const dueBills =
-		billData?.rows.filter(
-			(b) => b.active && (b.status === "due" || b.status === "overdue"),
-		) ?? [];
+	const billData = current ? await loadBillRows(c.env.DB, today) : null;
 	const activeBills = billData?.rows.filter((bill) => bill.active) ?? [];
-	const billTotals = current
-		? calculateBillTotals({
-				month,
-				bills: activeBills.map(({ id, amountCents, frequency }) => ({
-					id,
-					amountCents,
-					frequency,
-					active: true,
-				})),
-				displayedOccurrences: activeBills.map((bill) => ({
-					billId: bill.id,
-					dueDate: bill.dueDate,
-					status: bill.status,
-					amountCents: bill.amountCents,
-					paidCents: bill.paidCents,
-				})),
-				thisMonthOccurrences: activeBills.flatMap((bill) =>
-					bill.totalOccurrences
-						.filter((occurrence) => occurrence.dueDate.startsWith(month))
-						.map((occurrence) => ({ billId: bill.id, ...occurrence })),
-				),
-			})
-		: null;
+	// The list is the bills Safe to spend sets aside, judged by the same totals, so the list and the figure agree.
+	const dueBills = current
+		? activeBills.filter(
+				(bill) => billTotalsForRows(month, [bill]).soonCount > 0,
+			)
+		: [];
+	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
+	const unpaidBillsCents = billTotals?.soonCents ?? 0;
 	const summary = summarizeMonth({
 		month,
 		...data,
-		unpaidDueBillsCents: dueBills.reduce((sum, b) => sum + b.amountCents, 0),
+		unpaidDueBillsCents: unpaidBillsCents,
 		savingsGoalCents: data.savingsGoalCents,
 	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));

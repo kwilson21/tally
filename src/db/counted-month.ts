@@ -56,7 +56,8 @@ export const COUNTED_TRANSACTION = `${INCLUDED} AND t.is_split = 0
 /** The month a transaction's own date and bill payment put it in. */
 function billMonthSql(transaction: string, payment: string, bill: string) {
 	const bankMonth = `substr(${transaction}.date,1,7)`;
-	const occurrenceMonth = `CASE WHEN ${bill}.frequency='yearly' THEN ${payment}.period || '-' || printf('%02d',${bill}.anchor_month) ELSE ${payment}.period END`;
+	const quarterMonth = `printf('%s-%02d',substr(${payment}.period,1,4),(((${bill}.anchor_month-1+(((CAST(substr(${payment}.period,7,1) AS INTEGER)-(((${bill}.anchor_month-1)/3)+1)+4)%4)*3))%12)+1))`;
+	const occurrenceMonth = `CASE WHEN ${bill}.frequency='yearly' THEN ${payment}.period || '-' || printf('%02d',${bill}.anchor_month) WHEN ${bill}.frequency IN ('weekly','biweekly') THEN substr(${payment}.period,1,7) WHEN ${bill}.frequency='quarterly' THEN ${quarterMonth} ELSE ${payment}.period END`;
 	return `CASE WHEN ${payment}.period IS NOT NULL AND (${occurrenceMonth}) < ${bankMonth} THEN (${occurrenceMonth}) ELSE ${bankMonth} END`;
 }
 
