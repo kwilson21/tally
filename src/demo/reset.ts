@@ -351,5 +351,16 @@ function demoBills(
 			seedMerchantKey("GOOGLE *YOUTUBE"),
 			0,
 		],
+		[
+			8,
+			"Daycare",
+			24000,
+			5,
+			"weekly",
+			null,
+			6,
+			seedMerchantKey("LITTLE SPROUTS DAYCARE"),
+			1,
+		],
 	];
 }

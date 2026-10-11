@@ -8,6 +8,28 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
 import { loadBillRows } from "../src/routes/bills";
+import appCss from "../src/styles/app.css?raw";
+
+/** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */
+const cssRules = [
+	...appCss.replace(/\s+/g, " ").matchAll(/([^{}]+)\{([^{}]*)\}/g),
+].flatMap(([, selectors = "", body = ""]) =>
+	selectors.split(",").map((selector) => ({ selector: selector.trim(), body })),
+);
+const hidesWith = (selector: string) =>
+	cssRules.some(
+		(rule) => rule.selector === selector && /display:\s*none/.test(rule.body),
+	);
+const endsWithRule = (ending: string, display: RegExp) =>
+	cssRules.some(
+		(rule) => rule.selector.endsWith(ending) && display.test(rule.body),
+	);
+
+/** The page's row for one occurrence: its `<li>` block, found by its label as a whole (not "Fri, Oct 2" in "Fri, Oct 23"). */
+const occurrenceRow = (html: string, label: string) =>
+	(html.split("<li").find((item) => item.includes(`>${label}<`)) ?? "").split(
+		"</li>",
+	)[0] ?? "";
 
 describe("Bills", () => {
 	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
@@ -286,6 +308,178 @@ describe("Bills", () => {
 		);
 	});
 
+	it("lists quarterly months from the selected first month and defaults to January", async () => {
+		const defaultHtml = await (
+			await exports.default.fetch("http://tally.test/bills/new")
+		).text();
+		expect(defaultHtml).toContain(
+			"Then every 3 months: January, April, July and October.",
+		);
+		const post = (body: URLSearchParams) =>
+			exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body,
+			});
+		const html = await (
+			await post(
+				new URLSearchParams({
+					name: "Quarterly fixture",
+					amount: "bad",
+					due_day: "12",
+					frequency: "quarterly",
+					anchor_month: "10",
+					category_id: "1",
+					merchant_raw_name: "QUARTERLY FIXTURE",
+				}),
+			)
+		).text();
+		const encoded = html.replaceAll("&#39;", "'").replaceAll("&amp;", "&");
+		expect(encoded).toContain(
+			"Then every 3 months: October, January, April and July.",
+		);
+	});
+
+	it("offers all five frequencies and their cadence fields", async () => {
+		const form = await (
+			await exports.default.fetch("http://tally.test/bills/new")
+		).text();
+		for (const words of [
+			"Monthly",
+			"Yearly",
+			"Weekly",
+			"Every two weeks",
+			"Quarterly",
+			"Day of the week",
+			"A date it was paid",
+			"Due day",
+			"First month",
+		])
+			expect(form).toContain(words);
+
+		const response = await exports.default.fetch("http://tally.test/bills", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Biweekly fixture",
+				amount: "bad",
+				due_day: "5",
+				frequency: "biweekly",
+				anchor_date: "2026-10-02",
+				category_id: "1",
+				merchant_raw_name: "BIWEEKLY FIXTURE",
+			}),
+		});
+		expect(await response.text()).toContain(
+			"Then every two weeks from that date. Next: Oct 16.",
+		);
+	});
+
+	it("says the next every-two-weeks date after today, however old the anchor is", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+		try {
+			const response = await exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					name: "Biweekly fixture",
+					amount: "bad",
+					due_day: "5",
+					frequency: "biweekly",
+					anchor_date: "2026-09-04",
+					category_id: "1",
+					merchant_raw_name: "BIWEEKLY FIXTURE",
+				}),
+			});
+			expect(await response.text()).toContain(
+				"Then every two weeks from that date. Next: Oct 16.",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("shows the yearly month only for yearly bills and the due day only where a bill has one", () => {
+		expect(hidesWith(".bill-year-label")).toBe(true);
+		expect(
+			endsWithRule(
+				'.bill-form:has(input[name="frequency"][value="yearly"]:checked) .bill-year-label',
+				/display:\s*inline/,
+			),
+		).toBe(true);
+		expect(
+			endsWithRule(
+				'.bill-form:has(input[name="frequency"][value="biweekly"]:checked) .bill-due-day',
+				/display:\s*none/,
+			),
+		).toBe(true);
+		expect(
+			endsWithRule(
+				'.bill-form:has(input[name="frequency"][value="weekly"]:checked) .bill-due-day',
+				/display:\s*none/,
+			),
+		).toBe(true);
+	});
+
+	it("asks a biweekly bill only for its date, never for a due day", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					name: "Undated fixture",
+					amount: "10.00",
+					due_day: "",
+					frequency: "biweekly",
+					anchor_date: "",
+					category_id: "1",
+					merchant_raw_name: "UNDATED FIXTURE",
+				}),
+			})
+		).text();
+		expect(html).toContain("Choose a date.");
+		expect(html).not.toContain("Enter a day from 1 to 31.");
+	});
+
+	it("saves a biweekly bill's due day as the weekday of its anchor date", async () => {
+		const response = await exports.default.fetch("http://tally.test/bills", {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Every two weeks fixture",
+				amount: "10.00",
+				due_day: "",
+				frequency: "biweekly",
+				anchor_date: "2026-10-02",
+				category_id: "1",
+				merchant_raw_name: "EVERY TWO WEEKS FIXTURE",
+			}),
+		});
+		expect(response.status).toBe(303);
+		expect(
+			await env.DB.prepare(
+				"SELECT due_day, anchor_date FROM bills WHERE name='Every two weeks fixture'",
+			).first(),
+		).toEqual({ due_day: 5, anchor_date: "2026-10-02" });
+	});
+
 	it("adds a bill and returns htmx feedback", async () => {
 		const body = new URLSearchParams({
 			name: "Gym",
@@ -343,7 +537,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
-		expect(html).toContain("Inactive (7)");
+		expect(html).toContain("Inactive (8)");
 		expect(html).not.toContain("No bills yet.");
 		// With bills but none due, the count is accurate and stays.
 		expect(html).toContain("0 bills to pay soon, $0.00 in all");
@@ -509,7 +703,187 @@ describe("Bills", () => {
 		const setAside = rows
 			.filter((row) => row.active && ["due", "overdue"].includes(row.status))
 			.reduce((sum, row) => sum + row.amountCents, 0);
-		expect(setAside).toBeLessThan(25_000);
+		expect(setAside).toBeLessThan(50_000);
+	});
+
+	it("shows the demo's weekly Daycare total for its five October Fridays", async () => {
+		await resetDemo(env.DB, "2026-10-31");
+		const bill = await env.DB.prepare(
+			"SELECT id,amount_cents,frequency FROM bills WHERE name='Daycare'",
+		).first<{ id: number; amount_cents: number; frequency: string }>();
+		expect(bill).toEqual({ id: 8, amount_cents: 24000, frequency: "weekly" });
+		const { rows } = await loadBillRows(env.DB, "2026-10-31");
+		const daycare = rows.find((row) => row.name === "Daycare");
+		// Every October Friday is paid by now, so the next one (November's first) is shown too; October's are the total.
+		const october = (daycare?.totalOccurrences ?? []).filter((occurrence) =>
+			occurrence.dueDate.startsWith("2026-10"),
+		);
+		expect(october.map((occurrence) => occurrence.dueDate).sort()).toEqual([
+			"2026-10-02",
+			"2026-10-09",
+			"2026-10-16",
+			"2026-10-23",
+			"2026-10-30",
+		]);
+		expect(
+			october.reduce((sum, occurrence) => sum + occurrence.amountCents, 0),
+		).toBe(120000);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html).toContain("Daycare");
+		expect(
+			october.reduce((sum, occurrence) => sum + occurrence.amountCents, 0),
+		).toBe(120000);
+	});
+
+	it("pays the demo's past Daycare Fridays from its own Childcare budget", async () => {
+		await resetDemo(env.DB, "2026-10-10");
+		const category = await env.DB.prepare(
+			"SELECT c.name AS name, b.amount_cents AS budget FROM bills d JOIN categories c ON c.id = d.category_id JOIN budget_amounts b ON b.category_id = c.id WHERE d.name = 'Daycare'",
+		).first<{ name: string; budget: number }>();
+		expect(category).toEqual({ name: "Childcare", budget: 104000 });
+		const { rows } = await loadBillRows(env.DB, "2026-10-10");
+		const daycare = rows.find((row) => row.name === "Daycare");
+		expect(
+			Object.fromEntries(
+				(daycare?.totalOccurrences ?? []).map((occurrence) => [
+					occurrence.dueDate,
+					occurrence.status,
+				]),
+			),
+		).toEqual({
+			"2026-10-02": "paid",
+			"2026-10-09": "paid",
+			"2026-10-16": "due",
+			"2026-10-23": "upcoming",
+			"2026-10-30": "upcoming",
+		});
+	});
+
+	it("keeps the demo's Safe to spend positive on a fixed day, with Eating Out the one category over", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+		try {
+			await resetDemo(env.DB, "2026-10-10");
+			const html = await (
+				await exports.default.fetch("http://tally.test/")
+			).text();
+			const headline =
+				html.match(/class="font-serif text-6xl[^"]*">([^<]*)</)?.[1] ?? "";
+			expect(headline).toMatch(/^\$\d/);
+			expect(html).toContain(
+				"Eating Out is $36 over. Everything else is on track.",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("counts a weekly bill once in the Bills summary, with each unpaid due occurrence in its amount", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-07");
+		await env.DB.prepare("DELETE FROM bills").run();
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9396,'Weekly fixture',10000,5,'weekly',5,'WEEKLY FIXTURE')",
+		).run();
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html.match(/\d+ bills? to pay soon, \$[\d.]+ in all/)?.[0]).toBe(
+			"1 bill to pay soon, $200.00 in all",
+		);
+		const home = await (
+			await exports.default.fetch("http://tally.test/")
+		).text();
+		expect(home).toContain("Weekly fixture");
+		expect(home).toContain("Bills due soon");
+	});
+
+	it("reads one weekly bill with two unpaid due occurrences as one bill and both amounts", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-07");
+		await env.DB.prepare("DELETE FROM bills").run();
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9395,'Weekly fixture',24000,5,'weekly',5,'WEEKLY FIXTURE')",
+		).run();
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html.match(/\d+ bills? to pay soon, \$[\d,.]+ in all/)?.[0]).toBe(
+			"1 bill to pay soon, $480.00 in all",
+		);
+	});
+
+	it("counts the next Friday in November when it falls due before the month ends", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-30T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-30");
+		await env.DB.prepare("DELETE FROM bills").run();
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9397,'Friday fixture',24000,5,'weekly',5,'FRIDAY FIXTURE')",
+		).run();
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		// October's five Fridays are unpaid (the 2nd to the 23rd overdue, the 30th due), and Nov 6 is due in a week.
+		expect(html.match(/\d+ bills? to pay soon, \$[\d,.]+ in all/)?.[0]).toBe(
+			"1 bill to pay soon, $1,440.00 in all",
+		);
+	});
+
+	it("lists on Home a monthly bill whose next due date is in November, once October is paid", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-30T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-30");
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9398,'Rent fixture',120000,6,'monthly',5,'RENT FIXTURE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 9398,'2026-10',id,'user','linked' FROM transactions LIMIT 1",
+			),
+		]);
+		const home = await (
+			await exports.default.fetch("http://tally.test/")
+		).text();
+		expect(home).toContain("Bills due soon");
+		expect(home).toContain("Rent fixture");
+	});
+
+	it("totals a weekly bill's every Friday this month in its group headings", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-11T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-11");
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9631,'Friday totals fixture',24000,5,'weekly',5,'FRIDAY TOTALS FIXTURE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9632,'Month totals fixture',10000,28,'monthly',5,'MONTH TOTALS FIXTURE')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9641,1,'2026-10-02',24000,'Friday Totals Oct Two'),(9642,1,'2026-10-09',24000,'Friday Totals Oct Nine'),(9643,1,'2026-09-28',10000,'Month Totals Sep')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9631,'2026-10-02',9641,'user','linked'),(9631,'2026-10-09',9642,'user','linked'),(9632,'2026-09',9643,'user','linked')",
+			),
+		]);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		// Due is the shown Oct 16 Friday. Upcoming is Oct 23 and Oct 30 plus the monthly bill's Oct 28.
+		expect(html).toMatch(
+			/Due in the next 7 days<\/span><span class="ml-auto shrink-0">\$240\.00<\/span>/,
+		);
+		expect(html).toMatch(
+			/Upcoming<\/span><span class="ml-auto shrink-0">\$580\.00 this month<\/span>/,
+		);
+		expect(html).toContain("$820 still to pay in October");
 	});
 
 	it("refuses to save, deactivate or reactivate a missing bill", async () => {
@@ -846,6 +1220,41 @@ describe("Bills", () => {
 		).toBe(3);
 	});
 
+	it("refuses to move a weekly bill with linked payments to another day of the week", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='weekly',due_day=5,anchor_month=NULL,anchor_date=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,'2026-10-09',id,'user','linked' FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
+			),
+		]);
+		const res = await exports.default.fetch("http://tally.test/bills/1", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Streaming",
+				amount: "2.99",
+				weekly_day: "1",
+				frequency: "weekly",
+				category_id: "5",
+				merchant_raw_name: "APPLE.COM/BILL",
+			}),
+		});
+		expect(await res.text()).toContain(
+			"To change when it&#39;s due, deactivate it and add a new bill.",
+		);
+		expect(
+			await env.DB.prepare("SELECT due_day FROM bills WHERE id=1").first(
+				"due_day",
+			),
+		).toBe(5);
+	});
+
 	it("keeps an unpaid recent month before a newer linked month", async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
@@ -863,6 +1272,132 @@ describe("Bills", () => {
 		).text();
 		expect(html).toContain(`occurrences/${period}/link`);
 		expect(html).toContain("Not paid");
+	});
+
+	describe("a linked payment older than six months", () => {
+		beforeEach(async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date("2026-10-11T16:00:00Z"));
+			await resetDemo(env.DB, "2026-10-11");
+			await env.DB.prepare("DELETE FROM bills").run();
+		});
+
+		it("shows a monthly payment linked eight months back on its row, and opens its picker", async () => {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9611,'Old month fixture',12345,3,'monthly',5,'OLD MONTH FIXTURE')",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9621,1,'2026-02-03',12345,'Feb Monthly Payment')",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9611,'2026-02',9621,'user','linked')",
+				),
+			]);
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills/9611")
+			).text();
+			expect(occurrenceRow(html, "February")).toContain("Feb Monthly Payment");
+			expect(occurrenceRow(html, "February")).toContain("$123.45");
+			const picker = await exports.default.fetch(
+				"http://tally.test/bills/9611/occurrences/2026-02/link",
+			);
+			expect(picker.status).toBe(200);
+		});
+
+		it("lists a weekly payment linked to an early-February Friday on its row", async () => {
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9612,'Old Friday fixture',24000,5,'weekly',5,'OLD FRIDAY FIXTURE')",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9622,1,'2026-02-06',24000,'Feb Friday Payment')",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9612,'2026-02-06',9622,'user','linked')",
+				),
+			]);
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills/9612")
+			).text();
+			expect(occurrenceRow(html, "Fri, Feb 6")).toContain("Feb Friday Payment");
+			expect(occurrenceRow(html, "Fri, Feb 6")).toContain("$240.00");
+		});
+	});
+
+	describe("a weekly bill's missed occurrences on its page", () => {
+		/** A Friday bill with no payments, as the page sees it on `today` (a household date). */
+		async function fridayPage(today: string) {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date(`${today}T16:00:00Z`));
+			await resetDemo(env.DB, today);
+			await env.DB.prepare("DELETE FROM bills").run();
+			await env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9501,'Friday fixture',24000,5,'weekly',5,'FRIDAY FIXTURE')",
+			).run();
+			return (
+				await exports.default.fetch("http://tally.test/bills/9501")
+			).text();
+		}
+
+		it("says Not paid for an unpaid Friday from an earlier month, and Bills shows the next one", async () => {
+			const html = await fridayPage("2026-11-02");
+			expect(occurrenceRow(html, "Fri, Oct 30")).toContain("Not paid");
+			expect(occurrenceRow(html, "Fri, Nov 6")).toContain("Due");
+			const bills = await (
+				await exports.default.fetch("http://tally.test/bills")
+			).text();
+			expect(bills).toContain("Due Nov 6 · every Friday");
+		});
+
+		it("keeps each unpaid Friday this month overdue, and says Not paid only from an earlier month", async () => {
+			const html = await fridayPage("2026-10-16");
+			expect(occurrenceRow(html, "Fri, Oct 2")).toContain("Overdue");
+			expect(occurrenceRow(html, "Fri, Oct 9")).toContain("Overdue");
+			expect(occurrenceRow(html, "Fri, Oct 16")).toContain("Due");
+			expect(occurrenceRow(html, "Fri, Sep 25")).toContain("Not paid");
+		});
+	});
+
+	it("lists and accepts only payments within three days of a weekly occurrence", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-10");
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			env.DB.prepare(
+				"UPDATE bills SET frequency='weekly',due_day=5,anchor_month=NULL,anchor_date=NULL WHERE id=1",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9901,1,'2026-10-06',1000,'PICKER NEAR'),(9902,1,'2026-10-05',1000,'PICKER FAR')",
+			),
+		]);
+		const html = await (
+			await exports.default.fetch(
+				"http://tally.test/bills/1/occurrences/2026-10-09/link",
+			)
+		).text();
+		expect(html).toContain('value="9901"');
+		expect(html).not.toContain('value="9902"');
+
+		const res = await exports.default.fetch("http://tally.test/bills/1/link", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				transaction_id: "9902",
+				period: "2026-10-09",
+				opened_period: "2026-10-09",
+			}),
+		});
+		expect(await res.text()).toContain("isn&#39;t within 3 days of");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9902",
+			).first("n"),
+		).toBe(0);
 	});
 
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
@@ -1337,7 +1872,7 @@ describe("Bill guards", () => {
 		});
 
 		describe("bills that already share a name", () => {
-			// Two active Rent bills, as a family's data may already hold. Ids 8 and 9.
+			// Two active Rent bills, as a family's data may already hold. Daycare uses id 8.
 			beforeEach(async () => {
 				for (const merchant of ["LANDLORD", "LANDLORD 2"])
 					await env.DB.prepare(
@@ -1347,6 +1882,7 @@ describe("Bill guards", () => {
 						.bind(merchant)
 						.run();
 			});
+			const rentIds = [9, 10];
 			const edit = (id: number, over: Record<string, string>) =>
 				post(
 					`/bills/${id}`,
@@ -1354,12 +1890,12 @@ describe("Bill guards", () => {
 						name: "Rent",
 						amount: "1200.00",
 						due_day: "1",
-						merchant_raw_name: id === 8 ? "LANDLORD" : "LANDLORD 2",
+						merchant_raw_name: id === 9 ? "LANDLORD" : "LANDLORD 2",
 						...over,
 					}),
 				);
 
-			it.each([8, 9])("still lets bill %i's amount be changed", async (id) => {
+			it.each(rentIds)("still lets bill %i's amount be changed", async (id) => {
 				const res = await edit(id, { amount: "1250.00" });
 				expect(res.headers.get("HX-Trigger")).toContain(
 					'"announce":"Bill saved"',
@@ -1368,7 +1904,7 @@ describe("Bill guards", () => {
 				expect(await nameOf(id)).toBe("Rent");
 			});
 
-			it.each([8, 9])(
+			it.each(rentIds)(
 				"still refuses renaming bill %i to a third bill's name",
 				async (id) => {
 					const res = await edit(id, { name: "water" });

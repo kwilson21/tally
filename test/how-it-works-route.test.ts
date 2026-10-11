@@ -32,6 +32,20 @@ beforeEach(async () => {
 });
 
 describe("GET /how-it-works in the demo", () => {
+	it("describes bill payments as at most one payment per occurrence", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"Tally matches each bill occurrence to at most one payment",
+		);
+		expect(html).not.toContain(
+			"You can link several payments to one occurrence when a bill is paid in parts.",
+		);
+		expect(html).toContain("A payment can pay only one bill occurrence.");
+		expect(html).not.toContain("one payment pays exactly one occurrence");
+		expect(html).not.toContain("exactly one bill occurrence");
+		expect(html).not.toContain("Each bill gets at most one payment per period");
+	});
+
 	it("has the architecture and the Phase 1 feature sections", async () => {
 		const { res, html } = await get("/how-it-works");
 		expect(res.status).toBe(200);
@@ -135,7 +149,14 @@ describe("GET /how-it-works in the demo", () => {
 			Math.round(Number(value.replace(/[$,]/g, "")) * 100);
 		const safeCents = cents(match?.[1] ?? "$0") - cents(match?.[2] ?? "$0");
 		const homeHtml = (await get("/")).html;
-		expect(homeHtml).toContain(formatCents(safeCents, { wholeDollars: true }));
+		const shown = homeHtml.match(
+			/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
+		);
+		expect(shown).not.toBeNull();
+		// Home's headline is formatCents in whole dollars, so the example is rounded the same way.
+		expect(`${shown?.[1] ?? ""}$${shown?.[2]}`).toBe(
+			formatCents(safeCents, { wholeDollars: true }).replace("-", "−"),
+		);
 	});
 
 	it("explains exclusions with this month's excluded count", async () => {
