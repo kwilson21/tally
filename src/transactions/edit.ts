@@ -109,8 +109,9 @@ export function postedCredit(
 /**
  * Whether a linked credit counts with its purchase once this edit is saved, so the edit panel's lock and
  * "Counts in" line and the route's category drop say how the row will really count. saveEdit writes only the
- * income and review answers the person changed (against what the panel showed), keeps the rest, and a new link
- * reviews a credit; this follows those writes. The purchase (linked, not excluded) is the caller's to check.
+ * income and review answers the person changed (against what the panel showed), keeps the rest, and a save
+ * clears only a review a person made, so a review Jev holds stays. A new link reviews a credit. This follows
+ * those writes. The purchase (linked, not excluded) is the caller's to check.
  */
 export function followsPurchaseAfterSave(
 	stored: {
@@ -145,14 +146,17 @@ export function followsPurchaseAfterSave(
 	// Unticking income on a Jev credit, with the review unticked, leaves it unreviewed (saveEdit's credit_reviewed).
 	const unreviewedByIncome =
 		incomeChanged && !edit.creditReviewed && stored.incomeSource === "jev";
+	// saveEdit clears only a review a person made (credit_reviewed_by = 'user'); a review Jev holds stays.
+	const reviewCleared =
+		reviewChanged && !edit.creditReviewed && stored.creditReviewedByUser;
 	return followsPurchase({
 		amountCents: stored.amountCents,
 		income: incomeChanged || reviewedAsNotIncome ? edit.income : stored.income,
 		// A new link is written as a review last, so it wins over the review chip and the Jev rule (saveEdit).
 		creditReviewed:
 			linking ||
-			((reviewChanged ? edit.creditReviewed : stored.creditReviewed) &&
-				!unreviewedByIncome),
+			(reviewChanged && edit.creditReviewed) ||
+			(stored.creditReviewed && !reviewCleared && !unreviewedByIncome),
 	});
 }
 

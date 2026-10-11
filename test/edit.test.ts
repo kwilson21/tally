@@ -299,4 +299,13 @@ describe("followsPurchaseAfterSave: whether a linked credit counts with its purc
 			),
 		).toBe(true);
 	});
+
+	it("still follows a credit Jev reviewed when a stale panel unticks the review, since a save clears only a person's review", () => {
+		expect(
+			followsPurchaseAfterSave(
+				{ ...stored, creditReviewedByUser: false, incomeSource: null },
+				{ ...unchanged, creditReviewed: false, creditReviewedWas: true },
+			),
+		).toBe(true);
+	});
 });
