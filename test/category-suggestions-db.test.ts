@@ -738,6 +738,41 @@ describe("createFromSuggestion", () => {
 		expect((await suggestion(id))?.decided_at).not.toBeNull();
 	});
 
+	it("clears the bank-change note on a ticked transaction it puts in the category, and keeps it on an unticked one", async () => {
+		const { id, made } = await pending();
+		const removed = (tx: number) =>
+			db
+				.prepare(
+					"SELECT split_removed_from_cents FROM transactions WHERE id = ?",
+				)
+				.bind(tx)
+				.first<{ split_removed_from_cents: number | null }>();
+		for (const tx of [made[0], made[3]] as number[])
+			await db
+				.prepare(
+					"UPDATE transactions SET split_removed_from_cents = 18742 WHERE id = ?",
+				)
+				.bind(tx)
+				.run();
+
+		await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made.slice(0, 3), shown: made, notes: {} },
+			"person@example.com",
+		);
+
+		expect(await row(made[0] as number)).toMatchObject({
+			category_source: "user",
+		});
+		expect(await removed(made[0] as number)).toEqual({
+			split_removed_from_cents: null,
+		});
+		expect(await removed(made[3] as number)).toEqual({
+			split_removed_from_cents: 18742,
+		});
+	});
+
 	it("leaves an unticked transaction uncategorized, and saves the note written for it", async () => {
 		const { id, made } = await pending();
 		await createFromSuggestion(
