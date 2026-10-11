@@ -4,23 +4,12 @@
 // exclusion is (spec §6.1 rule 4), decided where spending is read (`INCLUDED` in counted-month.ts), so
 // this rule needs no exception for bill payments, and removing a link leaves the exclusion as it was.
 
-/** Plaid categories for money that only moves between a family's own accounts. */
-const MOVE_CATEGORIES = ["TRANSFER_IN", "TRANSFER_OUT"];
 /** Plaid categories for money that only moves between a family's own accounts or pays down a loan or card. */
-const TRANSFER_CATEGORIES = [...MOVE_CATEGORIES, "LOAN_PAYMENTS"];
-
-const categoryIn = (names: string[]) => (category: string) =>
-	`${category} IN (${names.map((name) => `'${name}'`).join(", ")})`;
+const TRANSFER_CATEGORIES = ["TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS"];
 
 /** SQL that is true when a Plaid category (a column or a bound value) is one of those. The names are constants, never input. */
-export const isPlaidTransferSql = categoryIn(TRANSFER_CATEGORIES);
-
-/**
- * SQL that is true when a Plaid category is a move between a family's own accounts. LOAN_PAYMENTS is not
- * one: Plaid files card payments and loan payments under it alike, and only the category is stored, so
- * Possible bills cannot tell a card payment from a loan payment (#339 decides loan payments).
- */
-export const isPlaidMoveSql = categoryIn(MOVE_CATEGORIES);
+export const isPlaidTransferSql = (category: string) =>
+	`${category} IN (${TRANSFER_CATEGORIES.map((name) => `'${name}'`).join(", ")})`;
 
 /**
  * True when a person decided what this transaction is (decision 70): income they chose, which stays

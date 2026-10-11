@@ -4,7 +4,6 @@ import {
 	merchantKeySql,
 	merchantNotABillSql,
 } from "../db/merchant-key";
-import { isPlaidMoveSql } from "../db/plaid-transfers";
 import { tidyName } from "../transactions/tidy-name";
 
 /** Rules for finding monthly bills from recent charges (spec §8.2, P18). */
@@ -111,10 +110,11 @@ const chargeMerchant = (column: "display_name" | "default_category_id") =>
 /**
  * Suggests bills from the last three months of charges, one per merchant key. A charge is left out when
  * its key is marked Not a bill, or an existing bill covers it: by its key, or by its raw name for a bill
- * saved under the bank's raw text, before the key existed. A charge Tally flagged as a transfer, or Plaid
- * sorted as TRANSFER_IN or TRANSFER_OUT, is left out as well, on the charge or on its purchase, even when a
- * person has brought it back into the budget. Card payments are left out only while Plaid excludes them,
- * and a transfer only Jev is unsure of is not left out (see isPlaidMoveSql).
+ * saved under the bank's raw text, before the key existed. A charge excluded from the budget is never
+ * suggested, which is where card payments and moves between the family's own accounts go, whether Plaid,
+ * Jev or a person excluded it; one a person brought back into the budget counts as spending and can be
+ * suggested. The stored Plaid category is not checked: its main category alone can't tell a move between
+ * the family's own accounts from a payment to someone else, or a card payment from a loan payment.
  */
 export async function loadBillSuggestions(
 	db: D1Database,
@@ -131,9 +131,7 @@ export async function loadBillSuggestions(
 	  LEFT JOIN categories tc ON tc.id=t.category_id
 	  LEFT JOIN categories dc ON dc.id=${chargeMerchant("default_category_id")}
 	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.excluded=0 AND t.flag_income=0
-	   AND t.is_split=0 AND t.flag_transfer=0 AND COALESCE(p.flag_transfer,0)=0
-	   AND NOT ${isPlaidMoveSql("COALESCE(t.plaid_category,'')")} AND NOT ${isPlaidMoveSql("COALESCE(p.plaid_category,'')")}
-	   AND NOT ${merchantNotABillSql(CHARGE_KEY)}
+	   AND t.is_split=0 AND NOT ${merchantNotABillSql(CHARGE_KEY)}
 	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE ${isMerchantTextOfSql(CHARGE_KEY, CHARGE_RAW, "b.merchant_raw_name", "b.merchant_raw_text")})
 	  ORDER BY ${CHARGE_KEY},t.date`)
 		.bind(threeMonthsBack(today), today)
