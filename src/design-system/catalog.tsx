@@ -812,16 +812,16 @@ const NOT_BUDGETED_ROW_SPEC: UseSpecText = {
 	affordance:
 		"The whole row is a link ending in terracotta “Add a budget”. In the app it opens the category's budget sheet in place; without JavaScript it is a plain link to /budget/:id. An archived category has no link and no “Add a budget”: it shows its spending only, and is not a control.",
 	states:
-		"Counted spending: the name, with “$60 spent” in muted words under it. A net refund: the name, with “+$15” in green under it and no “spent”. Nothing spent: the name alone, with “Add a budget”. Hover: no change. Focus: the app's focus-visible outline on the link, 2px terracotta with a 2px offset. The row has no bar.",
+		"Counted spending: the name, with “$60 spent” in muted words under it. A net refund: the name, with “+$15” in green under it and no “spent”. Nothing spent: the name alone, with “Add a budget”. Hover: no change. Focus: the app's focus-visible outline on the link, 2px terracotta with a 2px offset. The row has no bar. An archived category that nets to $0: the name, with “$0” in muted words under it, and no link.",
 	feedback:
 		"Opening the row swaps its budget sheet into Home in place and pushes the sheet's address (/budget/:id) into the URL. Closing the sheet brings Home back with focus on this row.",
 	input:
-		"Touch: the row is at least 44px tall, with no gestures. Keyboard: Tab reaches the row, and Enter opens its sheet. Screen reader: the name, the amount and “Add a budget”, read as one link.",
+		"Touch: the row is at least 44px tall, with no gestures. Keyboard: Tab reaches the row, and Enter opens its sheet. Screen reader: the name, the amount and “Add a budget”, read as one link; a net refund is heard as “+$15 back: refunds outweigh spending”.",
 	motion: "None.",
 	edges:
-		"Cents show only when there are some: $60, or $60.50. A long name is cut to one line with an ellipsis. Nothing spent shows only the name and “Add a budget”. An archived category keeps any amount it has but has no link and no “Add a budget”, so it is not a control.",
+		"Cents show only when there are some: $60, or $60.50. A long name is cut to one line with an ellipsis. Nothing spent shows only the name and “Add a budget”. An archived category keeps any amount it has, $0 included, but has no link and no “Add a budget”, so it is not a control.",
 	words:
-		"Not budgeted (the list's heading) · {amount} spent · +{amount} · Add a budget.",
+		"Not budgeted (the list's heading) · {amount} spent · +{amount} · Add a budget · $0 · back: refunds outweigh spending (screen readers only).",
 };
 
 // TransactionsButton's use spec (DESIGN.md, "Use"): every part answered before the owner signs it off.
@@ -1452,9 +1452,9 @@ function Rows() {
 				title="NotBudgetedRow"
 				tier="visual"
 				components={["NotBudgetedRow"]}
-				sentence="A category without a budget: counted spending appears under its name, a net refund is green, and an empty category keeps only its name and Add a budget."
+				sentence="A category without a budget: counted spending appears under its name, a net refund is green, an archived category that nets to $0 shows “$0”, and an empty category keeps only its name and Add a budget."
 			>
-				<State label="Counted spending, a net refund and no spending">
+				<State label="Counted spending, a net refund, no spending and an archived category at $0">
 					<div>
 						<h3 class="text-sm text-muted">Not budgeted</h3>
 						<ul class="max-w-xl divide-y divide-rule">
@@ -1478,6 +1478,12 @@ function Rows() {
 								color="cat-blue"
 								spentCents={-2000}
 								href="/design-system/bottom-sheet"
+							/>
+							<NotBudgetedRow
+								name="Old Gym"
+								icon="tag"
+								color="cat-slate"
+								spentCents={0}
 							/>
 						</ul>
 					</div>

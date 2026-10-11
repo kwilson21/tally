@@ -46,6 +46,7 @@ describe("ProgressRow", () => {
 		expect(html).toMatch(/\$0\.01 over<span class="sr-only"> budget<\/span>/);
 		expect(html).toContain("fill-over");
 		expect(html).not.toContain("fill-near-limit");
+		expect(html).not.toContain("nearly spent");
 	});
 
 	it.each([
@@ -54,10 +55,13 @@ describe("ProgressRow", () => {
 		[20000, 20000, true],
 		[0, 0, false],
 	])(
-		"marks %i of %i with the nearly spent bar at the 80% line",
+		"marks %i of %i with the nearly spent bar at the 80% line, and says so to screen readers",
 		async (spent, budget, amber) => {
 			const html = await row(spent, budget);
 			expect(html.includes("fill-near-limit")).toBe(amber);
+			expect(html.includes('<span class="sr-only">, nearly spent</span>')).toBe(
+				amber,
+			);
 		},
 	);
 
@@ -69,6 +73,10 @@ describe("ProgressRow", () => {
 	it("shows a net refund in green with an empty bar and its budget under the name", async () => {
 		const html = await row(-2000, 20000);
 		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
+		expect(html).toContain(
+			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
+		);
+		expect(html).not.toContain("nearly spent");
 		expect(html).toMatch(/<rect width="0%"[^>]*class="bar-fill fill-ok"/);
 		// P98: the budget stays visible under the name, as the drawing shows it.
 		expect(html).toMatch(
@@ -128,6 +136,7 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 		const html = await adjusting(18600, 20000);
 		expect(html).not.toContain("bar-fill");
 		expect(html).toContain('class="fill-near-limit"');
+		expect(html).toContain('<span class="sr-only">, nearly spent</span>');
 		expect(await row(18600, 20000)).toContain("bar-fill fill-near-limit");
 	});
 
@@ -158,6 +167,9 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 	it("keeps a net refund's budget under its name, and its empty bar, in Adjust mode too", async () => {
 		const html = await adjusting(-2000, 20000);
 		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
+		expect(html).toContain(
+			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
+		);
 		expect(html).toMatch(/<rect width="0%"[^>]*class="fill-ok"/);
 		expect(html).toMatch(
 			/<span class="block text-lg">Gas<\/span><span class="block text-muted">\$200 budget<\/span>/,

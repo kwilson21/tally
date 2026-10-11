@@ -14,3 +14,6 @@ export function categoryRowAmount(cents: number) {
 			}
 		: { text: centsWhenAny(cents), className: "text-right text-lg" };
 }
+
+/** What a screen reader hears after "+$20", as the P98 drawing says it. */
+export const REFUND_WORDS = " back: refunds outweigh spending";

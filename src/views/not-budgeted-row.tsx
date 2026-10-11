@@ -1,5 +1,5 @@
 import { CategoryIcon } from "./category";
-import { categoryRowAmount } from "./category-amount";
+import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
 
 /** A category without a budget: its counted amount sits under its name; only active rows can open a sheet. */
 export function NotBudgetedRow({
@@ -25,11 +25,13 @@ export function NotBudgetedRow({
 			<CategoryIcon icon={icon} color={color} />
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg">{name}</span>
-				{spentCents !== 0 && (
+				{/* An archived row (no link) is listed only because it has counted transactions, so it shows its amount even at $0. */}
+				{(spentCents !== 0 || !href) && (
 					<span
 						class={`block text-sm ${spentCents < 0 ? "text-ok" : "text-muted"}`}
 					>
 						{amount.text}
+						{spentCents < 0 && <span class="sr-only">{REFUND_WORDS}</span>}
 						{spentCents > 0 && " spent"}
 					</span>
 				)}

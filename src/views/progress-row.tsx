@@ -3,7 +3,7 @@ import { nudgeCents } from "../budgets/nudge";
 import { formatCents } from "../money";
 import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
-import { categoryRowAmount } from "./category-amount";
+import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
 import { Icon } from "./icons";
 
 type Props = {
@@ -152,6 +152,7 @@ export function ProgressRow({
 								</span>
 								<span class={categoryRowAmount(spentCents).className}>
 									{categoryRowAmount(spentCents).text}
+									<span class="sr-only">{REFUND_WORDS}</span>
 								</span>
 							</>
 						) : (
@@ -159,6 +160,7 @@ export function ProgressRow({
 								<span class="text-lg">{name}</span>
 								<span class="ml-auto text-right text-lg">
 									{whole(spentCents)} of {whole(budgetCents)}
+									{nearLimit && <span class="sr-only">, nearly spent</span>}
 								</span>
 							</>
 						)}
