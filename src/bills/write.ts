@@ -16,8 +16,9 @@ export type BillFields = {
 	name: string;
 	amountCents: number;
 	dueDay: number;
-	frequency: "monthly" | "yearly";
+	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
 	anchorMonth: number | null;
+	anchorDate?: string | null;
 	categoryId: number;
 	merchantRawName: string;
 };
@@ -36,8 +37,8 @@ export async function insertBill(
 ): Promise<boolean> {
 	const { meta } = await db
 		.prepare(
-			`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,merchant_raw_text)
-			 SELECT ?,?,?,?,?,?,?,0 WHERE ${FREE}`,
+			`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,anchor_date,category_id,merchant_raw_name,merchant_raw_text)
+			 SELECT ?,?,?,?,?,?,?,?,0 WHERE ${FREE}`,
 		)
 		.bind(
 			f.name,
@@ -45,6 +46,7 @@ export async function insertBill(
 			f.dueDay,
 			f.frequency,
 			f.anchorMonth,
+			f.anchorDate ?? null,
 			f.categoryId,
 			f.merchantRawName,
 			null,
@@ -73,7 +75,7 @@ export async function updateBill(
 	// In an UPDATE's WHERE, `name` is the row's name as it is now, before the SET.
 	const update = db
 		.prepare(
-			`UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,category_id=?,
+			`UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,anchor_date=?,category_id=?,
 			   merchant_raw_text=CASE WHEN merchant_raw_name=? THEN merchant_raw_text ELSE 0 END,merchant_raw_name=?
 			 WHERE id=? AND (lower(trim(name))=lower(trim(?)) OR ${FREE})`,
 		)
@@ -83,6 +85,7 @@ export async function updateBill(
 			f.dueDay,
 			f.frequency,
 			f.anchorMonth,
+			f.anchorDate ?? null,
 			f.categoryId,
 			f.merchantRawName,
 			f.merchantRawName,

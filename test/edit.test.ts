@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseEdit, safeBack } from "../src/transactions/edit";
+import {
+	followsPurchaseAfterSave,
+	parseEdit,
+	safeBack,
+} from "../src/transactions/edit";
 
 const form = (fields: Record<string, string>) => {
 	const f = new FormData();
@@ -187,5 +191,121 @@ describe("safeBack", () => {
 		]) {
 			expect(safeBack(url)).toBe("/transactions");
 		}
+	});
+});
+
+describe("followsPurchaseAfterSave: whether a linked credit counts with its purchase once saved", () => {
+	const PURCHASE_ID = 9001;
+	// A linked, reviewed credit that is not income, as the panel first drew it.
+	const stored = {
+		amountCents: -2000,
+		refundOfId: PURCHASE_ID,
+		income: false,
+		incomeSource: "user" as string | null,
+		creditReviewed: true,
+		creditReviewedByUser: true,
+	};
+	// The panel's answers when nothing was changed.
+	const unchanged = {
+		refundOfId: PURCHASE_ID,
+		income: false,
+		incomeWas: false,
+		creditReviewed: true,
+		creditReviewedWas: true,
+		creditReviewedProvided: true,
+	};
+
+	it("follows a linked credit that is reviewed and not income", () => {
+		expect(followsPurchaseAfterSave(stored, unchanged)).toBe(true);
+	});
+
+	it("doesn't follow a linked credit that stays income", () => {
+		expect(
+			followsPurchaseAfterSave(
+				{ ...stored, income: true, incomeSource: "user" },
+				{ ...unchanged, income: true, incomeWas: true },
+			),
+		).toBe(false);
+	});
+
+	it("doesn't follow a Jev-income credit unticked as income and not reviewed, so its category is kept", () => {
+		expect(
+			followsPurchaseAfterSave(
+				{
+					...stored,
+					income: true,
+					incomeSource: "jev",
+					creditReviewedByUser: false,
+				},
+				{
+					...unchanged,
+					income: false,
+					incomeWas: true,
+					creditReviewed: false,
+					creditReviewedWas: false,
+				},
+			),
+		).toBe(false);
+	});
+
+	it("still follows a Jev-income credit unticked as income and ticked as reviewed", () => {
+		expect(
+			followsPurchaseAfterSave(
+				{
+					...stored,
+					income: true,
+					incomeSource: "jev",
+					creditReviewedByUser: false,
+				},
+				{
+					...unchanged,
+					income: false,
+					incomeWas: true,
+					creditReviewed: true,
+					creditReviewedWas: false,
+				},
+			),
+		).toBe(true);
+	});
+
+	it("follows a credit that a new link makes a reviewed refund, even when the review is unticked", () => {
+		// saveEdit reviews a credit as a link is saved, whatever the review chip held.
+		expect(
+			followsPurchaseAfterSave(
+				{ ...stored, refundOfId: null },
+				{ ...unchanged, creditReviewed: false, creditReviewedWas: true },
+			),
+		).toBe(true);
+	});
+
+	it("follows a stale panel that unticks income and ticks the review, since the save turns income off", () => {
+		// Another tab marked the credit as income after this panel was drawn, so the panel's income was off.
+		expect(
+			followsPurchaseAfterSave(
+				{
+					...stored,
+					income: true,
+					incomeSource: "user",
+					creditReviewed: false,
+					creditReviewedByUser: false,
+				},
+				{
+					...unchanged,
+					income: false,
+					incomeWas: false,
+					creditReviewed: true,
+					creditReviewedWas: false,
+				},
+			),
+		).toBe(true);
+	});
+
+	it("still follows a credit Jev reviewed when a stale panel unticks the review, since a save clears only a person's review", () => {
+		expect(
+			followsPurchaseAfterSave(
+				{ ...stored, creditReviewedByUser: false, incomeSource: null },
+				{ ...unchanged, creditReviewed: false, creditReviewedWas: true },
+			),
+		).toBe(true);
 	});
 });

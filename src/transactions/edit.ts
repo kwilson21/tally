@@ -1,5 +1,7 @@
 // What the edit panel's form may change, checked before anything is saved.
 
+import { followsPurchase } from "../db/counted-month";
+
 export type Edit = {
 	/** null leaves the category as it is. */
 	categoryId: number | null;
@@ -82,6 +84,85 @@ const MAX_NOTE = 500;
 const text = (form: FormData, key: string) =>
 	String(form.get(key) ?? "").trim();
 
+/** The income and review answers the edit form posts. The "was" answers are undefined when the form omits them. */
+export function postedCredit(
+	form: FormData,
+): Pick<
+	Edit,
+	| "income"
+	| "incomeWas"
+	| "creditReviewed"
+	| "creditReviewedWas"
+	| "creditReviewedProvided"
+> {
+	return {
+		income: form.get("income") === "1",
+		incomeWas: form.has("income_was")
+			? form.get("income_was") === "1"
+			: undefined,
+		creditReviewed: form.get("creditReviewed") === "1",
+		creditReviewedWas: form.has("creditReviewed_was")
+			? form.get("creditReviewed_was") === "1"
+			: undefined,
+		creditReviewedProvided:
+			form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
+	};
+}
+
+/**
+ * Whether a linked credit counts with its purchase once this edit is saved, so the edit panel's lock and
+ * "Counts in" line and the route's category drop say how the row will really count. saveEdit writes only the
+ * income and review answers the person changed (against what the panel showed), keeps the rest, and a save
+ * clears only a review a person made, so a review Jev holds stays. A new link reviews a credit. This follows
+ * those writes. The purchase (linked, not excluded) is the caller's to check.
+ */
+export function followsPurchaseAfterSave(
+	stored: {
+		amountCents: number;
+		refundOfId?: number | null;
+		income: boolean;
+		incomeSource: string | null;
+		creditReviewed: boolean;
+		creditReviewedByUser: boolean;
+	},
+	edit: Pick<
+		Edit,
+		| "refundOfId"
+		| "income"
+		| "incomeWas"
+		| "creditReviewed"
+		| "creditReviewedWas"
+		| "creditReviewedProvided"
+	>,
+): boolean {
+	const linking =
+		typeof edit.refundOfId === "number" &&
+		edit.refundOfId !== (stored.refundOfId ?? null);
+	const incomeChanged = edit.income !== (edit.incomeWas ?? stored.income);
+	const reviewChanged =
+		edit.creditReviewedProvided !== false &&
+		edit.creditReviewed !==
+			(edit.creditReviewedWas ?? stored.creditReviewedByUser);
+	// A review ticked as not income turns income off whatever the panel drew (saveEdit's flag_income).
+	const reviewedAsNotIncome =
+		reviewChanged && edit.creditReviewed && !edit.income;
+	// Unticking income on a Jev credit, with the review unticked, leaves it unreviewed (saveEdit's credit_reviewed).
+	const unreviewedByIncome =
+		incomeChanged && !edit.creditReviewed && stored.incomeSource === "jev";
+	// saveEdit clears only a review a person made (credit_reviewed_by = 'user'); a review Jev holds stays.
+	const reviewCleared =
+		reviewChanged && !edit.creditReviewed && stored.creditReviewedByUser;
+	return followsPurchase({
+		amountCents: stored.amountCents,
+		income: incomeChanged || reviewedAsNotIncome ? edit.income : stored.income,
+		// A new link is written as a review last, so it wins over the review chip and the Jev rule (saveEdit).
+		creditReviewed:
+			linking ||
+			(reviewChanged && edit.creditReviewed) ||
+			(stored.creditReviewed && !reviewCleared && !unreviewedByIncome),
+	});
+}
+
 /** Reads the edit form. Category ids must be live categories; lengths are limited. */
 export function parseEdit(
 	form: FormData,
@@ -131,16 +212,7 @@ export function parseEdit(
 	const personWasRaw = text(form, "for_person_id_was");
 	const personWas = personWasRaw ? Number(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";
-	const income = form.get("income") === "1";
-	const creditReviewed = form.get("creditReviewed") === "1";
-	const incomeWas = form.has("income_was")
-		? form.get("income_was") === "1"
-		: undefined;
-	const creditReviewedWas = form.has("creditReviewed_was")
-		? form.get("creditReviewed_was") === "1"
-		: undefined;
-	const creditReviewedProvided =
-		form.get("creditReviewedVisible") === "1" || form.has("creditReviewed");
+	const credit = postedCredit(form);
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
 		errors.category = "Pick a category from the list.";
@@ -186,11 +258,7 @@ export function parseEdit(
 					}
 				: {}),
 			excluded,
-			income,
-			incomeWas,
-			creditReviewed,
-			creditReviewedWas,
-			creditReviewedProvided,
+			...credit,
 			kind:
 				form.has("kind") &&
 				(!hiddenUntouched ||
