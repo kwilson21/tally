@@ -59,6 +59,8 @@ export type Edit = {
 	 * counts it in the budget even if it was excluded.
 	 */
 	refundOfId?: number | null;
+	cashDate?: string;
+	cashAmountCents?: number;
 };
 
 /** The edit panel changes a merchant rule only when the person changes the toggle. */
@@ -83,7 +85,9 @@ export type EditErrors = Partial<
 		| "note"
 		| "refund"
 		| "kind"
-		| "forPerson",
+		| "forPerson"
+		| "date"
+		| "amount",
 		string
 	>
 >;

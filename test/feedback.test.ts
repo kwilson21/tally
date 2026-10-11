@@ -23,6 +23,7 @@ function productionApp(
 		diagnostics?: boolean;
 		replayLinks?: boolean;
 		demo?: boolean;
+		appVersion?: string;
 	} = {},
 ) {
 	const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
@@ -41,6 +42,7 @@ function productionApp(
 					FEEDBACK_GITHUB_TOKEN: token,
 					FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
 					FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
+					APP_VERSION: options.appVersion,
 				} as unknown as Env,
 				{ waitUntil, passThroughOnException() {}, props: {} },
 			);
@@ -208,6 +210,67 @@ describe("feedback form", () => {
 			page: "/settings",
 			device: "Mobile browser",
 		});
+	});
+
+	it("keeps the app version a report was sent from", async () => {
+		const response = await productionApp(undefined, {
+			appVersion: "v2026.10.10 b818481",
+		}).fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Confused",
+				message: "Stored with the build it came from",
+				from: "/",
+			}),
+		);
+		expect(response.status).toBe(303);
+		expect(
+			await env.DB.prepare("SELECT app_version FROM feedback").first(),
+		).toEqual({ app_version: "v2026.10.10 b818481" });
+	});
+
+	it("keeps the app version and the opted-in context in their own columns", async () => {
+		const response = await productionApp(undefined, {
+			diagnostics: true,
+			appVersion: "demo abc1234",
+		}).fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Confused",
+				message: "Both optional columns together",
+				from: "/accounts",
+				include_diagnostics: "yes",
+				client_context: JSON.stringify({ deviceCategory: "Mobile browser" }),
+			}),
+		);
+		expect(response.status).toBe(303);
+		const row = await env.DB.prepare(
+			"SELECT client_context, app_version FROM feedback",
+		).first<{ client_context: string | null; app_version: string | null }>();
+		expect(JSON.parse(row?.client_context ?? "null")).toEqual({
+			route: "/accounts",
+			deviceCategory: "Mobile browser",
+			errorName: null,
+		});
+		expect(row?.app_version).toBe("demo abc1234");
+	});
+
+	it("stores no app version when none is set", async () => {
+		const response = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Confused",
+				message: "Sent from a local build",
+				from: "/",
+			}),
+		);
+		expect(response.status).toBe(303);
+		expect(
+			await env.DB.prepare("SELECT app_version FROM feedback").first(),
+		).toEqual({ app_version: null });
 	});
 
 	it("stores allowlisted technical context only after the user opts in", async () => {
@@ -441,6 +504,10 @@ describe("feedback form", () => {
 		).text();
 		expect(html).toContain("Attach technical details");
 		expect(html).toContain("excludes raw");
+		expect(html).toContain(
+			"coarse device category and app version are included with every report",
+		);
+		expect(html).toContain("browser versions");
 		expect(html).not.toContain('name="include_replay"');
 	});
 
@@ -674,6 +741,11 @@ describe("demo", () => {
 		expect(html.indexOf("Before a new report is sent")).toBeLessThan(
 			html.indexOf('action="/feedback"'),
 		);
+	});
+
+	it("tells the person the app version is stored in D1 (decision 98)", async () => {
+		const html = await (await productionApp().fetch("/feedback")).text();
+		expect(html).toMatch(/Tally stores [^.]*app version[^.]* in Cloudflare D1/);
 	});
 
 	it("shows that feedback is off and returns 404 on POST without GitHub", async () => {
