@@ -219,18 +219,25 @@ export function NotOnPageCount({
  * The line for ticks not on this page: a closed disclosure that opens onto those rows, ticked, in a
  * list up to 40% of the screen tall that scrolls on its own. The wrapper always stays, so a list reply
  * can draw the line or take it away (SELECTION_BAR_OOB). `open` is only for the catalog's open state.
+ * Out of band, a count reply with none left empties the wrapper, so the line goes (#350).
  */
 export function NotOnPage({
 	count,
 	rows,
 	open = false,
+	oob = false,
 }: {
 	count: number;
 	rows?: Child;
 	open?: boolean;
+	oob?: boolean;
 }) {
 	return (
-		<div id="not-on-page" class="empty:hidden">
+		<div
+			id="not-on-page"
+			class="empty:hidden"
+			hx-swap-oob={oob ? "outerHTML" : undefined}
+		>
 			{count > 0 && (
 				<details class="group" open={open}>
 					<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">

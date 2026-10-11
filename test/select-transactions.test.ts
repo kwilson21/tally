@@ -852,6 +852,53 @@ describe("select several transactions", () => {
 			expect(onPage).not.toContain('class="sr-only"');
 		});
 
+		it("takes the line away once no tick is off the page, rather than saying 0 not on this page", async () => {
+			const [a, b] = (await pageOneTicks()) as [number, number];
+			const onPage = await countFragment([a, b], [a, b]);
+			expect(onPage).toContain(
+				'<div id="not-on-page" class="empty:hidden" hx-swap-oob="outerHTML"></div>',
+			);
+			expect(onPage).not.toContain("not on this page");
+			expect(onPage).not.toContain("<details");
+		});
+
+		it.each([
+			["/transactions/select/category/save", { category: "1" }],
+			["/transactions/select/exclude", {}],
+		])(
+			"%s changes exactly the ticks that are not on this page",
+			async (path, fields) => {
+				const ids = await pageOneTicks();
+				await env.DB.prepare(
+					`UPDATE transactions SET category_id=NULL, category_source=NULL, excluded=0, excluded_source=NULL WHERE id IN (${ids.map(() => "?").join(",")})`,
+				)
+					.bind(...ids)
+					.run();
+				const before = await snapshot();
+				const res = await post(
+					path,
+					form(ids, { ...fields, back: "/transactions?month=all&page=2" }),
+				);
+				expect(res.status).toBe(200);
+				const after = await snapshot();
+				const changed = after
+					.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
+					.map((row) => row.id);
+				expect(changed.sort()).toEqual([...ids].sort());
+			},
+		);
+
+		it("says the ticks in words on a full page load without JavaScript, not Choose rows", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
+			);
+			expect(html).toMatch(
+				/id="selected-count"[^>]*>3 selected<span class="sr-only">, 3 not on this page<\/span>/,
+			);
+			expect(html).not.toContain("Choose rows, then an action");
+		});
+
 		it("keeps the ticks through a filter change, and counts the rows it hides as not on this page", async () => {
 			const ids = await pageOneTicks();
 			const html = await pageHtml(

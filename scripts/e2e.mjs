@@ -759,9 +759,26 @@ assert.equal(
 	"1 not on this page",
 	"Older must keep the tick and say it is not on this page",
 );
+assert.match(
+	page.url(),
+	/[?&]ids=/,
+	"Older's address must carry the tick, so a reload keeps it",
+);
 step(
 	"a tick stays when Older takes its page away, and the bar still counts it",
 );
+// Unticking the last tick that is off the page takes its line away with the count, so no words say 0 (#350).
+await page.locator("#not-on-page summary").click();
+await page.locator("#not-on-page label:has(input[name=ids])").nth(0).click();
+await page.waitForFunction(
+	() => !document.querySelector("#not-on-page summary"),
+);
+assert.equal(
+	(await page.locator("#selected-count").textContent())?.trim(),
+	"0 selected",
+	"the count must lose the tick and the line must go with it",
+);
+step("unticking the last tick off the page takes its line away");
 
 // Select several uncategorized rows, then set their category in one action (P20 A).
 assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);

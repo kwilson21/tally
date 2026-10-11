@@ -86,6 +86,7 @@ import {
 	FOCUS_SET_CATEGORY,
 	LIST_LOAD_PAUSE,
 	MAX_SELECTED,
+	NotOnPage,
 	NotOnPageCount,
 	SELECTION_BAR_OOB,
 	SelectAllOnPage,
@@ -664,7 +665,12 @@ async function renderList(
 							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
 						>
 							<SelectionActionBar
-								label={htmx ? undefined : "Choose rows, then an action"}
+								// Without JavaScript, the ticks in the address are counted in words once there are any (#350).
+								label={
+									htmx || tickCount > 0
+										? undefined
+										: "Choose rows, then an action"
+								}
 								count={tickCount}
 								notOnPage={offPage.length}
 								rows={offPageRows}
@@ -830,7 +836,12 @@ transactions.get("/transactions/select/count", (c) => {
 				oob
 			/>
 			<SelectionLimit count={ticks.length} oob />
-			<NotOnPageCount count={notOnPage} oob />
+			{notOnPage > 0 ? (
+				<NotOnPageCount count={notOnPage} oob />
+			) : (
+				// With none left off the page, the whole line goes, not just its words (#350).
+				<NotOnPage count={0} oob />
+			)}
 		</>,
 	);
 });
