@@ -230,7 +230,7 @@ export function parseEdit(
 		: undefined;
 	const hiddenUntouched = detailsVisible === false;
 	const noteWas = text(form, "note_was");
-	const kindWas = text(form, "kind_was");
+	const kindWas = text(form, "kind_was") || null;
 	const personWasRaw = text(form, "for_person_id_was");
 	const personWas = personWasRaw ? Number(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";

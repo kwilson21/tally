@@ -11,8 +11,15 @@ import {
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
-const ARCHIVED_BUDGET_APPLIES =
-	"c.archived = 0 OR c.archived_on IS NULL OR c.archived_on >= (?1 || '-01')";
+/**
+ * False when an archive period covers the whole month ?1 (spec §5): archived in an earlier month and not
+ * restored until a later one. A month the category was archived in still counts. Alias `c`.
+ */
+const ACTIVE_IN_MONTH = `NOT EXISTS (
+	SELECT 1 FROM category_archive_periods p
+	WHERE p.category_id = c.id AND substr(p.archived_on, 1, 7) < ?1
+		AND (p.restored_on IS NULL OR substr(p.restored_on, 1, 7) > ?1)
+)`;
 
 export type CategoryRow = {
 	id: number;
@@ -33,8 +40,8 @@ export type MonthData = {
 /**
  * Loads what summarizeMonth needs for a month ('YYYY-MM'). Counted = in month, not excluded (or paying a
  * bill), not a split parent.
- * Categories are active ones, plus archived categories with counted spending that month, or a
- * budget effective before the category was archived.
+ * Categories are active ones (not archived for the whole month), plus archived categories with counted
+ * spending that month, or a budget that applies to the month (see ACTIVE_IN_MONTH).
  */
 export async function loadMonth(
 	db: D1Database,
@@ -46,7 +53,7 @@ export async function loadMonth(
 		db
 			.prepare(
 				`SELECT id, name, icon, color, archived FROM categories c
-				 WHERE c.archived = 0
+				 WHERE (c.archived = 0 AND ${ACTIVE_IN_MONTH})
 					OR EXISTS (
 						SELECT 1 FROM transactions t
 						${COUNTED_JOINS}
@@ -55,7 +62,7 @@ export async function loadMonth(
 					OR EXISTS (
 						SELECT 1 FROM budget_amounts ba
 						WHERE ba.category_id = c.id AND ba.effective_month <= ?1
-							AND (${ARCHIVED_BUDGET_APPLIES})
+							AND ${ACTIVE_IN_MONTH}
 					)
 				 ORDER BY sort_order, name`,
 			)
@@ -64,7 +71,7 @@ export async function loadMonth(
 			.prepare(
 				`SELECT ba.category_id AS categoryId, ba.effective_month AS effectiveMonth, ba.amount_cents AS amountCents
 				 FROM budget_amounts ba JOIN categories c ON c.id = ba.category_id
-				 WHERE ba.effective_month <= ?1 AND (${ARCHIVED_BUDGET_APPLIES})`,
+				 WHERE ba.effective_month <= ?1 AND ${ACTIVE_IN_MONTH}`,
 			)
 			.bind(month),
 		db
@@ -105,7 +112,11 @@ export async function loadMonth(
 	};
 }
 
-/** First counted month, checking the earliest counted date and its two-month bill-occurrence bound. */
+/**
+ * First counted month, checking the earliest counted date and its two-month bill-occurrence bound.
+ * The start is the earliest counted transaction that isn't a linked refund: a refund counts in its
+ * purchase's month (spec §7), so its own date says nothing about where history starts.
+ */
 export async function firstCountedMonth(
 	db: D1Database,
 ): Promise<string | null> {
@@ -114,7 +125,7 @@ export async function firstCountedMonth(
 			`WITH first_date AS MATERIALIZED (
 				SELECT t.date, ${COUNTED_MONTH} AS month FROM transactions t
 				${COUNTED_JOINS}
-				WHERE ${COUNTED_TRANSACTION}
+				WHERE ${COUNTED_TRANSACTION} AND NOT ${FOLLOWS_PURCHASE}
 				ORDER BY t.date
 				LIMIT 1
 			), nearby_month AS (
