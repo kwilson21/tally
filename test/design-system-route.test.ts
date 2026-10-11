@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import design from "../DESIGN.md?raw";
+import dsScript from "../public/js/ds.js?raw";
 import {
 	ADJUST_ROWS,
 	BAND,
@@ -779,6 +780,17 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('src="/js/ds.js"');
 		expect(html).toMatch(/data-ds-toast="success"/);
 		expect(html).toMatch(/data-ds-toast="error"/);
+	});
+
+	it("gives the Show an Undo toast button its 10-second expiry, and ds.js passes it on", async () => {
+		const { html } = await get("/design-system");
+		const undo =
+			html.match(/<button[^>]*data-ds-undo="catalog-demo-token"[^>]*>/)?.[0] ??
+			"";
+		expect(undo).toContain('data-ds-undo-expires-in-ms="10000"');
+		expect(dsScript).toMatch(
+			/undoExpiresInMs:\s*Number\(button\.dataset\.dsUndoExpiresInMs\)/,
+		);
 	});
 
 	it("shows the Transactions heading wrapping beside Select and the long name in the Toast specimen", async () => {

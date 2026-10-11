@@ -5,6 +5,13 @@ import { followsPurchase } from "../db/counted-month";
 export type Edit = {
 	/** null leaves the category as it is. */
 	categoryId: number | null;
+	/**
+	 * "New category" was chosen: the save makes the category from the name typed under the chips, then files
+	 * the transaction in it (the route makes it, once everything else checks). categoryId is null until then.
+	 */
+	newCategory?: boolean;
+	/** The name typed under the chips, kept for a panel drawn again after an error. Only a choice counts. */
+	newCategoryName?: string;
 	alwaysForMerchant: boolean;
 	/** Toggle state when the panel opened. */
 	alwaysWas?: boolean;
@@ -84,6 +91,7 @@ export function merchantRuleChange(
 export type EditErrors = Partial<
 	Record<
 		| "category"
+		| "newCategory"
 		| "merchant"
 		| "note"
 		| "refund"
@@ -191,7 +199,9 @@ export function parseEdit(
 ): { ok: true; value: Edit } | { ok: false; errors: EditErrors } {
 	const errors: EditErrors = {};
 	const rawCategory = text(form, "category");
-	const categoryId = rawCategory === "" ? null : Number(rawCategory);
+	const newCategory = rawCategory === "new";
+	const categoryId =
+		rawCategory === "" || newCategory ? null : Number(rawCategory);
 	const alwaysForMerchant = form.get("always") === "1";
 	const alwaysWas = form.get("always_was") === "1";
 	const ruleCategoryWas = Number(form.get("rule_category_was")) || null;
@@ -241,7 +251,12 @@ export function parseEdit(
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
 		errors.category = "Pick a category from the list.";
-	} else if (!alwaysWas && alwaysForMerchant && categoryId === null) {
+	} else if (
+		!alwaysWas &&
+		alwaysForMerchant &&
+		categoryId === null &&
+		!newCategory
+	) {
 		errors.category = "Pick a category to use for this merchant.";
 	}
 	if (displayName.length > MAX_NAME)
@@ -264,6 +279,7 @@ export function parseEdit(
 		ok: true,
 		value: {
 			categoryId,
+			...(newCategory ? { newCategory: true } : {}),
 			alwaysForMerchant,
 			alwaysWas,
 			merchantRuleWas: ruleCategoryWas,

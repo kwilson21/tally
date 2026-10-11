@@ -504,10 +504,12 @@ describe("saveSuggestion", () => {
 			"person",
 		);
 		await db.prepare("DROP TRIGGER take_name_during_create").run();
+		// The name was made during the write, so the ticked ones join that category (decision 101); no duplicate.
 		expect(result).toMatchObject({
-			ok: false,
-			reason: "invalid",
-			error: "That name is taken.",
+			ok: true,
+			name: "Subscriptions",
+			attached: true,
+			moved: 4,
 		});
 		expect(
 			await db
@@ -906,25 +908,52 @@ describe("createFromSuggestion", () => {
 		expect(result).toMatchObject({ ok: true, leftOut: [late] });
 	});
 
-	it("refuses a name a category already has, in any capitals, archived ones too, and creates nothing", async () => {
+	it("refuses a name only an archived category has, and creates nothing", async () => {
 		const { id, made } = await pending();
 		await db
 			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
 			.run();
-		for (const taken of ["groceries", "GAS"]) {
-			await db
-				.prepare("UPDATE category_suggestions SET name = ? WHERE id = ?")
-				.bind(taken, id)
-				.run();
-			const result = await createFromSuggestion(
-				db,
-				id,
-				{ ticked: made, shown: made, notes: {} },
-				"person",
-			);
-			expect(result).toMatchObject({ ok: false, reason: "invalid" });
-		}
+		await db
+			.prepare("UPDATE category_suggestions SET name = 'GAS' WHERE id = ?")
+			.bind(id)
+			.run();
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		expect(result).toMatchObject({
+			ok: false,
+			reason: "invalid",
+			error: "An archived category has that name. Restore it instead.",
+		});
 		expect(await suggestion(id)).toMatchObject({ status: "pending" });
+	});
+
+	it("adds the ticked ones to the active category with that name, in any capitals, instead of making one", async () => {
+		const { id, made } = await pending();
+		await db
+			.prepare(
+				"UPDATE category_suggestions SET name = 'groceries' WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		const count = (await categories()).length;
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		expect(result).toMatchObject({
+			ok: true,
+			attached: true,
+			name: "Groceries",
+			moved: made.length,
+		});
+		expect((await categories()).length).toBe(count);
+		expect(await suggestion(id)).toMatchObject({ status: "created" });
 	});
 
 	it("refuses when 50 categories are active already", async () => {
@@ -1070,6 +1099,108 @@ describe("createFromSuggestion", () => {
 				category_suggestion_id: id,
 			});
 		expect((await row(made[3] as number))?.note).toBeNull();
+	});
+
+	it("adds the ticked ones to the active category whose accented name differs only in capitals, instead of making a second", async () => {
+		const { id, made } = await pending();
+		const school = await db
+			.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', 100) RETURNING id",
+			)
+			.bind("École")
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE category_suggestions SET name = ? WHERE id = ?")
+			.bind("école", id)
+			.run();
+		const count = (await categories()).length;
+
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made.slice(0, 3), shown: made, notes: {} },
+			"person",
+		);
+
+		expect(result).toMatchObject({
+			ok: true,
+			attached: true,
+			name: "École",
+			moved: 3,
+		});
+		expect((await categories()).length).toBe(count);
+		for (const tx of made.slice(0, 3))
+			expect(await row(tx)).toMatchObject({
+				category_id: school?.id,
+				category_source: "user",
+			});
+		expect(await suggestion(id)).toMatchObject({ status: "created" });
+	});
+
+	it("adds the ticked ones to the active category with the same accented name in another Unicode form", async () => {
+		const { id, made } = await pending();
+		const cafe = await db
+			.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', 101) RETURNING id",
+			)
+			.bind("Café")
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE category_suggestions SET name = ? WHERE id = ?")
+			.bind("Café", id)
+			.run();
+		const count = (await categories()).length;
+
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+
+		expect(result).toMatchObject({
+			ok: true,
+			attached: true,
+			name: "Café",
+			moved: made.length,
+		});
+		expect((await categories()).length).toBe(count);
+		for (const tx of made)
+			expect(await row(tx)).toMatchObject({
+				category_id: cafe?.id,
+				category_source: "user",
+			});
+		expect(await suggestion(id)).toMatchObject({ status: "created" });
+	});
+
+	it("refuses a name an archived category has in other accented capitals, and creates nothing", async () => {
+		const { id, made } = await pending();
+		await db
+			.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES (?, 'tag', 'cat-blue', 102, 1)",
+			)
+			.bind("École")
+			.run();
+		await db
+			.prepare("UPDATE category_suggestions SET name = ? WHERE id = ?")
+			.bind("école", id)
+			.run();
+		const count = (await categories()).length;
+
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+
+		expect(result).toEqual({
+			ok: false,
+			reason: "invalid",
+			error: "An archived category has that name. Restore it instead.",
+		});
+		expect((await categories()).length).toBe(count);
+		expect(await suggestion(id)).toMatchObject({ status: "pending" });
 	});
 });
 

@@ -250,7 +250,7 @@ describe("GET /transactions/:id", () => {
 		const { html: panel } = await get(`/transactions/${id}`);
 		const sheet = panel.slice(panel.indexOf('role="dialog"'));
 		expect(sheet).toMatch(
-			/<fieldset class="flex flex-col gap-2"[^>]*><legend class="[^"]*">Category<\/legend><div class="flex flex-wrap items-start gap-2">/,
+			/<fieldset class="flex flex-col gap-2 group\/category"[^>]*><legend class="[^"]*">Category<\/legend><div class="flex flex-wrap items-start gap-2">/,
 		);
 		expect(sheet).toContain("Count as income");
 		expect(sheet).toContain("border-dashed");
@@ -529,10 +529,11 @@ describe("GET /transactions/:id", () => {
 		expect(html).toContain("$12.00");
 		expect(html).toMatch(/Credit card ••9012/);
 		expect(html).toMatch(/<fieldset[^>]*><legend[^>]*>Category<\/legend>/);
-		// One radio for each of the demo's six categories, Childcare included.
+		// One radio for each of the demo's six categories, Childcare included, and New category, which is one
+		// of the choices (decision 101).
 		expect(
 			(html.match(/<input type="radio" name="category"/g) ?? []).length,
-		).toBe(6);
+		).toBe(7);
 		expect(html).toContain("Always for this merchant");
 		expect(html).toContain("Count as income");
 		// "Type your own" starts empty; the store's own name is the choice that shows what it is.

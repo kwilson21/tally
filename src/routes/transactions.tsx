@@ -5,6 +5,13 @@ import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import { readAiSwitches } from "../db/ai-switches";
+import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
+import {
+	addLikely,
+	type LikelyRow,
+	likelyStill,
+	likelyTransactions,
+} from "../db/likely-transactions";
 import { refundedByOthersSql } from "../db/refunded";
 import {
 	correctCashSplit,
@@ -28,6 +35,7 @@ import {
 	type TransactionDetail,
 } from "../db/transactions";
 import { centsToAmount, formatCents } from "../money";
+import { nameForm, parseCategory } from "../settings/category-form";
 import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
 import {
 	type CashValues,
@@ -84,6 +92,7 @@ import type { HouseholdPerson } from "../views/household-people";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { LikelyAdd, LikelySheet } from "../views/likely-transactions";
 import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
@@ -97,6 +106,11 @@ import {
 	SUGGESTED_NAME_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
+import {
+	NEW_CATEGORY_GROUP,
+	NewCategoryChip,
+	NewCategoryName,
+} from "../views/new-category-choice";
 import { PendingNote } from "../views/pending-note";
 import {
 	RuleOffer,
@@ -1293,6 +1307,20 @@ function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
 	);
 }
 
+/**
+ * Closing a sheet swaps the list back in and returns focus to this transaction's row; the pushed URL
+ * stays clean.
+ */
+function listCloseAttrs(back: string, id: number): Record<string, string> {
+	return {
+		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${id}`,
+		"hx-target": "#page",
+		"hx-select": "#page",
+		"hx-swap": "outerHTML",
+		"hx-push-url": back,
+	};
+}
+
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
 function EditSheet({
 	tx,
@@ -1313,14 +1341,7 @@ function EditSheet({
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
-	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
-	const closeAttrs = {
-		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${tx.id}`,
-		"hx-target": "#page",
-		"hx-select": "#page",
-		"hx-swap": "outerHTML",
-		"hx-push-url": back,
-	};
+	const closeAttrs = listCloseAttrs(back, tx.id);
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
 	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
@@ -1757,7 +1778,7 @@ function EditSheet({
 					</div>
 				)}
 				<fieldset
-					class="flex flex-col gap-2"
+					class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
 					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
@@ -1801,7 +1822,17 @@ function EditSheet({
 								{cat.name}
 							</Chip>
 						))}
+						<NewCategoryChip
+							checked={!purchase && values.newCategory === true}
+						/>
 					</div>
+					{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
+					<NewCategoryName
+						id="new-category-name"
+						value={values.newCategoryName ?? ""}
+						hint="Added to your categories and used for this transaction."
+						error={errors.newCategory}
+					/>
 					{purchase && (
 						<p class="text-sm text-muted">
 							{purchaseCategory
@@ -2542,7 +2573,6 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	if (!tx || tx.parentId !== null) return c.notFound();
-	if (tx.income) return c.text("Income transactions cannot be split.", 400);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
@@ -2580,6 +2610,24 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			kept: partId === undefined ? undefined : archived.get(partId),
 		};
 	});
+	// Income is never split. A row that a bank change made income after the sheet opened gets the same
+	// sheet back, refused in words, as the other split refusals do.
+	if (tx.income)
+		return renderList(c, today, filtersFrom(c, today, back), {
+			status: 422,
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					error="Income can't be split."
+					today={today}
+					still
+					correction={correction}
+				/>
+			),
+		});
 	if (form.get("add") === "1") {
 		// Add a part: the open sheet again, with one more part.
 		values.push({ category: "", amount: "" });
@@ -2818,6 +2866,7 @@ async function savePanel(
 		followsPurchaseAfterSave(tx, { refundOfId, ...postedCredit(form) })
 	) {
 		form.delete("category");
+		form.delete("new_category_name");
 		form.delete("always");
 	}
 	// A name choice counts only while it is still offered: the panel may have been opened before "Suggest store
@@ -2870,6 +2919,8 @@ async function savePanel(
 	) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
+			newCategory: form.get("category") === "new",
+			newCategoryName: form.get("new_category_name")?.toString() ?? "",
 			alwaysForMerchant: form.get("always") === "1",
 			alwaysWas: form.get("always_was") === "1",
 			merchantRuleWas: Number(form.get("rule_category_was")) || null,
@@ -2927,14 +2978,27 @@ async function savePanel(
 					amountCents,
 				);
 
+	// "New category" (decision 101): the name under the chips is checked here, and the category is made only
+	// once every other check has passed, so a taken name or a full list saves nothing.
+	const choseNew = form.get("category") === "new";
+	const named = choseNew
+		? parseCategory(
+				nameForm(form.get("new_category_name")),
+				await categoryNames(c.env.DB),
+				null,
+			)
+		: null;
+	const newCategoryError = named && !named.ok ? named.errors.name : undefined;
 	if (
 		!parsed.ok ||
 		!refundOk ||
+		newCategoryError ||
 		(cashParsed && Object.keys(cashParsed.errors).length)
 	)
 		return showErrors({
 			...(parsed.ok ? {} : parsed.errors),
 			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
+			...(newCategoryError ? { newCategory: newCategoryError } : {}),
 			...(cashParsed?.errors ?? {}),
 		});
 	if (cashParsed && tx.isSplit) {
@@ -2957,6 +3021,14 @@ async function savePanel(
 		if (parts && parts.cents !== cashParsed.amountCents)
 			return partsBroken(cashParsed.amountCents, parts.cents);
 	}
+	let edit: Edit = parsed.value;
+	let made: { id: number; name: string } | null = null;
+	if (named?.ok) {
+		const created = await makeCategory(c.env.DB, named.value);
+		if (!created.ok) return showErrors({ newCategory: created.error });
+		edit = { ...parsed.value, categoryId: created.id };
+		made = { id: created.id, name: named.value.name };
+	}
 
 	// The link is written only when it changes. A refund that is more than what's left of its
 	// purchase is refused by the write itself, with nothing saved (spec §8.5).
@@ -2964,7 +3036,7 @@ async function savePanel(
 		c.env.DB,
 		tx.id,
 		{
-			...parsed.value,
+			...edit,
 			refundOfId: refundOfId === current ? undefined : refundOfId,
 			...(cashParsed
 				? {
@@ -2974,8 +3046,14 @@ async function savePanel(
 				: {}),
 		},
 		actor(c),
-	);
+	).catch(async (error: unknown) => {
+		// A save that throws files nothing, so a category made for it goes too.
+		if (made) await unmakeCategory(c.env.DB, made.id);
+		throw error;
+	});
 	if (!result.saved) {
+		// Nothing was filed in a category made for this save, so it goes too: a retry must not find its name taken.
+		if (made) await unmakeCategory(c.env.DB, made.id);
 		if ("personMissing" in result)
 			// Removed since this page loaded the household: the panel shows the household as it is now.
 			return showErrors(
@@ -3068,15 +3146,30 @@ async function savePanel(
 	if (
 		((addedName || addedNote || changedDetails) &&
 			tx.categoryId === null &&
-			parsed.value.categoryId === null) ||
+			edit.categoryId === null) ||
 		guessAgain
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
+	// A category made here offers the transactions that might belong in it, when there are any (decision 76).
+	// Its reason names the entry as this save left it: a cash entry's date and amount may have just changed.
+	const likely = made
+		? {
+				savedId: tx.id,
+				savedDate: cashValues?.date ?? tx.date,
+				savedCents: cashParsed?.amountCents ?? tx.amountCents,
+				back,
+				categoryId: made.id,
+				categoryName: made.name,
+				rows: await likelyTransactions(c.env.DB, tx.id, made.name, today),
+			}
+		: null;
+	const panel = likely && likely.rows.length > 0 ? likely : null;
 	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
-	if (!c.req.header("HX-Request"))
-		return ruleOffer
-			? renderRuleOffer(c, today, back, ruleOffer)
-			: c.redirect(back, 303);
+	if (!c.req.header("HX-Request")) {
+		if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
+		if (panel) return renderLikely(c, today, filters, panel);
+		return c.redirect(back, 303);
+	}
 
 	// The toast and the announcer say what the row reads once saved, read back from the database: its own name,
 	// else the merchant's, else the bank's text tidied (never the raw bank string, #93). A split part keeps its
@@ -3085,9 +3178,9 @@ async function savePanel(
 	const name = after?.displayName ?? tx.displayName;
 	// A save that chose no name while the row still shows an undecided guess named nothing: it says just "Saved.".
 	const unnamed = after?.nameSuggested === true;
-	const category = categories.find(
-		(cat) => cat.id === parsed.value.categoryId,
-	)?.name;
+	// A category made in this save is named too, so the toast says what the transaction is now.
+	const category =
+		made?.name ?? categories.find((cat) => cat.id === edit.categoryId)?.name;
 	// A one-off name that made Tally guess the category again had its category cleared (saveEdit), so the
 	// category the save posted is not what the row now shows: the announcer says Tally guesses it again.
 	const saved = unnamed
@@ -3131,9 +3224,11 @@ async function savePanel(
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return ruleOffer
-		? renderRuleOffer(c, today, back, ruleOffer)
-		: renderList(c, today, filters, { focusId: tx.id });
+	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
+	// category made in this save has only this one.
+	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
+	if (panel) return renderLikely(c, today, filters, panel);
+	return renderList(c, today, filters, { focusId: tx.id });
 }
 
 /**
@@ -3153,6 +3248,74 @@ async function savePendingEdit(
 	form.set("amount", centsToAmount(totalCents));
 	return savePanel(c, (await getTransaction(c.env.DB, tx.id)) ?? tx, form);
 }
+
+/** A live category a likely-transactions form names, or null. */
+async function liveCategory(db: D1Database, value: string | File | null) {
+	const id = Number(value);
+	if (!Number.isInteger(id) || id <= 0) return null;
+	return db
+		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
+		.bind(id)
+		.first<{ id: number; name: string }>();
+}
+
+// The likely transactions after a new category (decision 76): Add files the ticked ones, and only them.
+transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
+	const filters = filtersFrom(c, today, back);
+	const category = await liveCategory(c.env.DB, form.get("category"));
+	// A category archived since the panel opened moves nothing, as when every ticked row has changed.
+	const moved = category
+		? await addLikely(c.env.DB, {
+				savedId: tx.id,
+				categoryId: category.id,
+				categoryName: category.name,
+				ticked: form.getAll("ids").map(Number),
+				today,
+				actor: actor(c),
+			})
+		: 0;
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	// Nothing moves when every ticked row changed since the panel opened (addLikely files only the ticked rows
+	// the panel's rules still allow).
+	const message =
+		moved === 0 || !category
+			? "Nothing moved: those transactions changed since the panel opened."
+			: `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({
+			toast: { message, type: moved === 0 ? "info" : "success" },
+			announce: message,
+		}),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, today, filters, { focusId: tx.id });
+});
+
+// A tick on the likely panel redraws only its Add count, so the number follows the ticks: the ticked rows Add
+// would file now, not the six the panel lists.
+transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	const today = await householdToday(c.env.DB);
+	const category = await liveCategory(c.env.DB, form.get("category"));
+	if (!category) return c.notFound();
+	const count = (
+		await likelyStill(c.env.DB, {
+			savedId: tx.id,
+			categoryName: category.name,
+			today,
+			ticked: form.getAll("ids").map(Number),
+		})
+	).length;
+	return c.html(<LikelyAdd count={count} categoryName={category.name} />);
+});
 
 async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	const form = await c.req.formData();
@@ -3193,6 +3356,43 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		focusHeading: true,
+	});
+}
+
+/** The likely panel after a category is made (decision 76), drawn over the list. Only the ticked rows move. */
+function renderLikely(
+	c: Context<App>,
+	today: string,
+	filters: Filters,
+	panel: {
+		savedId: number;
+		savedDate: string;
+		savedCents: number;
+		back: string;
+		categoryId: number;
+		categoryName: string;
+		rows: LikelyRow[];
+	},
+) {
+	return renderList(c, today, filters, {
+		sheet: () => (
+			<LikelySheet
+				savedId={panel.savedId}
+				savedDate={panel.savedDate}
+				savedCents={panel.savedCents}
+				back={panel.back}
+				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
+				categoryId={panel.categoryId}
+				categoryName={panel.categoryName}
+				rows={panel.rows}
+				ticked={
+					new Set(
+						panel.rows.filter((row) => row.sameMerchant).map((row) => row.id),
+					)
+				}
+				today={today}
+			/>
+		),
 	});
 }
 
