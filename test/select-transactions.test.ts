@@ -691,4 +691,96 @@ describe("select several transactions", () => {
 			),
 		).toBe(false);
 	});
+
+	/** The opening tag of the first element that matches. */
+	const openingTag = (html: string, pattern: RegExp) =>
+		html.match(pattern)?.[0] ?? "";
+	/** The list's page links (Newer and Older), whole. */
+	const pageLinks = (html: string) =>
+		[...html.matchAll(/<a [^>]*rel="(?:prev|next)"[^>]*>/g)].map((m) => m[0]);
+	const LOAD_PAUSE = {
+		"hx-indicator": "#selection-form",
+		"hx-disable": "#set-category-selection, #exclude-selection",
+	};
+
+	it("pauses the filters, the page links and Select all while a Select-mode list loads", async () => {
+		const html = await pageHtml("month=all&page=2&select=1");
+		const filters = openingTag(html, /<form[^>]*id="filters"[^>]*>/);
+		expect(attribute(filters, "hx-indicator")).toBe(LOAD_PAUSE["hx-indicator"]);
+		expect(attribute(filters, "hx-disable")).toBe(LOAD_PAUSE["hx-disable"]);
+		const links = pageLinks(html);
+		expect(links.length).toBeGreaterThan(0);
+		for (const link of links) {
+			expect(attribute(link, "hx-indicator")).toBe(LOAD_PAUSE["hx-indicator"]);
+			expect(attribute(link, "hx-disable")).toBe(LOAD_PAUSE["hx-disable"]);
+		}
+		const selectAll = selectAllTag(html);
+		expect(attribute(selectAll, "hx-indicator")).toBe(
+			LOAD_PAUSE["hx-indicator"],
+		);
+		expect(attribute(selectAll, "hx-disable")).toBe(LOAD_PAUSE["hx-disable"]);
+	});
+
+	it("marks the selection form as the list's indicator, counted on the bar's count only", async () => {
+		const html = await pageHtml("month=all&select=1");
+		const form = openingTag(html, /<form[^>]*id="selection-form"[^>]*>/);
+		expect(attribute(form, "class")).toContain("selection-list");
+		expect(attribute(form, "hx-indicator")).toBe("#selected-count");
+	});
+
+	it("leaves the list's controls unpaused outside Select mode", async () => {
+		const html = await pageHtml("month=all&page=2");
+		const filters = openingTag(html, /<form[^>]*id="filters"[^>]*>/);
+		expect(filters).not.toContain("hx-indicator");
+		expect(filters).not.toContain("hx-disable");
+		const links = pageLinks(html);
+		expect(links.length).toBeGreaterThan(0);
+		for (const link of links) {
+			expect(link).not.toContain("hx-indicator");
+			expect(link).not.toContain("hx-disable");
+		}
+		expect(html).not.toContain('class="selection-list');
+	});
+
+	it("keeps the pause on Select all in the count's out-of-band copy", async () => {
+		const ids = rowIds(await pageHtml("month=all&select=1"));
+		const oneOff = await countFragment(ids.slice(1), ids);
+		const selectAll = selectAllTag(oneOff);
+		expect(selectAll).not.toBe("");
+		expect(attribute(selectAll, "hx-indicator")).toBe(
+			LOAD_PAUSE["hx-indicator"],
+		);
+		expect(attribute(selectAll, "hx-disable")).toBe(LOAD_PAUSE["hx-disable"]);
+	});
+
+	it("asks the reply for focus on the first tick after Older or Newer, in Select mode only", async () => {
+		const html = await pageHtml("month=all&page=2&select=1");
+		const links = pageLinks(html);
+		expect(links.length).toBeGreaterThan(0);
+		for (const link of links) {
+			const href = attribute(link, "href");
+			expect(href).toContain("select=1");
+			expect(attribute(link, "hx-get")).toBe(`${href}&focus=first-tick`);
+			expect(attribute(link, "hx-push-url")).toBe(href);
+		}
+		const plain = await pageHtml("month=all&page=2");
+		expect(plain).not.toContain("first-tick");
+		for (const link of pageLinks(plain)) {
+			expect(attribute(link, "hx-get")).toBe(attribute(link, "href"));
+			expect(attribute(link, "hx-push-url")).toBe("true");
+		}
+	});
+
+	it("gives the first row's tick autofocus in the reply to Older or Newer, and nothing else", async () => {
+		const html = await pageHtml(
+			"month=all&page=2&select=1&focus=first-tick",
+			true,
+		);
+		expect(html.match(/ autofocus/g)?.length ?? 0).toBe(1);
+		const tick = openingTag(html, /<input[^>]*autofocus[^>]*>/);
+		expect(tick).toContain('name="ids"');
+		expect(tick).toContain(`value="${rowIds(html)[0]}"`);
+		const plain = await pageHtml("month=all&page=2&select=1", true);
+		expect(plain).not.toContain("autofocus");
+	});
 });

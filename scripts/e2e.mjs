@@ -606,6 +606,134 @@ await page.unroute("**/transactions/select/count*", slowCount);
 dropReplacedRequestLogs(errorsBefore);
 step("Next while a count loads gives page 2 its own ids");
 
+// A tap during a Select-mode list load does nothing: the rows and actions are out of reach, and no count starts from the page that is leaving (#215).
+errorsBefore = consoleErrors.length;
+await goto(`${BASE}/transactions?month=all`, { waitUntil: "networkidle" });
+await page.getByRole("link", { name: "Select" }).click();
+const pausedRows = page.locator("#selection-form label:has(input[name=ids])");
+await pausedRows.nth(0).click();
+await page.getByText("1 selected", { exact: true }).waitFor();
+const countRequests = [];
+const recordCount = (request) => {
+	if (request.url().includes("/transactions/select/count"))
+		countRequests.push(request.url());
+};
+page.on("request", recordCount);
+const slowList = async (route) => {
+	await new Promise((resolve) => setTimeout(resolve, 1500));
+	await route.continue().catch(() => {}); // the page may already have replaced this request
+};
+await page.route("**/transactions?*page=2*", slowList);
+const countsBeforeLoad = countRequests.length;
+await page.locator('a[rel="next"]').click();
+await page.waitForTimeout(200);
+assert.equal(
+	await page.locator("#selection-form.htmx-request").count(),
+	1,
+	"the list's load must mark the selection form",
+);
+assert.equal(await page.locator("#set-category-selection").isDisabled(), true);
+assert.equal(await page.locator("#exclude-selection").isDisabled(), true);
+assert.equal(
+	await page
+		.locator("#selection-form .selection-mark")
+		.first()
+		.evaluate((el) => getComputedStyle(el).opacity),
+	"0.4",
+	"the round marks fade to 40% once the load runs past 150 ms",
+);
+assert.equal(
+	await pausedRows
+		.nth(0)
+		.locator("span.min-w-0")
+		.first()
+		.evaluate((el) => getComputedStyle(el).opacity),
+	"1",
+	"the row's words stay full ink",
+);
+const tapBox = await pausedRows.nth(1).boundingBox();
+await page.mouse.click(
+	tapBox.x + tapBox.width / 2,
+	tapBox.y + tapBox.height / 2,
+);
+await page.waitForTimeout(300);
+assert.equal(
+	await page.locator("#selection-form input[name=ids]").nth(1).isChecked(),
+	false,
+	"a tap during the load must not tick a row",
+);
+assert.equal(
+	countRequests.length,
+	countsBeforeLoad,
+	"a tap during the load must not send a count",
+);
+await page.waitForFunction(
+	() => !document.querySelector("#selection-form.htmx-request"),
+);
+await page.unroute("**/transactions?*page=2*", slowList);
+const pageTwoIds = await page
+	.locator("#results input[name=ids]")
+	.evaluateAll((inputs) => inputs.map((input) => input.value).join(","));
+assert.equal(
+	await page.locator("#select-all-page input[name=page-ids]").inputValue(),
+	pageTwoIds,
+	"page 2's Select all must hold page 2's ids",
+);
+assert.equal(
+	(await page.locator("#selected-count").textContent())?.trim(),
+	`${await page.locator("#selection-form input[name=ids]:checked").count()} selected`,
+	"the count must match the ticks on page 2",
+);
+assert.equal(
+	await page.evaluate(
+		() =>
+			document.activeElement ===
+			document.querySelector("#results input[name=ids]"),
+	),
+	true,
+	"focus must move to the first row's tick once the list lands",
+);
+assert.equal(
+	countRequests.length,
+	countsBeforeLoad,
+	"no count may start from the page that left",
+);
+page.off("request", recordCount);
+dropReplacedRequestLogs(errorsBefore);
+step(
+	"a tap during a list load does nothing, and focus lands on the first tick",
+);
+
+// A second filter change during a list load keeps the ticks: the newest list carries the ticks still checked (#215).
+errorsBefore = consoleErrors.length;
+await goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "networkidle",
+});
+const tickable = page.locator("#selection-form label:has(input[name=ids])");
+await tickable.nth(0).click();
+await tickable.nth(1).click();
+await page.getByText("2 selected", { exact: true }).waitFor();
+const slowLists = async (route) => {
+	await new Promise((resolve) => setTimeout(resolve, 1500));
+	await route.continue().catch(() => {}); // the page may already have replaced this request
+};
+await page.route("**/transactions?*", slowLists);
+await page.locator("#show").selectOption("spending");
+await page.waitForTimeout(400);
+await page.locator("#show").selectOption("all");
+await page.waitForFunction(
+	() => !document.querySelector("#selection-form.htmx-request"),
+);
+await page.unroute("**/transactions?*", slowLists);
+assert.equal(
+	await page.locator("#selection-form input[name=ids]:checked").count(),
+	2,
+	"both ticks must survive a second filter change during a list load",
+);
+await page.getByText("2 selected", { exact: true }).waitFor();
+dropReplacedRequestLogs(errorsBefore);
+step("a second filter change during a list load keeps the ticks");
+
 // Select several uncategorized rows, then set their category in one action (P20 A).
 assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);
 await goto(`${BASE}/transactions?uncategorized=1`, {
