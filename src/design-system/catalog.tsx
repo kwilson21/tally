@@ -1945,25 +1945,81 @@ function Rows() {
 					"SelectableTransactionRow",
 					"Button",
 				]}
-				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it that ticks every row on the page (“Select all 25”) until every row is ticked, and Set category and Exclude on a second line (P70 A and P81 A). Ticks that aren't on this page sit on a line of their own, closed or open, and past 100 the bar says so in brick (#350)."
+				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it. The link ticks the page (“Select all 25”) until every row on the page is ticked; then it offers the whole set the filters match, named with its month (“Select all 112 in September”, P70 A, P81 A and #321). In all mode the rows unticked from the set are kept, and the link ticks them again. Set category and Exclude sit on a second line. Ticks that aren't on this page sit on a line of their own, closed or open, and past 100 the bar says so in brick (#350)."
 			>
 				<State label="Some rows ticked: the link offers the page">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
 							count={3}
 							notOnPage={0}
-							ticks={[101, 103, 104]}
+							selection={{ ticks: [101, 103, 104], all: false, unticked: [] }}
+							unselected={109}
+							total={112}
+							words="September"
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
 						/>
 					</div>
 				</State>
-				<State label="Every row ticked: the link is gone">
+				<State label="Every row on the page ticked: the link offers the whole month">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
 							count={25}
 							notOnPage={0}
-							ticks={SAMPLE_PAGE_IDS}
+							selection={{ ticks: SAMPLE_PAGE_IDS, all: false, unticked: [] }}
+							unselected={87}
+							total={112}
+							words="September"
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+						/>
+					</div>
+				</State>
+				<State label="The whole month selected: no link, the count says 112">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={112}
+							notOnPage={0}
+							selection={{ ticks: [], all: true, unticked: [] }}
+							unselected={0}
+							total={112}
+							words="September"
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+						/>
+					</div>
+				</State>
+				<State label="One unticked after the whole month: 111 selected, and the link ticks them all again">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={111}
+							notOnPage={0}
+							selection={{
+								ticks: [],
+								all: true,
+								unticked: [101],
+							}}
+							unselected={1}
+							total={112}
+							words="September"
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+						/>
+					</div>
+				</State>
+				<State label="All months: the link names them, “Select all 340 in all months”">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={339}
+							notOnPage={0}
+							selection={{
+								ticks: [],
+								all: true,
+								unticked: [101],
+							}}
+							unselected={1}
+							total={340}
+							words="all months"
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
 						/>
@@ -1974,7 +2030,10 @@ function Rows() {
 						<SelectionActionBar
 							count={0}
 							notOnPage={0}
-							ticks={[]}
+							selection={{ ticks: [], all: false, unticked: [] }}
+							unselected={112}
+							total={112}
+							words="September"
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
 							disabled
@@ -1986,7 +2045,14 @@ function Rows() {
 						<SelectionActionBar
 							count={4}
 							notOnPage={3}
-							ticks={[101, ...OFF_PAGE_IDS.slice(0, 3)]}
+							selection={{
+								ticks: [101, ...OFF_PAGE_IDS.slice(0, 3)],
+								all: false,
+								unticked: [],
+							}}
+							unselected={108}
+							total={112}
+							words="September"
 							rows={
 								<ul class="divide-y divide-rule">
 									{TRANSACTION_ROWS.slice(0, 3).map((state) => (
@@ -2004,7 +2070,14 @@ function Rows() {
 						<SelectionActionBar
 							count={4}
 							notOnPage={3}
-							ticks={[101, ...OFF_PAGE_IDS.slice(0, 3)]}
+							selection={{
+								ticks: [101, ...OFF_PAGE_IDS.slice(0, 3)],
+								all: false,
+								unticked: [],
+							}}
+							unselected={108}
+							total={112}
+							words="September"
 							openNotOnPage
 							rows={
 								<ul class="divide-y divide-rule">
@@ -2023,7 +2096,14 @@ function Rows() {
 						<SelectionActionBar
 							count={101}
 							notOnPage={76}
-							ticks={[...SAMPLE_PAGE_IDS, ...OFF_PAGE_IDS]}
+							selection={{
+								ticks: [...SAMPLE_PAGE_IDS, ...OFF_PAGE_IDS],
+								all: false,
+								unticked: [],
+							}}
+							unselected={11}
+							total={112}
+							words="September"
 							rows={undefined}
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
@@ -2045,9 +2125,16 @@ function Rows() {
 							<SelectionActionBar
 								count={1}
 								notOnPage={0}
-								ticks={TRANSACTION_ROWS.slice(1, 2).map(
-									(state) => state.row.id,
-								)}
+								selection={{
+									ticks: TRANSACTION_ROWS.slice(1, 2).map(
+										(state) => state.row.id,
+									),
+									all: false,
+									unticked: [],
+								}}
+								unselected={1}
+								total={2}
+								words="September"
 								back="/transactions"
 								pageIds={TRANSACTION_ROWS.slice(0, 2).map(
 									(state) => state.row.id,

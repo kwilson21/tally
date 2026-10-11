@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+import { NO_SELECTION, type Selection } from "../transactions/selection";
 import { Button } from "./button";
 import { Icon } from "./icons";
 
@@ -8,7 +9,7 @@ export const MAX_SELECTED = 100;
 export const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
 
 /**
- * What a reply refreshes in the bar: the live count and both actions, the page link (its wrapper
+ * What a reply refreshes in the bar: the live count and both actions, the Select all link (its wrapper
  * stays in place, so a count can bring the link back), the limit and the line for ticks not on this
  * page. Out of band, a list change adds the list's own parts to this (LIST_OOB in the transactions route).
  */
@@ -36,8 +37,11 @@ export const LIST_LOAD_PAUSE = {
 	"hx-disable": "#set-category-selection, #exclude-selection",
 };
 
-/** Every ticked row in the selection form, on this page or not (the rows a list request carries, #350). */
-const TICKS = "#selection-form input[name=ids]:checked";
+/**
+ * Every ticked row in the selection form, on this page or not (the rows a list request carries, #350), and
+ * the fields that carry the rest of the selection: the page's rows, the all-mode flag and the unticked rows (#321).
+ */
+const TICKS = "#selection-form input[name=ids]:checked, #select-all-page input";
 
 /**
  * The form field the "not on this page" line sends while it is drawn, so a count that empties the line
@@ -47,13 +51,36 @@ export const NOT_ON_PAGE_FIELD = "not-on-page";
 
 /**
  * Every ticked row rides in a list request, on this page or not, so the ticks survive a change of
- * page, search or filter (#350).
+ * page, search or filter (#350). The selection's own fields ride with them (#321).
  */
 export const TICKS_INCLUDE = { "hx-include": TICKS };
 
-/** The select-mode list at `back` (the list's own address), with these rows ticked. */
-export const selectModeHref = (back: string, ids: number[]) =>
-	`${back}${back.includes("?") ? "&" : "?"}select=1${ids.length ? `&ids=${ids.join(",")}` : ""}`;
+/**
+ * The selection as address parameters, each only when it is set: the ticks, the all-mode flag, and the rows
+ * unticked from the whole set (#321). Each is written in the address, so a reload keeps the selection.
+ */
+export const selectionQuery = (selection: Selection) =>
+	`${selection.ticks.length ? `&ids=${selection.ticks.join(",")}` : ""}${selection.all ? "&all=1" : ""}${selection.all && selection.unticked.length ? `&unticked=${selection.unticked.join(",")}` : ""}`;
+
+/** The select-mode list at `back` (the list's own address), with this selection. */
+export const selectModeHref = (back: string, selection: Selection) =>
+	`${back}${back.includes("?") ? "&" : "?"}select=1${selectionQuery(selection)}`;
+
+/**
+ * The all-mode fields a form posts: the flag and each row unticked from the set (#321). The page's own
+ * rows are read from their boxes, so these are for the rows off the page.
+ */
+export function SelectionFields({ selection }: { selection: Selection }) {
+	if (!selection.all) return null;
+	return (
+		<>
+			<input type="hidden" name="all" value="1" />
+			{selection.unticked.map((id) => (
+				<input type="hidden" name="unticked" value={id} />
+			))}
+		</>
+	);
+}
 
 /** The bar's two actions. Out of band, a count's reply swaps them in place; each keeps its own request otherwise. */
 export function SelectionActionButtons({
@@ -106,61 +133,125 @@ export function SelectionActionButtons({
 	);
 }
 
-/** Whether Select all is drawn: the page has rows to tick, and some of them are not ticked yet. */
-export const selectAllShown = (pageIds: number[], ticked: Set<number>) =>
-	pageIds.length > 0 && !pageIds.every((id) => ticked.has(id));
+/**
+ * Which Select all link the bar offers (P70 A, P81 A, #321). While some rows on the page aren't ticked, the page
+ * ("Select all 25"). Once they are, or in all mode, the whole set ("Select all 112 in September") while some
+ * matched row isn't selected yet, so the link never offers to tick nothing. Null otherwise.
+ */
+export function selectAllOffer({
+	pageIds,
+	ticked,
+	all,
+	unselected,
+}: {
+	pageIds: number[];
+	ticked: Set<number>;
+	all: boolean;
+	/** The rows the filters match that the bar doesn't select yet: what the whole-set link would add. */
+	unselected: number;
+}): "page" | "whole" | null {
+	if (all) return unselected > 0 ? "whole" : null;
+	if (pageIds.length > 0 && !pageIds.every((id) => ticked.has(id)))
+		return "page";
+	return unselected > 0 ? "whole" : null;
+}
 
 /**
- * The text link that ticks every selectable row on the page (P70 A). It is a plain link to the
- * same select-mode list, carrying every tick already in the address plus this page's rows, so it works
- * without JavaScript too. Its htmx request asks the reply to focus Set category (FOCUS_SET_CATEGORY),
- * while the pushed address stays the plain list. It shows until every row on the page is ticked. The
- * wrapper always stays, carrying the page's ids, so a count can swap the link in or out.
+ * The text link that ticks rows: the page's (P70 A), or the whole set (P81 A, "Select all 112 in September"). Each is a
+ * plain link to the same select-mode list, carrying the selection already in the address, so it works without
+ * JavaScript too. Its htmx request asks the reply to focus Set category (FOCUS_SET_CATEGORY), while the pushed
+ * address stays the plain list. The wrapper always stays, carrying the page's ids and the selection's fields, so a
+ * count can swap the link in or out.
  */
 export function SelectAllOnPage({
 	back,
 	pageIds,
-	ticks,
+	selection,
+	unselected,
+	total,
+	words,
 	oob = false,
 	autofocus = false,
 }: {
-	/** The list's own address (no ticks), which Select all's link builds on. */
+	/** The list's own address (no selection), which the link builds on. */
 	back: string;
 	/** The selectable rows on the page (split parents have no checkbox). */
 	pageIds: number[];
-	/** Every ticked row, on this page or not: the link keeps them as it ticks the page (#350). */
-	ticks: number[];
+	/** The selection the bar shows, settled against the filters (see settle). */
+	selection: Selection;
+	/** The rows the filters match that the bar doesn't select yet (see selectAllOffer). */
+	unselected: number;
+	/** The selectable rows the filters match: the whole-set link's number (#321). */
+	total: number;
+	/** The month the whole-set link names: "September", or "all months". */
+	words: string;
 	oob?: boolean;
 	/** Takes focus when it is drawn (a count reply after the last tick off the page is unticked, #350). */
 	autofocus?: boolean;
 }) {
-	const showLink = selectAllShown(pageIds, new Set(ticks));
+	const offer = selectAllOffer({
+		pageIds,
+		ticked: new Set(selection.ticks),
+		all: selection.all,
+		unselected,
+	});
 	// Each id once: the ticks, then this page's rows that aren't ticked yet (the address both forms share).
-	const address = selectModeHref(back, [...new Set([...ticks, ...pageIds])]);
+	const pageAddress = selectModeHref(back, {
+		ticks: [...new Set([...selection.ticks, ...pageIds])],
+		all: false,
+		unticked: [],
+	});
+	// The whole set, with every tick kept and no unticked rows: the link ticks everything the filters match.
+	const wholeAddress = selectModeHref(back, {
+		ticks: selection.ticks,
+		all: true,
+		unticked: [],
+	});
 	return (
 		<span id="select-all-page" hx-swap-oob={oob ? "outerHTML" : undefined}>
 			<input type="hidden" name="page-ids" value={pageIds.join(",")} />
-			{showLink && (
+			<SelectionFields selection={selection} />
+			{offer === "page" && (
 				<Button
 					kind="text"
 					// Without JavaScript the link carries the ticks and ticks this page's rows.
-					href={address}
+					href={pageAddress}
 					class="-mr-2"
 					// htmx replaces a URL's own ids with the ones it includes, so this address has none: the ticks
 					// and the page's rows come as parameters, and the reply ticks both (page-ids, #350).
-					hx-get={`${selectModeHref(back, [])}&focus=${FOCUS_SET_CATEGORY}`}
+					hx-get={`${selectModeHref(back, NO_SELECTION)}&focus=${FOCUS_SET_CATEGORY}`}
 					{...LIST_LOAD_PAUSE}
-					hx-include={`${TICKS}, #select-all-page input[name=page-ids]`}
+					hx-include={TICKS}
 					hx-sync="#filters:replace"
 					hx-target="#results"
 					hx-select="#results > *"
 					hx-select-oob={SELECTION_BAR_OOB}
 					hx-swap="innerHTML"
 					// The reply's HX-Push-Url (the ticks, without the focus marker) replaces this in Select mode.
-					hx-push-url={address}
+					hx-push-url={pageAddress}
 					autofocus={autofocus}
 				>
 					{`Select all ${pageIds.length}`}
+				</Button>
+			)}
+			{offer === "whole" && (
+				<Button
+					kind="text"
+					href={wholeAddress}
+					class="-mr-2"
+					// As the page link: the all-mode flag rides in the request, and the ticks and the fields come as parameters.
+					hx-get={`${selectModeHref(back, { ticks: [], all: true, unticked: [] })}&focus=${FOCUS_SET_CATEGORY}`}
+					{...LIST_LOAD_PAUSE}
+					hx-include={TICKS}
+					hx-sync="#filters:replace"
+					hx-target="#results"
+					hx-select="#results > *"
+					hx-select-oob={SELECTION_BAR_OOB}
+					hx-swap="innerHTML"
+					hx-push-url={wholeAddress}
+					autofocus={autofocus}
+				>
+					{`Select all ${total} in ${words}`}
 				</Button>
 			)}
 		</span>
@@ -288,9 +379,10 @@ export function NotOnPage({
 }
 
 /**
- * The select-mode action bar (P70 A and P81 A): the live "N selected" count with the page link
+ * The select-mode action bar (P70 A and P81 A): the live "N selected" count with the Select all link
  * beside it, then the limit, the line for ticks not on this page, and Set category and Exclude on the
- * last line.
+ * last line. `count` is what the actions act on (the whole set in all mode); `selection.ticks` is what the
+ * limit counts.
  */
 export function SelectionActionBar({
 	label,
@@ -299,14 +391,17 @@ export function SelectionActionBar({
 	rows,
 	back,
 	pageIds,
-	ticks,
+	selection,
+	unselected,
+	total,
+	words,
 	disabled = false,
 	focusSetCategory = false,
 	openNotOnPage = false,
 }: {
 	/** The words for the count when there is no script to count with (the first load without JavaScript). */
 	label?: string;
-	/** The ticked rows the list still shows, which the words count. */
+	/** The rows the actions act on, which the words count. */
 	count: number;
 	/** The ticked rows that are not in the list on screen. */
 	notOnPage: number;
@@ -315,8 +410,14 @@ export function SelectionActionBar({
 	/** The list's own address, which Select all builds on. */
 	back: string;
 	pageIds: number[];
-	/** Every ticked row, on this page or not: the link keeps them, and the limit counts every one (#350). */
-	ticks: number[];
+	/** The selection, settled against the filters (#321). */
+	selection: Selection;
+	/** The rows the filters match that the bar doesn't select yet (see selectAllOffer). */
+	unselected: number;
+	/** The selectable rows the filters match: the whole-set link's number. */
+	total: number;
+	/** The month the whole-set link names. */
+	words: string;
 	disabled?: boolean;
 	/** The reply to Select all: Set category takes focus (see FOCUS_SET_CATEGORY). */
 	focusSetCategory?: boolean;
@@ -329,9 +430,16 @@ export function SelectionActionBar({
 				<span id="selected-count" aria-live="polite" class="text-lg">
 					{label ?? <SelectedCount count={count} notOnPage={notOnPage} />}
 				</span>
-				<SelectAllOnPage back={back} pageIds={pageIds} ticks={ticks} />
+				<SelectAllOnPage
+					back={back}
+					pageIds={pageIds}
+					selection={selection}
+					unselected={unselected}
+					total={total}
+					words={words}
+				/>
 			</div>
-			<SelectionLimit count={ticks.length} />
+			<SelectionLimit count={selection.ticks.length} />
 			<NotOnPage count={notOnPage} rows={rows} open={openNotOnPage} />
 			<div class="flex gap-2">
 				<SelectionActionButtons

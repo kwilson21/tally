@@ -29,6 +29,7 @@ import {
 	removeSplit,
 	saveEdit,
 	saveSplit,
+	selectableMatchIds,
 	selectableTickIds,
 	setMerchantRule,
 	type TransactionDetail,
@@ -74,6 +75,13 @@ import {
 	firstRuleOfferAmong,
 	ruleOfferForTransaction,
 } from "../transactions/rule-offer";
+import {
+	NO_SELECTION,
+	type Selection,
+	selectedIds,
+	settle,
+	unticksFrom,
+} from "../transactions/selection";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
@@ -128,8 +136,10 @@ import {
 	SelectedCount,
 	SelectionActionBar,
 	SelectionActionButtons,
+	SelectionFields,
 	SelectionLimit,
-	selectAllShown,
+	selectAllOffer,
+	selectionQuery,
 	selectModeHref,
 	TICKS_INCLUDE,
 	TOO_MANY,
@@ -169,8 +179,13 @@ type ListOptions = {
 	status?: 200 | 404 | 422;
 	pageTitle?: string;
 	selecting?: boolean;
-	/** In select mode: the rows to show ticked (back from the Set category sheet, or kept across a list change). */
-	checkedIds?: Set<number>;
+	/**
+	 * In select mode: the selection to show (back from the Set category sheet, or kept across a list change), as
+	 * the request carries it. It is settled against the filters the list shows (#321).
+	 */
+	selection?: Selection;
+	/** In select mode on an htmx request: the address the reply pushes, which carries the selection (#350). */
+	selectPushBase?: string;
 	selectionError?: string;
 	focusHeading?: boolean;
 	/** The reply to Select all: focus Set category (the link leaves with the reply), when rows are ticked. */
@@ -239,7 +254,8 @@ async function renderList(
 		status = 200,
 		pageTitle,
 		selecting: selectRequested = false,
-		checkedIds = new Set<number>(),
+		selection = NO_SELECTION,
+		selectPushBase,
 		selectionError,
 		focusHeading = false,
 		focusSetCategory = false,
@@ -340,20 +356,40 @@ async function renderList(
 	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
 	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
 	const onPage = new Set(pageIds);
+	// The rows the filters match (no split parent): what Select all selects, and what the selection settles against (#321).
+	const selectable = selecting
+		? await selectableMatchIds(c.env.DB, filters)
+		: [];
+	const settled = settle(selection, new Set(selectable));
 	// A tick stays until it is unticked, Done or acted on, so a tick that isn't on this page is drawn in
 	// the bar's "not on this page" line, still ticked (#350). Only rows that still exist are counted.
-	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
 	const offPage = selecting
 		? await listRowsByIds(
 				c.env.DB,
-				[...checkedIds].filter((id) => !onPage.has(id)),
+				settled.ticks.filter((id) => !onPage.has(id)),
 			)
 		: [];
 	// Every tick the list keeps, on this page or not: the address, the links, the bar and the limit all read these.
 	// A tick to a row that is gone, or is now a split, drops out here, whichever caller drew the list (#350).
-	const kept = new Set([...ticked, ...offPage].map((row) => row.id));
-	const ticks = [...checkedIds].filter((id) => kept.has(id));
-	const tickCount = ticks.length;
+	const offIds = new Set(offPage.map((row) => row.id));
+	const ticks = settled.ticks.filter((id) => onPage.has(id) || offIds.has(id));
+	const current: Selection = {
+		ticks,
+		all: settled.all,
+		unticked: settled.unticked,
+	};
+	// What the actions act on, and the matched rows the bar doesn't select yet: the whole-set link's count (#321).
+	const picked = selecting ? selectedIds(current, selectable) : [];
+	const pickedSet = new Set(picked);
+	const unselected = selectable.filter((id) => !pickedSet.has(id)).length;
+	const tickCount = picked.length;
+	const tickedSet = new Set(current.ticks);
+	const unticked = new Set(current.unticked);
+	// The month the whole-set link names: "September", or "all months" (#321).
+	const monthWords = monthWordsFor(filters.month, today);
+	// A row's box: all mode checks every row the set holds, except the rows unticked from it.
+	const checkedOn = (id: number) =>
+		current.all ? !unticked.has(id) : tickedSet.has(id);
 	const pageHref = (n: number) => listUrl({ ...filters, page: n });
 	// "Only October" narrows a search that runs in every month to this month, and keeps the search (#211).
 	const onlyMonthHref = listUrl({
@@ -374,9 +410,7 @@ async function renderList(
 	// Without JavaScript a page link's address carries the ticks, so the next page keeps them (#350). The
 	// htmx request doesn't use this address: it sends the ticks as they are when clicked, not as drawn.
 	const pageLinkHref = (n: number) =>
-		selecting && ticks.length > 0
-			? `${pageHref(n)}&ids=${ticks.join(",")}`
-			: pageHref(n);
+		selecting ? `${pageHref(n)}${selectionQuery(current)}` : pageHref(n);
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
 		<a
@@ -455,8 +489,11 @@ async function renderList(
 	// In Select mode the Add cash sheet's close link and Cancel keep the ticks (#350). The link carries them as
 	// drawn, for a browser without JavaScript; with it, the request sends them as they are when the link is tapped.
 	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
-	const cashHref = selecting ? selectModeHref(cashPath, ticks) : cashPath;
-	const cashGet = selecting ? selectModeHref(cashPath, []) : cashPath;
+	const cashHref = selecting ? selectModeHref(cashPath, current) : cashPath;
+	const cashGet = selecting ? selectModeHref(cashPath, NO_SELECTION) : cashPath;
+	// A list reply in Select mode pushes the address with the settled selection in it, so a reload keeps it (#350, #321).
+	if (selecting && htmx && selectPushBase !== undefined)
+		c.header("HX-Push-Url", selectModeHref(selectPushBase, current));
 
 	return c.html(
 		<Layout
@@ -645,6 +682,7 @@ async function renderList(
 					<noscript>
 						{selecting &&
 							ticks.map((id) => <input type="hidden" name="ids" value={id} />)}
+						{selecting && <SelectionFields selection={current} />}
 						<Button type="submit" class="self-start px-4">
 							Apply filters
 						</Button>
@@ -731,7 +769,7 @@ async function renderList(
 									hint="Try a wider month, or clear the search."
 									// The filters' link keeps select mode and every tick, as a filter change does (#350).
 									action={{
-										href: selectModeHref(clearFiltersHref, ticks),
+										href: selectModeHref(clearFiltersHref, current),
 										label: "Clear filters",
 									}}
 								/>
@@ -748,7 +786,7 @@ async function renderList(
 												) : (
 													<SelectableTransactionRow
 														row={shown(row)}
-														checked={checkedIds.has(row.id)}
+														checked={checkedOn(row.id)}
 														today={today}
 														autofocus={row.id === firstTickId}
 													/>
@@ -779,10 +817,13 @@ async function renderList(
 								rows={offPageRows}
 								back={back}
 								pageIds={pageIds}
-								ticks={ticks}
+								selection={current}
+								unselected={unselected}
+								total={selectable.length}
+								words={monthWords}
 								// Both actions wait on every tick the list keeps, as the limit does, not only the rows it shows.
 								disabled={
-									htmx && (ticks.length === 0 || ticks.length > MAX_SELECTED)
+									htmx && (tickCount === 0 || ticks.length > MAX_SELECTED)
 								}
 								focusSetCategory={focusSetCategory && tickCount > 0}
 							/>
@@ -864,27 +905,24 @@ transactions.get("/transactions", async (c) => {
 	const selectAll = params.get("focus") === FOCUS_SET_CATEGORY;
 	// Every tick is kept, past 100 too: the bar refuses to act on more than 100, but never trims them (#350).
 	// A tick to a row that is gone, or is now a split, drops out here, before the address and the list read it (#350).
-	const ticks = selecting
-		? await selectableTickIds(
-				c.env.DB,
-				parseIds([
-					...params.getAll("ids"),
-					...(selectAll ? params.getAll("page-ids") : []),
-				]),
-			)
-		: [];
+	// The whole-set link ticks every match again, so its request clears the unticked rows (#321).
+	const read = selectionFields(params);
+	const selection = selecting
+		? await requestedSelection(c.env.DB, read, {
+				pageLink: selectAll && !read.all,
+				wholeAgain: selectAll && read.all,
+			})
+		: NO_SELECTION;
 	const filters = { ...asked, month };
+	let selectPushBase: string | undefined;
 	if (c.req.header("HX-Request") === "true") {
 		const named = monthParam(asked, before, month, thisMonth);
 		if (selecting) {
-			// In Select mode the address is written clean (#350): the filters, the month it names (set even when that
-			// is this month, which filtersToQuery leaves out), and the ticks, with no focus marker or page-ids.
+			// In Select mode the address is written clean (#350): the filters, and the month it names (set even when that
+			// is this month, which filtersToQuery leaves out). renderList adds the settled selection to it (#321).
 			const query = new URLSearchParams(filtersToQuery(filters, thisMonth));
 			if (named !== null) query.set("month", named);
-			c.header(
-				"HX-Push-Url",
-				selectModeHref(`/transactions${query.size ? `?${query}` : ""}`, ticks),
-			);
+			selectPushBase = `/transactions${query.size ? `?${query}` : ""}`;
 		} else {
 			// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
 			// It is written only when the request's own address names a different month (htmx sends the form's month).
@@ -903,7 +941,8 @@ transactions.get("/transactions", async (c) => {
 		selecting,
 		focusSetCategory: selecting && selectAll,
 		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
-		checkedIds: selecting ? new Set(ticks) : undefined,
+		selection,
+		selectPushBase,
 	});
 });
 
@@ -939,40 +978,67 @@ function parseIds(values: (string | File)[]) {
 }
 
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
-transactions.get("/transactions/select/count", (c) => {
+transactions.get("/transactions/select/count", async (c) => {
 	const params = new URL(c.req.url).searchParams;
-	// Every checked row in the form, on this page or not; the page's own rows come from page-ids.
-	const ticks = parseIds(params.getAll("ids"));
-	const pageIds = parseIds(params.getAll("page-ids"));
+	const read = selectionFields(params);
+	const pageIds = read.pageIds ?? [];
 	const onPage = new Set(pageIds);
-	const notOnPage = ticks.filter((id) => !onPage.has(id)).length;
 	const back = safeBack(params.get("back"));
-	// Each tap keeps the ticks in the address, replacing its entry rather than adding one, so a reload keeps them (#350).
-	c.header("HX-Replace-Url", selectModeHref(back, ticks));
+	const today = await householdToday(c.env.DB);
+	const filters = filtersFrom(c, today, back);
+	const matched = await selectableMatchIds(c.env.DB, filters);
+	// The count counts the ticks the form posts, as it always has: an action is what drops a gone row (#350).
+	const selection = settle(
+		{
+			ticks: read.ids,
+			all: read.all,
+			unticked: read.all
+				? unticksFrom(read.hidden, read.ids, read.pageIds)
+				: [],
+		},
+		new Set(matched),
+	);
+	// What the actions act on, and the matched rows the bar doesn't select yet (the whole-set link's count, #321).
+	const picked = selectedIds(selection, matched);
+	const pickedSet = new Set(picked);
+	const unselected = matched.filter((id) => !pickedSet.has(id)).length;
+	const notOnPage = selection.ticks.filter((id) => !onPage.has(id)).length;
+	// Each tap keeps the selection in the address, replacing its entry rather than adding one, so a reload keeps it (#350).
+	c.header("HX-Replace-Url", selectModeHref(back, selection));
 	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
 	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
 	const lineGone = params.has(NOT_ON_PAGE_FIELD) && notOnPage === 0;
-	const focusSelectAll = lineGone && selectAllShown(pageIds, new Set(ticks));
+	const focusSelectAll =
+		lineGone &&
+		selectAllOffer({
+			pageIds,
+			ticked: new Set(selection.ticks),
+			all: selection.all,
+			unselected,
+		}) !== null;
 	const focusCount = lineGone && !focusSelectAll;
 	return c.html(
 		<>
 			<SelectedCount
-				count={ticks.length}
+				count={picked.length}
 				notOnPage={notOnPage}
 				focus={focusCount}
 			/>
 			<SelectionActionButtons
-				disabled={ticks.length === 0 || ticks.length > MAX_SELECTED}
+				disabled={picked.length === 0 || selection.ticks.length > MAX_SELECTED}
 				oob
 			/>
 			<SelectAllOnPage
 				back={back}
 				pageIds={pageIds}
-				ticks={ticks}
+				selection={selection}
+				unselected={unselected}
+				total={matched.length}
+				words={monthWordsFor(filters.month, today)}
 				autofocus={focusSelectAll}
 				oob
 			/>
-			<SelectionLimit count={ticks.length} oob />
+			<SelectionLimit count={selection.ticks.length} oob />
 			{notOnPage > 0 ? (
 				<NotOnPageCount count={notOnPage} oob />
 			) : (
@@ -983,40 +1049,102 @@ transactions.get("/transactions/select/count", (c) => {
 	);
 });
 
+/** A request's selection fields, as a form posts them or an address carries them (#321). */
+type SelectionReadable = {
+	get(name: string): string | File | null;
+	getAll(name: string): (string | File)[];
+};
+function selectionFields(fields: SelectionReadable) {
+	const pageIds = fields.getAll("page-ids");
+	return {
+		/** The ticked rows, on this page or not (the form's checkboxes, or the address's ids). */
+		ids: parseIds(fields.getAll("ids")),
+		/** The rows the page drew, when the request names them (page-ids): their boxes say which are unticked. */
+		pageIds: pageIds.length > 0 ? parseIds(pageIds) : undefined,
+		all: fields.get("all") === "1",
+		/** The rows unticked from the whole set, as the hidden fields and the address carry them. */
+		hidden: parseIds(fields.getAll("unticked")),
+	};
+}
+
 /**
- * The posted ids, or why they can't be acted on. A tick to a row that is gone, or is now a split, drops out
- * before the limit counts them (#350). `ticks` are the ticks the list keeps when it is drawn again: a refusal
- * for more than 100 keeps every one of them, and trims none (#350).
+ * The selection a request means, before the filters settle it (#321): its ticks, as selectable rows (a tick
+ * to a gone or split row drops out, #350), and in all mode the rows unticked from the set. `pageLink` also
+ * ticks the page's rows (Select all's page link); `wholeAgain` ticks the whole set again, clearing the unticks.
  */
-async function postedSelection(c: Context<App>, form: FormData) {
-	const ids = await selectableTickIds(c.env.DB, parseIds(form.getAll("ids")));
-	if (ids.length > MAX_SELECTED)
-		return { ids: [], ticks: ids, error: TOO_MANY };
+async function requestedSelection(
+	db: D1Database,
+	read: ReturnType<typeof selectionFields>,
+	{ pageLink, wholeAgain }: { pageLink: boolean; wholeAgain: boolean },
+): Promise<Selection> {
+	const ids = [...read.ids, ...(pageLink ? (read.pageIds ?? []) : [])];
+	const ticks = await selectableTickIds(db, [...new Set(ids)]);
+	if (!read.all) return { ticks, all: false, unticked: [] };
+	return {
+		ticks,
+		all: true,
+		unticked: wholeAgain
+			? []
+			: unticksFrom(read.hidden, read.ids, read.pageIds),
+	};
+}
+
+/** "September", or "all months": the month the whole-set link names (#321). */
+function monthWordsFor(month: string, today: string) {
+	return month === "all" ? "all months" : monthLabel(month, today);
+}
+
+/**
+ * What a bar action acts on (#321): the selection the form posts, settled against the filters `back` lists, as
+ * the rows the action changes. A tick to a gone or split row drops out first, and a refusal over 100 ticks keeps
+ * every one and trims none (#350). The matches are read now, so the action changes what they are at this moment.
+ */
+async function postedSelection(
+	c: Context<App>,
+	form: FormData,
+	back: string,
+	today: string,
+) {
+	const matched = await selectableMatchIds(
+		c.env.DB,
+		filtersFrom(c, today, back),
+	);
+	const selection = settle(
+		await requestedSelection(c.env.DB, selectionFields(form), {
+			pageLink: false,
+			wholeAgain: false,
+		}),
+		new Set(matched),
+	);
+	const ids = selectedIds(selection, matched);
+	if (selection.ticks.length > MAX_SELECTED)
+		return { ids: [], selection, error: TOO_MANY };
 	return {
 		ids,
-		ticks: ids,
+		selection,
 		error: ids.length === 0 ? NONE_SELECTED : undefined,
 	};
 }
 
 function SelectCategorySheet({
 	ids,
-	ticks,
+	selection,
 	back,
 	categories,
 	error,
 	still,
 }: {
+	/** The rows the sheet's Save changes; the title counts them. */
 	ids: number[];
-	/** Every tick the list keeps, which Cancel goes back to (a refusal keeps them all). */
-	ticks: number[];
+	/** What Save posts back: the ticks, and in all mode the whole set and the rows unticked from it (#321). */
+	selection: Selection;
 	back: string;
 	categories: Category[];
 	error?: string;
 	/** Its Save was refused, so the open sheet is drawn again where it is. */
 	still?: boolean;
 }) {
-	const cancelHref = selectModeHref(back, ticks);
+	const cancelHref = selectModeHref(back, selection);
 	const alert = error && (
 		<p id="select-category-error" role="alert" class="text-sm text-over">
 			{error}
@@ -1054,9 +1182,10 @@ function SelectCategorySheet({
 					hx-select="#main > *"
 					hx-swap="innerHTML"
 				>
-					{ids.map((id) => (
+					{selection.ticks.map((id) => (
 						<input type="hidden" name="ids" value={id} />
 					))}
+					<SelectionFields selection={selection} />
 					<input type="hidden" name="back" value={back} />
 					<fieldset
 						aria-describedby={error ? "select-category-error" : undefined}
@@ -1098,14 +1227,14 @@ async function categorySheet(
 	back: string,
 	{
 		ids,
-		ticks,
+		selection,
 		error,
 		still = false,
 	}: {
-		/** The rows the sheet's Save changes. */
+		/** The rows the sheet's Save changes (see postedSelection). */
 		ids: number[];
-		/** Every tick the list keeps (see postedSelection). */
-		ticks: number[];
+		/** Every tick and the all-mode fields the list keeps (see postedSelection). */
+		selection: Selection;
 		error?: string;
 		/** Its Save was refused: the sheet is already open, so it isn't drawn arriving again. */
 		still?: boolean;
@@ -1113,13 +1242,13 @@ async function categorySheet(
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
 		selecting: true,
-		checkedIds: new Set(ticks),
+		selection,
 		status: error ? 422 : 200,
 		pageTitle: "Set category · Tally",
 		sheet: (categories) => (
 			<SelectCategorySheet
 				ids={ids}
-				ticks={ticks}
+				selection={selection}
 				back={back}
 				categories={categories}
 				error={error}
@@ -1132,12 +1261,9 @@ async function categorySheet(
 transactions.post("/transactions/select/category", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, ticks, error } = await postedSelection(c, form);
-	return categorySheet(c, await householdToday(c.env.DB), back, {
-		ids,
-		ticks,
-		error,
-	});
+	const today = await householdToday(c.env.DB);
+	const { ids, selection, error } = await postedSelection(c, form, back, today);
+	return categorySheet(c, today, back, { ids, selection, error });
 });
 
 async function finishSelection(
@@ -1161,10 +1287,15 @@ async function finishSelection(
 transactions.post("/transactions/select/category/save", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, ticks, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
+	const { ids, selection, error } = await postedSelection(c, form, back, today);
 	if (error)
-		return categorySheet(c, today, back, { ids, ticks, error, still: true });
+		return categorySheet(c, today, back, {
+			ids,
+			selection,
+			error,
+			still: true,
+		});
 	const category = Number(form.get("category"));
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
@@ -1176,18 +1307,16 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	if (!cat)
 		return categorySheet(c, today, back, {
 			ids,
-			ticks,
+			selection,
 			error: "Pick a category from the list.",
 			still: true,
 		});
-	// The same write as the edit panel's category change (saveEdit).
-	await c.env.DB.batch(
-		ids.map((id) =>
-			c.env.DB.prepare(
-				"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, updated_by=?, updated_at=datetime('now') WHERE id=?",
-			).bind(cat.id, actor(c), id),
-		),
-	);
+	// The same write as the edit panel's category change (saveEdit), once for every row the selection holds.
+	await c.env.DB.prepare(
+		"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, updated_by=?, updated_at=datetime('now') WHERE id IN (SELECT value FROM json_each(?))",
+	)
+		.bind(cat.id, actor(c), JSON.stringify(ids))
+		.run();
 	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
 	// The first merchant in the selection to reach three picks of this category is asked (decision 79).
 	const found = await firstRuleOfferAmong(c.env.DB, ids, cat.id);
@@ -1213,30 +1342,29 @@ transactions.post("/transactions/select/category/save", async (c) => {
 transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	const { ids, ticks, error } = await postedSelection(c, form);
 	const today = await householdToday(c.env.DB);
+	const { ids, selection, error } = await postedSelection(c, form, back, today);
 	if (error)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			selecting: true,
-			checkedIds: new Set(ticks),
+			selection,
 			status: 422,
 			selectionError: error,
 		});
 	// As in the edit panel (saveEdit): a split is one bank transaction, so excluding a part
 	// excludes the purchase and all its parts. Rows already excluded keep who excluded them.
-	await c.env.DB.batch(
-		ids.map((id) =>
-			c.env.DB.prepare(
-				`UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
-				WHERE excluded=0 AND (
-					id=?1
-					OR parent_id=?1
-					OR id=(SELECT parent_id FROM transactions WHERE id=?1)
-					OR parent_id=(SELECT parent_id FROM transactions WHERE id=?1)
-				)`,
-			).bind(id, actor(c)),
-		),
-	);
+	// One statement for every row the selection holds (#321).
+	await c.env.DB.prepare(
+		`UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
+		WHERE excluded=0 AND (
+			id IN (SELECT value FROM json_each(?1))
+			OR parent_id IN (SELECT value FROM json_each(?1))
+			OR id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
+			OR parent_id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
+		)`,
+	)
+		.bind(JSON.stringify(ids), actor(c))
+		.run();
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
 	const paying = await payingBillsCount(c.env.DB, ids);
@@ -2083,19 +2211,19 @@ function CashSheet({
 	values,
 	errors,
 	back,
-	ticks,
+	selection,
 	today,
 }: {
 	categories: Category[];
 	values: CashValues;
 	errors?: import("../transactions/cash").CashErrors;
 	back: string;
-	/** The ticks, when the sheet is open over Select mode (#350): Cancel and the backdrop go back with them. */
-	ticks?: number[];
+	/** The selection, when the sheet is open over Select mode (#350, #321): Cancel and the backdrop go back with it. */
+	selection?: Selection;
 	today: string;
 }) {
-	// Closing (the backdrop or Cancel) returns to the list the sheet was opened from, with Select mode's ticks.
-	const closeHref = ticks ? selectModeHref(back, ticks) : back;
+	// Closing (the backdrop or Cancel) returns to the list the sheet was opened from, with Select mode's selection.
+	const closeHref = selection ? selectModeHref(back, selection) : back;
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
@@ -2118,7 +2246,7 @@ function CashSheet({
 				today={today}
 				back={back}
 				cancelHref={closeHref}
-				ticks={ticks}
+				selection={selection}
 				// Made each time the form is drawn: posting this form again records one transaction.
 				entryKey={crypto.randomUUID()}
 			/>
@@ -2129,23 +2257,26 @@ function CashSheet({
 transactions.get("/transactions/cash/new", async (c) => {
 	const params = new URL(c.req.url).searchParams;
 	const back = safeBack(params.get("back") ?? undefined);
-	// In Select mode the ticks ride in the address (or, from a tap, in the request), and the sheet's close link
-	// and Cancel keep them, so closing the sheet leaves the ticks as they were (#350).
+	// In Select mode the selection rides in the address (or, from a tap, in the request), and the sheet's close link
+	// and Cancel keep it, so closing the sheet leaves the selection as it was (#350, #321).
 	const selecting = params.get("select") === "1";
-	const ticks = selecting
-		? await selectableTickIds(c.env.DB, parseIds(params.getAll("ids")))
+	const selection = selecting
+		? await requestedSelection(c.env.DB, selectionFields(params), {
+				pageLink: false,
+				wholeAgain: false,
+			})
 		: undefined;
 	const today = await householdToday(c.env.DB);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		pageTitle: "Add cash · Tally",
 		selecting,
-		checkedIds: new Set(ticks),
+		selection,
 		sheet: (categories, today) => (
 			<CashSheet
 				categories={categories}
 				values={cashValues(today)}
 				back={back}
-				ticks={ticks}
+				selection={selection}
 				today={today}
 			/>
 		),
@@ -2155,10 +2286,13 @@ transactions.get("/transactions/cash/new", async (c) => {
 transactions.post("/transactions/cash", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
-	// A form drawn in Select mode posts its ticks back, so a refused form keeps them (#350).
+	// A form drawn in Select mode posts its selection back, so a refused form keeps it (#350, #321).
 	const selecting = form.get("select") === "1";
-	const ticks = selecting
-		? await selectableTickIds(c.env.DB, parseIds(form.getAll("ids")))
+	const selection = selecting
+		? await requestedSelection(c.env.DB, selectionFields(form), {
+				pageLink: false,
+				wholeAgain: false,
+			})
 		: undefined;
 	const today = await householdToday(c.env.DB);
 	const values = cashValues(today, form);
@@ -2175,14 +2309,14 @@ transactions.post("/transactions/cash", async (c) => {
 			pageTitle: "Add cash · Tally",
 			status: 422,
 			selecting,
-			checkedIds: new Set(ticks),
+			selection,
 			sheet: () => (
 				<CashSheet
 					categories={categories}
 					values={values}
 					errors={parsed.errors}
 					back={back}
-					ticks={ticks}
+					selection={selection}
 					today={today}
 				/>
 			),
