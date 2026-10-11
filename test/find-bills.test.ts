@@ -77,6 +77,23 @@ describe("finding bills", () => {
 		).toEqual([]);
 	});
 
+	it("names a merchant with no chosen name by its tidied bank text, and never re-tidies a chosen name", () => {
+		const bank: BillFindingCharge = {
+			...charge("2026-08-01"),
+			rawName: "BLUE BOTTLE COFFEE",
+			displayName: null,
+		};
+		expect(
+			findBillSuggestions([bank, { ...bank, date: "2026-09-01" }]),
+		).toMatchObject([
+			{ rawName: "BLUE BOTTLE COFFEE", displayName: "Blue bottle coffee" },
+		]);
+		const chosen = { ...bank, displayName: "BLUE BOTTLE" };
+		expect(
+			findBillSuggestions([chosen, { ...chosen, date: "2026-09-01" }]),
+		).toMatchObject([{ displayName: "BLUE BOTTLE" }]);
+	});
+
 	it("clamps the three-month cutoff at month end", () => {
 		expect(threeMonthsBack("2026-05-31")).toBe("2026-02-28");
 		expect(threeMonthsBack("2024-05-31")).toBe("2024-02-29");
@@ -136,7 +153,7 @@ describe("finding bills", () => {
 		const found = await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		expect(
 			found.find((row) => row.rawName === "SUGGESTED ONLY")?.displayName,
-		).toBe("SUGGESTED ONLY");
+		).toBe("Suggested only");
 		expect(
 			found.find((row) => row.rawName === "CHOSEN NAME")?.displayName,
 		).toBe("Mine");
@@ -180,7 +197,7 @@ describe("finding bills", () => {
 		expect(
 			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
 		).toContainEqual(
-			expect.objectContaining({ rawName: "NO ROW", displayName: "NO ROW" }),
+			expect.objectContaining({ rawName: "NO ROW", displayName: "No row" }),
 		);
 	});
 
@@ -229,6 +246,17 @@ describe("finding bills", () => {
 		expect(
 			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
 		).not.toContainEqual(expect.objectContaining({ rawName: "NOT A BILL" }));
+	});
+
+	it("names an unnamed merchant by its tidied text in the headline and the Add form, with the bank's text on the muted line", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("SHOP BANK 4411", 0, false);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/find")
+		).text();
+		expect(html).toContain("<span>Shop bank</span>");
+		expect(html).toContain("name=Shop+bank&amp;amount=");
+		expect(html).toContain("SHOP BANK 4411 ·");
 	});
 
 	it("prefills every Add value", async () => {

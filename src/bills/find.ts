@@ -4,6 +4,7 @@ import {
 	merchantKeySql,
 	merchantNotABillSql,
 } from "../db/merchant-key";
+import { tidyName } from "../transactions/tidy-name";
 
 /** Rules for finding monthly bills from recent charges (spec §8.2, P18). */
 export const BILL_FIND_MONTHS = 3;
@@ -14,7 +15,8 @@ export const BILL_FIND_AMOUNT_PERCENT = 10;
 export type BillFindingCharge = {
 	/** The charge's merchant key: Plaid's merchant name, or the raw name when it sent none (spec §6.1). */
 	rawName: string;
-	displayName: string;
+	/** The merchant's chosen name, or null until a person names it; then the tidied key is shown (decision 46). */
+	displayName: string | null;
 	date: string;
 	amountCents: number;
 	categoryId: number | null;
@@ -68,7 +70,7 @@ export function findBillSuggestions(
 			null;
 		suggestions.push({
 			rawName: latest.rawName,
-			displayName: latest.displayName,
+			displayName: latest.displayName || tidyName(latest.rawName),
 			amountCents: latest.amountCents,
 			dueDay: Number(latest.date.slice(8)),
 			categoryId,
@@ -111,7 +113,7 @@ export async function loadBillSuggestions(
 ): Promise<BillSuggestion[]> {
 	const { results } = await db
 		.prepare(`SELECT ${CHARGE_KEY} AS rawName,
-	  COALESCE(${chargeMerchant("display_name")},${CHARGE_KEY}) AS displayName,
+	  ${chargeMerchant("display_name")} AS displayName,
 	  t.date, t.amount_cents AS amountCents,
 	  CASE WHEN tc.archived=0 THEN t.category_id END AS categoryId,
 	  CASE WHEN dc.archived=0 THEN dc.id END AS defaultCategoryId
