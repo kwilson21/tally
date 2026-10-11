@@ -4,10 +4,13 @@ import { categorizePending } from "../src/categorize-pending";
 import { type AiTallyCounts, readAiTally } from "../src/db/ai-log";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { settleSuggestion } from "../src/db/merchant-names";
+import { saveEdit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { buildSeed } from "../src/demo/seed";
+import { app } from "../src/index";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { tallyExport } from "../src/settings/export";
+import { saveOrganizeGroup } from "../src/transactions/organize";
 import { AiTally } from "../src/views/ai-tally";
 import { WhyLink } from "../src/views/why-link";
 
@@ -100,6 +103,38 @@ const logName = (merchant: string, day: string) =>
 		.bind(merchant, day)
 		.run();
 
+const logNames = async () =>
+	(
+		await db
+			.prepare(
+				"SELECT merchant_raw_name AS name FROM ai_log WHERE kind = 'name' ORDER BY merchant_raw_name",
+			)
+			.all<{ name: string }>()
+	).results.map((row) => row.name);
+
+/** A purchase with no category yet, for a name to be kept on. */
+const chargeAt = async (rawName: string) =>
+	(
+		await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by) VALUES (1, ?, 650, ?, 'test') RETURNING id",
+			)
+			.bind(TODAY, rawName)
+			.first<{ id: number }>()
+	)?.id as number;
+
+/** The edit panel's values for a save that changes nothing but what a test names (as categorize-db's). */
+const personEdit = {
+	categoryId: null,
+	alwaysForMerchant: false,
+	displayName: null,
+	note: null,
+	excluded: false,
+	income: false,
+	creditReviewed: true,
+	creditReviewedProvided: true,
+};
+
 /** The tally's lines as the Settings group draws them, all switches on. */
 const linesOf = async (tally: AiTallyCounts, switches = OFF) =>
 	(await AiTally({ tally, switches }).toString()).replace(/<[^>]+>/g, "|");
@@ -164,14 +199,17 @@ describe("the tally's counts", () => {
 		const [a] = await someIds(1);
 		await logCategory(a as number, TODAY);
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
-		const ai = (
-			env as unknown as { AI?: { run: (...args: unknown[]) => unknown } }
-		).AI;
-		const aiSpy = ai ? vi.spyOn(ai, "run") : null;
-		await readAiTally(db, TODAY);
-		await exports.default.fetch(`${BASE}/settings`);
+		// The tests' env has no AI binding (wrangler.jsonc), so the page gets a stub that records any ask.
+		const ai = { run: vi.fn(async () => ({ response: "Some Place" })) };
+		const page = await app.request(
+			`${BASE}/settings`,
+			{},
+			{ ...env, AI: ai as unknown as Ai },
+		);
+		expect(page.status).toBe(200);
+		expect(await readAiTally(db, TODAY)).toMatchObject({ sorted: 1 });
 		expect(fetchSpy).not.toHaveBeenCalled();
-		expect(aiSpy?.mock.calls.length ?? 0).toBe(0);
+		expect(ai.run).not.toHaveBeenCalled();
 	});
 
 	it("shows zeros, not an error, for a household with no AI work yet", async () => {
@@ -274,6 +312,53 @@ describe("the tally's counts", () => {
 		expect(await readAiTally(db, TODAY)).toMatchObject({
 			sorted: 1,
 			changed: 1,
+		});
+	});
+
+	it("counts a purchase once when Tally sorted both its pending row and its posted row", async () => {
+		const insert = (plaidId: string, pending: number) =>
+			db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, category_id, category_source, category_confidence, jev_category_id, updated_by)
+					 VALUES (1, ?, 1200, 'CORNER COFFEE', ?, ?, 1, 'jev', 0.9, 1, 'test')`,
+				)
+				.bind(TODAY, plaidId, pending)
+				.run();
+		await insert("pend-2", 1);
+		await insert("post-2", 0);
+		const idOf = async (plaidId: string) =>
+			(
+				await db
+					.prepare("SELECT id FROM transactions WHERE plaid_transaction_id = ?")
+					.bind(plaidId)
+					.first<{ id: number }>()
+			)?.id as number;
+		const pendingId = await idOf("pend-2");
+		const postedId = await idOf("post-2");
+		await logCategory(pendingId, TODAY);
+		await logCategory(postedId, TODAY);
+		const item = await db
+			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE plaid_items SET sync_lock_id = 'lock-2' WHERE id = ?")
+			.bind(item?.id)
+			.run();
+		await db.batch(
+			mergePendingIntoPosted(db, item?.id as number, "lock-2", "pend-2", {
+				id: "post-2",
+				cents: 1200,
+				date: TODAY,
+				name: "CORNER COFFEE",
+				merchantName: null,
+				plaidCategory: null,
+			}),
+		);
+		expect(await idsWhere("plaid_transaction_id = 'pend-2'")).toEqual([]);
+		expect(await logIds("category")).toEqual([postedId]);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
 		});
 	});
 });
@@ -416,6 +501,70 @@ describe("what the Jev run and the names write", () => {
 			.all<{ name: string }>();
 		expect(names.results.map((row) => row.name)).toEqual(["ACME*X"]);
 		expect((await readAiTally(db, TODAY)).named).toBe(1);
+	});
+
+	it("logs a guessed name kept in the edit panel, and not the bank's name or one typed in", async () => {
+		await db
+			.prepare(
+				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES
+				 ('EDIT*SHOP', 'Edit Shop', 'pending'), ('EDIT*BANK', 'EDIT*BANK', 'pending'), ('EDIT*TYPED', 'Typed Co', 'pending')`,
+			)
+			.run();
+		const shop = await chargeAt("EDIT*SHOP");
+		const bank = await chargeAt("EDIT*BANK");
+		const typed = await chargeAt("EDIT*TYPED");
+		await saveEdit(
+			db,
+			bank,
+			{ ...personEdit, displayName: "EDIT*BANK" },
+			"test",
+		);
+		await saveEdit(
+			db,
+			typed,
+			{ ...personEdit, displayName: "Own Name" },
+			"test",
+		);
+		expect(await logNames()).toEqual([]);
+
+		await saveEdit(
+			db,
+			shop,
+			{ ...personEdit, displayName: "Edit Shop" },
+			"test",
+		);
+		expect(await logNames()).toEqual(["EDIT*SHOP"]);
+		expect((await readAiTally(db, TODAY)).named).toBe(1);
+	});
+
+	it("logs a guessed name kept for an Organize group, and not the bank's name", async () => {
+		await db
+			.prepare(
+				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES
+				 ('ORG*SHOP', 'Org Shop', 'pending'), ('ORG*BANK', 'ORG*BANK', 'pending')`,
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by) VALUES (1, ?, 650, 'ORG*SHOP', 'test'), (1, ?, 700, 'ORG*BANK', 'test')",
+			)
+			.bind(TODAY, TODAY)
+			.run();
+		const category = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		const groupId = category?.id as number;
+		expect(
+			await saveOrganizeGroup(db, ["ORG*BANK"], groupId, "ORG*BANK", "test"),
+		).toBe(1);
+		expect(await logNames()).toEqual([]);
+
+		expect(
+			await saveOrganizeGroup(db, ["ORG*SHOP"], groupId, "Org Shop", "test"),
+		).toBe(1);
+		expect(await logNames()).toEqual(["ORG*SHOP"]);
 	});
 });
 

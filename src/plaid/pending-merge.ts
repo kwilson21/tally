@@ -203,6 +203,9 @@ const STATEMENTS = [
 	// Tally's log of the pending row's answer moves to the posted row, so it is still counted and a person's
 	// later change to it is still seen (spec §5 and §8.6). A row the posted row already has stays where it is.
 	`UPDATE OR IGNORE ai_log SET transaction_id = ${POSTED} WHERE transaction_id = ${PENDING} AND ${READY}`,
+	// What didn't move is dropped with the pending row: the posted row's own row already counts that purchase,
+	// so one purchase is never counted twice (spec §8.6, one category row and one income row per transaction).
+	`DELETE FROM ai_log WHERE transaction_id = ${PENDING} AND ${READY}`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
 	`DELETE FROM transactions WHERE id = ${PENDING} AND ${READY}`,
 ];
