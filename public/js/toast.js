@@ -82,6 +82,9 @@
 			? new ResizeObserver(measureToasts)
 			: null;
 
+	// The toast the last "toast" event made. failed() reads it straight after dispatching, since the
+	// event is synchronous.
+	let lastToast = null;
 	document.body.addEventListener("toast", (event) => {
 		const {
 			message,
@@ -92,6 +95,7 @@
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
 		const toast = document.createElement("div");
+		lastToast = toast;
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
 		if (type === "error") {
@@ -198,11 +202,15 @@
 	// couldn't be reached (502), so it's swapped in and says its own words. The words follow what
 	// was being done: a GET (a filter, opening a sheet) couldn't load; anything else couldn't save.
 	// The events go to document, because htmx sends them there when their element has left the
-	// page. Several at once (queued taps on a dead connection) show one toast, not a stack.
-	// "At once" is a second: a retry that fails again a couple of seconds later is a new failure, so
-	// it replaces the toast with a fresh alert (a screen reader hears it again) and a fresh 4 seconds.
+	// page. Several at once (queued taps on a dead connection) show one toast, not a stack: an
+	// identical failure within a second is dropped only while its own toast is still on screen. Once
+	// another toast has replaced it, or a body swap has removed it, the failure is said again. So a
+	// retry that fails a couple of seconds later is a new failure too: it replaces the toast with a
+	// fresh alert (a screen reader hears it again) and a fresh 4 seconds.
 	const BURST_MS = 1000;
-	const failedAt = new Map();
+	// The newest failure: its words, when it was said, and its toast. One record is enough, since only
+	// the newest plain or error toast is ever on screen.
+	let lastFailure = null;
 	function failed(ctx) {
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
@@ -210,11 +218,16 @@
 				: COULDNT_SAVE;
 		// The page's own clock, not the device's: a clock moved back must not silence later failures.
 		const now = performance.now();
-		if (now - (failedAt.get(message) ?? -Infinity) < BURST_MS) return;
-		failedAt.set(message, now);
+		if (
+			lastFailure?.message === message &&
+			now - lastFailure.at < BURST_MS &&
+			document.getElementById("toasts")?.contains(lastFailure.toast)
+		)
+			return;
 		document.body.dispatchEvent(
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);
+		lastFailure = { message, at: now, toast: lastToast };
 	}
 	// htmx 4 aborts a request that timed out exactly as it aborts one that was replaced (hx-sync) or
 	// cancelled (htmx:abort): ctx.request.abort(), an AbortError with no reason and no timeout event

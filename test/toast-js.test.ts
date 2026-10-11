@@ -536,6 +536,35 @@ describe("several failures at once", () => {
 		vi.advanceTimersByTime(500);
 		expect(toasts.children).toHaveLength(1);
 	});
+
+	it("says the newest failure when a load and a save failure alternate within a second", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:error", dropped("GET"));
+		fire(document, "htmx:error", dropped("POST"));
+		fire(document, "htmx:error", dropped("GET"));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_LOAD]);
+		expect((toasts.children[0] as FakeNode).attrs.get("role")).toBe("alert");
+	});
+
+	it("says a failure again when a success toast replaced its toast within a second", async () => {
+		const { document, body, toasts } = await page();
+		fire(document, "htmx:response:error", status(500));
+		fire(body, "toast", { message: "Saved." });
+		expect(toasts.children.map((t) => t.words())).toEqual(["Saved."]);
+		fire(document, "htmx:response:error", status(500));
+		expect(toasts.children.map((t) => t.words())).toEqual([COULDNT_SAVE]);
+		expect((toasts.children[0] as FakeNode).attrs.get("role")).toBe("alert");
+	});
+
+	it("says a failure again on the new #toasts after htmx replaces the body within a second", async () => {
+		const { document, toasts, swapBody } = await page();
+		fire(document, "htmx:response:error", status(500));
+		expect(toasts.children).toHaveLength(1);
+		const next = swapBody();
+		fire(document, "htmx:response:error", status(500));
+		expect(next.children).toHaveLength(1);
+		expect((next.children[0] as FakeNode).words()).toBe(COULDNT_SAVE);
+	});
 });
 
 describe("the toasts the server sends", () => {
