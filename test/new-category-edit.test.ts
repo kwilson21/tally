@@ -34,6 +34,20 @@ async function post(path: string, fields: Record<string, string>) {
 	return { res, html: await res.text() };
 }
 
+/** A post from a browser with JavaScript off: no HX-Request header, so the answer is a page, not a fragment. */
+async function postWithoutJs(path: string, fields: Record<string, string>) {
+	const res = await exports.default.fetch(BASE + path, {
+		method: "POST",
+		redirect: "manual",
+		headers: {
+			Origin: BASE,
+			"content-type": "application/x-www-form-urlencoded",
+		},
+		body: new URLSearchParams(fields).toString(),
+	});
+	return { res, html: await res.text() };
+}
+
 const categoryCount = async () =>
 	(
 		await env.DB.prepare("SELECT COUNT(*) AS n FROM categories").first<{
@@ -333,6 +347,36 @@ describe("a refused save makes no category", () => {
 		expect(await categoryCount()).toBe(count);
 		expect(await filedAs(refund)).toEqual({ categoryId: null, source: null });
 	});
+
+	it("a save that throws makes no category, and the failure still reaches the person", async () => {
+		const entry = await insertRow(
+			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
+			TODAY,
+			-1200,
+			"Corner shop",
+		);
+		// Nothing references the entry, so it can go. Its own save then finds no transaction and throws.
+		await env.DB.prepare(
+			`CREATE TRIGGER drop_entry_on_pet_care AFTER INSERT ON categories WHEN NEW.name = 'Pet Care'
+			BEGIN DELETE FROM transactions WHERE id = ${entry}; END`,
+		).run();
+		try {
+			const { res } = await post(
+				`/transactions/${entry}`,
+				saveFields({
+					merchant: "",
+					merchant_was: "",
+					category: "new",
+					new_category_name: "Pet Care",
+				}),
+			);
+
+			expect(res.status).toBe(500);
+			expect(await categoryNamed("Pet Care")).toBeNull();
+		} finally {
+			await env.DB.prepare("DROP TRIGGER drop_entry_on_pet_care").run();
+		}
+	});
 });
 
 describe("the likely transactions after a new category", () => {
@@ -605,5 +649,84 @@ describe("the likely transactions after a new category", () => {
 		expect(saved.html).not.toContain(
 			`Same merchant as ${shortDay(`${LAST}-15`, TODAY)}`,
 		);
+	});
+
+	it("with JavaScript off, a new category draws the likely panel as a page, without a toast", async () => {
+		const saved = await postWithoutJs(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		expect(saved.res.status).toBe(200);
+		expect(saved.res.headers.get("HX-Trigger")).toBeNull();
+		expect(saved.html).toContain("Pet Care is made.");
+		expect(saved.html).toContain(`action="/transactions/${bakery}/likely"`);
+		expect(saved.html).toMatch(
+			new RegExp(`name="ids" value="${first}" checked`),
+		);
+	});
+
+	it("with JavaScript off and nothing likely, a new category answers 303 back", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE raw_name = 'SQ *LOCAL BAKERY 4432' AND id <> ?",
+		)
+			.bind(GROCERIES, bakery)
+			.run();
+
+		const saved = await postWithoutJs(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		expect(saved.res.status).toBe(303);
+		expect(saved.res.headers.get("location")).toBe("/transactions");
+	});
+
+	it("with the new category archived since the panel opened, Add moves nothing and says so", async () => {
+		await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+		const made = await categoryNamed("Pet Care");
+		await env.DB.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(made?.id)
+			.run();
+
+		const { res } = await post(`/transactions/${bakery}/likely`, {
+			back: "/transactions",
+			category: String(made?.id),
+			ids: String(first),
+		});
+
+		const message =
+			"Nothing moved: those transactions changed since the panel opened.";
+		expect(res.status).toBe(200);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message, type: "info" },
+			announce: message,
+		});
+		expect(res.headers.get("HX-Push-Url")).toBe("/transactions");
+		expect(await filedAs(first)).toEqual({ categoryId: null, source: null });
+	});
+
+	it("with the new category archived since the panel opened, a save without JavaScript goes back", async () => {
+		await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+		const made = await categoryNamed("Pet Care");
+		await env.DB.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(made?.id)
+			.run();
+
+		const { res } = await postWithoutJs(`/transactions/${bakery}/likely`, {
+			back: "/transactions",
+			category: String(made?.id),
+			ids: String(first),
+		});
+
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe("/transactions");
+		expect(await filedAs(first)).toEqual({ categoryId: null, source: null });
 	});
 });

@@ -122,4 +122,20 @@ describe("Settings' Suggested card for a category that already exists", () => {
 			.first<{ status: string }>();
 		expect(status?.status).toBe("created");
 	});
+
+	it("names the category as it is stored in the Add to toast, whatever capitals the suggestion has", async () => {
+		await env.DB.prepare(
+			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-plum', 99)",
+		).run();
+
+		const { res } = await post(`/settings/suggestions/${suggestion}/create`, [
+			["shown", String(first)],
+			["ids", String(first)],
+		]);
+
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("Added 1 transaction to pet care");
+		expect(trigger.announce).toContain("Added 1 transaction to pet care.");
+	});
 });

@@ -5,7 +5,11 @@ import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
-import { addLikely, likelyTransactions } from "../db/likely-transactions";
+import {
+	addLikely,
+	type LikelyRow,
+	likelyTransactions,
+} from "../db/likely-transactions";
 import { refundedByOthersSql } from "../db/refunded";
 import {
 	correctCashSplit,
@@ -2978,7 +2982,11 @@ async function savePanel(
 				: {}),
 		},
 		actor(c),
-	);
+	).catch(async (error: unknown) => {
+		// A save that throws files nothing, so a category made for it goes too.
+		if (made) await unmakeCategory(c.env.DB, made.id);
+		throw error;
+	});
 	if (!result.saved) {
 		// Nothing was filed in a category made for this save, so it goes too: a retry must not find its name taken.
 		if (made) await unmakeCategory(c.env.DB, made.id);
@@ -3049,11 +3057,26 @@ async function savePanel(
 		edit.categoryId === null
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
+	// A category made here offers the transactions that might belong in it, when there are any (decision 76).
+	// Its reason names the entry as this save left it: a cash entry's date and amount may have just changed.
+	const likely = made
+		? {
+				savedId: tx.id,
+				savedDate: cashValues?.date ?? tx.date,
+				savedCents: cashParsed?.amountCents ?? tx.amountCents,
+				back,
+				categoryId: made.id,
+				categoryName: made.name,
+				rows: await likelyTransactions(c.env.DB, tx.id, made.name, today),
+			}
+		: null;
+	const panel = likely && likely.rows.length > 0 ? likely : null;
 	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
-	if (!c.req.header("HX-Request"))
-		return ruleOffer
-			? renderRuleOffer(c, today, back, ruleOffer)
-			: c.redirect(back, 303);
+	if (!c.req.header("HX-Request")) {
+		if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
+		if (panel) return renderLikely(c, today, filters, panel);
+		return c.redirect(back, 303);
+	}
 
 	// A category made in this save is named too, so the toast says what the transaction is now.
 	const category =
@@ -3092,33 +3115,7 @@ async function savePanel(
 	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
 	// category made in this save has only this one.
 	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
-	// A category made here offers the transactions that might belong in it, when there are any (decision 76).
-	// Its reason names the entry as this save left it: a cash entry's date and amount may have just changed.
-	const created = made;
-	const likely = created
-		? await likelyTransactions(c.env.DB, tx.id, created.name, today)
-		: [];
-	if (created && likely.length > 0)
-		return renderList(c, today, filters, {
-			sheet: () => (
-				<LikelySheet
-					savedId={tx.id}
-					savedDate={cashValues?.date ?? tx.date}
-					savedCents={cashParsed?.amountCents ?? tx.amountCents}
-					back={back}
-					closeAttrs={listCloseAttrs(back, tx.id)}
-					categoryId={created.id}
-					categoryName={created.name}
-					rows={likely}
-					ticked={
-						new Set(
-							likely.filter((row) => row.sameMerchant).map((row) => row.id),
-						)
-					}
-					today={today}
-				/>
-			),
-		});
+	if (panel) return renderLikely(c, today, filters, panel);
 	return renderList(c, today, filters, { focusId: tx.id });
 }
 
@@ -3159,20 +3156,22 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 	const category = await liveCategory(c.env.DB, form.get("category"));
-	if (!category) return renderList(c, today, filters, { focusId: tx.id });
-	const moved = await addLikely(c.env.DB, {
-		savedId: tx.id,
-		categoryId: category.id,
-		categoryName: category.name,
-		ticked: form.getAll("ids").map(Number),
-		today,
-		actor: actor(c),
-	});
+	// A category archived since the panel opened moves nothing, as when every ticked row has changed.
+	const moved = category
+		? await addLikely(c.env.DB, {
+				savedId: tx.id,
+				categoryId: category.id,
+				categoryName: category.name,
+				ticked: form.getAll("ids").map(Number),
+				today,
+				actor: actor(c),
+			})
+		: 0;
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	// Nothing moves when every ticked row changed since the panel opened (addLikely offers only the rows
 	// that still need a category).
 	const message =
-		moved === 0
+		moved === 0 || !category
 			? "Nothing moved: those transactions changed since the panel opened."
 			: `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
 	c.header(
@@ -3244,6 +3243,43 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		focusHeading: true,
+	});
+}
+
+/** The likely panel after a category is made (decision 76), drawn over the list. Only the ticked rows move. */
+function renderLikely(
+	c: Context<App>,
+	today: string,
+	filters: Filters,
+	panel: {
+		savedId: number;
+		savedDate: string;
+		savedCents: number;
+		back: string;
+		categoryId: number;
+		categoryName: string;
+		rows: LikelyRow[];
+	},
+) {
+	return renderList(c, today, filters, {
+		sheet: () => (
+			<LikelySheet
+				savedId={panel.savedId}
+				savedDate={panel.savedDate}
+				savedCents={panel.savedCents}
+				back={panel.back}
+				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
+				categoryId={panel.categoryId}
+				categoryName={panel.categoryName}
+				rows={panel.rows}
+				ticked={
+					new Set(
+						panel.rows.filter((row) => row.sameMerchant).map((row) => row.id),
+					)
+				}
+				today={today}
+			/>
+		),
 	});
 }
 

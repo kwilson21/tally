@@ -378,4 +378,79 @@ describe("addLikely", () => {
 		expect(await splitRemoved(ticked)).toBeNull();
 		expect(await splitRemoved(unticked)).toBe(18742);
 	});
+
+	it.each([
+		{ change: "excluded = 1", victim: "same" },
+		{ change: "flag_income = 1", victim: "same" },
+		{ change: "pending = 1", victim: "same" },
+		{ change: "category_suggestion_id = NULL", victim: "guess" },
+	] as const)(
+		"files nothing it is no longer offered when $change lands after the read",
+		async ({ change, victim }) => {
+			const sameNew = await tx(
+				`${THIS}-03`,
+				7650,
+				"BANFIELD PET HOSPITAL",
+				"Banfield Pet Hospital",
+			);
+			const guessNew = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
+				suggestionId: suggested,
+			});
+			const changed = victim === "same" ? sameNew : guessNew;
+			const control = victim === "same" ? guessNew : sameNew;
+
+			const moved = await addLikely(editedAfterRead(change, changed), {
+				savedId: saved,
+				categoryId: pet,
+				categoryName: "Pet Care",
+				ticked: [sameNew, guessNew],
+				today: TODAY,
+				actor: "test",
+			});
+
+			expect(moved).toBe(1);
+			expect((await filed(changed))?.categoryId).toBeNull();
+			expect(await filed(control)).toEqual({
+				categoryId: pet,
+				source: "user",
+				suggestionId: null,
+			});
+		},
+	);
 });
+
+/** The likely read's rows, then one edit to `id` before the write: the window addLikely's UPDATE must survive. */
+function editedAfterRead(change: string, id: number): D1Database {
+	const afterRead = (statement: D1PreparedStatement): D1PreparedStatement =>
+		new Proxy(statement, {
+			get(target, property) {
+				if (property === "bind")
+					return (...values: unknown[]) => afterRead(target.bind(...values));
+				if (property === "all")
+					return async () => {
+						const result = await target.all();
+						await env.DB.prepare(
+							`UPDATE transactions SET ${change} WHERE id = ?`,
+						)
+							.bind(id)
+							.run();
+						return result;
+					};
+				const value = Reflect.get(target, property);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	return new Proxy(env.DB, {
+		get(target, property) {
+			if (property === "prepare")
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					return sql.includes("ORDER BY sameMerchant DESC")
+						? afterRead(statement)
+						: statement;
+				};
+			const value = Reflect.get(target, property);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	}) as D1Database;
+}

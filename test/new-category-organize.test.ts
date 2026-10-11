@@ -1,7 +1,11 @@
 import { env, exports } from "cloudflare:workers";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { organize } from "../src/routes/organize";
+
+type TestApp = { Bindings: Env; Variables: { actor: string } };
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -58,6 +62,103 @@ const filedIn = async (name: string) =>
 
 beforeEach(async () => {
 	await resetDemo(env.DB, TODAY);
+});
+
+/** The organize route alone, saving as the household, against `db` in place of the demo's database. */
+async function saveWith(db: D1Database, fields: Record<string, string>) {
+	const app = new Hono<TestApp>();
+	app.use("*", async (c, next) => {
+		c.set("actor", "demo");
+		await next();
+	});
+	app.route("/", organize as unknown as Hono<TestApp>);
+	const res = await app.request(
+		"/transactions/organize",
+		{
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams(fields).toString(),
+		},
+		{ ...env, DB: db },
+	);
+	return { res, html: await res.text() };
+}
+
+/** The database as another save leaves it: Harbor Supply filed in category 1, just before this save's first batch. */
+function otherSaveFilesFirst(): D1Database {
+	let raced = false;
+	return new Proxy(env.DB, {
+		get(target, property) {
+			const value = Reflect.get(target, property);
+			if (property === "batch")
+				return async (statements: D1PreparedStatement[]) => {
+					if (!raced) {
+						raced = true;
+						await env.DB.prepare(
+							"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'",
+						).run();
+					}
+					return target.batch(statements);
+				};
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	}) as D1Database;
+}
+
+/** The Harbor Supply rule as the merchants table holds it now. */
+const harborRule = () =>
+	env.DB.prepare(
+		"SELECT default_category_id AS categoryId FROM merchants WHERE raw_name = 'HARBOR SUPPLY'",
+	).first<{ categoryId: number | null }>();
+
+describe("a group another save files while this one saves", () => {
+	it("says the merchant has a category, and makes no new category and no merchant rule", async () => {
+		await harborCharges(2);
+
+		const { res } = await saveWith(otherSaveFilesFirst(), {
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Pets",
+			name: "",
+		});
+
+		expect(res.status).toBe(200);
+		const trigger = res.headers.get("HX-Trigger") ?? "";
+		expect(trigger).toContain("That merchant already has a category.");
+		expect(trigger).not.toContain("set to");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
+			).first<{ n: number }>(),
+		).toEqual({ n: 0 });
+		expect(await harborRule()).toEqual({ categoryId: null });
+	});
+
+	it("leaves the merchant rule as it was when an existing category is chosen", async () => {
+		await harborCharges(2);
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'HARBOR SUPPLY'",
+		).run();
+		const chosen = await env.DB.prepare(
+			"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+
+		const { res } = await saveWith(otherSaveFilesFirst(), {
+			group: "Harbor Supply",
+			category: String(chosen?.id),
+			name: "",
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger") ?? "").toContain(
+			"That merchant already has a category.",
+		);
+		expect(await harborRule()).toEqual({ categoryId: 1 });
+	});
 });
 
 describe("New category in Organize", () => {

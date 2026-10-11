@@ -934,6 +934,7 @@ describe("createFromSuggestion", () => {
 		expect(result).toMatchObject({
 			ok: true,
 			attached: true,
+			name: "Groceries",
 			moved: made.length,
 		});
 		expect((await categories()).length).toBe(count);

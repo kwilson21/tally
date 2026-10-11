@@ -402,13 +402,24 @@ export async function createFromSuggestion(
 		};
 	}
 	const leftOut = (results[5]?.results as { id: number }[]) ?? [];
+	// The write made no category, so the ticks joined one the family already had (or one made during the write).
+	const joined = (results[1]?.meta.changes ?? 0) === 0;
+	// A joined category is named as the family stored it, whatever capitals the suggestion has. It is read after
+	// the write, so it also names a category made during the write.
+	const stored = joined
+		? await db
+				.prepare(
+					"SELECT name FROM categories WHERE name = ? COLLATE NOCASE AND archived = 0",
+				)
+				.bind(name)
+				.first<{ name: string }>()
+		: null;
 	return {
 		ok: true,
-		name,
+		name: stored?.name ?? name,
 		moved: results[3]?.meta.changes ?? 0,
 		leftOut: leftOut.map((row) => row.id),
-		// The write made no category, so the ticks joined one the family already had (or one made during the write).
-		attached: (results[1]?.meta.changes ?? 0) === 0,
+		attached: joined,
 	};
 }
 
