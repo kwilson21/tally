@@ -3,11 +3,8 @@ import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
 import type { CategorySummary } from "../src/budget";
 import appCss from "../src/styles/app.css?raw";
-import {
-	categoryRowAmount,
-	MonthEnd,
-	PastNotBudgeted,
-} from "../src/views/month-end";
+import { categoryRowAmount } from "../src/views/category-amount";
+import { MonthEnd, PastNotBudgeted } from "../src/views/month-end";
 
 const rows = (count: number): CategorySummary[] =>
 	Array.from({ length: count }, (_, index) => ({

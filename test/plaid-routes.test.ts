@@ -177,7 +177,7 @@ describe("Plaid routes", () => {
 
 	it("marks an item repaired, starts its sync, and returns only its announcement", async () => {
 		const inserted = await env.DB.prepare(
-			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status, reconnect_emailed_at) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention', '2026-10-06 04:00:00') RETURNING id",
 		)
 			.bind(await encryptToken("never-return-this", KEY))
 			.first<{ id: number }>();
@@ -197,10 +197,12 @@ describe("Plaid routes", () => {
 		expect(response.status).toBe(204);
 		expect(waitUntil).toHaveBeenCalledOnce();
 		expect(
-			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
+			await env.DB.prepare(
+				"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+			)
 				.bind(inserted?.id)
 				.first(),
-		).toEqual({ status: "ok" });
+		).toEqual({ status: "ok", reconnect_emailed_at: null });
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message: "Fixed First Bank.", type: "success" },
 			announce: "Fixed First Bank.",
