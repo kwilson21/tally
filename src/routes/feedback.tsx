@@ -13,6 +13,7 @@ import { Layout } from "../views/layout";
 type FeedbackEnv = Env & {
 	FEEDBACK_GITHUB_TOKEN?: string;
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
+	APP_VERSION?: string;
 };
 type App = { Bindings: FeedbackEnv; Variables: { actor: string } };
 export const feedback = new Hono<App>();
@@ -197,8 +198,10 @@ feedback.post("/feedback", async (c) => {
 			clientContext = null;
 		}
 	}
-	const columns = diagnosticsOn ? ", client_context" : "";
-	const placeholders = diagnosticsOn ? ", ?" : "";
+	const columns = diagnosticsOn
+		? ", client_context, app_version"
+		: ", app_version";
+	const placeholders = diagnosticsOn ? ", ?, ?" : ", ?";
 	const device =
 		String(data.get("device_category")) === "Mobile browser"
 			? "Mobile browser"
@@ -217,6 +220,7 @@ feedback.post("/feedback", async (c) => {
 	];
 	if (diagnosticsOn)
 		params.push(clientContext ? JSON.stringify(clientContext) : null);
+	params.push(c.env.APP_VERSION || null);
 	params.push(limitId);
 	const result = await c.env.DB.prepare(
 		`INSERT INTO feedback (actor, type, feeling, message, page, device${columns})
