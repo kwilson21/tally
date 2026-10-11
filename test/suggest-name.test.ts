@@ -198,11 +198,27 @@ describe("suggestNote", () => {
 		).toEqual({ ok: true, note: "App or iCloud subscription" });
 	});
 
+	it("keeps a line that adds a word about the purchase to the store's name", async () => {
+		expect(
+			await suggestNote(
+				fakeAi("CVS Pharmacy prescription refill"),
+				"CVS PHARMACY #1234",
+				["CVS Pharmacy"],
+			),
+		).toEqual({ ok: true, note: "CVS Pharmacy prescription refill" });
+	});
+
 	it.each([
 		["CVS purchase.", "CVS PHARMACY #1234"],
 		["CVS Pharmacy payment", "CVS PHARMACY #1234"],
 		["The CVS order", "CVS PHARMACY #1234"],
 		["Purchase at CVS", "CVS PHARMACY #1234"],
+		["CVS Pharmacy store", "CVS PHARMACY #1234"],
+		["CVS Pharmacy visit", "CVS PHARMACY #1234"],
+		["CVS trips", "CVS PHARMACY #1234"],
+		["Items from CVS", "CVS PHARMACY #1234"],
+		["Pharmacy stuff", "CVS PHARMACY #1234"],
+		["CVS bill payment", "CVS PHARMACY #1234"],
 	])(
 		"drops %j for %j, since it only restates the store and a generic noun",
 		async (answer, rawName) => {
