@@ -1170,6 +1170,7 @@ async function billPage(
 	error?: string,
 	selectedTransactionId?: number,
 	given?: string,
+	rerender = false,
 ) {
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
@@ -1230,6 +1231,7 @@ async function billPage(
 			dueDateLabel={shortDate(occurrenceDate(bill, pickerPeriod))}
 			frequency={bill.frequency}
 			selectedTransactionId={selectedTransactionId}
+			rerender={rerender}
 			candidates={candidates.map((t) => ({
 				id: t.transaction_id,
 				displayName: t.display_name ?? tidyName(t.raw_name),
@@ -1249,8 +1251,7 @@ async function billPage(
 				}))}
 		/>
 	) : null;
-	if (picker && c.req.header("HX-Target") === "payment-picker")
-		return c.html(picker);
+	if (picker && rerender) return c.html(picker);
 	return c.html(
 		<Layout
 			title={`${bill.name} · Tally`}
@@ -1382,6 +1383,10 @@ bills.get("/bills/:id/occurrences/:period/link", (c) =>
 		c.req.param("period"),
 		undefined,
 		Number(c.req.query("transaction_id")) || undefined,
+		undefined,
+		// htmx sends HX-Request on every request it makes, and only a month chip asks for this URL that way:
+		// it gets the picker back to swap in place, never a second page.
+		Boolean(c.req.header("HX-Request")),
 	),
 );
 bills.get("/bills/:id/month-explanation", async (c) => {

@@ -53,6 +53,7 @@ export function BillPaymentPicker({
 	candidates,
 	periods,
 	selectedTransactionId,
+	rerender = false,
 }: {
 	billId: number;
 	billName: string;
@@ -63,6 +64,8 @@ export function BillPaymentPicker({
 	candidates: PaymentPickerCandidate[];
 	periods: PaymentPickerPeriod[];
 	selectedTransactionId?: number;
+	/** True when a month chip swapped this picker in: focus stays on the chosen month, not the section. */
+	rerender?: boolean;
 }) {
 	const action = `/bills/${billId}/link`;
 	const windowDays = manualLinkWindowDays(frequency);
@@ -71,11 +74,16 @@ export function BillPaymentPicker({
 	const selectedPayment = candidates.find(
 		(candidate) => candidate.id === selectedTransactionId,
 	);
+	const count = candidates.length;
+	const countSentence =
+		count === 0
+			? "No payments to link"
+			: `${count} ${count === 1 ? "payment" : "payments"} to link`;
 	return (
 		<section
 			id="payment-picker"
 			tabindex={-1}
-			autofocus
+			autofocus={!rerender}
 			class="mt-6 border-t border-rule pt-4"
 		>
 			<h2 class="font-serif text-3xl font-semibold">Link a payment</h2>
@@ -127,6 +135,7 @@ export function BillPaymentPicker({
 									name="period"
 									value={period.value}
 									checked={period.value === opened?.value}
+									autofocus={rerender && period.value === opened?.value}
 									hx-get={`/bills/${billId}/occurrences/${encodeURIComponent(period.value)}/link`}
 									hx-include="[name='transaction_id'],[name='period']"
 									hx-target="#payment-picker"
@@ -137,6 +146,7 @@ export function BillPaymentPicker({
 							))}
 						</div>
 						<div id="bill-month-explanation" aria-live="polite">
+							<span class="sr-only">{countSentence}</span>
 							{opened && selectedPayment ? (
 								<BillMonthExplanation
 									countedMonth={opened.countedMonth}

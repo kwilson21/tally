@@ -1517,6 +1517,91 @@ describe("Bills", () => {
 		});
 	});
 
+	// Choosing a month swaps the picker into the page (#323): the response must be the picker alone, not a second
+	// copy of the page (a second <main>, #announcer, skip link and sidebar) nested in it.
+	describe("choosing a month in Link a payment", () => {
+		const period = "2026-10";
+		const pickerFor = (headers: Record<string, string> = {}) =>
+			exports.default.fetch(
+				`http://tally.test/bills/1/occurrences/${period}/link`,
+				{ headers },
+			);
+		// What the vendored htmx 4 sends when a month chip (inside section#payment-picker) asks for its picker.
+		const monthChipRequest = {
+			"HX-Request": "true",
+			"HX-Target": "section#payment-picker",
+		};
+		const pickerSection = (html: string) =>
+			html.match(/<section id="payment-picker"[\s\S]*?<\/section>/)?.[0] ?? "";
+
+		beforeEach(async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+			await resetDemo(env.DB, "2026-10-10");
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+				env.DB.prepare(
+					"UPDATE bills SET frequency='monthly',due_day=15,anchor_month=NULL,anchor_date=NULL,amount_cents=1500,merchant_raw_name='STREAM CO',merchant_raw_text=0 WHERE id=1",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9960,1,'2026-10-12',1500,'STREAM CO'),(9961,1,'2026-10-13',1400,'STREAM CO')",
+				),
+			]);
+		});
+		afterEach(() => vi.useRealTimers());
+
+		it("answers a month chip with only the picker, for htmx 4's real HX-Target header", async () => {
+			const res = await pickerFor(monthChipRequest);
+			expect(res.status).toBe(200);
+			const html = await res.text();
+			expect(html.trimStart().startsWith('<section id="payment-picker"')).toBe(
+				true,
+			);
+			expect(html).not.toContain("<html");
+			expect(html).not.toContain("<main");
+			expect(html).not.toContain('id="announcer"');
+			expect(html).not.toContain('id="toasts"');
+			expect(html.match(/id="payment-picker"/g)).toHaveLength(1);
+		});
+
+		it("leaves one main, one announcer and one picker once the swap puts the picker into the page", async () => {
+			const page = await (await pickerFor()).text();
+			const fragment = await (await pickerFor(monthChipRequest)).text();
+			const swapped = page.replace(pickerSection(page), () => fragment);
+			expect(swapped.match(/<main/g)).toHaveLength(1);
+			expect(swapped.match(/id="announcer"/g)).toHaveLength(1);
+			expect(swapped.match(/id="payment-picker"/g)).toHaveLength(1);
+		});
+
+		it("keeps focus on the chosen month and does not autofocus the section on a re-render", async () => {
+			const html = await (await pickerFor(monthChipRequest)).text();
+			const section = html.match(/<section[^>]*>/)?.[0] ?? "";
+			expect(section).not.toContain("autofocus");
+			const focused = html.match(/<input[^>]*autofocus[^>]*>/g) ?? [];
+			expect(focused).toHaveLength(1);
+			expect(focused[0]).toContain(`name="period" value="${period}"`);
+		});
+
+		it("still autofocuses the section when the page opens on its picker", async () => {
+			const page = await (await pickerFor()).text();
+			expect(page.match(/<section id="payment-picker"[^>]*>/)?.[0]).toContain(
+				"autofocus",
+			);
+			expect(pickerSection(page)).not.toMatch(/<input[^>]*autofocus/);
+		});
+
+		it("announces the new candidate count through the picker's aria-live line", async () => {
+			const html = await (await pickerFor(monthChipRequest)).text();
+			const count = (html.match(/name="transaction_id" value="/g) ?? []).length;
+			expect(count).toBeGreaterThanOrEqual(2);
+			const line =
+				html.match(
+					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
+				)?.[1] ?? "";
+			expect(line).toContain(`${count} payments to link`);
+		});
+	});
+
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
 		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
