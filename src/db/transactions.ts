@@ -24,7 +24,7 @@ import {
 } from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
-import { KEPT_NAME_LOG_SQL } from "./ai-log";
+import { JEV_ANSWER_LOG_SQL, KEPT_NAME_LOG_SQL } from "./ai-log";
 import { readAiSwitches } from "./ai-switches";
 import {
 	COUNTED_JOINS,
@@ -1826,6 +1826,27 @@ export async function saveNoteAttempts(
 }
 
 /**
+ * Saves one Jev answer and, when it applies a category or income Tally should count, its What AI did row, in
+ * one D1 batch (spec §8.6), so the two land together or not at all. Returns whether the answer was written.
+ */
+async function saveJevAnswer(
+	db: D1Database,
+	update: D1PreparedStatement,
+	id: number,
+	log: { day: string; category: boolean; income: boolean } | undefined,
+): Promise<boolean> {
+	if (!log || (!log.category && !log.income))
+		return (await update.run()).meta.changes > 0;
+	const [saved] = await db.batch([
+		update,
+		db
+			.prepare(JEV_ANSWER_LOG_SQL)
+			.bind(log.day, id, log.category ? 1 : 0, log.income ? 1 : 0),
+	]);
+	return (saved?.meta.changes ?? 0) > 0;
+}
+
+/**
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
@@ -1840,11 +1861,14 @@ export async function saveJevResult(
 		categoryOnly?: boolean;
 		categoryAsked?: boolean;
 		switches?: { income: boolean; categories?: boolean };
+		/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day. */
+		log?: { day: string; category: boolean; income: boolean };
 	} = {},
 ): Promise<boolean> {
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
-		const category = await db
+		// It never writes income, so its log row carries no income.
+		const category = db
 			.prepare(
 				`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
@@ -1862,9 +1886,13 @@ export async function saveJevResult(
 				options.categoryAsked === false ? null : d.suggestedCategoryId,
 				options.categoryAsked === false || !d.noneFit ? 0 : 1,
 				id,
-			)
-			.run();
-		return category.meta.changes > 0;
+			);
+		return saveJevAnswer(
+			db,
+			category,
+			id,
+			options.log && { ...options.log, income: false },
+		);
 	}
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise. A payment
 	// that pays a bill counts all the same (it is read as counted, spec §8.5), so it needs no exception here.
@@ -1875,7 +1903,7 @@ export async function saveJevResult(
 	const incomeConfidence = incomeOn
 		? (d.flagConfidence?.income ?? (income ? 1 : null))
 		: null;
-	const result = await db
+	const update = db
 		.prepare(
 			`UPDATE transactions SET
 				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_id END,
@@ -1933,9 +1961,8 @@ export async function saveJevResult(
 			excludes,
 			excludes,
 			id,
-		)
-		.run();
-	return result.meta.changes > 0;
+		);
+	return saveJevAnswer(db, update, id, options.log);
 }
 
 /** How many of these transactions pay a bill, on their own link or their split parent's (`paysBillSql`). */

@@ -84,8 +84,8 @@ app.onError(serverErrorPage);
 
 /**
  * Production runs four times each morning, with reminders in their own invocation, because D1 allows 1,000 queries in one
- * Worker invocation and a Jev call costs about three of them (the switches read before it and after it,
- * and saving its answer). Each run has the whole limit to itself, and the day's Jev calls still add up
+ * Worker invocation and a Jev call costs about three of them (the switches read, and saving its answer with
+ * its log row in one batch). Each run has the whole limit to itself, and the day's Jev calls still add up
  * to the 500 of decision 56:
  *
  * - 09:00, the sync run (`runScheduled`): syncs every bank, which applies the merchant rules, and retries

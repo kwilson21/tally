@@ -2226,8 +2226,8 @@ describe("the AI switches", () => {
 		expect(jev.calls()).toBe(10);
 	});
 
-	// Someone can save the switches while a run is going, so each transaction reads them again: before
-	// it's sent, and before its answer is saved.
+	// Someone can save the switches while a run is going, so they are read again for each call: as its
+	// answer comes back, before that answer is saved, and before the next call is sent.
 	describe("turned off while a run is going", () => {
 		/** A Jev that runs `during` as its nth answer is on its way back, then answers. */
 		function jevWith(

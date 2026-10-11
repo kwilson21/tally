@@ -2,9 +2,9 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import {
+	AI_TALLY_SQL,
 	type AiTallyCounts,
 	readAiTally,
-	recordJevAnswers,
 } from "../src/db/ai-log";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { settleSuggestion } from "../src/db/merchant-names";
@@ -184,12 +184,15 @@ describe("the migration", () => {
 
 describe("the tally's counts", () => {
 	it("counts a month from that month's own stored rows only", async () => {
-		const [a, b, c, d] = await someIds(4);
+		const [a, b, c, d, e, f] = await someIds(6);
 		await logCategory(a as number, "2026-10-02");
 		await logCategory(b as number, "2026-10-09");
 		await logCategory(c as number, "2026-09-28");
 		await logIncome(d as number, "2026-10-03");
 		await logName("SQ *BLUE BOTTLE", "2026-09-15");
+		// Just outside both months: not counted in either.
+		await logCategory(e as number, "2026-08-31");
+		await logCategory(f as number, "2026-11-01");
 		expect(await readAiTally(db, TODAY)).toEqual({
 			month: "2026-10",
 			sorted: 2,
@@ -197,6 +200,28 @@ describe("the tally's counts", () => {
 			named: 0,
 			paychecks: 1,
 		});
+	});
+
+	it("falls back to September from its first day, and not August's last", async () => {
+		const [a, b] = await someIds(2);
+		await logCategory(a as number, "2026-09-01");
+		await logCategory(b as number, "2026-08-31");
+		expect(await readAiTally(db, "2026-10-02")).toEqual({
+			month: "2026-09",
+			sorted: 1,
+			changed: 0,
+			named: 0,
+			paychecks: 0,
+		});
+	});
+
+	it("reads its two months through the household_day index", async () => {
+		const { results } = await db
+			.prepare(`EXPLAIN QUERY PLAN ${AI_TALLY_SQL}`)
+			.bind("2026-09-01", "2026-11-01")
+			.all<{ detail: string }>();
+		const plan = results.map((row) => row.detail).join("\n");
+		expect(plan).toMatch(/USING (COVERING )?INDEX ai_log_household_day/);
 	});
 
 	it("builds the tally without calling Jev or Workers AI", async () => {
@@ -387,7 +412,7 @@ describe("a deleted transaction's log row", () => {
 			)
 			.bind(id)
 			.run();
-		await recordJevAnswers(db, TODAY, { categories: [id], incomes: [] });
+		await logCategory(id, TODAY);
 	};
 
 	it("forgets the id of a pending row the bank drops, so the next purchase that takes it is still logged", async () => {
@@ -550,6 +575,65 @@ describe("the tally's lines", () => {
 });
 
 describe("what the Jev run and the names write", () => {
+	it("saves a Jev answer and its log row together, or neither", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		// A credit no one reviewed, so Jev's income answer is applied and logged along with the category.
+		await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by) VALUES (1, ?, -250000, 'ACME PAYROLL', 'test')",
+			)
+			.bind(TODAY)
+			.run();
+		// The answer carries no details questions, so the switch for them is off (as in the categorize tests).
+		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, details: false });
+		const before = {
+			category: await idsWhere("category_source = 'jev'"),
+			income: await idsWhere("income_source = 'jev'"),
+		};
+		await db
+			.prepare(
+				"CREATE TRIGGER ai_log_down BEFORE INSERT ON ai_log BEGIN SELECT RAISE(ABORT, 'log down'); END",
+			)
+			.run();
+		try {
+			// A failed save stops the run, as it does today.
+			await categorizePending(
+				{ DB: db, JEV_API_KEY: "test-key" },
+				fakeJev(() => reply(0.99, 0.99)).fetchImpl,
+			).catch(() => {});
+		} finally {
+			await db.prepare("DROP TRIGGER ai_log_down").run();
+		}
+		expect(
+			(
+				await db
+					.prepare("SELECT COUNT(*) AS n FROM ai_log")
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(0);
+		expect(await idsWhere("category_source = 'jev'")).toEqual(before.category);
+		expect(await idsWhere("income_source = 'jev'")).toEqual(before.income);
+
+		// With the log writable again, the same transactions are asked about and both rows come back.
+		await categorizePending(
+			{ DB: db, JEV_API_KEY: "test-key" },
+			fakeJev(() => reply(0.99, 0.99)).fetchImpl,
+		);
+		const after = {
+			category: await idsWhere("category_source = 'jev'"),
+			income: await idsWhere("income_source = 'jev'"),
+		};
+		const newCategory = after.category.filter(
+			(id) => !before.category.includes(id),
+		);
+		const newIncome = after.income.filter((id) => !before.income.includes(id));
+		expect(newCategory.length).toBeGreaterThan(0);
+		expect(newIncome.length).toBeGreaterThan(0);
+		expect(await logIds("category")).toEqual(newCategory);
+		expect(await logIds("income")).toEqual(newIncome);
+	});
+
 	it("logs each category and income a run applies, once, and nothing it doesn't", async () => {
 		// A credit no one reviewed: Jev may mark it as income and give it a category.
 		await db
