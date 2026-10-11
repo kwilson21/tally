@@ -21,6 +21,7 @@ import {
 	removeSplit,
 	saveEdit,
 	saveSplit,
+	setMerchantRule,
 	type TransactionDetail,
 } from "../db/transactions";
 import { centsToAmount, formatCents } from "../money";
@@ -58,6 +59,11 @@ import {
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
 import { resultCount } from "../transactions/result-count";
+import {
+	categoryRuleOffer,
+	firstRuleOfferAmong,
+	ruleOfferForTransaction,
+} from "../transactions/rule-offer";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
@@ -87,6 +93,11 @@ import {
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import { PendingNote } from "../views/pending-note";
+import {
+	RuleOffer,
+	type RuleOfferValue,
+	ruleOfferAnnouncement,
+} from "../views/rule-offer";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
@@ -1053,7 +1064,25 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		),
 	);
 	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
-	return finishSelection(c, today, back, message);
+	// The first merchant in the selection to reach three picks of this category is asked (decision 79).
+	const found = await firstRuleOfferAmong(c.env.DB, ids, cat.id);
+	const tx = found ? await getTransaction(c.env.DB, found.transactionId) : null;
+	if (!found || !tx) return finishSelection(c, today, back, message);
+	const value: RuleOfferValue = {
+		merchantKey: found.merchantKey,
+		categoryId: found.categoryId,
+		count: found.count,
+		merchant: tx.displayName || tidyName(tx.rawName),
+		category: cat.name,
+		back,
+	};
+	const announce = ruleOfferAnnouncement(value, message);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce }),
+	);
+	c.header("HX-Push-Url", back);
+	return renderRuleOffer(c, today, back, value);
 });
 
 transactions.post("/transactions/select/exclude", async (c) => {
@@ -2001,12 +2030,49 @@ transactions.post("/transactions/cash", async (c) => {
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const offerRecord = await categoryRuleOffer(
+		c.env.DB,
+		saved.merchant,
+		saved.categoryId,
+	);
+	const categoryName = categories.find(
+		(category) => category.id === saved.categoryId,
+	)?.name;
+	// The question names the merchant as the family named it, as the Select save does: the name the list
+	// shows for the saved entry, or its tidied bank text when no name is chosen.
+	const savedTx = offerRecord ? await getTransaction(c.env.DB, saved.id) : null;
+	const offer: RuleOfferValue | null =
+		offerRecord && categoryName
+			? {
+					...offerRecord,
+					merchant: savedTx?.displayName || tidyName(saved.merchant),
+					category: categoryName,
+					back,
+				}
+			: null;
+	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
+	if (!c.req.header("HX-Request"))
+		return offer
+			? renderRuleOffer(c, today, back, offer)
+			: c.redirect(back, 303);
+	// The save's own words come first in the announcement, with or without the question after them.
+	const savedWords = `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`;
+	if (offer) {
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message: `Added ${saved.merchant}`, type: "success" },
+				announce: ruleOfferAnnouncement(offer, savedWords),
+			}),
+		);
+		c.header("HX-Push-Url", back);
+		return renderRuleOffer(c, today, back, offer);
+	}
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: { message: `Added ${saved.merchant}`, type: "success" },
-			announce: `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`,
+			announce: savedWords,
 		}),
 	);
 	c.header("HX-Push-Url", back);
@@ -2557,7 +2623,7 @@ async function savePanel(
 	const filters = filtersFrom(c, today, back);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
-	).all<{ id: number; name: string }>();
+	).all<Category>();
 	const people = (
 		await c.env.DB.prepare(
 			"SELECT id, name FROM household_people ORDER BY id",
@@ -2749,6 +2815,34 @@ async function savePanel(
 						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
 	}
+	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
+	// suggestion its rows were showing when nothing was chosen (P29 A). The toast and the offer use this name.
+	// A panel that didn't rename the merchant names it as stored, not as it was drawn.
+	const name =
+		(parsed.value.nameChanged === false
+			? tx.merchantName
+			: parsed.value.displayName) ??
+		(tx.nameSuggested && !parsed.value.keepBankName
+			? tx.displayName
+			: tidyName(tx.rawName));
+	const ruleOfferRecord =
+		parsed.value.categoryId === null ||
+		parsed.value.categoryId === tx.categoryId ||
+		parsed.value.alwaysForMerchant
+			? null
+			: await ruleOfferForTransaction(c.env.DB, tx.id, parsed.value.categoryId);
+	const offerCategory = categories.find(
+		(cat) => cat.id === parsed.value.categoryId,
+	);
+	const ruleOffer =
+		ruleOfferRecord && offerCategory
+			? {
+					...ruleOfferRecord,
+					merchant: name,
+					category: offerCategory.name,
+					back,
+				}
+			: undefined;
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
@@ -2769,15 +2863,12 @@ async function savePanel(
 		parsed.value.categoryId === null
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
+	if (!c.req.header("HX-Request"))
+		return ruleOffer
+			? renderRuleOffer(c, today, back, ruleOffer)
+			: c.redirect(back, 303);
 
-	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
-	// suggestion its rows were showing when nothing was chosen (P29 A).
-	const name =
-		parsed.value.displayName ??
-		(tx.nameSuggested && !parsed.value.keepBankName
-			? tx.displayName
-			: tidyName(tx.rawName));
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;
@@ -2797,6 +2888,8 @@ async function savePanel(
 					? " It still counts while it pays a bill."
 					: " It's excluded from the budget."
 				: " It counts in the budget again.";
+	const saveWords =
+		(keptDetails ? `Kept the details for ${name}.` : saved) + exclusion;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
@@ -2804,12 +2897,15 @@ async function savePanel(
 				message: keptDetails ? `Kept details for ${name}` : `Saved ${name}`,
 				type: "success",
 			},
-			announce:
-				(keptDetails ? `Kept the details for ${name}.` : saved) + exclusion,
+			announce: ruleOffer
+				? ruleOfferAnnouncement(ruleOffer, saveWords)
+				: saveWords,
 		}),
 	);
 	c.header("HX-Push-Url", back);
-	return renderList(c, today, filters, { focusId: tx.id });
+	return ruleOffer
+		? renderRuleOffer(c, today, back, ruleOffer)
+		: renderList(c, today, filters, { focusId: tx.id });
 }
 
 /**
@@ -2829,6 +2925,70 @@ async function savePendingEdit(
 	form.set("amount", centsToAmount(totalCents));
 	return savePanel(c, (await getTransaction(c.env.DB, tx.id)) ?? tx, form);
 }
+
+async function respondToRuleOffer(c: Context<App>, yes: boolean) {
+	const form = await c.req.formData();
+	const merchantKey = form.get("merchant_key")?.toString() ?? "";
+	const categoryId = Number(form.get("category"));
+	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
+	const validCategory = await c.env.DB.prepare(
+		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
+	)
+		.bind(categoryId)
+		.first<{ id: number; name: string }>();
+	const askedName = form.get("merchant")?.toString() ?? "";
+	const merchantName = merchantKey
+		? await c.env.DB.prepare(
+				"SELECT display_name AS displayName FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first<{ displayName: string | null }>()
+		: null;
+	const offer =
+		validCategory && merchantKey
+			? await categoryRuleOffer(c.env.DB, merchantKey, categoryId)
+			: null;
+	const message =
+		yes && offer && validCategory
+			? `Always use ${validCategory.name} for ${askedName || merchantName?.displayName || tidyName(merchantKey)}.`
+			: validCategory
+				? `Saved as ${validCategory.name}.`
+				: "Saved.";
+	if (yes && offer && validCategory)
+		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, today, filtersFrom(c, today, back), {
+		focusHeading: true,
+	});
+}
+
+function renderRuleOffer(
+	c: Context<App>,
+	today: string,
+	back: string,
+	value: RuleOfferValue,
+) {
+	return renderList(c, today, filtersFrom(c, today, back), {
+		sheet: () => (
+			<BottomSheet labelledBy="rule-offer-title" closeHref={back}>
+				<RuleOffer value={value} focus />
+			</BottomSheet>
+		),
+	});
+}
+
+transactions.post("/transactions/rule-offer", (c) =>
+	respondToRuleOffer(c, true),
+);
+transactions.post("/transactions/rule-offer/dismiss", (c) =>
+	respondToRuleOffer(c, false),
+);
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
