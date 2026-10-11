@@ -1064,7 +1064,8 @@ async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
 /**
  * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows
  * each new part, if the whole refund still fits its purchase (src/db/refunded.ts), and is dropped if
- * not; refunds linked to replaced parts are unlinked in the same batch.
+ * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
+ * keeps its unlink date on each new part, so the parts still say why (decision 99).
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1114,9 +1115,9 @@ export async function saveSplit(
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
-			(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source${reviewColumns}, refund_of_id, parent_id, plaid_transaction_id, updated_by)
+			(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source${reviewColumns}, refund_of_id, refund_unlinked_purchase_date, parent_id, plaid_transaction_id, updated_by)
 			SELECT account_id, date, ?, raw_name, merchant_name, ?, 'user', excluded, excluded_source${reviewValues},
-				${inheritedRefundLink}, id, NULL, ?
+				${inheritedRefundLink}, refund_unlinked_purchase_date, id, NULL, ?
 			FROM transactions WHERE id = ? AND amount_cents = ?`)
 				.bind(
 					part.amountCents,
@@ -1253,8 +1254,8 @@ export async function correctCashSplit(
 			: [
 					gated(
 						`INSERT INTO transactions
-					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by, refund_of_id, parent_id, plaid_transaction_id, updated_by)
-				SELECT t.account_id, t.date, json_extract(p.value, '$.cents'), t.raw_name, t.merchant_name, json_extract(p.value, '$.categoryId'), 'user', t.excluded, t.excluded_source, t.income_source, t.credit_reviewed, t.credit_reviewed_by, NULL, t.id, NULL, ?1
+					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by, refund_of_id, refund_unlinked_purchase_date, parent_id, plaid_transaction_id, updated_by)
+				SELECT t.account_id, t.date, json_extract(p.value, '$.cents'), t.raw_name, t.merchant_name, json_extract(p.value, '$.categoryId'), 'user', t.excluded, t.excluded_source, t.income_source, t.credit_reviewed, t.credit_reviewed_by, NULL, t.refund_unlinked_purchase_date, t.id, NULL, ?1
 				FROM json_each(?2) AS p, transactions t
 				WHERE t.id = ?3`,
 						[by, JSON.stringify(newParts), parentId],

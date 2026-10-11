@@ -2965,6 +2965,63 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			{ name: "Part refund", refundOfId: b },
 		]);
 	});
+
+	it("gives a part added to a split cash entry the unlink date its parent carries", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today(),
+				amount: "90.00",
+				merchant: "Unlinked cash entry",
+				category: "1",
+			}),
+		});
+		const id = await idByName("Unlinked cash entry");
+		await env.DB.prepare(
+			"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		await saveSplit(
+			env.DB,
+			id,
+			[
+				{ amountCents: 6000, categoryId: 1 },
+				{ amountCents: 3000, categoryId: 5 },
+			],
+			"demo",
+		);
+		const [a, b] = await partsOf(id);
+
+		await expect(
+			correctCashSplit(
+				env.DB,
+				id,
+				{
+					totalCents: 10000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a?.id as number, categoryId: 1, amountCents: 6000 },
+						{ id: b?.id as number, categoryId: 5, amountCents: 3000 },
+						{ id: null, categoryId: 5, amountCents: 1000 },
+					],
+				},
+				"demo",
+			),
+		).resolves.toEqual({ saved: true });
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents, refund_unlinked_purchase_date AS d FROM transactions WHERE parent_id = ? AND id NOT IN (?, ?)",
+			)
+				.bind(id, a?.id, b?.id)
+				.first(),
+		).toEqual({ amountCents: 1000, d: "2026-09-10" });
+	});
 });
 
 describe("a bank transaction split into parts", () => {

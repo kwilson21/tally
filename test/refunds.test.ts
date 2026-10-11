@@ -12,13 +12,16 @@ import {
 import { loadMonth } from "../src/db/month";
 import {
 	getTransaction,
+	listTransactions,
 	monthCounts,
 	needsCategoryCount,
 	pendingForJev,
 	refundPurchases,
 	saveEdit,
+	saveSplit,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { parseFilters } from "../src/transactions/filters";
 import {
 	organizeGroups,
 	saveOrganizeGroup,
@@ -1016,6 +1019,68 @@ describe("a refund a bank change unlinked", () => {
 		expect(await linkOf(REFUND)).toEqual({ r: PURCHASE, d: null });
 		expect(await linkOf(9011)).toEqual({ r: PURCHASE, d: null });
 		expect(await linkOf(9012)).toEqual({ r: OTHER_MERCHANT, d: null });
+	});
+
+	it("keeps saying so on the parts a person splits it into", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+
+		await saveSplit(
+			db,
+			REFUND,
+			[
+				{ amountCents: -1000, categoryId: KIDS },
+				{ amountCents: -1000, categoryId: GAS },
+			],
+			"test",
+		);
+
+		const parts = await db
+			.prepare(
+				"SELECT refund_unlinked_purchase_date AS d FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all<{ d: string | null }>();
+		expect(parts.results).toEqual([{ d: "2026-09-10" }, { d: "2026-09-10" }]);
+		// The list pages at 25 rows, so each part is found under its own category.
+		const listedUnder = async (category: number) =>
+			(
+				await listTransactions(
+					db,
+					parseFilters(
+						new URLSearchParams({ category: String(category) }),
+						"2026-09",
+					),
+				)
+			).rows
+				.filter((row) => row.parentId === REFUND)
+				.map((row) => row.refundUnlinkedPurchaseDate);
+		expect(await listedUnder(KIDS)).toEqual(["2026-09-10"]);
+		expect(await listedUnder(GAS)).toEqual(["2026-09-10"]);
+	});
+
+	it("gives a split refund's parts no unlink date when the refund carries none", async () => {
+		await saveSplit(
+			db,
+			REFUND,
+			[
+				{ amountCents: -1000, categoryId: KIDS },
+				{ amountCents: -1000, categoryId: GAS },
+			],
+			"test",
+		);
+
+		const parts = await db
+			.prepare(
+				"SELECT refund_unlinked_purchase_date AS d FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+			.bind(REFUND)
+			.all<{ d: string | null }>();
+		expect(parts.results).toEqual([{ d: null }, { d: null }]);
 	});
 });
 
