@@ -1,10 +1,20 @@
+import { formatCents } from "../money";
 import { splitStatus } from "../transactions/split";
 import { Button } from "./button";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 
 type Category = { id: number; name: string };
-export type SplitValue = { category: string; amount: string };
+/**
+ * A part row. `partId` is the saved part a correction updates; a new row has none. `kept` is that part's
+ * own category when it is archived: the row's select offers it, and no other row does.
+ */
+export type SplitValue = {
+	category: string;
+	amount: string;
+	partId?: number;
+	kept?: Category;
+};
 
 export function SplitLine({
 	parentCents,
@@ -24,9 +34,19 @@ export function SplitLine({
 	);
 }
 
+/**
+ * The split sheet's form. In correction mode (Change the parts, spec §8.4) `totalCents` is the entry's
+ * new amount, which the live line counts against, and `amountWas` is the amount the saved parts were
+ * drawn with; the parts' own sum is always that amount, so the line says how far the parts are from
+ * the new one. `pendingEdit` is the panel's other unsaved changes, carried through every redraw so
+ * they are saved with the corrected parts.
+ */
 export function SplitForm({
 	id,
 	parentCents,
+	totalCents,
+	amountWas,
+	pendingEdit,
 	categories,
 	values,
 	back,
@@ -34,11 +54,15 @@ export function SplitForm({
 }: {
 	id: number;
 	parentCents: number;
+	totalCents?: number;
+	amountWas?: number;
+	pendingEdit?: string;
 	categories: Category[];
 	values: SplitValue[];
 	back: string;
 	error?: string;
 }) {
+	const correcting = totalCents !== undefined && amountWas !== undefined;
 	return (
 		<form
 			method="post"
@@ -51,10 +75,19 @@ export function SplitForm({
 			hx-select-oob="#needs-count:innerHTML"
 		>
 			<input type="hidden" name="back" value={back} />
+			{correcting && (
+				<>
+					<input type="hidden" name="total" value={String(totalCents)} />
+					<input type="hidden" name="amount_was" value={String(amountWas)} />
+					{pendingEdit !== undefined && (
+						<input type="hidden" name="pending_edit" value={pendingEdit} />
+					)}
+				</>
+			)}
 			<div class="flex items-center justify-between gap-3">
 				<div id="split-line" aria-live="polite">
 					<SplitLine
-						parentCents={parentCents}
+						parentCents={totalCents ?? parentCents}
 						amounts={values.map((v) => v.amount)}
 					/>
 				</div>
@@ -62,6 +95,11 @@ export function SplitForm({
 					Add a part
 				</Button>
 			</div>
+			{correcting && amountWas !== totalCents && (
+				<p class="text-sm text-muted">
+					{`The parts add up to ${formatCents(amountWas)}. Change them to match ${formatCents(totalCents)}.`}
+				</p>
+			)}
 			{error && (
 				<p role="alert" class="text-sm text-over">
 					{error}
@@ -71,6 +109,13 @@ export function SplitForm({
 				<div
 					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
 				>
+					{correcting && (
+						<input
+							type="hidden"
+							name="part_id"
+							value={value.partId === undefined ? "" : String(value.partId)}
+						/>
+					)}
 					<label for={`part-category-${index}`} class="sr-only">
 						Part {index + 1} category
 					</label>
@@ -82,7 +127,7 @@ export function SplitForm({
 						required
 					>
 						<option value="">Pick a category</option>
-						{categories.map((cat) => (
+						{[...categories, ...(value.kept ? [value.kept] : [])].map((cat) => (
 							<option
 								value={cat.id}
 								selected={value.category === String(cat.id)}

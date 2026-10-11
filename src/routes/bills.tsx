@@ -16,10 +16,13 @@ import {
 } from "../bills/price-change";
 import {
 	type BillStatus,
+	billCadenceLabel,
 	billOccurrence,
 	billOccurrenceForMonth,
+	billOccurrencesForMonth,
+	manualLinkWindowDays,
 } from "../bills/status";
-import { type BillTotalFrequency, calculateBillTotals } from "../bills/totals";
+import { type BillTotalFrequency, billTotalsForRows } from "../bills/totals";
 import {
 	activateBill,
 	type BillFields,
@@ -65,8 +68,9 @@ type DbBill = {
 	name: string;
 	amount_cents: number;
 	due_day: number;
-	frequency: "monthly" | "yearly";
+	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
 	anchor_month: number | null;
+	anchor_date: string | null;
 	category_id: number | null;
 	merchant_raw_name: string;
 	merchant_raw_text: number;
@@ -84,8 +88,9 @@ type Values = {
 	name: string;
 	amount: string;
 	due_day: string;
-	frequency: "monthly" | "yearly";
+	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
 	anchor_month: string;
+	anchor_date: string;
 	category_id: string;
 	merchant_raw_name: string;
 };
@@ -98,6 +103,11 @@ function previousMonth(today: string) {
 		: `${year}-${String(month - 1).padStart(2, "0")}`;
 }
 
+const validDateString = (date: string) =>
+	/^\d{4}-\d{2}-\d{2}$/.test(date) &&
+	!Number.isNaN(Date.parse(`${date}T00:00:00Z`)) &&
+	new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date;
+
 /** Every bill with its status, as of `today`: the household's date, read once by the request. */
 export async function loadBillRows(db: D1Database, today: string) {
 	const rows = await db
@@ -106,12 +116,16 @@ export async function loadBillRows(db: D1Database, today: string) {
 			 FROM bills b
 			 LEFT JOIN categories c ON c.id=b.category_id
 			 LEFT JOIN bill_payments bp ON bp.bill_id=b.id AND bp.status='linked'
-			   AND (bp.period >= ? OR (length(bp.period)=4 AND bp.period >= ?))
+			   AND (bp.period >= ? OR (length(bp.period)=4 AND bp.period >= ?) OR (b.frequency='quarterly' AND bp.period >= ?))
 			 LEFT JOIN transactions t ON t.id=bp.transaction_id
 			 ORDER BY b.id`,
 		)
 		// Only the periods billOccurrence can pick: last month on, or last year on.
-		.bind(previousMonth(today), String(Number(today.slice(0, 4)) - 1))
+		.bind(
+			previousMonth(today),
+			String(Number(today.slice(0, 4)) - 1),
+			`${Number(today.slice(0, 4)) - 1}-Q1`,
+		)
 		.all<DbBill>();
 	const result: (BillRowData & {
 		active: boolean;
@@ -123,6 +137,12 @@ export async function loadBillRows(db: D1Database, today: string) {
 			amountCents: number;
 			paidCents: number;
 		}[];
+		nextOccurrence?: {
+			dueDate: string;
+			status: BillStatus;
+			amountCents: number;
+			paidCents: number;
+		};
 		/** The occurrence the row shows, as bill_payments keys it, and the merchant it's matched on. */
 		period: string;
 		merchantRawName: string;
@@ -134,6 +154,15 @@ export async function loadBillRows(db: D1Database, today: string) {
 		if (list) list.push(row);
 		else byBill.set(row.id, [row]);
 	}
+	// An occurrence's status in the month's totals: paid once linked, else overdue, due within seven days, or upcoming.
+	const occurrenceStatus = (dueDate: string, linked: boolean): BillStatus =>
+		linked
+			? "paid"
+			: dueDate < today
+				? "overdue"
+				: dueDate <= daysBefore(today, -7)
+					? "due"
+					: "upcoming";
 	for (const billRows of byBill.values()) {
 		const b = billRows[0] as DbBill;
 		const payments = new Map(
@@ -158,6 +187,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 				frequency: b.frequency,
 				dueDay: b.due_day,
 				anchorMonth: b.anchor_month,
+				anchorDate: b.anchor_date,
 			},
 			today,
 			new Set(payments.keys()),
@@ -170,35 +200,42 @@ export async function loadBillRows(db: D1Database, today: string) {
 				paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
 			},
 		];
-		if (
-			b.frequency === "monthly" ||
-			b.anchor_month === Number(today.slice(5, 7))
-		) {
-			const current = billOccurrenceForMonth(
-				{
-					frequency: b.frequency,
-					dueDay: b.due_day,
-					anchorMonth: b.anchor_month,
-				},
-				Number(today.slice(0, 4)),
-				Number(today.slice(5, 7)),
-			);
+		const monthOccurrences = billOccurrencesForMonth(
+			{
+				frequency: b.frequency,
+				dueDay: b.due_day,
+				anchorMonth: b.anchor_month,
+				anchorDate: b.anchor_date,
+			},
+			Number(today.slice(0, 4)),
+			Number(today.slice(5, 7)),
+		);
+		for (const current of monthOccurrences)
 			if (!totalOccurrences.some((item) => item.dueDate === current.dueDate)) {
-				const linked = payments.has(current.period);
 				totalOccurrences.push({
 					dueDate: current.dueDate,
-					status: linked
-						? "paid"
-						: current.dueDate < today
-							? "overdue"
-							: current.dueDate <= daysBefore(today, -7)
-								? "due"
-								: "upcoming",
+					status: occurrenceStatus(
+						current.dueDate,
+						payments.has(current.period),
+					),
 					amountCents: b.amount_cents,
 					paidCents: paymentsByPeriod.get(current.period) ?? 0,
 				});
 			}
-		}
+		// A weekly or every-two-weeks bill's next occurrence is set aside once it falls due, even when it is in
+		// next month (an unpaid Friday on Oct 30 with Nov 6 due in a week). Only that one is needed beyond the month.
+		const stepDays =
+			b.frequency === "weekly" ? 7 : b.frequency === "biweekly" ? 14 : 0;
+		const nextDue = stepDays ? daysBefore(occurrence.dueDate, -stepDays) : "";
+		const nextOccurrence =
+			nextDue && !nextDue.startsWith(today.slice(0, 7))
+				? {
+						dueDate: nextDue,
+						status: occurrenceStatus(nextDue, payments.has(nextDue)),
+						amountCents: b.amount_cents,
+						paidCents: paymentsByPeriod.get(nextDue) ?? 0,
+					}
+				: undefined;
 		result.push({
 			id: b.id,
 			name: b.name,
@@ -213,8 +250,10 @@ export async function loadBillRows(db: D1Database, today: string) {
 			merchantRawName: b.merchant_raw_name,
 			merchantRawText: b.merchant_raw_text,
 			frequency: b.frequency,
+			dueDay: b.due_day,
 			paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
 			totalOccurrences,
+			nextOccurrence,
 		});
 	}
 	return { today, rows: result };
@@ -256,35 +295,7 @@ async function page(
 	});
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
-	const soon = active.filter(
-		(b) => b.status === "due" || b.status === "overdue",
-	);
-	const totals = calculateBillTotals({
-		month: today.slice(0, 7),
-		bills: active.map((bill) => ({
-			id: bill.id,
-			amountCents: bill.amountCents,
-			frequency: bill.frequency,
-			active: true,
-		})),
-		displayedOccurrences: active.map((bill) => ({
-			billId: bill.id,
-			dueDate: bill.dueDate,
-			status: bill.status,
-			amountCents: bill.amountCents,
-			paidCents: bill.paidCents,
-		})),
-		thisMonthOccurrences: active.flatMap((bill) =>
-			bill.totalOccurrences
-				.filter((occurrence) =>
-					occurrence.dueDate.startsWith(today.slice(0, 7)),
-				)
-				.map((occurrence) => ({
-					billId: bill.id,
-					...occurrence,
-				})),
-		),
-	});
+	const totals = billTotalsForRows(today.slice(0, 7), active);
 	return c.html(
 		<Layout
 			title="Bills · Tally"
@@ -296,8 +307,8 @@ async function page(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">Bills</h1>
 				{rows.length > 0 && (
 					<p class="mt-2 font-serif text-lg italic">
-						{soon.length} {soon.length === 1 ? "bill" : "bills"} to pay soon,{" "}
-						{formatCents(soon.reduce((n, b) => n + b.amountCents, 0))} in all
+						{totals.soonCount} {totals.soonCount === 1 ? "bill" : "bills"} to
+						pay soon, {formatCents(totals.soonCents)} in all
 					</p>
 				)}
 				{rows.length > 0 && (
@@ -370,7 +381,13 @@ async function page(
 				)}
 			</div>
 			<div id="sheet">
-				{sheet && <BillSheet {...sheet} categories={await categories(c)} />}
+				{sheet && (
+					<BillSheet
+						{...sheet}
+						categories={await categories(c)}
+						today={today}
+					/>
+				)}
 			</div>
 		</Layout>,
 	);
@@ -416,9 +433,19 @@ function valuesOf(b?: DbBill): Values {
 		due_day: String(b?.due_day ?? ""),
 		frequency: b?.frequency ?? "monthly",
 		anchor_month: String(b?.anchor_month ?? 1),
+		anchor_date: b?.anchor_date ?? "",
 		category_id: String(b?.category_id ?? ""),
 		merchant_raw_name: b?.merchant_raw_name ?? "",
 	};
+}
+
+function quarterlyMonths(anchorMonth: string) {
+	const first = Math.min(12, Math.max(1, Number(anchorMonth) || 1)) - 1;
+	return [0, 3, 6, 9].map((offset) =>
+		new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
+			new Date(Date.UTC(2026, (first + offset) % 12, 1)),
+		),
+	);
 }
 
 function BillSheet({
@@ -427,12 +454,14 @@ function BillSheet({
 	errors = {},
 	bigAmount,
 	categories,
+	today,
 }: {
 	bill?: DbBill;
 	values?: Values;
 	errors?: Record<string, string>;
 	bigAmount?: BigAmount;
 	categories: Category[];
+	today: string;
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
 	// Once a name has been refused, Reactivate also sends the Name field, so renaming the bill is how
@@ -497,20 +526,50 @@ function BillSheet({
 					</div>
 				)}
 				<div class="flex flex-wrap items-end gap-3">
-					<TextInput
-						id="bill-day"
-						name="due_day"
-						label="Due day"
-						value={values.due_day}
-						error={errors.due_day}
-						surface="paper"
-						class="w-24"
-						inputmode="numeric"
-						required
-					/>
+					<label class="bill-weekday flex flex-col gap-1">
+						<span>Day of the week</span>
+						<select
+							name="weekly_day"
+							class="min-h-11 rounded-control border border-rule bg-paper px-3"
+						>
+							{[
+								"Monday",
+								"Tuesday",
+								"Wednesday",
+								"Thursday",
+								"Friday",
+								"Saturday",
+								"Sunday",
+							].map((day, i) => (
+								<option
+									value={i + 1}
+									selected={values.due_day === String(i + 1)}
+								>
+									{day}
+								</option>
+							))}
+						</select>
+						{values.frequency === "weekly" && errors.due_day && (
+							<span role="alert" class="text-sm text-over">
+								{errors.due_day}
+							</span>
+						)}
+					</label>
+					<div class="bill-due-day">
+						<TextInput
+							id="bill-day"
+							name="due_day"
+							label="Due day"
+							value={values.due_day}
+							error={values.frequency === "weekly" ? undefined : errors.due_day}
+							surface="paper"
+							class="w-24"
+							inputmode="numeric"
+						/>
+					</div>
 					<fieldset class="bill-frequency">
 						<legend>How often</legend>
-						<div class="mt-1 flex gap-2">
+						<div class="mt-1 flex flex-wrap gap-2">
 							<Chip
 								type="radio"
 								name="frequency"
@@ -527,6 +586,22 @@ function BillSheet({
 							>
 								Yearly
 							</Chip>
+							{(["weekly", "biweekly", "quarterly"] as const).map(
+								(frequency) => (
+									<Chip
+										type="radio"
+										name="frequency"
+										value={frequency}
+										checked={values.frequency === frequency}
+									>
+										{frequency === "biweekly"
+											? "Every two weeks"
+											: frequency === "weekly"
+												? "Weekly"
+												: "Quarterly"}
+									</Chip>
+								),
+							)}
 						</div>
 						{errors.frequency && (
 							<p role="alert" class="mt-1 text-sm text-over">
@@ -536,7 +611,8 @@ function BillSheet({
 					</fieldset>
 				</div>
 				<label class="bill-month flex-col gap-1">
-					<span>Month (for yearly bills)</span>
+					<span class="bill-year-label">Month (for yearly bills)</span>
+					<span class="bill-quarter-label">First month</span>
 					<select
 						name="anchor_month"
 						class="min-h-11 rounded-control border border-rule bg-paper px-3"
@@ -558,7 +634,30 @@ function BillSheet({
 							{errors.anchor_month}
 						</span>
 					)}
+					<span class="bill-quarter-hint text-sm text-muted">
+						{"Then every 3 months: " +
+							quarterlyMonths(values.anchor_month)
+								.join(", ")
+								.replace(/, ([^,]+)$/, " and $1") +
+							"."}
+					</span>
 				</label>
+				<div class="bill-anchor-date">
+					<TextInput
+						id="bill-anchor-date"
+						name="anchor_date"
+						label="A date it was paid"
+						type="date"
+						value={values.anchor_date}
+						error={errors.anchor_date}
+						hint={
+							values.anchor_date && validDateString(values.anchor_date)
+								? `Then every two weeks from that date. Next: ${shortDate(nextTwoWeeksAfter(values.anchor_date, today))}.`
+								: "Then every two weeks from that date."
+						}
+						surface="paper"
+					/>
+				</div>
 				<fieldset>
 					<legend>Category</legend>
 					<div class="mt-1 flex flex-wrap gap-2">
@@ -624,6 +723,7 @@ bills.get("/bills/new", (c) => {
 				due_day: q.due_day ?? "",
 				frequency: "monthly" as const,
 				anchor_month: "1",
+				anchor_date: "",
 				category_id: q.category_id ?? "",
 				merchant_raw_name: q.merchant_raw_name ?? "",
 			}
@@ -727,9 +827,14 @@ async function save(c: Context<App>, id?: number) {
 	const values: Values = {
 		name: raw("name"),
 		amount: raw("amount"),
-		due_day: raw("due_day"),
-		frequency: raw("frequency") === "yearly" ? "yearly" : "monthly",
+		due_day: raw(raw("frequency") === "weekly" ? "weekly_day" : "due_day"),
+		frequency: (
+			["monthly", "yearly", "weekly", "biweekly", "quarterly"] as const
+		).includes(raw("frequency") as Values["frequency"])
+			? (raw("frequency") as Values["frequency"])
+			: "monthly",
 		anchor_month: raw("anchor_month"),
+		anchor_date: raw("anchor_date"),
 		category_id: raw("category_id"),
 		merchant_raw_name: raw("merchant_raw_name"),
 	};
@@ -741,9 +846,25 @@ async function save(c: Context<App>, id?: number) {
 	} catch {
 		errors.amount = "Enter an amount greater than $0.";
 	}
-	const due = Number(values.due_day);
-	if (!Number.isInteger(due) || due < 1 || due > 31)
-		errors.due_day = "Enter a day from 1 to 31.";
+	const anchorDate = values.anchor_date;
+	const validAnchorDate = validDateString(anchorDate);
+	const due =
+		values.frequency === "biweekly" && validAnchorDate
+			? ((new Date(`${anchorDate}T00:00:00Z`).getUTCDay() + 6) % 7) + 1
+			: Number(values.due_day);
+	// A biweekly bill has no due day field: its weekday comes from its date, so only that date is checked.
+	if (
+		values.frequency !== "biweekly" &&
+		(!Number.isInteger(due) ||
+			due < 1 ||
+			due > (values.frequency === "weekly" ? 7 : 31))
+	)
+		errors.due_day =
+			values.frequency === "weekly"
+				? "Choose a day of the week."
+				: "Enter a day from 1 to 31.";
+	if (values.frequency === "biweekly" && !validAnchorDate)
+		errors.anchor_date = "Choose a date.";
 	if (!values.name) errors.name = "Enter a name.";
 	if (!values.merchant_raw_name)
 		errors.merchant_raw_name = "Enter the bank's text.";
@@ -758,7 +879,7 @@ async function save(c: Context<App>, id?: number) {
 	}
 	const anchor = Number(values.anchor_month);
 	if (
-		values.frequency === "yearly" &&
+		(values.frequency === "yearly" || values.frequency === "quarterly") &&
 		(!Number.isInteger(anchor) || anchor < 1 || anchor > 12)
 	)
 		errors.anchor_month = "Choose a month.";
@@ -780,31 +901,40 @@ async function save(c: Context<App>, id?: number) {
 		if (!bigAmount.confirmed)
 			errors.amount = `${formatCents(cents)} is a lot for a bill.`;
 	}
-	// Linked payments are budget history, so a bill that has them keeps its schedule.
-	if (bill && bill.frequency !== values.frequency) {
+	// Linked payments are budget history, so a bill that has them keeps its schedule. A weekly bill's
+	// due day is its weekday, which names its occurrences, so moving it is a change of schedule too.
+	const periodKeysChanged =
+		!!bill &&
+		(bill.frequency !== values.frequency ||
+			bill.anchor_month !==
+				(values.frequency === "yearly" || values.frequency === "quarterly"
+					? anchor
+					: null) ||
+			bill.anchor_date !==
+				(values.frequency === "biweekly" ? anchorDate : null) ||
+			(values.frequency === "weekly" && bill.due_day !== due));
+	const protectedScheduleChanged = periodKeysChanged;
+	if (protectedScheduleChanged) {
 		const linked = await c.env.DB.prepare(
 			"SELECT 1 FROM bill_payments WHERE bill_id=? AND status='linked' LIMIT 1",
 		)
 			.bind(id)
 			.first();
-		if (linked)
-			errors.frequency =
-				"This bill has payments linked. To change how often it's due, deactivate it and add a new bill.";
-	}
-	if (
-		bill &&
-		bill.frequency === "yearly" &&
-		values.frequency === "yearly" &&
-		bill.anchor_month !== anchor
-	) {
-		const linked = await c.env.DB.prepare(
-			"SELECT 1 FROM bill_payments WHERE bill_id=? AND status='linked' LIMIT 1",
-		)
-			.bind(id)
-			.first();
-		if (linked)
-			errors.anchor_month =
-				"This bill has payments linked. To change when it's due, deactivate it and add a new bill.";
+		if (linked) {
+			// The message goes under the field that changed, so it is visible on the form.
+			const field =
+				bill.frequency !== values.frequency
+					? "frequency"
+					: values.frequency === "weekly"
+						? "due_day"
+						: values.frequency === "biweekly"
+							? "anchor_date"
+							: "anchor_month";
+			errors[field] =
+				bill.frequency === values.frequency
+					? "This bill has payments linked. To change when it's due, deactivate it and add a new bill."
+					: "This bill has payments linked. To change how often it's due, deactivate it and add a new bill.";
+		}
 	}
 	if (Object.keys(errors).length)
 		return page(c, { bill: bill ?? undefined, values, errors, bigAmount });
@@ -813,18 +943,17 @@ async function save(c: Context<App>, id?: number) {
 		amountCents: cents,
 		dueDay: due,
 		frequency: values.frequency,
-		anchorMonth: values.frequency === "yearly" ? anchor : null,
+		anchorMonth:
+			values.frequency === "yearly" || values.frequency === "quarterly"
+				? anchor
+				: null,
+		anchorDate: values.frequency === "biweekly" ? anchorDate : null,
 		categoryId: Number(values.category_id),
 		merchantRawName: values.merchant_raw_name,
 	};
 	// Old dismissals have no meaning once the schedule changes (links can't exist here, checked above).
 	const written = id
-		? await updateBill(
-				c.env.DB,
-				id,
-				fields,
-				!!bill && bill.frequency !== values.frequency,
-			)
+		? await updateBill(c.env.DB, id, fields, periodKeysChanged)
 		: await insertBill(c.env.DB, fields);
 	// Another save took the name since the check above, and the write refused it.
 	if (!written)
@@ -914,12 +1043,52 @@ const shortDate = (date: string) =>
 		day: "numeric",
 		timeZone: "UTC",
 	}).format(new Date(`${date}T00:00:00Z`));
+
+/** The first date after `today` in the every-two-weeks series from `anchor` (anchor + 14k). */
+function nextTwoWeeksAfter(anchor: string, today: string): string {
+	const dayNumber = (date: string) =>
+		Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+	const steps = Math.max(
+		0,
+		Math.floor((dayNumber(today) - dayNumber(anchor)) / 14) + 1,
+	);
+	return new Date((dayNumber(anchor) + 14 * steps) * 86_400_000)
+		.toISOString()
+		.slice(0, 10);
+}
+
+const occurrenceLabel = (date: string) =>
+	new Intl.DateTimeFormat("en-US", {
+		weekday: "short",
+		month: "short",
+		day: "numeric",
+		timeZone: "UTC",
+	}).format(new Date(`${date}T00:00:00Z`));
 const addMonths = (period: string, amount: number) => {
 	const date = new Date(`${period}-01T00:00:00Z`);
 	date.setUTCMonth(date.getUTCMonth() + amount);
 	return date.toISOString().slice(0, 7);
 };
 const occurrenceDate = (bill: DbBill, period: string) => {
+	if (bill.frequency === "weekly" || bill.frequency === "biweekly")
+		return period;
+	if (bill.frequency === "quarterly") {
+		const quarter = Number(period.slice(-1));
+		const firstQuarter = Math.floor(((bill.anchor_month ?? 1) - 1) / 3) + 1;
+		const month =
+			(((bill.anchor_month ?? 1) - 1 + ((quarter - firstQuarter + 4) % 4) * 3) %
+				12) +
+			1;
+		return billOccurrenceForMonth(
+			{
+				frequency: bill.frequency,
+				dueDay: bill.due_day,
+				anchorMonth: bill.anchor_month,
+			},
+			Number(period.slice(0, 4)),
+			month,
+		).dueDate;
+	}
 	const month =
 		bill.frequency === "monthly"
 			? period
@@ -929,53 +1098,69 @@ const occurrenceDate = (bill: DbBill, period: string) => {
 			frequency: bill.frequency,
 			dueDay: bill.due_day,
 			anchorMonth: bill.anchor_month,
+			anchorDate: bill.anchor_date,
 		},
 		Number(month.slice(0, 4)),
 		Number(month.slice(5, 7)),
 	).dueDate;
 };
+const occurrenceMonth = (bill: DbBill, period: string) =>
+	occurrenceDate(bill, period).slice(0, 7);
+/** The shape of each frequency's payment keys (bill_payments.period), so a key of another shape never sets a start. */
+const periodKeyShape: Record<DbBill["frequency"], RegExp> = {
+	monthly: /^\d{4}-\d{2}$/,
+	yearly: /^\d{4}$/,
+	weekly: /^\d{4}-\d{2}-\d{2}$/,
+	biweekly: /^\d{4}-\d{2}-\d{2}$/,
+	quarterly: /^\d{4}-Q[1-4]$/,
+};
+/** The periods a bill's page lists and accepts: back to its earliest linked payment (or six months), ahead two months (a year for yearly bills). */
 async function billPeriods(db: D1Database, bill: DbBill, today: string) {
-	const first = await db
+	const linked = await db
 		.prepare(
-			"SELECT MIN(period) AS period FROM bill_payments WHERE bill_id=? AND status='linked'",
+			"SELECT period FROM bill_payments WHERE bill_id=? AND status='linked'",
 		)
 		.bind(bill.id)
-		.first<{ period: string | null }>();
-	const sixBack = addMonths(today.slice(0, 7), -6);
-	let start = first?.period
-		? first.period.length === 4
-			? `${first.period}-${String(bill.anchor_month).padStart(2, "0")}`
-			: first.period
-		: sixBack;
-	if (start > sixBack) start = sixBack;
-	const upcoming = addMonths(
-		today.slice(0, 7),
-		bill.frequency === "yearly" ? 12 : 1,
-	);
-	const current = billOccurrence(
-		{
-			frequency: bill.frequency,
-			dueDay: bill.due_day,
-			anchorMonth: bill.anchor_month,
-		},
-		today,
-		new Set(),
-	).period;
-	const end = bill.frequency === "yearly" ? upcoming.slice(0, 4) : upcoming;
-	if (bill.frequency === "yearly") {
-		const periods = Array.from(
-			{ length: Math.max(0, Number(end) - Number(start.slice(0, 4)) + 1) },
-			(_, i) => String(Number(end) - i),
-		);
-		if (!periods.includes(current)) periods.push(current);
-		return periods.sort().reverse();
+		.all<{ period: string }>();
+	let start = addMonths(today.slice(0, 7), -6);
+	for (const { period } of linked.results) {
+		if (!periodKeyShape[bill.frequency].test(period)) continue;
+		const month = occurrenceMonth(bill, period);
+		if (month < start) start = month;
 	}
-	const result: string[] = [];
-	for (let period = end; period >= start; period = addMonths(period, -1))
-		result.push(period);
-	if (!result.includes(current)) result.push(current);
-	result.sort().reverse();
-	return result;
+	const end = addMonths(
+		today.slice(0, 7),
+		bill.frequency === "yearly" ? 12 : 2,
+	);
+	const result = new Set<string>();
+	for (let month = start; month <= end; month = addMonths(month, 1)) {
+		for (const occurrence of billOccurrencesForMonth(
+			{
+				frequency: bill.frequency,
+				dueDay: bill.due_day,
+				anchorMonth: bill.anchor_month,
+				anchorDate: bill.anchor_date,
+			},
+			Number(month.slice(0, 4)),
+			Number(month.slice(5, 7)),
+		))
+			result.add(occurrence.period);
+	}
+	result.add(
+		billOccurrence(
+			{
+				frequency: bill.frequency,
+				dueDay: bill.due_day,
+				anchorMonth: bill.anchor_month,
+				anchorDate: bill.anchor_date,
+			},
+			today,
+			new Set(),
+		).period,
+	);
+	return [...result].sort((a, b) =>
+		occurrenceDate(bill, b).localeCompare(occurrenceDate(bill, a)),
+	);
 }
 
 async function billPage(
@@ -993,9 +1178,9 @@ async function billPage(
 	if (pickerPeriod && !periods.includes(pickerPeriod)) return c.notFound();
 	const payments = (
 		await c.env.DB.prepare(
-			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked'`,
+			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked' AND bp.period IN (SELECT value FROM json_each(?))`,
 		)
-			.bind(id)
+			.bind(id, JSON.stringify(periods))
 			.all<LinkedPayment>()
 	).results;
 	const byPeriod = new Map(
@@ -1006,11 +1191,12 @@ async function billPage(
 		const due = occurrenceDate(bill, pickerPeriod);
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=30 AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),
 					due,
+					manualLinkWindowDays(bill.frequency),
 					bill.id,
 					pickerPeriod,
 					bill.amount_cents,
@@ -1024,6 +1210,7 @@ async function billPage(
 			frequency: bill.frequency,
 			dueDay: bill.due_day,
 			anchorMonth: bill.anchor_month,
+			anchorDate: bill.anchor_date,
 		},
 		today,
 		new Set(payments.map((p) => p.period)),
@@ -1031,9 +1218,9 @@ async function billPage(
 	// A payment at another price, offered on the occurrence the Bills row shows (P36 B, spec §8.5).
 	const offer = await findPriceOffer(c.env.DB, offerBill(bill, current));
 	const countedMonth = (period: string) =>
-		bill.frequency === "monthly"
-			? period
-			: `${period}-${String(bill.anchor_month).padStart(2, "0")}`;
+		bill.frequency === "yearly"
+			? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
+			: occurrenceMonth(bill, period);
 	const picker = pickerPeriod ? (
 		<BillPaymentPicker
 			billId={id}
@@ -1041,6 +1228,7 @@ async function billPage(
 			billAmountCents={bill.amount_cents}
 			openedPeriod={pickerPeriod}
 			dueDateLabel={shortDate(occurrenceDate(bill, pickerPeriod))}
+			frequency={bill.frequency}
 			selectedTransactionId={selectedTransactionId}
 			candidates={candidates.map((t) => ({
 				id: t.transaction_id,
@@ -1054,8 +1242,9 @@ async function billPage(
 				.filter((period) => !byPeriod.has(period))
 				.map((period) => ({
 					value: period,
-					label:
-						bill.frequency === "monthly" ? monthName(period, today) : period,
+					label: ["monthly", "yearly"].includes(bill.frequency)
+						? monthName(countedMonth(period), today)
+						: occurrenceLabel(occurrenceDate(bill, period)),
 					countedMonth: countedMonth(period),
 				}))}
 		/>
@@ -1079,8 +1268,13 @@ async function billPage(
 				</h1>
 				<p class="text-lg">
 					{formatCents(bill.amount_cents)}{" "}
-					{bill.frequency === "monthly" ? "a month" : "a year"}, due the{" "}
-					{ordinal(bill.due_day)}
+					{bill.frequency === "weekly"
+						? `every ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][bill.due_day - 1]}`
+						: bill.frequency === "biweekly"
+							? "every two weeks"
+							: bill.frequency === "quarterly"
+								? "every 3 months"
+								: `${bill.frequency === "monthly" ? "a month" : "a year"}, due the ${ordinal(bill.due_day)}`}
 				</p>
 				{error && (
 					<p role="alert" class="mt-3 text-over">
@@ -1092,21 +1286,28 @@ async function billPage(
 					{periods.map((period) => {
 						const payment = byPeriod.get(period);
 						const due = occurrenceDate(bill, period);
+						// A missed weekly Friday from this month is overdue and set aside (Bills' totals count it so);
+						// only one from an earlier month reads Not paid.
+						const missedThisMonth =
+							["weekly", "biweekly"].includes(bill.frequency) &&
+							due.slice(0, 7) === today.slice(0, 7);
 						const status = payment
 							? "paid"
 							: period === current.period
 								? current.status
 								: due < today
-									? "not-paid"
+									? missedThisMonth
+										? "overdue"
+										: "not-paid"
 									: "upcoming";
 						return (
 							<BillOccurrenceRow
 								billId={id}
 								period={period}
 								label={
-									bill.frequency === "monthly"
-										? monthName(period, today)
-										: period
+									["monthly", "yearly"].includes(bill.frequency)
+										? monthName(countedMonth(period), today)
+										: occurrenceLabel(due)
 								}
 								status={status}
 								payment={
@@ -1129,6 +1330,10 @@ async function billPage(
 												dateLabel: shortDay(offer.date, today),
 												billAmountCents: bill.amount_cents,
 												frequency: bill.frequency,
+												cadence: billCadenceLabel({
+													frequency: bill.frequency,
+													dueDay: bill.due_day,
+												}),
 											}
 										: undefined
 								}
@@ -1207,9 +1412,9 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 	return c.html(
 		<BillMonthExplanation
 			countedMonth={
-				bill.frequency === "monthly"
-					? period
-					: `${period}-${String(bill.anchor_month).padStart(2, "0")}`
+				bill.frequency === "yearly"
+					? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
+					: occurrenceMonth(bill, period)
 			}
 			paymentDate={payment.date}
 		/>,
@@ -1237,23 +1442,26 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 	const due = occurrenceDate(bill, period);
+	const manualWindow = manualLinkWindowDays(bill.frequency);
 	const eligible = await c.env.DB.prepare(
-		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30",
+		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=?",
 	)
-		.bind(transaction, due)
+		.bind(transaction, due, manualWindow)
 		.first();
 	if (!eligible) {
-		const label = monthName(
-			bill.frequency === "monthly"
-				? period
-				: `${period}-${String(bill.anchor_month).padStart(2, "0")}`,
-			today,
-		);
+		const label = ["monthly", "yearly"].includes(bill.frequency)
+			? monthName(
+					bill.frequency === "yearly"
+						? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
+						: period,
+					today,
+				)
+			: occurrenceLabel(occurrenceDate(bill, period));
 		return billPage(
 			c,
 			id,
 			opened,
-			`That payment isn't within 30 days of ${label}'s bill.`,
+			`That payment isn't within ${manualWindow} days of ${label}'s bill.`,
 			undefined,
 			today,
 		);
@@ -1261,9 +1469,9 @@ bills.post("/bills/:id/link", async (c) => {
 	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
 	// linking never writes (spec §6.1 rule 4, §8.5).
 	const result = await c.env.DB.prepare(
-		`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=30)`,
+		`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND abs(julianday(date)-julianday(?))<=?)`,
 	)
-		.bind(id, period, transaction, transaction, due)
+		.bind(id, period, transaction, transaction, due, manualWindow)
 		.run();
 	if (!result.meta.changes)
 		return billPage(
@@ -1332,6 +1540,7 @@ function offerBill(
 		id: bill.id,
 		active: !!bill.active,
 		status: occurrence.status,
+		frequency: bill.frequency,
 		amountCents: bill.amount_cents,
 		merchantRawName: bill.merchant_raw_name,
 		merchantRawText: bill.merchant_raw_text,
@@ -1356,6 +1565,7 @@ async function currentOffer(
 			frequency: bill.frequency,
 			dueDay: bill.due_day,
 			anchorMonth: bill.anchor_month,
+			anchorDate: bill.anchor_date,
 		},
 		today,
 		new Set(linked.map((row) => row.period)),

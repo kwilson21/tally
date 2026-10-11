@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { SHOW_LABELS, SHOWS } from "../src/transactions/filters";
@@ -360,24 +360,32 @@ describe("GET /transactions", () => {
 	});
 
 	it("pages through results with real links, 25 at a time", async () => {
-		const first = (await get("/transactions")).html;
-		expect(first).toMatch(
-			/<p id="result-count"[^>]*>Showing 1–25 of 39 transactions in [A-Z][a-z]+<\/p>/,
-		);
-		expect(first).toMatch(/<nav aria-label="Pages"/);
-		expect(first).toContain("Page 1 of 2");
-		expect(first).toMatch(
-			/<a[^>]*href="\/transactions\?page=2"[^>]*rel="next"[^>]*>Older<\/a>/,
-		);
-		expect(first).not.toContain(">Newer<");
+		// Pinned to October 11: the demo's two Daycare Fridays so far are in the count (40 with them).
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-11T15:00:00Z"));
+		try {
+			await resetDemo(env.DB, "2026-10-11");
+			const first = (await get("/transactions")).html;
+			expect(first).toMatch(
+				/<p id="result-count"[^>]*>Showing 1–25 of 41 transactions in [A-Z][a-z]+<\/p>/,
+			);
+			expect(first).toMatch(/<nav aria-label="Pages"/);
+			expect(first).toContain("Page 1 of 2");
+			expect(first).toMatch(
+				/<a[^>]*href="\/transactions\?page=2"[^>]*rel="next"[^>]*>Older<\/a>/,
+			);
+			expect(first).not.toContain(">Newer<");
 
-		const second = (await get("/transactions?page=2")).html;
-		expect(rowCount(second)).toBe(14);
-		expect(second).toMatch(/Showing 26–39 of 39 transactions/);
-		expect(second).toMatch(
-			/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
-		);
-		expect(second).not.toContain(">Older<");
+			const second = (await get("/transactions?page=2")).html;
+			expect(rowCount(second)).toBe(16);
+			expect(second).toMatch(/Showing 26–41 of 41 transactions/);
+			expect(second).toMatch(
+				/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
+			);
+			expect(second).not.toContain(">Older<");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("centres the page label between two equal sides, so it stays put from page to page", async () => {

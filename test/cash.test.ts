@@ -1,9 +1,16 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
-import { saveSplit } from "../src/db/transactions";
+import {
+	correctCashSplit,
+	getTransaction,
+	saveEdit,
+	saveSplit,
+} from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { formatCents } from "../src/money";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { entryKeyOf } from "../src/transactions/cash";
@@ -169,6 +176,30 @@ describe("adding cash", () => {
 		expect(html).toContain("Enter where you spent it.");
 	});
 
+	it("refuses an amount of zero on Add cash and saves nothing", async () => {
+		const { res, html } = await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "0.00",
+				merchant: "Zero add cash",
+				category: "1",
+			}),
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain("Enter an amount greater than zero.");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name='Zero add cash'",
+			).first(),
+		).toEqual({ n: 0 });
+	});
+
 	it("refreshes Add cash with the list when filters change in place", async () => {
 		const { html } = await request("/transactions?month=all");
 		const link = html.match(/<a[^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
@@ -239,6 +270,693 @@ describe("adding cash", () => {
 });
 
 describe("cash lifecycle", () => {
+	const createBillLinkedCash = async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const month = today.slice(0, 7);
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today,
+				amount: "18.50",
+				merchant: "Bill-linked cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Bill-linked cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9600,'Linked cash bill',1850,5,'monthly',1,'BILL-LINKED CASH')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9600,?,?,'user','linked')",
+		)
+			.bind(month, id)
+			.run();
+
+		return { id, today, month };
+	};
+	const saveCashEdit = (id: number, date: string, amount: string) =>
+		request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ date, amount, back: "/transactions" }),
+		});
+	const linkedPayment = (id: number) =>
+		env.DB.prepare(
+			"SELECT bill_id,period,transaction_id,status FROM bill_payments WHERE transaction_id=?",
+		)
+			.bind(id)
+			.first();
+
+	it("date edit keeps the bill link", async () => {
+		const { id, today, month } = await createBillLinkedCash();
+		const yesterday = new Date(`${today}T00:00:00Z`);
+		yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+		const earlierDate = yesterday.toISOString().slice(0, 10);
+		const saved = await saveCashEdit(id, earlierDate, "18.50");
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT date FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ date: earlierDate });
+		expect(await linkedPayment(id)).toEqual({
+			bill_id: 9600,
+			period: month,
+			transaction_id: id,
+			status: "linked",
+		});
+	});
+
+	it("amount edit keeps the bill link", async () => {
+		const { id, today, month } = await createBillLinkedCash();
+		const saved = await saveCashEdit(id, today, "20.00");
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, date FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 2000, date: today });
+		expect(await linkedPayment(id)).toEqual({
+			bill_id: 9600,
+			period: month,
+			transaction_id: id,
+			status: "linked",
+		});
+	});
+
+	it("edits a cash entry's date and amount in the edit panel", async () => {
+		const created = await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: "2026-10-01",
+				amount: "18.50",
+				merchant: "Editable cash",
+				category: "1",
+			}),
+		});
+		expect(created.res.status).toBe(200);
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Editable cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const monthSummary = async () => {
+			const data = await loadMonth(env.DB, "2026-10");
+			return summarizeMonth({
+				month: "2026-10",
+				categories: data.categories,
+				amounts: data.amounts,
+				transactions: data.transactions,
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		};
+		const spentBefore = await monthSummary();
+		const panel = await request(`/transactions/${id}`);
+		expect(panel.html).toContain("Cash · you entered this");
+		expect(panel.html).toContain(`name="amount"`);
+		expect(panel.html).toContain(`name="date"`);
+		const saved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: "2026-10-02",
+				amount: "20.00",
+				back: "/transactions",
+			}),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT date,amount_cents FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ date: "2026-10-02", amount_cents: 2000 });
+		expect((await monthSummary()) - spentBefore).toBe(150);
+	});
+
+	const createCash = async (merchant: string, amount: string) => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount,
+				merchant,
+				category: "1",
+			}),
+		});
+		return (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
+			)
+				.bind(merchant)
+				.first<{ id: number }>()
+		)?.id as number;
+	};
+
+	it("refuses an amount of zero in the edit panel and keeps the amount", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const id = await createCash("Zero edit cash", "18.50");
+		const { res, html } = await saveCashEdit(id, today, "0.00");
+		expect(res.status).toBe(422);
+		expect(html).toContain("Enter an amount greater than zero.");
+		expect(
+			await env.DB.prepare("SELECT amount_cents FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 1850 });
+	});
+
+	it("saves a cash entry's category, note, date and amount from one Save", async () => {
+		const id = await createCash("One save cash", "18.50");
+		const saved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: "2026-10-02",
+				amount: "20.00",
+				category: "5",
+				note: "One save note",
+				back: "/transactions",
+			}),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT date, amount_cents, note, category_id, category_source FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({
+			date: "2026-10-02",
+			amount_cents: 2000,
+			note: "One save note",
+			category_id: 5,
+			category_source: "user",
+		});
+	});
+
+	it("saves nothing in the panel, its category included, when the amount is refused", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const id = await createCash("Refused panel cash", "20.00");
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,?, -1500, 'Refused panel refund', ?, 1 FROM transactions WHERE id=?",
+		)
+			.bind(today, id, id)
+			.run();
+		const refused = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today,
+				amount: "10.00",
+				category: "5",
+				back: "/transactions",
+			}),
+		});
+		expect(refused.res.status).toBe(422);
+		expect(refused.html).toContain(
+			"Linked refunds add up to $15.00, so the amount can&#39;t be less than that.",
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, category_id FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 2000, category_id: 1 });
+	});
+
+	it("treats a cash entry deleted while it is being saved as an error, not a refund refusal", async () => {
+		const id = await createCash("Vanishing cash", "18.50");
+		const db = {
+			prepare: env.DB.prepare.bind(env.DB),
+			batch: async (statements: D1PreparedStatement[]) => {
+				await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
+					.bind(id)
+					.run();
+				return env.DB.batch(statements);
+			},
+		} as unknown as D1Database;
+		await expect(
+			saveEdit(
+				db,
+				id,
+				{
+					categoryId: null,
+					alwaysForMerchant: false,
+					displayName: null,
+					note: null,
+					excluded: false,
+					income: false,
+					creditReviewed: false,
+					cashDate: "2026-10-02",
+					cashAmountCents: 2000,
+				},
+				"synthetic-test",
+			),
+		).rejects.toThrow(`No transaction ${id}`);
+	});
+
+	it("refuses future cash edit dates and bank date and amount changes", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "18.50",
+				merchant: "Future guard",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Future guard' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const tomorrow = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
+		tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+		const future = tomorrow.toISOString().slice(0, 10);
+		const rejected = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: future,
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(rejected.res.status).toBe(422);
+		expect(rejected.html).toContain("Choose today or an earlier date.");
+		const bankRow = await env.DB.prepare(
+			"SELECT t.id, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id LIMIT 1",
+		).first<{ id: number; bank: string }>();
+		const bankId = bankRow?.id as number;
+		const bankPanel = await request(`/transactions/${bankId}`);
+		expect(bankPanel.html).toContain(
+			`From ${bankRow?.bank}. Its date and amount stay as the bank sent them. If something&#39;s off, you can split it, exclude it, or count it in another month.`,
+		);
+		const bank = await env.DB.prepare(
+			"SELECT date,amount_cents FROM transactions WHERE id=?",
+		)
+			.bind(bankId)
+			.first();
+		await request(`/transactions/${bankId}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: future,
+				amount: "1.00",
+				back: "/transactions",
+			}),
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT date,amount_cents FROM transactions WHERE id=?",
+			)
+				.bind(bankId)
+				.first(),
+		).toEqual(bank);
+	});
+
+	it("keeps split parts with a cash entry date and refuses an amount that differs", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "18.50",
+				merchant: "Split edit",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Split edit' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await saveSplit(
+			env.DB,
+			id,
+			[
+				{ amountCents: 900, categoryId: 1 },
+				{ amountCents: 950, categoryId: 2 },
+			],
+			"demo",
+		);
+		const rejected = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "20.00",
+				back: "/transactions",
+			}),
+		});
+		expect(rejected.res.status).toBe(422);
+		expect(rejected.html).toContain(
+			"The parts add up to $18.50. Change them to match $20.00.",
+		);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id=?",
+				)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(2);
+		const tomorrow = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
+		tomorrow.setUTCDate(tomorrow.getUTCDate() - 1);
+		const moved = tomorrow.toISOString().slice(0, 10);
+		const saved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: moved,
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT DISTINCT date FROM transactions WHERE parent_id=?",
+				)
+					.bind(id)
+					.all()
+			).results,
+		).toEqual([{ date: moved }]);
+	});
+
+	it("a split cash part's panel has no cash fields, and a category save on it keeps the entry", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "20.00",
+				merchant: "Split part cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Split part cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await saveSplit(
+			env.DB,
+			id,
+			[
+				{ amountCents: 900, categoryId: 1 },
+				{ amountCents: 1100, categoryId: 2 },
+			],
+			"demo",
+		);
+		const part = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id=? ORDER BY id LIMIT 1",
+			)
+				.bind(id)
+				.first<{ id: number }>()
+		)?.id as number;
+		const panel = await request(`/transactions/${part}`);
+		expect(panel.res.status).toBe(200);
+		expect(panel.html).not.toContain(`name="amount"`);
+		expect(panel.html).not.toContain(`name="date"`);
+		expect(panel.html).not.toContain("Cash · you entered this");
+		expect(panel.html).toContain("$9.00");
+		const saved = await request(`/transactions/${part}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ category: "2", back: "/transactions" }),
+		});
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT category_id FROM transactions WHERE id=?")
+				.bind(part)
+				.first(),
+		).toEqual({ category_id: 2 });
+		expect(
+			await env.DB.prepare("SELECT amount_cents FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ amount_cents: 2000 });
+	});
+
+	it("refuses an edited date more than ten years before today, and accepts the boundary", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "18.50",
+				merchant: "Ten year cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Ten year cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const tenYearsBefore = (days: number) => {
+			const day = new Date(`${today}T00:00:00Z`);
+			day.setUTCFullYear(day.getUTCFullYear() - 10);
+			day.setUTCDate(day.getUTCDate() + days);
+			return day.toISOString().slice(0, 10);
+		};
+		const tooOld = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: tenYearsBefore(-1),
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(tooOld.res.status).toBe(422);
+		expect(tooOld.html).toContain("Choose a date within the last 10 years.");
+		const boundary = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: tenYearsBefore(0),
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect(boundary.res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT date FROM transactions WHERE id=?")
+				.bind(id)
+				.first(),
+		).toEqual({ date: tenYearsBefore(0) });
+	});
+
+	it("counts a cash entry in the month of its edited date", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const previousMonthEnd = new Date(`${today.slice(0, 7)}-01T00:00:00Z`);
+		previousMonthEnd.setUTCDate(0);
+		const oldDate = previousMonthEnd.toISOString().slice(0, 10);
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: oldDate,
+				amount: "18.50",
+				merchant: "Month move cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Month move cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const loadSpent = async () => {
+			const data = await loadMonth(env.DB, today.slice(0, 7));
+			return summarizeMonth({
+				month: today.slice(0, 7),
+				categories: data.categories,
+				amounts: data.amounts,
+				transactions: data.transactions,
+				unpaidDueBillsCents: 0,
+			}).totalSpentCents;
+		};
+		const before = await loadSpent();
+		await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today,
+				amount: "18.50",
+				back: "/transactions",
+			}),
+		});
+		expect((await loadSpent()) - before).toBe(1850);
+	});
+
+	it("keeps a cash entry's linked refund and refuses reducing its amount below that refund", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "20.00",
+				merchant: "Refund guard cash",
+				category: "1",
+			}),
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Refund guard cash' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,?, -1500, 'Cash refund', ?, 1 FROM transactions WHERE id=?",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE), id, id)
+			.run();
+		const tooSmall = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: todayIn(DEFAULT_TIME_ZONE),
+				amount: "10.00",
+				back: "/transactions",
+			}),
+		});
+		expect(tooSmall.res.status).toBe(422);
+		expect(tooSmall.html).toContain(
+			"Linked refunds add up to $15.00, so the amount can&#39;t be less than that.",
+		);
+		const yesterday = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
+		yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+		const date = yesterday.toISOString().slice(0, 10);
+		const moved = await request(`/transactions/${id}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date,
+				amount: "20.00",
+				back: "/transactions",
+			}),
+		});
+		expect(moved.res.status).toBe(200);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT date,refund_of_id FROM transactions WHERE raw_name='Cash refund' ORDER BY id DESC LIMIT 1",
+				).first<{ refund_of_id: number | null }>()
+			)?.refund_of_id,
+		).toBe(id);
+	});
+
 	it("uses the cash-delete toast wording for a split entry and Undo restores its parent and parts", async () => {
 		const name = "Split market";
 		const created = await request("/transactions/cash", {
@@ -1130,5 +1848,1156 @@ describe("the cash form's Category group", () => {
 			/<fieldset><legend>Category<\/legend><div class="mt-2 flex flex-wrap gap-2">/,
 		);
 		expect(html).not.toContain("cash-category-error");
+	});
+});
+
+describe("changing a split cash entry's parts (Change the parts)", () => {
+	const today = () => todayIn(DEFAULT_TIME_ZONE);
+	const post = (path: string, fields: [string, string][], htmx = true) =>
+		request(path, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				Origin: BASE,
+				...(htmx ? { "HX-Request": "true" } : {}),
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams(fields),
+		});
+	const idByName = async (merchant: string) =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
+			)
+				.bind(merchant)
+				.first<{ id: number }>()
+		)?.id as number;
+	const partsOf = async (id: number) =>
+		(
+			await env.DB.prepare(
+				"SELECT id, category_id AS categoryId, amount_cents AS amountCents FROM transactions WHERE parent_id=? ORDER BY id",
+			)
+				.bind(id)
+				.all<{ id: number; categoryId: number; amountCents: number }>()
+		).results;
+	const stateOf = async (id: number) => ({
+		parent: await env.DB.prepare(
+			"SELECT amount_cents AS amountCents, is_split AS isSplit FROM transactions WHERE id=?",
+		)
+			.bind(id)
+			.first(),
+		parts: await partsOf(id),
+		refund: await env.DB.prepare(
+			"SELECT refund_of_id AS refundOfId, amount_cents AS amountCents FROM transactions WHERE raw_name='Part refund'",
+		).first(),
+	});
+	const spentThisMonth = async () => {
+		const month = today().slice(0, 7);
+		const data = await loadMonth(env.DB, month);
+		return summarizeMonth({
+			month,
+			categories: data.categories,
+			amounts: data.amounts,
+			transactions: data.transactions,
+			unpaidDueBillsCents: 0,
+		}).totalSpentCents;
+	};
+	/**
+	 * A $90.00 cash entry split into Groceries $60.00 (part A) and Household $30.00 (part B), with a
+	 * $20.00 refund linked to B.
+	 */
+	const splitCash = async (merchant: string) => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today(),
+				amount: "90.00",
+				merchant,
+				category: "1",
+			}),
+		});
+		const id = await idByName(merchant);
+		await saveSplit(
+			env.DB,
+			id,
+			[
+				{ amountCents: 6000, categoryId: 1 },
+				{ amountCents: 3000, categoryId: 5 },
+			],
+			"demo",
+		);
+		const [a, b] = await partsOf(id);
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,date,-2000,'Part refund',?,1 FROM transactions WHERE id=?",
+		)
+			.bind(b?.id, id)
+			.run();
+		return { id, a: a?.id as number, b: b?.id as number };
+	};
+	/** Saves (or adds a part to) the correction sheet: a posted total of $100.00 over the saved $90.00. */
+	const correction = (
+		id: number,
+		parts: [string, string, string][],
+		{
+			extra = [],
+			total = "10000",
+			amountWas = "9000",
+		}: { extra?: [string, string][]; total?: string; amountWas?: string } = {},
+	) =>
+		post(`/transactions/${id}/split`, [
+			["back", "/transactions"],
+			["total", total],
+			["amount_was", amountWas],
+			...extra,
+			...parts.flatMap(([partId, category, amount]) => [
+				["part_id", partId] as [string, string],
+				["part_category", category] as [string, string],
+				["part_amount", amount] as [string, string],
+			]),
+		]);
+	/** The saved parts, A and B, each at its own amount. */
+	const savedParts = (a: number, b: number): [string, string, string][] => [
+		[String(a), "1", "60.00"],
+		[String(b), "5", "40.00"],
+	];
+
+	it("offers Change the parts when an amount breaks the parts, and saves nothing", async () => {
+		const { id } = await splitCash("Parts refusal");
+		const before = await stateOf(id);
+		const { res, html } = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "100.00"],
+			["back", "/transactions"],
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"The parts add up to $90.00. Change them to match $100.00.",
+		);
+		expect(html).toMatch(
+			/<button(?=[^>]*name="change_parts")(?=[^>]*value="1")[^>]*>Change the parts<\/button>/,
+		);
+		expect(html).not.toContain("split?total=");
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("offers Change the parts when the parts change between the check and the save, and saves nothing more", async () => {
+		const { id, a, b } = await splitCash("Parts change in save");
+		const realBatch = env.DB.batch.bind(env.DB);
+		// Another save moves part B to $40.00 after the check, in the save's own batch.
+		const spy = vi
+			.spyOn(env.DB, "batch")
+			.mockImplementationOnce(async (statements) => {
+				await env.DB.prepare(
+					"UPDATE transactions SET amount_cents = 4000 WHERE id = ?",
+				)
+					.bind(b)
+					.run();
+				return realBatch(statements);
+			});
+		let batches = 0;
+		const answer = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "90.00"],
+			["back", "/transactions"],
+		]).finally(() => {
+			batches = spy.mock.calls.length;
+			spy.mockRestore();
+		});
+		expect(batches).toBe(1);
+		expect(answer.res.status).toBe(422);
+		expect(answer.html).toContain(
+			"The parts add up to $100.00. Change them to match $90.00.",
+		);
+		expect(answer.html).toMatch(
+			/<button(?=[^>]*name="change_parts")(?=[^>]*value="1")[^>]*>Change the parts<\/button>/,
+		);
+		expect(answer.html).not.toContain("split?total=");
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 4000 },
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 9000 });
+	});
+
+	it("offers no Change the parts for another amount error, or on a split entry that isn't refused", async () => {
+		const { id } = await splitCash("No parts link");
+		const zero = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "0"],
+			["back", "/transactions"],
+		]);
+		expect(zero.res.status).toBe(422);
+		expect(zero.html).toContain("Enter an amount greater than zero.");
+		expect(zero.html).not.toContain("Change the parts");
+		const panel = await request(`/transactions/${id}?back=%2Ftransactions`);
+		expect(panel.res.status).toBe(200);
+		expect(panel.html).not.toContain("Change the parts");
+	});
+
+	it("opens the split with the new total, the saved parts and the mismatch and live lines", async () => {
+		const { id, a, b } = await splitCash("Sheet");
+		const { res, html } = await request(
+			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
+		);
+		expect(res.status).toBe(200);
+		// The amount under the title is the new total, not the saved $90.00.
+		const shown = html.match(
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+		)?.[1];
+		expect(shown).toBe(formatCents(10000, { signed: true }));
+		expect(shown).not.toBe(formatCents(9000, { signed: true }));
+		expect(html).toMatch(/<option value="1" selected[^>]*>Groceries<\/option>/);
+		expect(html).toMatch(/<option value="5" selected[^>]*>Household<\/option>/);
+		expect(html).toContain('value="60.00"');
+		expect(html).toContain('value="30.00"');
+		expect(html).toMatch(
+			new RegExp(`<input[^>]*name="part_id"[^>]*value="${a}"`),
+		);
+		expect(html).toMatch(
+			new RegExp(`<input[^>]*name="part_id"[^>]*value="${b}"`),
+		);
+		expect(html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
+		expect(html).toMatch(/<input[^>]*name="amount_was"[^>]*value="9000"/);
+		expect(html).toContain(
+			"The parts add up to $90.00. Change them to match $100.00.",
+		);
+		expect(html).toContain("$10.00 left to assign");
+	});
+
+	it("says what is left against the new total as the parts change", async () => {
+		const { id } = await splitCash("Live line");
+		const left = await post(`/transactions/${id}/split/line`, [
+			["total", "10000"],
+			["part_amount", "60.00"],
+			["part_amount", "30.00"],
+		]);
+		expect(left.html).toContain("$10.00 left to assign");
+		const full = await post(`/transactions/${id}/split/line`, [
+			["total", "10000"],
+			["part_amount", "60.00"],
+			["part_amount", "40.00"],
+		]);
+		expect(full.html).toContain("Adds up to $100.00");
+	});
+
+	it("saves the new total and the corrected parts together, keeping the split and the refund on its part", async () => {
+		const { id, a, b } = await splitCash("Save corrected");
+		const before = await spentThisMonth();
+		const { res } = await correction(id, savedParts(a, b));
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.type).toBe("success");
+		expect(trigger.toast.message).toMatch(/^Split /);
+		expect(trigger.toast.message).not.toContain("no longer linked");
+		expect(trigger.announce).toMatch(/^Saved split for /);
+		expect(trigger.announce).not.toContain("no longer linked");
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents, is_split AS isSplit FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 10000, isSplit: 1 });
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 4000 },
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT refund_of_id AS refundOfId FROM transactions WHERE raw_name='Part refund'",
+			).first(),
+		).toEqual({ refundOfId: b });
+		expect((await spentThisMonth()) - before).toBe(1000);
+	});
+
+	/** The entry's own row, as the panel's save writes it, with the name the app shows for it. */
+	const parentOf = async (id: number) => ({
+		...(await env.DB.prepare(
+			"SELECT amount_cents AS amountCents, date, note, excluded, kind FROM transactions WHERE id = ?",
+		)
+			.bind(id)
+			.first()),
+		displayName: (await getTransaction(env.DB, id))?.displayName,
+	});
+	const shiftDay = (date: string, days: number) => {
+		const shifted = new Date(`${date}T00:00:00Z`);
+		shifted.setUTCDate(shifted.getUTCDate() + days);
+		return shifted.toISOString().slice(0, 10);
+	};
+	const unescapeAttribute = (value: string) =>
+		value
+			.replaceAll("&quot;", '"')
+			.replaceAll("&#39;", "'")
+			.replaceAll("&lt;", "<")
+			.replaceAll("&gt;", ">")
+			.replaceAll("&amp;", "&");
+	/** The hidden fields in markup, as name and value, with the entities an attribute escapes undone. */
+	const hiddenFields = (html: string): [string, string][] =>
+		[
+			...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g),
+		].map(([, name = "", value = ""]): [string, string] => [
+			name,
+			unescapeAttribute(value),
+		]);
+	const pendingIn = (html: string) =>
+		hiddenFields(html)
+			.filter(([name]) => name === "pending_edit")
+			.map(([, value]) => value);
+	/** The hidden fields the edit panel of entry `id` draws, as its form posts them. */
+	const panelFields = async (id: number) => {
+		const { html } = await request(`/transactions/${id}?back=%2Ftransactions`);
+		const start = html.indexOf(`action="/transactions/${id}"`);
+		const end = html.indexOf(`action="/transactions/${id}/delete"`, start);
+		return hiddenFields(html.slice(start, end));
+	};
+	const shownTotal = (html: string) =>
+		html.match(
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+		)?.[1];
+
+	it("keeps the panel's other changes through Change the parts and saves them with the corrected parts", async () => {
+		const { id, a, b } = await splitCash("Panel changes");
+		const before = await parentOf(id);
+		const earlier = shiftDay(today(), -2);
+		const edits: [string, string][] = [
+			["date", earlier],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market\nand bakery"],
+			["excluded", "1"],
+			["kind", "one_off"],
+		];
+		const drawn = (await panelFields(id)).filter(
+			([name]) => !edits.some(([edit]) => edit === name),
+		);
+		const fields = [...drawn, ...edits];
+		const pending = new URLSearchParams(fields).toString();
+
+		const sheet = await post(`/transactions/${id}`, [
+			...fields,
+			["change_parts", "1"],
+		]);
+		expect(sheet.res.status).toBe(200);
+		expect(shownTotal(sheet.html)).toBe(formatCents(10000, { signed: true }));
+		expect(hiddenFields(sheet.html)).toEqual(
+			expect.arrayContaining([
+				["total", "10000"],
+				["amount_was", "9000"],
+				["part_id", String(a)],
+				["part_id", String(b)],
+			]),
+		);
+		expect(pendingIn(sheet.html)).toEqual([pending]);
+		expect(await parentOf(id)).toEqual(before);
+
+		const added = await correction(id, savedParts(a, b), {
+			extra: [
+				["add", "1"],
+				["pending_edit", pending],
+			],
+		});
+		expect(added.res.status).toBe(200);
+		expect(added.html).toContain(
+			`name="pending_edit" value="${pending.replaceAll("&", "&amp;")}"`,
+		);
+		expect(pendingIn(added.html)).toEqual([pending]);
+		expect(
+			hiddenFields(added.html).filter(([name]) => name === "part_id"),
+		).toHaveLength(3);
+
+		const saved = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		expect(saved.res.status).toBe(200);
+		const trigger = JSON.parse(saved.res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast).toEqual({
+			message: "Saved Corner Market",
+			type: "success",
+		});
+		expect(trigger.announce).toMatch(/^Saved Corner Market\./);
+		expect(await parentOf(id)).toEqual({
+			amountCents: 10000,
+			date: earlier,
+			note: "Farmers market\nand bakery",
+			excluded: 1,
+			kind: "one_off",
+			displayName: "Corner Market",
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT id, category_id AS categoryId, amount_cents AS amountCents, date, excluded FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(id)
+					.all()
+			).results,
+		).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000, date: earlier, excluded: 1 },
+			{ id: b, categoryId: 5, amountCents: 4000, date: earlier, excluded: 1 },
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT refund_of_id AS refundOfId FROM transactions WHERE raw_name='Part refund'",
+			).first(),
+		).toEqual({ refundOfId: b });
+	});
+
+	it("Change the parts with an amount that already matches the parts saves the panel as usual", async () => {
+		const { id } = await splitCash("Matching amount");
+		const { res, html } = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "90.00"],
+			["merchant", "Corner Market"],
+			["back", "/transactions"],
+			["change_parts", "1"],
+		]);
+		expect(res.status).toBe(200);
+		expect(html).not.toContain('id="split-title"');
+		expect(
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Saved Corner Market");
+		expect(await parentOf(id)).toMatchObject({
+			amountCents: 9000,
+			displayName: "Corner Market",
+		});
+	});
+
+	it("a refused correction keeps the pending edit", async () => {
+		const { id, a, b } = await splitCash("Refused correction");
+		const before = await parentOf(id);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", today()],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market\nand bakery"],
+			["excluded", "1"],
+		]).toString();
+
+		// The parts add up to $90.00, not the new $100.00 total.
+		const short = await correction(
+			id,
+			[
+				[String(a), "1", "60.00"],
+				[String(b), "5", "30.00"],
+			],
+			{ extra: [["pending_edit", pending]] },
+		);
+		expect(short.res.status).toBe(422);
+		expect(pendingIn(short.html)).toEqual([pending]);
+		expect(await parentOf(id)).toEqual(before);
+
+		// Part 2's linked refund ($20.00) is more than its new $10.00.
+		const refund = await correction(
+			id,
+			[
+				[String(a), "1", "90.00"],
+				[String(b), "5", "10.00"],
+			],
+			{ extra: [["pending_edit", pending]] },
+		);
+		expect(refund.res.status).toBe(422);
+		expect(refund.html).toContain(
+			"Linked refunds add up to $20.00, so part 2 can&#39;t be less than that.",
+		);
+		expect(pendingIn(refund.html)).toEqual([pending]);
+		expect(await parentOf(id)).toEqual(before);
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 3000 },
+		]);
+	});
+
+	it("a pending edit the panel then refuses reopens the panel with its error and the posted values", async () => {
+		const { id, a, b } = await splitCash("Refused panel");
+		const tomorrow = shiftDay(today(), 1);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", tomorrow],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market\nand bakery"],
+			["excluded", "1"],
+			["kind", "one_off"],
+		]).toString();
+
+		const { res, html } = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		// The correction saved the amount and the parts; the panel refused the future date.
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 10000 });
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 4000 },
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain("Choose today or an earlier date.");
+		expect(html).toContain(`value="${tomorrow}"`);
+		expect(html).toContain("Farmers market\nand bakery");
+		expect(html).toMatch(/name="merchant"[^>]*value="Corner Market"/);
+		expect(await parentOf(id)).toMatchObject({
+			date: today(),
+			excluded: 0,
+		});
+	});
+
+	it("redirects a plain browser save back to the list", async () => {
+		const { id, a, b } = await splitCash("Plain save");
+		const { res } = await post(
+			`/transactions/${id}/split`,
+			[
+				["back", "/transactions"],
+				["total", "10000"],
+				["amount_was", "9000"],
+				["part_id", String(a)],
+				["part_category", "1"],
+				["part_amount", "60.00"],
+				["part_id", String(b)],
+				["part_category", "5"],
+				["part_amount", "40.00"],
+			],
+			false,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe("/transactions");
+	});
+
+	it("still refuses parts that don't add up to the new total, and saves nothing", async () => {
+		const { id, a, b } = await splitCash("Still refused");
+		const before = await stateOf(id);
+		const { res, html } = await correction(id, [
+			[String(a), "1", "60.00"],
+			[String(b), "5", "30.00"],
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"The parts must add up exactly to the transaction amount.",
+		);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("refuses a part that a linked refund is more than, and saves nothing", async () => {
+		const { id, a, b } = await splitCash("Part guard");
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -2500 WHERE refund_of_id = ?",
+		)
+			.bind(b)
+			.run();
+		const before = await stateOf(id);
+		const { res, html } = await correction(id, [
+			[String(a), "1", "80.00"],
+			[String(b), "5", "20.00"],
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $25.00, so part 2 can&#39;t be less than that.",
+		);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("adds a part and keeps the total, the saved parts and their refund, then saves a third part", async () => {
+		const { id, a, b } = await splitCash("Add part");
+		const added = await correction(
+			id,
+			[
+				[String(a), "1", "60.00"],
+				[String(b), "5", "30.00"],
+			],
+			{ extra: [["add", "1"]] },
+		);
+		expect(added.res.status).toBe(200);
+		expect(added.html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
+		expect(added.html).toMatch(/<input[^>]*name="amount_was"[^>]*value="9000"/);
+		expect(added.html).toMatch(
+			new RegExp(`<input[^>]*name="part_id"[^>]*value="${a}"`),
+		);
+		expect(added.html).toMatch(
+			new RegExp(`<input[^>]*name="part_id"[^>]*value="${b}"`),
+		);
+		expect(added.html).toMatch(/<input[^>]*name="part_id"[^>]*value=""/);
+		expect(added.html).toContain(
+			"The parts add up to $90.00. Change them to match $100.00.",
+		);
+		expect((added.html.match(/name="part_id"/g) ?? []).length).toBe(3);
+		const saved = await correction(id, [
+			[String(a), "1", "60.00"],
+			[String(b), "5", "30.00"],
+			["", "2", "10.00"],
+		]);
+		expect(saved.res.status).toBe(200);
+		const parts = await partsOf(id);
+		expect(parts).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 3000 },
+			{ id: expect.any(Number), categoryId: 2, amountCents: 1000 },
+		]);
+		expect(parts[2]?.id).toBeGreaterThan(b);
+		expect(
+			await env.DB.prepare(
+				"SELECT refund_of_id AS refundOfId FROM transactions WHERE raw_name='Part refund'",
+			).first(),
+		).toEqual({ refundOfId: b });
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents FROM transactions WHERE id=?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 10000 });
+	});
+
+	it("is only for a split cash entry, with a whole, positive total, and otherwise is not found", async () => {
+		const { id, a, b } = await splitCash("Not allowed");
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today(),
+				amount: "12.00",
+				merchant: "Plain cash",
+				category: "1",
+			}),
+		});
+		const plain = await idByName("Plain cash");
+		const bank = (
+			await env.DB.prepare(
+				"SELECT t.id FROM transactions t JOIN accounts ac ON ac.id = t.account_id WHERE ac.type <> 'cash' AND t.parent_id IS NULL AND t.is_split = 0 AND t.flag_income = 0 ORDER BY t.id LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const before = await stateOf(id);
+		for (const target of [bank, a, plain]) {
+			expect(
+				(await request(`/transactions/${target}/split?total=10000`)).res.status,
+			).toBe(404);
+			expect((await correction(target, savedParts(a, b))).res.status).toBe(404);
+		}
+		for (const total of ["0", "-10000", "10000.5", "abc", ""]) {
+			expect(
+				(await request(`/transactions/${id}/split?total=${total}`)).res.status,
+			).toBe(404);
+			expect(
+				(await correction(id, savedParts(a, b), { total })).res.status,
+			).toBe(404);
+		}
+		expect(
+			(await correction(id, savedParts(a, b), { amountWas: "abc" })).res.status,
+		).toBe(404);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("is not found when a posted part id isn't a whole number, in the save or in Add a part, and saves nothing", async () => {
+		const { id, a } = await splitCash("Bad part id");
+		const before = await stateOf(id);
+		const tampered: [string, string, string][] = [
+			[String(a), "1", "60.00"],
+			["abc", "5", "40.00"],
+		];
+		expect((await correction(id, tampered)).res.status).toBe(404);
+		expect(
+			(await correction(id, tampered, { extra: [["add", "1"]] })).res.status,
+		).toBe(404);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("saves nothing when the posted parts or the amount are out of date, and the save is an error", async () => {
+		const { id, a, b } = await splitCash("Out of date");
+		const before = await stateOf(id);
+		const foreign = (
+			await env.DB.prepare(
+				"SELECT t.id FROM transactions t WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.id <> ? ORDER BY t.id LIMIT 1",
+			)
+				.bind(id)
+				.first<{ id: number }>()
+		)?.id as number;
+		const cases: { name: string; run: () => Promise<{ res: Response }> }[] = [
+			{
+				name: "a saved part is missing",
+				run: () =>
+					correction(id, [
+						[String(a), "1", "60.00"],
+						["", "5", "40.00"],
+					]),
+			},
+			{
+				name: "a part id that isn't one of its parts is posted",
+				run: () =>
+					correction(id, [
+						[String(a), "1", "60.00"],
+						[String(b), "5", "30.00"],
+						[String(foreign), "2", "10.00"],
+					]),
+			},
+			{
+				name: "a saved part is posted twice",
+				run: () =>
+					correction(id, [
+						[String(a), "1", "60.00"],
+						[String(a), "5", "40.00"],
+					]),
+			},
+			{
+				name: "the parent's amount is no longer the one drawn",
+				run: () => correction(id, savedParts(a, b), { amountWas: "8000" }),
+			},
+		];
+		for (const testCase of cases) {
+			const { res } = await testCase.run();
+			expect(res.status, testCase.name).toBe(500);
+			expect(await stateOf(id), testCase.name).toEqual(before);
+		}
+	});
+
+	it("refuses a correction when a part was added at the same moment, and writes nothing from it", async () => {
+		const { id, a, b } = await splitCash("Racing part");
+		const db = {
+			prepare: env.DB.prepare.bind(env.DB),
+			batch: async (statements: D1PreparedStatement[]) => {
+				// Another same-total correction lands first: part A is $50.00 and a $10.00 part is added.
+				await env.DB.prepare(
+					"UPDATE transactions SET amount_cents = 5000 WHERE id = ?",
+				)
+					.bind(a)
+					.run();
+				await env.DB.prepare(
+					`INSERT INTO transactions
+					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, parent_id, updated_by)
+				SELECT account_id, date, 1000, raw_name, merchant_name, 1, 'user', id, 'demo' FROM transactions WHERE id = ?`,
+				)
+					.bind(id)
+					.run();
+				return env.DB.batch(statements);
+			},
+		} as unknown as D1Database;
+		await expect(
+			correctCashSplit(
+				db,
+				id,
+				{
+					totalCents: 10000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 6000 },
+						{ id: b, categoryId: 5, amountCents: 4000 },
+					],
+				},
+				"demo",
+			),
+		).rejects.toThrow("changed while it was being corrected");
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+				)
+					.bind(id)
+					.first<{ amountCents: number }>()
+			)?.amountCents,
+		).toBe(9000);
+		expect((await partsOf(id)).map((part) => part.amountCents)).toEqual([
+			5000, 3000, 1000,
+		]);
+	});
+
+	it("saves a correction that adds two new parts at once", async () => {
+		const { id, a, b } = await splitCash("Two new parts");
+		await expect(
+			correctCashSplit(
+				env.DB,
+				id,
+				{
+					totalCents: 10000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 5000 },
+						{ id: b, categoryId: 5, amountCents: 3000 },
+						{ id: null, categoryId: 1, amountCents: 1000 },
+						{ id: null, categoryId: 5, amountCents: 1000 },
+					],
+				},
+				"demo",
+			),
+		).resolves.toEqual({ saved: true });
+		expect((await partsOf(id)).map((part) => part.amountCents)).toEqual([
+			5000, 3000, 1000, 1000,
+		]);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+				)
+					.bind(id)
+					.first<{ amountCents: number }>()
+			)?.amountCents,
+		).toBe(10000);
+	});
+
+	it("refuses a correction with two new parts when another part is added at the same moment, and writes nothing", async () => {
+		const { id, a, b } = await splitCash("Racing two new parts");
+		const db = {
+			prepare: env.DB.prepare.bind(env.DB),
+			batch: async (statements: D1PreparedStatement[]) => {
+				// A $10.00 part is added after the sheet was read.
+				await env.DB.prepare(
+					`INSERT INTO transactions
+					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, parent_id, updated_by)
+				SELECT account_id, date, 1000, raw_name, merchant_name, 1, 'user', id, 'demo' FROM transactions WHERE id = ?`,
+				)
+					.bind(id)
+					.run();
+				return env.DB.batch(statements);
+			},
+		} as unknown as D1Database;
+		await expect(
+			correctCashSplit(
+				db,
+				id,
+				{
+					totalCents: 10000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 5000 },
+						{ id: b, categoryId: 5, amountCents: 3000 },
+						{ id: null, categoryId: 1, amountCents: 1000 },
+						{ id: null, categoryId: 5, amountCents: 1000 },
+					],
+				},
+				"demo",
+			),
+		).rejects.toThrow("changed while it was being corrected");
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+				)
+					.bind(id)
+					.first<{ amountCents: number }>()
+			)?.amountCents,
+		).toBe(9000);
+		expect((await partsOf(id)).map((part) => part.amountCents)).toEqual([
+			6000, 3000, 1000,
+		]);
+	});
+
+	it("refuses a same-total correction with two new parts when another part is added at the same moment, and writes nothing", async () => {
+		const { id, a, b } = await splitCash("Racing same total");
+		const db = {
+			prepare: env.DB.prepare.bind(env.DB),
+			batch: async (statements: D1PreparedStatement[]) => {
+				// Another same-total correction lands first: part A is $50.00 and a $10.00 part is added.
+				await env.DB.prepare(
+					"UPDATE transactions SET amount_cents = 5000 WHERE id = ?",
+				)
+					.bind(a)
+					.run();
+				await env.DB.prepare(
+					`INSERT INTO transactions
+					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, parent_id, updated_by)
+				SELECT account_id, date, 1000, raw_name, merchant_name, 1, 'user', id, 'demo' FROM transactions WHERE id = ?`,
+				)
+					.bind(id)
+					.run();
+				return env.DB.batch(statements);
+			},
+		} as unknown as D1Database;
+		await expect(
+			correctCashSplit(
+				db,
+				id,
+				{
+					totalCents: 9000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 4000 },
+						{ id: b, categoryId: 5, amountCents: 3000 },
+						{ id: null, categoryId: 1, amountCents: 1000 },
+						{ id: null, categoryId: 5, amountCents: 1000 },
+					],
+				},
+				"demo",
+			),
+		).rejects.toThrow("changed while it was being corrected");
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+				)
+					.bind(id)
+					.first<{ amountCents: number }>()
+			)?.amountCents,
+		).toBe(9000);
+		expect((await partsOf(id)).map((part) => part.amountCents)).toEqual([
+			5000, 3000, 1000,
+		]);
+	});
+
+	/** Archives a category, as Settings does: entries that already use it keep it. */
+	const archive = (categoryId: number) =>
+		env.DB.prepare(
+			"UPDATE categories SET archived = 1, archived_on = ? WHERE id = ?",
+		)
+			.bind(today(), categoryId)
+			.run();
+	/** The category select of part `index` (0-based) in the sheet's HTML. */
+	const selectOf = (html: string, index: number) =>
+		html.match(
+			new RegExp(`<select id="part-category-${index}"[\\s\\S]*?</select>`),
+		)?.[0] ?? "";
+
+	it("keeps a saved part's archived category in its own select, and in no other row's", async () => {
+		const { id, b } = await splitCash("Archived sheet");
+		await archive(5);
+		const { res, html } = await request(
+			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
+		);
+		expect(res.status).toBe(200);
+		expect(selectOf(html, 0)).not.toMatch(/<option value="5"/);
+		expect(selectOf(html, 1)).toMatch(
+			/<option value="5" selected[^>]*>Household<\/option>/,
+		);
+		expect(html).toMatch(
+			new RegExp(`<input[^>]*name="part_id"[^>]*value="${b}"`),
+		);
+	});
+
+	it("saves a correction that still has a saved part on its archived category, which it keeps", async () => {
+		const { id, a, b } = await splitCash("Keeps archived");
+		await archive(5);
+		const { res } = await correction(id, savedParts(a, b));
+		expect(res.status).toBe(200);
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 4000 },
+		]);
+	});
+
+	it("refuses an archived category on a part that doesn't keep it, and on a new part, with nothing saved", async () => {
+		const { id, a, b } = await splitCash("Archived refused");
+		await archive(5);
+		const before = await stateOf(id);
+		const onSaved = await correction(id, [
+			[String(a), "5", "60.00"],
+			[String(b), "5", "40.00"],
+		]);
+		expect(onSaved.res.status).toBe(422);
+		expect(onSaved.html).toContain("Pick a category for part 1.");
+		const onNew = await correction(id, [
+			[String(a), "1", "60.00"],
+			[String(b), "5", "30.00"],
+			["", "5", "10.00"],
+		]);
+		expect(onNew.res.status).toBe(422);
+		expect(onNew.html).toContain("Pick a category for part 3.");
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("keeps B's archived option when the sheet is drawn again with Add a part or with an error", async () => {
+		const { id, a, b } = await splitCash("Redrawn archived");
+		await archive(5);
+		const added = await correction(id, savedParts(a, b), {
+			extra: [["add", "1"]],
+		});
+		expect(added.res.status).toBe(200);
+		expect(selectOf(added.html, 1)).toMatch(
+			/<option value="5" selected[^>]*>Household<\/option>/,
+		);
+		expect(selectOf(added.html, 2)).not.toMatch(/<option value="5"/);
+		const failed = await correction(id, [
+			[String(a), "1", "60.00"],
+			[String(b), "5", "30.00"],
+			["", "", "10.00"],
+		]);
+		expect(failed.res.status).toBe(422);
+		expect(selectOf(failed.html, 1)).toMatch(
+			/<option value="5" selected[^>]*>Household<\/option>/,
+		);
+	});
+
+	/** A refund linked to the entry itself, not to a part: $85.00, or `cents` when given. */
+	const linkEntryRefund = (id: number, cents = 8500) =>
+		env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,date,?,'Entry refund',?,1 FROM transactions WHERE id=?",
+		)
+			.bind(-cents, id, id)
+			.run();
+
+	it("refuses a split correction whose total is below the refunds linked to the entry and its part together, with the words in the sheet and nothing saved", async () => {
+		const { id, a, b } = await splitCash("Entry refund sheet");
+		await linkEntryRefund(id);
+		const before = await stateOf(id);
+		const { res, html } = await correction(
+			id,
+			[
+				[String(a), "1", "50.00"],
+				[String(b), "5", "30.00"],
+			],
+			{ total: "8000", amountWas: "9000" },
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $105.00, so the amount can&#39;t be less than that.",
+		);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("refuses an amount below the refunds linked to the entry and its part in the edit panel, with no Change the parts, and saves nothing", async () => {
+		const { id } = await splitCash("Entry refund panel");
+		await linkEntryRefund(id);
+		const before = await stateOf(id);
+		const { res, html } = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "80.00"],
+			["back", "/transactions"],
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $105.00, so the amount can&#39;t be less than that.",
+		);
+		expect(html).not.toContain("Change the parts");
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("refuses a split correction whose total is below the refunds linked to the entry and its parts together, with the words in the sheet and nothing saved", async () => {
+		const { id, a, b } = await splitCash("Family refunds sheet");
+		await linkEntryRefund(id, 6500);
+		const before = await stateOf(id);
+		const { res, html } = await correction(
+			id,
+			[
+				[String(a), "1", "50.00"],
+				[String(b), "5", "30.00"],
+			],
+			{ total: "8000", amountWas: "9000" },
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $85.00, so the amount can&#39;t be less than that.",
+		);
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("refuses an amount below the refunds linked to the entry and its parts together in the edit panel, with no Change the parts, and saves nothing", async () => {
+		const { id } = await splitCash("Family refunds panel");
+		await linkEntryRefund(id, 6500);
+		const before = await stateOf(id);
+		const { res, html } = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "80.00"],
+			["back", "/transactions"],
+		]);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $85.00, so the amount can&#39;t be less than that.",
+		);
+		expect(html).not.toContain("Change the parts");
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("reports the refunds of the entry and its parts together from correctCashSplit, and saves nothing", async () => {
+		const { id, a, b } = await splitCash("Family refunds direct");
+		await linkEntryRefund(id, 6500);
+		const before = await stateOf(id);
+		await expect(
+			correctCashSplit(
+				env.DB,
+				id,
+				{
+					totalCents: 8000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 5000 },
+						{ id: b, categoryId: 5, amountCents: 3000 },
+					],
+				},
+				"demo",
+			),
+		).resolves.toEqual({ saved: false, refundTotalCents: 8500 });
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("saves a correction whose total covers the refunds linked to the entry and its parts together, and keeps each refund's link", async () => {
+		const { id, a, b } = await splitCash("Family refunds saved");
+		await linkEntryRefund(id, 6500);
+		const { res } = await correction(
+			id,
+			[
+				[String(a), "1", "55.00"],
+				[String(b), "5", "30.00"],
+			],
+			{ total: "8500", amountWas: "9000" },
+		);
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 8500 });
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 5500 },
+			{ id: b, categoryId: 5, amountCents: 3000 },
+		]);
+		const links = await env.DB.prepare(
+			"SELECT raw_name AS name, refund_of_id AS refundOfId FROM transactions WHERE raw_name IN ('Entry refund', 'Part refund') ORDER BY raw_name",
+		).all<{ name: string; refundOfId: number }>();
+		expect(links.results).toEqual([
+			{ name: "Entry refund", refundOfId: id },
+			{ name: "Part refund", refundOfId: b },
+		]);
+	});
+});
+
+describe("a bank transaction split into parts", () => {
+	it("shows the bank's notice on the transaction, not on its parts", async () => {
+		const bank = await env.DB.prepare(
+			"SELECT t.id, t.amount_cents AS amountCents, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id WHERE t.parent_id IS NULL AND t.is_split = 0 AND a.type <> 'cash' AND ABS(t.amount_cents) >= 2 ORDER BY t.id LIMIT 1",
+		).first<{ id: number; amountCents: number; bank: string }>();
+		const amount = bank?.amountCents as number;
+		const half = Math.trunc(amount / 2);
+		await saveSplit(
+			env.DB,
+			bank?.id as number,
+			[
+				{ amountCents: half, categoryId: 1 },
+				{ amountCents: amount - half, categoryId: 5 },
+			],
+			"demo",
+		);
+		const [part] = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+			)
+				.bind(bank?.id)
+				.all<{ id: number }>()
+		).results;
+		const parentPanel = await request(`/transactions/${bank?.id}`);
+		expect(parentPanel.html).toContain(
+			`From ${bank?.bank}. Its date and amount stay as the bank sent them.`,
+		);
+		const partPanel = await request(`/transactions/${part?.id}`);
+		expect(partPanel.res.status).toBe(200);
+		expect(partPanel.html).not.toContain(
+			"Its date and amount stay as the bank sent them",
+		);
 	});
 });

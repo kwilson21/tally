@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { billOccurrence } from "../src/bills/status";
-import { billStatusLine } from "../src/views/bill-row";
+import { billOccurrence, billOccurrenceForMonth } from "../src/bills/status";
+import { BillRow, billStatusLine } from "../src/views/bill-row";
 
 describe("bill status", () => {
 	it("clamps month ends and includes the seventh day", () => {
@@ -39,6 +39,105 @@ describe("bill status", () => {
 				false,
 			),
 		).toEqual({ dueDate: "2026-10-15", period: "2026", status: "due" });
+	});
+
+	it("keys each weekly occurrence by its due date", () => {
+		const bill = { frequency: "weekly", dueDay: 5 } as const;
+		expect(
+			[2, 9, 16, 23, 30].map((day) =>
+				billOccurrence(bill, `2026-10-${String(day).padStart(2, "0")}`, false),
+			),
+		).toEqual(
+			[2, 9, 16, 23, 30].map((day) => ({
+				dueDate: `2026-10-${String(day).padStart(2, "0")}`,
+				period: `2026-10-${String(day).padStart(2, "0")}`,
+				status: "due",
+			})),
+		);
+	});
+
+	it("counts biweekly occurrences from its anchor date", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "biweekly", dueDay: 5, anchorDate: "2026-10-02" },
+				"2026-10-16",
+				false,
+			),
+		).toMatchObject({ dueDate: "2026-10-16", period: "2026-10-16" });
+	});
+
+	it("keys quarterly occurrences by calendar quarter", () => {
+		expect(
+			billOccurrenceForMonth(
+				{ frequency: "quarterly", dueDay: 15, anchorMonth: 11 },
+				2026,
+				11,
+			),
+		).toEqual({ dueDate: "2026-11-15", period: "2026-Q4" });
+	});
+
+	it("keeps weekly missed occurrences set aside until paid, then drops an earlier month", () => {
+		const bill = { frequency: "weekly", dueDay: 5 } as const;
+		expect(billOccurrence(bill, "2026-10-12", false)).toMatchObject({
+			dueDate: "2026-10-09",
+			status: "overdue",
+		});
+		expect(
+			billOccurrence(bill, "2026-10-12", new Set(["2026-10-09"])),
+		).toMatchObject({ dueDate: "2026-10-16", status: "due" });
+		// Still this month: the missed Friday stays overdue, whatever day of the month it is.
+		expect(billOccurrence(bill, "2026-10-31", false)).toMatchObject({
+			dueDate: "2026-10-30",
+			status: "overdue",
+		});
+		// Next month: Oct 30 is last month's, so it is not the one shown (it reads Not paid on the page),
+		// and the next Friday takes its place.
+		expect(billOccurrence(bill, "2026-11-02", false)).toMatchObject({
+			dueDate: "2026-11-06",
+			status: "due",
+		});
+	});
+
+	it("skips every paid weekly occurrence, not only the next one", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "weekly", dueDay: 5 },
+				"2026-10-07",
+				new Set(["2026-10-02", "2026-10-09"]),
+			),
+		).toEqual({
+			dueDate: "2026-10-16",
+			period: "2026-10-16",
+			status: "upcoming",
+		});
+	});
+
+	it("skips every paid every-two-weeks occurrence the same way", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "biweekly", dueDay: 5, anchorDate: "2026-10-02" },
+				"2026-10-07",
+				new Set(["2026-10-02", "2026-10-16"]),
+			),
+		).toEqual({
+			dueDate: "2026-10-30",
+			period: "2026-10-30",
+			status: "upcoming",
+		});
+	});
+
+	it("moves past an unpaid Friday from an earlier month and then past a paid one", () => {
+		expect(
+			billOccurrence(
+				{ frequency: "weekly", dueDay: 5 },
+				"2026-11-03",
+				new Set(["2026-11-06"]),
+			),
+		).toEqual({
+			dueDate: "2026-11-13",
+			period: "2026-11-13",
+			status: "upcoming",
+		});
 	});
 
 	it("makes a linked occurrence paid before considering its date", () => {
@@ -102,6 +201,22 @@ describe("bill status", () => {
 			).toMatchObject({ dueDate: "2026-11-02", status: "due" });
 			expect(billOccurrence(bill, "2026-10-28", false)).toMatchObject({
 				dueDate: "2026-11-02",
+				status: "due",
+			});
+		});
+		it("applies the same seven-day handoff to quarterly bills", () => {
+			const bill = {
+				frequency: "quarterly",
+				dueDay: 15,
+				anchorMonth: 1,
+			} as const;
+			// The hand-off boundary: Apr 15 is still overdue on Jul 7, and Jul 15 is due on Jul 8.
+			expect(billOccurrence(bill, "2026-07-07", false)).toMatchObject({
+				dueDate: "2026-04-15",
+				status: "overdue",
+			});
+			expect(billOccurrence(bill, "2026-07-08", false)).toMatchObject({
+				dueDate: "2026-07-15",
 				status: "due",
 			});
 		});
@@ -173,5 +288,40 @@ describe("billStatusLine", () => {
 				today,
 			),
 		).toBe("Was due Oct 2");
+	});
+});
+
+describe("BillRow cadence", () => {
+	const daycare = {
+		id: 8,
+		name: "Daycare",
+		amountCents: 24000,
+		status: "due" as const,
+		dueDate: "2026-10-09",
+		icon: "kids",
+		color: "cat-ochre",
+	};
+	const rowText = (
+		frequency: "weekly" | "biweekly" | "quarterly" | "monthly",
+		dueDay: number,
+	) =>
+		String(
+			BillRow({
+				bill: { ...daycare, frequency, dueDay },
+				today: "2026-10-05",
+			}),
+		);
+
+	it("adds the weekday after the status sentence for a weekly bill", () => {
+		expect(rowText("weekly", 5)).toContain("Due Oct 9 · every Friday");
+	});
+
+	it("adds the interval for a bill every two weeks", () => {
+		expect(rowText("biweekly", 5)).toContain("Due Oct 9 · every two weeks");
+	});
+
+	it("leaves a quarterly or monthly row's status sentence as it is", () => {
+		expect(rowText("quarterly", 9)).not.toContain("every 3 months");
+		expect(rowText("monthly", 9)).not.toContain("· every");
 	});
 });

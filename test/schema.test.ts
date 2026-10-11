@@ -173,6 +173,29 @@ describe("schema", () => {
 		).rejects.toThrow();
 	});
 
+	it("accepts cadence columns and occurrence keys", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_date,merchant_raw_name) VALUES(2,'Daycare',24000,5,'biweekly','2026-10-02','LITTLE SPROUTS')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(2,'2026-10-16',2,'auto','linked')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name) VALUES(3,'Water',18600,15,'quarterly',11,'CITY WATER')",
+			)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(3,'2026-Q4',1,'auto','linked')",
+			)
+			.run();
+	});
+
 	it("enforces one pending suggestion per name, ignoring case", async () => {
 		await db
 			.prepare(

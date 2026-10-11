@@ -8,6 +8,8 @@ import {
 	BILL_FIND_MONTHS,
 } from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
+import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../bills/status";
+import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
 import { accountsByBank } from "../db/accounts";
@@ -169,12 +171,8 @@ howItWorks.get("/how-it-works", async (c) => {
 	const trendsExampleText = trendsExample(buildTrends(trendsData));
 	const hasTransactions =
 		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
-	const unpaidDueBillsCents = billData.rows
-		.filter(
-			(bill) =>
-				bill.active && (bill.status === "due" || bill.status === "overdue"),
-		)
-		.reduce((sum, bill) => sum + bill.amountCents, 0);
+	// The same totals Home and Bills show, so this page's set-aside amount is theirs.
+	const unpaidDueBillsCents = billTotalsForRows(month, billData.rows).soonCents;
 	const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents });
 	const budgeted = new Set(summary.categories.map((category) => category.id));
 	const unbudgetedCents = data.transactions
@@ -504,7 +502,9 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							A match has the same merchant, is within{" "}
 							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% of the bill amount, and
-							is within {BILL_DATE_WINDOW_DAYS} days of its due date.
+							is within {WEEKLY_BILL_DATE_WINDOW_DAYS} days of its due date for
+							a weekly bill, or {BILL_DATE_WINDOW_DAYS} days for the other
+							bills.
 						</li>
 						<li>
 							Tally suggests a possible bill when at least two money-out charges
@@ -524,6 +524,16 @@ howItWorks.get("/how-it-works", async (c) => {
 							Unlinking it leaves it excluded, as it was.
 						</li>
 						<li>A payment can pay only one bill occurrence.</li>
+						<li>
+							Bills can repeat monthly, yearly, weekly, every two weeks or
+							quarterly. Bills shows each bill's next unpaid occurrence. A
+							missed weekly or every-two-weeks occurrence from this month stays
+							overdue until it is paid, and one from an earlier month says “Not
+							paid” and is no longer set aside. A missed monthly, yearly or
+							quarterly occurrence stays overdue until it is paid or the next
+							one is due. Safe to spend sets aside every due or overdue
+							occurrence that is unpaid.
+						</li>
 						<li>
 							A late payment counts in the month of the bill it paid, instead of
 							the month when it appeared at the bank.
