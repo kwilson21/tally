@@ -1768,6 +1768,78 @@ describe("refund guards", () => {
 		});
 	});
 
+	describe("reviewing a linked credit as not income counts it against its purchase", () => {
+		// SIX becomes a $20 credit linked to the $50 purchase and never reviewed, so it doesn't count yet.
+		const REVIEW_AS_NOT_INCOME: [string, string][] = [
+			["creditReviewed", "1"],
+			["creditReviewed_was", "0"],
+			["income", "0"],
+			["income_was", "0"],
+		];
+		const unreviewedCredit = () =>
+			db
+				.prepare(
+					"UPDATE transactions SET amount_cents = -2000, refund_of_id = ? WHERE id = ?",
+				)
+				.bind(PURCHASE, SIX)
+				.run();
+
+		it("refuses it when the purchase has nothing left, saying so, and saves nothing", async () => {
+			await db
+				.prepare("UPDATE transactions SET amount_cents = -5000 WHERE id = ?")
+				.bind(BIG_REFUND)
+				.run();
+			expect((await link(BIG_REFUND, PURCHASE)).res.status).toBe(200);
+			await unreviewedCredit();
+			const { res, html, trigger } = await save(SIX, [
+				["refund_of", String(PURCHASE)],
+				...REVIEW_AS_NOT_INCOME,
+				["note", "should not save"],
+			]);
+			expect(res.status).toBe(422);
+			expect(refundAlert(html)).toBe(tooBig("$0.00"));
+			expect(trigger).toBeNull();
+			expect(await row(SIX)).toMatchObject({
+				refund_of_id: PURCHASE,
+				note: null,
+				credit_reviewed: null,
+			});
+		});
+
+		it("saves it when the purchase still has $20 left", async () => {
+			expect((await link(THIRTY_A, PURCHASE)).res.status).toBe(200);
+			await unreviewedCredit();
+			const { res, html } = await save(SIX, [
+				["refund_of", String(PURCHASE)],
+				...REVIEW_AS_NOT_INCOME,
+			]);
+			expect(res.status).toBe(200);
+			expect(refundAlert(html)).toBeUndefined();
+			expect(await row(SIX)).toMatchObject({
+				refund_of_id: PURCHASE,
+				credit_reviewed: 1,
+			});
+		});
+
+		it("saves a note on a linked credit that already counts, even when its purchase is over-refunded", async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = ?, credit_reviewed = 1 WHERE id IN (?, ?)",
+				)
+				.bind(PURCHASE, BIG_REFUND, THIRTY_A)
+				.run();
+			const { res } = await save(THIRTY_A, [
+				["refund_of", String(PURCHASE)],
+				["note", "note only"],
+			]);
+			expect(res.status).toBe(200);
+			expect(await row(THIRTY_A)).toMatchObject({
+				refund_of_id: PURCHASE,
+				note: "note only",
+			});
+		});
+	});
+
 	describe("a refund of a split part is checked against the part", () => {
 		it("refuses a $20 refund of a $10 part, though the whole split is $30", async () => {
 			const { res, html } = await link(REFUND, PART_KIDS);
