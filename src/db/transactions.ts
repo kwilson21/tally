@@ -155,6 +155,8 @@ const RAW_SHOW_SQL: Record<Show, string | null> = {
 export async function listTransactions(
 	db: D1Database,
 	f: Filters,
+	/** Only these transactions, unpaged and whatever the filters (see listRowsByIds). */
+	ids?: number[],
 ): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
@@ -181,6 +183,11 @@ export async function listTransactions(
 	if (f.uncategorized && !f.raw) where.push(NEEDS_CATEGORY);
 	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
 	if (f.raw) where.push("t.parent_id IS NULL");
+	// Ticked rows that are not in the list on screen (#350): split parents have no tick, and an unknown id drops out.
+	if (ids) {
+		where.push("t.is_split = 0 AND t.id IN (SELECT value FROM json_each(?))");
+		args.push(JSON.stringify(ids));
+	}
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
 	if (f.q) {
@@ -236,7 +243,7 @@ export async function listTransactions(
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
 			ORDER BY t.date DESC, t.id DESC
-			LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`,
+			${ids ? "" : `LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`}`,
 		)
 		.bind(...args)
 		.all<
@@ -323,6 +330,32 @@ export async function listTransactions(
 		},
 	);
 	return { rows, total, page, pages };
+}
+
+/**
+ * The given transactions as list rows, whatever the filters: the ticks that aren't on the list on screen
+ * (#350). A split parent and an unknown id drop out, so only what the bar can act on is counted.
+ */
+export async function listRowsByIds(
+	db: D1Database,
+	ids: number[],
+): Promise<ListRow[]> {
+	if (ids.length === 0) return [];
+	const { rows } = await listTransactions(
+		db,
+		{
+			q: "",
+			month: "all",
+			category: null,
+			account: null,
+			show: "all",
+			uncategorized: false,
+			page: 1,
+			raw: false,
+		},
+		ids,
+	);
+	return rows;
 }
 
 /** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */

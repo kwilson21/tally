@@ -9,6 +9,7 @@ import {
 	firstVisitState,
 	getTransaction,
 	type ListRow,
+	listRowsByIds,
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
@@ -82,10 +83,17 @@ import {
 	FOCUS_FIRST_TICK,
 	FOCUS_SET_CATEGORY,
 	LIST_LOAD_PAUSE,
+	MAX_SELECTED,
+	NotOnPageCount,
 	SELECTION_BAR_OOB,
 	SelectAllOnPage,
+	SelectedCount,
 	SelectionActionBar,
 	SelectionActionButtons,
+	SelectionLimit,
+	selectModeHref,
+	TICKS_INCLUDE,
+	TOO_MANY,
 } from "../views/selection-action-bar";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
 import { TextInput } from "../views/text-input";
@@ -284,7 +292,7 @@ async function renderList(
 	// its controls pause while it loads (LIST_LOAD_PAUSE).
 	const includeTicked = selecting
 		? {
-				"hx-include": "#selection-form input[name=ids]:checked",
+				...TICKS_INCLUDE,
 				...LIST_LOAD_PAUSE,
 			}
 		: {};
@@ -303,6 +311,7 @@ async function renderList(
 			hx-select="#results > *"
 			hx-select-oob={LIST_OOB}
 			hx-swap="innerHTML show:top"
+			// In Select mode the reply's HX-Push-Url (the ticks, without the focus marker) replaces this.
 			hx-push-url={selecting ? pageHref(n) : "true"}
 			{...includeTicked}
 		>
@@ -348,14 +357,33 @@ async function renderList(
 			<WhyLink section="names" topic="suggested name" />
 		</p>
 	) : null;
-	// Only rows still in the list stay ticked. With htmx the count is exact; a full page load
-	// shows the no-JS hint, and htmx re-counts on load.
-	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
 	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
 	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
+	const onPage = new Set(pageIds);
+	// A tick stays until it is unticked, Done or acted on, so a tick that isn't on this page is drawn in
+	// the bar's "not on this page" line, still ticked (#350). Only ids that still exist are counted.
+	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	const offPage = selecting
+		? await listRowsByIds(
+				c.env.DB,
+				[...checkedIds].filter((id) => !onPage.has(id)),
+			)
+		: [];
+	const tickCount = ticked.length + offPage.length;
 	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
 	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
 	const tickedOnPage = new Set(ticked.map((row) => row.id));
+	// The ticks not on this page, under their day headings, in the disclosure (ticked).
+	const offPageRows = byDay(offPage).map(([date, dayRows]) => (
+		<>
+			<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
+			<ul class="divide-y divide-rule">
+				{dayRows.map((row) => (
+					<SelectableTransactionRow row={shown(row)} checked today={today} />
+				))}
+			</ul>
+		</>
+	));
 	const htmx = c.req.header("HX-Request") === "true";
 	const cashHref = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
 
@@ -634,16 +662,15 @@ async function renderList(
 							class={`fixed inset-x-0 ${ABOVE_TABS} z-30 border-t border-ink bg-paper px-5 py-3 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-x-auto lg:bottom-0 lg:w-[min(48rem,calc(min(100%,72rem)-20.5rem))] lg:px-0`}
 						>
 							<SelectionActionBar
-								label={
-									htmx
-										? selectedLabel(ticked.length)
-										: "Choose rows, then an action"
-								}
-								href={selectModeHref(back, pageIds)}
+								label={htmx ? undefined : "Choose rows, then an action"}
+								count={tickCount}
+								notOnPage={offPage.length}
+								rows={offPageRows}
+								back={back}
 								pageIds={pageIds}
 								ticked={tickedOnPage}
-								disabled={htmx && ticked.length === 0}
-								focusSetCategory={focusSetCategory && ticked.length > 0}
+								disabled={htmx && (tickCount === 0 || tickCount > MAX_SELECTED)}
+								focusSetCategory={focusSetCategory && tickCount > 0}
 							/>
 						</div>
 					</form>
@@ -713,20 +740,31 @@ transactions.get("/transactions", async (c) => {
 	const focus = Number(params.get("focus"));
 	const selecting = params.get("select") === "1";
 	const today = await householdToday(c.env.DB);
-	return renderList(
-		c,
-		today,
-		parseFilters(params, today.slice(0, 7), isDemo(c)),
-		{
-			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
-			selecting,
-			focusSetCategory: selecting && params.get("focus") === FOCUS_SET_CATEGORY,
-			focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
-			checkedIds: selecting
-				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
-				: undefined,
-		},
-	);
+	const filters = parseFilters(params, today.slice(0, 7), isDemo(c));
+	// Select all's reply ticks the page's rows too: they come as page-ids, since htmx would replace the
+	// ids in its own address with the ticks it includes (SelectAllOnPage).
+	const selectAll = params.get("focus") === FOCUS_SET_CATEGORY;
+	// Every tick is kept, past 100 too: the bar refuses to act on more than 100, but never trims them (#350).
+	const ticks = selecting
+		? parseIds([
+				...params.getAll("ids"),
+				...(selectAll ? params.getAll("page-ids") : []),
+			])
+		: [];
+	// A list change in Select mode pushes the address with the ticks in it, so a reload keeps them. The
+	// focus marker stays out of it (#350).
+	if (selecting && c.req.header("HX-Request") === "true")
+		c.header(
+			"HX-Push-Url",
+			selectModeHref(listHref(filters, today.slice(0, 7)), ticks),
+		);
+	return renderList(c, today, filters, {
+		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		selecting,
+		focusSetCategory: selecting && selectAll,
+		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
+		checkedIds: selecting ? new Set(ticks) : undefined,
+	});
 });
 
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
@@ -740,12 +778,7 @@ const LIST_OOB = [
 	"#view-links:outerHTML",
 ].join(", ");
 
-/** Most ids one bulk action takes (D1 binds at most 100 parameters per statement). */
-const MAX_SELECTED = 100;
-const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
 const NONE_SELECTED = "Select at least one transaction.";
-
-const selectedLabel = (count: number) => `${count} selected`;
 
 /** Positive whole-number ids, once each; each value may be one id or "1,2,3". */
 function parseIds(values: (string | File)[]) {
@@ -775,19 +808,27 @@ async function selectableIds(db: D1Database, ids: number[]) {
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
 transactions.get("/transactions/select/count", (c) => {
 	const params = new URL(c.req.url).searchParams;
-	const ticked = new Set(parseIds(params.getAll("ids")));
+	// Every checked row in the form, on this page or not; the page's own rows come from page-ids.
+	const ticks = parseIds(params.getAll("ids"));
 	const pageIds = parseIds(params.getAll("page-ids"));
+	const onPage = new Set(pageIds);
+	const notOnPage = ticks.filter((id) => !onPage.has(id)).length;
 	const back = safeBack(params.get("back"));
 	return c.html(
 		<>
-			{selectedLabel(ticked.size)}
-			<SelectionActionButtons disabled={ticked.size === 0} oob />
-			<SelectAllOnPage
-				href={selectModeHref(back, pageIds)}
-				pageIds={pageIds}
-				ticked={ticked}
+			<SelectedCount count={ticks.length} notOnPage={notOnPage} />
+			<SelectionActionButtons
+				disabled={ticks.length === 0 || ticks.length > MAX_SELECTED}
 				oob
 			/>
+			<SelectAllOnPage
+				back={back}
+				pageIds={pageIds}
+				ticked={new Set(ticks)}
+				oob
+			/>
+			<SelectionLimit count={ticks.length} oob />
+			<NotOnPageCount count={notOnPage} oob />
 		</>,
 	);
 });
@@ -799,10 +840,6 @@ async function postedSelection(c: Context<App>, form: FormData) {
 	const ids = await selectableIds(c.env.DB, posted);
 	return { ids, error: ids.length === 0 ? NONE_SELECTED : undefined };
 }
-
-/** The select-mode list with these rows ticked (Cancel and close on the sheet). */
-const selectModeHref = (back: string, ids: number[]) =>
-	`${back}${back.includes("?") ? "&" : "?"}select=1${ids.length ? `&ids=${ids.join(",")}` : ""}`;
 
 function SelectCategorySheet({
 	ids,

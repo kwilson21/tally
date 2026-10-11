@@ -679,10 +679,18 @@ assert.equal(
 	pageTwoIds,
 	"page 2's Select all must hold page 2's ids",
 );
+// The tick from page 1 stays ticked and counts, as a tick not on this page (#350).
+const ticksOnPageTwo = await page
+	.locator("#results input[name=ids]:checked")
+	.count();
+const ticksNotOnPage = await page
+	.locator("#not-on-page input[name=ids]:checked")
+	.count();
+assert.equal(ticksNotOnPage, 1, "page 1's tick must stay ticked off the page");
 assert.equal(
 	(await page.locator("#selected-count").textContent())?.trim(),
-	`${await page.locator("#selection-form input[name=ids]:checked").count()} selected`,
-	"the count must match the ticks on page 2",
+	`${ticksOnPageTwo + ticksNotOnPage} selected, ${ticksNotOnPage} not on this page`,
+	"the count must match every tick, on this page or not",
 );
 assert.equal(
 	await page.evaluate(
@@ -733,6 +741,27 @@ assert.equal(
 await page.getByText("2 selected", { exact: true }).waitFor();
 dropReplacedRequestLogs(errorsBefore);
 step("a second filter change during a list load keeps the ticks");
+
+// A tick stays when Older takes its page away: the bar still counts it, as a tick not on this page (#350).
+await goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "networkidle",
+});
+await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
+await page.getByText("1 selected", { exact: true }).waitFor();
+await page.locator('a[rel="next"]').click();
+await page.waitForFunction(
+	() =>
+		document.querySelector("#selected-count")?.textContent?.trim() ===
+		"1 selected, 1 not on this page",
+);
+assert.equal(
+	(await page.locator("#not-on-page summary").textContent())?.trim(),
+	"1 not on this page",
+	"Older must keep the tick and say it is not on this page",
+);
+step(
+	"a tick stays when Older takes its page away, and the bar still counts it",
+);
 
 // Select several uncategorized rows, then set their category in one action (P20 A).
 assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);

@@ -1686,13 +1686,14 @@ function Rows() {
 					"SelectableTransactionRow",
 					"Button",
 				]}
-				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it that ticks every row on the page (“Select all 25”) until every row is ticked, and Set category and Exclude on a second line (P70 A and P81 A)."
+				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it that ticks every row on the page (“Select all 25”) until every row is ticked, and Set category and Exclude on a second line (P70 A and P81 A). Ticks that aren't on this page sit on a line of their own, closed or open, and past 100 the bar says so in brick (#350)."
 			>
 				<State label="Some rows ticked: the link offers the page">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
-							label="3 selected"
-							href="/transactions?select=1"
+							count={3}
+							notOnPage={0}
+							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
 							ticked={new Set([101, 103, 104])}
 						/>
@@ -1701,8 +1702,9 @@ function Rows() {
 				<State label="Every row ticked: the link is gone">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
-							label="25 selected"
-							href="/transactions?select=1"
+							count={25}
+							notOnPage={0}
+							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
 							ticked={new Set(SAMPLE_PAGE_IDS)}
 						/>
@@ -1711,10 +1713,61 @@ function Rows() {
 				<State label="Nothing ticked: the actions wait, the link still offers the page">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
 						<SelectionActionBar
-							label="0 selected"
-							href="/transactions?select=1"
+							count={0}
+							notOnPage={0}
+							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
 							ticked={new Set()}
+							disabled
+						/>
+					</div>
+				</State>
+				<State label="Ticks not on this page, closed: a terracotta line that opens onto them">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={4}
+							notOnPage={3}
+							rows={
+								<ul class="divide-y divide-rule">
+									{TRANSACTION_ROWS.slice(0, 3).map((state) => (
+										<SelectableTransactionRow row={state.row} checked />
+									))}
+								</ul>
+							}
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+							ticked={new Set([101])}
+						/>
+					</div>
+				</State>
+				<State label="Ticks not on this page, open: the rows, ticked, in a list up to 40% of the screen">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={4}
+							notOnPage={3}
+							openNotOnPage
+							rows={
+								<ul class="divide-y divide-rule">
+									{TRANSACTION_ROWS.slice(0, 3).map((state) => (
+										<SelectableTransactionRow row={state.row} checked />
+									))}
+								</ul>
+							}
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+							ticked={new Set([101])}
+						/>
+					</div>
+				</State>
+				<State label="Over 100: the words in brick, and both actions wait">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={101}
+							notOnPage={76}
+							rows={undefined}
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+							ticked={new Set(SAMPLE_PAGE_IDS)}
 							disabled
 						/>
 					</div>
@@ -1731,8 +1784,9 @@ function Rows() {
 						</ul>
 						<div class="border-t border-ink bg-paper py-3">
 							<SelectionActionBar
-								label="1 selected"
-								href="/transactions?select=1"
+								count={1}
+								notOnPage={0}
+								back="/transactions"
 								pageIds={TRANSACTION_ROWS.slice(0, 2).map(
 									(state) => state.row.id,
 								)}
