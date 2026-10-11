@@ -2034,6 +2034,128 @@ describe("syncItem", () => {
 		});
 	});
 
+	describe("a merchant rule's category when the bank changes a purchase", () => {
+		const syncPage = (item: number, body: Record<string, unknown>) =>
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				item,
+				plaidFetch(() => response(page(body))),
+			);
+
+		/** A stored purchase the bank sent, with its id and the id of a category to give it. */
+		async function storedPurchase(item: number) {
+			await syncPage(item, { added: [transaction()] });
+			const category = await env.DB.prepare(
+				"SELECT id FROM categories LIMIT 1",
+			).first<{ id: number }>();
+			const parent = await env.DB.prepare(
+				"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first<{ id: number; account_id: number }>();
+			return {
+				parent: parent?.id as number,
+				account: parent?.account_id,
+				category: category?.id,
+			};
+		}
+
+		const stateOf = (id: number) =>
+			env.DB.prepare(
+				"SELECT is_split, category_id, category_source, split_removed_from_cents FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first();
+
+		it("restores a split purchase's merchant-rule category when the bank changes its amount and merchant name", async () => {
+			const item = await addItem();
+			const { parent, account, category } = await storedPurchase(item);
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET is_split = 1, category_id = ?, category_source = 'merchant_rule' WHERE id = ?",
+				).bind(category, parent),
+				env.DB.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, parent_id) VALUES (?, '2026-09-27', 500, 'RAW SHOP', ?, ?)",
+				).bind(account, category, parent),
+			]);
+
+			await syncPage(item, {
+				modified: [transaction({ amount: 20, merchant_name: "Other shop" })],
+			});
+
+			expect(await stateOf(parent)).toEqual({
+				is_split: 0,
+				category_id: category,
+				category_source: "merchant_rule",
+				split_removed_from_cents: 1234,
+			});
+		});
+
+		it("restores a split purchase's merchant-rule category through the added path too", async () => {
+			const item = await addItem();
+			const { parent, account, category } = await storedPurchase(item);
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET is_split = 1, category_id = ?, category_source = 'merchant_rule' WHERE id = ?",
+				).bind(category, parent),
+				env.DB.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, parent_id) VALUES (?, '2026-09-27', 500, 'RAW SHOP', ?, ?)",
+				).bind(account, category, parent),
+			]);
+
+			await syncPage(item, {
+				added: [transaction({ amount: 20, merchant_name: "Other shop" })],
+			});
+
+			expect(await stateOf(parent)).toEqual({
+				is_split: 0,
+				category_id: category,
+				category_source: "merchant_rule",
+				split_removed_from_cents: 1234,
+			});
+		});
+
+		it("keeps a restored merchant-rule category through a later rename, with its note", async () => {
+			const item = await addItem();
+			const { parent, category } = await storedPurchase(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', split_removed_from_cents = 1234 WHERE id = ?",
+			)
+				.bind(category, parent)
+				.run();
+
+			await syncPage(item, {
+				modified: [transaction({ merchant_name: "Other shop" })],
+			});
+
+			expect(await stateOf(parent)).toEqual({
+				is_split: 0,
+				category_id: category,
+				category_source: "merchant_rule",
+				split_removed_from_cents: 1234,
+			});
+		});
+
+		it("still clears a plain purchase's merchant-rule category when the bank renames it", async () => {
+			const item = await addItem();
+			const { parent, category } = await storedPurchase(item);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'merchant_rule' WHERE id = ?",
+			)
+				.bind(category, parent)
+				.run();
+
+			await syncPage(item, {
+				modified: [transaction({ merchant_name: "Other shop" })],
+			});
+
+			expect(await stateOf(parent)).toEqual({
+				is_split: 0,
+				category_id: null,
+				category_source: null,
+				split_removed_from_cents: null,
+			});
+		});
+	});
+
 	it("skips a concurrent run and releases the lock after success", async () => {
 		const id = await addItem();
 		let releaseAccounts!: () => void;
