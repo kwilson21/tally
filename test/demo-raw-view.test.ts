@@ -552,7 +552,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL",
 		).first<{ n: number }>();
 		expect(countOf(pageTwo.html)).toContain(
-			`of ${rawTotal?.n} transactions across all months`,
+			`of ${rawTotal?.n} transactions in all months`,
 		);
 		expect(rowsOf(pageTwo.html)).toHaveLength(25);
 		// Raw rows are read only for selection.

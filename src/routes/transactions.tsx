@@ -48,6 +48,9 @@ import {
 import {
 	type Filters,
 	filtersToQuery,
+	monthFor,
+	monthParam,
+	pageBefore,
 	parseFilters,
 	SHOW_LABELS,
 	SHOWS,
@@ -123,6 +126,8 @@ type ListOptions = {
 	sheet?: (categories: Category[], today: string) => unknown;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
+	/** "Only October" asked for focus on the result count, since its link goes (#211). */
+	countFocus?: boolean;
 	status?: 200 | 404 | 422;
 	pageTitle?: string;
 	selecting?: boolean;
@@ -192,6 +197,7 @@ async function renderList(
 	{
 		sheet,
 		focusId,
+		countFocus = false,
 		status = 200,
 		pageTitle,
 		selecting: selectRequested = false,
@@ -202,16 +208,21 @@ async function renderList(
 		focusFirstTick = false,
 	}: ListOptions = {},
 ) {
-	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
-		await Promise.all([
-			listTransactions(c.env.DB, filters),
-			monthsWithTransactions(c.env.DB),
-			needsCategoryCount(c.env.DB, filters.month, filters.raw),
-			c.env.DB.prepare(
-				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-			).all<Category>(),
-			accountChoices(c.env.DB),
-		]);
+	const [
+		{ rows, total, page, pages, matched },
+		months,
+		needs,
+		categories,
+		accounts,
+	] = await Promise.all([
+		listTransactions(c.env.DB, filters),
+		monthsWithTransactions(c.env.DB),
+		needsCategoryCount(c.env.DB, filters.month, filters.raw),
+		c.env.DB.prepare(
+			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+		).all<Category>(),
+		accountChoices(c.env.DB),
+	]);
 	const peoplePrompt = filters.raw
 		? false
 		: await c.env.DB.prepare(
@@ -268,24 +279,35 @@ async function renderList(
 		categoryName,
 		today,
 		accountName,
+		matched,
 	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
+	// The count takes focus when the row a save was about has left the list, or when "Only October" asked (#211).
 	const focusCount =
 		firstVisit === null &&
-		focusId !== undefined &&
-		!rows.some((r) => r.id === focusId);
+		(countFocus ||
+			(focusId !== undefined && !rows.some((r) => r.id === focusId)));
 	const allCategorized =
 		filters.uncategorized &&
 		filters.q === "" &&
 		filters.category === null &&
 		filters.account === null &&
 		filters.show === "all";
-	const pageHref = (n: number) => {
-		const query = filtersToQuery({ ...filters, page: n }, today.slice(0, 7));
-		const params = new URLSearchParams(query);
+	// The address of this list with other filters: select mode is kept.
+	const listUrl = (next: Filters) => {
+		const params = new URLSearchParams(filtersToQuery(next, today.slice(0, 7)));
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
+	const pageHref = (n: number) => listUrl({ ...filters, page: n });
+	// "Only October" narrows a search that runs in every month to this month, and keeps the search (#211).
+	const onlyMonthHref = listUrl({
+		...filters,
+		month: today.slice(0, 7),
+		page: 1,
+	});
+	// Its request asks for focus on the count, since the link goes with its focus; the address it pushes stays clean.
+	const onlyMonthRequest = `${onlyMonthHref}${onlyMonthHref.includes("?") ? "&" : "?"}focus=count`;
 	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked, and
 	// its controls pause while it loads (LIST_LOAD_PAUSE).
 	const includeTicked = selecting
@@ -566,6 +588,29 @@ async function renderList(
 						{count}
 					</p>
 				)}
+				{/* Always drawn on a list, so a search that runs in every month can add or remove its link (LIST_OOB). */}
+				{firstVisit === null && (
+					<div id="only-month">
+						{filters.q !== "" && filters.month === "all" && (
+							<Button
+								kind="text"
+								href={onlyMonthHref}
+								class="-ml-2"
+								hx-get={onlyMonthRequest}
+								hx-sync="#filters:replace"
+								hx-target="#results"
+								hx-select="#results > *"
+								// The count is swapped whole, so htmx can focus it: the link goes, and its focus with it.
+								hx-select-oob={`#result-count:outerHTML, ${LIST_OOB}`}
+								hx-swap="innerHTML show:top"
+								hx-push-url={onlyMonthHref}
+								{...includeTicked}
+							>
+								Only {monthLabel(today.slice(0, 7), today)}
+							</Button>
+						)}
+					</div>
+				)}
 				{/* Under the count, not in it: what the raw view leaves out stays put as filters change. */}
 				{filters.raw && <p class="mt-1 text-muted">{BANK_VIEW_NOTE}</p>}
 				{/* Always drawn on a list, so a filter change can add or remove the link inside it (LIST_OOB). */}
@@ -719,12 +764,30 @@ transactions.get("/transactions", async (c) => {
 	const focus = Number(params.get("focus"));
 	const selecting = params.get("select") === "1";
 	const today = await householdToday(c.env.DB);
+	const thisMonth = today.slice(0, 7);
+	const asked = parseFilters(params, thisMonth, isDemo(c));
+	// A search typed into an empty box looks in every month, and emptying the box goes back to this month (#211).
+	const before = pageBefore(c.req.header("HX-Current-URL"));
+	const month = monthFor(asked, before, thisMonth);
+	if (c.req.header("HX-Request") === "true") {
+		// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
+		// It is written only when the request's own address names a different month (htmx sends the form's month).
+		const named = monthParam(asked, before, month, thisMonth);
+		const address = new URL(c.req.url);
+		if (named !== address.searchParams.get("month")) {
+			address.searchParams.delete("focus");
+			if (named === null) address.searchParams.delete("month");
+			else address.searchParams.set("month", named);
+			c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+		}
+	}
 	return renderList(
 		c,
 		today,
-		parseFilters(params, today.slice(0, 7), isDemo(c)),
+		{ ...asked, month },
 		{
 			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+			countFocus: params.get("focus") === "count",
 			selecting,
 			focusSetCategory: selecting && params.get("focus") === FOCUS_SET_CATEGORY,
 			focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
@@ -744,6 +807,11 @@ const LIST_OOB = [
 	"#selection-back:outerHTML",
 	SELECTION_BAR_OOB,
 	"#view-links:outerHTML",
+	// The Month choice follows the month a search resolves (#211). It is replaced whole: innerHTML left
+	// its old selection showing (Chrome kept "All months" after the options changed). htmx puts focus
+	// back on the new element by its id, so a keyboard user stays in it.
+	"#month:outerHTML",
+	"#only-month:innerHTML",
 ].join(", ");
 
 /** Most ids one bulk action takes (D1 binds at most 100 parameters per statement). */

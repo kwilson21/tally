@@ -216,6 +216,9 @@ describe("data exports", () => {
 			env.DB.prepare(
 				"INSERT INTO bill_payments (id, bill_id, period, transaction_id, matched_by, status) VALUES (1, 1, '2026-09', 1, 'user', 'linked')",
 			),
+			env.DB.prepare(
+				"INSERT INTO category_archive_periods (category_id, archived_on, restored_on) VALUES (1, '2026-08-20', '2026-10-05')",
+			),
 		]);
 		await env.DB.prepare(
 			"INSERT INTO category_suggestions(name,status) VALUES('Archived idea','dismissed')",
@@ -236,6 +239,7 @@ describe("data exports", () => {
 		expect(data).toHaveProperty("exported_at");
 		for (const table of [
 			"categories",
+			"category_archive_periods",
 			"category_suggestions",
 			"budget_amounts",
 			"savings_goal_amounts",
@@ -270,6 +274,7 @@ describe("data exports", () => {
 				"name",
 				"status",
 			],
+			category_archive_periods: ["archived_on", "category_id", "restored_on"],
 			budget_amounts: ["amount_cents", "category_id", "effective_month"],
 			savings_goal_amounts: ["amount_cents", "effective_month"],
 			merchants: [
@@ -325,8 +330,10 @@ describe("data exports", () => {
 				"note_dismissed",
 				"kind",
 				"kind_guessed",
+				"kind_cleared",
 				"for_person_id",
 				"for_person_guessed",
+				"for_person_cleared",
 				"parent_id",
 				"pending",
 				"plaid_category",
