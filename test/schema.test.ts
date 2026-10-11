@@ -58,6 +58,7 @@ describe("schema", () => {
 			"budget_amounts",
 			"cash_delete_holds",
 			"categories",
+			"category_archive_periods",
 			"category_suggestions",
 			"documents",
 			"feedback",
