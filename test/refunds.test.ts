@@ -975,6 +975,48 @@ describe("a refund a bank change unlinked", () => {
 				.first(),
 		).toEqual({ r: PURCHASE, d: null });
 	});
+
+	it("relinks a split refund's parts with it and clears their dates, but not a part linked to another purchase", async () => {
+		// The bank's change unlinked a split refund: the refund and its parts each say so.
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET is_split = 1, refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+				)
+				.bind(REFUND),
+			db.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, refund_of_id, refund_unlinked_purchase_date) VALUES
+				(9011, 3, '2026-09-10', -1000, 'REFUND SHOP', ${KIDS}, 'user', 0, ${REFUND}, NULL, '2026-09-10'),
+				(9012, 3, '2026-09-10', -1000, 'REFUND SHOP', ${GAS}, 'user', 0, ${REFUND}, ${OTHER_MERCHANT}, NULL)`),
+		]);
+
+		await saveEdit(
+			db,
+			REFUND,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: "Refund Shop",
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: false,
+				refundOfId: PURCHASE,
+			},
+			"test",
+		);
+
+		const linkOf = (id: number) =>
+			db
+				.prepare(
+					"SELECT refund_of_id AS r, refund_unlinked_purchase_date AS d FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first();
+		expect(await linkOf(REFUND)).toEqual({ r: PURCHASE, d: null });
+		expect(await linkOf(9011)).toEqual({ r: PURCHASE, d: null });
+		expect(await linkOf(9012)).toEqual({ r: OTHER_MERCHANT, d: null });
+	});
 });
 
 describe("captions on the linked pair", () => {

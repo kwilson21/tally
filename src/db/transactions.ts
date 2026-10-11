@@ -771,7 +771,7 @@ export async function saveEdit(
 		statements.push(
 			db
 				.prepare(
-					`UPDATE transactions SET refund_of_id = ?1
+					`UPDATE transactions SET refund_of_id = ?1, refund_unlinked_purchase_date = NULL
 					WHERE parent_id = ?2 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?2)
 						AND ${refundFitsSql("?2", "?1")}`,
 				)
