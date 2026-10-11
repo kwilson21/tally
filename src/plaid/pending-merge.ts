@@ -91,6 +91,14 @@ const STATEMENTS = [
 		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
 		note_dismissed = MAX(transactions.note_dismissed, p.note_dismissed)
 	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.kind_cleared = 1 OR p.for_person_cleared = 1 OR p.note_tried_at IS NOT NULL OR p.note_dismissed = 1)`,
+	// Jev's unsure transfer score goes before the exclusions below: a copied exclusion would otherwise look like
+	// the posted row's own answer, and the score would be lost (#309).
+	`UPDATE transactions SET transfer_confidence = p.transfer_confidence
+	 ${FROM_PENDING} AND p.transfer_confidence IS NOT NULL AND p.amount_cents = ?3
+	 AND NOT ${hasAnswerSql(
+			"transactions.excluded_source = 'user'",
+			"transactions.excluded_source = 'jev' OR transactions.transfer_confidence IS NOT NULL",
+		)}`,
 	// Exclusion, with the flags it came with.
 	`UPDATE transactions SET excluded = p.excluded, excluded_source = 'user',
 		flag_transfer = p.flag_transfer, flag_reimbursement = p.flag_reimbursement
@@ -110,14 +118,6 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
 	 AND transactions.category_confidence IS NULL`,
-	// Jev's unsure transfer score goes before the exclusion below: a copied exclusion would otherwise look like
-	// the posted row's own answer, and the score would be lost (#309).
-	`UPDATE transactions SET transfer_confidence = p.transfer_confidence
-	 ${FROM_PENDING} AND p.transfer_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND NOT ${hasAnswerSql(
-			"transactions.excluded_source = 'user'",
-			"transactions.excluded_source = 'jev' OR transactions.transfer_confidence IS NOT NULL",
-		)}`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
 	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
 	// row), where it takes over the source: Jev's exclusion stands if Plaid drops the category later.

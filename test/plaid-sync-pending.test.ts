@@ -1063,6 +1063,22 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			});
 		});
 
+		it("keeps Jev's unsure transfer score when a person's exclusion moves onto a posted row with no answer (#309)", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user', transfer_confidence = 0.4 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				excluded: 1,
+				excluded_source: "user",
+				transfer_confidence: 0.4,
+			});
+		});
+
 		it("keeps the posted row's own transfer score when Jev's exclusion moves onto it (#309)", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item, { amount: -42 });
