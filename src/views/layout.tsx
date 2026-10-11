@@ -85,10 +85,10 @@ export function Layout({
 				</div>
 				<BottomTabs active={active} />
 				{!currentPath.startsWith("/feedback") && <FeedbackButton />}
-				{/* z-60: above the BottomSheet (z-50), so a failed save's toast shows over an open sheet. Taps pass through it, so a toast over Save never eats the tap that tries again. */}
+				{/* z-60: above the BottomSheet (z-50), so a failed save's toast shows over an open sheet. Taps pass through it, so a toast over Save never eats the tap that tries again. Toasts sit in the frame, never over the page (decision 101): on a phone 12 px above the tab bar and its safe area, at the top edge while a sheet is open, and 12 px above the Select bar's real height in Select mode; on desktop 24 px from the bottom, beside the sidebar and no wider than it. */}
 				<div
 					id="toasts"
-					class="pointer-events-none fixed inset-x-4 bottom-36 z-60 flex flex-col items-center gap-2 lg:bottom-6"
+					class="pointer-events-none fixed inset-x-4 z-60 flex flex-col items-center gap-2 bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+0.75rem)] max-lg:[body:has([role=dialog])_&]:top-[calc(0.75rem+var(--safe-area-top))] max-lg:[body:has([role=dialog])_&]:bottom-auto max-lg:[body:has(#selection-form):not(:has([role=dialog]))_&]:bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+var(--selection-bar-height)+0.75rem)] lg:bottom-6 lg:left-[max(2rem,calc(50%_-_34rem))] lg:right-auto lg:w-56 lg:items-start"
 				/>
 				<div
 					id="announcer"
