@@ -2573,6 +2573,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					error="Income can't be split."
 					today={today}
 					still
+					correction={correction}
 				/>
 			),
 		});
