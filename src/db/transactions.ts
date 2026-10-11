@@ -224,7 +224,15 @@ export async function listTransactions(
 				alternatives.push(
 					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR ${ownNameSql("t")} LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')`,
 				);
-				args.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+				args.push(
+					pattern,
+					pattern,
+					pattern,
+					pattern,
+					pattern,
+					pattern,
+					pattern,
+				);
 			}
 			if (amount) {
 				alternatives.push("ABS(t.amount_cents) BETWEEN ? AND ?");

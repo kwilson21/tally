@@ -202,7 +202,9 @@ export function parseEdit(
 	const keepBankName = pick === "store";
 	const displayName = pick === "own" ? typedName : pickedName;
 	// The panel says what the name field held when it was drawn (`merchant_was`). With "own" ticked, a typed
-	// name the merchant already has is no rename of the merchant (it is still one for this transaction).
+	// name the merchant already has is no rename of the merchant under All, so the merchant keeps it. Under
+	// This one only it still names this transaction. (A save under All that replaces this transaction's own
+	// name counts as a change too; savePanel sets that once it knows the row has one.)
 	const shown = form.get("merchant_was");
 	const fieldChanged = shown === null || typedName !== String(shown).trim();
 	const note = text(form, "note");

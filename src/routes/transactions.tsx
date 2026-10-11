@@ -2634,6 +2634,15 @@ async function savePanel(
 	if (parsed.ok && offered.length === 0) parsed.value.keepBankName = false;
 	const jevCategories = await jevAnswersCategories(c);
 	if (parsed.ok) parsed.value.jevCategories = jevCategories;
+	// "All" with a typed name the merchant already has changes no merchant name, but it still replaces this
+	// transaction's own name (decision 101), so the save counts as a name change for this one.
+	if (
+		parsed.ok &&
+		pick === OWN_VALUE &&
+		parsed.value.nameScope === "all" &&
+		tx.nameChoices.thisOwn !== null
+	)
+		parsed.value.nameChanged = true;
 
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount.
