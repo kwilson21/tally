@@ -2,7 +2,11 @@ import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
-import { type Edit, merchantRuleChange } from "../transactions/edit";
+import {
+	type Edit,
+	followsPurchaseAfterSave,
+	merchantRuleChange,
+} from "../transactions/edit";
 import {
 	type AmountSearch,
 	type Filters,
@@ -27,6 +31,7 @@ import {
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
+	followsPurchase,
 	INCLUDED,
 	INCLUDED_ROW,
 	includedSql,
@@ -827,12 +832,13 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
 			merchantKey: string;
 			rawName: string;
+			amountCents: number;
 			categoryId: number | null;
 			categorySource: string | null;
 			income: number;
@@ -877,19 +883,31 @@ export async function saveEdit(
 				: edit.creditReviewed !== edit.creditReviewedWas;
 	const creditReviewByUser =
 		creditReviewChanged && !edit.income && creditReviewChoice === 1;
-	// A linked credit marked as income doesn't count toward its purchase (src/db/refunded.ts), so a save
-	// that clears that, with the link staying, makes it count: that is checked like a link. The panel's
-	// own update also clears the income when a person reviews the credit as not income
-	// (creditReviewByUser), so that counts too. A panel that still shows income off, saving only a note,
-	// clears nothing. (A split parent never counts, only its parts do, and the cap ignores whether a
-	// refund is excluded or reviewed, so income is the one flag that changes what counts.)
+	// A linked credit counts with its purchase once it is reviewed and not income (followsPurchase), so a save
+	// that makes it start counting, with the link staying, is checked like a link. followsPurchaseAfterSave says
+	// whether it counts once saved, whether by a review as not income or by clearing its income. A save that
+	// clears a linked credit's income is checked as it always was, even when the review leaves it uncounted. A
+	// panel that still shows income off, saving only a note, clears nothing. (A split parent never counts, only
+	// its parts do, and the cap ignores whether a refund is excluded or reviewed.)
+	const storedCredit = {
+		amountCents: current.amountCents,
+		refundOfId: current.refundOfId,
+		income: current.income === 1,
+		incomeSource: current.incomeSource,
+		creditReviewed: current.creditReviewed === 1,
+		creditReviewedByUser: current.creditReviewedBy === "user",
+	};
+	const startsCounting =
+		!followsPurchase(storedCredit) &&
+		followsPurchaseAfterSave(storedCredit, edit);
 	const recounting =
 		newLink === undefined &&
 		current.refundOfId !== null &&
-		current.income === 1 &&
-		(incomeChanged || creditReviewByUser) &&
-		!edit.income &&
-		current.isSplit === 0
+		current.isSplit === 0 &&
+		(startsCounting ||
+			(current.income === 1 &&
+				(incomeChanged || creditReviewByUser) &&
+				!edit.income))
 			? current.refundOfId
 			: null;
 
