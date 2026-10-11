@@ -644,3 +644,30 @@ html:not(.js) [data-money-js] {
 		transition: none;
 	}
 }
+
+/*
+ * Ticks not on this page (#350). While a list loads, Older, Newer and Select all take no taps, and Set
+ * category and Exclude dim with them: all three drop to 40% in the same 150 ms step as the round marks,
+ * so a fast load doesn't blink them. Reduced motion drops them at once. The bar with the disclosure open is
+ * taller, so the list keeps its last rows clear of it.
+ */
+.selection-list.htmx-request a[hx-get] {
+	pointer-events: none;
+	opacity: 0.4;
+	transition: opacity var(--duration-pause) step-end;
+}
+.selection-list.htmx-request #set-category-selection,
+.selection-list.htmx-request #exclude-selection {
+	opacity: 0.4;
+	transition: opacity var(--duration-pause) step-end;
+}
+@media (prefers-reduced-motion: reduce) {
+	.selection-list.htmx-request a[hx-get],
+	.selection-list.htmx-request #set-category-selection,
+	.selection-list.htmx-request #exclude-selection {
+		transition: none;
+	}
+}
+.selection-list:has(#not-on-page details[open]) {
+	padding-bottom: calc(40vh + 11rem);
+}

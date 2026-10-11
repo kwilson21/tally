@@ -163,6 +163,8 @@ const RAW_SHOW_SQL: Record<Show, string | null> = {
 export async function listTransactions(
 	db: D1Database,
 	f: Filters,
+	/** Only these transactions, unpaged and whatever the filters (see listRowsByIds). */
+	ids?: number[],
 ): Promise<{
 	rows: ListRow[];
 	total: number;
@@ -196,6 +198,11 @@ export async function listTransactions(
 	if (f.uncategorized && !f.raw) where.push(NEEDS_CATEGORY);
 	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
 	if (f.raw) where.push("t.parent_id IS NULL");
+	// Ticked rows that are not in the list on screen (#350): split parents have no tick, and an unknown id drops out.
+	if (ids) {
+		where.push("t.is_split = 0 AND t.id IN (SELECT value FROM json_each(?))");
+		args.push(JSON.stringify(ids));
+	}
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
 	// The search's pattern when it looks in categories too (#211), so the count can say whether one matched.
@@ -296,7 +303,7 @@ export async function listTransactions(
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
 			${from}
 			ORDER BY t.date DESC, t.id DESC
-			LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`,
+			${ids ? "" : `LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`}`,
 		)
 		.bind(...args)
 		.all<
@@ -383,6 +390,52 @@ export async function listTransactions(
 		},
 	);
 	return { rows, total, page, pages, matched };
+}
+
+/**
+ * The given transactions as list rows, whatever the filters: the ticks that aren't on the list on screen
+ * (#350). A split parent and an unknown id drop out, so only what the bar can act on is counted.
+ */
+export async function listRowsByIds(
+	db: D1Database,
+	ids: number[],
+): Promise<ListRow[]> {
+	if (ids.length === 0) return [];
+	const { rows } = await listTransactions(
+		db,
+		{
+			q: "",
+			month: "all",
+			category: null,
+			account: null,
+			show: "all",
+			uncategorized: false,
+			page: 1,
+			raw: false,
+		},
+		ids,
+	);
+	return rows;
+}
+
+/**
+ * The given ids that are still rows a bulk action can change (not deleted, not a split parent), in the order
+ * given: the rule listTransactions' `ids` uses, so a stale tick drops out before anything reads it (#350).
+ * One bind for the whole list, so there is no cap on how many.
+ */
+export async function selectableTickIds(
+	db: D1Database,
+	ids: number[],
+): Promise<number[]> {
+	if (ids.length === 0) return [];
+	const { results } = await db
+		.prepare(
+			"SELECT id FROM transactions WHERE is_split = 0 AND id IN (SELECT value FROM json_each(?))",
+		)
+		.bind(JSON.stringify(ids))
+		.all<{ id: number }>();
+	const selectable = new Set(results.map((row) => row.id));
+	return ids.filter((id) => selectable.has(id));
 }
 
 /** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */

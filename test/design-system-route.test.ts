@@ -811,6 +811,19 @@ describe("GET /design-system in the demo", () => {
 		const csp = res.headers.get("content-security-policy") ?? "";
 		expect(csp).toContain("form-action 'none'");
 	});
+
+	it("shows the bar's ticks-not-on-this-page line closed and open, and the over-100 warning, in the catalog (#350)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="selection-action-bar"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toMatch(/<details(?![^>]* open)[^>]*>/);
+		expect(section).toMatch(/<details[^>]*\sopen(?=[\s>=])/);
+		expect(section).toContain("3 not on this page");
+		expect(section).toContain("101 selected");
+		expect(section).toMatch(
+			/<p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p>/,
+		);
+	});
 });
 
 describe("the catalog outside the demo", () => {
