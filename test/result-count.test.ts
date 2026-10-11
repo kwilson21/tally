@@ -39,7 +39,7 @@ describe("resultCount", () => {
 			"12 transactions in December 2025",
 		);
 		expect(resultCount(one, { ...base, month: "all" }, null, TODAY)).toBe(
-			"12 transactions across all months",
+			"12 transactions in all months",
 		);
 	});
 
@@ -49,7 +49,7 @@ describe("resultCount", () => {
 			"12 transactions in Groceries, September",
 		);
 		expect(resultCount(one, { ...f, month: "all" }, "Groceries", TODAY)).toBe(
-			"12 transactions in Groceries, across all months",
+			"12 transactions in Groceries, all months",
 		);
 	});
 
@@ -68,7 +68,7 @@ describe("resultCount", () => {
 			resultCount({ total: 1, first: 1, shown: 1, pages: 1 }, raw, null, TODAY),
 		).toBe("1 transaction in September, as the bank sends them");
 		expect(resultCount(one, { ...raw, month: "all" }, null, TODAY)).toBe(
-			"12 transactions across all months, as the bank sends them",
+			"12 transactions in all months, as the bank sends them",
 		);
 		expect(
 			resultCount(
@@ -107,7 +107,7 @@ describe("resultCount", () => {
 			resultCount(one, { ...f, category: 1 }, "Groceries", TODAY, CARD),
 		).toBe("12 transactions in Groceries, Chase Card ••9921, September");
 		expect(resultCount(one, { ...f, month: "all" }, null, TODAY, CARD)).toBe(
-			"12 transactions in Chase Card ••9921, across all months",
+			"12 transactions in Chase Card ••9921, all months",
 		);
 		expect(
 			resultCount(
@@ -117,9 +117,7 @@ describe("resultCount", () => {
 				TODAY,
 				CARD,
 			),
-		).toBe(
-			"12 transactions in Groceries, Chase Card ••9921, across all months",
-		);
+		).toBe("12 transactions in Groceries, Chase Card ••9921, all months");
 	});
 
 	it("names the Cash account", () => {
@@ -202,5 +200,72 @@ describe("resultCount", () => {
 		const a = resultCount(one, { ...base, category: 1 }, "Groceries", TODAY);
 		const b = resultCount(one, { ...base, category: 2 }, "Gas", TODAY);
 		expect(a).not.toBe(b);
+	});
+
+	it("names the amount a search reads, to the cent or across the dollar (#211)", () => {
+		expect(
+			resultCount(one, { ...base, q: "42.17", month: "all" }, null, TODAY),
+		).toBe('12 transactions matching "42.17" (amount $42.17) in all months');
+		expect(resultCount(one, { ...base, q: "$42" }, null, TODAY)).toBe(
+			'12 transactions matching "$42" (amounts $42.00 to $42.99) in September',
+		);
+		expect(
+			resultCount(one, { ...base, q: "42" }, null, TODAY, null, {
+				category: false,
+				allByAmount: true,
+			}),
+		).toBe(
+			'12 transactions matching "42" (amounts $42.00 to $42.99) in September',
+		);
+		expect(resultCount(one, { ...base, q: "$1,284" }, null, TODAY)).toBe(
+			'12 transactions matching "$1,284" (amounts $1,284.00 to $1,284.99) in September',
+		);
+	});
+
+	it("says a search matched a category, and says nothing more for other text (#211)", () => {
+		expect(
+			resultCount(one, { ...base, q: "groceries" }, null, TODAY, null, {
+				category: true,
+				allByAmount: false,
+			}),
+		).toBe('12 transactions matching "groceries" (category) in September');
+		expect(
+			resultCount(one, { ...base, q: "costco", month: "all" }, null, TODAY),
+		).toBe('12 transactions matching "costco" in all months');
+	});
+
+	it("names a plain number's amount only when every row matched by amount, so a mixed count says nothing more (#211)", () => {
+		const twoRows = { total: 2, first: 1, shown: 2, pages: 1 };
+		// STORE 42 CAFE matched by its name and a $42.50 purchase by its amount: the count names no amount.
+		expect(
+			resultCount(twoRows, { ...base, q: "42" }, null, TODAY, null, {
+				category: false,
+				allByAmount: false,
+			}),
+		).toBe('2 transactions matching "42" in September');
+		// $42 searches amounts alone, so its rows all matched by amount, whatever the flags say.
+		expect(resultCount(twoRows, { ...base, q: "$42" }, null, TODAY)).toBe(
+			'2 transactions matching "$42" (amounts $42.00 to $42.99) in September',
+		);
+	});
+
+	it("reads the search's amount with the category and the account, the month last (#211)", () => {
+		expect(
+			resultCount(
+				{ total: 2, first: 1, shown: 2, pages: 1 },
+				{ ...base, q: "42.17", month: "all", category: 1 },
+				"Groceries",
+				TODAY,
+				CARD,
+			),
+		).toBe(
+			'2 transactions matching "42.17" (amount $42.17) in Groceries, Chase Card ••9921, all months',
+		);
+	});
+
+	it("names no amount or category in the raw view, whose search is the bank's own text (#211)", () => {
+		expect(resultCount(one, { ...base, q: "42", raw: true }, null, TODAY)).toBe(
+			'12 transactions matching "42" in September, as the bank sends them',
+		);
 	});
 });

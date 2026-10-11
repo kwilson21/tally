@@ -3,7 +3,14 @@ import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type Edit, merchantRuleChange } from "../transactions/edit";
-import { type Filters, likePattern, type Show } from "../transactions/filters";
+import {
+	type AmountSearch,
+	type Filters,
+	likePattern,
+	type SearchMatch,
+	type Show,
+	searchAmount,
+} from "../transactions/filters";
 import {
 	type NameSource,
 	nameSource,
@@ -157,7 +164,14 @@ const RAW_SHOW_SQL: Record<Show, string | null> = {
 export async function listTransactions(
 	db: D1Database,
 	f: Filters,
-): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
+): Promise<{
+	rows: ListRow[];
+	total: number;
+	page: number;
+	pages: number;
+	/** What the rows matched the search by, for the count's note (#211). */
+	matched: SearchMatch;
+}> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
 	const {
@@ -185,6 +199,10 @@ export async function listTransactions(
 	if (f.raw) where.push("t.parent_id IS NULL");
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
+	// The search's pattern when it looks in categories too (#211), so the count can say whether one matched.
+	let categoryPattern: string | null = null;
+	// The search's amount, when it looks at amounts, so the count can say whether every row matched by one.
+	let amountSearch: AmountSearch | null = null;
 	if (f.q) {
 		if (f.raw) {
 			where.push("t.raw_name LIKE ? ESCAPE '\\'");
@@ -194,13 +212,25 @@ export async function listTransactions(
 			// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
 			// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
 			// row says can be searched for.
-			where.push(
-				`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR ${ownNameSql("t")} LIKE ? ESCAPE '\\')`,
-			);
+			// A search also finds a category by its name (#211), and an amount (decision 79). A plain whole
+			// number matches its amount and the words, so "42" finds "STORE 42" as well as $42.00 to $42.99;
+			// with a "$" or a decimal point the search is the amount alone.
+			const amount = searchAmount(f.q);
+			amountSearch = amount;
 			const pattern = likePattern(f.q);
-			args.push(pattern, pattern, pattern, pattern);
-			args.push(pattern);
-			args.push(pattern);
+			const alternatives: string[] = [];
+			if (amount === null || amount.plain) {
+				categoryPattern = pattern;
+				alternatives.push(
+					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR ${ownNameSql("t")} LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')`,
+				);
+				args.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+			}
+			if (amount) {
+				alternatives.push("ABS(t.amount_cents) BETWEEN ? AND ?");
+				args.push(amount.low, amount.high);
+			}
+			where.push(`(${alternatives.join(" OR ")})`);
 		}
 	}
 
@@ -213,11 +243,39 @@ export async function listTransactions(
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
+	// What the rows matched, in the same statement as the count (#211): whether any counted row matched by its
+	// category's name (an archived category counts too, as the search does), and, for a plain number, whether
+	// every counted row matched by its amount. A row that matched by its words alone breaks the second; with no
+	// row counted it holds, as it does for an amount-only search, so the count names the amount then.
+	const countColumns = ["COUNT(*) AS n"];
+	const countArgs: (string | number)[] = [];
+	if (amountSearch?.plain) {
+		countColumns.push(
+			"COALESCE(MIN(CASE WHEN ABS(t.amount_cents) BETWEEN ? AND ? THEN 1 ELSE 0 END), 1) AS allAmount",
+		);
+		countArgs.push(amountSearch.low, amountSearch.high);
+	}
+	if (categoryPattern !== null) {
+		countColumns.push(
+			"MAX(CASE WHEN c.name LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) AS categoryHit",
+		);
+		countArgs.push(categoryPattern);
+	}
 	const counted = await db
-		.prepare(`SELECT COUNT(*) AS n ${from}`)
-		.bind(...args)
-		.first<{ n: number }>();
+		.prepare(`SELECT ${countColumns.join(", ")} ${from}`)
+		.bind(...countArgs, ...args)
+		.first<{
+			n: number;
+			allAmount?: number | null;
+			categoryHit?: number | null;
+		}>();
 	const total = counted?.n ?? 0;
+	const matched: SearchMatch = {
+		category: counted?.categoryHit === 1,
+		allByAmount:
+			amountSearch !== null &&
+			(!amountSearch.plain || counted?.allAmount === 1),
+	};
 	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 	const page = Math.min(f.page, pages);
 
@@ -331,7 +389,7 @@ export async function listTransactions(
 			};
 		},
 	);
-	return { rows, total, page, pages };
+	return { rows, total, page, pages, matched };
 }
 
 /** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */
