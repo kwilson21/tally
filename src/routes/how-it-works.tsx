@@ -318,7 +318,9 @@ howItWorks.get("/how-it-works", async (c) => {
 							uncategorized.
 						</li>
 						<li>
-							Search matches the merchant name, the bank's name, and the note.
+							Search matches the merchant name, the bank's name, the note, and a
+							category's name. A number such as 42.17 or $42 finds amounts, and
+							a search looks in every month.
 						</li>
 					</ul>
 					{hasTransactions ? (
