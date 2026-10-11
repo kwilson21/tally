@@ -504,6 +504,10 @@ describe("feedback form", () => {
 		).text();
 		expect(html).toContain("Attach technical details");
 		expect(html).toContain("excludes raw");
+		expect(html).toContain(
+			"coarse device category and app version are included with every report",
+		);
+		expect(html).toContain("browser versions");
 		expect(html).not.toContain('name="include_replay"');
 	});
 
@@ -737,6 +741,11 @@ describe("demo", () => {
 		expect(html.indexOf("Before a new report is sent")).toBeLessThan(
 			html.indexOf('action="/feedback"'),
 		);
+	});
+
+	it("tells the person the app version is stored in D1 (decision 98)", async () => {
+		const html = await (await productionApp().fetch("/feedback")).text();
+		expect(html).toMatch(/Tally stores [^.]*app version[^.]* in Cloudflare D1/);
 	});
 
 	it("shows that feedback is off and returns 404 on POST without GitHub", async () => {
