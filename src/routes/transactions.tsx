@@ -2521,7 +2521,6 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
 	if (!tx || tx.parentId !== null) return c.notFound();
-	if (tx.income) return c.text("Income transactions cannot be split.", 400);
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
@@ -2559,6 +2558,23 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			kept: partId === undefined ? undefined : archived.get(partId),
 		};
 	});
+	// Income is never split. A row that a bank change made income after the sheet opened gets the same
+	// sheet back, refused in words, as the other split refusals do.
+	if (tx.income)
+		return renderList(c, today, filtersFrom(c, today, back), {
+			status: 422,
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					error="Income can't be split."
+					today={today}
+					still
+				/>
+			),
+		});
 	if (form.get("add") === "1") {
 		// Add a part: the open sheet again, with one more part.
 		values.push({ category: "", amount: "" });

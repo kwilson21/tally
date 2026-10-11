@@ -311,7 +311,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>
 							A refund linked to its purchase counts in that purchase's month
-							and category.
+							and category while the purchase counts; if the purchase is
+							excluded, the refund counts on its own date and category.
 						</li>
 						<li>
 							"Needs a category" counts exactly the transactions Home counts as
@@ -512,10 +513,11 @@ howItWorks.get("/how-it-works", async (c) => {
 							bills.
 						</li>
 						<li>
-							Tally suggests a possible bill when at least two money-out charges
-							in the last {BILL_FIND_MONTHS} months are {BILL_FIND_MIN_DAYS}–
-							{BILL_FIND_MAX_DAYS} days apart and within{" "}
-							{BILL_FIND_AMOUNT_PERCENT}% in amount.
+							Tally suggests a possible bill when a merchant's latest money-out
+							charge in the last {BILL_FIND_MONTHS} months repeats an earlier
+							one {BILL_FIND_MIN_DAYS}–{BILL_FIND_MAX_DAYS} days before it,
+							within {BILL_FIND_AMOUNT_PERCENT}% of that earlier charge's
+							amount.
 						</li>
 						<li>
 							A payment from the same merchant that is outside that{" "}

@@ -46,6 +46,21 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toContain("Each bill gets at most one payment per period");
 	});
 
+	it("states the possible-bill rule the finder applies: the latest charge repeats an earlier one 25–35 days before it, within 10%", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"Tally suggests a possible bill when a merchant's latest money-out charge in the last 3 months repeats an earlier one 25–35 days before it, within 10% of that earlier charge's amount.",
+		);
+		expect(html).not.toContain("are 25–35 days apart");
+	});
+
+	it("gives a linked refund its exception in the spec's words, when its purchase is excluded", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"A refund linked to its purchase counts in that purchase's month and category while the purchase counts; if the purchase is excluded, the refund counts on its own date and category.",
+		);
+	});
+
 	it("has the architecture and the Phase 1 feature sections", async () => {
 		const { res, html } = await get("/how-it-works");
 		expect(res.status).toBe(200);

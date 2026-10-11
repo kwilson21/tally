@@ -776,6 +776,85 @@ describe("focus when an Undo toast ends", () => {
 	});
 });
 
+describe("an Undo request that fails", () => {
+	const undoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+	const undoForm = (toasts: FakeNode) =>
+		(toasts.children[0] as FakeNode)
+			.all()
+			.find((node) => node.tag === "form") as FakeNode;
+	const undoButton = (form: FakeNode) =>
+		form.children.find((node) => node.tag === "button") as FakeNode;
+
+	it("turns Undo back on when its request fails while the toast is still up, and the error toast says to try again", async () => {
+		const { body, document, toasts } = await page();
+		undoToast(body);
+		const form = undoForm(toasts);
+		const button = undoButton(form);
+		form.dispatchEvent(new Event("submit"));
+		expect(button.disabled).toBe(true);
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: form, request: { method: "POST" } },
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(button.disabled).toBe(false);
+		const error = toasts.children.at(-1) as FakeNode;
+		expect(error.attrs.get("role")).toBe("alert");
+		expect(error.words()).toBe(COULDNT_SAVE);
+		expect(toasts.children).toHaveLength(2);
+	});
+
+	it("turns Undo back on for a server error reply too", async () => {
+		const { body, document, toasts } = await page();
+		undoToast(body);
+		const form = undoForm(toasts);
+		const button = undoButton(form);
+		form.dispatchEvent(new Event("submit"));
+		fire(document, "htmx:response:error", {
+			ctx: {
+				sourceElement: form,
+				request: { method: "POST" },
+				response: { status: 500 },
+			},
+		});
+		expect(button.disabled).toBe(false);
+	});
+
+	it("leaves Undo disabled when a different request fails", async () => {
+		const { body, document, toasts } = await page();
+		undoToast(body);
+		const form = undoForm(toasts);
+		const button = undoButton(form);
+		form.dispatchEvent(new Event("submit"));
+		fire(document, "htmx:error", {
+			ctx: {
+				sourceElement: new FakeNode("form"),
+				request: { method: "POST" },
+			},
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(button.disabled).toBe(true);
+	});
+
+	it("does nothing once the Undo toast has gone", async () => {
+		const { body, document, toasts } = await page();
+		undoToast(body);
+		const form = undoForm(toasts);
+		const button = undoButton(form);
+		form.dispatchEvent(new Event("submit"));
+		vi.advanceTimersByTime(10000);
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: form, request: { method: "POST" } },
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(button.disabled).toBe(true);
+	});
+});
+
 describe("Select mode's action bar", () => {
 	const SELECTION_BAR = "--selection-bar-height";
 	const barAt = (height: number) => {
