@@ -40,6 +40,50 @@ describe("ProgressRow", () => {
 		const html = await row(28650, 25000);
 		expect(html).toMatch(/\$36\.50 over<span class="sr-only"> budget<\/span>/);
 	});
+
+	it("$200.01 reads $0.01 over", async () => {
+		const html = await row(20001, 20000);
+		expect(html).toMatch(/\$0\.01 over<span class="sr-only"> budget<\/span>/);
+		expect(html).toContain("fill-over");
+		expect(html).not.toContain("fill-near-limit");
+		expect(html).not.toContain("nearly spent");
+	});
+
+	it.each([
+		[16000, 20000, true],
+		[15999, 20000, false],
+		[20000, 20000, true],
+		[0, 0, false],
+	])(
+		"marks %i of %i with the nearly spent bar at the 80% line, and says so to screen readers",
+		async (spent, budget, amber) => {
+			const html = await row(spent, budget);
+			expect(html.includes("fill-near-limit")).toBe(amber);
+			expect(html.includes('<span class="sr-only">, nearly spent</span>')).toBe(
+				amber,
+			);
+		},
+	);
+
+	it("keeps the bar green below 80% and brick above budget", async () => {
+		expect(await row(15999, 20000)).toContain("fill-ok");
+		expect(await row(20001, 20000)).toContain("fill-over");
+	});
+
+	it("shows a net refund in green with an empty bar and its budget under the name", async () => {
+		const html = await row(-2000, 20000);
+		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
+		expect(html).toContain(
+			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
+		);
+		expect(html).not.toContain("nearly spent");
+		expect(html).toMatch(/<rect width="0%"[^>]*class="bar-fill fill-ok"/);
+		// P98: the budget stays visible under the name, as the drawing shows it.
+		expect(html).toMatch(
+			/<span class="block text-lg">Gas<\/span><span class="block text-muted">\$200 budget<\/span>/,
+		);
+		expect(html).not.toContain("of $200");
+	});
 });
 
 describe("ProgressRow in Adjust mode (#94)", () => {
@@ -91,8 +135,9 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 	it("doesn't replay the bar's fill on each tap, so the list stays still", async () => {
 		const html = await adjusting(18600, 20000);
 		expect(html).not.toContain("bar-fill");
-		expect(html).toContain('class="fill-ok"');
-		expect(await row(18600, 20000)).toContain("bar-fill fill-ok");
+		expect(html).toContain('class="fill-near-limit"');
+		expect(html).toContain('<span class="sr-only">, nearly spent</span>');
+		expect(await row(18600, 20000)).toContain("bar-fill fill-near-limit");
 	});
 
 	it("on a phone, − takes the icon's place", async () => {
@@ -117,5 +162,18 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 
 	it("draws no buttons day to day", async () => {
 		expect(await row(18600, 20000)).not.toContain("<button");
+	});
+
+	it("keeps a net refund's budget under its name, and its empty bar, in Adjust mode too", async () => {
+		const html = await adjusting(-2000, 20000);
+		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
+		expect(html).toContain(
+			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
+		);
+		expect(html).toMatch(/<rect width="0%"[^>]*class="fill-ok"/);
+		expect(html).toMatch(
+			/<span class="block text-lg">Gas<\/span><span class="block text-muted">\$200 budget<\/span>/,
+		);
+		expect(html).not.toContain("of $200");
 	});
 });

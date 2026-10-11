@@ -128,7 +128,7 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 			return c.html(repairFailure(result.item.error), 502);
 		}
 		const repaired = await c.env.DB.prepare(
-			"UPDATE plaid_items SET status = 'ok' WHERE id = ? AND disconnected_at IS NULL",
+			"UPDATE plaid_items SET status = 'ok', reconnect_emailed_at = NULL WHERE id = ? AND disconnected_at IS NULL",
 		)
 			.bind(item.id)
 			.run();

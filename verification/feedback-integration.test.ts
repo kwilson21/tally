@@ -4,6 +4,10 @@ import { app } from "../src/index";
 import { fileFeedbackIssue } from "../src/routes/feedback";
 
 vi.mock("../src/access", () => ({
+	verifiedAccessIdentity: async () => ({
+		email: "fixture@example.test",
+		issuedAt: null,
+	}),
 	verifiedEmail: async () => "fixture@example.test",
 }));
 vi.mock("../src/routes/feedback", async (importOriginal) => {
@@ -48,6 +52,29 @@ describe("actual app diagnostics middleware", () => {
 			expect(html).toContain("</body>");
 			expect(html.includes("/js/feedback-diagnostics.js")).toBe(enabled);
 		});
+	it("keeps feedback requests out of household-member bookkeeping", async () => {
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		const response = await app.fetch(
+			new Request(`${base}/feedback`),
+			bindings({ DEMO: "false" }),
+		);
+		expect(response.status).toBe(200);
+		expect(await response.text()).toContain("Send feedback");
+		expect(error).not.toHaveBeenCalled();
+		error.mockRestore();
+	});
+	it("still serves a page when household-member bookkeeping fails, logging one line without an address", async () => {
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		const response = await app.fetch(
+			new Request(`${base}/__feedback-fragment-fixture`),
+			bindings({ DEMO: "false" }),
+		);
+		expect(response.status).toBe(202);
+		expect(await response.text()).toBe("<p>synthetic fragment</p>");
+		expect(error).toHaveBeenCalledOnce();
+		expect(error).toHaveBeenCalledWith("household member bookkeeping failed");
+		error.mockRestore();
+	});
 	it("preserves fragment body, status and headers", async () => {
 		const response = await app.fetch(
 			new Request(`${base}/__feedback-fragment-fixture`),

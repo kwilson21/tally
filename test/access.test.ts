@@ -1,7 +1,11 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { verifiedEmail } from "../src/access";
+import { verifiedAccessIdentity, verifiedEmail } from "../src/access";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import {
+	noteHouseholdMember,
+	removeHouseholdMember,
+} from "../src/db/reconnect";
 import { resetDemo } from "../src/demo/reset";
 
 const encoder = new TextEncoder();
@@ -345,6 +349,102 @@ describe("verifiedEmail", () => {
 			}),
 		).toBeNull();
 		expect(await verifiedEmail(request("token"), {})).toBeNull();
+	});
+});
+
+describe("verified Access identity and household members", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("does not restore a removed member from a renewed token without iat", async () => {
+		const team = "member-without-iat.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		await noteHouseholdMember(env.DB, "family.member@example.com", 100);
+		await removeHouseholdMember(env.DB, "family.member@example.com");
+		const jwt = await token(privateKey, team);
+		const identity = await verifiedAccessIdentity(request(jwt), {
+			ACCESS_TEAM_DOMAIN: team,
+			ACCESS_AUD: "test-aud",
+		});
+		if (!identity) throw new Error("Expected a verified Access identity");
+		expect(identity).toEqual({
+			email: "family.member@example.com",
+			issuedAt: null,
+		});
+		await noteHouseholdMember(env.DB, identity.email, identity.issuedAt);
+		const row = await env.DB.prepare(
+			"SELECT removed_at FROM household_members WHERE email = ?",
+		)
+			.bind(identity.email)
+			.first<{ removed_at: string | null }>();
+		expect(row?.removed_at).not.toBeNull();
+	});
+
+	it("restores a removed member from a newer verified token and adds a first-time member without iat", async () => {
+		const team = "member-with-iat.cloudflareaccess.com";
+		const { privateKey, jwk } = await keys();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ keys: [jwk] })),
+		);
+		await noteHouseholdMember(env.DB, "family.member@example.com", 100);
+		await removeHouseholdMember(env.DB, "family.member@example.com");
+		const earlier = await token(privateKey, team, {
+			iat: Math.floor(Date.now() / 1000) - 60,
+		});
+		const oldIdentity = await verifiedAccessIdentity(request(earlier), {
+			ACCESS_TEAM_DOMAIN: team,
+			ACCESS_AUD: "test-aud",
+		});
+		if (!oldIdentity)
+			throw new Error("Expected a verified old Access identity");
+		await noteHouseholdMember(env.DB, oldIdentity.email, oldIdentity.issuedAt);
+		let row = await env.DB.prepare(
+			"SELECT removed_at FROM household_members WHERE email = ?",
+		)
+			.bind(oldIdentity.email)
+			.first<{ removed_at: string | null }>();
+		expect(row?.removed_at).not.toBeNull();
+
+		const newerIat = Math.floor(Date.now() / 1000) + 1;
+		const jwt = await token(privateKey, team, { iat: newerIat });
+		const identity = await verifiedAccessIdentity(request(jwt), {
+			ACCESS_TEAM_DOMAIN: team,
+			ACCESS_AUD: "test-aud",
+		});
+		if (!identity) throw new Error("Expected a verified Access identity");
+		expect(identity.issuedAt).toBe(newerIat);
+		await noteHouseholdMember(env.DB, identity.email, identity.issuedAt);
+		row = await env.DB.prepare(
+			"SELECT removed_at FROM household_members WHERE email = ?",
+		)
+			.bind(identity.email)
+			.first<{ removed_at: string | null }>();
+		expect(row?.removed_at).toBeNull();
+
+		const firstTime = await token(privateKey, team, {
+			email: "new.member@example.com",
+		});
+		const newIdentity = await verifiedAccessIdentity(request(firstTime), {
+			ACCESS_TEAM_DOMAIN: team,
+			ACCESS_AUD: "test-aud",
+		});
+		if (!newIdentity)
+			throw new Error("Expected a verified first-time Access identity");
+		expect(newIdentity).toEqual({
+			email: "new.member@example.com",
+			issuedAt: null,
+		});
+		await noteHouseholdMember(env.DB, newIdentity.email, newIdentity.issuedAt);
+		row = await env.DB.prepare(
+			"SELECT removed_at FROM household_members WHERE email = ?",
+		)
+			.bind(newIdentity.email)
+			.first<{ removed_at: string | null }>();
+		expect(row?.removed_at).toBeNull();
 	});
 });
 
