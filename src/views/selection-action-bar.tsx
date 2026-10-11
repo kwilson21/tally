@@ -141,6 +141,7 @@ export function SelectAllOnPage({
 					hx-select="#results > *"
 					hx-select-oob={SELECTION_BAR_OOB}
 					hx-swap="innerHTML"
+					// The reply's HX-Push-Url (the ticks, without the focus marker) replaces this in Select mode.
 					hx-push-url={selectModeHref(back, pageIds)}
 				>
 					{`Select all ${pageIds.length}`}

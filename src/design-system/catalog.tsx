@@ -1683,6 +1683,9 @@ function Rows() {
 					"SelectionActionBar",
 					"SelectAllOnPage",
 					"SelectionActionButtons",
+					"SelectionLimit",
+					"NotOnPage",
+					"SelectedCount",
 					"SelectableTransactionRow",
 					"Button",
 				]}
