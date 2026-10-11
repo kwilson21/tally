@@ -420,6 +420,7 @@ export type TransactionDetail = ListRow & {
 	/** Who last settled the income answer ("user" or "jev"), or null when nothing has. */
 	incomeSource: string | null;
 	accountName: string;
+	bankName: string | null;
 	accountMask: string | null;
 	accountType: string;
 	/** The merchant's chosen display name, or null when it falls back to the raw name. */
@@ -507,9 +508,10 @@ export async function getTransaction(
 				CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
 				CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
-				a.name AS accountName, a.mask AS accountMask, a.type AS accountType
+				a.name AS accountName, a.mask AS accountMask, a.type AS accountType, pi.institution_name AS bankName
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
+			LEFT JOIN plaid_items pi ON pi.id = a.plaid_item_id
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
 			LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
@@ -626,11 +628,15 @@ const EXCLUDE =
 
 /**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
- * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left.
+ * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left. A cash
+ * amount is refused when it breaks its parts (`amountCents` is the parts' total) or its linked
+ * refunds (`refundCents` is their total, the smallest amount that would fit).
  */
 export type SaveEditResult =
 	| { saved: true }
-	| { saved: false; refundLeftCents: number };
+	| { saved: false; refundLeftCents: number }
+	| { saved: false; cashError: "split"; amountCents: number }
+	| { saved: false; cashError: "refund"; refundCents: number };
 
 /**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
@@ -718,6 +724,13 @@ export async function saveEdit(
 					args: [id, recounting],
 				}
 			: { sql: () => "", args: [] };
+	if (edit.cashAmountCents !== undefined) {
+		const priorSql = gate.sql;
+		const priorArgs = gate.args;
+		gate.sql = (n) =>
+			`${priorSql(n)} AND EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?${n + priorArgs.length} AND cash.parent_id IS NULL AND cash.account_id IN (SELECT id FROM accounts WHERE type='cash') AND (cash.is_split = 0 OR (SELECT COALESCE(SUM(amount_cents), 0) FROM transactions part WHERE part.parent_id = cash.id) = ?${n + priorArgs.length + 1}) AND COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) <= ?${n + priorArgs.length + 1})`;
+		gate.args = [...priorArgs, id, edit.cashAmountCents];
+	}
 	/** A statement with the gate on its WHERE (before `tail`), binding `args` and then the gate's. */
 	const gated = (sql: string, args: unknown[], tail = "") =>
 		db
@@ -874,14 +887,11 @@ export async function saveEdit(
 		// update changes it; one a person linked to another purchase keeps its own choice. The
 		// credit's review stays as it was.
 		statements.push(
-			db
-				.prepare(
-					"UPDATE transactions SET refund_of_id = NULL WHERE parent_id = ?1 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?1)",
-				)
-				.bind(id),
-			db
-				.prepare("UPDATE transactions SET refund_of_id = NULL WHERE id = ?")
-				.bind(id),
+			gated(
+				"UPDATE transactions SET refund_of_id = NULL WHERE parent_id = ?1 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?1)",
+				[id],
+			),
+			gated("UPDATE transactions SET refund_of_id = NULL WHERE id = ?", [id]),
 		);
 	} else if (linking) {
 		// An explicit human link is also a review of this credit as a refund. The link was written
@@ -889,12 +899,11 @@ export async function saveEdit(
 		// which a person linking a refund hasn't ticked, so the review is made again here. It stays on
 		// a split parent, so its parts inherit the reviewed link as one bank transaction.
 		statements.push(
-			db
-				.prepare(
-					`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user'
+			gated(
+				`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user'
 					WHERE id = ? AND amount_cents < 0 AND refund_of_id = ?`,
-				)
-				.bind(id, newLink),
+				[id, newLink],
+			),
 		);
 	}
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
@@ -996,7 +1005,36 @@ export async function saveEdit(
 			]),
 		);
 	}
+	let cashChangeIndex: number | null = null;
+	if (edit.cashDate !== undefined && edit.cashAmountCents !== undefined) {
+		cashChangeIndex = statements.length;
+		statements.push(
+			gated(
+				"UPDATE transactions SET date = ?, amount_cents = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+				[edit.cashDate, edit.cashAmountCents, actor, id],
+			),
+			gated(
+				"UPDATE transactions SET date = ?, updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
+				[edit.cashDate, actor, id],
+			),
+		);
+	}
 	const results = await db.batch(statements);
+	if (cashChangeIndex !== null && !results[cashChangeIndex]?.meta.changes) {
+		const state = await db
+			.prepare(
+				`SELECT COALESCE((SELECT SUM(amount_cents) FROM transactions part WHERE part.parent_id = cash.id), 0) AS parts,
+				COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) AS refunds
+				FROM transactions cash WHERE cash.id = ?`,
+			)
+			.bind(id)
+			.first<{ parts: number; refunds: number }>();
+		// The row is there unless it was deleted during the save, and then nothing says why it was refused.
+		if (!state) throw new Error(`No transaction ${id}`);
+		if (current.isSplit && state.parts !== edit.cashAmountCents)
+			return { saved: false, cashError: "split", amountCents: state.parts };
+		return { saved: false, cashError: "refund", refundCents: state.refunds };
+	}
 	// The statement that decides is the refund's own link, the second one, when there is a link; for a
 	// credit that counts again it is the panel's own update, the first. No change means the amount
 	// didn't fit, and then none of the others applied either.
@@ -1110,6 +1148,157 @@ export async function saveSplit(
 					? [linkedPurchase.date]
 					: [],
 	};
+}
+
+/** One part of a split cash entry's correction: `id` is the saved part it updates, null for a new one. */
+export type CashSplitPart = {
+	id: number | null;
+	categoryId: number;
+	amountCents: number;
+};
+
+/**
+ * Change the parts (spec §8.4): saves a split cash entry's new total and its corrected parts in one
+ * atomic batch. Saved parts are updated in place by id and new ones are added, so the split and every
+ * refund linked to a part stay linked (decision 79: a cash entry's split is never reset). Unlike
+ * saveSplit, nothing is deleted or unlinked.
+ *
+ * Every statement carries the same gate, so a refusal writes nothing. The gate checks that the entry is
+ * still the split it was drawn as (`amountWasCents`, or the new total once the parent statement has set
+ * it), that every posted saved part is still one of its parts, that the refunds linked to the entry and to
+ * its parts together fit the new total, that the refunds linked to each part still fit its new amount
+ * (src/db/refunded.ts), and that the entry has no parts but the saved ones. The parent's amount is set
+ * first and the new parts are inserted last, in one statement, so nothing the gate reads changes under an
+ * earlier statement: a part another save added in the meantime refuses every statement, and no statement
+ * can pass after an earlier one refused. Returns `refundTotalCents` (what the refunds linked to the entry
+ * and its parts together take) when those are more than the new total, which moving the parts can't fix.
+ * Returns `refundPart` (the part's 1-based position and what its refunds take) when a part's refunds don't
+ * fit; throws when the entry or its parts are no longer as they were drawn, so the save is an error.
+ */
+export async function correctCashSplit(
+	db: D1Database,
+	parentId: number,
+	edit: { totalCents: number; amountWasCents: number; parts: CashSplitPart[] },
+	by: string,
+): Promise<
+	| { saved: true }
+	| { saved: false; refundTotalCents: number }
+	| { saved: false; refundPart: { part: number; refundCents: number } }
+> {
+	const { totalCents, amountWasCents, parts } = edit;
+	const partsTotal = parts.reduce((sum, part) => sum + part.amountCents, 0);
+	if (partsTotal !== totalCents)
+		throw new Error(`The parts of ${parentId} don't add up to ${totalCents}`);
+	const savedParts = parts.flatMap((part, index) =>
+		part.id === null
+			? []
+			: [{ id: part.id, cents: part.amountCents, position: index + 1 }],
+	);
+	const savedJson = JSON.stringify(savedParts);
+	const current = await db
+		.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+		.bind(parentId)
+		.all<{ id: number }>();
+	const savedIds = savedParts.map((part) => part.id).sort((x, y) => x - y);
+	const currentIds = current.results.map((row) => row.id);
+	if (
+		savedIds.length !== currentIds.length ||
+		savedIds.some((id, index) => id !== currentIds[index])
+	)
+		throw new Error(`Split ${parentId} changed while it was being corrected`);
+
+	// The gate's parameters are numbered from `n`, after the statement's own. Its entry amount is either the
+	// drawn one or the new total, which the parent statement sets first, so the gate reads the same thing
+	// before and after every statement that can pass. No statement adds a part before the last one.
+	const gate = (n: number) => `EXISTS (SELECT 1 FROM transactions cash
+			WHERE cash.id = ?${n} AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents IN (?${n + 1}, ?${n + 2})
+				AND cash.account_id IN (SELECT id FROM accounts WHERE type = 'cash'))
+		AND NOT EXISTS (SELECT 1 FROM json_each(?${n + 3}) AS saved
+			WHERE (SELECT parent_id FROM transactions WHERE id = json_extract(saved.value, '$.id')) IS NOT ?${n})
+		AND NOT EXISTS (SELECT 1 FROM json_each(?${n + 3}) AS saved
+			WHERE ${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents'))
+		AND (${refundedByOthersSql(`?${n}`, "0")}
+			+ COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?${n + 3}) AS saved), 0)) <= ?${n + 2}
+		AND NOT EXISTS (SELECT 1 FROM transactions WHERE parent_id = ?${n}
+			AND id NOT IN (SELECT json_extract(saved.value, '$.id') FROM json_each(?${n + 3}) AS saved))`;
+	const gateArgs = [parentId, amountWasCents, totalCents, savedJson];
+	const gated = (sql: string, args: unknown[]) =>
+		db
+			.prepare(`${sql} AND ${gate(args.length + 1)}`)
+			.bind(...args, ...gateArgs);
+
+	const parentStatement = gated(
+		"UPDATE transactions SET amount_cents = ?1, updated_by = ?2, updated_at = datetime('now') WHERE id = ?3",
+		[totalCents, by, parentId],
+	);
+	const partStatements = parts.flatMap((part) =>
+		part.id === null
+			? []
+			: [
+					gated(
+						"UPDATE transactions SET amount_cents = ?1, category_id = ?2, category_source = 'user', updated_by = ?3, updated_at = datetime('now') WHERE id = ?4 AND parent_id = ?5",
+						[part.amountCents, part.categoryId, by, part.id, parentId],
+					),
+				],
+	);
+	// Every new part in one statement, so the count the gate reads is still the saved parts' count until it runs.
+	const newParts = parts.flatMap((part) =>
+		part.id === null
+			? [{ cents: part.amountCents, categoryId: part.categoryId }]
+			: [],
+	);
+	const insertStatements =
+		newParts.length === 0
+			? []
+			: [
+					gated(
+						`INSERT INTO transactions
+					(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by, refund_of_id, parent_id, plaid_transaction_id, updated_by)
+				SELECT t.account_id, t.date, json_extract(p.value, '$.cents'), t.raw_name, t.merchant_name, json_extract(p.value, '$.categoryId'), 'user', t.excluded, t.excluded_source, t.income_source, t.credit_reviewed, t.credit_reviewed_by, NULL, t.id, NULL, ?1
+				FROM json_each(?2) AS p, transactions t
+				WHERE t.id = ?3`,
+						[by, JSON.stringify(newParts), parentId],
+					),
+				];
+	// The parent's amount is set first, so a refusal by any statement leaves the batch with nothing written.
+	const results = await db.batch([
+		parentStatement,
+		...partStatements,
+		...insertStatements,
+	]);
+	if ((results[0]?.meta.changes ?? 0) > 0) return { saved: true };
+
+	// Nothing changed. If the entry is still as it was drawn, the refunds linked to the entry and to its
+	// parts together come first, since moving its parts can't make them fit; then the first part whose
+	// refunds no longer fit (in the sheet's order) is the reason. Otherwise the entry changed, which is an error.
+	const linked = await db
+		.prepare(
+			`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?2) AS saved), 0) AS refundCents
+			FROM transactions cash
+			WHERE cash.id = ?1 AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?3`,
+		)
+		.bind(parentId, savedJson, amountWasCents)
+		.first<{ refundCents: number }>();
+	if (linked && linked.refundCents > totalCents)
+		return { saved: false, refundTotalCents: linked.refundCents };
+	const misfit = `${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents')`;
+	const refused = await db
+		.prepare(
+			`SELECT json_extract(saved.value, '$.position') AS part,
+				${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} AS refundCents
+			FROM json_each(?1) AS saved
+			WHERE EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?2 AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?3)
+				AND ${misfit}
+			ORDER BY json_extract(saved.value, '$.position') LIMIT 1`,
+		)
+		.bind(savedJson, parentId, amountWasCents)
+		.first<{ part: number; refundCents: number }>();
+	if (refused)
+		return {
+			saved: false,
+			refundPart: { part: refused.part, refundCents: refused.refundCents },
+		};
+	throw new Error(`Split ${parentId} changed while it was being corrected`);
 }
 
 /**
