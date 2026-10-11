@@ -18,7 +18,8 @@ export type CategoryErrors = Partial<Record<"name", string>>;
 
 const normalizeName = (name: string) =>
 	name.normalize("NFC").trim().replace(/\s+/g, " ");
-const same = (a: string, b: string) =>
+/** Whether two category names are the same, ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. */
+export const sameName = (a: string, b: string) =>
 	normalizeName(a).toLowerCase() === normalizeName(b).toLowerCase();
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
@@ -39,11 +40,11 @@ export function parseCategory(
 	const name = normalizeName(String(form.get("name") ?? ""));
 	const errors: CategoryErrors = {};
 
-	const clash = existing.find((c) => c.id !== id && same(c.name, name));
+	const clash = existing.find((c) => c.id !== id && sameName(c.name, name));
 	if (name === "") errors.name = "Give the category a name.";
 	else if (name.length > MAX_NAME)
 		errors.name = `Keep the name to ${MAX_NAME} characters.`;
-	else if (same(name, NONE_FIT))
+	else if (sameName(name, NONE_FIT))
 		errors.name = "That name is reserved for Tally. Pick another.";
 	else if (clash)
 		errors.name = clash.archived

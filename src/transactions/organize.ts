@@ -153,28 +153,21 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	// A rule is set only for a merchant whose charges carry the category by the time it runs (the batch runs in
-	// order), so a group another save filed first keeps its rule. The count is what this batch changed.
+	// A merchant gets its rule only while this batch still has one of its charges to file, so a group another save
+	// filed first keeps its rule (the batch runs in order, so each check sees the charges just before the update that files them).
 	const upserts = names.map((merchantKey) =>
 		db
 			.prepare(
 				`INSERT INTO merchants (raw_name, display_name, default_category_id)
-				SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE category_id = ? AND ${KEY_UPDATE} = ?)
+				SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
 				ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
 					display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
 					${SETTLE_SUGGESTION_SQL}`,
 			)
-			.bind(
-				merchantKey,
-				displayName,
-				categoryId,
-				categoryId,
-				merchantKey,
-				displayName,
-			),
+			.bind(merchantKey, displayName, categoryId, merchantKey, displayName),
 	);
-	const results = await db.batch([...updates, ...upserts]);
+	const results = await db.batch([...upserts, ...updates]);
 	return results
-		.slice(0, updates.length)
+		.slice(upserts.length)
 		.reduce((changed, result) => changed + result.meta.changes, 0);
 }

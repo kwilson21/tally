@@ -88,9 +88,13 @@ async function saveWith(db: D1Database, fields: Record<string, string>) {
 	return { res, html: await res.text() };
 }
 
-/** The database as another save leaves it: Harbor Supply filed in category 1, just before this save's first batch. */
-function otherSaveFilesFirst(): D1Database {
+/**
+ * The database as another save leaves it: Harbor Supply filed in category 1, just before this save's first batch.
+ * With `onlyUnfiled`, only the charges still needing a category are filed, so older ones keep theirs.
+ */
+function otherSaveFilesFirst(onlyUnfiled = false): D1Database {
 	let raced = false;
+	const filing = `UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'${onlyUnfiled ? " AND category_id IS NULL" : ""}`;
 	return new Proxy(env.DB, {
 		get(target, property) {
 			const value = Reflect.get(target, property);
@@ -98,9 +102,7 @@ function otherSaveFilesFirst(): D1Database {
 				return async (statements: D1PreparedStatement[]) => {
 					if (!raced) {
 						raced = true;
-						await env.DB.prepare(
-							"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'",
-						).run();
+						await env.DB.prepare(filing).run();
 					}
 					return target.batch(statements);
 				};
@@ -158,6 +160,45 @@ describe("a group another save files while this one saves", () => {
 			"That merchant already has a category.",
 		);
 		expect(await harborRule()).toEqual({ categoryId: 1 });
+	});
+
+	it("keeps another save's merchant rule when older charges of that merchant are already in the chosen category", async () => {
+		await harborCharges(2);
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'HARBOR SUPPLY'",
+		).run();
+		const chosen = (await env.DB.prepare(
+			"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
+		).first<{ id: number }>()) as { id: number };
+		const older = (await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-01-05', 500, 'HARBOR SUPPLY', ?, 'user') RETURNING id",
+		)
+			.bind(chosen.id)
+			.first<{ id: number }>()) as { id: number };
+
+		const { res } = await saveWith(otherSaveFilesFirst(true), {
+			group: "Harbor Supply",
+			category: String(chosen.id),
+			name: "",
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger") ?? "").toContain(
+			"That merchant already has a category.",
+		);
+		expect(await harborRule()).toEqual({ categoryId: 1 });
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
+			)
+				.bind(older.id)
+				.first(),
+		).toEqual({ categoryId: chosen.id });
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'HARBOR SUPPLY' AND category_id = 1",
+			).first<{ n: number }>(),
+		).toEqual({ n: 2 });
 	});
 });
 

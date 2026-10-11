@@ -1,6 +1,7 @@
 import { JEV_THRESHOLD } from "../ai/categorize";
-import { fullMessage, MAX_ACTIVE } from "../settings/category-form";
+import { fullMessage, MAX_ACTIVE, sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
+import { categoryNames } from "./categories";
 import { merchantKeySql } from "./merchant-key";
 import type { ListRow } from "./transactions";
 
@@ -267,33 +268,20 @@ export async function createFromSuggestion(
 			error: "Keep each note under 500 characters.",
 		};
 	// A category the family already has with this name takes the ticked transactions ("Add to", decision
-	// 101), instead of a new one. An archived one can't take them: it is restored first.
-	const count = await db
-		.prepare(
-			`SELECT COUNT(*) n, COUNT(CASE WHEN archived=0 THEN 1 END) active, COALESCE(MAX(sort_order),0) last,
-				MAX(CASE WHEN name=?1 COLLATE NOCASE THEN id END) existingId,
-				MAX(CASE WHEN name=?1 COLLATE NOCASE THEN archived END) existingArchived
-			FROM categories`,
-		)
-		.bind(name)
-		.first<{
-			n: number;
-			active: number;
-			last: number;
-			existingId: number | null;
-			existingArchived: number | null;
-		}>();
-	const existing =
-		count?.existingId == null
-			? null
-			: { id: count.existingId, archived: count.existingArchived ?? 0 };
+	// 101), instead of a new one, in any capitals or accents the form would also match (sameName, since SQL
+	// NOCASE folds ASCII only). An archived one can't take them: it is restored first.
+	const categories = await categoryNames(db);
+	const existing = categories.find((c) => sameName(c.name, name));
+	const active = categories.filter((c) => !c.archived).length;
+	// Every write below names the category as the family stored it, so its NOCASE lookups find that row.
+	const target = existing?.name ?? name;
 	if (existing?.archived)
 		return {
 			ok: false,
 			reason: "invalid",
 			error: "An archived category has that name. Restore it instead.",
 		};
-	if (!existing && (count?.active ?? 0) >= MAX_ACTIVE)
+	if (!existing && active >= MAX_ACTIVE)
 		return { ok: false, reason: "invalid", error: fullMessage("add") };
 	const notes = Object.entries(input.notes)
 		.filter(
@@ -321,13 +309,13 @@ export async function createFromSuggestion(
 					`INSERT INTO categories (name,icon,color,sort_order) SELECT ?,'tag',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM categories) WHERE ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived=0)<50 AND NOT EXISTS(SELECT 1 FROM categories WHERE name=? COLLATE NOCASE) AND EXISTS(SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 				)
 				.bind(
-					name,
+					target,
 					["cat-blue", "cat-plum", "cat-slate", "cat-ochre", "cat-brown"][
-						(count?.n ?? 0) % 5
+						categories.length % 5
 					],
 					id,
 					token,
-					name,
+					target,
 					id,
 					JSON.stringify(ticked),
 				),
@@ -337,12 +325,12 @@ export async function createFromSuggestion(
 					AND EXISTS (SELECT 1 FROM categories WHERE name=? COLLATE NOCASE AND archived=0)
 					AND EXISTS (SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 				)
-				.bind(id, token, name, id, JSON.stringify(ticked)),
+				.bind(id, token, target, id, JSON.stringify(ticked)),
 			db
 				.prepare(
 					`UPDATE transactions SET category_id=(SELECT id FROM categories WHERE name=? COLLATE NOCASE),category_source='user',category_confidence=NULL,jev_none_fit=0,category_suggestion_id=NULL,split_removed_from_cents=NULL,updated_by=?,updated_at=datetime('now') WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
 				)
-				.bind(name, actor, id, JSON.stringify(ticked), id, token),
+				.bind(target, actor, id, JSON.stringify(ticked), id, token),
 			db
 				.prepare(
 					`UPDATE transactions SET note=json_extract(note.value,'$.note'),updated_by=?,updated_at=datetime('now') FROM json_each(?) AS note WHERE transactions.id=json_extract(note.value,'$.id') AND transactions.category_suggestion_id=? AND transactions.category_id IS NULL AND transactions.category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
@@ -411,7 +399,7 @@ export async function createFromSuggestion(
 				.prepare(
 					"SELECT name FROM categories WHERE name = ? COLLATE NOCASE AND archived = 0",
 				)
-				.bind(name)
+				.bind(target)
 				.first<{ name: string }>()
 		: null;
 	return {

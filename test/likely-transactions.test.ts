@@ -417,6 +417,31 @@ describe("addLikely", () => {
 			});
 		},
 	);
+
+	it("files nothing into a category archived since the panel was read", async () => {
+		const sameNew = await tx(
+			`${THIS}-03`,
+			7650,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		await env.DB.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(pet)
+			.run();
+
+		// Called directly, as if the archive landed between the route's liveCategory() check and this write.
+		const moved = await addLikely(env.DB, {
+			savedId: saved,
+			categoryId: pet,
+			categoryName: "Pet Care",
+			ticked: [sameNew],
+			today: TODAY,
+			actor: "test",
+		});
+
+		expect(moved).toBe(0);
+		expect((await filed(sameNew))?.categoryId).toBeNull();
+	});
 });
 
 /** The likely read's rows, then one edit to `id` before the write: the window addLikely's UPDATE must survive. */

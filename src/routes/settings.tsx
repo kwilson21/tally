@@ -36,6 +36,7 @@ import {
 	fullMessage,
 	parseCategory,
 	restoreProblem,
+	sameName,
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
@@ -475,8 +476,6 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	).all<{ id: number; name: string }>();
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
-	// A suggestion whose name a category already has is added to it, not made again (decision 101).
-	const activeNames = new Set(active.map((cat) => cat.name.toLowerCase()));
 	const rulesSearch =
 		view.rulesSearch ??
 		new URL(c.req.url).searchParams.get("rules_search") ??
@@ -538,11 +537,12 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							last={i === active.length - 1}
 						/>
 					))}
+					{/* A suggestion whose name an active category already has is added to it, not made again (decision 101). */}
 					{categorySuggestions.map((suggestion) => (
 						<CategorySuggestionCard
 							suggestion={suggestion}
-							existing={activeNames.has(
-								tidyName(suggestion.name).toLowerCase(),
+							existing={active.some((cat) =>
+								sameName(cat.name, tidyName(suggestion.name)),
 							)}
 							error={
 								view.suggestionValues?.id === suggestion.id

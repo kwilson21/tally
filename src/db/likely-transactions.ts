@@ -161,15 +161,16 @@ export async function addLikely(
 	const ids = [...new Set(input.ticked)].filter((id) => offered.has(id));
 	if (ids.length === 0) return 0;
 	// The write applies the panel's own rules again, in the same statement, so a row that changed since the
-	// read (excluded, income, pending, or its guess withdrawn) is left alone. ?1-?4 are the panel's parameters
-	// (the saved transaction, the two months, the name), ?5 and ?6 the category and actor, then the ticked ids.
+	// read (excluded, income, pending, or its guess withdrawn) is left alone, and so is every row when the
+	// category was archived since the read. ?1-?4 are the panel's parameters (the saved transaction, the two
+	// months, the name), ?5 and ?6 the category and actor (?5 is checked live in the same statement too), then the ticked ids.
 	const thisMonth = input.today.slice(0, 7);
 	const marks = ids.map((_, i) => `?${i + 7}`).join(", ");
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET category_id = ?5, category_source = 'user', category_confidence = NULL,
 				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, updated_by = ?6, updated_at = datetime('now')
-			WHERE category_id IS NULL AND id IN (
+			WHERE category_id IS NULL AND EXISTS (SELECT 1 FROM categories WHERE id = ?5 AND archived = 0) AND id IN (
 				SELECT t.id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
 				AND t.id IN (${marks}))`,
 		)
