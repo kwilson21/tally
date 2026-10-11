@@ -15,6 +15,17 @@ const inputTag = (error?: string) =>
 	).match(/<input [^>]*data-money-input[^>]*>/)?.[0] ?? "";
 
 describe("MoneyInput", () => {
+	it("waits for a number: a blank amount disables −$1 and the cent-down arrow, and +$1 stays on", () => {
+		const html = renderToString(
+			<MoneyInput id="amount" name="amount" label="Amount" value="" />,
+		);
+		// The disabled attribute (rendered as disabled=""), not the disabled: Tailwind class in each class list.
+		expect(html).toMatch(/data-nudge="-100"[^>]*\sdisabled(="")?[\s>]/);
+		expect(html).toMatch(/data-nudge="-1"[^>]*\sdisabled(="")?[\s>]/);
+		expect(html).not.toMatch(/data-nudge="100"[^>]*\sdisabled(="")?[\s>]/);
+		expect(html).not.toMatch(/data-nudge="1"[^>]*\sdisabled(="")?[\s>]/);
+	});
+
 	it("draws a three-month average chip with its pressed state and 44px target", () => {
 		const html = renderToString(
 			<MoneyInput

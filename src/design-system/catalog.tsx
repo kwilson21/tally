@@ -610,7 +610,7 @@ const TOAST_SPEC: UseSpecText = {
 	states:
 		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except that when an Undo toast ends with focus on its Undo button, focus moves to the list's result count, or to the page's title when there is no count (the first-visit page). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for two Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too). Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
@@ -618,7 +618,7 @@ const TOAST_SPEC: UseSpecText = {
 	edges:
 		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
-		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo. A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
+		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -2805,7 +2805,7 @@ function Controls() {
 				title="Add cash"
 				tier="visual"
 				components={["CashForm"]}
-				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it."
+				sentence="P21's edit-panel-shaped form adds cash spending. P71 reuses its Amount and Date fields in the cash entry's edit panel, with errors beneath the fields. An amount that breaks a split's parts shows its error under Amount, with Change the parts below it. It opens with the amount blank, as Add a bill does (#342)."
 			>
 				<State label="Add cash">
 					<div
@@ -2827,6 +2827,39 @@ function Controls() {
 								merchant: "Farmers market",
 								category: "1",
 								note: "Peaches and eggs",
+							}}
+							categories={[
+								{
+									id: 1,
+									name: "Groceries",
+									icon: "groceries",
+									color: "cat-blue",
+								},
+								{
+									id: 2,
+									name: "Eating Out",
+									icon: "eating-out",
+									color: "cat-plum",
+								},
+							]}
+							action="#"
+						/>
+					</div>
+				</State>
+				<State label="As it opens: the amount is blank, as Add a bill's is">
+					<div
+						inert
+						class="max-w-3xl rounded-sheet border border-rule bg-paper p-5"
+					>
+						<h4 class="font-serif text-4xl font-semibold">Add cash spending</h4>
+						<CashForm
+							today="2026-09-29"
+							values={{
+								date: "2026-09-29",
+								amount: "",
+								merchant: "",
+								category: "",
+								note: "",
 							}}
 							categories={[
 								{
