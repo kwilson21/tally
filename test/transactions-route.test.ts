@@ -473,6 +473,11 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 	});
 	/** The count's text, with the quotes Hono escapes put back. */
 	const countText = (html: string) => countOf(html)?.replaceAll("&quot;", '"');
+	/** The transaction ids in the list, in order. */
+	const rowIds = (html: string) =>
+		[...html.matchAll(/<li data-transaction="(\d+)"/g)].map((m) =>
+			Number(m[1]),
+		);
 	const selectedMonth = (html: string) =>
 		optionsOf(html, "month").find((option) => option.selected)?.value;
 	/** The "Only …" link under the count, as its text and address. */
@@ -582,9 +587,100 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 		expect(countText(html)).toMatch(/ in all months$/);
 	});
 
-	it("swaps the Month choice out of band with the count, so it shows the month the list shows", async () => {
+	it("replaces the Month choice out of band, so it shows the month the list shows", async () => {
 		const { html } = await get("/transactions");
-		expect(html).toContain("#month:innerHTML");
+		expect(html).toContain("#month:outerHTML");
+		expect(html).not.toContain("#month:innerHTML");
+	});
+
+	it("sends Only October with a count-focus marker, and pushes the clean address", async () => {
+		const { html } = await get(
+			"/transactions?q=trader&month=all",
+			fromPage("/transactions?q=trader&month=all"),
+		);
+		const link = html.match(/<a ([^>]*)>Only [^<]+<\/a>/)?.[1] ?? "";
+		expect(link).toContain("focus=count");
+		expect(link).toContain('hx-push-url="/transactions?q=trader"');
+		expect(link).toContain("#result-count:outerHTML");
+	});
+
+	it("moves focus to the count when Only October asks for it, and not otherwise", async () => {
+		const { html } = await get(
+			`/transactions?q=trader&month=${THIS}&focus=count`,
+			fromPage("/transactions?q=trader&month=all"),
+		);
+		expect(html).toMatch(
+			/<p id="result-count"[^>]*tabindex="-1"[^>]*autofocus/,
+		);
+		const plain = (
+			await get(
+				`/transactions?q=trader&month=${THIS}`,
+				fromPage("/transactions?q=trader&month=all"),
+			)
+		).html;
+		expect(plain).not.toMatch(/<p id="result-count"[^>]*autofocus/);
+	});
+
+	it("says (category) only when a row in that category matched, not when a merchant's name does", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (99310, 'Zebra Care', 'gas', 'cat-slate', 99)",
+			),
+			env.DB.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99311, 1, '${THIS}-01', -1200, 'ZEBRA SHOP', 1)`,
+			),
+		]);
+		const merchantOnly = await get(
+			"/transactions?q=zebra&month=all",
+			fromPage("/transactions?q=zebra&month=all"),
+		);
+		expect(countText(merchantOnly.html)).toBe(
+			'1 transaction matching "zebra" in all months',
+		);
+		await env.DB.prepare(
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99312, 1, '${THIS}-02', -1300, 'NOT THE NAME', 99310)`,
+		).run();
+		const byCategory = await get(
+			"/transactions?q=zebra&month=all",
+			fromPage("/transactions?q=zebra&month=all"),
+		);
+		expect(countText(byCategory.html)).toBe(
+			'2 transactions matching "zebra" (category) in all months',
+		);
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 99310",
+		).run();
+		const archived = await get(
+			"/transactions?q=zebra&month=all",
+			fromPage("/transactions?q=zebra&month=all"),
+		);
+		expect(countText(archived.html)).toBe(
+			'2 transactions matching "zebra" (category) in all months',
+		);
+	});
+
+	it("finds September's Costco rows from October's empty box, and Only October narrows to October's", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99320, 1, '${THIS}-02', -4111, 'COSTCO ROWTEST OCT', 1)`,
+			),
+			env.DB.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99321, 1, '${LAST}-02', -4222, 'COSTCO ROWTEST SEP', 1)`,
+			),
+		]);
+		const everyMonth = await get(
+			`/transactions?q=costco&month=${THIS}`,
+			fromPage("/transactions"),
+		);
+		expect(rowIds(everyMonth.html)).toEqual(
+			expect.arrayContaining([99320, 99321]),
+		);
+		const onlyOctober = await get(
+			`/transactions?q=costco&month=${THIS}`,
+			fromPage("/transactions?q=costco&month=all"),
+		);
+		expect(rowIds(onlyOctober.html)).toContain(99320);
+		expect(rowIds(onlyOctober.html)).not.toContain(99321);
 	});
 });
 

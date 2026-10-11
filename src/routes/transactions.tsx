@@ -110,6 +110,8 @@ type ListOptions = {
 	sheet?: (categories: Category[], today: string) => unknown;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
+	/** "Only October" asked for focus on the result count, since its link goes (#211). */
+	countFocus?: boolean;
 	status?: 200 | 404 | 422;
 	pageTitle?: string;
 	selecting?: boolean;
@@ -175,6 +177,7 @@ async function renderList(
 	{
 		sheet,
 		focusId,
+		countFocus = false,
 		status = 200,
 		pageTitle,
 		selecting: selectRequested = false,
@@ -183,16 +186,21 @@ async function renderList(
 		focusHeading = false,
 	}: ListOptions = {},
 ) {
-	const [{ rows, total, page, pages }, months, needs, categories, accounts] =
-		await Promise.all([
-			listTransactions(c.env.DB, filters),
-			monthsWithTransactions(c.env.DB),
-			needsCategoryCount(c.env.DB, filters.month, filters.raw),
-			c.env.DB.prepare(
-				"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-			).all<Category>(),
-			accountChoices(c.env.DB),
-		]);
+	const [
+		{ rows, total, page, pages, categoryMatched },
+		months,
+		needs,
+		categories,
+		accounts,
+	] = await Promise.all([
+		listTransactions(c.env.DB, filters),
+		monthsWithTransactions(c.env.DB),
+		needsCategoryCount(c.env.DB, filters.month, filters.raw),
+		c.env.DB.prepare(
+			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+		).all<Category>(),
+		accountChoices(c.env.DB),
+	]);
 	const peoplePrompt = filters.raw
 		? false
 		: await c.env.DB.prepare(
@@ -243,25 +251,20 @@ async function renderList(
 			label: `account ${filters.account}`,
 			disconnected: false,
 		});
-	// A search whose text is a category's name finds that category's rows, and the count says so (#211).
-	const categoryMatch =
-		filters.q !== "" &&
-		categories.results.some((cat) =>
-			cat.name.toLowerCase().includes(filters.q.toLowerCase()),
-		);
 	const count = resultCount(
 		{ total, first, shown: rows.length, pages },
 		filters,
 		categoryName,
 		today,
 		accountName,
-		categoryMatch,
+		categoryMatched,
 	);
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
+	// The count takes focus when the row a save was about has left the list, or when "Only October" asked (#211).
 	const focusCount =
 		firstVisit === null &&
-		focusId !== undefined &&
-		!rows.some((r) => r.id === focusId);
+		(countFocus ||
+			(focusId !== undefined && !rows.some((r) => r.id === focusId)));
 	const allCategorized =
 		filters.uncategorized &&
 		filters.q === "" &&
@@ -281,6 +284,8 @@ async function renderList(
 		month: today.slice(0, 7),
 		page: 1,
 	});
+	// Its request asks for focus on the count, since the link goes with its focus; the address it pushes stays clean.
+	const onlyMonthRequest = `${onlyMonthHref}${onlyMonthHref.includes("?") ? "&" : "?"}focus=count`;
 	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked.
 	const includeTicked = selecting
 		? { "hx-include": "#selection-form input[name=ids]:checked" }
@@ -557,13 +562,14 @@ async function renderList(
 								kind="text"
 								href={onlyMonthHref}
 								class="-ml-2"
-								hx-get={onlyMonthHref}
+								hx-get={onlyMonthRequest}
 								hx-sync="#filters:replace"
 								hx-target="#results"
 								hx-select="#results > *"
-								hx-select-oob={LIST_OOB}
+								// The count is swapped whole, so htmx can focus it: the link goes, and its focus with it.
+								hx-select-oob={`#result-count:outerHTML, ${LIST_OOB}`}
 								hx-swap="innerHTML show:top"
-								hx-push-url="true"
+								hx-push-url={onlyMonthHref}
 								{...includeTicked}
 							>
 								Only {monthLabel(today.slice(0, 7), today)}
@@ -742,6 +748,7 @@ transactions.get("/transactions", async (c) => {
 		{ ...asked, month },
 		{
 			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+			countFocus: params.get("focus") === "count",
 			selecting,
 			checkedIds: selecting
 				? new Set(parseIds(params.getAll("ids")).slice(0, MAX_SELECTED))
@@ -761,9 +768,10 @@ const LIST_OOB = [
 	"#set-category-selection:outerHTML",
 	"#exclude-selection:outerHTML",
 	"#view-links:outerHTML",
-	// The Month choice's options follow a month a search resolves (#211); its element stays, so a
-	// keyboard user keeps focus in it.
-	"#month:innerHTML",
+	// The Month choice follows the month a search resolves (#211). It is replaced whole: innerHTML left
+	// its old selection showing (Chrome kept "All months" after the options changed). htmx puts focus
+	// back on the new element by its id, so a keyboard user stays in it.
+	"#month:outerHTML",
 	"#only-month:innerHTML",
 ].join(", ");
 

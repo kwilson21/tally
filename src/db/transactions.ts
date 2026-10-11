@@ -160,7 +160,14 @@ const RAW_SHOW_SQL: Record<Show, string | null> = {
 export async function listTransactions(
 	db: D1Database,
 	f: Filters,
-): Promise<{ rows: ListRow[]; total: number; page: number; pages: number }> {
+): Promise<{
+	rows: ListRow[];
+	total: number;
+	page: number;
+	pages: number;
+	/** Whether a row matched the search by its category's name (#211). */
+	categoryMatched: boolean;
+}> {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
 	const {
@@ -188,6 +195,8 @@ export async function listTransactions(
 	if (f.raw) where.push("t.parent_id IS NULL");
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
 	if (shown) where.push(shown);
+	// The search's pattern when it looks in categories too (#211), so the count can say whether one matched.
+	let categoryPattern: string | null = null;
 	if (f.q) {
 		if (f.raw) {
 			where.push("t.raw_name LIKE ? ESCAPE '\\'");
@@ -204,6 +213,7 @@ export async function listTransactions(
 			const pattern = likePattern(f.q);
 			const alternatives: string[] = [];
 			if (amount === null || amount.plain) {
+				categoryPattern = pattern;
 				alternatives.push(
 					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR c.name LIKE ? ESCAPE '\\')`,
 				);
@@ -226,11 +236,18 @@ export async function listTransactions(
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
+	// Whether any counted row matched by its category's name, in the same statement (#211): the count says
+	// "(category)" only then, and an archived category counts too, as the search does.
+	const categoryHit =
+		categoryPattern === null
+			? "0"
+			: "MAX(CASE WHEN c.name LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)";
 	const counted = await db
-		.prepare(`SELECT COUNT(*) AS n ${from}`)
-		.bind(...args)
-		.first<{ n: number }>();
+		.prepare(`SELECT COUNT(*) AS n, ${categoryHit} AS categoryHit ${from}`)
+		.bind(...(categoryPattern === null ? args : [categoryPattern, ...args]))
+		.first<{ n: number; categoryHit: number | null }>();
 	const total = counted?.n ?? 0;
+	const categoryMatched = counted?.categoryHit === 1;
 	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 	const page = Math.min(f.page, pages);
 
@@ -338,7 +355,7 @@ export async function listTransactions(
 			};
 		},
 	);
-	return { rows, total, page, pages };
+	return { rows, total, page, pages, categoryMatched };
 }
 
 /** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */

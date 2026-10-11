@@ -265,4 +265,32 @@ describe("listTransactions: search by amount and category (#211)", () => {
 		expect(rows.some((row) => row.id === 99220)).toBe(true);
 		expect(rows.every((row) => row.categoryName === "Groceries")).toBe(true);
 	});
+
+	it("reports a category match only when a row in that category matched, archived or not (#211)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (99300, 'Zebra Care', 'gas', 'cat-slate', 99)",
+		).run();
+		await insert(99230, 1200, "ZEBRA SHOP", 1).run();
+		expect((await list("q=zebra&month=all")).categoryMatched).toBe(false);
+		await insert(99231, 1300, "NOT THE NAME", 99300).run();
+		expect((await list("q=zebra&month=all")).categoryMatched).toBe(true);
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 99300",
+		).run();
+		expect((await list("q=zebra&month=all")).categoryMatched).toBe(true);
+	});
+
+	it("never reports a category match for an amount or a raw-view search (#211)", async () => {
+		await insert(99232, 4217, "AMOUNT ROW", 1).run();
+		expect((await list("q=42.17&month=all")).categoryMatched).toBe(false);
+		const raw = await listTransactions(
+			env.DB,
+			parseFilters(
+				new URLSearchParams("q=groceries&month=all&raw=1"),
+				"2026-09",
+				true,
+			),
+		);
+		expect(raw.categoryMatched).toBe(false);
+	});
 });

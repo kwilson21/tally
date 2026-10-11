@@ -462,6 +462,40 @@ step(
 	"the demo refund shows its linked purchase, checked, and Refund for on its row",
 );
 
+// A search runs in every month; "Only October" narrows it and moves focus to the count; one more letter keeps
+// that month in the Month choice and the count (#211, decision 101).
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+const thisMonth = await page.locator("#month").inputValue();
+await page.locator("#q").fill("costco");
+await page
+	.locator("#result-count")
+	.getByText(/ in all months$/)
+	.waitFor();
+const only = page.getByRole("link", { name: /^Only / });
+const onlyMonth = (await only.innerText()).replace(/^Only /, "");
+await only.click();
+await page
+	.locator("#result-count")
+	.getByText(new RegExp(`in ${onlyMonth}$`))
+	.waitFor();
+await page.waitForFunction(() => document.activeElement?.id === "result-count");
+assert.equal(await page.locator("#month").inputValue(), thisMonth);
+await page.locator("#q").click();
+await page.keyboard.press("End");
+await page.keyboard.type("s");
+await page
+	.locator("#result-count")
+	.getByText(/"costcos" in /)
+	.waitFor();
+assert.match(
+	await page.locator("#result-count").innerText(),
+	new RegExp(`in ${onlyMonth}$`),
+);
+assert.equal(await page.locator("#month").inputValue(), thisMonth);
+step(
+	"Only October narrows a search to this month, and one more letter keeps it",
+);
+
 // Reorder through htmx: the button inside the edit form must send its own direction.
 await goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.locator('summary[data-category="3"]').click();

@@ -648,7 +648,7 @@ const SEARCH_EVERY_MONTH_SPEC: UseSpecText = {
 	feedback:
 		"The count is the page's aria-live line, so each change of search or month is announced with its new text. The Month choice follows the month a search resolves, and the address follows it, so a reload shows the same list. Without JavaScript a search looks in the month the form sends, since there is no page to come from.",
 	input:
-		"Touch: the link is 44px tall. Keyboard: Tab to “Only October” and press Enter. The link goes once it has narrowed the search, and focus isn't moved; the count announces the new list. Screen reader: the count reads “5 transactions matching “costco” in all months”, then “Only October, link”.",
+		"Touch: the link is 44px tall. Keyboard: Tab to “Only October” and press Enter. The link goes once it has narrowed the search, and focus moves to the count, which reads the new list. Screen reader: the count reads “5 transactions matching “costco” in all months”, then “Only October, link”.",
 	motion: "None. The list swaps in place, as it does for a filter change.",
 	edges:
 		"A plain number such as 42 finds amounts from $42.00 to $42.99 and names or notes with those digits. $42 and 42.17 find amounts only, and 42.17 is exact to the cent, money out and money in alike. Text that is a category's name finds its rows, and the count says “(category)”. A search across every month with a category or an account picked keeps those in the count.",
