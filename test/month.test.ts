@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
+import { setArchived } from "../src/db/categories";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
 
 const db = env.DB;
@@ -52,22 +53,13 @@ describe("loadMonth", () => {
 			db.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id) VALUES (1, '2026-09-12', 500, 'BEFORE SPEND', 42)",
 			),
-			db.prepare(
-				"UPDATE categories SET archived = 1, archived_on = '2026-08-31' WHERE id IN (41, 42)",
-			),
-			db.prepare(
-				"UPDATE categories SET archived = 1, archived_on = '2026-09-15' WHERE id = 43",
-			),
-			db.prepare(
-				"UPDATE categories SET archived = 1, archived_on = '2026-10-01' WHERE id = 44",
-			),
-			db.prepare(
-				"UPDATE categories SET archived = 1, archived_on = '2026-08-31' WHERE id = 45",
-			),
-			db.prepare(
-				"UPDATE categories SET archived = 0, archived_on = NULL WHERE id = 45",
-			),
 		]);
+		await setArchived(db, 41, true, "2026-08-31");
+		await setArchived(db, 42, true, "2026-08-31");
+		await setArchived(db, 43, true, "2026-09-15");
+		await setArchived(db, 44, true, "2026-10-01");
+		await setArchived(db, 45, true, "2026-08-31");
+		await setArchived(db, 45, false, "2026-10-05");
 		const data = await loadMonth(db, "2026-09");
 		const byId = new Map(
 			data.categories.map((category) => [category.id, category]),
@@ -76,13 +68,14 @@ describe("loadMonth", () => {
 		expect(byId.get(42)).toMatchObject({ id: 42, archived: true });
 		expect(byId.has(43)).toBe(true);
 		expect(byId.has(44)).toBe(true);
-		expect(byId.get(45)).toMatchObject({ id: 45, archived: false });
+		// Archived in August and restored in October: September is wholly inside its archive.
+		expect(byId.has(45)).toBe(false);
 		const budgeted = new Set(data.amounts.map((amount) => amount.categoryId));
 		expect(budgeted.has(41)).toBe(false);
 		expect(budgeted.has(42)).toBe(false);
 		expect(budgeted.has(43)).toBe(true);
 		expect(budgeted.has(44)).toBe(true);
-		expect(budgeted.has(45)).toBe(true);
+		expect(budgeted.has(45)).toBe(false);
 		await db.batch([
 			db.prepare("DELETE FROM transactions WHERE raw_name = 'BEFORE SPEND'"),
 			db.prepare(
@@ -151,6 +144,65 @@ describe("loadMonth", () => {
 				(t) => t.amountCents === 4000,
 			),
 		).toBe(false);
+	});
+});
+
+describe("a budget across archive periods", () => {
+	async function addBudgetedCategory(id: number) {
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (?, ?, 'tag', 'cat-blue', ?)",
+				)
+				.bind(id, `Period ${id}`, id),
+			db
+				.prepare("INSERT INTO budget_amounts VALUES (?, '2026-01', 7000)")
+				.bind(id),
+		]);
+	}
+
+	async function removeCategory(id: number) {
+		await db.batch([
+			db.prepare("DELETE FROM budget_amounts WHERE category_id = ?").bind(id),
+			db.prepare("DELETE FROM categories WHERE id = ?").bind(id),
+		]);
+	}
+
+	it("is left out of the months a restored category was archived for", async () => {
+		await addBudgetedCategory(51);
+		await setArchived(db, 51, true, "2026-08-20");
+		const archived = await loadMonth(db, "2026-09");
+		await setArchived(db, 51, false, "2026-10-05");
+		const restored = await loadMonth(db, "2026-09");
+		expect(restored.categories).toEqual(archived.categories);
+		expect(restored.amounts).toEqual(archived.amounts);
+		expect(restored.categories.map((c) => c.id)).not.toContain(51);
+		expect(restored.amounts.map((a) => a.categoryId)).not.toContain(51);
+		await removeCategory(51);
+	});
+
+	it("still counts in the month a category was archived in", async () => {
+		await addBudgetedCategory(52);
+		await setArchived(db, 52, true, "2026-09-15");
+		await setArchived(db, 52, false, "2026-10-01");
+		const september = await loadMonth(db, "2026-09");
+		expect(september.categories.map((c) => c.id)).toContain(52);
+		expect(september.amounts.map((a) => a.categoryId)).toContain(52);
+		await removeCategory(52);
+	});
+
+	it("is counted again in the months after it is archived again", async () => {
+		await addBudgetedCategory(53);
+		await setArchived(db, 53, true, "2026-08-20");
+		await setArchived(db, 53, false, "2026-10-05");
+		await setArchived(db, 53, true, "2026-10-20");
+		const september = await loadMonth(db, "2026-09");
+		const october = await loadMonth(db, "2026-10");
+		expect(september.categories.map((c) => c.id)).not.toContain(53);
+		expect(september.amounts.map((a) => a.categoryId)).not.toContain(53);
+		expect(october.categories.map((c) => c.id)).toContain(53);
+		expect(october.amounts.map((a) => a.categoryId)).toContain(53);
+		await removeCategory(53);
 	});
 });
 
@@ -300,6 +352,19 @@ describe("firstCountedMonth query count", () => {
 			),
 		]);
 		expect(await firstCountedMonth(db)).toBe("2026-09");
+	});
+
+	it("keeps April when a January refund linked to a May purchase is the earliest date", async () => {
+		await clearHistory();
+		await db.batch([
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (320, 1, '2026-04-10', 1000, 'APRIL', 1), (321, 1, '2026-05-05', 2000, 'MAY', 1)",
+			),
+			db.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, credit_reviewed, refund_of_id) VALUES (322, 1, '2026-01-15', -500, 'REFUND', 1, 1, 321)",
+			),
+		]);
+		expect(await firstCountedMonth(db)).toBe("2026-04");
 	});
 
 	it("returns no month when history has no counted transaction", async () => {
