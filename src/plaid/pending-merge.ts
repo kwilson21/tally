@@ -151,8 +151,11 @@ const STATEMENTS = [
 	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL
 	 WHERE id = ${POSTED} AND is_split = 0 AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,
-	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row).
-	`UPDATE transactions SET split_removed_from_cents = p.amount_cents
+	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row),
+	// and takes the category the pending purchase had before its split, as sync does (decision 99).
+	`UPDATE transactions SET split_removed_from_cents = p.amount_cents,
+		category_id = CASE WHEN transactions.category_id IS NULL THEN p.category_id ELSE transactions.category_id END,
+		category_source = CASE WHEN transactions.category_id IS NULL THEN p.category_source ELSE transactions.category_source END
 	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
 	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).

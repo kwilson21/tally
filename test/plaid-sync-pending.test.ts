@@ -437,6 +437,12 @@ describe("when the bank posts a pending transaction", () => {
 		const item = await addItem();
 		const id = await syncPending(item);
 		const parts = await splitInto(id, 600, 634);
+		// The purchase keeps the category it had before its split (decision 99).
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 3, category_source = 'jev' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
 		const refundOfPart = await addRefund(parts[0] as number, -100);
 
 		await post(item, { amount: 15 });
@@ -444,7 +450,8 @@ describe("when the bank posts a pending transaction", () => {
 		expect(await row("posted-1")).toMatchObject({
 			is_split: 0,
 			amount_cents: 1500,
-			category_id: null,
+			category_id: 3,
+			category_source: "jev",
 			split_removed_from_cents: 1234,
 		});
 		expect(

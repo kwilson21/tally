@@ -404,11 +404,52 @@ describe("rowCaption", () => {
 		});
 	});
 
-	it("drops the bank-change note once the purchase has a category again", () => {
+	it("keeps the bank-change note beside the category it went back to, until a person decides", () => {
 		expect(
-			rowCaption({ ...base, splitRemovedFromCents: 1234, categoryId: 1 })
-				?.caption,
-		).not.toContain("The bank changed this");
+			rowCaption({
+				...base,
+				splitRemovedFromCents: 1234,
+				categoryId: 1,
+				categoryName: "Groceries",
+			}),
+		).toEqual({
+			kind: "category",
+			caption:
+				"Groceries · The bank changed this from $12.34, so its split was removed.",
+			tag: false,
+		});
+	});
+
+	it("says a refund is no longer linked after the bank changed its purchase", () => {
+		expect(
+			rowCaption({
+				...base,
+				amountCents: -500,
+				categoryId: 1,
+				categoryName: "Kids",
+				refundUnlinkedPurchaseDate: "2026-09-10",
+			}),
+		).toEqual({
+			kind: "category",
+			caption:
+				"Kids · The bank changed the Sep 10 purchase, so this refund is no longer linked",
+			tag: false,
+		});
+	});
+
+	it("says a refund with no category is no longer linked, and that it needs one", () => {
+		expect(
+			rowCaption({
+				...base,
+				amountCents: -500,
+				refundUnlinkedPurchaseDate: "2026-09-10",
+			}),
+		).toEqual({
+			kind: "needs",
+			caption:
+				"The bank changed the Sep 10 purchase, so this refund is no longer linked",
+			tag: true,
+		});
 	});
 });
 

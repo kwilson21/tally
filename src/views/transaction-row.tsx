@@ -54,34 +54,31 @@ export function rowCaption(row: ListRow): Caption {
 			caption: ["Split transaction", paidBill].filter(Boolean).join(" · "),
 			tag: false,
 		};
-	// The note stays only until the purchase has a category again.
+	// The note stays on the purchase until a person changes or confirms its category (decision 99), so it
+	// is shown beside the category it went back to, or in Needs category when it has none.
 	if (
 		row.splitRemovedFromCents !== null &&
-		row.splitRemovedFromCents !== undefined &&
-		row.categoryId === null
-	)
-		return {
-			kind: "needs",
-			caption: `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.`,
-			tag: true,
-		};
-	if (row.isSplit)
-		return { kind: "category", caption: "Split transaction", tag: false };
-	if (
-		row.splitRemovedFromCents !== null &&
-		row.splitRemovedFromCents !== undefined &&
-		row.categoryId === null
-	)
-		return {
-			kind: "needs",
-			caption: `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.`,
-			tag: true,
-		};
+		row.splitRemovedFromCents !== undefined
+	) {
+		const note = `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.`;
+		return row.categoryId === null
+			? { kind: "needs", caption: note, tag: true }
+			: {
+					kind: "category",
+					caption: [row.categoryName, note, paidBill]
+						.filter(Boolean)
+						.join(" · "),
+					tag: false,
+				};
+	}
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
-	// A linked refund and its purchase each say so after the category (P19).
-	const pair = row.refundPurchaseDate
-		? `Refund for ${shortDay(row.refundPurchaseDate, row.date)}`
-		: refunded(row);
+	// A linked refund and its purchase each say so after the category (P19). A refund the bank's change
+	// unlinked says why instead (decision 99).
+	const pair = row.refundUnlinkedPurchaseDate
+		? `The bank changed the ${shortDay(row.refundUnlinkedPurchaseDate, row.date)} purchase, so this refund is no longer linked`
+		: row.refundPurchaseDate
+			? `Refund for ${shortDay(row.refundPurchaseDate, row.date)}`
+			: refunded(row);
 	if (row.categoryName)
 		return {
 			kind: "category",

@@ -1136,7 +1136,7 @@ function EditSheet({
 				{dayLabel(tx.date, today)} · {account}
 			</p>
 			{tx.pending && <PendingNote />}
-			{tx.splitRemovedFromCents != null && tx.categoryId === null && (
+			{tx.splitRemovedFromCents != null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}
 					{formatCents(tx.splitRemovedFromCents, { signed: true })}, so its

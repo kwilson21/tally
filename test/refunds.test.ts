@@ -681,6 +681,26 @@ describe("linking a refund", () => {
 	});
 });
 
+describe("a refund a bank change unlinked", () => {
+	it("stops saying so once a person links it again", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		await link(REFUND, PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT refund_of_id AS r, refund_unlinked_purchase_date AS d FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ r: PURCHASE, d: null });
+	});
+});
+
 describe("captions on the linked pair", () => {
 	it("names the purchase on the refund, and the refunded amount on the purchase", async () => {
 		await link(REFUND, PURCHASE);
