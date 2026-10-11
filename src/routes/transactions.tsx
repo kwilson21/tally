@@ -97,6 +97,7 @@ import {
 	SelectionActionButtons,
 } from "../views/selection-action-bar";
 import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
+import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
