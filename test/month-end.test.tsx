@@ -394,7 +394,9 @@ describe("MonthEnd budget bars", () => {
 			/>,
 		);
 		expect(html).toContain('class="text-right text-lg text-ok"');
-		expect(html).toContain("+$20");
+		expect(html).toContain(
+			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
+		);
 	});
 
 	// #300: the wide copy of a chart with ten categories doesn't reserve the phone cue's 44px.
@@ -414,9 +416,75 @@ describe("MonthEnd budget bars", () => {
 			["711", "711"],
 			["667", "667"],
 		]);
-		const wide = html.slice(html.indexOf('class="mt-4 hidden lg:block"'));
-		expect(wide).toContain('<line x1="31" x2="667" y1="40" y2="40"');
-		expect(wide).toContain('<text x="663" y="45"');
+		const split = html.indexOf('class="mt-4 hidden lg:block"');
+		const wide = html.slice(split);
+		expect(wide).toContain('<line x1="31" x2="613" y1="40" y2="40"');
+		expect(wide).toContain('<rect x="571"');
+		expect(wide).toContain(
+			'<text x="619" y="45" class="fill-muted text-sm">budget</text>',
+		);
+		expect(html.slice(0, split)).toContain(
+			'<text x="707" y="45" text-anchor="end"',
+		);
+	});
+
+	// #300: six to ten categories at lg. The wide copy stops at its last bar and keeps only the budget word's room.
+	it.each([
+		[6, 457, 66],
+		[7, 523, 66],
+		[8, 589, 66],
+		[9, 655, 66],
+		[10, 667, 60],
+	])(
+		"fits the wide copy of %i categories in %i units, with the budget word clear of the last bar (#300)",
+		(count, width, step) => {
+			const html = renderToString(
+				<MonthEnd
+					chartId={`wide-${count}`}
+					monthName="September"
+					amountCents={0}
+					rows={rows(count)}
+				/>,
+			);
+			const wide = html.slice(html.indexOf('class="mt-4 hidden lg:block"'));
+			const svg = wide.match(/<svg[\s\S]*?<\/svg>/)?.[0] ?? "";
+			const rectXs = [...svg.matchAll(/<rect x="([\d.]+)"/g)].map((match) =>
+				Number(match[1]),
+			);
+			const lastBarEnd = (rectXs[rectXs.length - 1] ?? 0) + 42;
+			const wordX = Number(
+				svg.match(/<text x="([\d.]+)" y="45"[^>]*>budget<\/text>/)?.[1],
+			);
+			expect(svg).toContain(`viewBox="0 0 ${width} 142"`);
+			expect(width).toBeLessThanOrEqual(667);
+			expect(
+				rectXs.slice(1).map((x, index) => x - (rectXs[index] ?? x)),
+			).toEqual(Array(count - 1).fill(step));
+			expect(svg).toContain(`<line x1="31" x2="${lastBarEnd}" y1="40" y2="40"`);
+			expect(wordX - lastBarEnd).toBeGreaterThanOrEqual(6);
+			expect(wordX + 48).toBeLessThanOrEqual(width);
+		},
+	);
+
+	it("caps the wide copy's labels at 56 for ten categories, and the phone copy's at 62 (#300)", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="ten-caps"
+				monthName="September"
+				amountCents={0}
+				rows={rows(10)}
+			/>,
+		);
+		const split = html.indexOf('class="mt-4 hidden lg:block"');
+		const capsOf = (part: string) =>
+			[...part.matchAll(/textLength="(\d+)"/g)].map((match) => match[1]);
+		// Ten labels and ten overages, each capped.
+		const phoneCaps = capsOf(html.slice(0, split));
+		expect(phoneCaps).toHaveLength(20);
+		expect(new Set(phoneCaps)).toEqual(new Set(["62"]));
+		const wideCaps = capsOf(html.slice(split));
+		expect(wideCaps).toHaveLength(20);
+		expect(new Set(wideCaps)).toEqual(new Set(["56"]));
 	});
 
 	it("keeps the cue's 44px in every copy of a chart with eleven categories (#300)", () => {
@@ -505,8 +573,29 @@ describe("PastNotBudgeted's Needs a category row", () => {
 			/>,
 		);
 		expect(html).toContain(
-			'<span class="text-right text-lg text-ok">+$14</span>',
+			'<span class="text-right text-lg text-ok">+$14<span class="sr-only"> back: refunds outweigh spending</span></span>',
 		);
+	});
+
+	it("says refunds in words only for a refund, not for spending or the $0 row", () => {
+		const html = renderToString(
+			<PastNotBudgeted
+				items={[
+					{ name: "Kids", icon: "kids", color: "cat-ochre", spentCents: 3000 },
+				]}
+				needsCategory={{ spentCents: 5000, count: 1 }}
+			/>,
+		);
+		expect(needsRow(html)).not.toContain("refunds outweigh");
+		expect(html).not.toContain("refunds outweigh");
+		expect(
+			renderToString(
+				<PastNotBudgeted
+					items={[]}
+					needsCategory={{ spentCents: 0, count: 2 }}
+				/>,
+			),
+		).not.toContain("refunds outweigh");
 	});
 
 	it("shows the Not budgeted heading with just this row when no category is Not budgeted", () => {

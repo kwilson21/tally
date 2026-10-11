@@ -860,7 +860,7 @@ describe("GET / with the demo seed", () => {
 		const { html } = await homeAt("2026-09");
 		expect(html).toMatch(/whitespace-nowrap[^"]*">\$130<\/p>/);
 		expect(html).toMatch(
-			/Needs a category<\/span><span class="text-right text-lg text-ok">\+\$50<\/span>/,
+			/Needs a category<\/span><span class="text-right text-lg text-ok">\+\$50<span class="sr-only"> back: refunds outweigh spending<\/span><\/span>/,
 		);
 	});
 

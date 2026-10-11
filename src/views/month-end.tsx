@@ -2,7 +2,7 @@ import type { CategorySummary } from "../budget";
 import { formatCents } from "../money";
 import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
-import { categoryRowAmount } from "./category-amount";
+import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
 
 const wholeUnlessTiny = (cents: number) =>
 	formatCents(cents, {
@@ -85,7 +85,12 @@ function uniqueLabels(labels: string[]): string[] {
 }
 
 // At text-sm, 8 SVG units per Unicode code point is a conservative width estimate.
-const labelNeedsCap = (text: string) => Array.from(text).length * 8 > 62;
+const labelNeedsCap = (text: string, cap = 62) =>
+	Array.from(text).length * 8 > cap;
+// Home's lg:max-w-2xl column is 672px; the wide copy of a ten-category chart stays within #300's 667px.
+const WIDE_COPY_MAX = 667;
+// The wide copy's room after its last bar: 6 units, then the budget word at the same estimate.
+const BUDGET_WORD_ROOM = 6 + Array.from("budget").length * 8;
 
 function EndBars({
 	rows,
@@ -106,6 +111,11 @@ function EndBars({
 		rows.length > 1 && !scrolls
 			? Math.min(66, (areaRight - left - barWidth) / (rows.length - 1))
 			: 66;
+	// The wide copy of six to ten categories tightens its spacing so it fits WIDE_COPY_MAX with the budget word.
+	const wideStep = Math.min(
+		66,
+		(WIDE_COPY_MAX - left - barWidth - BUDGET_WORD_ROOM) / (rows.length - 1),
+	);
 	const x0 = !scrolls
 		? left + (areaRight - left - ((rows.length - 1) * step + barWidth)) / 2
 		: left;
@@ -117,10 +127,19 @@ function EndBars({
 		.join(", ");
 	// The 44px of trailing space is the phone cue's room. Only a copy where the cue shows reserves it.
 	const chart = (cueSpace: boolean) => {
-		const width = Math.max(
-			350,
-			left + Math.max(0, rows.length - 1) * 66 + 42 + (cueSpace ? 44 : 0),
-		);
+		// The wide copy has no cue: it ends at its last bar and keeps only the budget word's room.
+		const wide = scrolls && !cueSpace;
+		const barStep = wide ? wideStep : step;
+		const lastBarEnd = x0 + Math.max(0, rows.length - 1) * barStep + barWidth;
+		const width = wide
+			? lastBarEnd + BUDGET_WORD_ROOM
+			: Math.max(
+					350,
+					left + Math.max(0, rows.length - 1) * 66 + 42 + (cueSpace ? 44 : 0),
+				);
+		const lineEnd = wide ? lastBarEnd : scrolls ? width : areaRight;
+		const wordX = wide ? lastBarEnd + 6 : scrolls ? width - 4 : areaRight + 6;
+		const labelCap = wide ? Math.min(62, barStep - 4) : 62;
 		return (
 			<svg
 				viewBox={`0 0 ${width} 142`}
@@ -131,7 +150,7 @@ function EndBars({
 			>
 				<line
 					x1={left}
-					x2={scrolls ? width : areaRight}
+					x2={lineEnd}
 					y1="40"
 					y2="40"
 					class="stroke-muted"
@@ -139,9 +158,9 @@ function EndBars({
 					stroke-dasharray="4 4"
 				/>
 				<text
-					x={scrolls ? width - 4 : 298}
+					x={wordX}
 					y="45"
-					text-anchor={scrolls ? "end" : undefined}
+					text-anchor={scrolls && !wide ? "end" : undefined}
 					class="fill-muted text-sm"
 				>
 					budget
@@ -155,7 +174,7 @@ function EndBars({
 							endBarRatio(row.spentCents, row.budgetCents).ratio * unit,
 						),
 					);
-					const x = x0 + index * step;
+					const x = x0 + index * barStep;
 					return (
 						<g>
 							<rect
@@ -175,8 +194,9 @@ function EndBars({
 									aria-label={`Over budget by ${wholeUnlessTiny(row.spentCents - row.budgetCents)}`}
 									{...(labelNeedsCap(
 										`+${wholeUnlessTiny(row.spentCents - row.budgetCents)}`,
+										labelCap,
 									)
-										? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
+										? { textLength: labelCap, lengthAdjust: "spacingAndGlyphs" }
 										: {})}
 								>
 									<title>
@@ -191,8 +211,8 @@ function EndBars({
 								text-anchor="middle"
 								class="fill-muted text-sm"
 								aria-label={row.name}
-								{...(labelNeedsCap(labels[index] ?? "")
-									? { textLength: 62, lengthAdjust: "spacingAndGlyphs" }
+								{...(labelNeedsCap(labels[index] ?? "", labelCap)
+									? { textLength: labelCap, lengthAdjust: "spacingAndGlyphs" }
 									: {})}
 							>
 								<title>{row.name}</title>
@@ -362,6 +382,9 @@ export function PastNotBudgeted({
 						<span class="min-w-0 flex-1 truncate text-lg">{item.name}</span>
 						<span class={categoryRowAmount(item.spentCents).className}>
 							{categoryRowAmount(item.spentCents).text}
+							{item.spentCents < 0 && (
+								<span class="sr-only">{REFUND_WORDS}</span>
+							)}
 						</span>
 					</li>
 				))}
@@ -373,6 +396,9 @@ export function PastNotBudgeted({
 						</span>
 						<span class={categoryRowAmount(needs.spentCents).className}>
 							{categoryRowAmount(needs.spentCents).text}
+							{needs.spentCents < 0 && (
+								<span class="sr-only">{REFUND_WORDS}</span>
+							)}
 						</span>
 					</li>
 				)}
