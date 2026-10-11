@@ -19,6 +19,12 @@ export type PaymentPickerPeriod = {
 	countedMonth: string;
 };
 
+/** The count the picker's aria-live line says and a month choice announces: "2 payments to link", or none. */
+export const paymentCountSentence = (count: number) =>
+	count === 0
+		? "No payments to link"
+		: `${count} ${count === 1 ? "payment" : "payments"} to link`;
+
 const month = (value: string) =>
 	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
 		new Date(`${value}-01T00:00:00Z`),
@@ -74,11 +80,7 @@ export function BillPaymentPicker({
 	const selectedPayment = candidates.find(
 		(candidate) => candidate.id === selectedTransactionId,
 	);
-	const count = candidates.length;
-	const countSentence =
-		count === 0
-			? "No payments to link"
-			: `${count} ${count === 1 ? "payment" : "payments"} to link`;
+	const countSentence = paymentCountSentence(candidates.length);
 	return (
 		<section
 			id="payment-picker"
@@ -95,16 +97,16 @@ export function BillPaymentPicker({
 				Within {windowDays} days of {dueDateLabel}, same merchant first, then
 				closest amount.
 			</p>
-			{candidates.length ? (
-				<form
-					method="post"
-					action={action}
-					hx-post={action}
-					hx-target="body"
-					hx-swap="outerHTML"
-					class="mt-4 flex flex-col gap-3"
-				>
-					<input type="hidden" name="opened_period" value={openedPeriod} />
+			<form
+				method="post"
+				action={action}
+				hx-post={action}
+				hx-target="body"
+				hx-swap="outerHTML"
+				class="mt-4 flex flex-col gap-3"
+			>
+				<input type="hidden" name="opened_period" value={openedPeriod} />
+				{candidates.length ? (
 					<fieldset>
 						<legend>Payment</legend>
 						<div class="mt-1 flex flex-col gap-2">
@@ -126,54 +128,56 @@ export function BillPaymentPicker({
 							))}
 						</div>
 					</fieldset>
-					<fieldset>
-						<legend>Which month's bill does it pay?</legend>
-						<div class="mt-2 flex flex-wrap gap-2">
-							{periods.map((period) => (
-								<Chip
-									type="radio"
-									name="period"
-									value={period.value}
-									checked={period.value === opened?.value}
-									autofocus={rerender && period.value === opened?.value}
-									hx-get={`/bills/${billId}/occurrences/${encodeURIComponent(period.value)}/link`}
-									hx-include="[name='transaction_id'],[name='period']"
-									hx-target="#payment-picker"
-									hx-swap="outerHTML"
-								>
-									{period.label}
-								</Chip>
-							))}
-						</div>
-						<div id="bill-month-explanation" aria-live="polite">
-							<span class="sr-only">{countSentence}</span>
-							{opened && selectedPayment ? (
-								<BillMonthExplanation
-									countedMonth={opened.countedMonth}
-									paymentDate={selectedPayment.date}
-								/>
-							) : (
-								<p class="text-sm text-muted">
-									A late payment counts in its bill's month; an early one stays
-									in the month it was paid.
-								</p>
-							)}
-						</div>
-					</fieldset>
+				) : (
+					<EmptyState
+						kind="search"
+						sentence="No payments to link"
+						hint={`There are no eligible, unclaimed payments within ${windowDays} days.`}
+					/>
+				)}
+				<fieldset>
+					<legend>Which month's bill does it pay?</legend>
+					<div class="mt-2 flex flex-wrap gap-2">
+						{periods.map((period) => (
+							<Chip
+								type="radio"
+								name="period"
+								value={period.value}
+								checked={period.value === opened?.value}
+								autofocus={rerender && period.value === opened?.value}
+								hx-get={`/bills/${billId}/occurrences/${encodeURIComponent(period.value)}/link`}
+								hx-include="[name='transaction_id'],[name='period']"
+								hx-target="#payment-picker"
+								hx-swap="outerHTML"
+							>
+								{period.label}
+							</Chip>
+						))}
+					</div>
+					<div id="bill-month-explanation" aria-live="polite">
+						<span class="sr-only">{countSentence}</span>
+						{opened && selectedPayment ? (
+							<BillMonthExplanation
+								countedMonth={opened.countedMonth}
+								paymentDate={selectedPayment.date}
+							/>
+						) : (
+							<p class="text-sm text-muted">
+								A late payment counts in its bill's month; an early one stays in
+								the month it was paid.
+							</p>
+						)}
+					</div>
+				</fieldset>
+				{candidates.length ? (
 					<div class="flex gap-3">
 						<Button type="submit">Link</Button>
 						<Button kind="text" href={`/bills/${billId}`}>
 							Cancel
 						</Button>
 					</div>
-				</form>
-			) : (
-				<EmptyState
-					kind="search"
-					sentence="No payments to link"
-					hint={`There are no eligible, unclaimed payments within ${windowDays} days.`}
-				/>
-			)}
+				) : null}
+			</form>
 		</section>
 	);
 }

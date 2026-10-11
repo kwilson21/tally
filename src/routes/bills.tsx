@@ -42,6 +42,7 @@ import { BillOccurrenceRow } from "../views/bill-occurrence-row";
 import {
 	BillMonthExplanation,
 	BillPaymentPicker,
+	paymentCountSentence,
 } from "../views/bill-payment-picker";
 import {
 	BillMonthlyTotal,
@@ -1251,7 +1252,14 @@ async function billPage(
 				}))}
 		/>
 	) : null;
-	if (picker && rerender) return c.html(picker);
+	if (picker && rerender) {
+		// A live region that arrives with its own text is not always spoken, so the count also goes to the announcer.
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ announce: paymentCountSentence(candidates.length) }),
+		);
+		return c.html(picker);
+	}
 	return c.html(
 		<Layout
 			title={`${bill.name} · Tally`}

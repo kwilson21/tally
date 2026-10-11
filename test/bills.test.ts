@@ -1521,9 +1521,9 @@ describe("Bills", () => {
 	// copy of the page (a second <main>, #announcer, skip link and sidebar) nested in it.
 	describe("choosing a month in Link a payment", () => {
 		const period = "2026-10";
-		const pickerFor = (headers: Record<string, string> = {}) =>
+		const pickerFor = (headers: Record<string, string> = {}, chosen = period) =>
 			exports.default.fetch(
-				`http://tally.test/bills/1/occurrences/${period}/link`,
+				`http://tally.test/bills/1/occurrences/${chosen}/link`,
 				{ headers },
 			);
 		// What the vendored htmx 4 sends when a month chip (inside section#payment-picker) asks for its picker.
@@ -1590,8 +1590,9 @@ describe("Bills", () => {
 			expect(pickerSection(page)).not.toMatch(/<input[^>]*autofocus/);
 		});
 
-		it("announces the new candidate count through the picker's aria-live line", async () => {
-			const html = await (await pickerFor(monthChipRequest)).text();
+		it("announces the new candidate count through the picker's aria-live line and the announcer", async () => {
+			const res = await pickerFor(monthChipRequest);
+			const html = await res.text();
 			const count = (html.match(/name="transaction_id" value="/g) ?? []).length;
 			expect(count).toBeGreaterThanOrEqual(2);
 			const line =
@@ -1599,6 +1600,36 @@ describe("Bills", () => {
 					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
 				)?.[1] ?? "";
 			expect(line).toContain(`${count} payments to link`);
+			// The aria-live line arrives with the swap, so the announcer gets the same words from the header.
+			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+				announce: `${count} payments to link`,
+			});
+		});
+
+		it("keeps the month choices, with focus on the chosen one, when that month has no payments to link", async () => {
+			// Income can't pay a bill, so flagging everything within 30 days of November's due date (Nov 15) leaves no payment.
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income=1 WHERE date BETWEEN '2026-10-16' AND '2026-12-15'",
+			).run();
+			const chosen = "2026-11";
+			const otherMonth = await (await pickerFor(monthChipRequest)).text();
+			const res = await pickerFor(monthChipRequest, chosen);
+			expect(res.status).toBe(200);
+			const html = await res.text();
+			expect(html.match(/name="transaction_id"/g)).toBeNull();
+			expect(html).toContain(`name="period" value="${chosen}"`);
+			expect(html.match(/name="period" value="/g)).toHaveLength(
+				otherMonth.match(/name="period" value="/g)?.length ?? -1,
+			);
+			const focused = html.match(/<input[^>]*autofocus[^>]*>/g) ?? [];
+			expect(focused).toHaveLength(1);
+			expect(focused[0]).toContain(`name="period" value="${chosen}"`);
+			expect(html).toContain(
+				'<div id="bill-month-explanation" aria-live="polite"><span class="sr-only">No payments to link</span>',
+			);
+			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+				announce: "No payments to link",
+			});
 		});
 	});
 
