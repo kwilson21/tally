@@ -1132,10 +1132,10 @@ export async function saveEdit(
 		);
 	}
 	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a category
-	// Tally picked, or an unsure answer, is cleared so the next answer can take its place, as an empty one is. A
-	// pending new-category suggestion the row is behind is released with it, so the row leaves the suggestion and
-	// Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands once the writes
-	// above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
+	// Tally picked, or no category at all (an unsure answer included), is cleared so the next answer can take its
+	// place. A pending new-category suggestion the row is behind is released with it, so the row leaves the
+	// suggestion and Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands
+	// once the writes above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
 	const askable = {
 		included: excluded === 0 || current.paysBill === 1,
 		isSplit: current.isSplit === 1,
@@ -1165,7 +1165,7 @@ export async function saveEdit(
 			gated(
 				`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
 					category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0, updated_by = ?, updated_at = datetime('now')
-				WHERE id = ? AND (category_source = 'jev' OR (category_id IS NULL AND category_source IS NULL AND category_confidence IS NOT NULL))
+				WHERE id = ? AND (category_source = 'jev' OR (category_id IS NULL AND category_source IS NULL))
 					AND ${jevAsksAboutSql("transactions")}`,
 				[actor, id],
 			),

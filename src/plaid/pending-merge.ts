@@ -120,15 +120,15 @@ const STATEMENTS = [
 	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = 'user'
 	 ${FROM_PENDING} AND p.credit_reviewed_by = 'user' AND COALESCE(transactions.credit_reviewed_by, '') != 'user'`,
 	// A name a person gave the pending row alone clears Tally's answer on the posted row, which was made for the old
-	// name, so the night run asks again with it. Only Jev's pick and an unsure one: a person's pick and a merchant
-	// rule's stay. Only where Jev can be asked about the posted row and the pending one as they now stand, after the
-	// person's exclusion, income and review moves above: a row taken out of the budget keeps its answer. It runs
-	// before the name moves, since moving the name is the condition it reads.
+	// name, so the night run asks again with it. Only Jev's pick and an empty category (an unsure answer included):
+	// a person's pick and a merchant rule's stay. Only where Jev can be asked about the posted row and the pending
+	// one as they now stand, after the person's exclusion, income and review moves above: a row taken out of the
+	// budget keeps its answer. It runs before the name moves, since moving the name is the condition it reads.
 	`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
 		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0
 	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL
 	 AND (transactions.category_source = 'jev' OR (transactions.category_id IS NULL
-		AND transactions.category_source IS NULL AND transactions.category_confidence IS NOT NULL))
+		AND transactions.category_source IS NULL))
 	 AND ${jevAsksAboutSql("transactions")} AND ${jevAsksAboutSql("p")}`,
 	// This one only (decision 101): a name a person gave the pending row alone is kept, unless the posted row has its own.
 	`UPDATE transactions SET own_name = p.own_name

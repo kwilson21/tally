@@ -1456,6 +1456,73 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				jev_category_id: 3,
 			});
 		});
+
+		it("releases the posted row's suggestion when the pending row's name came with none, even with its confidence already cleared", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Bakery supplies', 'pending')",
+			).run();
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
+					 jev_category_id = NULL, jev_none_fit = 1,
+					 category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Bakery supplies')
+					 WHERE id = ?`,
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				category_id: null,
+				category_confidence: null,
+				jev_none_fit: 0,
+			});
+			expect(
+				await env.DB.prepare(
+					"SELECT category_suggestion_id FROM transactions WHERE id = ?",
+				)
+					.bind(ids.posted)
+					.first(),
+			).toEqual({ category_suggestion_id: null });
+		});
+
+		it("keeps the suggestion link of a posted row a person excluded, which the name doesn't re-guess", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Bakery goods', 'pending')",
+			).run();
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+				).bind(ids.pending),
+				env.DB.prepare(
+					`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
+					 jev_category_id = NULL, jev_none_fit = 1, excluded = 1, excluded_source = 'user',
+					 category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Bakery goods')
+					 WHERE id = ?`,
+				).bind(ids.posted),
+			]);
+			await post(item, { amount: -42 });
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				category_id: null,
+			});
+			expect(
+				await env.DB.prepare(
+					"SELECT category_suggestion_id, jev_none_fit FROM transactions WHERE id = ?",
+				)
+					.bind(ids.posted)
+					.first(),
+			).toEqual({
+				category_suggestion_id: expect.any(Number),
+				jev_none_fit: 1,
+			});
+		});
 	});
 
 	it("moves a bill payment onto it", async () => {

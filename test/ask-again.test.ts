@@ -613,6 +613,68 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		expect(await listedRows()).not.toContain(bakery);
 	});
 
+	it("releases the pending suggestion even when the row's confidence was already cleared, as a failed re-ask leaves it", async () => {
+		await behindSuggestion();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = NULL WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		expect(await listedRows()).toContain(bakery);
+		const jev = fakeJev(() => new Response("{}", { status: 503 }));
+		await save(bakery, {
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(jev.bodies[0]?.state).toMatchObject({ merchant: "Dog bed" });
+		expect(await answerColumns(bakery)).toEqual({
+			category_id: null,
+			category_source: null,
+			category_confidence: null,
+			category_suggestion_id: null,
+			jev_category_id: null,
+			jev_none_fit: 0,
+		});
+		expect(await listedRows()).not.toContain(bakery);
+	});
+
+	it("releases the suggestion the same way after a note's failed re-ask cleared the confidence", async () => {
+		await behindSuggestion();
+		fakeJev(() => new Response("{}", { status: 503 }));
+		await save(bakery, {
+			category: "",
+			merchant: "Local Bakery",
+			note: "Birthday cake for Sam",
+		});
+		await background();
+		expect(await answerColumns(bakery)).toMatchObject({
+			category_confidence: null,
+			category_suggestion_id: expect.any(Number),
+		});
+		expect(await listedRows()).toContain(bakery);
+		const jev = fakeJev(() => new Response("{}", { status: 503 }));
+		await save(bakery, {
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(await answerColumns(bakery)).toEqual({
+			category_id: null,
+			category_source: null,
+			category_confidence: null,
+			category_suggestion_id: null,
+			jev_category_id: null,
+			jev_none_fit: 0,
+		});
+		expect(await listedRows()).not.toContain(bakery);
+	});
+
 	it.each(["user", "merchant_rule"])(
 		"keeps every column of a row whose %s category is set, suggestion and all",
 		async (source) => {
