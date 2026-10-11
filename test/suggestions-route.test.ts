@@ -191,6 +191,8 @@ describe("GET /settings/suggestions", () => {
 		expect(text).toContain("Count it as income, not spending?");
 		expect(html).toContain(`value="income-${ids.income}"`);
 		expect(text).toContain("Yes, it's income");
+		// No screen names Jev, or the AI behind a suggestion (spec §8.6).
+		expect(html).not.toMatch(/\bJev\b/);
 	});
 
 	it("shows Settings' Band with the count of every kind, and nothing else", async () => {
@@ -419,6 +421,47 @@ describe("categories", () => {
 				"SELECT COUNT(*) AS n FROM merchants WHERE default_category_id IS NOT NULL",
 			),
 		).toMatchObject({ n: 0 });
+	});
+
+	it("a category set here clears a split's removed-amount mark, as the edit panel does", async () => {
+		const ids = await oneOfEach();
+		await db
+			.prepare(
+				"UPDATE transactions SET split_removed_from_cents = 500 WHERE id = ?",
+			)
+			.bind(ids.category)
+			.run();
+		await post(
+			"/settings/suggestions",
+			{ id: `category-${ids.category}`, answer: "yes" },
+			true,
+		);
+		expect(
+			await row(
+				"SELECT split_removed_from_cents FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toMatchObject({ split_removed_from_cents: null });
+	});
+
+	it("never excludes a refund linked to a purchase, even when a stale answer arrives for it", async () => {
+		const ids = await oneOfEach();
+		const purchase = await insertTx({ raw: "SHOP PURCHASE", amount: 9000 });
+		await db
+			.prepare(
+				"UPDATE transactions SET refund_of_id = ?, transfer_confidence = 0.5 WHERE id = ?",
+			)
+			.bind(purchase, ids.transfer)
+			.run();
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id: `transfer-${ids.transfer}`, answer: "yes" },
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(
+			await row("SELECT excluded FROM transactions WHERE id = ?", ids.transfer),
+		).toMatchObject({ excluded: 0 });
 	});
 
 	it("Something else with no chip asks for one", async () => {

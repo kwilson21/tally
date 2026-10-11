@@ -285,6 +285,34 @@ describe("suggestionQueue", () => {
 		expect(gone).toEqual([]);
 	});
 
+	it("never asks about a refund linked to a purchase: its exclusion or income mark would change the purchase's refunds", async () => {
+		const purchase = await transaction({ amount: 5000, raw: "SHOP PURCHASE" });
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name,
+					income_confidence, transfer_confidence, refund_of_id)
+				VALUES (?, ?, '2026-10-03', -5000, 'SHOP REFUND', 0.5, 0.5, ?)`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`, account, purchase)
+			.run();
+		expect(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).toEqual([]);
+	});
+
+	it("never asks a category for a transaction a person or Tally left out of the budget", async () => {
+		await transaction({
+			amount: 2300,
+			raw: "LEFT OUT TAQ",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+			excluded: 1,
+		});
+		expect(
+			(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).filter(
+				(item) => item.kind === "category",
+			),
+		).toEqual([]);
+	});
+
 	it("is empty when nothing waits", async () => {
 		expect(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).toEqual([]);
 	});

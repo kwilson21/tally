@@ -129,7 +129,7 @@ async function incomeSuggestions(
 				CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence,
 				t.flag_income AS income, t.credit_reviewed AS creditReviewed, t.excluded AS excluded
 			FROM transactions t ${JOIN_MERCHANT}
-			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.income_confidence IS NOT NULL`,
+			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.income_confidence IS NOT NULL AND t.refund_of_id IS NULL`,
 		)
 		.all<
 			Candidate & {
@@ -179,7 +179,7 @@ async function transferSuggestions(
 				t.transfer_confidence AS transferConfidence
 			FROM transactions t ${JOIN_MERCHANT}
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.transfer_confidence IS NOT NULL
-				AND t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(t.excluded_source, '') != 'user'
+				AND t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(t.excluded_source, '') != 'user' AND t.refund_of_id IS NULL
 				AND t.flag_income = 0`,
 		)
 		.all<Candidate & { transferConfidence: number }>();
@@ -222,7 +222,7 @@ async function categorySuggestions(
 			FROM transactions t ${JOIN_MERCHANT}
 			JOIN categories c ON c.id = t.jev_category_id AND c.archived = 0
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.category_id IS NULL AND t.category_source IS NULL
-				AND t.category_confidence < ? AND t.flag_income = 0`,
+				AND t.category_confidence < ? AND t.flag_income = 0 AND t.excluded = 0`,
 		)
 		.bind(JEV_THRESHOLD)
 		.all<

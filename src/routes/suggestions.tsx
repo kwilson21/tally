@@ -292,7 +292,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET flag_income = 1, income_source = 'user', income_confidence = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND flag_income = 0 AND amount_cents < 0`,
+						WHERE id = ? AND flag_income = 0 AND amount_cents < 0 AND refund_of_id IS NULL`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -305,7 +305,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user', income_confidence = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND flag_income = 0 AND amount_cents < 0`,
+						WHERE id = ? AND flag_income = 0 AND amount_cents < 0 AND refund_of_id IS NULL`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -325,7 +325,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET excluded = 1, excluded_source = 'user', transfer_confidence = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND excluded = 0`,
+						WHERE id = ? AND excluded = 0 AND refund_of_id IS NULL`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -338,7 +338,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET excluded = 0, excluded_source = 'user', transfer_confidence = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND excluded = 0 AND COALESCE(excluded_source, '') != 'user'`,
+						WHERE id = ? AND excluded = 0 AND COALESCE(excluded_source, '') != 'user' AND refund_of_id IS NULL`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -356,7 +356,7 @@ suggestions.post(PATH, async (c) => {
 			if (answer === "yes") {
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL,
+						`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND jev_category_id IS NOT NULL
 							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = transactions.jev_category_id AND c.archived = 0)`,
@@ -386,7 +386,7 @@ suggestions.post(PATH, async (c) => {
 					});
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
+						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
 					)
