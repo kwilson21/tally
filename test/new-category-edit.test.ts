@@ -50,6 +50,13 @@ const filedAs = (id: number) =>
 		.bind(id)
 		.first<{ categoryId: number | null; source: string | null }>();
 
+/** One row's markup in a page, from its item's opening tag to its closing tag. */
+function rowHtml(html: string, id: number) {
+	const start = html.indexOf(`data-transaction="${id}"`);
+	expect(start).toBeGreaterThan(-1);
+	return html.slice(start, html.indexOf("</li>", start));
+}
+
 let bakery: number;
 
 /** The fields a save of the bakery panel posts, with the merchant name left as it is. */
@@ -463,5 +470,44 @@ describe("the likely transactions after a new category", () => {
 		);
 
 		expect(saved.html).toContain(`Same merchant as Dec 31, ${prior} (`);
+	});
+
+	it("show a guess with the Maybe chip the list shows, not the plain Needs category tag", async () => {
+		const suggestion = (
+			await env.DB.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		const guess = (
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_suggestion_id) VALUES (1, ?, 2000, 'SQ *CORNER PETS', ?) RETURNING id",
+			)
+				.bind(`${THIS}-03`, suggestion)
+				.first<{ id: number }>()
+		)?.id as number;
+
+		const saved = await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		const row = rowHtml(saved.html, guess);
+		expect(row).toContain("Maybe new: Pet Care");
+		expect(row).not.toContain("Needs category");
+	});
+
+	it("show a likely purchase's refunds in its caption, as the list does", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, refund_of_id, credit_reviewed) VALUES (1, ?, -500, 'SQ *LOCAL BAKERY 4432', ?, 1)",
+		)
+			.bind(`${THIS}-05`, first)
+			.run();
+
+		const saved = await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		expect(rowHtml(saved.html, first)).toContain("$5.00 refunded");
 	});
 });

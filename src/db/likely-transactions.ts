@@ -8,8 +8,11 @@ import { COUNTED_JOINS } from "./counted-month";
 import { merchantColumnSql, sameMerchantSql } from "./merchant-key";
 import {
 	type ListRow,
+	MAYBE_CATEGORY_COLUMNS,
+	MAYBE_CATEGORY_JOINS,
 	NAME_SUGGESTION_COLUMNS,
 	NEEDS_CATEGORY,
+	REFUNDED_COLUMN,
 } from "./transactions";
 
 /** Most rows the panel offers, same merchant first (decision 79). */
@@ -31,6 +34,7 @@ type LikelyRecord = Omit<
 	| "excluded"
 	| "income"
 	| "creditReviewed"
+	| "maybeCategoryNew"
 > & {
 	merchantName: string | null;
 	suggestedNames: string | null;
@@ -41,15 +45,19 @@ type LikelyRecord = Omit<
 	excluded: number;
 	income: number;
 	creditReviewed: number | null;
+	maybeCategoryNew: number;
 };
 
-// A name is worked out as the list works it (NAME_SUGGESTION_COLUMNS and shownName), so a guess reads the same.
+// A name is worked out as the list works it (NAME_SUGGESTION_COLUMNS and shownName), and a row's Maybe chip and
+// refunds as the list draws them (MAYBE_CATEGORY_COLUMNS, REFUNDED_COLUMN), so a row reads the same here.
 const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 	${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note,
 	t.excluded AS excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 	t.category_id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
+	${MAYBE_CATEGORY_COLUMNS}, ${REFUNDED_COLUMN},
 	t.pending AS pending, ${sameMerchantSql("t", "src")} AS sameMerchant
 	FROM transactions t ${COUNTED_JOINS}
+	${MAYBE_CATEGORY_JOINS}
 	JOIN transactions src ON src.id = ?1
 	LEFT JOIN categories c ON c.id = t.category_id`;
 
@@ -57,7 +65,7 @@ const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amou
 const LIKELY_WHERE = `WHERE ${NEEDS_CATEGORY} AND t.id <> src.id AND t.parent_id IS NULL AND t.pending = 0
 	AND substr(t.date, 1, 7) IN (?2, ?3)
 	AND (${sameMerchantSql("t", "src")} OR t.category_suggestion_id IN (
-		SELECT cs.id FROM category_suggestions cs WHERE cs.status = 'pending' AND cs.name = ?4 COLLATE NOCASE))`;
+		SELECT sug.id FROM category_suggestions sug WHERE sug.status = 'pending' AND sug.name = ?4 COLLATE NOCASE))`;
 
 /**
  * The likely transactions for a category made from `savedId`, named `categoryName`, as of `today` (the
@@ -102,6 +110,7 @@ export async function likelyTransactions(
 				excluded: !!row.excluded,
 				income: !!row.income,
 				creditReviewed: !!row.creditReviewed,
+				maybeCategoryNew: !!row.maybeCategoryNew,
 				pending: !!row.pending,
 				sameMerchant: !!row.sameMerchant,
 			};
