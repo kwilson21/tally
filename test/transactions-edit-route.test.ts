@@ -526,9 +526,10 @@ describe("GET /transactions/:id", () => {
 		expect(html).toContain("$12.00");
 		expect(html).toMatch(/Credit card ••9012/);
 		expect(html).toMatch(/<fieldset[^>]*><legend[^>]*>Category<\/legend>/);
+		// One radio for each of the demo's six categories, Childcare included.
 		expect(
 			(html.match(/<input type="radio" name="category"/g) ?? []).length,
-		).toBe(5);
+		).toBe(6);
 		expect(html).toContain("Always for this merchant");
 		expect(html).toContain("Count as income");
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value="Local Bakery"/);

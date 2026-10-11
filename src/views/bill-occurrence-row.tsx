@@ -18,7 +18,8 @@ export type OccurrencePriceOffer = {
 	amountCents: number;
 	dateLabel: string;
 	billAmountCents: number;
-	frequency: "monthly" | "yearly";
+	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
+	cadence?: string;
 };
 
 const statusLabel: Record<BillStatus | "not-paid", string> = {
@@ -73,7 +74,7 @@ function PriceChanged({
 				{`${offer.merchant} charged ${charged} on ${offer.dateLabel}, not ${formatCents(offer.billAmountCents)}.`}
 			</p>
 			<p class="text-muted">
-				{`Updating the bill links that payment and makes it ${charged} ${offer.frequency === "monthly" ? "a month" : "a year"}.`}
+				{`Updating the bill links that payment and makes it ${charged} ${offer.cadence ?? (offer.frequency === "monthly" ? "a month" : offer.frequency === "yearly" ? "a year" : offer.frequency === "biweekly" ? "every two weeks" : offer.frequency === "quarterly" ? "every 3 months" : "a week")}.`}
 			</p>
 			<form
 				method="post"

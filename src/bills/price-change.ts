@@ -15,11 +15,12 @@ import { tidyName } from "../transactions/tidy-name";
 import { BIG_BILL_CENTS } from "./guards";
 import {
 	BILL_DATE_WINDOW_DAYS,
+	billDateWindowDays,
 	dayNumber,
 	type MatchCandidate,
 	withinBillAmount,
 } from "./match";
-import type { BillStatus } from "./status";
+import type { BillFrequency, BillStatus } from "./status";
 
 /** The payment on offer for a bill's occurrence. */
 export type PriceOffer = {
@@ -37,18 +38,20 @@ export type PriceOffer = {
  * outside ±10%, which the matcher leaves alone. It is money out, since a refund or a credit isn't a price,
  * and no more than $100,000, which a bill's own form asks a person to confirm (decision 72, P45 A).
  * `candidates` are the same-merchant payments that are unclaimed and not dismissed for this occurrence.
+ * `windowDays` is the bill's own date window (`billDateWindowDays`), the one the matcher uses.
  */
 export function pickPriceOffer<P extends MatchCandidate>(
 	candidates: P[],
 	dueDate: string,
 	billAmountCents: number,
+	windowDays = BILL_DATE_WINDOW_DAYS,
 ): P | undefined {
 	const due = dayNumber(dueDate);
 	const apart = (c: P) => Math.abs(dayNumber(c.date) - due);
 	return candidates
 		.filter(
 			(c) =>
-				apart(c) <= BILL_DATE_WINDOW_DAYS &&
+				apart(c) <= windowDays &&
 				c.amountCents > 0 &&
 				c.amountCents <= BIG_BILL_CENTS &&
 				!withinBillAmount(c.amountCents, billAmountCents),
@@ -65,12 +68,14 @@ export function pickPriceOffer<P extends MatchCandidate>(
 /**
  * What an offer needs to know about a bill; the occurrence is the one Bills shows for it, with the
  * status `billOccurrence` gave it. An offer is only for an active bill whose occurrence is unpaid, which
- * is to say due or overdue with no payment linked (paid has one; upcoming is weeks away).
+ * is to say due or overdue with no payment linked (paid has one; upcoming is weeks away). The frequency
+ * sets the date window, as it does for the matcher.
  */
 export type OfferBill = {
 	id: number;
 	active: boolean;
 	status: BillStatus;
+	frequency: BillFrequency;
 	amountCents: number;
 	/** The bill's merchant key (or the bank's raw text, when `merchantRawText` is 1), as §6.1 rule 1 matches it. */
 	merchantRawName: string;
@@ -89,6 +94,7 @@ type Row = {
 
 /** The same-merchant payments near an occurrence that nothing has claimed and nobody has turned away. */
 function candidates(db: D1Database, bill: OfferBill): D1PreparedStatement {
+	const window = billDateWindowDays(bill.frequency);
 	return db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
@@ -104,15 +110,20 @@ function candidates(db: D1Database, bill: OfferBill): D1PreparedStatement {
 				merchant_raw_name: bill.merchantRawName,
 				merchant_raw_text: bill.merchantRawText,
 			}),
-			daysBefore(bill.dueDate, BILL_DATE_WINDOW_DAYS),
-			daysBefore(bill.dueDate, -BILL_DATE_WINDOW_DAYS),
+			daysBefore(bill.dueDate, window),
+			daysBefore(bill.dueDate, -window),
 			bill.id,
 			bill.period,
 		);
 }
 
 function offerFrom(rows: Row[], bill: OfferBill): PriceOffer | undefined {
-	const picked = pickPriceOffer(rows, bill.dueDate, bill.amountCents);
+	const picked = pickPriceOffer(
+		rows,
+		bill.dueDate,
+		bill.amountCents,
+		billDateWindowDays(bill.frequency),
+	);
 	return picked
 		? {
 				transactionId: picked.id,

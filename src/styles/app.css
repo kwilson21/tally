@@ -59,6 +59,7 @@
 
 	/* How long each move takes (DESIGN.md, Motion). A rule names one of these, never a length. */
 	--duration-confirm: 150ms; /* a confirmation: the switch, a toast arriving, a page cross-fading */
+	--duration-pause: 150ms; /* how long a Select-mode list load runs before its round marks fade */
 	--duration-rising: 200ms; /* something rising or sliding in: the sheet, the desktop panel */
 	--duration-shake: 300ms; /* a field with an error, once */
 	--duration-slow: 600ms; /* a budget bar filling on load */
@@ -315,8 +316,38 @@ html:not(.js) [data-money-js] {
 .bill-month {
 	display: none;
 }
-.bill-form:has(input[name="frequency"][value="yearly"]:checked) .bill-month {
+.bill-weekday,
+.bill-anchor-date,
+.bill-year-label,
+.bill-quarter-label,
+.bill-quarter-hint {
+	display: none;
+}
+.bill-form:has(input[name="frequency"][value="yearly"]:checked) .bill-month,
+.bill-form:has(input[name="frequency"][value="quarterly"]:checked) .bill-month {
 	display: flex;
+}
+.bill-form:has(input[name="frequency"][value="yearly"]:checked)
+	.bill-year-label {
+	display: inline;
+}
+.bill-form:has(input[name="frequency"][value="quarterly"]:checked)
+	.bill-quarter-label,
+.bill-form:has(input[name="frequency"][value="quarterly"]:checked)
+	.bill-quarter-hint {
+	display: inline;
+}
+.bill-form:has(input[name="frequency"][value="weekly"]:checked) .bill-weekday {
+	display: flex;
+}
+.bill-form:has(input[name="frequency"][value="weekly"]:checked) .bill-due-day,
+.bill-form:has(input[name="frequency"][value="biweekly"]:checked)
+	.bill-due-day {
+	display: none;
+}
+.bill-form:has(input[name="frequency"][value="biweekly"]:checked)
+	.bill-anchor-date {
+	display: block;
 }
 
 /*
@@ -581,5 +612,29 @@ html:not(.js) [data-money-js] {
 	.proposal-loop .switch-knob,
 	.proposal-loop .switch-track {
 		animation: none;
+	}
+}
+
+/*
+ * A Select-mode list load (#215). While htmx marks the selection form (.selection-list.htmx-request,
+ * from LIST_LOAD_PAUSE), a round tick can't be tapped or reached: its label takes no taps, and its
+ * checkbox is hidden, so it leaves the keyboard's order. It stays checked, and hx-include still sends
+ * it. The round marks drop to 40% once the load has run for --duration-pause: a step timing holds the
+ * mark at full ink for the whole token and then drops it, so there is no fade, and a reply that lands
+ * sooner replaces the rows before the drop shows. Reduced motion ends the transition (below).
+ */
+.selection-list.htmx-request label:has(> input[name="ids"]) {
+	pointer-events: none;
+}
+.selection-list.htmx-request input[name="ids"] {
+	visibility: hidden;
+}
+.selection-list.htmx-request .selection-mark {
+	opacity: 0.4;
+	transition: opacity var(--duration-pause) step-end;
+}
+@media (prefers-reduced-motion: reduce) {
+	.selection-list.htmx-request .selection-mark {
+		transition: none;
 	}
 }

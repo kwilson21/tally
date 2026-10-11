@@ -343,6 +343,7 @@ describe("data exports", () => {
 				"active",
 				"amount_cents",
 				"anchor_month",
+				"anchor_date",
 				"category_id",
 				"due_day",
 				"frequency",
