@@ -334,6 +334,70 @@ describe("cash delete undo", () => {
 		expect(feedback.toast.message).toBe("That cash entry is already back.");
 	});
 
+	it("restores an entry whose For person was removed during the Undo window, with no person", async () => {
+		const id = await cashEntry();
+		const entry = await env.DB.prepare(
+			"SELECT raw_name, date, amount_cents, account_id FROM transactions WHERE id = ?",
+		)
+			.bind(id)
+			.first<{
+				raw_name: string;
+				date: string;
+				amount_cents: number;
+				account_id: number;
+			}>();
+		if (!entry) throw new Error("cash entry missing");
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people (name) VALUES ('Sam')",
+		).run();
+		const personId = Number(person.meta.last_row_id);
+		await env.DB.prepare(
+			"UPDATE transactions SET for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
+		)
+			.bind(personId, id)
+			.run();
+		const deleted = await deleteRequest(id, env.DB);
+		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
+			.undo as string;
+		const removed = await request("/settings/people", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				action: "remove",
+				person_id: String(personId),
+			}),
+		});
+		expect(removed.res.status).toBe(200);
+
+		const restored = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back: "/transactions" }),
+		});
+		const feedback = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}");
+		expect(feedback.announce).toMatch(/ is back\.$/);
+		expect(feedback.toast.message).not.toBe(
+			"Undo expired. The cash entry stays deleted.",
+		);
+		// A restore takes new ids, so the entry is found by what it was.
+		expect(
+			await env.DB.prepare(
+				`SELECT for_person_id, for_person_guessed FROM transactions
+				WHERE raw_name = ? AND date = ? AND amount_cents = ? AND account_id = ?`,
+			)
+				.bind(entry.raw_name, entry.date, entry.amount_cents, entry.account_id)
+				.first(),
+		).toEqual({ for_person_id: null, for_person_guessed: 0 });
+	});
+
 	it("clears undo holds on demo reset and leaves the deleted entry expired", async () => {
 		const id = await cashEntry();
 		const deleted = await deleteRequest(id, env.DB);

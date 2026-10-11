@@ -40,6 +40,7 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	FOR_PERSON_ERROR,
 	followsPurchaseAfterSave,
 	parseEdit,
 	postedCredit,
@@ -2616,8 +2617,13 @@ async function savePanel(
 	);
 
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
-	// when the amount broke its parts, so the panel offers Change the parts for that amount.
-	const showErrors = (errors: EditErrors, changePartsTotalCents?: number) => {
+	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
+	// is the household as it is now, used when a For person was removed during the save.
+	const showErrors = (
+		errors: EditErrors,
+		changePartsTotalCents?: number,
+		shownPeople: HouseholdPerson[] = people,
+	) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
 			alwaysForMerchant: form.get("always") === "1",
@@ -2650,7 +2656,7 @@ async function savePanel(
 					tx={tx}
 					back={back}
 					categories={all}
-					people={people}
+					people={shownPeople}
 					values={values}
 					refunds={refunds}
 					errors={errors}
@@ -2723,7 +2729,18 @@ async function savePanel(
 		},
 		actor(c),
 	);
-	if (!result.saved)
+	if (!result.saved) {
+		if ("personMissing" in result)
+			// Removed since this page loaded the household: the panel shows the household as it is now.
+			return showErrors(
+				{ forPerson: FOR_PERSON_ERROR },
+				undefined,
+				(
+					await c.env.DB.prepare(
+						"SELECT id, name FROM household_people ORDER BY id",
+					).all<HouseholdPerson>()
+				).results,
+			);
 		return "refundLeftCents" in result
 			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
 			: result.cashError === "split"
@@ -2731,6 +2748,7 @@ async function savePanel(
 				: showErrors({
 						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
+	}
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
