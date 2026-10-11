@@ -80,6 +80,7 @@ import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_SET_CATEGORY,
+	LIST_LOAD_PAUSE,
 	SELECTION_BAR_OOB,
 	SelectAllOnPage,
 	SelectionActionBar,
@@ -275,9 +276,13 @@ async function renderList(
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
-	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked.
+	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked, and
+	// its controls pause while it loads (LIST_LOAD_PAUSE).
 	const includeTicked = selecting
-		? { "hx-include": "#selection-form input[name=ids]:checked" }
+		? {
+				"hx-include": "#selection-form input[name=ids]:checked",
+				...LIST_LOAD_PAUSE,
+			}
 		: {};
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
@@ -563,11 +568,13 @@ async function renderList(
 						id="selection-form"
 						aria-label="Select transactions"
 						method="post"
-						class="pb-40"
+						class="selection-list pb-40"
 						hx-get="/transactions/select/count"
 						hx-trigger="load, change"
-						// A list change (filter, page or Select all) replaces any count in flight, so an older count can't overwrite the newer list's bar. Known gap: a tick made while a list request is loading queues a count from the old page's ids, which lands after the list (a follow-up; closing it means disabling the checkboxes while a list request runs).
+						// A list change (filter, page or Select all) replaces any count in flight, so an older count can't overwrite the newer list's bar. A list load pauses the ticks, so no count can start from a page that is leaving.
 						hx-sync="#filters:queue last"
+						// The count's own indicator: marking the form would pause the ticks during every count.
+						hx-indicator="#selected-count"
 						hx-target="#selected-count"
 						hx-swap="innerHTML"
 					>

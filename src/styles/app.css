@@ -59,6 +59,7 @@
 
 	/* How long each move takes (DESIGN.md, Motion). A rule names one of these, never a length. */
 	--duration-confirm: 150ms; /* a confirmation: the switch, a toast arriving, a page cross-fading */
+	--duration-pause: 150ms; /* how long a Select-mode list load runs before its round marks fade */
 	--duration-rising: 200ms; /* something rising or sliding in: the sheet, the desktop panel */
 	--duration-shake: 300ms; /* a field with an error, once */
 	--duration-slow: 600ms; /* a budget bar filling on load */
@@ -582,4 +583,23 @@ html:not(.js) [data-money-js] {
 	.proposal-loop .switch-track {
 		animation: none;
 	}
+}
+
+/*
+ * A Select-mode list load (#215). While htmx marks the selection form (.selection-list.htmx-request,
+ * from LIST_LOAD_PAUSE), a round tick can't be tapped or reached: its label takes no taps, and its
+ * checkbox is hidden, so it leaves the keyboard's order. It stays checked, and hx-include still sends
+ * it. Once the load runs past --duration-pause the round marks fade to 40%. The fade has no length of
+ * its own (the transition lasts 0s and waits the token), so it snaps, and a reply that lands sooner
+ * replaces the rows before it shows. Nothing moves, so reduced motion needs no rule here.
+ */
+.selection-list.htmx-request label:has(> input[name="ids"]) {
+	pointer-events: none;
+}
+.selection-list.htmx-request input[name="ids"] {
+	visibility: hidden;
+}
+.selection-list.htmx-request .selection-mark {
+	opacity: 0.4;
+	transition: opacity 0s var(--duration-pause);
 }

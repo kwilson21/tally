@@ -1683,6 +1683,7 @@ function Rows() {
 					"SelectionActionBar",
 					"SelectAllOnPage",
 					"SelectionActionButtons",
+					"SelectableTransactionRow",
 					"Button",
 				]}
 				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it that ticks every row on the page (“Select all 25”) until every row is ticked, and Set category and Exclude on a second line (P70 A and P81 A)."
@@ -1716,6 +1717,33 @@ function Rows() {
 							ticked={new Set()}
 							disabled
 						/>
+					</div>
+				</State>
+				<State label="A list loading: ticks paused, marks at 40%, actions disabled">
+					<div class="selection-list htmx-request max-w-xl" inert>
+						<ul>
+							{TRANSACTION_ROWS.slice(0, 1).map((state) => (
+								<SelectableTransactionRow row={state.row} />
+							))}
+							{TRANSACTION_ROWS.slice(1, 2).map((state) => (
+								<SelectableTransactionRow row={state.row} checked />
+							))}
+						</ul>
+						<div class="border-t border-ink bg-paper py-3">
+							<SelectionActionBar
+								label="1 selected"
+								href="/transactions?select=1"
+								pageIds={TRANSACTION_ROWS.slice(0, 2).map(
+									(state) => state.row.id,
+								)}
+								ticked={
+									new Set(
+										TRANSACTION_ROWS.slice(1, 2).map((state) => state.row.id),
+									)
+								}
+								disabled
+							/>
+						</div>
 					</div>
 				</State>
 			</Specimen>

@@ -14,6 +14,15 @@ export const SELECTION_BAR_OOB =
  */
 export const FOCUS_SET_CATEGORY = "set-category-selection";
 
+/**
+ * The attributes a Select-mode list request carries: htmx marks the selection form while it loads (its
+ * ticks pause with it, in CSS) and disables the two actions until the reply lands.
+ */
+export const LIST_LOAD_PAUSE = {
+	"hx-indicator": "#selection-form",
+	"hx-disable": "#set-category-selection, #exclude-selection",
+};
+
 /** The bar's two actions. Out of band, a count's reply swaps them in place; each keeps its own request otherwise. */
 export function SelectionActionButtons({
 	disabled = false,
@@ -96,6 +105,7 @@ export function SelectAllOnPage({
 					class="-mr-2"
 					// href always has a query (selectModeHref), so the marker joins with &.
 					hx-get={`${href}&focus=${FOCUS_SET_CATEGORY}`}
+					{...LIST_LOAD_PAUSE}
 					hx-sync="#filters:replace"
 					hx-target="#results"
 					hx-select="#results > *"

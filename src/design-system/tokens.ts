@@ -110,6 +110,11 @@ export const DURATION_TOKENS = [
 		use: "a confirmation: the switch's knob, a toast arriving, a page cross-fading",
 	},
 	{
+		name: "pause",
+		value: "150ms",
+		use: "how long a Select-mode list load runs before its round marks fade to 40%; it moves nothing",
+	},
+	{
 		name: "rising",
 		value: "200ms",
 		use: "something rising or sliding in: the sheet, the desktop panel, the backdrop",
