@@ -489,10 +489,12 @@ describe("saveSuggestion", () => {
 			"person",
 		);
 		await db.prepare("DROP TRIGGER take_name_during_create").run();
+		// The name was made during the write, so the ticked ones join that category (decision 101); no duplicate.
 		expect(result).toMatchObject({
-			ok: false,
-			reason: "invalid",
-			error: "That name is taken.",
+			ok: true,
+			name: "Subscriptions",
+			attached: true,
+			moved: 4,
 		});
 		expect(
 			await db
@@ -856,25 +858,51 @@ describe("createFromSuggestion", () => {
 		expect(result).toMatchObject({ ok: true, leftOut: [late] });
 	});
 
-	it("refuses a name a category already has, in any capitals, archived ones too, and creates nothing", async () => {
+	it("refuses a name only an archived category has, and creates nothing", async () => {
 		const { id, made } = await pending();
 		await db
 			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
 			.run();
-		for (const taken of ["groceries", "GAS"]) {
-			await db
-				.prepare("UPDATE category_suggestions SET name = ? WHERE id = ?")
-				.bind(taken, id)
-				.run();
-			const result = await createFromSuggestion(
-				db,
-				id,
-				{ ticked: made, shown: made, notes: {} },
-				"person",
-			);
-			expect(result).toMatchObject({ ok: false, reason: "invalid" });
-		}
+		await db
+			.prepare("UPDATE category_suggestions SET name = 'GAS' WHERE id = ?")
+			.bind(id)
+			.run();
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		expect(result).toMatchObject({
+			ok: false,
+			reason: "invalid",
+			error: "An archived category has that name. Restore it instead.",
+		});
 		expect(await suggestion(id)).toMatchObject({ status: "pending" });
+	});
+
+	it("adds the ticked ones to the active category with that name, in any capitals, instead of making one", async () => {
+		const { id, made } = await pending();
+		await db
+			.prepare(
+				"UPDATE category_suggestions SET name = 'groceries' WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		const count = (await categories()).length;
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: made, shown: made, notes: {} },
+			"person",
+		);
+		expect(result).toMatchObject({
+			ok: true,
+			attached: true,
+			moved: made.length,
+		});
+		expect((await categories()).length).toBe(count);
+		expect(await suggestion(id)).toMatchObject({ status: "created" });
 	});
 
 	it("refuses when 50 categories are active already", async () => {

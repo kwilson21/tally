@@ -4,6 +4,8 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
+import { categoryNames, makeCategory } from "../db/categories";
+import { addLikely, likelyTransactions } from "../db/likely-transactions";
 import {
 	type FirstVisit,
 	firstVisitState,
@@ -22,6 +24,7 @@ import {
 	type TransactionDetail,
 } from "../db/transactions";
 import { formatCents } from "../money";
+import { nameForm, parseCategory } from "../settings/category-form";
 import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
 import {
 	type CashValues,
@@ -67,6 +70,7 @@ import type { HouseholdPerson } from "../views/household-people";
 import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
+import { LikelyAdd, LikelySheet } from "../views/likely-transactions";
 import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
@@ -78,6 +82,11 @@ import {
 	SUGGESTED_NAME_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
+import {
+	NEW_CATEGORY_GROUP,
+	NewCategoryChip,
+	NewCategoryName,
+} from "../views/new-category-choice";
 import { PendingNote } from "../views/pending-note";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
@@ -1061,6 +1070,20 @@ function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
 	);
 }
 
+/**
+ * Closing a sheet swaps the list back in and returns focus to this transaction's row; the pushed URL
+ * stays clean.
+ */
+function listCloseAttrs(back: string, id: number): Record<string, string> {
+	return {
+		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${id}`,
+		"hx-target": "#page",
+		"hx-select": "#page",
+		"hx-swap": "outerHTML",
+		"hx-push-url": back,
+	};
+}
+
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
 function EditSheet({
 	tx,
@@ -1077,14 +1100,7 @@ function EditSheet({
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
-	// Closing swaps the list back in and returns focus to this row; the pushed URL stays clean.
-	const closeAttrs = {
-		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${tx.id}`,
-		"hx-target": "#page",
-		"hx-select": "#page",
-		"hx-swap": "outerHTML",
-		"hx-push-url": back,
-	};
+	const closeAttrs = listCloseAttrs(back, tx.id);
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
 	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
@@ -1465,7 +1481,7 @@ function EditSheet({
 					</div>
 				)}
 				<fieldset
-					class="flex flex-col gap-2"
+					class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
 					disabled={purchase !== undefined}
 					aria-describedby={errors.category ? "category-error" : undefined}
 				>
@@ -1509,7 +1525,17 @@ function EditSheet({
 								{cat.name}
 							</Chip>
 						))}
+						<NewCategoryChip
+							checked={!purchase && values.newCategory === true}
+						/>
 					</div>
+					{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
+					<NewCategoryName
+						id="new-category-name"
+						value={values.newCategoryName ?? ""}
+						hint="Added to your categories and used for this transaction."
+						error={errors.newCategory}
+					/>
 					{purchase && (
 						<p class="text-sm text-muted">
 							{purchaseCategory
@@ -2205,6 +2231,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		followsPurchaseAfterSave(tx, { refundOfId, ...postedCredit(form) })
 	) {
 		form.delete("category");
+		form.delete("new_category_name");
 		form.delete("always");
 	}
 	// A name chip counts only while it is still offered: the panel may have been opened before "Suggest store
@@ -2231,6 +2258,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const showErrors = (errors: EditErrors) => {
 		const values: Edit = {
 			categoryId: Number(form.get("category")) || null,
+			newCategory: form.get("category") === "new",
+			newCategoryName: form.get("new_category_name")?.toString() ?? "",
 			alwaysForMerchant: form.get("always") === "1",
 			alwaysWas: form.get("always_was") === "1",
 			merchantRuleWas: Number(form.get("rule_category_was")) || null,
@@ -2273,11 +2302,31 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		});
 	};
 
-	if (!parsed.ok || !refundOk)
+	// "New category" (decision 101): the name under the chips is checked here, and the category is made only
+	// once every other check has passed, so a taken name or a full list saves nothing.
+	const choseNew = form.get("category") === "new";
+	const named = choseNew
+		? parseCategory(
+				nameForm(form.get("new_category_name")),
+				await categoryNames(c.env.DB),
+				null,
+			)
+		: null;
+	const newCategoryError = named && !named.ok ? named.errors.name : undefined;
+	if (!parsed.ok || !refundOk || newCategoryError)
 		return showErrors({
 			...(parsed.ok ? {} : parsed.errors),
 			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
+			...(newCategoryError ? { newCategory: newCategoryError } : {}),
 		});
+	let edit: Edit = parsed.value;
+	let made: { id: number; name: string } | null = null;
+	if (named?.ok) {
+		const created = await makeCategory(c.env.DB, named.value);
+		if (!created.ok) return showErrors({ newCategory: created.error });
+		edit = { ...parsed.value, categoryId: created.id };
+		made = { id: created.id, name: named.value.name };
+	}
 
 	// The link is written only when it changes. A refund that is more than what's left of its
 	// purchase is refused by the write itself, with nothing saved (spec §8.5).
@@ -2285,7 +2334,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		c.env.DB,
 		tx.id,
 		{
-			...parsed.value,
+			...edit,
 			refundOfId: refundOfId === current ? undefined : refundOfId,
 		},
 		actor(c),
@@ -2309,7 +2358,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	if (
 		(addedName || addedNote || changedDetails) &&
 		tx.categoryId === null &&
-		parsed.value.categoryId === null
+		edit.categoryId === null
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
@@ -2321,9 +2370,8 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		(tx.nameSuggested && !parsed.value.keepBankName
 			? tx.displayName
 			: tidyName(tx.rawName));
-	const category = categories.find(
-		(cat) => cat.id === parsed.value.categoryId,
-	)?.name;
+	const category =
+		made?.name ?? categories.find((cat) => cat.id === edit.categoryId)?.name;
 	const saved = category
 		? `Saved. ${name} is now ${category}.`
 		: `Saved ${name}.`;
@@ -2352,7 +2400,90 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
+	// A category made here offers the transactions that might belong in it, when there are any (decision 76).
+	const created = made;
+	const likely = created
+		? await likelyTransactions(c.env.DB, tx.id, created.name, today)
+		: [];
+	if (created && likely.length > 0)
+		return renderList(c, today, filters, {
+			sheet: () => (
+				<LikelySheet
+					savedId={tx.id}
+					savedDate={tx.date}
+					savedCents={tx.amountCents}
+					back={back}
+					closeAttrs={listCloseAttrs(back, tx.id)}
+					categoryId={created.id}
+					categoryName={created.name}
+					rows={likely}
+					ticked={
+						new Set(
+							likely.filter((row) => row.sameMerchant).map((row) => row.id),
+						)
+					}
+					today={today}
+				/>
+			),
+		});
 	return renderList(c, today, filters, { focusId: tx.id });
+});
+
+/** A live category a likely-transactions form names, or null. */
+async function liveCategory(db: D1Database, value: string | File | null) {
+	const id = Number(value);
+	if (!Number.isInteger(id) || id <= 0) return null;
+	return db
+		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
+		.bind(id)
+		.first<{ id: number; name: string }>();
+}
+
+// The likely transactions after a new category (decision 76): Add files the ticked ones, and only them.
+transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const today = await householdToday(c.env.DB);
+	const filters = filtersFrom(c, today, back);
+	const category = await liveCategory(c.env.DB, form.get("category"));
+	if (!category) return renderList(c, today, filters, { focusId: tx.id });
+	const moved = await addLikely(c.env.DB, {
+		savedId: tx.id,
+		categoryId: category.id,
+		categoryName: category.name,
+		ticked: form.getAll("ids").map(Number),
+		today,
+		actor: actor(c),
+	});
+	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const message = `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
+	c.header(
+		"HX-Trigger",
+		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+	);
+	c.header("HX-Push-Url", back);
+	return renderList(c, today, filters, { focusId: tx.id });
+});
+
+// A tick on the likely panel redraws only its Add count, so the number follows the ticks.
+transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	const today = await householdToday(c.env.DB);
+	const category = await liveCategory(c.env.DB, form.get("category"));
+	if (!category) return c.notFound();
+	const ticked = new Set(form.getAll("ids").map(Number));
+	const offered = await likelyTransactions(
+		c.env.DB,
+		tx.id,
+		category.name,
+		today,
+	);
+	const count = offered.filter((row) => ticked.has(row.id)).length;
+	return c.html(<LikelyAdd count={count} categoryName={category.name} />);
 });
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {

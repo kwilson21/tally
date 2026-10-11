@@ -1,4 +1,5 @@
 import { JEV_THRESHOLD } from "../ai/categorize";
+import { fullMessage, MAX_ACTIVE } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { merchantKeySql } from "./merchant-key";
 import type { ListRow } from "./transactions";
@@ -221,7 +222,14 @@ export async function pendingSuggestions(
 }
 
 export type CreateResult =
-	| { ok: true; name: string; moved: number; leftOut: number[] }
+	/** `attached` is true when a category the family already had with that name took the ticks (decision 101). */
+	| {
+			ok: true;
+			name: string;
+			moved: number;
+			leftOut: number[];
+			attached: boolean;
+	  }
 	| { ok: false; reason: "gone" | "invalid"; error?: string };
 export async function createFromSuggestion(
 	db: D1Database,
@@ -258,24 +266,35 @@ export async function createFromSuggestion(
 			reason: "invalid",
 			error: "Keep each note under 500 characters.",
 		};
+	// A category the family already has with this name takes the ticked transactions ("Add to", decision
+	// 101), instead of a new one. An archived one can't take them: it is restored first.
 	const count = await db
 		.prepare(
-			"SELECT COUNT(*) n, COUNT(CASE WHEN archived=0 THEN 1 END) active, COALESCE(MAX(sort_order),0) last, MAX(name=? COLLATE NOCASE) conflict FROM categories",
+			`SELECT COUNT(*) n, COUNT(CASE WHEN archived=0 THEN 1 END) active, COALESCE(MAX(sort_order),0) last,
+				MAX(CASE WHEN name=?1 COLLATE NOCASE THEN id END) existingId,
+				MAX(CASE WHEN name=?1 COLLATE NOCASE THEN archived END) existingArchived
+			FROM categories`,
 		)
 		.bind(name)
-		.first<{ n: number; active: number; last: number; conflict: number }>();
-	if (count?.conflict)
+		.first<{
+			n: number;
+			active: number;
+			last: number;
+			existingId: number | null;
+			existingArchived: number | null;
+		}>();
+	const existing =
+		count?.existingId == null
+			? null
+			: { id: count.existingId, archived: count.existingArchived ?? 0 };
+	if (existing?.archived)
 		return {
 			ok: false,
 			reason: "invalid",
-			error: "That name is reserved for Jev.",
+			error: "An archived category has that name. Restore it instead.",
 		};
-	if ((count?.active ?? 0) >= 50)
-		return {
-			ok: false,
-			reason: "invalid",
-			error: "Tally has room for 50 categories. Archive one to add another.",
-		};
+	if (!existing && (count?.active ?? 0) >= MAX_ACTIVE)
+		return { ok: false, reason: "invalid", error: fullMessage("add") };
 	const notes = Object.entries(input.notes)
 		.filter(
 			([tx, note]) =>
@@ -314,9 +333,11 @@ export async function createFromSuggestion(
 				),
 			db
 				.prepare(
-					"UPDATE category_suggestions SET status='created' WHERE id=? AND status='pending' AND decided_at=? AND changes()>0",
+					`UPDATE category_suggestions SET status='created' WHERE id=? AND status='pending' AND decided_at=?
+					AND EXISTS (SELECT 1 FROM categories WHERE name=? COLLATE NOCASE AND archived=0)
+					AND EXISTS (SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 				)
-				.bind(id, token),
+				.bind(id, token, name, id, JSON.stringify(ticked)),
 			db
 				.prepare(
 					`UPDATE transactions SET category_id=(SELECT id FROM categories WHERE name=? COLLATE NOCASE),category_source='user',category_confidence=NULL,jev_none_fit=0,category_suggestion_id=NULL,updated_by=?,updated_at=datetime('now') WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
@@ -360,22 +381,20 @@ export async function createFromSuggestion(
 			.first<{ status: string }>();
 		if (stillPending?.status !== "pending")
 			return { ok: false, reason: "gone" };
-		const currentCount = await db
-			.prepare("SELECT COUNT(*) n FROM categories WHERE archived=0")
-			.first<{ n: number }>();
-		if ((currentCount?.n ?? 0) >= 50)
-			return {
-				ok: false,
-				reason: "invalid",
-				error: "Tally has room for 50 categories. Archive one to add another.",
-			};
-		if (
-			await db
-				.prepare("SELECT 1 FROM categories WHERE name=? COLLATE NOCASE")
-				.bind(name)
-				.first()
-		)
-			return { ok: false, reason: "invalid", error: "That name is taken." };
+		if (!existing) {
+			const currentCount = await db
+				.prepare("SELECT COUNT(*) n FROM categories WHERE archived=0")
+				.first<{ n: number }>();
+			if ((currentCount?.n ?? 0) >= MAX_ACTIVE)
+				return { ok: false, reason: "invalid", error: fullMessage("add") };
+			if (
+				await db
+					.prepare("SELECT 1 FROM categories WHERE name=? COLLATE NOCASE")
+					.bind(name)
+					.first()
+			)
+				return { ok: false, reason: "invalid", error: "That name is taken." };
+		}
 		return {
 			ok: false,
 			reason: "invalid",
@@ -388,6 +407,8 @@ export async function createFromSuggestion(
 		name,
 		moved: results[3]?.meta.changes ?? 0,
 		leftOut: leftOut.map((row) => row.id),
+		// The write made no category, so the ticks joined one the family already had (or one made during the write).
+		attached: (results[1]?.meta.changes ?? 0) === 0,
 	};
 }
 

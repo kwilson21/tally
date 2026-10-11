@@ -39,6 +39,7 @@ import {
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
+import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
@@ -474,6 +475,8 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	).all<{ id: number; name: string }>();
 	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
+	// A suggestion whose name a category already has is added to it, not made again (decision 101).
+	const activeNames = new Set(active.map((cat) => cat.name.toLowerCase()));
 	const rulesSearch =
 		view.rulesSearch ??
 		new URL(c.req.url).searchParams.get("rules_search") ??
@@ -538,6 +541,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					{categorySuggestions.map((suggestion) => (
 						<CategorySuggestionCard
 							suggestion={suggestion}
+							existing={activeNames.has(
+								tidyName(suggestion.name).toLowerCase(),
+							)}
 							error={
 								view.suggestionValues?.id === suggestion.id
 									? view.suggestionError
@@ -810,7 +816,10 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		);
 	const out = result.leftOut.length;
 	const count = result.moved;
-	const message = `Created ${result.name} with ${count} transaction${count === 1 ? "" : "s"}`;
+	const transactions = `${count} transaction${count === 1 ? "" : "s"}`;
+	const message = result.attached
+		? `Added ${transactions} to ${result.name}`
+		: `Created ${result.name} with ${transactions}`;
 	return done(
 		c,
 		message,

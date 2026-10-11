@@ -12,6 +12,7 @@ export function SelectableTransactionRow({
 	autofocus = false,
 	today = todayIn(DEFAULT_TIME_ZONE),
 	after,
+	reason,
 }: {
 	row: ListRow;
 	/** Ticked already (coming back from the Set category sheet). */
@@ -22,6 +23,12 @@ export function SelectableTransactionRow({
 	today?: string;
 	/** Optional content below the row, shown when this row is unchecked. */
 	after?: Child;
+	/**
+	 * The reason under the row, in muted words, lined up with its name (the likely-transactions panel: a
+	 * same-merchant fact, or Tally's guess with its Why? link). It sits outside the label, so a link in it
+	 * doesn't toggle the tick.
+	 */
+	reason?: Child;
 }) {
 	const nameId = `select-${row.id}-name`;
 	return (
@@ -54,6 +61,11 @@ export function SelectableTransactionRow({
 					<TransactionRow row={row} bare />
 				</span>
 			</label>
+			{reason && (
+				<div class="flex flex-wrap items-center gap-x-2 pb-2 pl-21 text-sm text-muted">
+					{reason}
+				</div>
+			)}
 			{after}
 		</li>
 	);

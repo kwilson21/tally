@@ -23,6 +23,13 @@ const same = (a: string, b: string) =>
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
 
+/** A form that holds one category name, as parseCategory reads it (a New category name typed in a panel). */
+export function nameForm(name: string | File | null): FormData {
+	const form = new FormData();
+	form.set("name", String(name ?? ""));
+	return form;
+}
+
 /** Reads the add or rename form. `id` is the category being renamed, or null when adding one. */
 export function parseCategory(
 	form: FormData,

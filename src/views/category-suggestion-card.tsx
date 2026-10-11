@@ -11,11 +11,14 @@ export function CategorySuggestionCard({
 	error,
 	ticked,
 	notes,
+	existing = false,
 }: {
 	suggestion: PendingSuggestion;
 	error?: string;
 	ticked?: number[];
 	notes?: Record<number, string>;
+	/** The family has made this category already, so the ticked transactions are added to it (decision 101). */
+	existing?: boolean;
 }) {
 	return (
 		<details
@@ -77,7 +80,7 @@ export function CategorySuggestionCard({
 				</ul>
 				<div class="flex flex-wrap items-center gap-2 py-3">
 					<Button kind="secondary" type="submit" name="action" value="create">
-						Create {suggestion.name}
+						{existing ? "Add to" : "Create"} {suggestion.name}
 					</Button>
 					<Button
 						kind="text"
