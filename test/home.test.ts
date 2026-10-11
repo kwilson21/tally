@@ -647,3 +647,26 @@ describe("GET / with no categories", () => {
 		expect(html).toMatch(/<a[^>]*href="\/settings"[^>]*>Open Settings<\/a>/);
 	});
 });
+
+describe("GET /?month= before a linked refund's date", () => {
+	beforeEach(async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+		]);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (330, 1, '2026-04-10', 1000, 'APRIL', 1), (331, 1, '2026-05-05', 2000, 'MAY', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, credit_reviewed, refund_of_id) VALUES (332, 1, '2026-01-15', -500, 'REFUND', 1, 1, 331)",
+			),
+		]);
+	});
+
+	it("opens April as a finished month when April has counted spending", async () => {
+		const { html } = await homeAt("2026-04");
+		expect(html).toContain("April ended");
+	});
+});

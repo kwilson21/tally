@@ -78,11 +78,14 @@ export function monthName(month: string): string {
 	return MONTHS[Number(month.slice(5, 7)) - 1] ?? month;
 }
 
-/** The month `n` months before 'YYYY-MM' ("2026-01", 1 → "2025-12"); a negative `n` goes forward. */
+/**
+ * The month `n` months before 'YYYY-MM' ("2026-01", 1 → "2025-12"); a negative `n` goes forward. The year
+ * keeps four digits ("0100-01", 1 → "0099-12").
+ */
 export function monthsBefore(month: string, n: number): string {
 	const [year = 0, m = 1] = month.split("-").map(Number);
 	const index = year * 12 + (m - 1) - n;
-	return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;
+	return `${String(Math.floor(index / 12)).padStart(4, "0")}-${String((index % 12) + 1).padStart(2, "0")}`;
 }
 
 /** How many days 'YYYY-MM' has (28 to 31; leap years counted). */

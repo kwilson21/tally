@@ -26,6 +26,7 @@ const TABLES_CHILD_FIRST = [
 	"category_suggestions",
 	"bills",
 	"budget_amounts",
+	"category_archive_periods",
 	"savings_goal_amounts",
 	"merchants",
 	"categories",
