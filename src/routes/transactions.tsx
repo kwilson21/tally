@@ -3128,12 +3128,12 @@ async function savePanel(
 	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
 	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
-		edit: parsed.value,
+		edit,
 		current: {
 			categoryId: tx.categoryId,
 			categorySource: tx.categorySource,
 		},
-		postedCategory: parsed.value.categoryId,
+		postedCategory: edit.categoryId,
 		row: {
 			included: !excludedNow || tx.paysBill === true,
 			isSplit: tx.isSplit === true,
