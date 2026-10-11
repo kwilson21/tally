@@ -22,6 +22,7 @@ import {
 	removeSplit,
 	saveEdit,
 	saveSplit,
+	selectableTickIds,
 	type TransactionDetail,
 } from "../db/transactions";
 import { centsToAmount, formatCents } from "../money";
@@ -310,6 +311,23 @@ async function renderList(
 		if (selecting) params.set("select", "1");
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
+	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
+	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
+	const onPage = new Set(pageIds);
+	// A tick stays until it is unticked, Done or acted on, so a tick that isn't on this page is drawn in
+	// the bar's "not on this page" line, still ticked (#350). Only rows that still exist are counted.
+	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
+	const offPage = selecting
+		? await listRowsByIds(
+				c.env.DB,
+				[...checkedIds].filter((id) => !onPage.has(id)),
+			)
+		: [];
+	// Every tick the list keeps, on this page or not: the address, the links, the bar and the limit all read these.
+	// A tick to a row that is gone, or is now a split, drops out here, whichever caller drew the list (#350).
+	const kept = new Set([...ticked, ...offPage].map((row) => row.id));
+	const ticks = [...checkedIds].filter((id) => kept.has(id));
+	const tickCount = ticks.length;
 	const pageHref = (n: number) => listUrl({ ...filters, page: n });
 	// "Only October" narrows a search that runs in every month to this month, and keeps the search (#211).
 	const onlyMonthHref = listUrl({
@@ -330,8 +348,8 @@ async function renderList(
 	// Without JavaScript a page link's address carries the ticks, so the next page keeps them (#350). The
 	// htmx request doesn't use this address: it sends the ticks as they are when clicked, not as drawn.
 	const pageLinkHref = (n: number) =>
-		selecting && checkedIds.size > 0
-			? `${pageHref(n)}&ids=${[...checkedIds].join(",")}`
+		selecting && ticks.length > 0
+			? `${pageHref(n)}&ids=${ticks.join(",")}`
 			: pageHref(n);
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
@@ -394,22 +412,6 @@ async function renderList(
 			<WhyLink section="names" topic="suggested name" />
 		</p>
 	) : null;
-	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
-	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
-	const onPage = new Set(pageIds);
-	// Every tick the list keeps, on this page or not: the address and the links carry all of them, and the
-	// limit counts all of them (#350).
-	const ticks = [...checkedIds];
-	// A tick stays until it is unticked, Done or acted on, so a tick that isn't on this page is drawn in
-	// the bar's "not on this page" line, still ticked (#350). Only rows that still exist are counted.
-	const ticked = rows.filter((row) => !row.isSplit && checkedIds.has(row.id));
-	const offPage = selecting
-		? await listRowsByIds(
-				c.env.DB,
-				ticks.filter((id) => !onPage.has(id)),
-			)
-		: [];
-	const tickCount = ticked.length + offPage.length;
 	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
 	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
 	// The ticks not on this page, under their day headings, in the disclosure (ticked).
@@ -616,9 +618,7 @@ async function renderList(
 					    sends the current ticks itself (TICKS_INCLUDE), so a stale render can't resend them (#350). */}
 					<noscript>
 						{selecting &&
-							[...checkedIds].map((id) => (
-								<input type="hidden" name="ids" value={id} />
-							))}
+							ticks.map((id) => <input type="hidden" name="ids" value={id} />)}
 						<Button type="submit" class="self-start px-4">
 							Apply filters
 						</Button>
@@ -836,37 +836,48 @@ transactions.get("/transactions", async (c) => {
 	// ids in its own address with the ticks it includes (SelectAllOnPage).
 	const selectAll = params.get("focus") === FOCUS_SET_CATEGORY;
 	// Every tick is kept, past 100 too: the bar refuses to act on more than 100, but never trims them (#350).
+	// A tick to a row that is gone, or is now a split, drops out here, before the address and the list read it (#350).
 	const ticks = selecting
-		? parseIds([
-				...params.getAll("ids"),
-				...(selectAll ? params.getAll("page-ids") : []),
-			])
+		? await selectableTickIds(
+				c.env.DB,
+				parseIds([
+					...params.getAll("ids"),
+					...(selectAll ? params.getAll("page-ids") : []),
+				]),
+			)
 		: [];
+	const filters = { ...asked, month };
 	if (c.req.header("HX-Request") === "true") {
-		// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
-		// It is written only when the request's own address names a different month (htmx sends the form's month).
 		const named = monthParam(asked, before, month, thisMonth);
-		const address = new URL(c.req.url);
-		if (named !== address.searchParams.get("month")) {
-			address.searchParams.delete("focus");
-			if (named === null) address.searchParams.delete("month");
-			else address.searchParams.set("month", named);
-			c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+		if (selecting) {
+			// In Select mode the address is written clean (#350): the filters, the month it names (set even when that
+			// is this month, which filtersToQuery leaves out), and the ticks, with no focus marker or page-ids.
+			const query = new URLSearchParams(filtersToQuery(filters, thisMonth));
+			if (named !== null) query.set("month", named);
+			c.header(
+				"HX-Push-Url",
+				selectModeHref(`/transactions${query.size ? `?${query}` : ""}`, ticks),
+			);
+		} else {
+			// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
+			// It is written only when the request's own address names a different month (htmx sends the form's month).
+			const address = new URL(c.req.url);
+			if (named !== address.searchParams.get("month")) {
+				address.searchParams.delete("focus");
+				if (named === null) address.searchParams.delete("month");
+				else address.searchParams.set("month", named);
+				c.header("HX-Push-Url", `${address.pathname}${address.search}`);
+			}
 		}
 	}
-	return renderList(
-		c,
-		today,
-		{ ...asked, month },
-		{
-			focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
-			countFocus: params.get("focus") === "count",
-			selecting,
-			focusSetCategory: selecting && selectAll,
-			focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
-			checkedIds: selecting ? new Set(ticks) : undefined,
-		},
-	);
+	return renderList(c, today, filters, {
+		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		countFocus: params.get("focus") === "count",
+		selecting,
+		focusSetCategory: selecting && selectAll,
+		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
+		checkedIds: selecting ? new Set(ticks) : undefined,
+	});
 });
 
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
@@ -898,18 +909,6 @@ function parseIds(values: (string | File)[]) {
 		}
 	}
 	return [...ids];
-}
-
-async function selectableIds(db: D1Database, ids: number[]) {
-	if (ids.length === 0 || ids.length > MAX_SELECTED) return [];
-	const marks = ids.map(() => "?").join(",");
-	const rows = await db
-		.prepare(
-			`SELECT id FROM transactions WHERE is_split = 0 AND id IN (${marks})`,
-		)
-		.bind(...ids)
-		.all<{ id: number }>();
-	return rows.results.map((row) => row.id);
 }
 
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
@@ -958,14 +957,14 @@ transactions.get("/transactions/select/count", (c) => {
 });
 
 /**
- * The posted ids, or why they can't be acted on. `ticks` are the ticks the list keeps when it is drawn
- * again: a refusal for more than 100 keeps every one of them, and trims none (#350).
+ * The posted ids, or why they can't be acted on. A tick to a row that is gone, or is now a split, drops out
+ * before the limit counts them (#350). `ticks` are the ticks the list keeps when it is drawn again: a refusal
+ * for more than 100 keeps every one of them, and trims none (#350).
  */
 async function postedSelection(c: Context<App>, form: FormData) {
-	const posted = parseIds(form.getAll("ids"));
-	if (posted.length > MAX_SELECTED)
-		return { ids: [], ticks: posted, error: TOO_MANY };
-	const ids = await selectableIds(c.env.DB, posted);
+	const ids = await selectableTickIds(c.env.DB, parseIds(form.getAll("ids")));
+	if (ids.length > MAX_SELECTED)
+		return { ids: [], ticks: ids, error: TOO_MANY };
 	return {
 		ids,
 		ticks: ids,
@@ -2070,7 +2069,9 @@ transactions.get("/transactions/cash/new", async (c) => {
 	// In Select mode the ticks ride in the address (or, from a tap, in the request), and the sheet's close link
 	// and Cancel keep them, so closing the sheet leaves the ticks as they were (#350).
 	const selecting = params.get("select") === "1";
-	const ticks = selecting ? parseIds(params.getAll("ids")) : undefined;
+	const ticks = selecting
+		? await selectableTickIds(c.env.DB, parseIds(params.getAll("ids")))
+		: undefined;
 	const today = await householdToday(c.env.DB);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		pageTitle: "Add cash · Tally",
@@ -2093,7 +2094,9 @@ transactions.post("/transactions/cash", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	// A form drawn in Select mode posts its ticks back, so a refused form keeps them (#350).
 	const selecting = form.get("select") === "1";
-	const ticks = selecting ? parseIds(form.getAll("ids")) : undefined;
+	const ticks = selecting
+		? await selectableTickIds(c.env.DB, parseIds(form.getAll("ids")))
+		: undefined;
 	const today = await householdToday(c.env.DB);
 	const values = cashValues(today, form);
 	const { results: categories } = await c.env.DB.prepare(

@@ -417,6 +417,26 @@ export async function listRowsByIds(
 	return rows;
 }
 
+/**
+ * The given ids that are still rows a bulk action can change (not deleted, not a split parent), in the order
+ * given: the rule listTransactions' `ids` uses, so a stale tick drops out before anything reads it (#350).
+ * One bind for the whole list, so there is no cap on how many.
+ */
+export async function selectableTickIds(
+	db: D1Database,
+	ids: number[],
+): Promise<number[]> {
+	if (ids.length === 0) return [];
+	const { results } = await db
+		.prepare(
+			"SELECT id FROM transactions WHERE is_split = 0 AND id IN (SELECT value FROM json_each(?))",
+		)
+		.bind(JSON.stringify(ids))
+		.all<{ id: number }>();
+	const selectable = new Set(results.map((row) => row.id));
+	return ids.filter((id) => selectable.has(id));
+}
+
 /** How many transactions need a category in a month ('YYYY-MM' or 'all'): the chip and Home's band. */
 export async function needsCategoryCount(
 	db: D1Database,

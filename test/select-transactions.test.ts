@@ -187,6 +187,17 @@ describe("select several transactions", () => {
 			),
 		]);
 
+	/** 101 real rows (ids 5001 to 5101), so a tick on each one exists and the bar can count it. */
+	const addHundredOneRows = async () => {
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 101)
+			INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id)
+			SELECT 5000 + n.i, src.account_id, src.date, -100 - n.i, src.raw_name, src.category_id
+			FROM n, (SELECT account_id,date,raw_name,category_id FROM transactions WHERE id=110) AS src`,
+		).run();
+		return Array.from({ length: 101 }, (_, i) => 5001 + i);
+	};
+
 	it("changes only the posted ids and leaves every other row and the split parent alone", async () => {
 		await splitParent();
 		await env.DB.prepare(
@@ -475,8 +486,8 @@ describe("select several transactions", () => {
 		["/transactions/select/category", {}],
 		["/transactions/select/category/save", { category: "1" }],
 	])("rejects more than 100 ids at %s", async (path, extra) => {
-		const ids = Array.from({ length: 101 }, (_, i) => 1000 + i);
-		ids[0] = 111;
+		// 101 real rows: a missing id drops out before the limit counts (#350), so made-up ids would not reach it.
+		const ids = await addHundredOneRows();
 		const before = await snapshot();
 		const res = await post(
 			path,
@@ -808,6 +819,24 @@ describe("select several transactions", () => {
 			const start = html.indexOf('<form id="selection-form"');
 			return start < 0 ? "" : html.slice(start, html.indexOf("</form>", start));
 		};
+		/** The ids a link or an address carries, once each, in the order written. */
+		const idsIn = (url: string) => [
+			...new Set(
+				new URL(url, "http://tally.test").searchParams
+					.getAll("ids")
+					.flatMap((value) => value.split(","))
+					.filter(Boolean)
+					.map(Number),
+			),
+		];
+		const sorted = (ids: number[]) => [...ids].sort((a, b) => a - b);
+		/** The ids in the no-JS hidden fields of the filter form. */
+		const noscriptIds = (html: string) =>
+			[
+				...(html.match(/<noscript>[\s\S]*?<\/noscript>/g) ?? [])
+					.join("")
+					.matchAll(/name="ids" value="(\d+)"/g),
+			].map((m) => Number(m[1]));
 
 		it("keeps page 1's ticks on page 2, and the bar counts them as not on this page", async () => {
 			const ids = await pageOneTicks();
@@ -1021,17 +1050,6 @@ describe("select several transactions", () => {
 				/<button(?=[^>]*id="set-category-selection")[^>]*\sdisabled(?=[\s>=])/,
 			);
 		});
-
-		/** 101 real rows (ids 5001 to 5101), so a tick on each one exists and the bar can count it. */
-		const addHundredOneRows = async () => {
-			await env.DB.prepare(
-				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 101)
-				INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id)
-				SELECT 5000 + n.i, src.account_id, src.date, -100 - n.i, src.raw_name, src.category_id
-				FROM n, (SELECT account_id,date,raw_name,category_id FROM transactions WHERE id=110) AS src`,
-			).run();
-			return Array.from({ length: 101 }, (_, i) => 5001 + i);
-		};
 
 		it("lists 101 real ticks without trimming any of them", async () => {
 			const ids = await addHundredOneRows();
@@ -1265,6 +1283,165 @@ describe("select several transactions", () => {
 			expect(cashForm).toContain('name="select" value="1"');
 			for (const id of ids)
 				expect(cashForm).toContain(`name="ids" value="${id}"`);
+		});
+
+		it("counts 100 real ticks on a full page load, past a missing one and a split parent, and carries only those into the links", async () => {
+			const real = (await addHundredOneRows()).slice(0, 100);
+			await splitParent();
+			const html = await pageHtml(
+				`month=all&select=1&ids=${ticksParam([...real, 999999, 110])}`,
+			);
+			expect(html).toMatch(/id="selected-count"[^>]*>100 selected/);
+			expect(html).not.toContain("Select 100 or fewer transactions.");
+			expect(html).not.toMatch(
+				/<button(?=[^>]*id="set-category-selection")[^>]*\sdisabled(?=[\s>=])/,
+			);
+			expect(html).not.toMatch(
+				/<button(?=[^>]*id="exclude-selection")[^>]*\sdisabled(?=[\s>=])/,
+			);
+			const links = pageLinks(html);
+			expect(links.length).toBeGreaterThan(0);
+			for (const link of links)
+				expect(sorted(idsIn(attribute(link, "href") ?? ""))).toEqual(
+					sorted(real),
+				);
+			expect(sorted(noscriptIds(html))).toEqual(sorted(real));
+			const addCash = html.match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+			expect(sorted(idsIn(attribute(addCash, "href") ?? ""))).toEqual(
+				sorted(real),
+			);
+			// Select all's address also carries this page's own rows, as it always has; no stale id is in it.
+			const selectAll = idsIn(selectAllHref(html) ?? "");
+			expect(selectAll).not.toContain(999999);
+			expect(selectAll).not.toContain(110);
+			expect(new Set(selectAll)).toEqual(new Set([...real, ...rowIds(html)]));
+		});
+
+		it("pushes only the 100 real ticks into the address on an htmx list change", async () => {
+			const real = (await addHundredOneRows()).slice(0, 100);
+			await splitParent();
+			const res = await request(
+				`/transactions?month=all&select=1&ids=${ticksParam([...real, 999999, 110])}`,
+				htmxHeaders,
+			);
+			const pushed = res.headers.get("HX-Push-Url") ?? "";
+			expect(sorted(idsIn(pushed))).toEqual(sorted(real));
+			expect(pushed).not.toMatch(/focus=|page-ids=/);
+		});
+
+		it("pushes month=all with the ticks when a search is typed into an empty box in Select mode", async () => {
+			const ids = await pageOneTicks();
+			const res = await request(
+				`/transactions?select=1&q=abc&ids=${ticksParam(ids)}`,
+				{
+					headers: {
+						"HX-Request": "true",
+						"HX-Current-URL": "http://tally.test/transactions?select=1",
+					},
+				},
+			);
+			expect(res.headers.get("HX-Push-Url")).toBe(
+				`/transactions?q=abc&month=all&select=1&ids=${ticksParam(ids)}`,
+			);
+		});
+
+		it("names this month in the pushed address when a month picked from an empty box is this one", async () => {
+			const thisMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+			const ids = await pageOneTicks();
+			const res = await request(
+				`/transactions?select=1&q=abc&month=${thisMonth}&ids=${ticksParam(ids)}`,
+				{
+					headers: {
+						"HX-Request": "true",
+						"HX-Current-URL": `http://tally.test/transactions?select=1&month=${thisMonth}`,
+					},
+				},
+			);
+			expect(res.headers.get("HX-Push-Url")).toBe(
+				`/transactions?q=abc&month=${thisMonth}&select=1&ids=${ticksParam(ids)}`,
+			);
+		});
+
+		it("acts on exactly the 100 real ticks when one of 101 posted ids is stale", async () => {
+			const real = (await addHundredOneRows()).slice(0, 100);
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/exclude",
+				form([...real, 999999], { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(200);
+			const after = (await snapshot()) as SnapshotRow[];
+			const changed = after
+				.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
+				.map((row) => row.id);
+			expect(sorted(changed)).toEqual(sorted(real));
+		});
+
+		it("refuses 101 real ticks with one stale among them, says 101 selected and the limit once, in the bar", async () => {
+			const real = await addHundredOneRows();
+			const res = await post(
+				"/transactions/select/exclude",
+				form([...real, 999999], { back: "/transactions?month=all" }),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
+			expect(html.match(/Select 100 or fewer transactions\./g)).toHaveLength(1);
+			expect(html).toMatch(
+				/<div id="selection-limit"[^>]*><p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p><\/div>/,
+			);
+			expect(html).not.toContain('value="999999"');
+		});
+
+		it("leaves a stale tick out of Clear filters' address when the filters match nothing", async () => {
+			const ids = await pageOneTicks();
+			const html = await pageHtml(
+				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam([...ids, 999999])}`,
+			);
+			expect(html).toContain("No transactions match these filters.");
+			const clear = html.match(/<a [^>]*>Clear filters<\/a>/)?.[0] ?? "";
+			expect(idsIn(attribute(clear, "href") ?? "")).toEqual(ids);
+		});
+
+		it("leaves a stale tick out of the Add cash sheet's close link and Cancel", async () => {
+			const ids = await pageOneTicks();
+			const sheetUrl = `/transactions/cash/new?back=${encodeURIComponent("/transactions?month=all")}&select=1&ids=${ticksParam([...ids, 999999])}`;
+			const sheet = await (await request(sheetUrl, htmxHeaders)).text();
+			const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+			expect(idsIn(attribute(backdrop ?? "", "href") ?? "")).toEqual(ids);
+			const cancel = sheet.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+			expect(idsIn(attribute(cancel, "href") ?? "")).toEqual(ids);
+			expect(sheet).not.toContain('value="999999"');
+		});
+
+		it("leaves a stale tick out of a refused Add cash form's fields", async () => {
+			const ids = await pageOneTicks();
+			const res = await post(
+				"/transactions/cash",
+				form([...ids, 999999], {
+					amount: "0",
+					date: todayIn(DEFAULT_TIME_ZONE),
+					merchant: "Corner shop",
+					category: "1",
+					note: "",
+					back: "/transactions?month=all",
+					select: "1",
+				}),
+			);
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(html).not.toContain('value="999999"');
+			const cashForm =
+				html.match(
+					/<form[^>]*action="\/transactions\/cash"[\s\S]*?<\/form>/,
+				)?.[0] ?? "";
+			expect(
+				sorted(
+					[...cashForm.matchAll(/name="ids" value="(\d+)"/g)].map((m) =>
+						Number(m[1]),
+					),
+				),
+			).toEqual(sorted(ids));
 		});
 	});
 });
