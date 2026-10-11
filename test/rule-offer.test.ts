@@ -703,6 +703,47 @@ describe("merchant category rule offer", () => {
 		expect(cash.html).toContain(QUESTION);
 	});
 
+	it("the cash question and the Yes toast name the merchant as the family named it", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE merchants SET display_name = 'Fresh Market' WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.run();
+		const cash = await post("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "10.00",
+			merchant,
+			category: String(groceries),
+			note: "",
+			back: "/transactions",
+		});
+		expect(cash.html).toContain("Always use Groceries for Fresh Market?");
+		expect(cash.html).not.toContain("for rule-offer-store?");
+		expect(announced(cash.res)).toContain(
+			"Always use Groceries for Fresh Market?",
+		);
+		expect(offerFields(cash.html).merchant).toBe("Fresh Market");
+		const yes = await post("/transactions/rule-offer", offerFields(cash.html));
+		expect(
+			JSON.parse(yes.res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("Always use Groceries for Fresh Market.");
+	});
+
+	it("the cash question names a merchant the list tidies, not its raw bank text", async () => {
+		await addPicks("COSTCO", 2, groceries);
+		const cash = await post("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "10.00",
+			merchant: "COSTCO",
+			category: String(groceries),
+			note: "",
+			back: "/transactions",
+		});
+		expect(cash.html).toContain("Always use Groceries for Costco?");
+		expect(cash.html).not.toContain("for COSTCO?");
+	});
+
 	it("does not ask on a third save that also ticks Always for this merchant", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, {

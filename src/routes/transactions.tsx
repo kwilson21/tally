@@ -1968,11 +1968,14 @@ transactions.post("/transactions/cash", async (c) => {
 	const categoryName = categories.find(
 		(category) => category.id === saved.categoryId,
 	)?.name;
+	// The question names the merchant as the family named it, as the Select save does: the name the list
+	// shows for the saved entry, or its tidied bank text when no name is chosen.
+	const savedTx = offerRecord ? await getTransaction(c.env.DB, saved.id) : null;
 	const offer: RuleOfferValue | null =
 		offerRecord && categoryName
 			? {
 					...offerRecord,
-					merchant: saved.merchant,
+					merchant: savedTx?.displayName || tidyName(saved.merchant),
 					category: categoryName,
 					back,
 				}
