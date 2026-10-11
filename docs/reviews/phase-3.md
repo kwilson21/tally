@@ -8,9 +8,9 @@
 
 > In both environments, with seed data for each. Shown in the demo, used by the family.
 
-**Met on `main`; not met in the demo.**
+**Built on `main`; in the demo and production since Oct 10; family use not verified here.** Phase 3 is all on `main`. When this review began, the demo was running a build from before it (finding 1); the owner then had `main` deployed to the demo and production as release `v2026.10.10` (decision 98). Whether the family uses the Phase 3 features isn't checked here, because this review reads no production data; that part of the finish line stays open for the owner.
 - **`main` has all of Phase 3.** A local copy of `main` with the demo seed, reset through its nightly job, returns 200 for `/`, `/transactions`, `/transactions?uncategorized=1`, a transaction's page, `/bills`, a bill's page, `/trends`, `/accounts`, `/settings`, `/more`, `/how-it-works` and `/healthz`, and 404 for an unknown path.
-- **E2E.** All four §11 flows are in `scripts/e2e.mjs`: recategorize (`:270`), split and remove a split (`:414`, `:424`), exclude (`:278`) and change a budget amount (`:338`), plus Add cash, a refund link, Select several and "no console errors". They passed in CI's own run on PR #319, whose tree is identical to `main`'s. CI runs the e2e on pull requests only.
+- **E2E.** All four §11 flows are in `scripts/e2e.mjs`: recategorize (`:270`), split and remove a split (`:414`, `:424`), exclude (`:278`) and change a budget amount (`:338`), plus Add cash, Select several and "no console errors"; for refunds the e2e only opens a seeded refund that is already linked and checks its row, so saving a new link is covered by route tests, not the e2e. They passed in CI's own run on PR #319, whose tree is identical to `main`'s. CI runs the e2e on pull requests only.
 - **Checks.** The latest `main` CI run is green.
 - **The demo is not running Phase 3** (finding 1). The public demo serves a build from before PR #151 (Oct 4): Bills says "This part of Tally isn't built yet.", a bill's page is 404, Accounts returns 500, How Tally works says "the demo adds bills in a later phase", and its newest rows are dated Oct 2. ROADMAP said Phase 3 was "complete on `main` and the demo"; that line is corrected in this PR.
 - **Production** was not checked: this review never reads production (decision 60's deploy after Oct 7 is the owner's).
@@ -24,7 +24,7 @@
 | Splits (P17) | #28 (#152) | Done with gaps. Create, remove, the exact-sum rule, decision 62's bank-correction removal and keeping split parents out of every count are built. Findings 6 and 7. |
 | Find bills (P18) | #156 (#161) | Done with gaps. The Band, the list, Add, Not a bill, the export and the seed match P18. Findings 10, 11 and 12. |
 | Refunds (P19) | #157 (#165) | Done with gaps. Linking from the refund, counting in the purchase's month and category, both captions and the export are built. Findings 8, 15, 16 and 17. |
-| Select several (P20) | #158 (#166) | Done with gaps. All 11 review findings on #166 are fixed; one rule from #165, merged 34 minutes later, never reached it. Finding 16. |
+| Select several (P20) | #158 (#166) | Done with gaps. All 11 review findings on #166 are fixed; one rule from #165, merged 33 minutes after it, never reached it. Finding 16. |
 | Add cash (P21) | #159 (#162) | Done with gaps. The form, the single Cash account, positive cents for spending, dates against the household's today, and delete with a question and a 10-second Undo (decisions 84, 85). Findings 18 and 19. |
 | Seed data | #29 | Done on `main`. The demo is behind (finding 1); finding 20. |
 
@@ -33,7 +33,7 @@
 - **Plaid's sign:** honored by the finder, price offers, refunds and cash; not by the bill payment picker (finding 5).
 - **Dates:** a transaction's date is never converted; every date sum is calendar math on `YYYY-MM-DD`; "today" is the household's.
 - **Page behavior:** every edit sends `HX-Trigger` with `toast` and `announce`; every swap is announced or moves focus, except the bill page's month chips (finding 4) and cash Undo (finding 18); errors use `role="alert"`; controls are 44px.
-- **Security and identity:** Hono's `csrf` guards every post; the actor comes only from the verified Access JWT; no Phase 3 code logs tokens or transaction details.
+- **Security and identity:** Hono's `csrf` guards every post; in production the actor comes only from the verified Access JWT, and in the demo, which has no Access, every edit is recorded as `demo`; no Phase 3 code logs tokens or transaction details.
 
 ## Findings
 
@@ -84,12 +84,12 @@ The owner answered every question from pictures of today's screen beside the opt
 
 ## What went well
 
-- **One counting rule.** Every reader scoped to a month (Home, Trends, the bill page, refunds) uses the same counted-month SQL, so a bill payment or a refund counts in exactly one month everywhere.
+- **One counting rule for the totals.** Home, Trends and refunds count a month through the same counted-month SQL, so a bill payment or a refund counts in exactly one month in every total. The bill page works out the month it shows for a payment separately (`src/routes/bills.tsx` ~1033), so a change to the counting rule must update it too; #329's small fixes carry a note to route it through the shared helper.
 - **Decided by seeing.** Decision 62 settled the two hardest rules (a missed bill, a bank change to a split) from pictures, and the code follows them.
 - **The critical flows are covered.** All four §11 E2E flows, plus Phase 3's own, run on every pull request.
 
 ## Lessons for Phase 4 and 5
 
 1. **A phase isn't shown in the demo until the demo is deployed.** ROADMAP said Phase 3 was in the demo for six days while the demo ran an older build. From now on, a phase's review checks the live demo, and ROADMAP says "on `main`" until the owner has deployed it.
-2. **Two features merged the same hour can miss each other's rules.** Refund linking (#165) changed how a linked refund counts; Select several (#166), merged 34 minutes later, kept writing categories onto those refunds. When a feature adds a counting rule, its brief lists every other writer of the same columns.
+2. **Two features merged the same hour can miss each other's rules.** Select several (#166) merged first; refund linking (#165), merged 33 minutes later, changed how a linked refund counts, and Select several never got the new rule, so it kept writing categories onto those refunds. When a feature adds a counting rule, its brief lists every other writer of the same columns.
 3. **Verify with CI's exact commands.** PR #318's local checks ran `npm test` but not `npm run test:feedback-integration`, which CI runs on its own, and CI went red. Decision 97's verifier now runs both.
