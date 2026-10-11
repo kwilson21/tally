@@ -7,6 +7,7 @@ import {
 	countedCategorySql,
 	countedMonthSql,
 	FOLLOWS_PURCHASE,
+	followsPurchase,
 } from "../src/db/counted-month";
 import { loadMonth } from "../src/db/month";
 import {
@@ -104,6 +105,14 @@ const refundOf = async (id: number) =>
 			.bind(id)
 			.first<{ r: number | null }>()
 	)?.r;
+
+/** The opening tag of the open edit panel's Category fieldset: `disabled` there means the purchase's category is locked. */
+function categoryFieldsetTag(html: string) {
+	const sheet = html.slice(html.indexOf('aria-labelledby="edit-title"'));
+	const legend = sheet.search(/<legend[^>]*>\s*Category\b/);
+	const start = sheet.lastIndexOf("<fieldset", legend);
+	return sheet.slice(start, sheet.indexOf(">", start) + 1);
+}
 
 const ownCategory = async (id: number) =>
 	(
@@ -678,6 +687,86 @@ describe("linking a refund", () => {
 		await link(REFUND, PURCHASE);
 		const { html } = await get(`/transactions/${REFUND}`);
 		expect(html).toContain("Counts with the Aug 20 purchase.");
+	});
+
+	it("a linked credit marked as income is unlocked, with no Counts in line", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		expect(categoryFieldsetTag(html)).not.toContain("disabled");
+		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
+		expect(html).not.toContain("with the Aug 20 purchase.");
+	});
+
+	it("a linked credit no longer reviewed is unlocked, with no Counts in line", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		expect(categoryFieldsetTag(html)).not.toContain("disabled");
+		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
+		expect(html).not.toContain("with the Aug 20 purchase.");
+	});
+
+	it("saves the category of a linked credit marked as income", async () => {
+		await save(REFUND, [
+			["refund_of", String(PURCHASE)],
+			["income", "1"],
+			["category", String(GAS)],
+		]);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("saves the category of a linked credit once it's no longer reviewed", async () => {
+		await link(REFUND, PURCHASE);
+		await save(REFUND, [
+			["creditReviewedVisible", "1"],
+			["creditReviewed_was", "1"],
+			["category", String(GAS)],
+		]);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+	});
+
+	it("the counting rule in TypeScript agrees with FOLLOWS_PURCHASE", async () => {
+		await link(REFUND, PURCHASE);
+		for (const amountCents of [-2000, 2000]) {
+			for (const flagIncome of [0, 1]) {
+				for (const creditReviewed of [0, 1]) {
+					await db
+						.prepare(
+							"UPDATE transactions SET amount_cents = ?, flag_income = ?, credit_reviewed = ? WHERE id = ?",
+						)
+						.bind(amountCents, flagIncome, creditReviewed, REFUND)
+						.run();
+					const row = await db
+						.prepare(
+							`SELECT ${FOLLOWS_PURCHASE} AS follows FROM transactions t LEFT JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?`,
+						)
+						.bind(REFUND)
+						.first<{ follows: number }>();
+					expect(
+						Boolean(row?.follows),
+						`amount ${amountCents}, income ${flagIncome}, reviewed ${creditReviewed}`,
+					).toBe(
+						followsPurchase({
+							amountCents,
+							income: flagIncome === 1,
+							creditReviewed: creditReviewed === 1,
+						}),
+					);
+				}
+			}
+		}
 	});
 });
 

@@ -15,6 +15,19 @@ export const FOLLOWS_PURCHASE =
 	"(rp.id IS NOT NULL AND rp.excluded = 0 AND t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(t.credit_reviewed, 0) = 1)";
 
 /**
+ * FOLLOWS_PURCHASE for a linked credit, in TypeScript, for the edit panel and the route, which decide before a
+ * save. It is the credit's own part: the purchase must still be linked and not excluded, which the caller checks.
+ * Keep it in step with FOLLOWS_PURCHASE (the tests check that they agree).
+ */
+export function followsPurchase(credit: {
+	amountCents: number;
+	income: boolean;
+	creditReviewed: boolean;
+}): boolean {
+	return credit.amountCents < 0 && !credit.income && credit.creditReviewed;
+}
+
+/**
  * True when a bill's payment is linked to the transaction `alias` names, or, for a split part, to its
  * parent: the bank transaction that paid the bill was split afterwards, so the whole of it, every part,
  * is that payment. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). A part with
