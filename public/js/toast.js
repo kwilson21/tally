@@ -35,8 +35,9 @@
 		return icon;
 	}
 
-	// The Undo toasts on screen. A newer plain or error toast never removes one of them early.
-	const undoToasts = new WeakSet();
+	// The Undo toasts on screen, each with the token its Undo posts. A newer plain or error toast never removes
+	// one of them early; only the restore's own toast ends the one it answers (undoDone, below).
+	const undoToasts = new WeakMap();
 	// Each Undo form's button and toast, so a failed Undo request can turn its button back on while its
 	// toast is still up (the error toast says to try again).
 	const undoButtons = new WeakMap();
@@ -85,6 +86,26 @@
 			? new ResizeObserver(measureToasts)
 			: null;
 
+	// Takes a toast off the page. Focus on the toast would be lost with it, so the Transactions heading takes it
+	// (every Transactions page has one, the first-visit page too). `lostToo` also counts focus on nothing: a
+	// disabled Undo button drops focus to the body, so a restore's toast (undoDone) uses it. A timer doesn't, since
+	// it would scroll the page to the heading when focus is only on the body.
+	function takeOffPage(toast, lostToo = false) {
+		const active = document.activeElement;
+		if (
+			toast.contains(active) ||
+			(lostToo && (!active || active === document.body))
+		) {
+			const heading = document.getElementById("transactions-title");
+			if (heading) {
+				heading.setAttribute("tabindex", "-1");
+				heading.focus();
+			}
+		}
+		toast.remove();
+		measureToasts();
+	}
+
 	// The toast the last "toast" event made. failed() reads it straight after dispatching, since the
 	// event is synchronous.
 	let lastToast = null;
@@ -94,6 +115,7 @@
 			type = "success",
 			undo,
 			undoExpiresInMs,
+			undoDone,
 		} = event.detail ?? {};
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
@@ -152,6 +174,12 @@
 			for (const old of [...(region?.children ?? [])]) {
 				if (!undoToasts.has(old)) old.remove();
 			}
+		// The one exception: a successful Undo's toast names the Deleted toast it answers, and that one ends now,
+		// since the entry is back (#397). The other Undo toasts run their own time.
+		if (undoDone)
+			for (const old of [...(region?.children ?? [])]) {
+				if (undoToasts.get(old) === undoDone) takeOffPage(old, true);
+			}
 		measureSelectionBar();
 		region?.append(toast);
 		// Measured after the append, so the older toasts just replaced are gone and this one is in.
@@ -164,7 +192,7 @@
 		const bar = document.getElementById("selection-bar");
 		if (bar) barSize?.observe(bar);
 		if (undo) {
-			undoToasts.add(toast);
+			undoToasts.set(toast, undo);
 			window.htmx?.process(toast);
 			toast.setAttribute(
 				"style",
@@ -176,19 +204,7 @@
 			undoButton?.focus();
 		}
 		setTimeout(
-			() => {
-				// Focus on Undo would be lost with the toast, so the Transactions heading takes it (every
-				// Transactions page has one, the first-visit page too).
-				if (toast.contains(document.activeElement)) {
-					const heading = document.getElementById("transactions-title");
-					if (heading) {
-						heading.setAttribute("tabindex", "-1");
-						heading.focus();
-					}
-				}
-				toast.remove();
-				measureToasts();
-			},
+			() => takeOffPage(toast),
 			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
 		);
 	});
@@ -224,8 +240,14 @@
 		// An Undo request that failed turns its button back on while its toast is still up: the error toast
 		// says to try again. The request's source element is the Undo form (htmx 4's ctx.sourceElement).
 		const undo = undoButtons.get(ctx?.sourceElement);
-		if (undo && document.getElementById("toasts")?.contains(undo.toast))
+		if (undo && document.getElementById("toasts")?.contains(undo.toast)) {
 			undo.button.disabled = false;
+			// Focus was on Undo when it was pressed, and a disabled button dropped it, so it comes back to Undo (#397).
+			// Not when the person has moved it somewhere else during the request.
+			const active = document.activeElement;
+			if (!active || active === document.body || undo.toast.contains(active))
+				undo.button.focus();
+		}
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
 				? COULDNT_LOAD

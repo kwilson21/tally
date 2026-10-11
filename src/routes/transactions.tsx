@@ -164,6 +164,8 @@ type ListOptions = {
 	sheet?: (categories: Category[], today: string) => unknown;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
+	/** After Undo restores a cash entry: focus its row when this list shows it. Nothing else is focused here; toast.js moves focus when the Undo toast ends (#397). */
+	restoredId?: number;
 	/** "Only October" asked for focus on the result count, since its link goes (#211). */
 	countFocus?: boolean;
 	status?: 200 | 404 | 422;
@@ -235,6 +237,7 @@ async function renderList(
 	{
 		sheet,
 		focusId,
+		restoredId,
 		countFocus = false,
 		status = 200,
 		pageTitle,
@@ -821,7 +824,9 @@ async function renderList(
 												<TransactionRow
 													row={shown(row)}
 													href={href}
-													autofocus={row.id === focusId}
+													autofocus={
+														row.id === focusId || row.id === restoredId
+													}
 													// Opening swaps in only the sheet, so the list keeps its place.
 													attrs={{
 														"hx-get": href,
@@ -3405,19 +3410,23 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 			: null;
 	const today = await householdToday(c.env.DB);
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	// The restored entry, when this Undo restored it (not an earlier one, nor an expired one).
+	const restoredNow = restored && !restored.alreadyRestored ? restored : null;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify(
-			restored && !restored.alreadyRestored
+			restoredNow
 				? {
+						// undoDone names the Deleted toast this Undo answers, which ends with this one (#397).
 						toast: {
 							message:
-								restored.lostLinks.length > 0
-									? `Restored ${restored.name}. ${restored.lostLinks.join(", ")} no longer fits and was left off.`
-									: `Restored ${restored.name}.`,
+								restoredNow.lostLinks.length > 0
+									? `Restored ${restoredNow.name}. ${restoredNow.lostLinks.join(", ")} no longer fits and was left off.`
+									: `Restored ${restoredNow.name}.`,
 							type: "success",
+							undoDone: token,
 						},
-						announce: `${restored.name} is back.`,
+						announce: `${restoredNow.name} is back.`,
 					}
 				: restored?.alreadyRestored
 					? {
@@ -3437,10 +3446,9 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 		),
 	);
 	c.header("HX-Push-Url", back);
-	const restoreEndsFirstVisit =
-		wasFirstVisit && restored !== null && !restored.alreadyRestored;
-	if (restoreEndsFirstVisit) swapWholePage(c);
+	if (wasFirstVisit && restoredNow) swapWholePage(c);
+	// The restored row takes focus when this list shows it; otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
 	return renderList(c, today, filtersFrom(c, today, back), {
-		focusHeading: restoreEndsFirstVisit,
+		restoredId: restoredNow?.id,
 	});
 });

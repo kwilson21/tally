@@ -878,6 +878,150 @@ describe("an Undo request that fails", () => {
 	});
 });
 
+// #397: a failed Undo gives focus back to its button, unless the person has moved it somewhere else.
+describe("focus on an Undo button that a failed request turned back on", () => {
+	const undoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+	const undoForm = (toasts: FakeNode) =>
+		(toasts.children[0] as FakeNode)
+			.all()
+			.find((node) => node.tag === "form") as FakeNode;
+	const undoButton = (form: FakeNode) =>
+		form.children.find((node) => node.tag === "button") as FakeNode;
+	const failure = (document: EventTarget, form: FakeNode) =>
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: form, request: { method: "POST" } },
+			error: new TypeError("Failed to fetch"),
+		});
+
+	it("moves focus back to Undo when focus had dropped to the page body while the request ran", async () => {
+		const { body, document, toasts } = await page();
+		undoToast(body);
+		const form = undoForm(toasts);
+		const button = undoButton(form);
+		form.dispatchEvent(new Event("submit"));
+		// A disabled button drops focus to the body in browsers.
+		document.activeElement = body;
+		failure(document, form);
+		expect(button.disabled).toBe(false);
+		expect(document.activeElement).toBe(button);
+	});
+
+	it("leaves focus alone when the person moved it somewhere else during the request", async () => {
+		const { body, document, toasts } = await page();
+		undoToast(body);
+		const form = undoForm(toasts);
+		const button = undoButton(form);
+		form.dispatchEvent(new Event("submit"));
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		failure(document, form);
+		expect(button.disabled).toBe(false);
+		expect(document.activeElement).toBe(elsewhere);
+	});
+
+	it("does not move focus when no Undo button turned back on", async () => {
+		const { body, document, toasts } = await page();
+		undoToast(body);
+		const form = undoForm(toasts);
+		form.dispatchEvent(new Event("submit"));
+		document.activeElement = body;
+		fire(document, "htmx:error", {
+			ctx: {
+				sourceElement: new FakeNode("form"),
+				request: { method: "POST" },
+			},
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(document.activeElement).toBe(body);
+	});
+});
+
+// #397: a successful Undo's "is back" toast ends the Deleted toast it answers (undoDone names its token),
+// and focus leaves that toast on the restored row or the Transactions heading.
+describe("the restored entry's toast ends its own Undo toast", () => {
+	const undoToast = (body: EventTarget, token: string, message: string) =>
+		fire(body, "toast", { message, undo: token, undoExpiresInMs: 10000 });
+	const restored = (body: EventTarget, undoDone: string) =>
+		fire(body, "toast", {
+			message: "Restored Coffee.",
+			type: "success",
+			undoDone,
+		});
+	const undoButton = (toast: FakeNode) =>
+		toast.all().find((node) => node.tag === "button") as FakeNode;
+
+	it("takes its Deleted toast away as the 'is back' toast appears, and keeps the other Undo toasts", async () => {
+		const { body, toasts } = await page();
+		undoToast(body, "token-coffee", "Deleted Coffee, $5.00.");
+		undoToast(body, "token-tea", "Deleted Tea, $3.00.");
+		const [coffee, tea] = toasts.children as [FakeNode, FakeNode];
+		restored(body, "token-coffee");
+		expect(toasts.children).not.toContain(coffee);
+		expect(toasts.children[0]).toBe(tea);
+		expect((toasts.children[1] as FakeNode).words()).toBe("Restored Coffee.");
+		// The restored entry's toast is a plain one, on its own 4 seconds; the other Undo toast runs its 10.
+		vi.advanceTimersByTime(4000);
+		expect(toasts.children).toEqual([tea]);
+		vi.advanceTimersByTime(6000);
+		expect(toasts.children).toEqual([]);
+	});
+
+	it("moves focus from its Undo button to the Transactions heading when the entry's row isn't listed", async () => {
+		const { body, document, toasts, heading } = await page();
+		const focus = vi.spyOn(heading, "focus");
+		undoToast(body, "token-coffee", "Deleted Coffee, $5.00.");
+		const toast = toasts.children[0] as FakeNode;
+		expect(document.activeElement).toBe(undoButton(toast));
+		restored(body, "token-coffee");
+		expect(toasts.children).not.toContain(toast);
+		expect(focus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(heading);
+		expect(heading.attrs.get("tabindex")).toBe("-1");
+	});
+
+	it("moves focus to the heading when a disabled Undo had dropped focus to the page body", async () => {
+		const { body, document, toasts, heading } = await page();
+		undoToast(body, "token-coffee", "Deleted Coffee, $5.00.");
+		const toast = toasts.children[0] as FakeNode;
+		const form = toast.all().find((node) => node.tag === "form") as FakeNode;
+		// The Undo request was posted: its button is off, and focus is on nothing.
+		form.dispatchEvent(new Event("submit"));
+		document.activeElement = body;
+		restored(body, "token-coffee");
+		expect(toasts.children).not.toContain(toast);
+		expect(document.activeElement).toBe(heading);
+	});
+
+	it("leaves focus on the restored row's link when the list shows the row", async () => {
+		const { body, document, toasts, heading } = await page();
+		const focus = vi.spyOn(heading, "focus");
+		undoToast(body, "token-coffee", "Deleted Coffee, $5.00.");
+		const toast = toasts.children[0] as FakeNode;
+		// The swap ran before this toast arrived, and its autofocus put focus on the row.
+		const row = new FakeNode("a");
+		document.activeElement = row;
+		restored(body, "token-coffee");
+		expect(toasts.children).not.toContain(toast);
+		expect(document.activeElement).toBe(row);
+		expect(focus).not.toHaveBeenCalled();
+	});
+
+	it("does not move focus to the heading when the Undo toast's time ends with focus on the page body", async () => {
+		const { body, document, heading } = await page();
+		const focus = vi.spyOn(heading, "focus");
+		undoToast(body, "token-coffee", "Deleted Coffee, $5.00.");
+		document.activeElement = body;
+		vi.advanceTimersByTime(10000);
+		expect(focus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(body);
+	});
+});
+
 describe("Select mode's action bar", () => {
 	const SELECTION_BAR = "--selection-bar-height";
 	const barAt = (height: number) => {
