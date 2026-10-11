@@ -88,7 +88,7 @@ step "11. Build the database tables" \
 # so a skipped step can't put Tally live without its sign-in check or its tables.
 REQUIRED="PLAID_CLIENT_ID PLAID_SECRET TOKEN_ENCRYPTION_KEY JEV_API_KEY PLAID_ENV PLAID_WEBHOOK_URL FEEDBACK_GITHUB_TOKEN ACCESS_TEAM_DOMAIN ACCESS_AUD"
 deploy_when_ready() {
-	local secrets migrations missing=""
+	local secrets migrations sha release missing=""
 	secrets=$(npx wrangler secret list --env "$ENV" --format json) || return 1
 	for name in $REQUIRED; do
 		grep -q "\"$name\"" <<<"$secrets" || missing="$missing $name"
@@ -102,7 +102,10 @@ deploy_when_ready() {
 		echo "Not deploying: the database tables aren't built yet. Run step 11 first."
 		return 1
 	fi
-	npx wrangler deploy --env "$ENV"
+	sha=$(git rev-parse --short HEAD) || return 1
+	release="v$(date +%Y.%m.%d)"
+	echo "This deploy is release $release. Afterwards, tag and publish it as README's Versions and releases section says."
+	npx wrangler deploy --env "$ENV" --message "$release $sha" --var "APP_VERSION:$release $sha"
 }
 
 step "12. Deploy" \

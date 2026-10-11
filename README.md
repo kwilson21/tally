@@ -27,7 +27,7 @@ Deploys are manual and done by the owner. The demo is the `demo` environment in 
 
     npx wrangler login
     npx wrangler d1 migrations apply DB --env demo --remote
-    npx wrangler deploy --env demo --message "demo main <short sha>"
+    npx wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"
 
 **Once, to load the sample data** into the empty database. Seed dates follow today's date, so this copies a freshly seeded local database. First empty the local database and start the app:
 
@@ -45,7 +45,7 @@ Then, in a second terminal, run this as one command. It stops at the first failu
 
 **Every day at 09:00 UTC** (4–5 am Eastern, 1–2 am Pacific, depending on daylight saving) the demo resets itself to the sample data. Visitors' edits last until the next reset. After the first deploy, the cron shows in the Cloudflare dashboard under Workers → `tally-demo` → Settings → Trigger events.
 
-**After each merge to `main`:** pull `main`, then `npx wrangler deploy --env demo --message "demo main <short sha>"`. If a PR added a migration, run the `migrations apply` line first.
+**After each merge to `main`:** pull `main`, then `npx wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"`. If a PR added a migration, run the `migrations apply` line first.
 
 **Check it** on a phone and a laptop: the page loads over HTTPS, Home shows the Rivera household, every nav link works, and the browser console shows no errors.
 
@@ -56,7 +56,7 @@ Then, in a second terminal, run this as one command. It stops at the first failu
 Each production deploy is a release named by its date, `vYYYY.MM.DD` (a second one the same day adds `.2`), decision 98. Deploys are owner-approved. From a clean checkout of `origin/main`, after `npm run build`:
 
     npx wrangler d1 migrations apply DB --env production --remote
-    npx wrangler deploy --env production --message "vYYYY.MM.DD main <short sha>"
+    npx wrangler deploy --env production --message "vYYYY.MM.DD <short sha>" --var "APP_VERSION:vYYYY.MM.DD <short sha>"
 
 Then publish the release on the same commit, with notes that list the PRs merged since the previous release and the migrations applied:
 
@@ -64,4 +64,4 @@ Then publish the release on the same commit, with notes that list the PRs merged
     git log --first-parent --format='- %s' <previous tag>..<sha>
     gh release create vYYYY.MM.DD --target <full sha> --title vYYYY.MM.DD --notes-file <notes>
 
-A demo deploy uses the same message with `demo` in place of the release name, and gets no tag. Before applying migrations, `npx wrangler d1 time-travel info <database> --env <env>` prints a bookmark to restore to.
+A demo deploy uses the same message with `demo` in place of the release name, and gets no tag. The `--var` flag sets `APP_VERSION`, which feedback reports store with the build they came from. Wrangler doesn't write `--var` into `wrangler.jsonc`, and a deploy without it removes `APP_VERSION`, so pass it on every deploy. Before applying migrations, `npx wrangler d1 time-travel info <database> --env <env>` prints a bookmark to restore to.
