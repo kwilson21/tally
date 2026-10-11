@@ -1400,6 +1400,123 @@ describe("Bills", () => {
 		).toBe(0);
 	});
 
+	// Only money out pays a bill (Plaid's sign: positive is money out, #324). A same-merchant credit, a refund, is
+	// neither offered in the picker nor linked by a POST that names it.
+	describe("a credit is not a payment", () => {
+		const period = "2026-10";
+		const link = (transaction: number, due: string) =>
+			exports.default.fetch("http://tally.test/bills/1/link", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					transaction_id: String(transaction),
+					period: due,
+					opened_period: due,
+				}),
+			});
+		const pickerHtml = async (due: string) =>
+			(
+				await exports.default.fetch(
+					`http://tally.test/bills/1/occurrences/${due}/link`,
+				)
+			).text();
+		const billStatus = async () =>
+			(await loadBillRows(env.DB, "2026-10-10")).rows.find(
+				(row) => row.id === 1,
+			)?.status;
+		const paidOccurrences = async (due: string) =>
+			env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=1 AND period=? AND status='linked'",
+			)
+				.bind(due)
+				.first("n");
+		const safeToSpend = async () =>
+			(await (await exports.default.fetch("http://tally.test/")).text()).match(
+				/class="font-serif text-6xl[^"]*">([^<]*)</,
+			)?.[1];
+
+		beforeEach(async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+			await resetDemo(env.DB, "2026-10-10");
+		});
+
+		it("does not list a same-merchant credit for a monthly bill, and refuses to link it", async () => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+				env.DB.prepare(
+					"UPDATE bills SET frequency='monthly',due_day=15,anchor_month=NULL,anchor_date=NULL,amount_cents=1500,merchant_raw_name='REFUND CO',merchant_raw_text=0 WHERE id=1",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9950,1,'2026-10-12',2500,'REFUND CO'),(9951,1,'2026-10-12',-1500,'REFUND CO')",
+				),
+			]);
+			const html = await pickerHtml(period);
+			expect(html).toContain('name="transaction_id" value="9950"');
+			expect(html).not.toContain('name="transaction_id" value="9951"');
+
+			const before = {
+				status: await billStatus(),
+				safe: await safeToSpend(),
+			};
+			expect(before.status).toBe("due");
+			const res = await link(9951, period);
+			expect(await res.text()).toMatch(
+				/<p role="alert"[^>]*>That payment isn&#39;t within 30 days of/,
+			);
+			expect(await paidOccurrences(period)).toBe(0);
+			expect(await billStatus()).toBe(before.status);
+			expect(await safeToSpend()).toBe(before.safe);
+		});
+
+		it("does not list a same-merchant credit inside a weekly bill's three days, and refuses to link it", async () => {
+			const friday = "2026-10-16";
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+				env.DB.prepare(
+					"UPDATE bills SET frequency='weekly',due_day=5,anchor_month=NULL,anchor_date=NULL,amount_cents=1500,merchant_raw_name='REFUND CO',merchant_raw_text=0 WHERE id=1",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9952,1,'2026-10-14',2500,'REFUND CO'),(9953,1,'2026-10-14',-1500,'REFUND CO')",
+				),
+			]);
+			const html = await pickerHtml(friday);
+			expect(html).toContain('name="transaction_id" value="9952"');
+			expect(html).not.toContain('name="transaction_id" value="9953"');
+
+			const before = {
+				status: await billStatus(),
+				safe: await safeToSpend(),
+			};
+			expect(before.status).not.toBe("paid");
+			const res = await link(9953, friday);
+			expect(await res.text()).toMatch(
+				/<p role="alert"[^>]*>That payment isn&#39;t within 3 days of/,
+			);
+			expect(await paidOccurrences(friday)).toBe(0);
+			expect(await billStatus()).toBe(before.status);
+			expect(await safeToSpend()).toBe(before.safe);
+		});
+
+		it("still links a same-merchant payment out to the bill", async () => {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+				env.DB.prepare(
+					"UPDATE bills SET frequency='monthly',due_day=15,anchor_month=NULL,anchor_date=NULL,amount_cents=1500,merchant_raw_name='REFUND CO',merchant_raw_text=0 WHERE id=1",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9950,1,'2026-10-12',2500,'REFUND CO'),(9951,1,'2026-10-12',-1500,'REFUND CO')",
+				),
+			]);
+			await link(9950, period);
+			expect(await paidOccurrences(period)).toBe(1);
+			expect(await billStatus()).toBe("paid");
+		});
+	});
+
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
 		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
