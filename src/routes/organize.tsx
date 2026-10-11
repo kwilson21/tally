@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { categoryNames, makeCategory } from "../db/categories";
+import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import { organizeGroups, saveOrganizeGroup } from "../transactions/organize";
@@ -208,7 +208,7 @@ organize.post("/transactions/organize", async (c) => {
 	const next = url.pathname + url.search;
 	// Another tab already finished this merchant: show the next one with a fresh form,
 	// so the stale choices can't carry over to it.
-	if (!group) {
+	const alreadyCategorized = () => {
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		const message = "That merchant already has a category.";
 		c.header(
@@ -216,7 +216,8 @@ organize.post("/transactions/organize", async (c) => {
 			JSON.stringify({ toast: { message, type: "info" }, announce: message }),
 		);
 		return renderOrganize(c, undefined, 200, true);
-	}
+	};
+	if (!group) return alreadyCategorized();
 	// "New category" (decision 101) is the choice when it's chosen: its name is checked first, and the
 	// category is made only once the rest passes, so a taken name saves nothing.
 	const choseNew = form.get("category") === "new";
@@ -243,6 +244,7 @@ organize.post("/transactions/organize", async (c) => {
 		return renderOrganize(c, values, 422);
 
 	let chosen = category;
+	let madeId: number | null = null;
 	if (named?.ok) {
 		const made = await makeCategory(c.env.DB, named.value);
 		if (!made.ok)
@@ -252,6 +254,7 @@ organize.post("/transactions/organize", async (c) => {
 				422,
 			);
 		chosen = { id: made.id, name: named.value.name };
+		madeId = made.id;
 	}
 	if (!chosen) return renderOrganize(c, values, 422);
 
@@ -263,6 +266,12 @@ organize.post("/transactions/organize", async (c) => {
 		name && name !== currentGroup.name ? name : null,
 		actor(c),
 	);
+	if (count === 0) {
+		// Another request categorized this group after it was read, so nothing was filed: a category made
+		// here goes too, and the answer is the one for a merchant that already has a category.
+		if (madeId !== null) await unmakeCategory(c.env.DB, madeId);
+		return alreadyCategorized();
+	}
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	c.header(

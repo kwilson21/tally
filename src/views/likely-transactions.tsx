@@ -36,16 +36,19 @@ function LikelyReason({
 	categoryName,
 	savedDate,
 	savedCents,
+	today,
 }: {
 	row: LikelyRow;
 	categoryName: string;
 	savedDate: string;
 	savedCents: number;
+	/** The household's date: the saved date shows its year only when it isn't this year. */
+	today: string;
 }) {
 	if (row.sameMerchant)
 		return (
 			<span>
-				{`Same merchant as ${shortDay(savedDate, savedDate)} (${formatCents(Math.abs(savedCents))})`}
+				{`Same merchant as ${shortDay(savedDate, today)} (${formatCents(Math.abs(savedCents))})`}
 			</span>
 		);
 	return (
@@ -135,6 +138,7 @@ export function LikelyPanel({
 										categoryName={categoryName}
 										savedDate={savedDate}
 										savedCents={savedCents}
+										today={today}
 									/>
 								}
 							/>

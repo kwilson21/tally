@@ -117,4 +117,69 @@ describe("New category in Organize", () => {
 		expect(made?.sortOrder).toBeGreaterThan(last?.last ?? 0);
 		expect(html).not.toContain("These might belong too:");
 	});
+
+	it("a 51st active category gives the full message and makes nothing", async () => {
+		await harborCharges(2);
+		const active = (
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
+			).first<{ n: number }>()
+		)?.n as number;
+		for (let i = active; i < 50; i++)
+			await env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
+			)
+				.bind(`Filler ${i}`, 100 + i)
+				.run();
+
+		const { res, html } = await post({
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Pets",
+			name: "",
+		});
+
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Tally has room for 50 categories. Archive one to add another.",
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
+			).first<{ n: number }>(),
+		).toEqual({ n: 0 });
+		const uncategorized = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'HARBOR SUPPLY' AND category_id IS NULL",
+		).first<{ n: number }>();
+		expect(uncategorized?.n).toBe(2);
+	});
+
+	it("a group another save categorized first makes no category and says it already has one", async () => {
+		await harborCharges(2);
+		// Another save files the group after this request has read it and before this one counts it.
+		await env.DB.prepare(
+			`CREATE TRIGGER other_save_files_group AFTER INSERT ON categories WHEN NEW.name = 'Pets'
+			BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'; END`,
+		).run();
+		try {
+			const { res } = await post({
+				group: "Harbor Supply",
+				category: "new",
+				new_category_name: "Pets",
+				name: "",
+			});
+
+			expect(res.status).toBe(200);
+			const trigger = res.headers.get("HX-Trigger") ?? "";
+			expect(trigger).toContain("That merchant already has a category.");
+			expect(trigger).not.toContain("set to");
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
+				).first<{ n: number }>(),
+			).toEqual({ n: 0 });
+		} finally {
+			await env.DB.prepare("DROP TRIGGER other_save_files_group").run();
+		}
+	});
 });

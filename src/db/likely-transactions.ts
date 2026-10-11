@@ -2,10 +2,15 @@
 // decision 76). Same-merchant rows come ticked; Tally's guesses come unticked, and only for a name Tally
 // suggested for them (decision 30). Nothing moves until a person adds them (addLikely).
 import { monthsBefore } from "../dates";
-import { tidyName } from "../transactions/tidy-name";
+import { shownName } from "../transactions/name-suggestions";
+import { readAiSwitches } from "./ai-switches";
 import { COUNTED_JOINS } from "./counted-month";
-import { merchantKeySql, sameMerchantSql } from "./merchant-key";
-import { type ListRow, NEEDS_CATEGORY } from "./transactions";
+import { merchantColumnSql, sameMerchantSql } from "./merchant-key";
+import {
+	type ListRow,
+	NAME_SUGGESTION_COLUMNS,
+	NEEDS_CATEGORY,
+} from "./transactions";
 
 /** Most rows the panel offers, same merchant first (decision 79). */
 export const LIKELY_LIMIT = 6;
@@ -15,14 +20,37 @@ export type LikelyRow = ListRow & {
 	sameMerchant: boolean;
 };
 
+/** The columns a likely row reads from the database, before its name is worked out. */
+type LikelyRecord = Omit<
+	LikelyRow,
+	| "displayName"
+	| "nameSuggested"
+	| "nameFromBank"
+	| "pending"
+	| "sameMerchant"
+	| "excluded"
+	| "income"
+	| "creditReviewed"
+> & {
+	merchantName: string | null;
+	suggestedNames: string | null;
+	suggestionStatus: string | null;
+	merchantKey: string;
+	pending: number;
+	sameMerchant: number;
+	excluded: number;
+	income: number;
+	creditReviewed: number | null;
+};
+
+// A name is worked out as the list works it (NAME_SUGGESTION_COLUMNS and shownName), so a guess reads the same.
 const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-	COALESCE(m.display_name, t.merchant_name, t.raw_name) AS displayName, t.note AS note,
+	${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note,
 	t.excluded AS excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 	t.category_id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 	t.pending AS pending, ${sameMerchantSql("t", "src")} AS sameMerchant
 	FROM transactions t ${COUNTED_JOINS}
 	JOIN transactions src ON src.id = ?1
-	LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 	LEFT JOIN categories c ON c.id = t.category_id`;
 
 /** The rows still needing a category, this month and last, that the new category might suit. */
@@ -42,37 +70,43 @@ export async function likelyTransactions(
 	today: string,
 ): Promise<LikelyRow[]> {
 	const thisMonth = today.slice(0, 7);
+	const { names: namesOn } = await readAiSwitches(db);
 	const { results } = await db
 		.prepare(
 			`${LIKELY_SELECT} ${LIKELY_WHERE}
 			ORDER BY sameMerchant DESC, t.date DESC, t.id DESC LIMIT ${LIKELY_LIMIT}`,
 		)
 		.bind(savedId, thisMonth, monthsBefore(thisMonth, 1), categoryName.trim())
-		.all<
-			Omit<
-				LikelyRow,
-				"pending" | "sameMerchant" | "excluded" | "income" | "creditReviewed"
-			> & {
-				pending: number;
-				sameMerchant: number;
-				excluded: number;
-				income: number;
-				creditReviewed: number | null;
-			}
-		>();
-	return results.map((row) => ({
-		...row,
-		// A merchant's bank text in capitals reads as a name only once tidied (as in the suggestions list).
-		displayName:
-			row.displayName === row.displayName.toUpperCase()
-				? tidyName(row.displayName)
-				: row.displayName,
-		excluded: !!row.excluded,
-		income: !!row.income,
-		creditReviewed: !!row.creditReviewed,
-		pending: !!row.pending,
-		sameMerchant: !!row.sameMerchant,
-	}));
+		.all<LikelyRecord>();
+	return results.map(
+		({
+			merchantName,
+			suggestedNames,
+			suggestionStatus,
+			merchantKey,
+			...row
+		}) => {
+			const shown = shownName({
+				chosen: merchantName,
+				stored: suggestedNames,
+				status: suggestionStatus,
+				key: merchantKey,
+				rawName: row.rawName,
+				namesOn,
+			});
+			return {
+				...row,
+				displayName: shown.name,
+				nameSuggested: shown.suggested,
+				nameFromBank: shown.fromBank,
+				excluded: !!row.excluded,
+				income: !!row.income,
+				creditReviewed: !!row.creditReviewed,
+				pending: !!row.pending,
+				sameMerchant: !!row.sameMerchant,
+			};
+		},
+	);
 }
 
 /**

@@ -31,6 +31,7 @@ export function SelectableTransactionRow({
 	reason?: Child;
 }) {
 	const nameId = `select-${row.id}-name`;
+	const reasonId = `select-${row.id}-reason`;
 	return (
 		<li data-transaction={row.id} class="group/tx">
 			{/* relative keeps the visually hidden checkbox inside its own row. */}
@@ -43,6 +44,7 @@ export function SelectableTransactionRow({
 					checked={checked}
 					autofocus={autofocus}
 					aria-labelledby={nameId}
+					aria-describedby={reason ? reasonId : undefined}
 				/>
 				<span class="selection-mark flex size-7 shrink-0 items-center justify-center rounded-full border border-muted peer-checked:border-ink peer-checked:bg-band">
 					<span class="hidden group-has-[:checked]:flex">
@@ -62,7 +64,10 @@ export function SelectableTransactionRow({
 				</span>
 			</label>
 			{reason && (
-				<div class="flex flex-wrap items-center gap-x-2 pb-2 pl-21 text-sm text-muted">
+				<div
+					id={reasonId}
+					class="flex flex-wrap items-center gap-x-2 pb-2 pl-21 text-sm text-muted"
+				>
 					{reason}
 				</div>
 			)}

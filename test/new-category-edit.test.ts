@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { makeCategory, unmakeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -166,6 +167,161 @@ describe("the New category chip in the edit panel", () => {
 	});
 });
 
+describe("a refused save makes no category", () => {
+	const insertRow = (
+		accountSql: string,
+		date: string,
+		cents: number,
+		rawName: string,
+		refundOf: number | null = null,
+	) =>
+		env.DB.prepare(
+			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, refund_of_id, credit_reviewed)
+			VALUES ((${accountSql}), ?, ?, ?, ?, ?) RETURNING id`,
+		)
+			.bind(date, cents, rawName, refundOf, refundOf === null ? 0 : 1)
+			.first<{ id: number }>()
+			.then((row) => row?.id as number);
+
+	it("a cash amount below its linked refunds saves nothing and makes no category", async () => {
+		const entry = await insertRow(
+			"SELECT id FROM accounts WHERE type = 'cash'",
+			TODAY,
+			2000,
+			"Farmers market",
+		);
+		await insertRow(
+			"SELECT id FROM accounts WHERE type = 'cash'",
+			TODAY,
+			-1500,
+			"Cash refund",
+			entry,
+		);
+		const count = await categoryCount();
+		const before = await filedAs(entry);
+
+		const { res, html } = await post(
+			`/transactions/${entry}`,
+			saveFields({
+				merchant: "",
+				merchant_was: "",
+				date: TODAY,
+				amount: "10.00",
+				category: "new",
+				new_category_name: "Pet Care",
+			}),
+		);
+
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $15.00, so the amount can&#39;t be less than that.",
+		);
+		expect(await categoryNamed("Pet Care")).toBeNull();
+		expect(await categoryCount()).toBe(count);
+		expect(await filedAs(entry)).toEqual(before);
+	});
+
+	// A refund counted as income doesn't follow its purchase, so the route keeps the category it would
+	// otherwise drop, and the category is made before the link is refused.
+	it("takes back only a made category nothing uses", async () => {
+		const unused = await makeCategory(env.DB, { name: "Unused" });
+		const used = await makeCategory(env.DB, { name: "Used" });
+		if (!unused.ok || !used.ok) throw new Error("the test categories");
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+		)
+			.bind(used.id, bakery)
+			.run();
+
+		await unmakeCategory(env.DB, unused.id);
+		await unmakeCategory(env.DB, used.id);
+
+		expect(await categoryNamed("Unused")).toBeNull();
+		expect(await categoryNamed("Used")).not.toBeNull();
+	});
+
+	it("a refund counted as income, linked past what is left of its purchase, makes no category", async () => {
+		const purchase = await insertRow(
+			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
+			TODAY,
+			10000,
+			"HOLIDAY SHOP",
+		);
+		await insertRow(
+			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
+			TODAY,
+			-9000,
+			"HOLIDAY SHOP",
+			purchase,
+		);
+		const refund = await insertRow(
+			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
+			TODAY,
+			-2000,
+			"HOLIDAY SHOP",
+		);
+		const count = await categoryCount();
+
+		const { res } = await post(
+			`/transactions/${refund}`,
+			saveFields({
+				merchant: "",
+				merchant_was: "",
+				refund_of: String(purchase),
+				income: "1",
+				category: "new",
+				new_category_name: "Pet Care",
+			}),
+		);
+
+		expect(res.status).toBe(422);
+		expect(await categoryNamed("Pet Care")).toBeNull();
+		expect(await categoryCount()).toBe(count);
+	});
+
+	it("a refund linked past what is left of its purchase saves nothing and makes no category", async () => {
+		const purchase = await insertRow(
+			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
+			TODAY,
+			10000,
+			"HOLIDAY SHOP",
+		);
+		await insertRow(
+			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
+			TODAY,
+			-9000,
+			"HOLIDAY SHOP",
+			purchase,
+		);
+		const refund = await insertRow(
+			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
+			TODAY,
+			-2000,
+			"HOLIDAY SHOP",
+		);
+		const count = await categoryCount();
+
+		const { res, html } = await post(
+			`/transactions/${refund}`,
+			saveFields({
+				merchant: "",
+				merchant_was: "",
+				refund_of: String(purchase),
+				category: "new",
+				new_category_name: "Pet Care",
+			}),
+		);
+
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"This refund is more than what&#39;s left of that purchase ($10.00 left).",
+		);
+		expect(await categoryNamed("Pet Care")).toBeNull();
+		expect(await categoryCount()).toBe(count);
+		expect(await filedAs(refund)).toEqual({ categoryId: null, source: null });
+	});
+});
+
 describe("the likely transactions after a new category", () => {
 	let first: number;
 	let second: number;
@@ -235,5 +391,77 @@ describe("the likely transactions after a new category", () => {
 			ids: String(first),
 		});
 		expect(one.html).toContain("Add 1 to Pet Care");
+	});
+
+	it("say nothing moved when a ticked row was categorized since the panel opened", async () => {
+		await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+		const made = await categoryNamed("Pet Care");
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+		)
+			.bind(GROCERIES, first)
+			.run();
+
+		const { res } = await post(`/transactions/${bakery}/likely`, {
+			back: "/transactions",
+			category: String(made?.id),
+			ids: String(first),
+		});
+
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Nothing moved: those transactions changed since the panel opened.",
+		);
+		expect(res.headers.get("HX-Trigger")).not.toContain("Set 0");
+		expect(await filedAs(first)).toEqual({
+			categoryId: GROCERIES,
+			source: "user",
+		});
+	});
+
+	it("tie each row's reason to its checkbox, so a screen reader reads both", async () => {
+		const saved = await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		const described = saved.html.match(
+			new RegExp(`name="ids" value="${first}"[^>]*aria-describedby="([^"]+)"`),
+		)?.[1];
+		expect(described).toBeTruthy();
+		const reason = saved.html.indexOf(`id="${described}"`);
+		expect(reason).toBeGreaterThan(-1);
+		expect(saved.html.slice(reason, reason + 200)).toContain(
+			"Same merchant as",
+		);
+	});
+
+	it("name each row as the list does, with a guessed name marked as a guess", async () => {
+		await env.DB.prepare(
+			"INSERT OR REPLACE INTO merchants (raw_name, display_name, suggested_name, suggestion_status) VALUES ('SQ *LOCAL BAKERY 4432', NULL, 'Bakery Co', 'pending')",
+		).run();
+
+		const saved = await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		expect(saved.html).toContain("Select Bakery Co (suggested name),");
+	});
+
+	it("show the year of a saved date from an earlier year", async () => {
+		const prior = Number(TODAY.slice(0, 4)) - 1;
+		await env.DB.prepare("UPDATE transactions SET date = ? WHERE id = ?")
+			.bind(`${prior}-12-31`, bakery)
+			.run();
+
+		const saved = await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		expect(saved.html).toContain(`Same merchant as Dec 31, ${prior} (`);
 	});
 });

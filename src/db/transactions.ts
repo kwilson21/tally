@@ -93,7 +93,7 @@ export type ListRow = {
 };
 
 /** What a row needs from its merchant to decide the name it shows (src/transactions/name-suggestions.ts). */
-const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus, ${merchantKeySql("t")} AS merchantKey`;
+export const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus, ${merchantKeySql("t")} AS merchantKey`;
 type NameSuggestionColumns = {
 	suggestedNames: string | null;
 	suggestionStatus: string | null;

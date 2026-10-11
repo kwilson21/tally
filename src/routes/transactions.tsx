@@ -4,7 +4,7 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
-import { categoryNames, makeCategory } from "../db/categories";
+import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { addLikely, likelyTransactions } from "../db/likely-transactions";
 import { refundedByOthersSql } from "../db/refunded";
 import {
@@ -2704,7 +2704,9 @@ async function savePanel(
 		},
 		actor(c),
 	);
-	if (!result.saved)
+	if (!result.saved) {
+		// Nothing was filed in a category made for this save, so it goes too: a retry must not find its name taken.
+		if (made) await unmakeCategory(c.env.DB, made.id);
 		return "refundLeftCents" in result
 			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
 			: result.cashError === "split"
@@ -2712,6 +2714,7 @@ async function savePanel(
 				: showErrors({
 						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
+	}
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
@@ -2847,10 +2850,18 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 		actor: actor(c),
 	});
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
-	const message = `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
+	// Nothing moves when every ticked row changed since the panel opened (addLikely offers only the rows
+	// that still need a category).
+	const message =
+		moved === 0
+			? "Nothing moved: those transactions changed since the panel opened."
+			: `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+		JSON.stringify({
+			toast: { message, type: moved === 0 ? "info" : "success" },
+			announce: message,
+		}),
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filters, { focusId: tx.id });

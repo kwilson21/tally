@@ -115,6 +115,26 @@ export async function makeCategory(
 	};
 }
 
+/**
+ * Takes back a category made for a save that was then refused, so a refusal leaves no category behind. It
+ * goes only while nothing uses it: a category another save has already filed transactions in stays.
+ */
+export async function unmakeCategory(
+	db: D1Database,
+	id: number,
+): Promise<void> {
+	await db
+		.prepare(
+			`DELETE FROM categories WHERE id = ?1
+				AND NOT EXISTS (SELECT 1 FROM transactions WHERE category_id = ?1 OR jev_category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM merchants WHERE default_category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM bills WHERE category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM budget_amounts WHERE category_id = ?1)`,
+		)
+		.bind(id)
+		.run();
+}
+
 /** Renames a category. */
 export async function saveCategory(
 	db: D1Database,
