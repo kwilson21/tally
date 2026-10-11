@@ -396,4 +396,152 @@ describe("MonthEnd budget bars", () => {
 		expect(html).toContain('class="text-right text-lg text-ok"');
 		expect(html).toContain("+$20");
 	});
+
+	// #300: the wide copy of a chart with ten categories doesn't reserve the phone cue's 44px.
+	it("gives a ten-category chart its phone width with the cue, and 667px in the wide copy without it (#300)", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="ten-wide"
+				monthName="September"
+				amountCents={0}
+				rows={rows(10)}
+			/>,
+		);
+		const svgs = [
+			...html.matchAll(/<svg viewBox="0 0 (\d+) 142"(?: width="(\d+)")?/g),
+		].map((match) => [match[1], match[2]]);
+		expect(svgs).toEqual([
+			["711", "711"],
+			["667", "667"],
+		]);
+		const wide = html.slice(html.indexOf('class="mt-4 hidden lg:block"'));
+		expect(wide).toContain('<line x1="31" x2="667" y1="40" y2="40"');
+		expect(wide).toContain('<text x="663" y="45"');
+	});
+
+	it("keeps the cue's 44px in every copy of a chart with eleven categories (#300)", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="eleven-wide"
+				monthName="September"
+				amountCents={0}
+				rows={rows(11)}
+			/>,
+		);
+		const svgs = [
+			...html.matchAll(/<svg viewBox="0 0 (\d+) 142"(?: width="(\d+)")?/g),
+		].map((match) => [match[1], match[2]]);
+		expect(svgs).toEqual([["777", "777"]]);
+	});
+
+	it("leaves a chart of five categories at 350px with no cue width (#300)", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="five-wide"
+				monthName="September"
+				amountCents={0}
+				rows={rows(5)}
+			/>,
+		);
+		const svgs = [...html.matchAll(/<svg viewBox="0 0 (\d+) 142"( width=)?/g)];
+		expect(svgs.map((match) => match[1])).toEqual(["350"]);
+		expect(svgs[0]?.[2]).toBeUndefined();
+	});
+
+	// #311: a large result's stamp wraps under the amount instead of running past the page edge.
+	it("lets the amount and its stamp wrap when a large result doesn't fit one line (#311)", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="large"
+				monthName="September"
+				amountCents={100_000_000}
+				rows={[]}
+			/>,
+		);
+		const row = html.match(
+			/<div class="([^"]*)"><p class="whitespace-nowrap font-serif text-6xl[^"]*">\$1,000,000<\/p>/,
+		)?.[1];
+		expect(row).toBeDefined();
+		expect(row?.split(" ")).toContain("flex-wrap");
+		expect(row).not.toContain("nowrap");
+	});
+});
+
+// #310: a finished month's uncategorized spending is named once, at the end of Not budgeted.
+describe("PastNotBudgeted's Needs a category row", () => {
+	// The Needs a category row is the list's last item.
+	const needsRow = (html: string) => {
+		const start = html.lastIndexOf("<li ");
+		return html.slice(start, html.indexOf("</li>", start) + "</li>".length);
+	};
+
+	it("ends the Not budgeted list with the uncategorized amount, drawn like the rows above", () => {
+		const html = renderToString(
+			<PastNotBudgeted
+				items={[
+					{ name: "Kids", icon: "kids", color: "cat-ochre", spentCents: 3000 },
+				]}
+				needsCategory={{ spentCents: 5000, count: 1 }}
+			/>,
+		);
+		const row = needsRow(html);
+		expect(row).toContain('<span class="shrink-0 text-muted">');
+		expect(row).toContain(
+			'<span class="min-w-0 flex-1 truncate text-lg">Needs a category</span>',
+		);
+		expect(row).toContain('<span class="text-right text-lg">$50</span>');
+		expect(row).not.toContain("<a");
+		expect(row).not.toContain("href");
+		expect(html.indexOf("Needs a category")).toBeGreaterThan(
+			html.indexOf(">Kids<"),
+		);
+	});
+
+	it("reads net refunds as +$ in green, as the rows above do", () => {
+		const html = renderToString(
+			<PastNotBudgeted
+				items={[]}
+				needsCategory={{ spentCents: -1400, count: 1 }}
+			/>,
+		);
+		expect(html).toContain(
+			'<span class="text-right text-lg text-ok">+$14</span>',
+		);
+	});
+
+	it("shows the Not budgeted heading with just this row when no category is Not budgeted", () => {
+		const html = renderToString(
+			<PastNotBudgeted
+				items={[]}
+				needsCategory={{ spentCents: 5000, count: 2 }}
+			/>,
+		);
+		expect(html).toContain(
+			'<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>',
+		);
+		expect(html.match(/<li /g)).toHaveLength(1);
+		expect(html).toContain("Needs a category");
+	});
+
+	it("shows nothing when the month has no uncategorized money", () => {
+		expect(
+			renderToString(
+				<PastNotBudgeted
+					items={[]}
+					needsCategory={{ spentCents: 0, count: 0 }}
+				/>,
+			),
+		).toBe("");
+		expect(renderToString(<PastNotBudgeted items={[]} />)).toBe("");
+	});
+
+	it("keeps a $0 row when uncategorized transactions net to $0, so they stay named", () => {
+		const html = renderToString(
+			<PastNotBudgeted
+				items={[]}
+				needsCategory={{ spentCents: 0, count: 2 }}
+			/>,
+		);
+		expect(html).toContain('<span class="text-right text-lg">$0</span>');
+	});
 });

@@ -823,9 +823,9 @@ const MONTH_HISTORY_SPEC: UseSpecText = {
 	motion:
 		"When more than five categories need a sideways cue, its arrows nudge three times at 1.2 seconds per nudge, then rest. Reduced motion leaves them still. The page uses the shell's browser page transition.",
 	edges:
-		"The strip shows at most 36 available months and always contains the viewed month. Near the first month it starts there and extends later to fill the strip when history allows; an older window ends at the viewed month. Earlier and Later open the month before or after the visible window. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either history end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month budget counts only for a category active during that month; an archived category with counted spending remains as a spending-only row. A finished-month chart with more than five budgeted categories is one 42px-bar row inside its own keyboard-scrollable region; at `lg`, the fade, arrow, hint and scrolling region appear only above ten categories, when the row exceeds the 672px Home content width (main column 696px at 1024px; 824px at 1280px and wider). Its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. Nonzero finished amounts and bar overages retain cents when whole-dollar rounding would hide them. A future or pre-history month address opens this month's Home.",
+		"The strip shows at most 36 available months and always contains the viewed month. Near the first month it starts there and extends later to fill the strip when history allows; an older window ends at the viewed month. Earlier and Later open the month before or after the visible window. Its arrows still step month by month to the first counted month, and any valid older month URL opens directly. At either history end the unavailable arrow has no link. The month links wrap on narrow screens to keep every 44px target in view. A finished-month budget counts only for a category active during that month; an archived category with counted spending remains as a spending-only row. A finished-month chart with more than five budgeted categories is one 42px-bar row inside its own keyboard-scrollable region; at `lg`, the fade, arrow, hint and scrolling region appear only above ten categories, when the row exceeds the 672px Home content width (main column 696px at 1024px; 824px at 1280px and wider). Its dashed budget line continues across the row and its budget word stays at the visible right edge. Labels wider than 62 SVG units are compressed only as needed and keep their full name in a title and accessible name. A fade, a 44px link to the end, and 'swipe sideways for the rest' appear only when the row scrolls, with empty trailing space equal to their combined width. Nonzero finished amounts and bar overages retain cents when whole-dollar rounding would hide them. Uncategorized money in a finished month is one read-only last row under Not budgeted: the grey list icon, “Needs a category”, and its amount (+$ in green when refunds outweigh spending); the row shows when that amount isn't $0 or transactions need a category, and when no category is Not budgeted, the heading stands above just this row. At 320px a large result's stamp drops beneath its amount when both don't fit one line. At `lg`, a ten-category chart's wide copy is 667px, reserving the phone cue's 44px only where the cue shows. A future or pre-history month address opens this month's Home.",
 	words:
-		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
+		"Previous month, {month} · Next month, {month} · {month}, this month · {month} ended · Under budget · Over budget · Back to {current month} · Not budgeted · Needs a category · {spent} / {budget} · Show the rest of the categories · swipe sideways for the rest.",
 };
 
 // NotBudgetedRow's use spec (DESIGN.md, "Use"): every part answered before the owner signs it off.
@@ -936,7 +936,7 @@ function HomeTopGroup() {
 					"PastNotBudgeted",
 					"ProgressRow",
 				]}
-				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94)."
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94). Uncategorized spending is named last under Not budgeted as Needs a category, the owner's pick for #310 (Oct 11); a large result's stamp wraps under it at 320px (#311)."
 			>
 				<State label="September ended under overall, with Eating Out over its own budget">
 					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">
@@ -1007,6 +1007,69 @@ function HomeTopGroup() {
 										icon: "kids",
 										color: "cat-ochre",
 										spentCents: 3000,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="Uncategorized spending: the result takes it out, and Needs a category names it once">
+					<Picture label="$100 budget, $20 categorized and $50 uncategorized: $30 under, with Needs a category at the end of Not budgeted">
+						<div class="max-w-2xl">
+							<MonthEnd
+								chartId="catalog-needs-category"
+								monthName="September"
+								amountCents={3000}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 10000,
+										spentCents: 2000,
+										leftCents: 8000,
+										over: false,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								items={[]}
+								needsCategory={{ spentCents: 5000, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="Uncategorized refunds outweigh spending: +$14 in green, as Not budgeted rows show it">
+					<Picture label="Needs a category at +$14 in green, last under a Not budgeted category">
+						<div class="max-w-2xl">
+							<PastNotBudgeted
+								items={[
+									{
+										name: "Kids",
+										icon: "kids",
+										color: "cat-ochre",
+										spentCents: 3000,
+									},
+								]}
+								needsCategory={{ spentCents: -1400, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="A $1,000,000 result at 320px: the stamp wraps under the amount">
+					<Picture label="A seven-figure finished amount at 320px, with its Under stamp dropping beneath it">
+						<div class="w-[320px] max-w-full">
+							<MonthEnd
+								chartId="catalog-large-result"
+								monthName="September"
+								amountCents={100_000_000}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 100_000_000,
+										spentCents: 0,
+										leftCents: 100_000_000,
+										over: false,
 									},
 								]}
 							/>

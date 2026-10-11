@@ -821,6 +821,49 @@ describe("GET / with the demo seed", () => {
 		expect((await home()).html).toContain("$0.30 more refunded than spent");
 	});
 
+	it("names a finished month's uncategorized spending in Not budgeted, and takes it out of the result (#310)", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare(
+				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-09', 10000)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (90011, 1, '2026-09-02', 2000, 'GROCERIES', 1), (90012, 1, '2026-09-03', 5000, 'UNCATEGORIZED', NULL)",
+			),
+		]);
+		const { html } = await homeAt("2026-09");
+		expect(html).toMatch(/whitespace-nowrap[^"]*">\$30<\/p>/);
+		expect(html).toContain("border-ok text-ok");
+		expect(html).toContain(
+			'<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>',
+		);
+		expect(html).toMatch(
+			/Needs a category<\/span><span class="text-right text-lg">\$50<\/span>/,
+		);
+		expect(html).not.toMatch(/href="\/budget\//);
+	});
+
+	it("shows a finished month's uncategorized refunds as +$ in green, and adds them to the result (#310)", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare(
+				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (1, '2026-09', 10000)",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, credit_reviewed) VALUES (90011, 1, '2026-09-02', 2000, 'GROCERIES', 1, 0), (90012, 1, '2026-09-03', -5000, 'UNCATEGORIZED REFUND', NULL, 1)",
+			),
+		]);
+		const { html } = await homeAt("2026-09");
+		expect(html).toMatch(/whitespace-nowrap[^"]*">\$130<\/p>/);
+		expect(html).toMatch(
+			/Needs a category<\/span><span class="text-right text-lg text-ok">\+\$50<\/span>/,
+		);
+	});
+
 	it("puts the number first: the month, budget remaining, the Band, Budget, then Things to try (#92)", async () => {
 		const { html } = await home();
 		const at = (s: string) => html.indexOf(s);
