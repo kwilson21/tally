@@ -1576,7 +1576,7 @@ function EditSheet({
 							rename={{
 								merchant: tx.nameChoices.merchantLabel,
 								total: tx.nameChoices.total,
-								part: tx.parentId !== null,
+								part: typeof tx.parentId === "number",
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
 								// The note shows only where a one-off name would make Jev guess again (rename.ts).
@@ -2995,11 +2995,17 @@ async function savePanel(
 	// doesn't stand in for it. An unnamed store is named by its tidied text, never the raw bank string (#93),
 	// or by the suggestion its rows were showing when nothing was chosen (P29 A). A panel that didn't rename
 	// the store names it as stored, not as it was drawn.
+	// A save that turns the store's suggestions down is one renaming the merchant with the bank's text (saveEdit's
+	// renamesMerchant); under This one only the suggestions stay, and the rows keep reading them.
+	const turnsDownSuggestions =
+		parsed.value.keepBankName === true &&
+		parsed.value.nameChanged !== false &&
+		parsed.value.nameScope !== "one";
 	const storeName =
 		(parsed.value.nameChanged === false || parsed.value.nameScope === "one"
 			? tx.merchantName
 			: parsed.value.displayName) ??
-		(parsed.value.keepBankName ? tidyName(tx.rawName) : tx.storeName);
+		(turnsDownSuggestions ? tidyName(tx.rawName) : tx.storeName);
 	const ruleOfferRecord =
 		parsed.value.categoryId === null ||
 		parsed.value.categoryId === tx.categoryId ||

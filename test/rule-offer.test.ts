@@ -1001,3 +1001,36 @@ describe("the rule offer names the store, not a name a row has of its own (decis
 		);
 	});
 });
+
+describe("the rule offer after the store's own name is picked (decision 101)", () => {
+	const suggest = () =>
+		env.DB.prepare(
+			"UPDATE merchants SET suggested_name = 'Pet Supplies Co', suggestion_status = 'pending' WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.run();
+
+	it("This one only keeps the store's suggestion, so the offer names the suggestion, not the tidied bank text", async () => {
+		await suggest();
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			name_pick: "store",
+			name_scope: "one",
+		});
+		expect(third.html).toContain("Always use Groceries for Pet Supplies Co?");
+		expect(third.html).not.toContain(QUESTION);
+	});
+
+	it("All turns the suggestion down, so the offer names the bank's text tidied", async () => {
+		await suggest();
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			name_pick: "store",
+			name_scope: "all",
+		});
+		expect(third.html).toContain(QUESTION);
+		expect(third.html).not.toContain("Pet Supplies Co");
+	});
+});
