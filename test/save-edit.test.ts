@@ -428,6 +428,30 @@ describe("saveEdit recounts a linked credit only when this save clears its incom
 		});
 	});
 
+	it("refuses reviewing a linked credit as not income when the purchase has no room left, since the review clears its income", async () => {
+		expect(
+			await saveEdit(
+				db,
+				INCOME_CREDIT,
+				{
+					...edit(),
+					note: "Reviewed only",
+					income: false,
+					incomeWas: false,
+					creditReviewed: true,
+					creditReviewedWas: false,
+					creditReviewedProvided: true,
+				},
+				"test",
+			),
+		).toEqual({ saved: false, refundLeftCents: 0 });
+		expect(await creditRow()).toEqual({
+			note: null,
+			flag_income: 1,
+			refund_of_id: PURCHASE,
+		});
+	});
+
 	it("still refuses clearing income on a linked credit when the purchase has no room left", async () => {
 		expect(
 			await saveEdit(
