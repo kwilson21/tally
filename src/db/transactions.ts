@@ -120,6 +120,10 @@ export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.categor
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
 /** What the refunds linked to a purchase add up to, for its "$X refunded" caption. */
 export const REFUNDED_COLUMN = `(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents`;
+/** The bill a payment is linked to, for its "paid … bill" caption; needs `t`. */
+export const BILL_NAME_COLUMN = `(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName`;
+/** The month a bill moved the row into, for its "Counts in …" caption, when it isn't the row's own month; needs COUNTED_JOINS. */
+export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth`;
 
 /**
  * True when a merchant's pending, unchosen suggested names (one per line) hold the search text; one `?`.
@@ -307,12 +311,12 @@ export async function listTransactions(
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
 				t.excluded, ${paysBillSql("t")} AS paysBill,
-				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
+				${BILL_NAME_COLUMN},
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=p.id AND bp.status='linked' LIMIT 1) AS parentBillName,
 				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				${MAYBE_CATEGORY_COLUMNS},
-				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth
+				${COUNTS_IN_MONTH_COLUMN}
 			${from}
 			ORDER BY t.date DESC, t.id DESC
 			${ids ? "" : `LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`}`,
@@ -623,7 +627,7 @@ export async function getTransaction(
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
 				t.excluded, ${paysBillSql("t")} AS paysBill,
-				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName,
+				${BILL_NAME_COLUMN},
 				${PENDING_SQL} AS pending, t.flag_income AS income, CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser, t.income_source AS incomeSource,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,

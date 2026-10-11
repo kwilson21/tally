@@ -190,6 +190,96 @@ describe("likelyTransactions", () => {
 
 		expect(rows).toEqual([]);
 	});
+
+	it("hides a guessed note while details are off, and marks it guessed while they are on", async () => {
+		const guessed = await tx(
+			`${THIS}-03`,
+			7650,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		const typed = await tx(
+			`${THIS}-04`,
+			4800,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET note = 'Dinner', note_guessed = 1 WHERE id = ?",
+			).bind(guessed),
+			env.DB.prepare(
+				"UPDATE transactions SET note = 'Vet bill' WHERE id = ?",
+			).bind(typed),
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO household_settings (key, value) VALUES ('ai_details', 'off')",
+			),
+		]);
+
+		const off = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		expect(off.find((row) => row.id === guessed)).toMatchObject({
+			note: null,
+			noteGuessed: false,
+		});
+		// A note a person wrote shows whatever the details switch says.
+		expect(off.find((row) => row.id === typed)).toMatchObject({
+			note: "Vet bill",
+			noteGuessed: false,
+		});
+
+		await env.DB.prepare(
+			"INSERT OR REPLACE INTO household_settings (key, value) VALUES ('ai_details', 'on')",
+		).run();
+		const on = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		expect(on.find((row) => row.id === guessed)).toMatchObject({
+			note: "Dinner",
+			noteGuessed: true,
+		});
+	});
+
+	it("carries the date a bank change unlinked a refund, as the list does", async () => {
+		const unlinked = (
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, credit_reviewed, refund_unlinked_purchase_date) VALUES (1, ?, -700, 'BANFIELD PET HOSPITAL', 'Banfield Pet Hospital', 1, ?) RETURNING id",
+			)
+				.bind(`${THIS}-06`, `${THIS}-01`)
+				.first<{ id: number }>()
+		)?.id as number;
+
+		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+
+		expect(rows.find((row) => row.id === unlinked)).toMatchObject({
+			refundUnlinkedPurchaseDate: `${THIS}-01`,
+			refundPurchaseDate: null,
+		});
+	});
+
+	it("carries the bill a payment pays and the month the bill moved it to", async () => {
+		const payment = await tx(
+			`${THIS}-06`,
+			9000,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		const bill = (
+			await env.DB.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Vet plan', 9000, 1, 'monthly', 'BANFIELD PLAN') RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'auto', 'linked')",
+		)
+			.bind(bill, LAST, payment)
+			.run();
+
+		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+
+		expect(rows.find((row) => row.id === payment)).toMatchObject({
+			paysBill: true,
+			billName: "Vet plan",
+			countsInMonth: LAST,
+		});
+	});
 });
 
 describe("addLikely", () => {

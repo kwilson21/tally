@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, shortDay, todayIn } from "../src/dates";
 import { makeCategory, unmakeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
 
@@ -510,4 +510,65 @@ describe("the likely transactions after a new category", () => {
 
 		expect(rowHtml(saved.html, first)).toContain("$5.00 refunded");
 	});
+
+	it("show a likely refund's purchase date, as the list does", async () => {
+		// The refund names a purchase that is excluded: a refund follows its purchase only while the purchase counts,
+		// so this one still needs a category and is offered.
+		await env.DB.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
+			.bind(first)
+			.run();
+		const refund = (
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, refund_of_id, credit_reviewed) VALUES (1, ?, -500, 'SQ *LOCAL BAKERY 4432', ?, 1) RETURNING id",
+			)
+				.bind(`${THIS}-05`, first)
+				.first<{ id: number }>()
+		)?.id as number;
+
+		const saved = await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+
+		expect(rowHtml(saved.html, refund)).toContain(
+			`Refund for ${shortDay(`${THIS}-01`, `${THIS}-05`)}`,
+		);
+	});
+
+	it.each([
+		{ details: "off", shows: false },
+		{ details: "on", shows: true },
+	])(
+		"hide a guessed note while details are $details, as the list does",
+		async ({ details, shows }) => {
+			const guessed = (
+				await env.DB.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, note_guessed) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432', 'Birthday cake', 1) RETURNING id",
+				)
+					.bind(`${THIS}-04`)
+					.first<{ id: number }>()
+			)?.id as number;
+			await env.DB.prepare(
+				"INSERT OR REPLACE INTO household_settings (key, value) VALUES ('ai_details', ?)",
+			)
+				.bind(details)
+				.run();
+
+			const saved = await post(
+				`/transactions/${bakery}`,
+				saveFields({ category: "new", new_category_name: "Pet Care" }),
+			);
+
+			const row = rowHtml(saved.html, guessed);
+			if (shows) {
+				expect(row).toContain("Birthday cake");
+				expect(row).toContain("decoration-dashed");
+				expect(row).toContain("Tally&#39;s guess:");
+			} else {
+				expect(row).not.toContain("Birthday cake");
+				expect(row).not.toContain("decoration-dashed");
+				expect(row).not.toContain("Tally&#39;s guess:");
+			}
+		},
+	);
 });

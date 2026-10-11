@@ -4,9 +4,11 @@
 import { monthsBefore } from "../dates";
 import { shownName } from "../transactions/name-suggestions";
 import { readAiSwitches } from "./ai-switches";
-import { COUNTED_JOINS } from "./counted-month";
+import { COUNTED_JOINS, paysBillSql } from "./counted-month";
 import { merchantColumnSql, sameMerchantSql } from "./merchant-key";
 import {
+	BILL_NAME_COLUMN,
+	COUNTS_IN_MONTH_COLUMN,
 	type ListRow,
 	MAYBE_CATEGORY_COLUMNS,
 	MAYBE_CATEGORY_JOINS,
@@ -35,6 +37,8 @@ type LikelyRecord = Omit<
 	| "income"
 	| "creditReviewed"
 	| "maybeCategoryNew"
+	| "noteGuessed"
+	| "paysBill"
 > & {
 	merchantName: string | null;
 	suggestedNames: string | null;
@@ -46,15 +50,21 @@ type LikelyRecord = Omit<
 	income: number;
 	creditReviewed: number | null;
 	maybeCategoryNew: number;
+	noteGuessed: number;
+	paysBill: number;
 };
 
-// A name is worked out as the list works it (NAME_SUGGESTION_COLUMNS and shownName), and a row's Maybe chip and
-// refunds as the list draws them (MAYBE_CATEGORY_COLUMNS, REFUNDED_COLUMN), so a row reads the same here.
+// A name is worked out as the list works it (NAME_SUGGESTION_COLUMNS and shownName), and a row's note, Maybe chip,
+// refunds and caption as the list draws them (MAYBE_CATEGORY_COLUMNS, REFUNDED_COLUMN, BILL_NAME_COLUMN and
+// COUNTS_IN_MONTH_COLUMN, and the caption's refund and bank-change fields), so a row reads the same here.
 const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-	${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note,
+	${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note, t.note_guessed AS noteGuessed,
 	t.excluded AS excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 	t.category_id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 	${MAYBE_CATEGORY_COLUMNS}, ${REFUNDED_COLUMN},
+	rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate,
+	${paysBillSql("t")} AS paysBill, ${BILL_NAME_COLUMN}, ${COUNTS_IN_MONTH_COLUMN},
+	t.split_removed_from_cents AS splitRemovedFromCents,
 	t.pending AS pending, ${sameMerchantSql("t", "src")} AS sameMerchant
 	FROM transactions t ${COUNTED_JOINS}
 	${MAYBE_CATEGORY_JOINS}
@@ -78,7 +88,7 @@ export async function likelyTransactions(
 	today: string,
 ): Promise<LikelyRow[]> {
 	const thisMonth = today.slice(0, 7);
-	const { names: namesOn } = await readAiSwitches(db);
+	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
 	const { results } = await db
 		.prepare(
 			`${LIKELY_SELECT} ${LIKELY_WHERE}
@@ -104,6 +114,9 @@ export async function likelyTransactions(
 			});
 			return {
 				...row,
+				// A guessed note is hidden while the details switch is off, and dashed while it is on (as the list does).
+				note: row.noteGuessed === 1 && !detailsOn ? null : row.note,
+				noteGuessed: detailsOn && row.noteGuessed === 1,
 				displayName: shown.name,
 				nameSuggested: shown.suggested,
 				nameFromBank: shown.fromBank,
@@ -111,6 +124,7 @@ export async function likelyTransactions(
 				income: !!row.income,
 				creditReviewed: !!row.creditReviewed,
 				maybeCategoryNew: !!row.maybeCategoryNew,
+				paysBill: !!row.paysBill,
 				pending: !!row.pending,
 				sameMerchant: !!row.sameMerchant,
 			};
