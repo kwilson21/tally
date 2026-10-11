@@ -19,6 +19,7 @@ const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 const TABLES_CHILD_FIRST = [
 	"cash_delete_holds",
 	"bill_payments",
+	"never_suggest_rules",
 	"documents",
 	"balance_history",
 	"transactions",

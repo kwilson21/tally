@@ -2,6 +2,8 @@
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
 import type { LikelyRow } from "../db/likely-transactions";
+import type { NeverSuggestRule } from "../db/never-suggest";
+import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import {
@@ -60,7 +62,7 @@ import {
 	MaybeIncome,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
-import { MerchantRules } from "../views/merchant-rules";
+import { MerchantRules, NeverSuggestList } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
@@ -80,6 +82,7 @@ import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SelectionActionBar } from "../views/selection-action-bar";
 import { SplitForm } from "../views/split-form";
+import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
 import { TextInput } from "../views/text-input";
@@ -150,6 +153,7 @@ const SECTIONS = [
 	["trends", "Trends"],
 	["rows", "Rows"],
 	["categorization", "Categorization"],
+	["suggestions-review", "Suggestions review"],
 	["controls", "Controls"],
 	["feedback", "Feedback and sheets"],
 	["demo", "Guidance"],
@@ -2116,6 +2120,216 @@ function Rows() {
 	);
 }
 
+const REVIEW_TODAY = "2026-10-11";
+
+// The review screen's items, as the queue hands them to the components (#195): one of each kind.
+const reviewItems: Record<string, SuggestionItem> = {
+	income: {
+		kind: "income",
+		id: "income-1",
+		transactionId: 1,
+		date: "2026-10-02",
+		amountCents: -250000,
+		bankText: "VENMO PAYMENT",
+		merchantKey: "VENMO",
+		merchant: "Venmo",
+		sure: 52,
+		categoryId: null,
+		category: null,
+	},
+	transfer: {
+		kind: "transfer",
+		id: "transfer-2",
+		transactionId: 2,
+		date: "2026-10-02",
+		amountCents: 20000,
+		bankText: "CHASE CARD PAYMENT",
+		merchantKey: "CHASE CARD PAYMENT",
+		merchant: "Chase card payment",
+		sure: 50,
+		categoryId: null,
+		category: null,
+	},
+	category: {
+		kind: "category",
+		id: "category-3",
+		transactionId: 3,
+		date: "2026-10-02",
+		amountCents: 2300,
+		bankText: "SQ *LUPITAS TAQ 2210",
+		merchantKey: "SQ *LUPITAS TAQ 2210",
+		merchant: "Lupita's Taqueria",
+		sure: 64,
+		categoryId: 2,
+		category: "Eating Out",
+	},
+	newCategory: {
+		kind: "new_category",
+		id: "new-4",
+		suggestionId: 4,
+		name: "Pet Care",
+		date: "2026-10-02",
+		rows: [
+			{
+				transactionId: 5,
+				date: "2026-10-02",
+				amountCents: 4500,
+				merchantKey: "CHEWY.COM 1",
+				merchant: "Chewy",
+			},
+			{
+				transactionId: 6,
+				date: "2026-09-30",
+				amountCents: 3100,
+				merchantKey: "PETSMART 22",
+				merchant: "Petsmart",
+			},
+			{
+				transactionId: 7,
+				date: "2026-09-28",
+				amountCents: 8900,
+				merchantKey: "BANFIELD 5",
+				merchant: "Banfield",
+			},
+		],
+		stores: [
+			{ merchantKey: "CHEWY.COM 1", merchant: "Chewy" },
+			{ merchantKey: "PETSMART 22", merchant: "Petsmart" },
+			{ merchantKey: "BANFIELD 5", merchant: "Banfield" },
+		],
+	},
+	name: {
+		kind: "name",
+		id: "name-8",
+		rowId: 8,
+		merchantKey: "BLUE BOTTLE COF",
+		date: "2026-10-02",
+		totalCents: 1950,
+		review: {
+			key: "BLUE BOTTLE COF",
+			id: 8,
+			bankText: "SQ *BLUE BOTTLE COF 0412",
+			tidied: "Blue bottle cof 0412",
+			names: ["Blue Bottle Coffee"],
+			source: "tally",
+			count: 3,
+		},
+	},
+};
+
+const reviewCategories = [
+	{ id: 2, name: "Eating Out" },
+	{ id: 1, name: "Groceries" },
+	{ id: 3, name: "Gas" },
+];
+
+function SuggestionsReview() {
+	return (
+		<Group id="suggestions-review" title="Suggestions review">
+			<Specimen
+				id="suggestion-cards"
+				title="SuggestionCard and MaybeQuestion"
+				tier="visual"
+				components={[
+					"SuggestionCard",
+					"MaybeQuestion",
+					"Button",
+					"Chip",
+					"NameChoices",
+					"WhyLink",
+					"Icon",
+				]}
+				sentence="One item on Settings' Suggestions screen, one question at a time: the store's name in the serif with its bank text, amount and day; the dashed Maybe tag as the question, Tally's guess with a Why?; Yes as the full-width primary; Something else opening in place with no script; No on income, a transfer or a new category; a quiet Skip. A name Tally guessed says so with the sparkles icon, and a name the bank sent says From your bank. A new category ticks each purchase."
+			>
+				<div hx-ignore class="grid gap-8 md:grid-cols-2">
+					{[
+						reviewItems.income,
+						reviewItems.transfer,
+						reviewItems.category,
+						reviewItems.newCategory,
+						reviewItems.name,
+					].map((item) => (
+						<div class="max-w-md">
+							<SuggestionCard
+								action="/settings/suggestions"
+								item={item as SuggestionItem}
+								today={REVIEW_TODAY}
+								skipHref="/settings/suggestions?skip=income-1"
+								categories={reviewCategories}
+							/>
+						</div>
+					))}
+				</div>
+			</Specimen>
+			<Specimen
+				id="suggestion-ask"
+				title="AskFirst"
+				tier="visual"
+				components={["AskFirst", "Button", "Icon"]}
+				sentence="The question after a No on income, a transfer or a new category: nothing is kept until Yes, and Not now moves on. The muted check says what the No decided."
+			>
+				<div hx-ignore class="grid gap-8 md:grid-cols-2">
+					<div class="max-w-md">
+						<AskFirst
+							action="/settings/suggestions"
+							kind="income"
+							id="income-1"
+							stores={[{ merchantKey: "VENMO", label: "Venmo" }]}
+							check="Not counted as income"
+						/>
+					</div>
+					<div class="max-w-md">
+						<AskFirst
+							action="/settings/suggestions"
+							kind="new_category"
+							id="new-4"
+							name="Pet Care"
+							stores={[
+								{ merchantKey: "CHEWY.COM 1", label: "Chewy" },
+								{ merchantKey: "PETSMART 22", label: "Petsmart" },
+								{ merchantKey: "BANFIELD 5", label: "Banfield" },
+							]}
+						/>
+					</div>
+				</div>
+			</Specimen>
+			<Specimen
+				id="never-suggest-list"
+				title="NeverSuggestList"
+				tier="visual"
+				components={["NeverSuggestList", "EmptyState", "Button"]}
+				sentence="Settings' Never suggest list under Tally's rules: one line per No the family said Yes to, the day of it, and a terracotta Remove that names the line. Empty, it says Tally hasn't been told No yet."
+			>
+				<div hx-ignore class="grid gap-8 md:grid-cols-2">
+					<NeverSuggestList
+						rules={[
+							{
+								id: 1,
+								merchantKey: "VENMO",
+								merchant: "Venmo",
+								kind: "income",
+								categoryId: null,
+								category: null,
+								decidedOn: "2026-10-03",
+							},
+							{
+								id: 2,
+								merchantKey: "CHEWY.COM 1",
+								merchant: "Chewy",
+								kind: "new_category",
+								categoryId: null,
+								category: null,
+								decidedOn: "2026-10-09",
+							},
+						]}
+					/>
+					<NeverSuggestList rules={[] as NeverSuggestRule[]} />
+				</div>
+			</Specimen>
+		</Group>
+	);
+}
+
 function Categorization() {
 	return (
 		<Group id="categorization" title="Categorization">
@@ -4063,6 +4277,7 @@ export function Catalog() {
 			<TrendsGroup />
 			<Rows />
 			<Categorization />
+			<SuggestionsReview />
 			<Controls />
 			<Feedback />
 			<Demo />

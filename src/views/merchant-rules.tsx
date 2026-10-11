@@ -1,3 +1,8 @@
+import { shortDay } from "../dates";
+import {
+	type NeverSuggestRule,
+	neverSuggestRuleLine,
+} from "../db/never-suggest";
 import { Button } from "./button";
 import { CategoryIcon } from "./category";
 import { EmptyState } from "./empty-state";
@@ -24,9 +29,12 @@ export function MerchantRules({
 	focusRuleIndex,
 	focusHeading,
 	error,
+	neverRules = [],
 }: {
 	id?: string;
 	rules: MerchantRule[];
+	/** The "Never suggest" lines, under the same heading (issue #195). */
+	neverRules?: NeverSuggestRule[];
 	total: number;
 	search?: string;
 	focusRuleIndex?: number;
@@ -158,6 +166,51 @@ export function MerchantRules({
 					)}
 				</div>
 			</div>
+			<NeverSuggestList rules={neverRules} />
 		</section>
+	);
+}
+
+/**
+ * The "Never suggest" list under the same heading (issue #195, decision 101): one line per No the family
+ * said Yes to, the day of it, and a Remove whose name says which line it takes away.
+ */
+export function NeverSuggestList({ rules }: { rules: NeverSuggestRule[] }) {
+	return (
+		<div class="mt-8">
+			<h3 class="text-xl font-semibold">Never suggest</h3>
+			{rules.length === 0 ? (
+				<EmptyState kind="done" sentence="Tally hasn't been told No yet." />
+			) : (
+				<ul class="mt-2 divide-y divide-rule border-y border-rule">
+					{rules.map((rule) => {
+						const line = neverSuggestRuleLine(rule);
+						return (
+							<li class="flex min-h-16 items-center gap-4 py-2">
+								<span class="min-w-0 flex-1">
+									<span class="block text-lg leading-6">{line}</span>
+									<span class="block leading-6 text-muted">
+										You said No on {shortDay(rule.decidedOn, rule.decidedOn)}
+									</span>
+								</span>
+								<form
+									method="post"
+									action="/settings/never-suggest/remove"
+									hx-post="/settings/never-suggest/remove"
+									hx-target="#merchant-rules"
+									hx-select="#merchant-rules"
+									hx-swap="outerHTML"
+								>
+									<input type="hidden" name="id" value={String(rule.id)} />
+									<Button type="submit" kind="text">
+										Remove<span class="sr-only"> {line}</span>
+									</Button>
+								</form>
+							</li>
+						);
+					})}
+				</ul>
+			)}
+		</div>
 	);
 }

@@ -3,6 +3,7 @@ import { fullMessage, MAX_ACTIVE, sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { categoryNames } from "./categories";
 import { merchantKeySql } from "./merchant-key";
+import { neverSuggestedSql } from "./never-suggest";
 import type { ListRow } from "./transactions";
 
 export type NoneFitTransaction = {
@@ -15,10 +16,12 @@ export async function noneFitTransactions(
 	db: D1Database,
 ): Promise<NoneFitTransaction[]> {
 	const theme = `COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")})`;
+	// A store with a "Never suggest" line for a new category is never grouped (decision 101).
 	const eligible = `t.jev_none_fit = 1 AND t.category_confidence >= ? AND t.jev_category_id IS NULL
 		AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_suggestion_id IS NULL
 		AND t.amount_cents > 0 AND t.pending = 0 AND t.excluded = 0 AND t.flag_income = 0
-		AND t.is_split = 0 AND t.parent_id IS NULL`;
+		AND t.is_split = 0 AND t.parent_id IS NULL
+		AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}`;
 	const { results: groups } = await db
 		.prepare(`SELECT COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
 			COUNT(*) count FROM transactions t WHERE ${eligible} GROUP BY theme HAVING COUNT(*) >= 3

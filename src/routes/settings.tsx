@@ -21,13 +21,18 @@ import {
 	dismissSuggestion,
 	pendingSuggestions,
 } from "../db/category-suggestions";
-import { namesToReview } from "../db/merchant-names";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
+import {
+	neverSuggestRuleLine,
+	neverSuggestRules,
+	removeNeverSuggest,
+} from "../db/never-suggest";
 import {
 	readBankSignInEmails,
 	removeHouseholdMember,
 	saveBankSignInEmails,
 } from "../db/reconnect";
+import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
 import { reconnectRecipients } from "../reconnect/reminders";
@@ -474,7 +479,8 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const people = await c.env.DB.prepare(
 		"SELECT id, name FROM household_people ORDER BY id",
 	).all<{ id: number; name: string }>();
-	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
+	const waiting = (await suggestionQueue(c.env.DB, aiSwitches)).length;
+	const neverRules = await neverSuggestRules(c.env.DB);
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
 	const rulesSearch =
 		view.rulesSearch ??
@@ -492,14 +498,16 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>
-			{/* Suggested merchant names waiting for a person (P29 A): a Band to the one-at-a-time review. It is
-			    always in the page, empty when nothing waits, so saving the names switch can draw it again. */}
+			{/* Every "Maybe …" waiting for a person (issue #195): a Band to the one review screen. It is always in
+			    the page, empty when nothing waits, so saving the AI switches can draw it again. */}
 			<div id="names-band">
-				{namesWaiting > 0 && (
+				{waiting > 0 && (
 					<div class="mt-4 lg:max-w-3xl">
-						<Band href="/settings/names" detail="Suggested names; you choose">
-							{namesWaiting} merchant {namesWaiting === 1 ? "name" : "names"} to
-							check
+						<Band
+							href="/settings/suggestions"
+							detail="Tally's guesses; you decide"
+						>
+							{waiting} {waiting === 1 ? "suggestion" : "suggestions"} to check
 						</Band>
 					</div>
 				)}
@@ -654,6 +662,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				focusRuleIndex={view.focusRuleIndex}
 				focusHeading={view.focusMerchantHeading}
 				error={view.merchantRuleError}
+				neverRules={neverRules}
 				search={
 					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
 				}
@@ -765,6 +774,36 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 		`/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`,
 		303,
 	);
+});
+
+// Remove takes one "Never suggest" line away and says so; the suggestion may come back as a fresh guess.
+settings.post("/settings/never-suggest/remove", async (c) => {
+	const form = await c.req.formData();
+	const id = Number(form.get("id")?.toString() ?? "");
+	const removed =
+		Number.isInteger(id) && id > 0
+			? await removeNeverSuggest(c.env.DB, id)
+			: null;
+	if (!removed) {
+		if (c.req.header("HX-Request"))
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({ announce: "Tally's rules list updated." }),
+			);
+		return renderSettings(c, { rulesSearch: "" });
+	}
+	const message = "Removed. Tally can suggest that again.";
+	if (c.req.header("HX-Request")) {
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: `${message} ${neverSuggestRuleLine(removed)} is gone.`,
+			}),
+		);
+		return renderSettings(c, { rulesSearch: "" });
+	}
+	return c.redirect("/settings#merchant-rules", 303);
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
@@ -944,21 +983,21 @@ settings.post("/settings/ai", async (c) => {
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
-	const waitingBefore = (await namesToReview(c.env.DB)).length;
+	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
 	await saveAiSwitches(c.env.DB, next);
 	const now = await readAiSwitches(c.env.DB);
-	const waitingAfter = (await namesToReview(c.env.DB, now)).length;
+	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
 	).join(", ");
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
-	// The Band above Categories changes with the names switch, so a change in what it says is announced too.
+	// The Band above Categories changes with the switches, so a change in what it says is announced too.
 	const band =
 		waitingAfter === waitingBefore
 			? ""
 			: waitingAfter === 0
-				? " No merchant names to check."
-				: ` ${waitingAfter} merchant ${waitingAfter === 1 ? "name" : "names"} to check.`;
+				? " Nothing to check."
+				: ` ${waitingAfter} ${waitingAfter === 1 ? "suggestion" : "suggestions"} to check.`;
 	return done(
 		c,
 		"Saved AI suggestions",

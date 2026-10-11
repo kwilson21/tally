@@ -191,6 +191,9 @@ describe("data exports", () => {
 			"INSERT INTO household_members (email, session_issued_at) VALUES ('person@example.com', 1)",
 		).run();
 		await env.DB.prepare(
+			"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO', 'income', '2026-10-03')",
+		).run();
+		await env.DB.prepare(
 			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-10', 50000)",
 		).run();
 		await env.DB.batch([
@@ -254,6 +257,7 @@ describe("data exports", () => {
 			"household_settings",
 			"household_members",
 			"household_people",
+			"never_suggest_rules",
 		]) {
 			expect(data[table], table).toBeInstanceOf(Array);
 		}
@@ -379,6 +383,13 @@ describe("data exports", () => {
 				"removed_at",
 			],
 			household_people: ["id", "name"],
+			never_suggest_rules: [
+				"category_id",
+				"decided_on",
+				"id",
+				"kind",
+				"merchant_key",
+			],
 		} as const;
 		for (const [table, columns] of Object.entries(exportedColumns)) {
 			expect(

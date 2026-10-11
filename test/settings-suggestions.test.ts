@@ -325,7 +325,9 @@ describe("GET /settings with a suggestion", () => {
 		expect(textOf(html)).toContain(
 			"20 more suggestions will show once you decide these.",
 		);
-		expect(counted.statements()).toBeLessThan(20);
+		// Settings reads the one review queue as well (#195): its income, transfer, category and name reads add
+		// a fixed handful of statements, none of them per suggestion.
+		expect(counted.statements()).toBeLessThan(30);
 	});
 
 	it("keeps a partly reviewed suggestion visible while one eligible transaction remains, then retires it at zero", async () => {
