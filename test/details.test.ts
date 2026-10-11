@@ -55,9 +55,9 @@ beforeEach(async () => {
 describe("transaction detail guesses", () => {
 	it("records empty note answers and reaches older untried purchases next", async () => {
 		await db
-			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,details_asked) VALUES
-			(1,'2026-10-01',100,'NEWEST A',1),(1,'2026-10-02',100,'NEWEST B',1),
-			(1,'2026-10-03',100,'NEWEST C',1),(1,'2026-09-01',100,'OLDER',1)`)
+			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,details_asked, note_worth_writing) VALUES
+			(1,'2026-10-01',100,'NEWEST A',1,1),(1,'2026-10-02',100,'NEWEST B',1,1),
+			(1,'2026-10-03',100,'NEWEST C',1,1),(1,'2026-09-01',100,'OLDER',1,1)`)
 			.run();
 		const asked: string[] = [];
 		const ai = {
@@ -85,8 +85,8 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
-			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked)
-			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1 FROM n`,
+			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing)
+			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1, 1 FROM n`,
 			)
 			.run();
 		let statements = 0;
@@ -112,8 +112,8 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
-			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked)
-			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1 FROM n`,
+			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing)
+			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1, 1 FROM n`,
 			)
 			.run();
 		const run = vi.fn(async () => {
@@ -140,12 +140,12 @@ describe("transaction detail guesses", () => {
 	it("guesses only empty notes and keeps a note typed after candidates were read", async () => {
 		await db
 			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, details_asked)
-			 VALUES (1, '2026-09-20', 500, 'EMPTY STRING', '', 1),
-			        (1, '2026-09-20', 600, 'WHITESPACE NOTE', '   ', 1),
-			        (1, '2026-09-20', 700, 'NULL NOTE', NULL, 1),
-			        (1, '2026-09-20', 800, 'PERSON NOTE', 'Costco run', 1),
-			        (1, '2026-09-20', 900, 'RACE NOTE', NULL, 1)`,
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, details_asked, note_worth_writing)
+			 VALUES (1, '2026-09-20', 500, 'EMPTY STRING', '', 1, 1),
+			        (1, '2026-09-20', 600, 'WHITESPACE NOTE', '   ', 1, 1),
+			        (1, '2026-09-20', 700, 'NULL NOTE', NULL, 1, 1),
+			        (1, '2026-09-20', 800, 'PERSON NOTE', 'Costco run', 1, 1),
+			        (1, '2026-09-20', 900, 'RACE NOTE', NULL, 1, 1)`,
 			)
 			.run();
 		const run = vi.fn(
@@ -193,6 +193,7 @@ describe("transaction detail guesses", () => {
 						income: { noul: 0 },
 						kind: { choice: "one_off", confidence: 0.99 },
 						for_person: { choice: `person:${person?.id}`, confidence: 0.99 },
+						note_worth_writing: { noul: 0.95 },
 					},
 				}),
 				{ status: 200 },
@@ -223,6 +224,91 @@ describe("transaction detail guesses", () => {
 			for_person_id: person?.id,
 			for_person_guessed: 1,
 		});
+	});
+
+	it("asks Workers AI for a what-it-was line only where Jev says one could say more than the store's name", async () => {
+		const purchase = async (rawName: string, merchantName: string) =>
+			(
+				await db
+					.prepare(
+						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, '2026-10-01', 1299, ?, ?) RETURNING id",
+					)
+					.bind(rawName, merchantName)
+					.first<{ id: number }>()
+			)?.id as number;
+		const cvs = await purchase("CVS PHARMACY #1234", "CVS Pharmacy");
+		const apple = await purchase("APPLE.COM/BILL", "Apple");
+		// A row Jev answered before this question existed: its note is never asked for.
+		await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked) VALUES (1, '2026-09-01', 500, 'OLD SHOP', 1)",
+			)
+			.run();
+		const fakeJev = async (_url: string, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body)) as {
+				state: { bank_description: string };
+			};
+			const worth =
+				body.state.bank_description === "APPLE.COM/BILL" ? 0.95 : 0.1;
+			return new Response(
+				JSON.stringify({
+					answers: {
+						category: { choice: "Eating Out", confidence: 0.99 },
+						transfer: { noul: 0 },
+						reimbursement: { noul: 0 },
+						income: { noul: 0 },
+						kind: { choice: "one_off", confidence: 0.99 },
+						for_person: { choice: "none", confidence: 0.99 },
+						note_worth_writing: { noul: worth },
+					},
+				}),
+				{ status: 200 },
+			);
+		};
+		await categorizePending({ DB: db, JEV_API_KEY: "test-key" }, fakeJev, {
+			onlyIds: [cvs, apple],
+		});
+		const stored = await db
+			.prepare(
+				"SELECT id, note_worth_writing FROM transactions WHERE id IN (?, ?) ORDER BY id",
+			)
+			.bind(cvs, apple)
+			.all<{ id: number; note_worth_writing: number }>();
+		expect(stored.results).toEqual([
+			{ id: cvs, note_worth_writing: 0 },
+			{ id: apple, note_worth_writing: 1 },
+		]);
+
+		const ai = {
+			run: vi.fn(async () => ({ response: "App or iCloud subscription" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		const asked = ai.run.mock.calls.map(
+			([, input]) =>
+				(input as { messages: { content: string }[] }).messages[1]?.content,
+		);
+		expect(asked).toEqual(["Bank text: APPLE.COM/BILL"]);
+		// The panel's What it was row for the no says Add, as it does for any empty detail.
+		const cvsPanel = (await get(`/transactions/${cvs}`)).html;
+		const whatItWas =
+			cvsPanel
+				.split(">What it was</span>")[1]
+				?.split('<span class="block font-medium">')[0] ?? "";
+		expect(whatItWas).toContain('<span class="truncate">Add</span>');
+		const notes = await db
+			.prepare(
+				"SELECT raw_name, note, note_guessed FROM transactions ORDER BY id",
+			)
+			.all<Record<string, unknown>>();
+		expect(notes.results).toEqual([
+			{ raw_name: "CVS PHARMACY #1234", note: null, note_guessed: 0 },
+			{
+				raw_name: "APPLE.COM/BILL",
+				note: "App or iCloud subscription",
+				note_guessed: 1,
+			},
+			{ raw_name: "OLD SHOP", note: null, note_guessed: 0 },
+		]);
 	});
 
 	it("shows the four detail rows and keeps them together with Looks right", async () => {
@@ -349,6 +435,7 @@ describe("transaction detail guesses", () => {
 						income: { noul: 0 },
 						kind: { choice: "one_off", confidence: 0.99 },
 						for_person: { choice: "person:1", confidence: 0.99 },
+						note_worth_writing: { noul: 0.95 },
 					},
 				});
 			},
@@ -392,6 +479,7 @@ describe("transaction detail guesses", () => {
 										choice: `person:${person?.id}`,
 										confidence: 0.99,
 									},
+									note_worth_writing: { noul: 0.95 },
 								}),
 					},
 				});
@@ -536,6 +624,7 @@ describe("transaction detail guesses", () => {
 							income: { noul: 0 },
 							kind: { choice: "subscription", confidence: 0.99 },
 							for_person: { choice: "person:1", confidence: 0.99 },
+							note_worth_writing: { noul: 0.95 },
 						},
 					}),
 					{ status: 200 },
@@ -634,11 +723,11 @@ describe("transaction detail guesses", () => {
 		const id = await charge();
 		await db
 			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('COFFEE SHOP', 'Coffee Shop', 'pending')",
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('COFFEE SHOP', 'Corner Coffee', 'pending')",
 			)
 			.run();
 		const before = await get(`/transactions/${id}`);
-		expect(before.html).toContain('value="s:Coffee Shop"');
+		expect(before.html).toContain('value="s:Corner Coffee"');
 		await db
 			.prepare("INSERT INTO household_people (name) VALUES ('Morgan')")
 			.run();
@@ -654,7 +743,7 @@ describe("transaction detail guesses", () => {
 		const kept = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "",
-			name_pick: "s:Coffee Shop",
+			name_pick: "s:Corner Coffee",
 			note: "Dinner",
 			kind: "one_off",
 			for_person_id: String(person?.id),
@@ -667,7 +756,7 @@ describe("transaction detail guesses", () => {
 					"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = 'COFFEE SHOP'",
 				)
 				.first(),
-		).toEqual({ display_name: "Coffee Shop", suggestion_status: "accepted" });
+		).toEqual({ display_name: "Corner Coffee", suggestion_status: "accepted" });
 		let row = await db
 			.prepare(
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
@@ -895,6 +984,7 @@ describe("transaction detail guesses", () => {
 						income: { noul: 0 },
 						kind: { choice: "one_off", confidence: 0.99 },
 						for_person: { choice: idChoice, confidence: 0.99 },
+						note_worth_writing: { noul: 0.95 },
 					},
 				});
 			},

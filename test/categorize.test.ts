@@ -285,6 +285,67 @@ describe("askJev", () => {
 		});
 	});
 
+	it("asks whether a what-it-was line could say more than the store's name, only when details are asked", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(input, categories, "k", fetchImpl, {
+			details: true,
+			people: [{ id: 4, name: "Morgan" }],
+		});
+		await askJev(input, categories, "k", fetchImpl);
+
+		const withDetails = JSON.parse(String(calls[0]?.init.body));
+		expect(withDetails.questions.note_worth_writing.type).toBe("noul");
+		expect(withDetails.questions.note_worth_writing.instructions).toMatch(
+			/store's name/,
+		);
+		const withoutDetails = JSON.parse(String(calls[1]?.init.body));
+		expect(withoutDetails.questions).not.toHaveProperty("note_worth_writing");
+	});
+
+	describe("the what-it-was question", () => {
+		const detailAnswers = {
+			...goodBody.answers,
+			kind: { type: "choice", choice: "one_off", confidence: 0.9 },
+			for_person: { type: "choice", choice: "none", confidence: 0.9 },
+			note_worth_writing: { type: "noul", noul: 0.91 },
+		};
+		const people = [{ id: 4, name: "Morgan" }];
+
+		it("reads the yes-probability with the detail answers", async () => {
+			const { fetchImpl } = fakeFetch(() => ok({ answers: detailAnswers }));
+			expect(
+				await askJev(input, categories, "k", fetchImpl, {
+					details: true,
+					people,
+				}),
+			).toMatchObject({
+				ok: true,
+				answer: { noteWorthWriting: 0.91 },
+			});
+		});
+
+		it("rejects an answer that omits the requested question, as it does a missing kind", async () => {
+			// JSON.stringify drops an undefined field, so Jev's answer simply has no question.
+			const { fetchImpl } = fakeFetch(() =>
+				ok({
+					answers: { ...detailAnswers, note_worth_writing: undefined },
+				}),
+			);
+			expect(
+				await askJev(input, categories, "k", fetchImpl, {
+					details: true,
+					people,
+				}),
+			).toMatchObject({ ok: false, status: 200 });
+		});
+
+		it("leaves the answer without a what-it-was field when details are not asked", async () => {
+			const { fetchImpl } = fakeFetch(() => ok(goodBody));
+			const result = await askJev(input, categories, "k", fetchImpl);
+			expect(result.ok && "noteWorthWriting" in result.answer).toBe(false);
+		});
+	});
+
 	it("starts with a threshold of 0.80", () => {
 		expect(JEV_THRESHOLD).toBe(0.8);
 	});

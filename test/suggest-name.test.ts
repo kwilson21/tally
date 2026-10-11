@@ -3,6 +3,7 @@ import {
 	cleanSuggestedNames,
 	NAME_MODEL,
 	suggestNames,
+	suggestNote,
 } from "../src/ai/suggest-name";
 
 // Workers AI suggests up to three names for a bank's text (spec §7, #33). Code decides what a
@@ -178,5 +179,43 @@ describe("suggestNames", () => {
 		expect(signals[1]).toBeInstanceOf(AbortSignal);
 		// A fresh one each call, so a signal that ran out for one request isn't handed to the next.
 		expect(signals[1]).not.toBe(signals[0]);
+	});
+});
+
+describe("suggestNote", () => {
+	const fakeAi = (answer: string) =>
+		({
+			run: vi.fn(async () => ({ response: answer })),
+		}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
+	it("keeps a line that says more than the store's name", async () => {
+		expect(
+			await suggestNote(
+				fakeAi("App or iCloud subscription"),
+				"APPLE.COM/BILL",
+				"Apple",
+			),
+		).toEqual({ ok: true, note: "App or iCloud subscription" });
+	});
+
+	it.each([
+		["CVS purchase.", "CVS PHARMACY #1234"],
+		["CVS Pharmacy payment", "CVS PHARMACY #1234"],
+		["The CVS order", "CVS PHARMACY #1234"],
+		["Purchase at CVS", "CVS PHARMACY #1234"],
+	])(
+		"drops %j for %j, since it only restates the store and a generic noun",
+		async (answer, rawName) => {
+			expect(
+				await suggestNote(fakeAi(answer), rawName, "CVS Pharmacy"),
+			).toEqual({ ok: true, note: null });
+		},
+	);
+
+	it("drops a line that restates the store when there is no merchant name", async () => {
+		expect(await suggestNote(fakeAi("Blue Bottle"), RAW, null)).toEqual({
+			ok: true,
+			note: null,
+		});
 	});
 });

@@ -32,6 +32,13 @@ export type JevResult =
 	/** status is null when no response arrived (network error or timeout). */
 	| { ok: false; status: number | null; requestId: string | null };
 
+/**
+ * Asked only with the details, in the same call (decision 103): whether a "what it was" line could say
+ * more than the store's name. Workers AI writes a line only for a yes, so an unclear answer is a no.
+ */
+const NOTE_WORTH_QUESTION =
+	"Could a short \"what it was\" line say something useful that the store's name doesn't already say? Yes for a purchase whose store name hides what it was, such as an app or iCloud subscription from APPLE.COM/BILL; no when the store's name already says it, such as CVS Pharmacy.";
+
 const FLAG_QUESTIONS: Record<Flag, string> = {
 	transfer:
 		"Is this a transfer between the household's own accounts, rather than spending?",
@@ -123,6 +130,10 @@ export async function askJev(
 								["none", "It isn't clear who this was for."],
 							]),
 						},
+						note_worth_writing: {
+							type: "noul",
+							instructions: NOTE_WORTH_QUESTION,
+						},
 					}
 				: {}),
 		},
@@ -155,6 +166,7 @@ export async function askJev(
 		options.people
 			? [...options.people.map((person) => `person:${person.id}`), "none"]
 			: [],
+		Boolean(options.details),
 	);
 	return answer
 		? { ok: true, answer }
@@ -171,6 +183,7 @@ function parseAnswer(
 	options: string[],
 	kinds: string[],
 	people: string[],
+	asksNote: boolean,
 ): JevAnswer | null {
 	const answers = (data as { answers?: Record<string, unknown> } | null)
 		?.answers;
@@ -207,6 +220,10 @@ function parseAnswer(
 	const forPerson = choice("for_person", people);
 	if (kinds.length && !kind) return null;
 	if (people.length && !forPerson) return null;
+	const noteWorth = (
+		answers?.note_worth_writing as { noul?: unknown } | undefined
+	)?.noul;
+	if (asksNote && !isProbability(noteWorth)) return null;
 	return {
 		category: category
 			? {
@@ -217,6 +234,9 @@ function parseAnswer(
 		flags,
 		...(kind ? { kind } : {}),
 		...(forPerson ? { forPerson } : {}),
+		...(asksNote && isProbability(noteWorth)
+			? { noteWorthWriting: noteWorth }
+			: {}),
 	};
 }
 

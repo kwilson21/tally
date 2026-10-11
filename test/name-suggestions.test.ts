@@ -3,6 +3,7 @@ import {
 	isBankName,
 	MAX_SUGGESTED_NAMES,
 	nameSource,
+	offeredNames,
 	parseSuggestedNames,
 	shownName,
 	storeSuggestedNames,
@@ -172,5 +173,35 @@ describe("shownName", () => {
 				stored: "Netflix",
 			}),
 		).toEqual({ name: "Netflix", suggested: false, fromBank: false });
+	});
+
+	it("does not offer a Tally guess that only recapitalizes the shown text", () => {
+		const guess = {
+			stored: "blue BOTTLE cof",
+			status: "pending",
+			key: raw,
+			namesOn: true,
+		};
+		expect(offeredNames(guess, raw)).toEqual([]);
+		expect(shownName({ ...input, ...guess })).toEqual({
+			name: "Blue bottle cof",
+			suggested: false,
+			fromBank: false,
+		});
+	});
+
+	it("keeps the bank's own name offered when it only recapitalizes the shown text (P87 B)", () => {
+		const bank = {
+			stored: "Blue Bottle Cof",
+			status: "pending",
+			key: "Blue Bottle Cof",
+			namesOn: true,
+		};
+		expect(offeredNames(bank, raw)).toEqual(["Blue Bottle Cof"]);
+		expect(shownName({ ...input, ...bank })).toEqual({
+			name: "Blue Bottle Cof",
+			suggested: true,
+			fromBank: true,
+		});
 	});
 });

@@ -64,10 +64,58 @@ export async function suggestNames(
 	return { ok: true, names: cleanSuggestedNames(text, rawName) };
 }
 
-/** Workers AI's short, one-line guess for what a purchase was, from only the bank text. */
+/** Words a "what it was" line can use without saying anything about the purchase beyond its store (decision 103). */
+const GENERIC_NOTE_WORDS = new Set([
+	"purchase",
+	"purchases",
+	"payment",
+	"payments",
+	"order",
+	"orders",
+	"charge",
+	"charges",
+	"transaction",
+	"transactions",
+	"a",
+	"an",
+	"the",
+	"at",
+	"of",
+	"for",
+	"and",
+	"from",
+]);
+
+const wordsOf = (text: string) =>
+	text
+		.toLowerCase()
+		.split(/[^\p{L}]+/u)
+		.filter(Boolean);
+
+/**
+ * True when a "what it was" line says nothing beyond the store: every word is in the store's name (the bank's
+ * text or its merchant name) or is a generic word such as "purchase" (decision 103). "CVS purchase." for CVS
+ * PHARMACY is dropped, while "App or iCloud subscription" for APPLE.COM/BILL is kept, since "app" and
+ * "subscription" are not in the store's name.
+ */
+export function restatesStore(
+	note: string,
+	storeNames: (string | null)[],
+): boolean {
+	const store = new Set(storeNames.flatMap((name) => wordsOf(name ?? "")));
+	return wordsOf(note).every(
+		(word) => store.has(word) || GENERIC_NOTE_WORDS.has(word),
+	);
+}
+
+/**
+ * Workers AI's short, one-line guess for what a purchase was, from only the bank text. Code then drops a line
+ * that only restates the store, by the bank text or the merchant name (decision 103); the merchant name is never sent.
+ */
 export async function suggestNote(
 	ai: Ai,
 	rawName: string,
+	merchantName: string | null = null,
 ): Promise<{ ok: true; note: string | null } | { ok: false }> {
 	try {
 		const answer = await ai.run(
@@ -102,7 +150,8 @@ export async function suggestNote(
 				note &&
 				note.length >= 2 &&
 				note.length <= 80 &&
-				!/https?:|www\.|\d{3,}|[$#]/i.test(note)
+				!/https?:|www\.|\d{3,}|[$#]/i.test(note) &&
+				!restatesStore(note, [rawName, merchantName])
 					? note
 					: null,
 		};

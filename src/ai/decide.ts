@@ -12,6 +12,8 @@ export type JevAnswer = {
 	flags: Record<Flag, number>;
 	kind?: { label: string; confidence: number };
 	forPerson?: { label: string; confidence: number };
+	/** Jev's yes-probability that a "what it was" line could say more than the store's name (decision 103). */
+	noteWorthWriting?: number;
 };
 
 export type Decision = {
