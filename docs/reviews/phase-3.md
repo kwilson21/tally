@@ -33,13 +33,13 @@
 - **Plaid's sign:** honored by the finder, price offers, refunds and cash; not by the bill payment picker (finding 5).
 - **Dates:** a transaction's date is never converted; every date sum is calendar math on `YYYY-MM-DD`; "today" is the household's.
 - **Page behavior:** every edit sends `HX-Trigger` with `toast` and `announce`; every swap is announced or moves focus, except the bill page's month chips (finding 4) and cash Undo (finding 18); errors use `role="alert"`; controls are 44px.
-- **Security and identity:** Hono's `csrf` guards every post; in production the actor comes only from the verified Access JWT, and in the demo, which has no Access, every edit is recorded as `demo`; no Phase 3 code logs tokens or transaction details.
+- **Security and identity:** Hono's `csrf` guards every post; in production the actor comes only from the verified Access JWT, and in the demo, which has no Access, the actor is `demo` wherever an edit records one (bill writes record no actor in either environment); no Phase 3 code logs tokens or transaction details.
 
 ## Findings
 
-Most important first. Bugs a person would hit are filed as issues now; the rest need the owner's call and are on the decisions page (Oct 10), each with a picture.
+Most important first. Bugs a person would hit were filed as issues; the owner answered the rest from pictures on Oct 10 and 11 (Owner decisions, below, and decision 99).
 
-1. **The public demo was running a build from before Phase 3** (spec gap, owner action; done Oct 10). Phase 3 wasn't "shown in the demo". **Proposal:** the owner deploys `main` to the demo (`npx wrangler d1 migrations apply DB --env demo --remote`, then `npx wrangler deploy --env demo`), then checks that `/bills` shows its four groups and Transactions shows today's date.
+1. **The public demo was running a build from before Phase 3** (spec gap, owner action; done Oct 10). Phase 3 wasn't "shown in the demo". **Done:** on Oct 10 the owner had `main` deployed to the demo (27 migrations, 0006 to 0033) and to production as release `v2026.10.10` (decision 98).
 2. **A bill added after its due date shows Overdue and holds its amount back for months** (money). Decision 62 doesn't tell a missed bill from one whose date passed before the family added it; a yearly bill added in October with a March date holds its amount out of Safe to spend until February, and nothing can mark it paid. **Owner's call** (decisions page, Phase 3 question 1).
 3. **The bill form asks for "the bank's text" but matches on the merchant's name** (money). A payment to a merchant Plaid names ("CVS Pharmacy") never matches the bank text typed in ("CHECKCARD 0921 CVS"). **Owner's call** (question 2).
 4. **Choosing a month in Link a payment nests a second copy of the page** (accessibility). htmx 4 sends `HX-Target: section#payment-picker`, the route expects `payment-picker`, and the whole page lands inside the picker with duplicate landmarks and ids. **Filed: #323.**
