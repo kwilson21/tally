@@ -589,9 +589,9 @@ html:not(.js) [data-money-js] {
  * A Select-mode list load (#215). While htmx marks the selection form (.selection-list.htmx-request,
  * from LIST_LOAD_PAUSE), a round tick can't be tapped or reached: its label takes no taps, and its
  * checkbox is hidden, so it leaves the keyboard's order. It stays checked, and hx-include still sends
- * it. Once the load runs past --duration-pause the round marks fade to 40%. The fade has no length of
- * its own (the transition lasts 0s and waits the token), so it snaps, and a reply that lands sooner
- * replaces the rows before it shows. Nothing moves, so reduced motion needs no rule here.
+ * it. The round marks drop to 40% once the load has run for --duration-pause: a step timing holds the
+ * mark at full ink for the whole token and then drops it, so there is no fade, and a reply that lands
+ * sooner replaces the rows before the drop shows. Reduced motion ends the transition (below).
  */
 .selection-list.htmx-request label:has(> input[name="ids"]) {
 	pointer-events: none;
@@ -601,5 +601,10 @@ html:not(.js) [data-money-js] {
 }
 .selection-list.htmx-request .selection-mark {
 	opacity: 0.4;
-	transition: opacity 0s var(--duration-pause);
+	transition: opacity var(--duration-pause) step-end;
+}
+@media (prefers-reduced-motion: reduce) {
+	.selection-list.htmx-request .selection-mark {
+		transition: none;
+	}
 }

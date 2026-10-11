@@ -112,7 +112,7 @@ export const DURATION_TOKENS = [
 	{
 		name: "pause",
 		value: "150ms",
-		use: "how long a Select-mode list load runs before its round marks fade to 40%; it moves nothing",
+		use: "how long a Select-mode list load runs before its round marks drop to 40% in one step; reduced motion drops them at once",
 	},
 	{
 		name: "rising",
