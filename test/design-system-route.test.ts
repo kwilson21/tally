@@ -492,7 +492,7 @@ describe("GET /design-system in the demo", () => {
 		expect(section).not.toMatch(/jev/i);
 		// DESIGN.md says what it is, where it shows and that it needs no script.
 		expect(design).toMatch(
-			/\| ViewLinks \|[^\n]*Tidied by Tally · Straight from the bank[^\n]*aria-current[^\n]*demo only[^\n]*no JavaScript/,
+			/\| ViewLinks \|[^\n]*With Tally · Without Tally[^\n]*aria-current[^\n]*demo only[^\n]*no JavaScript/,
 		);
 	});
 
