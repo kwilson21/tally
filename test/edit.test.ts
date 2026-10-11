@@ -268,6 +268,16 @@ describe("followsPurchaseAfterSave: whether a linked credit counts with its purc
 		).toBe(true);
 	});
 
+	it("follows a credit that a new link makes a reviewed refund, even when the review is unticked", () => {
+		// saveEdit reviews a credit as a link is saved, whatever the review chip held.
+		expect(
+			followsPurchaseAfterSave(
+				{ ...stored, refundOfId: null },
+				{ ...unchanged, creditReviewed: false, creditReviewedWas: true },
+			),
+		).toBe(true);
+	});
+
 	it("follows a stale panel that unticks income and ticks the review, since the save turns income off", () => {
 		// Another tab marked the credit as income after this panel was drawn, so the panel's income was off.
 		expect(

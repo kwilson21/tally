@@ -148,10 +148,11 @@ export function followsPurchaseAfterSave(
 	return followsPurchase({
 		amountCents: stored.amountCents,
 		income: incomeChanged || reviewedAsNotIncome ? edit.income : stored.income,
+		// A new link is written as a review last, so it wins over the review chip and the Jev rule (saveEdit).
 		creditReviewed:
-			(reviewChanged
-				? edit.creditReviewed
-				: linking || stored.creditReviewed) && !unreviewedByIncome,
+			linking ||
+			((reviewChanged ? edit.creditReviewed : stored.creditReviewed) &&
+				!unreviewedByIncome),
 	});
 }
 

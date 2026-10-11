@@ -866,6 +866,35 @@ describe("linking a refund", () => {
 		).toEqual({ income: 0, reviewed: 1 });
 	});
 
+	it("linking a reviewed credit with its review unticked still reviews it, so its category is dropped", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(
+			`/transactions/${REFUND}`,
+			edited(drawnFields(html, REFUND), {
+				refund_of: String(PURCHASE),
+				creditReviewed: undefined,
+				creditReviewed_was: "1",
+				category: String(GAS),
+			}),
+		);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+		expect(
+			await db
+				.prepare(
+					"SELECT credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ reviewed: 1 });
+	});
+
 	it("the counting rule in TypeScript agrees with FOLLOWS_PURCHASE", async () => {
 		await link(REFUND, PURCHASE);
 		for (const amountCents of [-2000, 2000]) {
