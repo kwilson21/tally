@@ -290,13 +290,13 @@ function day(month: string, d: number): string {
 	return `${month}-${String(d).padStart(2, "0")}`;
 }
 
-/** The Fridays of today's month, up to and including today. */
-function fridaysUpTo(today: string): string[] {
-	const month = today.slice(0, 7);
+/** Daycare's Fridays: every Friday of last month, then this month's up to and including today. */
+function daycareFridays(today: string): string[] {
 	const dates: string[] = [];
-	for (let d = 1; d <= Number(today.slice(8, 10)); d++) {
-		const date = day(month, d);
-		if (new Date(`${date}T00:00:00Z`).getUTCDay() === 5) dates.push(date);
+	const cursor = new Date(`${monthOffset(today, 1)}-01T00:00:00Z`);
+	while (cursor.toISOString().slice(0, 10) <= today) {
+		if (cursor.getUTCDay() === 5) dates.push(cursor.toISOString().slice(0, 10));
+		cursor.setUTCDate(cursor.getUTCDate() + 1);
 	}
 	return dates;
 }
@@ -396,7 +396,7 @@ export function buildSeed(today: string): Seed {
 	// fair (spec §8.3). From the 23rd on they fall on 5, 14 and 23 as written.
 	for (let monthsAgo = 5; monthsAgo >= 1; monthsAgo--) {
 		const month = monthOffset(today, monthsAgo);
-		// Childcare has no history of its own: its Fridays are only this month's Daycare charges.
+		// Childcare has no history of its own: its Fridays are only Daycare charges, added below.
 		for (const category of CATEGORIES.filter((c) => HISTORY[c.id])) {
 			const total = HISTORY[category.id]?.[5 - monthsAgo] ?? 0;
 			const merchants = MERCHANTS[category.id] ?? [];
@@ -531,9 +531,9 @@ export function buildSeed(today: string): Seed {
 			refundOfId: targetPurchaseId,
 		},
 	);
-	// Daycare: $240 on each Friday so far this month, from Checking and categorized as Childcare. Added
-	// before Netflix, so Netflix stays last.
-	for (const friday of fridaysUpTo(today))
+	// Daycare: $240 on each Friday of last month and of this month so far, from Checking and categorized
+	// as Childcare. Added before Netflix, so Netflix stays last.
+	for (const friday of daycareFridays(today))
 		transactions.push(
 			spend(CHECKING, friday, "LITTLE SPROUTS DAYCARE", CHILDCARE, 24000),
 		);
@@ -568,11 +568,11 @@ export function buildSeed(today: string): Seed {
 		{ categoryId: GAS, effectiveMonth: startMonth, amountCents: 20000 },
 		{ categoryId: KIDS, effectiveMonth: startMonth, amountCents: 30000 },
 		{ categoryId: HOUSEHOLD, effectiveMonth: startMonth, amountCents: 25000 },
-		// $1,200 is five Fridays of Daycare, the most a month can have.
+		// $1,040 is $240 a week for 52 weeks, spread over 12 months: about four Fridays of Daycare a month.
 		{
 			categoryId: CHILDCARE,
 			effectiveMonth: monthOffset(today, 0),
-			amountCents: 120000,
+			amountCents: 104000,
 		},
 	];
 

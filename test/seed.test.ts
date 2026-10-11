@@ -50,8 +50,8 @@ describe("buildSeed", () => {
 		});
 		expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
 		expect(summary.incomeCents).toBe(490000);
-		// Childcare's $1,200 budget adds to what is budgeted; its paid Fridays are spent.
-		expect(summary.safeToSpendCents).toBe(24500 + 120000 - childcareCents);
+		// Childcare's $1,040 budget adds to what is budgeted; its paid Fridays are spent.
+		expect(summary.safeToSpendCents).toBe(24500 + 104000 - childcareCents);
 	});
 
 	it.each(["2026-09-22", "2026-09-01", "2026-03-31", "2027-01-31"])(
@@ -453,8 +453,8 @@ describe("resetDemo", () => {
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		// Childcare's $1,200 budget less the three Fridays paid so far in September ($720).
-		expect(summary.safeToSpendCents).toBe(24500 + 120000 - 72000);
+		// Childcare's $1,040 budget less the three Fridays paid so far in September ($720).
+		expect(summary.safeToSpendCents).toBe(24500 + 104000 - 72000);
 		expect(summary.uncategorized.count).toBe(10);
 
 		const { results } = await env.DB.prepare(

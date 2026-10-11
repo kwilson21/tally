@@ -30,7 +30,7 @@ describe("settingsCategories", () => {
 			["Eating Out", 25000],
 			["Gas", 20000],
 			["Kids", 30000],
-			["Childcare", 120000],
+			["Childcare", 104000],
 		]);
 		expect(archived.map((c) => c.name)).toEqual(["Household"]);
 	});

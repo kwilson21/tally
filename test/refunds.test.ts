@@ -520,6 +520,7 @@ describe("linking a refund", () => {
 		expect(
 			counts.user +
 				counts.merchantRule +
+				counts.bill +
 				counts.jev +
 				counts.needsCategory +
 				counts.linkedWaiting,

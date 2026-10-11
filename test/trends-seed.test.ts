@@ -46,12 +46,8 @@ describe("Trends with the demo seed", () => {
 			["Eating Out", "Up 4 months running"],
 		]);
 		expect(page.others.map((r) => r.name)).toEqual(
-			// Childcare has no history, so it is in the rest once a Friday is paid (not on October 1).
-			today === "2026-10-01"
-				? ["Kids", "Household"]
-				: earlyOctober
-					? ["Kids", "Household", "Childcare"]
-					: ["Kids", "Childcare"],
+			// Childcare has last month's Fridays, so it is in the rest from October 1 on.
+			earlyOctober ? ["Kids", "Household", "Childcare"] : ["Kids", "Childcare"],
 		);
 		// Six months drawn, this one still going, and none of them a part month.
 		const months = page.goingWell[0]?.months ?? [];
@@ -61,15 +57,17 @@ describe("Trends with the demo seed", () => {
 	});
 
 	// Past months' spending is dated like this month's (clamped to today's day-of-month), so the
-	// same-days comparison is fair on any day: a modest difference, in the household's favour.
+	// same-days comparison is fair on any day: a difference in the household's favour, under $400. Daycare's
+	// Fridays fall on other days each month, so on a few days an extra Friday this month leaves only a few
+	// dollars between the two months.
 	it.each(DATES)(
-		"says this month is a modest amount less than by this time last month on %s",
+		"says this month is less than by this time last month, by under $400, on %s",
 		async (today) => {
 			const page = await demoPage(today);
 			const gap = page.sentence.match(/^\$([\d,]+) less than by this time in /);
 			expect(gap).not.toBeNull();
 			const dollars = Number((gap?.[1] ?? "0").replaceAll(",", ""));
-			expect(dollars).toBeGreaterThan(100);
+			expect(dollars).toBeGreaterThan(0);
 			expect(dollars).toBeLessThan(400);
 			// Out of about $1,700 for last month's days.
 			expect(page.sameDaysCents.last).toBeGreaterThan(150000);
