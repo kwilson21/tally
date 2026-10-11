@@ -2759,6 +2759,9 @@ function pendingEditOf(form: FormData): string {
 	return fields.toString();
 }
 
+/** What the announcer adds when a one-off name makes Tally guess the category again (decision 101), saved or kept. */
+const GUESSES_AGAIN = "Tally guesses its category again.";
+
 /**
  * Saves the edit panel as `form` posted it, for `tx` (spec §8): the check, the save, the toast and the
  * list again. Change the parts (spec §8.4) is a save that the amount breaks the parts of: it answers with
@@ -3089,7 +3092,7 @@ async function savePanel(
 	const saved = unnamed
 		? "Saved."
 		: guessAgain
-			? `Saved ${name}. Tally guesses its category again.`
+			? `Saved ${name}. ${GUESSES_AGAIN}`
 			: category
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
@@ -3103,7 +3106,9 @@ async function savePanel(
 				: " It counts in the budget again.";
 	const keptWords = unnamed
 		? "Kept the details."
-		: `Kept the details for ${name}.`;
+		: guessAgain
+			? `Kept the details for ${name}. ${GUESSES_AGAIN}`
+			: `Kept the details for ${name}.`;
 	const saveWords = (keptDetails ? keptWords : saved) + exclusion;
 	const toastMessage = unnamed
 		? keptDetails

@@ -662,6 +662,40 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			jev_none_fit: 1,
 		});
 	});
+	it("says Kept the details for the name, and that Tally guesses its category again, when Looks right keeps a category Tally picked", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: String(category),
+			details_action: "keep",
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Kept the details for Dog bed. Tally guesses its category again.");
+		expect(await rowOf(bakery)).toMatchObject({ category_id: null });
+	});
+
+	it("says just Kept the details for the name while the categories switch is off", async () => {
+		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, categories: false });
+		const category = await firstCategory();
+		await pickedByTally(category);
+		fakeJev();
+		const { response } = await save(bakery, {
+			details_action: "keep",
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Kept the details for Dog bed.");
+	});
 });
 
 describe("asking again honors what everything else does", () => {
