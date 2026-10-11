@@ -19,7 +19,8 @@
  *   refund link moves unless the posted row has one.
  * - A split moves with its parts, which follow the posted date, when the amount is unchanged and the
  *   posted row has no split of its own; when the amount changed it is removed and the posted row says the
- *   amount changed, as for any bank correction (decision 62).
+ *   amount changed, as for any bank correction (decision 62), takes the category the purchase had before
+ *   its split, and unlinks a refund of one of its parts with the purchase's date (decision 99).
  * Every statement checks that both rows still exist and that this run still holds the Item's lock, so
  * a replay or a lost lock changes nothing.
  */
@@ -158,6 +159,12 @@ const STATEMENTS = [
 		category_source = CASE WHEN transactions.category_id IS NULL THEN p.category_source ELSE transactions.category_source END
 	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
 	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
+	// A refund of one of those parts is unlinked, and its row says which purchase changed, with the pending
+	// purchase's date, until a person links it again (decision 99), as sync does. Its parts are deleted below.
+	`UPDATE transactions SET refund_of_id = NULL, refund_unlinked_purchase_date = (SELECT p.date FROM transactions p WHERE p.id = ${PENDING})
+	 WHERE refund_of_id IN (SELECT part.id FROM transactions part WHERE part.parent_id = ${PENDING})
+	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents != ?3)
+	 AND ${READY}`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
 	`DELETE FROM transactions WHERE id = ${PENDING} AND ${READY}`,
 ];

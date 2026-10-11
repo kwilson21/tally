@@ -295,6 +295,69 @@ describe("a split purchase's category from before its split", () => {
 			category_source: "user",
 		});
 	});
+
+	const splitRemoved = async (id: number) =>
+		(
+			await db
+				.prepare(
+					"SELECT split_removed_from_cents AS cents FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first<{ cents: number | null }>()
+		)?.cents;
+
+	it("a person's pick sets the category, clears the note, and takes the person's source", async () => {
+		const restored = await insertRow({
+			categoryId: EATING_OUT,
+			source: "jev",
+			splitRemoved: 4200,
+		});
+		await saveEdit(
+			db,
+			restored,
+			{ ...personEdit, categoryId: GROCERIES },
+			"demo",
+		);
+		expect(await row(restored)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "user",
+		});
+		expect(await splitRemoved(restored)).toBeNull();
+	});
+
+	it("confirming the restored category keeps Jev's source and clears the note", async () => {
+		const restored = await insertRow({
+			categoryId: EATING_OUT,
+			source: "jev",
+			splitRemoved: 4200,
+		});
+		await saveEdit(
+			db,
+			restored,
+			{ ...personEdit, categoryId: EATING_OUT },
+			"demo",
+		);
+		expect(await row(restored)).toMatchObject({
+			category_id: EATING_OUT,
+			category_source: "jev",
+		});
+		expect(await splitRemoved(restored)).toBeNull();
+	});
+
+	it("an Always rule fills a purchase that has no category, and its note stays until a person decides", async () => {
+		const noted = await insertRow({ splitRemoved: 4200 });
+		await saveEdit(
+			db,
+			await insertRow({}),
+			{ ...personEdit, categoryId: GROCERIES, alwaysForMerchant: true },
+			"demo",
+		);
+		expect(await row(noted)).toMatchObject({
+			category_id: GROCERIES,
+			category_source: "merchant_rule",
+		});
+		expect(await splitRemoved(noted)).toBe(4200);
+	});
 });
 
 describe("applyMerchantRules", () => {

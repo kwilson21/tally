@@ -459,16 +459,18 @@ describe("when the bank posts a pending transaction", () => {
 				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NOT NULL",
 			),
 		).toBe(0);
-		// A refund that pointed at a removed part counts on its own again.
+		// A refund that pointed at a removed part counts on its own again, and its row says why, with
+		// the pending purchase's date (decision 99).
 		expect(
-			(
-				await env.DB.prepare(
-					"SELECT refund_of_id FROM transactions WHERE id = ?",
-				)
-					.bind(refundOfPart)
-					.first()
-			)?.refund_of_id,
-		).toBeNull();
+			await env.DB.prepare(
+				"SELECT refund_of_id, refund_unlinked_purchase_date FROM transactions WHERE id = ?",
+			)
+				.bind(refundOfPart)
+				.first(),
+		).toEqual({
+			refund_of_id: null,
+			refund_unlinked_purchase_date: "2026-09-27",
+		});
 	});
 
 	it("keeps Jev's category only while the amount is unchanged", async () => {
@@ -1361,7 +1363,16 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NOT NULL",
 			),
 		).toBe(0);
-		expect(await refundOf(refundOfPart)).toBeNull();
+		expect(
+			await env.DB.prepare(
+				"SELECT refund_of_id, refund_unlinked_purchase_date FROM transactions WHERE id = ?",
+			)
+				.bind(refundOfPart)
+				.first(),
+		).toEqual({
+			refund_of_id: null,
+			refund_unlinked_purchase_date: "2026-09-27",
+		});
 	});
 
 	describe("a moved split's parts follow the posted row, except for a choice made on the part", () => {

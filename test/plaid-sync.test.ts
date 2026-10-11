@@ -1988,6 +1988,52 @@ describe("syncItem", () => {
 		).toBe(0);
 	});
 
+	it("a second bank change keeps the category a restored purchase went back to, and its note", async () => {
+		const item = await addItem();
+		const sync = (overrides: Record<string, unknown>) =>
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				item,
+				plaidFetch(() =>
+					response(page({ modified: [transaction(overrides)] })),
+				),
+			);
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			item,
+			plaidFetch(() => response(page({ added: [transaction()] }))),
+		);
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number; account_id: number }>();
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories LIMIT 1",
+		).first<{ id: number }>();
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET is_split = 1, category_id = ?, category_source = 'jev' WHERE id = ?",
+			).bind(category?.id, parent?.id),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, parent_id) VALUES (?, '2026-09-27', 500, 'RAW SHOP', ?, ?)",
+			).bind(parent?.account_id, category?.id, parent?.id),
+		]);
+		await sync({ amount: 20 });
+		await sync({ amount: 18 });
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents, is_split, category_id, category_source, split_removed_from_cents FROM transactions WHERE id = ?",
+			)
+				.bind(parent?.id)
+				.first(),
+		).toEqual({
+			amount_cents: 1800,
+			is_split: 0,
+			category_id: category?.id,
+			category_source: "jev",
+			split_removed_from_cents: 1234,
+		});
+	});
+
 	it("skips a concurrent run and releases the lock after success", async () => {
 		const id = await addItem();
 		let releaseAccounts!: () => void;

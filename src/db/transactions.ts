@@ -979,7 +979,7 @@ export async function saveEdit(
 		if (ruleChange.recategorize)
 			statements.push(
 				gated(
-					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL, split_removed_from_cents = NULL,
+					`UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
 					updated_by = ?, updated_at = datetime('now')
 				WHERE ${merchantKeySql("transactions")} = ? AND id != ? AND COALESCE(category_source, '') != 'user'
 						AND is_split = 0 AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL)`,
