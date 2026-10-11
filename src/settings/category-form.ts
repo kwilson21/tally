@@ -18,10 +18,18 @@ export type CategoryErrors = Partial<Record<"name", string>>;
 
 const normalizeName = (name: string) =>
 	name.normalize("NFC").trim().replace(/\s+/g, " ");
-const same = (a: string, b: string) =>
+/** Whether two category names are the same, ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. */
+export const sameName = (a: string, b: string) =>
 	normalizeName(a).toLowerCase() === normalizeName(b).toLowerCase();
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
+
+/** A form that holds one category name, as parseCategory reads it (a New category name typed in a panel). */
+export function nameForm(name: string | File | null): FormData {
+	const form = new FormData();
+	form.set("name", String(name ?? ""));
+	return form;
+}
 
 /** Reads the add or rename form. `id` is the category being renamed, or null when adding one. */
 export function parseCategory(
@@ -32,11 +40,11 @@ export function parseCategory(
 	const name = normalizeName(String(form.get("name") ?? ""));
 	const errors: CategoryErrors = {};
 
-	const clash = existing.find((c) => c.id !== id && same(c.name, name));
+	const clash = existing.find((c) => c.id !== id && sameName(c.name, name));
 	if (name === "") errors.name = "Give the category a name.";
 	else if (name.length > MAX_NAME)
 		errors.name = `Keep the name to ${MAX_NAME} characters.`;
-	else if (same(name, NONE_FIT))
+	else if (sameName(name, NONE_FIT))
 		errors.name = "That name is reserved for Tally. Pick another.";
 	else if (clash)
 		errors.name = clash.archived
