@@ -114,6 +114,54 @@ function categoryFieldsetTag(html: string) {
 	return sheet.slice(start, sheet.indexOf(">", start) + 1);
 }
 
+/**
+ * The fields the open edit panel posts as drawn, the way a browser sends its form: every hidden and text
+ * input, and each checked box or radio. Fields in a disabled fieldset are not skipped, so use this only for
+ * a panel whose fieldsets are open.
+ */
+function drawnFields(html: string, id: number): [string, string][] {
+	const start = html.indexOf(
+		`<form method="post" action="/transactions/${id}"`,
+	);
+	const form = html.slice(start, html.indexOf("</form>", start));
+	return (form.match(/<input\b[^>]*>/g) ?? []).flatMap((tag) => {
+		const name = /\sname="([^"]*)"/.exec(tag)?.[1];
+		if (!name) return [];
+		const value = (/\svalue="([^"]*)"/.exec(tag)?.[1] ?? "").replace(
+			/&amp;/g,
+			"&",
+		);
+		const type = /\stype="([^"]*)"/.exec(tag)?.[1];
+		const posted =
+			type === "checkbox" || type === "radio"
+				? /\schecked(=""|=|\s|\/|>)/.test(tag)
+				: true;
+		return posted ? [[name, value] as [string, string]] : [];
+	});
+}
+
+/** The drawn fields with some changed: a name in `changes` takes its new value, or is not posted when undefined. */
+function edited(
+	drawn: [string, string][],
+	changes: Record<string, string | undefined>,
+): [string, string][] {
+	const kept = drawn.filter(([name]) => !(name in changes));
+	const changed = Object.entries(changes).flatMap(([name, value]) =>
+		value === undefined ? [] : [[name, value] as [string, string]],
+	);
+	return [...kept, ...changed];
+}
+
+const ruleCategoryOf = async (merchant: string) =>
+	(
+		await db
+			.prepare(
+				"SELECT default_category_id AS c FROM merchants WHERE raw_name = ?",
+			)
+			.bind(merchant)
+			.first<{ c: number | null }>()
+	)?.c;
+
 const ownCategory = async (id: number) =>
 	(
 		await db
@@ -735,6 +783,87 @@ describe("linking a refund", () => {
 			["category", String(GAS)],
 		]);
 		expect(await ownCategory(REFUND)).toBe(GAS);
+	});
+
+	it("a plain save of a linked credit marked as income keeps the merchant rule the panel showed", async () => {
+		await db
+			.prepare(
+				"UPDATE merchants SET default_category_id = ? WHERE raw_name = 'REFUND SHOP'",
+			)
+			.bind(GROCERIES)
+			.run();
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(`/transactions/${REFUND}`, drawnFields(html, REFUND));
+		expect(await ruleCategoryOf("REFUND SHOP")).toBe(GROCERIES);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("saves the category of a linked Jev-income credit unticked as income and not reviewed", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(
+			`/transactions/${REFUND}`,
+			edited(drawnFields(html, REFUND), {
+				income: undefined,
+				category: String(GAS),
+			}),
+		);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income AS income, credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ income: 0, reviewed: 0 });
+	});
+
+	it("a stale panel that unticks income and ticks the review drops its category, as the credit now counts with its purchase", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user', credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		// The panel was drawn before income was marked, so it had income off and the review unticked; the
+		// person then ticks the review, and the posted panel is what `edited` builds below.
+		const { html } = await get(`/transactions/${REFUND}`);
+		await post(
+			`/transactions/${REFUND}`,
+			edited(drawnFields(html, REFUND), {
+				income: undefined,
+				income_was: "0",
+				creditReviewed: "1",
+				creditReviewed_was: "0",
+				category: String(GAS),
+			}),
+		);
+		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income AS income, credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+				)
+				.bind(REFUND)
+				.first(),
+		).toEqual({ income: 0, reviewed: 1 });
 	});
 
 	it("the counting rule in TypeScript agrees with FOLLOWS_PURCHASE", async () => {

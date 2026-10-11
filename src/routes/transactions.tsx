@@ -1244,7 +1244,9 @@ function EditSheet({
 					name="income_was"
 					value={(values.incomeWas ?? values.income) ? "1" : "0"}
 				/>
-				{!purchase && (
+				{/* The merchant rule is offered only for an unlinked row (the chip above), so a linked row posts
+				    no rule answer and a save leaves the rule alone, whatever its purchase or counting. */}
+				{tx.refundOfId == null && (
 					<>
 						<input
 							type="hidden"

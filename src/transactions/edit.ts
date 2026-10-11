@@ -117,6 +117,7 @@ export function followsPurchaseAfterSave(
 		amountCents: number;
 		refundOfId?: number | null;
 		income: boolean;
+		incomeSource: string | null;
 		creditReviewed: boolean;
 		creditReviewedByUser: boolean;
 	},
@@ -138,12 +139,19 @@ export function followsPurchaseAfterSave(
 		edit.creditReviewedProvided !== false &&
 		edit.creditReviewed !==
 			(edit.creditReviewedWas ?? stored.creditReviewedByUser);
+	// A review ticked as not income turns income off whatever the panel drew (saveEdit's flag_income).
+	const reviewedAsNotIncome =
+		reviewChanged && edit.creditReviewed && !edit.income;
+	// Unticking income on a Jev credit, with the review unticked, leaves it unreviewed (saveEdit's credit_reviewed).
+	const unreviewedByIncome =
+		incomeChanged && !edit.creditReviewed && stored.incomeSource === "jev";
 	return followsPurchase({
 		amountCents: stored.amountCents,
-		income: incomeChanged ? edit.income : stored.income,
-		creditReviewed: reviewChanged
-			? edit.creditReviewed
-			: linking || stored.creditReviewed,
+		income: incomeChanged || reviewedAsNotIncome ? edit.income : stored.income,
+		creditReviewed:
+			(reviewChanged
+				? edit.creditReviewed
+				: linking || stored.creditReviewed) && !unreviewedByIncome,
 	});
 }
 
