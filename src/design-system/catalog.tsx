@@ -1427,6 +1427,7 @@ function Rows() {
 						<BillFindingRow
 							suggestion={{
 								rawName: "CITY GYM",
+								bankText: "CITY GYM",
 								displayName: "City Gym",
 								amountCents: 4250,
 								dueDay: 12,

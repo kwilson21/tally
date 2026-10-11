@@ -11,6 +11,7 @@ import { resetDemo } from "../src/demo/reset";
 
 const charge = (date: string, amountCents = 1000): BillFindingCharge => ({
 	rawName: "GYM",
+	bankText: "GYM",
 	displayName: "Gym",
 	date,
 	amountCents,
@@ -81,6 +82,7 @@ describe("finding bills", () => {
 		const bank: BillFindingCharge = {
 			...charge("2026-08-01"),
 			rawName: "BLUE BOTTLE COFFEE",
+			bankText: "BLUE BOTTLE COFFEE",
 			displayName: null,
 		};
 		expect(
@@ -92,6 +94,51 @@ describe("finding bills", () => {
 		expect(
 			findBillSuggestions([chosen, { ...chosen, date: "2026-09-01" }]),
 		).toMatchObject([{ displayName: "BLUE BOTTLE" }]);
+	});
+
+	it("names an unnamed Plaid-named merchant by its latest charge's tidied bank text", () => {
+		const named = (
+			rawName: string,
+			date: string,
+			bankText: string,
+		): BillFindingCharge => ({
+			...charge(date),
+			rawName,
+			bankText,
+			displayName: null,
+		});
+		expect(
+			findBillSuggestions([
+				named("Local Bakery", "2026-08-01", "SQ *LOCAL BAKERY 4432"),
+				named("Local Bakery", "2026-09-01", "SQ *LOCAL BAKERY 4432"),
+			]),
+		).toMatchObject([
+			{
+				rawName: "Local Bakery",
+				bankText: "SQ *LOCAL BAKERY 4432",
+				displayName: "Local bakery",
+			},
+		]);
+		expect(
+			findBillSuggestions([
+				named("Target", "2026-08-01", "TARGET 1234"),
+				named("Target", "2026-09-01", "TARGET 5678"),
+			]),
+		).toMatchObject([
+			{ rawName: "Target", bankText: "TARGET 5678", displayName: "Target" },
+		]);
+		expect(
+			findBillSuggestions([
+				{
+					...named("Local Bakery", "2026-08-01", "SQ *LOCAL BAKERY 4432"),
+					displayName: "Bakery Club",
+				},
+				{
+					...named("Local Bakery", "2026-09-01", "SQ *LOCAL BAKERY 4432"),
+					displayName: "Bakery Club",
+				},
+			]),
+		).toMatchObject([{ displayName: "Bakery Club" }]);
 	});
 
 	it("clamps the three-month cutoff at month end", () => {
@@ -223,7 +270,11 @@ describe("finding bills", () => {
 		expect(
 			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
 		).toContainEqual(
-			expect.objectContaining({ rawName: "SPLIT GYM", chargeCount: 2 }),
+			expect.objectContaining({
+				rawName: "SPLIT GYM",
+				bankText: "SPLIT GYM",
+				chargeCount: 2,
+			}),
 		);
 	});
 
@@ -257,6 +308,29 @@ describe("finding bills", () => {
 		expect(html).toContain("<span>Shop bank</span>");
 		expect(html).toContain("name=Shop+bank&amp;amount=");
 		expect(html).toContain("SHOP BANK 4411 ·");
+	});
+
+	it("names a merchant named by Plaid, with no chosen name, by its latest bank text on the page", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("SQ *LOCAL BAKERY 4432", 0, false, "Local Bakery");
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).toContainEqual(
+			expect.objectContaining({
+				rawName: "Local Bakery",
+				bankText: "SQ *LOCAL BAKERY 4432",
+				displayName: "Local bakery",
+			}),
+		);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/find")
+		).text();
+		expect(html).toContain("<span>Local bakery</span>");
+		expect(html).toContain("name=Local+bakery&amp;amount=");
+		expect(html).toContain("merchant_raw_name=Local+Bakery");
+		expect(html).toContain("/bills/find/Local%20Bakery/dismiss");
+		expect(html).toContain("SQ *LOCAL BAKERY 4432 ·");
+		expect(html).not.toContain("Local Bakery ·");
 	});
 
 	it("prefills every Add value", async () => {
@@ -322,8 +396,13 @@ const daysAgo = (days: number) =>
 		.toISOString()
 		.slice(0, 10);
 
-/** Two $10 charges 30 days apart, both inside the three-month window. */
-async function insertCandidate(rawName: string, notABill = 0, withRow = true) {
+/** Two $10 charges 30 days apart, both inside the three-month window. A merchantName is Plaid's name for them. */
+async function insertCandidate(
+	rawName: string,
+	notABill = 0,
+	withRow = true,
+	merchantName: string | null = null,
+) {
 	if (withRow)
 		await env.DB.prepare(
 			"INSERT INTO merchants(raw_name,display_name,default_category_id,not_a_bill) VALUES(?,?,4,?)",
@@ -331,15 +410,15 @@ async function insertCandidate(rawName: string, notABill = 0, withRow = true) {
 			.bind(rawName, rawName, notABill)
 			.run();
 	await env.DB.prepare(
-		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
-		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
+		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,merchant_name)
+		 SELECT id,?,1000,?,4,? FROM accounts LIMIT 1`,
 	)
-		.bind(daysAgo(40), rawName)
+		.bind(daysAgo(40), rawName, merchantName)
 		.run();
 	await env.DB.prepare(
-		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
-		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
+		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,merchant_name)
+		 SELECT id,?,1000,?,4,? FROM accounts LIMIT 1`,
 	)
-		.bind(daysAgo(10), rawName)
+		.bind(daysAgo(10), rawName, merchantName)
 		.run();
 }

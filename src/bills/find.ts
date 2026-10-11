@@ -15,7 +15,9 @@ export const BILL_FIND_AMOUNT_PERCENT = 10;
 export type BillFindingCharge = {
 	/** The charge's merchant key: Plaid's merchant name, or the raw name when it sent none (spec §6.1). */
 	rawName: string;
-	/** The merchant's chosen name, or null until a person names it; then the tidied key is shown (decision 46). */
+	/** The charge's own bank text (a split part has its purchase's): tidied for its name until a person names the merchant, and shown on the muted line. */
+	bankText: string;
+	/** The merchant's chosen name, or null until a person names it; then the latest charge's tidied bank text is shown (decision 46). */
 	displayName: string | null;
 	date: string;
 	amountCents: number;
@@ -25,6 +27,8 @@ export type BillFindingCharge = {
 export type BillSuggestion = {
 	/** The merchant key, which becomes the new bill's `merchant_raw_name`. */
 	rawName: string;
+	/** The latest charge's bank text, shown on the muted line. */
+	bankText: string;
 	displayName: string;
 	amountCents: number;
 	dueDay: number;
@@ -70,7 +74,8 @@ export function findBillSuggestions(
 			null;
 		suggestions.push({
 			rawName: latest.rawName,
-			displayName: latest.displayName || tidyName(latest.rawName),
+			bankText: latest.bankText,
+			displayName: latest.displayName || tidyName(latest.bankText),
 			amountCents: latest.amountCents,
 			dueDay: Number(latest.date.slice(8)),
 			categoryId,
@@ -113,6 +118,7 @@ export async function loadBillSuggestions(
 ): Promise<BillSuggestion[]> {
 	const { results } = await db
 		.prepare(`SELECT ${CHARGE_KEY} AS rawName,
+	  ${CHARGE_RAW} AS bankText,
 	  ${chargeMerchant("display_name")} AS displayName,
 	  t.date, t.amount_cents AS amountCents,
 	  CASE WHEN tc.archived=0 THEN t.category_id END AS categoryId,
