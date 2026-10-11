@@ -1313,6 +1313,37 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
 	});
 
+	it("moves a This one only name a person gave the pending transaction onto the posted row (decision 101)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.prepare(
+			"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+		)
+			.bind(ids.pending)
+			.run();
+		await post(item, { amount: -42 });
+		expect(await row("posted-1")).toMatchObject({
+			id: ids.posted,
+			own_name: "Dog bed",
+		});
+		expect(await count("SELECT COUNT(*) AS n FROM transactions")).toBe(1);
+	});
+
+	it("keeps a name the posted transaction already has over the pending one's (decision 101)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item, { amount: -42 });
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+			).bind(ids.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Prime' WHERE id = ?",
+			).bind(ids.posted),
+		]);
+		await post(item, { amount: -42 });
+		expect(await row("posted-1")).toMatchObject({ own_name: "Prime" });
+	});
+
 	it("moves a bill payment onto it", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);

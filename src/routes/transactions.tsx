@@ -60,7 +60,6 @@ import { refundTooBigMessage } from "../transactions/refund-guards";
 import { oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
 import { parseSplit } from "../transactions/split";
-import { tidyName } from "../transactions/tidy-name";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -2795,12 +2794,11 @@ async function savePanel(
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
-	// The name the save gave, or else the name the row shows (its own name first, then the merchant's, then
-	// the suggestion it was showing, or the bank's text tidied): the toast and the announcer say what the row
-	// now reads. The store's own name is the bank's text tidied, never the raw bank string (#93).
+	// The toast and the announcer say what the row reads once saved, read back from the database: its own name,
+	// else the merchant's, else the bank's text tidied (never the raw bank string, #93). A split part keeps its
+	// purchase's own name when All doesn't reach it, so the toast names that, not the name the save gave.
 	const name =
-		parsed.value.displayName ??
-		(pick === STORE_VALUE ? tidyName(tx.rawName) : tx.displayName);
+		(await getTransaction(c.env.DB, tx.id))?.displayName ?? tx.displayName;
 	const category = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	)?.name;

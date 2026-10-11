@@ -555,7 +555,7 @@ const RENAME_CHOICES_SPEC: UseSpecText = {
 	states:
 		"Hidden until a name is ticked, so nothing shows at rest. Shown: “This one only” ticked, and “All” ticked by a tap. Focus: the focus-visible ring on each choice. Disabled, loading and error: not applicable.",
 	feedback:
-		"The toast says the name that was saved, as the Name row does. The counts are said before saving, in the words above, never afterwards.",
+		"The toast says the name the row shows once saved, as the Name row does: a split part under a purchase with its own name says that name, since All doesn't reach it. The counts are said before saving, in the words above, never afterwards.",
 	input:
 		"Keyboard: Tab to the choices and the arrow keys move between them. Screen reader: each choice is read with its muted lines, for example “All 23 from Amazon, radio button, not checked, Dog bed is replaced.”",
 	motion: "None.",
@@ -2465,7 +2465,7 @@ function Controls() {
 						/>
 					</div>
 				</State>
-				<State label="On a narrow phone (320px): long names wrap inside their chips">
+				<State label="On a narrow phone (320px): long names wrap inside their choices">
 					<div class="w-[320px] max-w-full">
 						<NameChoices
 							id="ds-names-narrow"

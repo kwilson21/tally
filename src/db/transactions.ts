@@ -581,7 +581,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				(SELECT COUNT(*) FROM transactions m WHERE m.parent_id IS NULL AND ${merchantKeySql("m")} = ${merchantKeySql("t")}) AS merchantTotal,
 				(SELECT json_group_array(json_object('name', o.own_name, 'date', o.date, 'part', o.parent_id IS NOT NULL)) FROM transactions o WHERE o.id != t.id AND o.own_name IS NOT NULL AND ${merchantKeySql("o")} = ${merchantKeySql("t")}) AS ownedJson,
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
@@ -633,6 +633,8 @@ export async function getTransaction(
 					merchantTotal: number;
 					/** A JSON array of the other own-named transactions from this merchant (parts included): name, date and whether a part. */
 					ownedJson: string;
+					/** This row's own name only (a split part's inherited name is not its own), read for the Rename list. */
+					thisOwnName: string | null;
 					excluded: number;
 					paysBill: number;
 					income: number;
@@ -656,6 +658,7 @@ export async function getTransaction(
 		merchantKey,
 		merchantTotal,
 		ownedJson,
+		thisOwnName,
 		...row
 	} = r;
 	const {
@@ -713,7 +716,7 @@ export async function getTransaction(
 			merchantLabel: r.merchantName ?? tidied,
 			total: merchantTotal,
 			owned,
-			thisOwn: r.ownName,
+			thisOwn: thisOwnName,
 			tallyCategory: r.categorySource === "jev" || r.categoryId === null,
 		},
 	};

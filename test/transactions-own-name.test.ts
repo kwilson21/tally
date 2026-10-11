@@ -405,6 +405,67 @@ describe("a name for one transaction (decision 101)", () => {
 		expect(html).toContain("All 3 from Amazon");
 	});
 
+	it("a split part shows its purchase's name but has none of its own, so All replaces nothing of its and the toast names what it still shows", async () => {
+		const { a, b } = await amazon();
+		await db
+			.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed', is_split = 1 WHERE id = ?",
+			)
+			.bind(a)
+			.run();
+		const part = (await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
+				 VALUES (1, '2026-10-02', 650, ?, 'Amazon', ?) RETURNING id`,
+			)
+			.bind(AMAZON, a)
+			.first<{ id: number }>()) as { id: number };
+		const html = await (
+			await exports.default.fetch(`${BASE}/transactions/${part.id}?month=all`)
+		).text();
+		expect(html).not.toContain("this one too");
+		expect(html).not.toContain("Dog bed is replaced.");
+		const { res } = await post(
+			`/transactions/${part.id}`,
+			{
+				back: "/transactions?month=all",
+				name_pick: "own",
+				merchant: "Prime",
+				merchant_was: "Amazon",
+				name_scope: "all",
+			},
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Dog bed");
+		expect(announceOf(res)).toBe("Saved Dog bed.");
+		expect(await merchant("Amazon")).toMatchObject({ display_name: "Prime" });
+		expect((await rowOf(part.id))?.displayName).toBe("Dog bed");
+		expect((await rowOf(b))?.displayName).toBe("Prime");
+	});
+
+	it("a save with nothing ticked on a split part under a named purchase names the name the part shows", async () => {
+		const { a } = await amazon();
+		await db
+			.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed', is_split = 1 WHERE id = ?",
+			)
+			.bind(a)
+			.run();
+		const part = (await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
+				 VALUES (1, '2026-10-02', 650, ?, 'Amazon', ?) RETURNING id`,
+			)
+			.bind(AMAZON, a)
+			.first<{ id: number }>()) as { id: number };
+		const { res } = await post(
+			`/transactions/${part.id}`,
+			{ back: "/transactions?month=all", note: "Dinner" },
+			true,
+		);
+		expect(toastOf(res)).toBe("Saved Dog bed");
+	});
+
 	it("a split's parts show the own name of the purchase they came from", async () => {
 		const { a } = await amazon();
 		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });

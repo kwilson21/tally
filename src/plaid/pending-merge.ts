@@ -5,8 +5,8 @@
  * posted row and the pending row is deleted, all in the page's own batch.
  *
  * What moves, and what wins:
- * - A person's category, note, exclusion and income choice move over a machine's value on the posted
- *   row. Where the posted row already holds a person's choice, it keeps it.
+ * - A person's category, note, own name (decision 101), exclusion and income choice move over a machine's
+ *   value on the posted row. Where the posted row already holds a person's choice, it keeps it.
  * - Tally's own answer (Jev's category pick and how sure it was, its transfer, reimbursement and income
  *   answers, decision 79) moves too, when the amount is unchanged and the posted row has no answer or
  *   choice of its own, so the posted row isn't asked again for nothing. A merchant rule's pick doesn't
@@ -78,6 +78,9 @@ const STATEMENTS = [
 	// Note: a note the posted row already has is kept.
 	`UPDATE transactions SET note = p.note, note_guessed = p.note_guessed
 	 ${FROM_PENDING} AND COALESCE(p.note, '') != '' AND COALESCE(transactions.note, '') = ''`,
+	// This one only (decision 101): a name a person gave the pending row alone is kept, unless the posted row has its own.
+	`UPDATE transactions SET own_name = p.own_name
+	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL`,
 	// Kept details beat guesses; a posted person's answer, or a clear, always wins.
 	`UPDATE transactions SET
 		kind = CASE WHEN ${KIND_TAKEN} THEN p.kind ELSE transactions.kind END,
