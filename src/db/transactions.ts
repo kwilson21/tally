@@ -20,6 +20,7 @@ import {
 	nameSource,
 	offeredNames,
 	shownName,
+	usableSuggestedNames,
 } from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
@@ -1605,6 +1606,7 @@ export async function pendingForJev(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
+				${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
 				t.details_asked AS detailsAsked,
@@ -1636,13 +1638,27 @@ export async function pendingForJev(
 				categoryOnly: number;
 				merchantKey: string;
 				detailsAsked: number;
+				suggestedNames: string | null;
+				suggestionStatus: string | null;
 			}
 		>();
-	return results.map((transaction) => ({
-		...transaction,
-		categoryOnly: transaction.categoryOnly === 1,
-		detailsAsked: transaction.detailsAsked === 1,
-	}));
+	return results.map(
+		({ suggestedNames, suggestionStatus, ...transaction }) => ({
+			...transaction,
+			// With no name chosen, Jev is told the bank's own store name, never a name Tally guessed (decision 103).
+			displayName:
+				transaction.displayName ??
+				usableSuggestedNames({
+					stored: suggestedNames,
+					status: suggestionStatus,
+					key: transaction.merchantKey,
+					namesOn: false,
+				})[0] ??
+				null,
+			categoryOnly: transaction.categoryOnly === 1,
+			detailsAsked: transaction.detailsAsked === 1,
+		}),
+	);
 }
 
 /** The recent categories chosen by a person or merchant rule, fetched once for a Jev page. */
@@ -1796,7 +1812,7 @@ export async function saveJevDetails(
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
  * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
- * text, Plaid's merchant name, and the merchant's chosen and suggested names. Only the bank text is sent.
+ * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
@@ -1808,12 +1824,14 @@ export async function transactionsNeedingNoteGuess(
 		merchantName: string | null;
 		displayName: string | null;
 		suggestedNames: string | null;
+		suggestionStatus: string | null;
+		merchantKey: string;
 	}[]
 > {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
-				${merchantColumnSql("t", "display_name")} AS displayName, ${merchantColumnSql("t", "suggested_name")} AS suggestedNames
+				${merchantColumnSql("t", "display_name")} AS displayName, ${NAME_SUGGESTION_COLUMNS}
 			 FROM transactions t
 			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
 			 ORDER BY t.note_tried_at IS NOT NULL, t.note_tried_at, t.date DESC, t.id DESC LIMIT ?`,
@@ -1825,6 +1843,8 @@ export async function transactionsNeedingNoteGuess(
 			merchantName: string | null;
 			displayName: string | null;
 			suggestedNames: string | null;
+			suggestionStatus: string | null;
+			merchantKey: string;
 		}>();
 	return results;
 }

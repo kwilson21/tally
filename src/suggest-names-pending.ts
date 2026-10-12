@@ -10,6 +10,7 @@ import {
 	transactionsNeedingNoteGuess,
 } from "./db/transactions";
 import { type Deadline, pastDeadline } from "./run-budget";
+import { usableSuggestedNames } from "./transactions/name-suggestions";
 
 /**
  * How many bank texts one night asks about: 100, about three D1 queries each. In production they follow
@@ -39,7 +40,8 @@ export async function suggestTransactionNotes(
 ): Promise<{ asked: number; suggested: number }> {
 	const done = { asked: 0, suggested: 0 };
 	if (!env.AI || limit <= 0 || pastDeadline(time)) return done;
-	if (!(await readAiSwitches(env.DB)).details) return done;
+	const switches = await readAiSwitches(env.DB);
+	if (!switches.details) return done;
 	const transactions = await transactionsNeedingNoteGuess(env.DB, limit);
 	let failuresInARow = 0;
 	for (let i = 0; i < transactions.length; i += DETAIL_SWITCH_CHECK_BATCH) {
@@ -55,7 +57,12 @@ export async function suggestTransactionNotes(
 			const result = await suggestNote(env.AI, transaction.rawName, [
 				transaction.merchantName,
 				transaction.displayName,
-				transaction.suggestedNames,
+				...usableSuggestedNames({
+					stored: transaction.suggestedNames,
+					status: transaction.suggestionStatus,
+					key: transaction.merchantKey,
+					namesOn: switches.names,
+				}),
 			]);
 			if (!result.ok) {
 				failuresInARow += 1;

@@ -34,6 +34,13 @@ async function post(path: string, fields: Record<string, string>) {
 	return { res, html: await res.text() };
 }
 
+async function noteRows() {
+	const { results } = await db
+		.prepare("SELECT note, note_guessed FROM transactions ORDER BY id")
+		.all<{ note: string | null; note_guessed: number }>();
+	return results;
+}
+
 async function charge() {
 	const row = await db
 		.prepare(
@@ -282,6 +289,76 @@ describe("transaction detail guesses", () => {
 				.split(">What it was</span>")[1]
 				?.split('<span class="block font-medium">')[0] ?? "";
 		expect(whatItWas).toContain('<span class="truncate">Add</span>');
+	});
+
+	it("keeps a guess that repeats only a name a person turned down", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'rejected')",
+			),
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1)",
+			),
+		]);
+		const ai = {
+			run: vi.fn(async () => ({ response: "Uber Eats order" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		expect(await noteRows()).toEqual([
+			{ note: "Uber Eats order", note_guessed: 1 },
+		]);
+	});
+
+	it("drops a guess that repeats a pending name the row shows, while names are on", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'pending')",
+			),
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1)",
+			),
+		]);
+		const ai = {
+			run: vi.fn(async () => ({ response: "Uber Eats order" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		expect(await noteRows()).toEqual([{ note: null, note_guessed: 0 }]);
+	});
+
+	it("keeps a guess that repeats a Tally name while names are off, since that name isn't shown", async () => {
+		await saveAiSwitches(db, { names: false });
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'pending')",
+			),
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1)",
+			),
+		]);
+		const ai = {
+			run: vi.fn(async () => ({ response: "Uber Eats order" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		expect(await noteRows()).toEqual([
+			{ note: "Uber Eats order", note_guessed: 1 },
+		]);
+	});
+
+	it("still drops a guess that repeats the bank's own name while names are off", async () => {
+		await saveAiSwitches(db, { names: false });
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Harbor Hardware', 'Harbor Hardware', 'pending')",
+			),
+			db.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'HBR HDWR #88', 'Harbor Hardware', 1, 1)",
+			),
+		]);
+		const ai = {
+			run: vi.fn(async () => ({ response: "Harbor Hardware purchase" })),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await suggestTransactionNotes({ DB: db, AI: ai });
+		expect(await noteRows()).toEqual([{ note: null, note_guessed: 0 }]);
 	});
 
 	it("drops a guess that repeats a name the row shows, without sending that name to Workers AI", async () => {
