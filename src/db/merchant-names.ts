@@ -105,7 +105,10 @@ export type NameReview = {
 	source: NameSource;
 	/** Its charges, a split counted once. */
 	count: number;
-	/** Its charges that keep a name of their own when the merchant is named. */
+	/**
+	 * Its charges that keep a name of their own when the merchant is named. A split purchase counts when it
+	 * has its own name or every one of its parts has one, since that is what its rows show.
+	 */
 	owned: number;
 };
 
@@ -130,7 +133,7 @@ export async function namesToReview(
 	const { results } = await db
 		.prepare(
 			`SELECT m.raw_name AS key, m.rowid AS id, m.suggested_name AS stored, t.raw_name AS bankText, COUNT(*) AS count,
-				SUM(t.own_name IS NOT NULL) AS owned
+				SUM(t.own_name IS NOT NULL OR (t.is_split = 1 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = t.id) AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = t.id AND part.own_name IS NULL))) AS owned
 			 FROM merchants m JOIN transactions t ON ${merchantKeySql("t")} = m.raw_name AND t.parent_id IS NULL
 			 WHERE m.suggestion_status = 'pending' AND m.display_name IS NULL AND COALESCE(m.suggested_name, '') != ''
 			 GROUP BY m.raw_name, t.raw_name`,
