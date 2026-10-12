@@ -28,7 +28,7 @@ export function AiTally({
 		: "Transactions · Off";
 	const named = switches.names
 		? `Cleaned ${count(tally.named, "merchant name", "merchant names")}`
-		: "Merchant names · Off";
+		: "Suggest store names · Off";
 	const paychecks = switches.income
 		? `Found ${count(tally.paychecks, "paycheck", "paychecks")}`
 		: "Paychecks · Off";

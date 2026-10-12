@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const request = async (path: string, init?: RequestInit) => {
@@ -996,7 +996,7 @@ describe("select several transactions", () => {
 			);
 			const link = html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0] ?? "";
 			expect(link).toContain(
-				'hx-include="#selection-form input[name=ids]:checked, #select-all-page input[name=page-ids]"',
+				'hx-include="#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]"',
 			);
 			expect(link).toContain(
 				'hx-get="/transactions?month=all&amp;page=2&amp;select=1&amp;focus=set-category-selection"',
@@ -1140,8 +1140,19 @@ describe("select several transactions", () => {
 		});
 
 		it("moves focus to the count when no Select all is drawn, so focus stays in the bar", async () => {
+			// The whole month is selected, so no link is left to tick anything (#321): focus stays on the count.
 			const pageRows = await pageTwoRows();
-			const text = await countFragment(pageRows, pageRows, true);
+			const text = await (
+				await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["page-ids", pageRows.join(",")],
+						["back", "/transactions?month=all"],
+						["all", "1"],
+						["not-on-page", "1"],
+						...pageRows.map((id) => ["ids", String(id)]),
+					])}`,
+				)
+			).text();
 			expect(selectAllTag(text)).toBe("");
 			expect(text).toMatch(
 				/^<span[^>]*tabindex="-1"[^>]*autofocus[^>]*>\d+ selected<\/span>/,
@@ -1255,7 +1266,7 @@ describe("select several transactions", () => {
 				"/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall&select=1",
 			);
 			expect(attribute(addCash, "hx-include")).toBe(
-				"#selection-form input[name=ids]:checked",
+				"#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]",
 			);
 			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
 			const sheetUrl = `/transactions/cash/new?${new URLSearchParams([
@@ -1468,6 +1479,966 @@ describe("select several transactions", () => {
 					),
 				),
 			).toEqual(sorted(ids));
+		});
+	});
+
+	describe("select all the transactions the filters match (#321)", () => {
+		/**
+		 * 101 selectable rows the search "ZQ TEST BAKERY" finds, in category 2, and a split parent it finds
+		 * too. Returns the 101 selectable ids.
+		 */
+		const seedMatches = async () => {
+			await addHundredOneRows();
+			await env.DB.batch([
+				env.DB.prepare(
+					"UPDATE transactions SET raw_name='ZQ TEST BAKERY', category_id=2, category_source='user' WHERE id BETWEEN 5001 AND 5101",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,is_split,category_id) SELECT 5200,account_id,date,-900,'ZQ TEST BAKERY',1,2 FROM transactions WHERE id=110",
+				),
+			]);
+			return Array.from({ length: 101 }, (_, i) => 5001 + i);
+		};
+
+		it("sets every transaction the filters match, past 100, and leaves a split parent and every other row alone", async () => {
+			const matched = await seedMatches();
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/category/save",
+				new URLSearchParams({
+					all: "1",
+					category: "1",
+					back: "/transactions?month=all&q=ZQ+TEST+BAKERY",
+				}),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe("Set 101 transactions to Groceries.");
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (matched.includes(row.id))
+					expect(row).toMatchObject({
+						category_id: 1,
+						category_source: "user",
+					});
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
+		/** The selectable rows the whole set holds with no filter: every row but a split parent. */
+		const selectableTotal = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE is_split = 0",
+				).first<{ n: number }>()
+			)?.n ?? 0;
+
+		/** The count's reply for an all-mode selection on this page's rows: `ticked` are the boxes that are checked. */
+		const wholeCount = async (
+			pageIds: number[],
+			ticked: number[],
+			back: string,
+		) =>
+			(
+				await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["page-ids", pageIds.join(",")],
+						["back", back],
+						["all", "1"],
+						...ticked.map((id) => ["ids", String(id)]),
+					])}`,
+				)
+			).text();
+
+		it("names the whole set in the link once every row on the page is ticked, with all months", async () => {
+			const ids = rowIds(await pageHtml("month=all&select=1"));
+			const total = await selectableTotal();
+			const text = await countFragment(ids, ids);
+			expect(text).toContain(`>Select all ${total} in all months</a>`);
+			expect(selectAllLabel(text)).toBeUndefined();
+		});
+
+		it("names the month the filters show, not all months, when one is picked", async () => {
+			const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+			const html = await pageHtml(`month=${month}&select=1`);
+			const ids = rowIds(html);
+			const text = await (
+				await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["page-ids", ids.join(",")],
+						["back", `/transactions?month=${month}`],
+						...ids.map((id) => ["ids", String(id)]),
+					])}`,
+				)
+			).text();
+			expect(text).toMatch(
+				new RegExp(
+					`>Select all \\d+ in ${monthLabel(month, todayIn(DEFAULT_TIME_ZONE))}</a>`,
+				),
+			);
+		});
+
+		it("after Select all, unticking one row leaves the rest selected, keeps the link, and an action changes those only", async () => {
+			const back = "/transactions?month=all";
+			const ids = rowIds(await pageHtml("month=all&select=1"));
+			const [first, ...rest] = ids;
+			const total = await selectableTotal();
+			const counted = await wholeCount(ids, rest, back);
+			expect(counted).toContain(`${total - 1} selected`);
+			expect(counted).toContain(`>Select all ${total} in all months</a>`);
+			// The reply's address keeps the whole set and the row that was unticked from it.
+			const replaced = (
+				await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["page-ids", ids.join(",")],
+						["back", back],
+						["all", "1"],
+						...rest.map((id) => ["ids", String(id)]),
+					])}`,
+				)
+			).headers.get("HX-Replace-Url");
+			expect(replaced).toContain("all=1");
+			expect(replaced).toContain(`unticked=${first}`);
+
+			const before = (
+				await env.DB.prepare(
+					"SELECT id, is_split, category_id FROM transactions",
+				).all<{ id: number; is_split: number; category_id: number | null }>()
+			).results;
+			const firstBefore = before.find((row) => row.id === first)?.category_id;
+			const res = await post(
+				"/transactions/select/category/save",
+				new URLSearchParams([
+					["page-ids", ids.join(",")],
+					["back", back],
+					["all", "1"],
+					["unticked", String(first)],
+					["category", "1"],
+					...rest.map((id) => ["ids", String(id)]),
+				]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe(`Set ${total - 1} transactions to Groceries.`);
+			const after = (
+				await env.DB.prepare(
+					"SELECT id, is_split, category_id FROM transactions",
+				).all<{ id: number; is_split: number; category_id: number | null }>()
+			).results;
+			for (const row of after) {
+				if (row.id === first) expect(row.category_id).toBe(firstBefore);
+				else if (row.is_split === 0) expect(row.category_id).toBe(1);
+			}
+		});
+
+		it("reads the whole set on the filters its address names, so a search changes the count", async () => {
+			await seedMatches();
+			const search = (q: string) =>
+				wholeCount([], [], `/transactions?month=all&q=${q}`);
+			expect(await search("ZQ+TEST+BAKERY")).toMatch(/^101 selected</);
+			expect(await search("zz-no-such-words-zz")).toMatch(/^0 selected</);
+		});
+
+		it("excludes every row the whole set holds past 100, and leaves a split parent and the rows the filters miss alone", async () => {
+			const matched = await seedMatches();
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/exclude",
+				new URLSearchParams({
+					all: "1",
+					back: "/transactions?month=all&q=ZQ+TEST+BAKERY",
+				}),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe("Excluded 101 transactions.");
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (matched.includes(row.id))
+					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
+		it("with Select all, Exclude changes only the rows the bar counts, so a matched split part is excluded on its own (P81 A)", async () => {
+			await splitParent();
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=990",
+			).run();
+			const back = "/transactions?month=all&category=2";
+			const matched = new Set(
+				(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE is_split=0 AND category_id=2",
+					).all<{ id: number }>()
+				).results.map((row) => row.id),
+			);
+			const before = (await snapshot()) as SnapshotRow[];
+			const counted = Number(
+				(await wholeCount([], [], back)).match(/^(\d+) selected/)?.[1],
+			);
+			expect(counted).toBe(matched.size);
+			const res = await post(
+				"/transactions/select/exclude",
+				new URLSearchParams({ all: "1", back }),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe(`Excluded ${counted} transactions.`);
+			const after = (await snapshot()) as SnapshotRow[];
+			expect(after.find((row) => row.id === 990)).toMatchObject({
+				excluded: 1,
+				excluded_source: "user",
+			});
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of after) {
+				if (matched.has(row.id)) expect(row.excluded).toBe(1);
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
+		/**
+		 * Select all's Exclude with one tick on split part 990 (category 1), which the category 2 search does not
+		 * match: the tick is a row the filters no longer match, so it takes its whole purchase (110, 990 and 991),
+		 * and each category 2 row is excluded on its own. `tick` is the form's field for that tick (#321).
+		 */
+		const expectWholePurchaseTick = async (tick: [string, string]) => {
+			await splitParent();
+			const back = "/transactions?month=all&category=2";
+			const matched = new Set(
+				(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE is_split=0 AND category_id=2",
+					).all<{ id: number }>()
+				).results.map((row) => row.id),
+			);
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/exclude",
+				new URLSearchParams([tick, ["all", "1"], ["back", back]]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe(`Excluded ${matched.size + 1} transactions.`);
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (matched.has(row.id)) expect(row.excluded).toBe(1);
+				else if ([110, 990, 991].includes(row.id))
+					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		};
+
+		it("with Select all, a tick the filters no longer match excludes its whole purchase, and the matched rows each on their own (#321)", async () => {
+			await expectWholePurchaseTick(["ids", "990"]);
+		});
+
+		it("with Select all, a held tick the filters no longer match is a tick again, so it excludes its whole purchase too (#321)", async () => {
+			await expectWholePurchaseTick(["held", "990"]);
+		});
+
+		it("with Select all, the toast and the bill note count only the rows this Exclude excludes, not matches already excluded (#321)", async () => {
+			const matched = await seedMatches();
+			// Jev excluded 30 of the matches already; the bar still counts them on the default All view.
+			const already = matched.slice(0, 30);
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded=1, excluded_source='jev' WHERE id BETWEEN 5001 AND 5030",
+			).run();
+			// 5001 is excluded already and pays a bill; 5040 is not, and pays one. The note counts 5040 alone.
+			await env.DB.batch([
+				...[9800, 9801].map((id) =>
+					env.DB.prepare(
+						"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (?, 'Club', 1200, 1, 'monthly', 1, 'CLUB')",
+					).bind(id),
+				),
+				...[
+					[9800, 5001],
+					[9801, 5040],
+				].map(([bill, transaction]) =>
+					env.DB.prepare(
+						"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT ?1, substr(date, 1, 7), ?2, 'user', 'linked' FROM transactions WHERE id = ?2",
+					).bind(bill, transaction),
+				),
+			]);
+			const back = "/transactions?month=all&q=ZQ+TEST+BAKERY";
+			expect(await wholeCount([], [], back)).toMatch(/^101 selected</);
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/exclude",
+				new URLSearchParams({ all: "1", back }),
+			);
+			expect(res.status).toBe(200);
+			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+			expect(trigger.toast.message).toBe(
+				"Excluded 71 transactions. 1 still counts while it pays a bill.",
+			);
+			expect(trigger.announce).toBe(trigger.toast.message);
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (already.includes(row.id))
+					expect(row).toEqual(beforeById.get(row.id));
+				else if (matched.includes(row.id))
+					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
+		it("opens Set category over the whole set with its all-mode fields, and titles every row it changes", async () => {
+			await seedMatches();
+			const res = await post(
+				"/transactions/select/category",
+				new URLSearchParams({
+					all: "1",
+					back: "/transactions?month=all&q=ZQ+TEST+BAKERY",
+				}),
+			);
+			const html = await res.text();
+			expect(html).toContain("Set category for 101");
+			expect(html).toMatch(/<input type="hidden" name="all" value="1"/);
+			expect(html).not.toMatch(/name="ids" value="5001"/);
+		});
+
+		it("ticks the whole set again from its link, clearing the rows unticked from it", async () => {
+			const ids = rowIds(await pageHtml("month=all&select=1"));
+			const [first] = ids;
+			const total = await selectableTotal();
+			const html = await (
+				await request(
+					`/transactions?month=all&select=1&all=1&focus=set-category-selection&unticked=${first}`,
+					{ headers: { "HX-Request": "true" } },
+				)
+			).text();
+			expect(html).toContain(`${total} selected`);
+			expect(tickedIds(html)).toContain(first);
+			expect(html).not.toMatch(/>Select all \d+ in all months<\/a>/);
+		});
+
+		it("follows the month the address names, so a month with no rows has nothing to select", async () => {
+			await seedMatches();
+			const text = await wholeCount([], [], "/transactions?month=2000-01");
+			expect(text).toMatch(/^0 selected/);
+			expect(text).not.toContain("Select all");
+		});
+
+		/**
+		 * The 101 matches dated long ago, so the newest rows (the page Select all draws) are not the search's
+		 * matches. The seed's rows follow today's date, and these would otherwise sort to the top.
+		 */
+		const seedOldMatches = async () => {
+			const matched = await seedMatches();
+			await env.DB.prepare(
+				"UPDATE transactions SET date = '2000-01-01' WHERE id BETWEEN 5001 AND 5101",
+			).run();
+			return matched;
+		};
+
+		it("after Select all, a search selects what its filters match, not the rows the old page drew, and the save changes only those", async () => {
+			const matched = await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const search = "/transactions?month=all&q=ZQ+TEST+BAKERY";
+			// The fields a filter change posts: the old page's boxes, all of them checked, and the old page's ids.
+			const fields: [string, string][] = [
+				["page-ids", old.join(",")],
+				["all", "1"],
+				...old.map((id): [string, string] => ["ids", String(id)]),
+			];
+			const list = await (
+				await request(`${search}&select=1&${new URLSearchParams(fields)}`, {
+					headers: { "HX-Request": "true" },
+				})
+			).text();
+			expect(list).toContain("101 selected");
+			expect(list).not.toContain("not on this page");
+			const counted = await (
+				await request(
+					`/transactions/select/count?${new URLSearchParams([["back", search], ...fields])}`,
+				)
+			).text();
+			expect(counted).toContain("101 selected");
+			expect(counted).not.toContain("not on this page");
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/category/save",
+				new URLSearchParams([["back", search], ["category", "1"], ...fields]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe("Set 101 transactions to Groceries.");
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (matched.includes(row.id))
+					expect(row).toMatchObject({
+						category_id: 1,
+						category_source: "user",
+					});
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
+		it("after Select all, keeps a tick the new filters hide on the not-on-this-page line, and counts none of the old page's boxes", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			// A row the search doesn't match and the old page doesn't show: a tick made before the filters changed.
+			const hidden = await env.DB.prepare(
+				`SELECT id FROM transactions WHERE is_split = 0 AND id < 5000 AND id NOT IN (${old.map(() => "?").join(",")}) ORDER BY id LIMIT 1`,
+			)
+				.bind(...old)
+				.first<{ id: number }>();
+			expect(hidden).not.toBeNull();
+			const counted = await (
+				await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["back", "/transactions?month=all&q=ZQ+TEST+BAKERY"],
+						["page-ids", old.join(",")],
+						["all", "1"],
+						...old.map((id) => ["ids", String(id)]),
+						["ids", String(hidden?.id)],
+					])}`,
+				)
+			).text();
+			expect(counted).toContain("102 selected");
+			expect(counted).toContain("1 not on this page");
+		});
+
+		/** A selectable row the old page doesn't draw and the ZQ search doesn't match: a tick made before the filters change. */
+		const hiddenRow = async (old: number[]) => {
+			const row = await env.DB.prepare(
+				`SELECT id FROM transactions WHERE is_split = 0 AND id < 5000 AND id NOT IN (${old.map(() => "?").join(",")}) ORDER BY id LIMIT 1`,
+			)
+				.bind(...old)
+				.first<{ id: number }>();
+			if (!row) throw new Error("no selectable row off the old page");
+			return row.id;
+		};
+
+		it("a tick made before Select all is held by the whole set, and the whole-set link keeps it (#350)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			const total = await selectableTotal();
+			const reply = await request(
+				`/transactions?${new URLSearchParams([
+					["month", "all"],
+					["select", "1"],
+					["all", "1"],
+					["focus", "set-category-selection"],
+					["page-ids", old.join(",")],
+					...[...old, x].map((id): [string, string] => ["ids", String(id)]),
+				])}`,
+				{ headers: { "HX-Request": "true" } },
+			);
+			const html = await reply.text();
+			expect(html).toContain(`${total} selected`);
+			expect(html).not.toContain("not on this page");
+			const bar =
+				html.match(/<span id="select-all-page"[\s\S]*?<\/span>/)?.[0] ?? "";
+			expect(bar).toContain(`<input type="hidden" name="held" value="${x}"`);
+			const pushed =
+				new URL(
+					reply.headers.get("HX-Push-Url") ?? "",
+					"http://tally.test",
+				).searchParams
+					.get("ids")
+					?.split(",")
+					.map(Number) ?? [];
+			expect(pushed).toContain(x);
+		});
+
+		it("a search after Select all keeps a held tick as a tick, off this page, until it is unticked or acted on (#350)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			// The fields a search change posts: the old page's boxes, all of them checked, and the held tick.
+			const fields: [string, string][] = [
+				["page-ids", old.join(",")],
+				["all", "1"],
+				...old.map((id): [string, string] => ["ids", String(id)]),
+				["held", String(x)],
+			];
+			const list = await (
+				await request(
+					`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(fields)}`,
+					{ headers: { "HX-Request": "true" } },
+				)
+			).text();
+			expect(list).toContain("102 selected");
+			expect(list).toContain("1 not on this page");
+			expect(tickedIds(list)).toContain(x);
+			const count = await request(
+				`/transactions/select/count?${new URLSearchParams([["back", "/transactions?month=all&q=ZQ+TEST+BAKERY"], ...fields])}`,
+			);
+			const counted = await count.text();
+			expect(counted).toContain("102 selected");
+			expect(counted).toContain("1 not on this page");
+			const replaced =
+				new URL(
+					count.headers.get("HX-Replace-Url") ?? "",
+					"http://tally.test",
+				).searchParams
+					.get("ids")
+					?.split(",")
+					.map(Number) ?? [];
+			expect(replaced).toContain(x);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
+			)
+				.bind(x)
+				.run();
+			const res = await post(
+				"/transactions/select/category/save",
+				new URLSearchParams([
+					["back", "/transactions?month=all&q=ZQ+TEST+BAKERY"],
+					["category", "1"],
+					...fields,
+				]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe("Set 102 transactions to Groceries.");
+			expect(
+				await env.DB.prepare("SELECT category_id FROM transactions WHERE id=?")
+					.bind(x)
+					.first(),
+			).toEqual({ category_id: 1 });
+		});
+
+		it("unticking a held tick ends it: the count leaves it out, and the search after it does not bring it back (#350)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			const total = await selectableTotal();
+			// X is on the page, but its box is not posted: it was unticked. The held field still says it was held.
+			const pageIds = [...old, x];
+			const count = await request(
+				`/transactions/select/count?${new URLSearchParams([
+					["page-ids", pageIds.join(",")],
+					["back", "/transactions?month=all"],
+					["all", "1"],
+					...old.map((id): [string, string] => ["ids", String(id)]),
+					["held", String(x)],
+				])}`,
+			);
+			expect(await count.text()).toContain(`${total - 1} selected`);
+			const replaced = count.headers.get("HX-Replace-Url") ?? "";
+			expect(replaced).toContain(`unticked=${x}`);
+			expect(
+				new URL(replaced, "http://tally.test").searchParams
+					.get("ids")
+					?.split(",")
+					.map(Number) ?? [],
+			).not.toContain(x);
+			// The search change carries what the reply left in the form: the unticked row, and no held one.
+			const listed = await (
+				await request(
+					`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(
+						[
+							["page-ids", pageIds.join(",")],
+							["all", "1"],
+							["unticked", String(x)],
+							...old.map((id): [string, string] => ["ids", String(id)]),
+						],
+					)}`,
+					{ headers: { "HX-Request": "true" } },
+				)
+			).text();
+			expect(listed).toContain("101 selected");
+			expect(listed).not.toContain("not on this page");
+			expect(tickedIds(listed)).not.toContain(x);
+		});
+
+		it("a reload of the address Select all pushed keeps the held tick, once a search is added to it (#350)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			const reply = await request(
+				`/transactions?${new URLSearchParams([
+					["month", "all"],
+					["select", "1"],
+					["all", "1"],
+					["focus", "set-category-selection"],
+					["page-ids", old.join(",")],
+					...[...old, x].map((id): [string, string] => ["ids", String(id)]),
+				])}`,
+				{ headers: { "HX-Request": "true" } },
+			);
+			const pushed = new URL(
+				reply.headers.get("HX-Push-Url") ?? "",
+				"http://tally.test",
+			);
+			pushed.searchParams.set("q", "ZQ TEST BAKERY");
+			const html = await (
+				await request(`${pushed.pathname}${pushed.search}`)
+			).text();
+			expect(html).toContain("102 selected");
+			expect(html).toContain("1 not on this page");
+		});
+
+		/** The rows the page's hidden page-ids field names: the rows the list drew (SelectAllOnPage). */
+		const pageIdsOf = (html: string) =>
+			(html.match(/name="page-ids" value="([\d,]*)"/)?.[1] ?? "")
+				.split(",")
+				.filter(Boolean)
+				.map(Number);
+
+		it("unticking a tick on the not-on-this-page line, after a search narrows the filters, ends it: clearing the search leaves it out, and the save changes only the rest (#321)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			const total = await selectableTotal();
+			const search = "/transactions?month=all&q=ZQ+TEST+BAKERY";
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
+			)
+				.bind(x)
+				.run();
+			// The search after Select all: the held tick is off its rows, so it is drawn on the line, ticked.
+			const narrowed = await (
+				await request(
+					`${search}&select=1&${new URLSearchParams([
+						["page-ids", old.join(",")],
+						["all", "1"],
+						...old.map((id): [string, string] => ["ids", String(id)]),
+						["held", String(x)],
+					])}`,
+					{ headers: { "HX-Request": "true" } },
+				)
+			).text();
+			expect(narrowed).toContain("102 selected");
+			expect(narrowed).toContain(`name="not-on-page-ids" value="${x}"`);
+			// The row's box is unticked on the line: the line still lists it, but its box posts nothing.
+			const zq = pageIdsOf(narrowed);
+			const count = await request(
+				`/transactions/select/count?${new URLSearchParams([
+					["back", search],
+					["page-ids", zq.join(",")],
+					["all", "1"],
+					["not-on-page", "1"],
+					["not-on-page-ids", String(x)],
+					...zq.map((id): [string, string] => ["ids", String(id)]),
+				])}`,
+			);
+			const counted = await count.text();
+			expect(counted).toContain("101 selected");
+			expect(counted).not.toContain("not on this page");
+			const replaced = count.headers.get("HX-Replace-Url") ?? "";
+			expect(replaced).toContain(`unticked=${x}`);
+			expect(
+				new URL(replaced, "http://tally.test").searchParams
+					.get("ids")
+					?.split(",")
+					.map(Number) ?? [],
+			).not.toContain(x);
+			expect(counted).toContain(`name="unticked" value="${x}"`);
+			// Clearing the search carries what the reply left in the form: the unticked row, which stays out.
+			const cleared = await (
+				await request(
+					`/transactions?month=all&select=1&${new URLSearchParams([
+						["page-ids", zq.join(",")],
+						["all", "1"],
+						["unticked", String(x)],
+						...zq.map((id): [string, string] => ["ids", String(id)]),
+					])}`,
+					{ headers: { "HX-Request": "true" } },
+				)
+			).text();
+			expect(cleared).toContain(`${total - 1} selected`);
+			expect(cleared).not.toContain("not on this page");
+			expect(tickedIds(cleared)).not.toContain(x);
+			const res = await post(
+				"/transactions/select/category/save",
+				new URLSearchParams([
+					["page-ids", zq.join(",")],
+					["back", "/transactions?month=all"],
+					["all", "1"],
+					["unticked", String(x)],
+					["category", "1"],
+					...zq.map((id): [string, string] => ["ids", String(id)]),
+				]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe(`Set ${total - 1} transactions to Groceries.`);
+			expect(
+				await env.DB.prepare("SELECT category_id FROM transactions WHERE id=?")
+					.bind(x)
+					.first(),
+			).toEqual({ category_id: 2 });
+		});
+
+		it("a search change that carries an untick on the not-on-this-page line keeps the row unticked in the address it pushes (#321)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			const zq = pageIdsOf(
+				await (
+					await request(
+						`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(
+							[
+								["page-ids", old.join(",")],
+								["all", "1"],
+								...old.map((id): [string, string] => ["ids", String(id)]),
+								["held", String(x)],
+							],
+						)}`,
+						{ headers: { "HX-Request": "true" } },
+					)
+				).text(),
+			);
+			const listed = await request(
+				`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(
+					[
+						["page-ids", zq.join(",")],
+						["all", "1"],
+						["not-on-page", "1"],
+						["not-on-page-ids", String(x)],
+						...zq.map((id): [string, string] => ["ids", String(id)]),
+					],
+				)}`,
+				{ headers: { "HX-Request": "true" } },
+			);
+			const html = await listed.text();
+			expect(html).toContain("101 selected");
+			expect(html).not.toContain("not on this page");
+			expect(listed.headers.get("HX-Push-Url") ?? "").toContain(
+				`unticked=${x}`,
+			);
+		});
+
+		describe("a Select all list keeps the month on screen once the month turns over (#321)", () => {
+			beforeEach(async () => {
+				const rows: [number, string][] = [
+					[5301, "2026-10-05"],
+					[5302, "2026-10-20"],
+					[5303, "2026-11-02"],
+				];
+				await env.DB.batch(
+					rows.map(([id, date]) =>
+						env.DB.prepare(
+							"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT ?1,account_id,?2,1200,'ZQ TURNOVER',2 FROM transactions WHERE id=110",
+						).bind(id, date),
+					),
+				);
+			});
+
+			afterEach(() => {
+				vi.useRealTimers();
+			});
+
+			/** Sets the clock. Only Date is faked, as in household-today.test.ts. */
+			const atInstant = (instant: string) => {
+				vi.useFakeTimers({ toFake: ["Date"] });
+				vi.setSystemTime(new Date(instant));
+			};
+			const OCTOBER = "2026-10-31T16:00:00Z";
+			const NOVEMBER = "2026-11-01T16:00:00Z";
+
+			/** The bar's back, as the Select all list on the TURNOVER search draws its hidden field. */
+			const barBack = async () => {
+				const html = await (
+					await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")
+				).text();
+				return (
+					attribute(
+						html.match(/<input[^>]*id="selection-back"[^>]*>/)?.[0] ?? "",
+						"value",
+					) ?? ""
+				);
+			};
+			/** The month an address names, or null when it names none. */
+			const monthOf = (address: string) =>
+				new URL(address, "http://tally.test").searchParams.get("month");
+			/** The back an Add cash address carries: the list the sheet returns to. */
+			const backOf = (address: string) =>
+				new URL(address, "http://tally.test").searchParams.get("back") ?? "";
+			/** The Add cash link on the TURNOVER Select all list, as drawn at the moment. */
+			const addCashTag = async () =>
+				(
+					await (
+						await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")
+					).text()
+				).match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+
+			it("names the month on screen in the bar's back, even when that is this month", async () => {
+				atInstant(OCTOBER);
+				expect(monthOf(await barBack())).toBe("2026-10");
+			});
+
+			it("counts the month on screen on the next month", async () => {
+				atInstant(OCTOBER);
+				const back = await barBack();
+				atInstant(NOVEMBER);
+				const counted = await (
+					await request(
+						`/transactions/select/count?${new URLSearchParams([
+							["back", back],
+							["all", "1"],
+						])}`,
+					)
+				).text();
+				expect(counted).toContain("2 selected");
+			});
+
+			it("excludes the month on screen on the next month, and pushes an address that names it", async () => {
+				atInstant(OCTOBER);
+				const back = await barBack();
+				atInstant(NOVEMBER);
+				const res = await post(
+					"/transactions/select/exclude",
+					new URLSearchParams({ all: "1", back }),
+				);
+				expect(res.status).toBe(200);
+				expect(
+					JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+				).toBe("Excluded 2 transactions.");
+				expect(monthOf(res.headers.get("HX-Push-Url") ?? "")).toBe("2026-10");
+				const rows = await env.DB.prepare(
+					"SELECT id, excluded FROM transactions WHERE raw_name = 'ZQ TURNOVER' ORDER BY id",
+				).all<{ id: number; excluded: number }>();
+				expect(rows.results).toEqual([
+					{ id: 5301, excluded: 1 },
+					{ id: 5302, excluded: 1 },
+					{ id: 5303, excluded: 0 },
+				]);
+			});
+
+			it("sets the category of the month on screen on the next month, and pushes an address that names it", async () => {
+				atInstant(OCTOBER);
+				const back = await barBack();
+				atInstant(NOVEMBER);
+				const res = await post(
+					"/transactions/select/category/save",
+					new URLSearchParams({ all: "1", back, category: "1" }),
+				);
+				expect(res.status).toBe(200);
+				expect(
+					JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+				).toBe("Set 2 transactions to Groceries.");
+				expect(monthOf(res.headers.get("HX-Push-Url") ?? "")).toBe("2026-10");
+				const rows = await env.DB.prepare(
+					"SELECT id, category_id FROM transactions WHERE raw_name = 'ZQ TURNOVER' ORDER BY id",
+				).all<{ id: number; category_id: number }>();
+				expect(rows.results).toEqual([
+					{ id: 5301, category_id: 1 },
+					{ id: 5302, category_id: 1 },
+					{ id: 5303, category_id: 2 },
+				]);
+			});
+
+			it("pushes no month for an Exclude in the month on screen, as the address was before", async () => {
+				atInstant(OCTOBER);
+				const res = await post(
+					"/transactions/select/exclude",
+					new URLSearchParams({
+						all: "1",
+						back: "/transactions?q=ZQ+TURNOVER&month=2026-10",
+					}),
+				);
+				expect(res.headers.get("HX-Push-Url")).toBe(
+					"/transactions?q=ZQ+TURNOVER",
+				);
+			});
+
+			it("names the month on screen in the Add cash link's back, in its href and hx-get, and keeps all", async () => {
+				atInstant(OCTOBER);
+				const link = await addCashTag();
+				const href = attribute(link, "href") ?? "";
+				expect(monthOf(backOf(href))).toBe("2026-10");
+				expect(new URL(href, "http://tally.test").searchParams.get("all")).toBe(
+					"1",
+				);
+				expect(monthOf(backOf(attribute(link, "hx-get") ?? ""))).toBe(
+					"2026-10",
+				);
+			});
+
+			it("keeps the month on screen in the Add cash sheet on the next month, in its close link, Cancel and back field", async () => {
+				atInstant(OCTOBER);
+				const href = attribute(await addCashTag(), "href") ?? "";
+				atInstant(NOVEMBER);
+				const sheet = await (
+					await request(href, { headers: { "HX-Request": "true" } })
+				).text();
+				const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+				const cancel = sheet.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+				for (const link of [backdrop ?? "", cancel]) {
+					const address = attribute(link, "href") ?? "";
+					expect(monthOf(address)).toBe("2026-10");
+					expect(
+						new URL(address, "http://tally.test").searchParams.get("all"),
+					).toBe("1");
+				}
+				const backField = attribute(
+					sheet.match(/<input[^>]*name="back"[^>]*>/)?.[0] ?? "",
+					"value",
+				);
+				expect(backField).toBe(backOf(href));
+				expect(monthOf(backField ?? "")).toBe("2026-10");
+			});
+
+			it("keeps the month on screen when the Add cash form is refused on the next month, in its close link, Cancel and back field", async () => {
+				atInstant(OCTOBER);
+				const back = backOf(attribute(await addCashTag(), "href") ?? "");
+				atInstant(NOVEMBER);
+				const res = await post(
+					"/transactions/cash",
+					new URLSearchParams({
+						amount: "0",
+						date: "2026-11-01",
+						merchant: "Corner shop",
+						category: "1",
+						note: "",
+						back,
+						select: "1",
+						all: "1",
+					}),
+				);
+				expect(res.status).toBe(422);
+				const html = await res.text();
+				const backdrop = html.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+				const cancel = html.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+				for (const link of [backdrop ?? "", cancel]) {
+					const address = attribute(link, "href") ?? "";
+					expect(monthOf(address)).toBe("2026-10");
+					expect(
+						new URL(address, "http://tally.test").searchParams.get("all"),
+					).toBe("1");
+				}
+				expect(
+					attribute(
+						html.match(/<input[^>]*name="back"[^>]*>/)?.[0] ?? "",
+						"value",
+					),
+				).toBe(back);
+			});
+
+			it("pushes the list's address, with no month, for a saved Add cash on the month on screen", async () => {
+				atInstant(OCTOBER);
+				const res = await post(
+					"/transactions/cash",
+					new URLSearchParams({
+						amount: "12.00",
+						date: "2026-10-31",
+						merchant: "Turnover cafe",
+						category: "1",
+						note: "",
+						back: "/transactions?q=ZQ+TURNOVER&month=2026-10",
+						select: "1",
+						all: "1",
+					}),
+				);
+				expect(res.status).toBe(200);
+				expect(res.headers.get("HX-Push-Url")).toBe(
+					"/transactions?q=ZQ+TURNOVER",
+				);
+			});
 		});
 	});
 });

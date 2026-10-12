@@ -1,9 +1,8 @@
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { matchBillPayments } from "../src/bills/match";
 import { unpaidBillsNote } from "../src/bills/unpaid";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { saveSplit } from "../src/db/transactions";
+import { getTransaction, saveSplit } from "../src/db/transactions";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -170,7 +169,7 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 		).toBe(MEMBERSHIP_JSON);
 	});
 
-	it("records the unlink as a dismissal on the purchase, so the matcher does not link the bill again", async () => {
+	it("links the bill to the purchase again when the sync leaves it matching, and the note stops naming it", async () => {
 		const { item, purchase } = await splitPurchase();
 		// The bank names the merchant "Costco", the key a bill's merchant must equal to be matched.
 		await env.DB.prepare(
@@ -185,7 +184,6 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 			item,
 			plaidFetch({ modified: [transaction({ amount: 42 })] }),
 		);
-		await matchBillPayments(env.DB, "2026-09-22");
 
 		expect(
 			(
@@ -201,52 +199,91 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 				period: "2026",
 				transaction_id: purchase,
 				matched_by: "auto",
-				status: "dismissed",
+				status: "linked",
 			},
 		]);
-		expect(
-			await env.DB.prepare(
-				"SELECT split_removed_bills FROM transactions WHERE id = ?",
-			)
-				.bind(purchase)
-				.first(),
-		).toEqual({ split_removed_bills: MEMBERSHIP_JSON });
-		expect(unpaidBillsNote(MEMBERSHIP_JSON)).toBe(
-			" The Costco membership bill for 2026 is no longer paid.",
-		);
-
-		// A person can still link the purchase to the bill by hand.
-		await exports.default.fetch(`http://tally.test/bills/${MEMBERSHIP}/link`, {
-			method: "POST",
-			redirect: "manual",
-			headers: {
-				Origin: "http://tally.test",
-				"HX-Request": "true",
-				"content-type": "application/x-www-form-urlencoded",
-			},
-			body: new URLSearchParams({
-				transaction_id: String(purchase),
-				period: "2026",
-				opened_period: "2026",
-			}),
-		});
-		expect(
-			await env.DB.prepare(
-				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = ? AND period = '2026' AND status = 'linked' AND transaction_id = ?",
-			)
-				.bind(MEMBERSHIP, purchase)
-				.first<{ n: number }>(),
-		).toEqual({ n: 1 });
+		// The bill is paid again, so the purchase's note no longer names it.
+		const detail = await getTransaction(env.DB, purchase);
+		expect(unpaidBillsNote(detail?.splitRemovedBills)).toBe("");
 	});
 
-	it("carries a dismissal a replacement left on its parts onto the purchase when the bank changes the amount again", async () => {
+	it("keeps a person's own Not this one from a part on the purchase when the sync removes the split", async () => {
 		const { item, purchase } = await splitPurchase();
 		await env.DB.prepare(
 			"UPDATE bills SET merchant_raw_name = 'Costco' WHERE id = ?",
 		)
 			.bind(MEMBERSHIP)
 			.run();
-		// A person replaces the parts, unlinking the bill: each new part is dismissed for it.
+		// A person marked the part's payment Not this one, so it is a dismissal on the part, not a link.
+		await env.DB.prepare(
+			"UPDATE bill_payments SET status = 'dismissed', matched_by = 'user' WHERE bill_id = ?",
+		)
+			.bind(MEMBERSHIP)
+			.run();
+
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 42 })] }),
+		);
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, matched_by, status FROM bill_payments WHERE bill_id = ?",
+				)
+					.bind(MEMBERSHIP)
+					.all()
+			).results,
+		).toEqual([
+			{ transaction_id: purchase, matched_by: "user", status: "dismissed" },
+		]);
+	});
+
+	it("names only the bill still unpaid once the other is paid again", async () => {
+		const { item, purchase } = await splitPurchase();
+		// A second bill, paid by the $10.00 part.
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9841, 'Water', 1000, 3, 'monthly', NULL, NULL, 'CITY WATER', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT 9841, '2026-09', id, 'auto', 'linked' FROM transactions WHERE parent_id = ? AND amount_cents = 1000",
+			).bind(purchase),
+		]);
+
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 60 })] }),
+		);
+		expect(
+			unpaidBillsNote(
+				(await getTransaction(env.DB, purchase))?.splitRemovedBills,
+			),
+		).toBe(" 2 bills are no longer paid.");
+
+		// A person links the Water payment to the purchase, so only the membership is still unpaid.
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9841, '2026-09', ?, 'user', 'linked')",
+		)
+			.bind(purchase)
+			.run();
+		expect(
+			unpaidBillsNote(
+				(await getTransaction(env.DB, purchase))?.splitRemovedBills,
+			),
+		).toBe(" The Costco membership bill for 2026 is no longer paid.");
+	});
+
+	it("leaves no dismissal after a replacement, so the bank's amount change lets the matcher link the bill again", async () => {
+		const { item, purchase } = await splitPurchase();
+		await env.DB.prepare(
+			"UPDATE bills SET merchant_raw_name = 'Costco' WHERE id = ?",
+		)
+			.bind(MEMBERSHIP)
+			.run();
+		// A person replaces the parts, which unlinks the bill and leaves no dismissal behind.
 		await saveSplit(
 			env.DB,
 			purchase,
@@ -257,29 +294,30 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 			"person@example.com",
 		);
 
-		// $42.00 on the same day: the bill's tolerance would link the purchase if nothing dismissed it.
+		// $42.00 on the same day: the bill's tolerance links the whole purchase, since nothing dismisses it.
 		await syncItem(
 			opts,
 			item,
 			plaidFetch({ modified: [transaction({ amount: 42 })] }),
 		);
-		await matchBillPayments(env.DB, "2026-09-22");
 
-		const { results } = await env.DB.prepare(
-			"SELECT bill_id, period, transaction_id, matched_by, status FROM bill_payments WHERE bill_id = ?",
-		)
-			.bind(MEMBERSHIP)
-			.all();
-		// Each new part carried a copy, and each copy moves onto the purchase.
-		expect(results.length).toBeGreaterThan(0);
-		for (const row of results)
-			expect(row).toEqual({
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT bill_id, period, transaction_id, matched_by, status FROM bill_payments WHERE bill_id = ?",
+				)
+					.bind(MEMBERSHIP)
+					.all()
+			).results,
+		).toEqual([
+			{
 				bill_id: MEMBERSHIP,
 				period: "2026",
 				transaction_id: purchase,
 				matched_by: "auto",
-				status: "dismissed",
-			});
+				status: "linked",
+			},
+		]);
 	});
 
 	it("stores no bill names when the split's parts paid none", async () => {

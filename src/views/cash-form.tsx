@@ -1,9 +1,11 @@
 import type { CashErrors, CashValues } from "../transactions/cash";
+import type { Selection } from "../transactions/selection";
 import { Button } from "./button";
 import { CategoryIcon } from "./category";
 import { Chip } from "./chip";
 import { FormField } from "./form-field";
 import { MoneyInput } from "./money-input";
+import { SelectionFields } from "./selection-action-bar";
 import { TextInput } from "./text-input";
 
 type Category = { id: number; name: string; icon: string; color: string };
@@ -15,7 +17,7 @@ export function CashForm({
 	action = "/transactions/cash",
 	back = "/transactions",
 	cancelHref = back,
-	ticks,
+	selection,
 	entryKey,
 	idPrefix = "cash",
 }: {
@@ -28,10 +30,10 @@ export function CashForm({
 	/** Where Cancel goes, when that is not the list the form returns to (Select mode's ticks, #350). */
 	cancelHref?: string;
 	/**
-	 * The ticks, when the form is drawn in Select mode: it posts them back, so a refused form keeps Select
-	 * mode and every tick (#350). A saved entry still returns to the plain list.
+	 * The selection, when the form is drawn in Select mode: it posts the ticks and the all-mode fields back, so a
+	 * refused form keeps Select mode and the whole selection (#350, #321). A saved entry still returns to the plain list.
 	 */
-	ticks?: number[];
+	selection?: Selection;
 	/** A one-time key (a UUID) made when the form is drawn, so posting the form twice saves once. */
 	entryKey?: string;
 	/** What every id on the form starts with, so two forms drawn on one page don't share ids. */
@@ -49,10 +51,11 @@ export function CashForm({
 			hx-disable="findAll button[type=submit]"
 		>
 			<input type="hidden" name="back" value={back} />
-			{ticks && <input type="hidden" name="select" value="1" />}
-			{ticks?.map((id) => (
+			{selection && <input type="hidden" name="select" value="1" />}
+			{selection?.ticks.map((id) => (
 				<input type="hidden" name="ids" value={id} />
 			))}
+			{selection && <SelectionFields selection={selection} />}
 			{entryKey && <input type="hidden" name="entry_key" value={entryKey} />}
 			<MoneyInput
 				id={`${idPrefix}-amount`}

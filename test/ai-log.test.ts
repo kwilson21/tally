@@ -747,7 +747,7 @@ describe("the tally's lines", () => {
 		expect(html).not.toContain("Sorted");
 	});
 
-	it("reads Paychecks · Off in muted words when Spot paychecks is off, and Merchant names · Off when names are", async () => {
+	it("reads Paychecks · Off in muted words when Spot paychecks is off, and Suggest store names · Off when names are", async () => {
 		const html = await AiTally({
 			tally: {
 				month: "2026-10",
@@ -759,7 +759,9 @@ describe("the tally's lines", () => {
 			switches: { names: false, categories: true, income: false },
 		}).toString();
 		expect(html).toMatch(/<li[^>]*text-muted[^>]*>Paychecks · Off<\/li>/);
-		expect(html).toMatch(/<li[^>]*text-muted[^>]*>Merchant names · Off<\/li>/);
+		expect(html).toMatch(
+			/<li[^>]*text-muted[^>]*>Suggest store names · Off<\/li>/,
+		);
 		expect(html).not.toContain("Found");
 		expect(html).not.toContain("Cleaned");
 	});

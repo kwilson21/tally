@@ -1747,7 +1747,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		).toBe(0);
 	});
 
-	it("records the unlink as a dismissal on the posted row, so the matcher does not link it again (decision 99)", async () => {
+	it("links the bill to the posted row again when the whole purchase still matches, with no dismissal (decision 105)", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
 		const parts = await splitInto(ids.pending, 600, 634);
@@ -1776,10 +1776,10 @@ describe("when the posted transaction is already stored as the link arrives", ()
 					"SELECT transaction_id, status FROM bill_payments WHERE bill_id = 9851",
 				).all()
 			).results,
-		).toEqual([{ transaction_id: ids.posted, status: "dismissed" }]);
+		).toEqual([{ transaction_id: ids.posted, status: "linked" }]);
 	});
 
-	it("carries a dismissal a part held onto the posted row when the amount changed (decision 99)", async () => {
+	it("leaves no dismissal on the posted row when the amount changed, so the matcher links the bill again (decision 105)", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
 		const parts = await splitInto(ids.pending, 600, 634);
@@ -1787,7 +1787,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			env.DB.prepare(
 				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9852, 'Water', 1500, 28, 'monthly', NULL, NULL, 'Shop', 1)",
 			),
-			// A person's earlier Not this one on the part, as a split change's replacement leaves it.
+			// An automatic dismissal a split change left on the part (#401), which goes with the part.
 			env.DB.prepare(
 				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9852, '2026-09', ?, 'auto', 'dismissed')",
 			).bind(parts[0]),
@@ -1808,9 +1808,81 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				transaction_id: ids.posted,
 				period: "2026-09",
 				matched_by: "auto",
+				status: "linked",
+			},
+		]);
+	});
+
+	it("keeps a person's Not this one from a dropped pending part on the posted row when the amount changed (decision 105)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const parts = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9853, 'Water', 600, 28, 'monthly', NULL, NULL, 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9853, '2026-09', ?, 'user', 'dismissed')",
+			).bind(parts[0]),
+		]);
+
+		// $6.10 posted on the bill's due date: the bill's amount would link the posted row if nothing dismissed it.
+		await post(item, { amount: 6.1 });
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, period, matched_by, status FROM bill_payments WHERE bill_id = 9853",
+				).all()
+			).results,
+		).toEqual([
+			{
+				transaction_id: ids.posted,
+				period: "2026-09",
+				matched_by: "user",
 				status: "dismissed",
 			},
 		]);
+	});
+
+	it("keeps a person's Not this one from a dropped pending part on each posted part when the posted row keeps its split (decision 105)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 700, 534);
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Shop' WHERE parent_id = ?",
+		)
+			.bind(ids.posted)
+			.run();
+		const pending = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9861, 'Water', 650, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9861, '2026-09', ?, 'user', 'dismissed')",
+			).bind(pending[0]),
+		]);
+
+		await post(item);
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		// The $7.00 posted part still matches the bill within 10%, so only the Not this one keeps it unlinked.
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, period, matched_by, status FROM bill_payments WHERE bill_id = 9861 ORDER BY transaction_id",
+				).all()
+			).results,
+		).toEqual(
+			[ids.posted, ...own].map((transactionId) => ({
+				transaction_id: transactionId,
+				period: "2026-09",
+				matched_by: "user",
+				status: "dismissed",
+			})),
+		);
 	});
 
 	it("clears the note a bank change left on the posted row when the posted row takes the split (decision 99)", async () => {
@@ -2442,7 +2514,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await row("posted-1")).toMatchObject({ is_split: 1 });
 	});
 
-	it("dismisses a removed pending split's bill on each part of the posted row's own split, so the matcher does not link it again (decision 99)", async () => {
+	it("leaves no dismissal for a removed pending split's bill on the posted row's own parts, so the matcher may link it (decision 105)", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
 		const own = await splitInto(ids.posted, 700, 534);
@@ -2465,19 +2537,22 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		await post(item);
 		await matchBillPayments(env.DB, "2026-09-22");
 
+		// The pending part's $6.00 payment has no posted part of its amount and category to keep it, so the
+		// matcher links the bill to the $7.00 part it still matches (within 10%), and no dismissal is left.
 		expect(
-			await count(
-				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9860 AND status = 'linked'",
-			),
-		).toBe(0);
-		for (const part of own) {
-			expect(
-				await count(
-					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9860 AND period = '2026-09' AND transaction_id = ? AND status = 'dismissed' AND matched_by = 'auto'",
-					part,
-				),
-			).toBe(1);
-		}
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, period, matched_by, status FROM bill_payments WHERE bill_id = 9860 ORDER BY id",
+				).all()
+			).results,
+		).toEqual([
+			{
+				transaction_id: own[0],
+				period: "2026-09",
+				matched_by: "auto",
+				status: "linked",
+			},
+		]);
 	});
 
 	it("keeps a pending part's bill payment on the posted part with the same amount and category (decision 99)", async () => {
@@ -2513,7 +2588,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		]);
 	});
 
-	it("does not keep a pending part's bill payment on a posted part that already pays another bill, and dismisses it on each part instead (decision 99)", async () => {
+	it("does not keep a pending part's bill payment on a posted part that already pays another bill, and unlinks it for the matcher to link again (decision 99, 105)", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
 		const own = await splitInto(ids.posted, 600, 634);
@@ -2548,22 +2623,29 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				).all()
 			).results,
 		).toEqual([{ transaction_id: own[0], status: "linked" }]);
+		// The posted part that already pays Gas is out of reach, so the matcher links Water to the other part it matches.
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, period, matched_by, status FROM bill_payments WHERE bill_id = 9863 ORDER BY id",
+				).all()
+			).results,
+		).toEqual([
+			{
+				transaction_id: own[1],
+				period: "2026-09",
+				matched_by: "auto",
+				status: "linked",
+			},
+		]);
 		expect(
 			await count(
-				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9863 AND status = 'linked'",
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9863 AND status = 'dismissed'",
 			),
 		).toBe(0);
-		for (const part of own) {
-			expect(
-				await count(
-					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9863 AND period = '2026-09' AND transaction_id = ? AND status = 'dismissed' AND matched_by = 'auto'",
-					part,
-				),
-			).toBe(1);
-		}
 	});
 
-	it("keeps one of two pending payments that match the posted part, dismisses the other on each part, and the sync still lands (decision 99)", async () => {
+	it("keeps one of two pending payments that match the posted part, unlinks the other, and the sync still lands (decision 99, 105)", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
 		const own = await splitInto(ids.posted, 600, 634);
@@ -2603,15 +2685,16 @@ describe("when the posted transaction is already stored as the link arrives", ()
 					"SELECT bill_id, transaction_id, status FROM bill_payments WHERE status = 'linked' ORDER BY bill_id",
 				).all()
 			).results,
-		).toEqual([{ bill_id: 9864, transaction_id: own[0], status: "linked" }]);
-		for (const part of own) {
-			expect(
-				await count(
-					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9865 AND period = '2026-09' AND transaction_id = ? AND status = 'dismissed' AND matched_by = 'auto'",
-					part,
-				),
-			).toBe(1);
-		}
+		).toEqual([
+			{ bill_id: 9864, transaction_id: own[0], status: "linked" },
+			// The other pending payment is unlinked, so the matcher links Gas to the part it still matches.
+			{ bill_id: 9865, transaction_id: own[1], status: "linked" },
+		]);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9865 AND status = 'dismissed'",
+			),
+		).toBe(0);
 	});
 
 	it("keeps each of two pending payments on its own posted part when the posted row has two parts that match them (decision 99)", async () => {
