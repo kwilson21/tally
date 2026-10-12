@@ -288,6 +288,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			merchantRawText: b.merchant_raw_text,
 			frequency: b.frequency,
 			dueDay: b.due_day,
+			anchorMonth: b.anchor_month,
 			paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
 			totalOccurrences,
 			nextOccurrence,
