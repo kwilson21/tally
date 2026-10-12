@@ -144,8 +144,12 @@ export async function namesToAvoid(db: D1Database): Promise<string[]> {
 
 export type PendingSuggestion = { id: number; name: string; rows: ListRow[] };
 export type PendingSuggestions = PendingSuggestion[] & { more: number };
+/** How many suggestions Settings lists; the review screen asks every one, so it passes no limit. */
+export const SETTINGS_SUGGESTION_LIMIT = 10;
+
 export async function pendingSuggestions(
 	db: D1Database,
+	limit = SETTINGS_SUGGESTION_LIMIT,
 ): Promise<PendingSuggestions> {
 	await db.batch([
 		db.prepare(
@@ -155,7 +159,7 @@ export async function pendingSuggestions(
 			`UPDATE category_suggestions SET status='none' WHERE status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=category_suggestions.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL)`,
 		),
 	]);
-	// Select the ten busiest eligible pending suggestions before loading ids or purchase rows.
+	// Select the busiest eligible pending suggestions (up to `limit`) before loading ids or purchase rows.
 	const { results: suggestions } = await db
 		.prepare(
 			`WITH candidates AS (
@@ -164,8 +168,9 @@ export async function pendingSuggestions(
 				AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL
 				WHERE cs.status='pending' GROUP BY cs.id HAVING COUNT(t.id)>0
 			), ranked AS (SELECT *, COUNT(*) OVER() total, ROW_NUMBER() OVER(ORDER BY n DESC,id) rank FROM candidates)
-			SELECT id,name,n,total FROM ranked WHERE rank<=10 ORDER BY rank`,
+			SELECT id,name,n,total FROM ranked WHERE rank<=? ORDER BY rank`,
 		)
+		.bind(limit)
 		.all<{ id: number; name: string; n: number; total: number }>();
 	if (!suggestions.length)
 		return Object.defineProperty([], "more", {
@@ -187,9 +192,9 @@ export async function pendingSuggestions(
 			t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending
 		FROM ranked r JOIN transactions t ON t.category_suggestion_id = r.id
 		LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
-		WHERE r.rank <= 10 AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
+		WHERE r.rank <= ? AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
 		ORDER BY r.rank, t.date DESC, t.id DESC`)
-		.bind(JSON.stringify(suggestions.map((s) => s.id)))
+		.bind(JSON.stringify(suggestions.map((s) => s.id)), limit)
 		.all<
 			Omit<ListRow, "pending" | "id"> & {
 				id: number;

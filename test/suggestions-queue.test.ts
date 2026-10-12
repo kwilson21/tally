@@ -148,6 +148,28 @@ describe("suggestionQueue", () => {
 		expect(queue).toHaveLength(5);
 	});
 
+	it("asks every pending new category, not only the ten busiest, so the count covers them all", async () => {
+		for (let n = 0; n < 11; n++) {
+			const suggestion = await db
+				.prepare(
+					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
+				)
+				.bind(`Club ${n}`)
+				.first<{ id: number }>();
+			await transaction({
+				amount: 1000 + n,
+				raw: `CLUB ${n}`,
+				suggestionId: suggestion?.id ?? null,
+				jevCategoryId: null,
+			});
+		}
+		const queue = await suggestionQueue(db, AI_SWITCHES_ALL_ON);
+		expect(queue.filter((item) => item.kind === "new_category")).toHaveLength(
+			11,
+		);
+		expect(queue).toHaveLength(11);
+	});
+
 	it("orders money first: income, then transfers, categories, new categories and names", async () => {
 		await oneOfEachKind();
 		const kinds = (await suggestionQueue(db, AI_SWITCHES_ALL_ON)).map(

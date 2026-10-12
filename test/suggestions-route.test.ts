@@ -210,23 +210,87 @@ describe("GET /settings/suggestions", () => {
 		);
 	});
 
-	it("moves past skipped items, and says so when they are all skipped", async () => {
+	it("moves past skipped items", async () => {
 		const ids = await oneOfEach();
 		const skipped = await get(
 			`/settings/suggestions?skip=income-${ids.income}`,
 		);
 		expect(textOf(skipped.html)).toContain("Suggestions · 2 of 5");
 		expect(textOf(skipped.html)).toContain("Leave it out of the budget?");
+	});
+
+	it("shows the place of the item in the queue, not the number of skips", async () => {
+		const ids = await oneOfEach();
+		// The transfer is set aside, so the income is first in the queue: "1 of 5", not "2 of 5".
+		const { html } = await get(
+			`/settings/suggestions?skip=transfer-${ids.transfer}`,
+		);
+		expect(textOf(html)).toContain("Suggestions · 1 of 5");
+		expect(textOf(html)).toContain("Count it as income, not spending?");
+	});
+
+	it("brings a skipped item back at the end once the others are answered", async () => {
+		const ids = await oneOfEach();
+		const name = await row(
+			"SELECT rowid AS id FROM merchants WHERE raw_name = ?",
+			BLUE,
+		);
+		const pets = ids.pets.map(String);
+		const skipUrl = `/settings/suggestions?skip=income-${ids.income}`;
+		await post(
+			skipUrl,
+			{ id: `transfer-${ids.transfer}`, answer: "yes" },
+			true,
+		);
+		await post(
+			skipUrl,
+			{ id: `category-${ids.category}`, answer: "yes" },
+			true,
+		);
+		await post(
+			skipUrl,
+			{ id: `new-${ids.suggestion}`, answer: "yes", shown: pets, ticked: pets },
+			true,
+		);
+		const { res, html } = await post(
+			skipUrl,
+			{ id: `name-${name?.id}`, answer: "yes" },
+			true,
+		);
+		expect(textOf(html)).toContain("Suggestions · 1 of 1");
+		expect(textOf(html)).toContain("Count it as income, not spending?");
+		expect(html).toContain(`value="income-${ids.income}"`);
+		expect(trigger(res).announce).toContain("1 left to check.");
+	});
+
+	it("sets a returned item aside on a second Skip, and says so once all are set aside", async () => {
+		const ids = await oneOfEach();
+		const name = await row(
+			"SELECT rowid AS id FROM merchants WHERE raw_name = ?",
+			BLUE,
+		);
 		const all = [
 			`income-${ids.income}`,
 			`transfer-${ids.transfer}`,
 			`category-${ids.category}`,
 			`new-${ids.suggestion}`,
-			`name-${(await row("SELECT rowid AS id FROM merchants WHERE raw_name = ?", BLUE))?.id}`,
+			`name-${name?.id}`,
 		];
-		const query = all.map((id) => `skip=${id}`).join("&");
-		const { html } = await get(`/settings/suggestions?${query}`);
+		const skips = all.map((id) => `skip=${id}`).join("&");
+		// Every item is skipped once, so the first comes back, in queue order, and its Skip is a second one.
+		const back = await get(`/settings/suggestions?${skips}`);
+		expect(textOf(back.html)).toContain("Suggestions · 1 of 5");
+		expect(textOf(back.html)).toContain("Count it as income, not spending?");
+		expect(back.html).toContain(`again=income-${ids.income}`);
+		const second = await get(
+			`/settings/suggestions?${skips}&again=income-${ids.income}`,
+		);
+		expect(textOf(second.html)).toContain("Suggestions · 2 of 5");
+		expect(textOf(second.html)).toContain("Leave it out of the budget?");
+		const agains = all.map((id) => `again=${id}`).join("&");
+		const { html } = await get(`/settings/suggestions?${skips}&${agains}`);
 		expect(textOf(html)).toContain("You skipped the rest.");
+		expect(html).toContain("Start over");
 	});
 
 	it("never shows bank text in an address (Skip uses the item's key)", async () => {
@@ -280,6 +344,29 @@ describe("income", () => {
 			ids.income,
 		);
 		expect(tx).toMatchObject({ flag_income: 0, credit_reviewed_by: "user" });
+		expect(
+			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
+		).toMatchObject({ n: 0 });
+	});
+
+	it("Yes writes no line for a store the income is not from", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `income-${ids.income}`, answer: "no" },
+			true,
+		);
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				id: `income-${ids.income}`,
+				answer: "ask_yes",
+				kind: "income",
+				store: [LUPITA, "A STORE TYPED INTO THE FORM"],
+			},
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(
 			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
 		).toMatchObject({ n: 0 });
@@ -550,6 +637,31 @@ describe("new categories", () => {
 		expect(
 			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
 		).toMatchObject({ n: 0 });
+	});
+
+	it("Yes on the question writes a line only for the stores the suggestion has", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `new-${ids.suggestion}`, answer: "no" },
+			true,
+		);
+		await post(
+			"/settings/suggestions",
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "ask_yes",
+				kind: "new_category",
+				store: ["CHEWY.COM 1", "NOT A STORE OF THIS SUGGESTION"],
+			},
+			true,
+		);
+		const lines = await db
+			.prepare(
+				"SELECT merchant_key AS key FROM never_suggest_rules WHERE kind = 'new_category' ORDER BY key",
+			)
+			.all<{ key: string }>();
+		expect(lines.results.map((line) => line.key)).toEqual(["CHEWY.COM 1"]);
 	});
 });
 

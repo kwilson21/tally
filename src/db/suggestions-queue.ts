@@ -263,7 +263,8 @@ async function newCategorySuggestions(
 	db: D1Database,
 	never: Set<string>,
 ): Promise<{ item: NewCategorySuggestion; order: number }[]> {
-	const suggestions = await pendingSuggestions(db);
+	// Every pending suggestion, not only the ten Settings lists: the count covers every kind (decision 101).
+	const suggestions = await pendingSuggestions(db, Number.MAX_SAFE_INTEGER);
 	if (suggestions.length === 0) return [];
 	const ids = suggestions.flatMap((suggestion) =>
 		suggestion.rows.map((row) => row.id),

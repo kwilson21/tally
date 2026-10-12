@@ -6,7 +6,11 @@ import {
 	dismissSuggestion,
 } from "../db/category-suggestions";
 import { type NameChoice, settleSuggestion } from "../db/merchant-names";
-import { addNeverSuggest, type NeverSuggestKind } from "../db/never-suggest";
+import {
+	addNeverSuggest,
+	type NeverSuggestKind,
+	questionStores,
+} from "../db/never-suggest";
 import { type SuggestionItem, suggestionQueue } from "../db/suggestions-queue";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
@@ -38,17 +42,46 @@ type Values = { id: string };
 
 export const suggestions = new Hono<App>();
 
-/** The address of the screen with the skipped items in it, so every form keeps the skips it was drawn with. */
-export function reviewAddress(skipped: string[]): string {
+/**
+ * The address of the screen with its skips in it, so every form keeps the skips it was drawn with. `skip`
+ * holds the items set aside; `again` holds those set aside a second time, after they came back (decision 79).
+ */
+export function reviewAddress(skipped: string[], again: string[] = []): string {
 	const query = new URLSearchParams();
 	for (const id of skipped) query.append("skip", id);
+	for (const id of again) query.append("again", id);
 	return query.size ? `${PATH}?${query}` : PATH;
 }
 
-/** The skip keys in an address, kept only when the queue still has them (never bank text). */
-function requestedSkips(url: string, ids: Set<string>): string[] {
-	const requested = new URL(url).searchParams.getAll("skip");
+/** The skip keys of one address key, kept only when the queue still has them (never bank text). */
+function requestedKeys(
+	url: string,
+	key: "skip" | "again",
+	ids: Set<string>,
+): string[] {
+	const requested = new URL(url).searchParams.getAll(key);
 	return [...new Set(requested)].filter((id) => ids.has(id));
+}
+
+/** What the address says about the review: the items set aside, and those set aside again. */
+function requestedReview(
+	url: string,
+	queue: SuggestionItem[],
+): { skipped: string[]; again: string[] } {
+	const ids = new Set(queue.map((item) => item.id));
+	const skipped = requestedKeys(url, "skip", ids);
+	const skippedSet = new Set(skipped);
+	return {
+		skipped,
+		again: requestedKeys(url, "again", ids).filter((id) => skippedSet.has(id)),
+	};
+}
+
+/** Skip: the first one sets the item aside; on an item that came back, it sets it aside for good. */
+function skipAddress(item: SuggestionItem, skipped: string[], again: string[]) {
+	return skipped.includes(item.id)
+		? reviewAddress(skipped, [...again, item.id])
+		: reviewAddress([...skipped, item.id], again);
 }
 
 /** Store labels for the question and toasts: the store's name, or its key tidied (spec §8.6). */
@@ -72,6 +105,7 @@ async function storeLabels(
 /** The screen as it is now, with the item to show, and the Band count's words. */
 type ScreenInput = {
 	skipped: string[];
+	again: string[];
 	queue: SuggestionItem[];
 	ask?: Ask;
 	values?: Values;
@@ -82,15 +116,34 @@ type ScreenInput = {
 };
 
 function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
-	const { skipped, queue, ask, values, error, focus = false, today } = input;
+	const {
+		skipped,
+		again,
+		queue,
+		ask,
+		values,
+		error,
+		focus = false,
+		today,
+	} = input;
 	const skippedSet = new Set(skipped);
-	const available = queue.filter((item) => !skippedSet.has(item.id));
+	const againSet = new Set(again);
+	// The items not set aside come first. Then the skipped ones come back in queue order, and a second Skip
+	// on one of them sets it aside for good, so "You skipped the rest." shows once they are all set aside.
+	const firstPass = queue.filter((item) => !skippedSet.has(item.id));
+	const returned = queue.filter(
+		(item) => skippedSet.has(item.id) && !againSet.has(item.id),
+	);
 	const current =
-		(values && queue.find((item) => item.id === values.id)) || available[0];
-	const position = skipped.length + 1;
+		(values && queue.find((item) => item.id === values.id)) ||
+		firstPass[0] ||
+		returned[0];
+	const position = current
+		? queue.findIndex((item) => item.id === current.id) + 1
+		: 0;
 	const total = queue.length;
 	// Every form posts to this screen's address, so the skips it was drawn with carry over.
-	const action = reviewAddress(skipped);
+	const action = reviewAddress(skipped, again);
 	return (
 		<Layout title="Suggestions · Tally" active="settings" demo={demo}>
 			<div id="suggestions-page" class="lg:max-w-3xl">
@@ -126,7 +179,7 @@ function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
 								item={current}
 								today={today}
 								categories={input.categories}
-								skipHref={reviewAddress([...skipped, current.id])}
+								skipHref={skipAddress(current, skipped, again)}
 								error={error}
 								focus={focus}
 							/>
@@ -168,8 +221,7 @@ async function renderScreen(
 ) {
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
-	const ids = new Set(queue.map((item) => item.id));
-	const skipped = requestedSkips(c.req.url, ids);
+	const { skipped, again } = requestedReview(c.req.url, queue);
 	const categories = await db
 		.prepare(
 			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
@@ -192,6 +244,7 @@ async function renderScreen(
 			demo={c.env.DEMO === "true"}
 			input={{
 				skipped,
+				again,
 				queue,
 				ask: options.ask,
 				values: options.values,
@@ -226,9 +279,8 @@ suggestions.post(PATH, async (c) => {
 	const who = actor(c as Context<App> & { env: Env & { DEMO: string } });
 	const today = await householdToday(db);
 	const queue = await suggestionQueue(db);
-	const ids = new Set(queue.map((item) => item.id));
-	const skipped = requestedSkips(c.req.url, ids);
-	const next = reviewAddress(skipped);
+	const { skipped, again } = requestedReview(c.req.url, queue);
+	const next = reviewAddress(skipped, again);
 	const done = (message: string, queueAfter: SuggestionItem[]) => {
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		return renderScreen(c, {
@@ -266,7 +318,11 @@ suggestions.post(PATH, async (c) => {
 				toast: { message, type: "info", announce: `${message} ${left(queue)}` },
 			});
 		}
-		for (const merchantKey of stores)
+		// Only the question's own store can get a line, whatever the form says (decision 101).
+		const asked = await questionStores(db, kind as NeverSuggestKind, id);
+		const known = stores.filter((store) => asked.has(store));
+		if (known.length === 0) return stale();
+		for (const merchantKey of known)
 			await addNeverSuggest(db, {
 				merchantKey,
 				kind: kind as NeverSuggestKind,
@@ -274,7 +330,7 @@ suggestions.post(PATH, async (c) => {
 			});
 		// The line hides the store's other items, so the count is taken once it is written.
 		const after = await suggestionQueue(db);
-		const labels = joinStores([...(await storeLabels(db, stores)).values()]);
+		const labels = joinStores([...(await storeLabels(db, known)).values()]);
 		const message =
 			kind === "income"
 				? `Got it. Tally won't suggest income for ${labels} again. Change it in Settings.`
