@@ -2450,6 +2450,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 		bankText: "VENMO PAYMENT",
 		merchantKey: "VENMO",
 		merchant: "Venmo",
+		label: "Venmo",
 		sure: 52,
 		categoryId: null,
 		category: null,
@@ -2463,6 +2464,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 		bankText: "CHASE CARD PAYMENT",
 		merchantKey: "CHASE CARD PAYMENT",
 		merchant: "Chase card payment",
+		label: "Chase card payment",
 		sure: 50,
 		categoryId: null,
 		category: null,
@@ -2476,6 +2478,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 		bankText: "SQ *LUPITAS TAQ 2210",
 		merchantKey: "SQ *LUPITAS TAQ 2210",
 		merchant: "Lupita's Taqueria",
+		label: "Lupita's Taqueria",
 		sure: 64,
 		categoryId: 2,
 		category: "Eating Out",
@@ -2494,6 +2497,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 				amountCents: 4500,
 				merchantKey: "CHEWY.COM 1",
 				merchant: "Chewy",
+				label: "Chewy",
 			},
 			{
 				transactionId: 6,
@@ -2501,6 +2505,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 				amountCents: 3100,
 				merchantKey: "PETSMART 22",
 				merchant: "Petsmart",
+				label: "Petsmart",
 			},
 			{
 				transactionId: 7,
@@ -2508,6 +2513,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 				amountCents: 8900,
 				merchantKey: "BANFIELD 5",
 				merchant: "Banfield",
+				label: "Banfield",
 			},
 		],
 		stores: [
@@ -2558,7 +2564,7 @@ function SuggestionsReview() {
 					"WhyLink",
 					"Icon",
 				]}
-				sentence="One item on Settings' Suggestions screen, one question at a time: the store's name in the serif with its bank text, amount and day; the dashed Maybe tag as the question, Tally's guess with a Why?; Yes as the full-width primary; Something else opening in place with no script, open again when its answer is refused; No on income, a transfer or a new category; a quiet Skip. A name Tally guessed says so with the sparkles icon, and a name the bank sent says From your bank. A new category ticks each purchase."
+				sentence="One item on Settings' Suggestions screen, one question at a time: its name in the serif (a name given to that one transaction, else the store's) with its bank text, amount and day; the dashed Maybe tag as the question, Tally's guess with a Why?; Yes as the full-width primary; Something else opening in place with no script, open again when its answer is refused; No on income, a transfer or a new category; a quiet Skip. A name Tally guessed says so with the sparkles icon, and a name the bank sent says From your bank. A new category ticks each purchase."
 			>
 				<div hx-ignore class="grid gap-8 md:grid-cols-2">
 					{[

@@ -486,6 +486,99 @@ describe("suggestionQueue", () => {
 	});
 });
 
+describe("a card's label is the transaction's own name, else its store's (spec §5)", () => {
+	async function amazon() {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('AMAZON', 'Amazon')",
+			)
+			.run();
+	}
+
+	it("labels an income, transfer and category item by its own name, and keeps its store and key", async () => {
+		await amazon();
+		const income = await transaction({
+			amount: -250000,
+			raw: "AMAZON",
+			incomeConfidence: 0.5,
+		});
+		const transfer = await transaction({
+			amount: 20000,
+			raw: "AMAZON",
+			transferConfidence: 0.5,
+		});
+		const category = await transaction({
+			amount: 2300,
+			raw: "AMAZON",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		for (const id of [income, transfer, category])
+			await db
+				.prepare(
+					"UPDATE transactions SET own_name = 'Birthday gift' WHERE id = ?",
+				)
+				.bind(id)
+				.run();
+		const queue = await suggestionQueue(db, AI_SWITCHES_ALL_ON);
+		expect(queue.map((item) => item.kind)).toEqual([
+			"income",
+			"transfer",
+			"category",
+		]);
+		for (const item of queue)
+			expect(item).toMatchObject({
+				label: "Birthday gift",
+				merchant: "Amazon",
+				merchantKey: "AMAZON",
+			});
+	});
+
+	it("labels a new category's row by its own name, and its stores by the store's name", async () => {
+		await amazon();
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Gifts', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const named = await transaction({
+			amount: 4500,
+			raw: "AMAZON",
+			suggestionId: suggestion?.id ?? null,
+			jevCategoryId: null,
+		});
+		const plain = await transaction({
+			amount: 3100,
+			raw: "AMAZON",
+			suggestionId: suggestion?.id ?? null,
+			jevCategoryId: null,
+		});
+		await db
+			.prepare(
+				"UPDATE transactions SET own_name = 'Birthday gift' WHERE id = ?",
+			)
+			.bind(named)
+			.run();
+		const newCategory = (await suggestionQueue(db, AI_SWITCHES_ALL_ON)).find(
+			(item) => item.kind === "new_category",
+		);
+		if (newCategory?.kind !== "new_category")
+			throw new Error("the new category was not asked");
+		expect(newCategory.stores).toEqual([
+			{ merchantKey: "AMAZON", merchant: "Amazon" },
+		]);
+		const rows = Object.fromEntries(
+			newCategory.rows.map((row) => [row.transactionId, row]),
+		);
+		expect(rows[named]).toMatchObject({
+			label: "Birthday gift",
+			merchant: "Amazon",
+			merchantKey: "AMAZON",
+		});
+		expect(rows[plain]).toMatchObject({ label: "Amazon", merchant: "Amazon" });
+	});
+});
+
 describe("transferAskedSql", () => {
 	it("matches only a plain unsure transfer, the same check the queue and the Yes and No writes share", async () => {
 		const plain = await transaction({

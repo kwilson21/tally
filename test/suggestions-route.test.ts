@@ -1434,6 +1434,40 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 		).toMatchObject({ category_id: null });
 	});
 
+	it("a Something else whose category was archived after the queue was read sets no category", async () => {
+		const eatingOut = await categoryId("Eating Out");
+		const groceries = await categoryId("Groceries");
+		const spent = await insertTx({
+			raw: LUPITA,
+			amount: 2300,
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="category-${spent}"`,
+		);
+		const res = await answer(
+			{
+				id: `category-${spent}`,
+				answer: "else",
+				category: String(groceries),
+			},
+			racing("UPDATE transactions SET category_id", () =>
+				db
+					.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+					.bind(groceries)
+					.run(),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				spent,
+			),
+		).toMatchObject({ category_id: null, category_source: null });
+	});
+
 	/** Another person says Never suggest a transfer for a store, after the queue was read (decision 101). */
 	const neverTransfer = (merchantKey: string) =>
 		db
@@ -1490,6 +1524,167 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			),
 		).toMatchObject({ transfer_maybe_declined: 0 });
 	});
+});
+
+describe("a card calls a transaction by its own name, else by its store's (spec §5)", () => {
+	/** Amazon, a store the family knows as "Amazon" (its display name), for the purchases below. */
+	async function amazon() {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('AMAZON', 'Amazon')",
+			)
+			.run();
+	}
+
+	/** Gives one transaction a name of its own ("This one only", decision 101). */
+	async function ownName(id: number, name: string) {
+		await db
+			.prepare("UPDATE transactions SET own_name = ? WHERE id = ?")
+			.bind(name, id)
+			.run();
+	}
+
+	/** The heading's words, as the person reads them. */
+	const titleOf = (html: string) =>
+		textOf(
+			html.match(/<h2 id="suggestion-title"[^>]*>([\s\S]*?)<\/h2>/)?.[1] ?? "",
+		).trim();
+
+	it("titles the card with the own name, not the store's", async () => {
+		await amazon();
+		const gift = await insertTx({
+			raw: "AMAZON",
+			amount: -250000,
+			incomeConfidence: 0.5,
+		});
+		await ownName(gift, "Birthday gift");
+		const { html } = await get("/settings/suggestions");
+		expect(titleOf(html)).toBe("Birthday gift");
+	});
+
+	it("says the own name in the Yes toasts of income and of a transfer", async () => {
+		await amazon();
+		const income = await insertTx({
+			raw: "AMAZON",
+			amount: -250000,
+			incomeConfidence: 0.5,
+		});
+		const transfer = await insertTx({
+			raw: "AMAZON",
+			amount: 20000,
+			transferConfidence: 0.5,
+		});
+		await ownName(income, "Birthday gift");
+		await ownName(transfer, "Birthday gift");
+		const counted = await post(
+			"/settings/suggestions",
+			{ id: `income-${income}`, answer: "yes" },
+			true,
+		);
+		expect(trigger(counted.res).toast?.message).toBe(
+			"Counted Birthday gift as income.",
+		);
+		const left = await post(
+			"/settings/suggestions",
+			{ id: `transfer-${transfer}`, answer: "yes" },
+			true,
+		);
+		expect(trigger(left.res).toast?.message).toBe(
+			"Left Birthday gift out of the budget.",
+		);
+	});
+
+	it.each([
+		["income", "Don't suggest income again for Amazon?"],
+		["transfer", "Don't suggest a transfer again for Amazon?"],
+	])(
+		"asks a No on %s about the store, not the own name",
+		async (kind, question) => {
+			await amazon();
+			const id =
+				kind === "income"
+					? await insertTx({
+							raw: "AMAZON",
+							amount: -250000,
+							incomeConfidence: 0.5,
+						})
+					: await insertTx({
+							raw: "AMAZON",
+							amount: 20000,
+							transferConfidence: 0.5,
+						});
+			await ownName(id, "Birthday gift");
+			const { html } = await post(
+				"/settings/suggestions",
+				{ id: `${kind}-${id}`, answer: "no" },
+				true,
+			);
+			expect(titleOf(html)).toBe(question);
+			expect(textOf(html)).not.toContain("Birthday gift");
+		},
+	);
+
+	it("names one purchase of a new category by its own name, as typed, while the heading still joins the stores", async () => {
+		const ids = await oneOfEach();
+		await ownName(ids.pets[0] ?? 0, "Pup's kibble");
+		const { html } = await get(
+			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}&skip=category-${ids.category}`,
+		);
+		expect(titleOf(html)).toBe("Chewy, Petsmart and Banfield");
+		expect(textOf(html)).toContain("Pup's kibble · $45.00 ·");
+		expect(textOf(html)).not.toContain("Chewy · $45.00");
+	});
+});
+
+describe("the primary Yes sits on its own full-width row, No under it (P42 A)", () => {
+	/**
+	 * The element holding a card's Yes and No: its form, or the div a new category's form puts the two
+	 * buttons in. It runs from the nearest open tag before Yes to the close after No.
+	 */
+	function answerGroup(html: string): string {
+		const yes = html.indexOf('name="answer" value="yes"');
+		const no = html.indexOf('name="answer" value="no"', yes);
+		const start = Math.max(
+			html.lastIndexOf("<form", yes),
+			html.lastIndexOf("<div", yes),
+		);
+		const end = Math.min(
+			...[html.indexOf("</div>", no), html.indexOf("</form>", no)].filter(
+				(at) => at !== -1,
+			),
+		);
+		return html.slice(start, end);
+	}
+
+	it.each([
+		["income", []],
+		["transfer", ["income"]],
+		["new category", ["income", "transfer", "category"]],
+	])(
+		"draws the %s card's Yes first in a full-width column, with No under it",
+		async (_card, earlier) => {
+			const ids = await oneOfEach();
+			const keys: Record<string, number> = {
+				income: ids.income,
+				transfer: ids.transfer,
+				category: ids.category,
+			};
+			const skip = earlier
+				.map((kind) => `skip=${kind}-${keys[kind]}`)
+				.join("&");
+			const { html } = await get(
+				`/settings/suggestions${skip ? `?${skip}` : ""}`,
+			);
+			const group = answerGroup(html);
+			expect(group).toContain('value="yes"');
+			expect(group).toContain('value="no"');
+			expect(group).toContain("flex flex-col");
+			expect(group).not.toContain("grid-cols-2");
+			expect(group.indexOf('value="yes"')).toBeLessThan(
+				group.indexOf('value="no"'),
+			);
+		},
+	);
 });
 
 describe("names", () => {

@@ -524,6 +524,22 @@ describe("GET /design-system in the demo", () => {
 		},
 	);
 
+	it("draws the SuggestionCard specimen's Yes full width, with No under it, never beside it (P42 A)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="suggestion-cards"')[1]?.split("</section>")[0] ?? "";
+		// Each card's answers sit in the form (or the div inside it) that holds its Yes: none may be a two-column grid.
+		const answered = section
+			.split("<form")
+			.slice(1)
+			.filter((form) => form.includes('name="answer" value="yes"'));
+		expect(answered.length).toBeGreaterThanOrEqual(3);
+		for (const form of answered)
+			expect(form.split('name="answer" value="yes"')[0]).not.toContain(
+				"grid-cols-2",
+			);
+	});
+
 	it("shows a guessed name in TransactionRow with the sparkles icon, dashed, and says so in DESIGN.md", async () => {
 		const { html } = await get("/design-system");
 		const section =

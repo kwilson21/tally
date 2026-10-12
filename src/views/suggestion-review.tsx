@@ -277,7 +277,7 @@ function TransactionHeading({
 				autofocus={focus || undefined}
 				class="font-serif text-3xl font-semibold tracking-tight outline-none"
 			>
-				{item.merchant}
+				{item.label}
 			</h2>
 			<p class="mt-1 text-sm text-muted wrap-anywhere">{item.bankText}</p>
 			<p class="text-muted">
@@ -362,7 +362,7 @@ function YesNoForm({
 			hx-target="#suggestions-page"
 			hx-select="#suggestions-page"
 			hx-swap="outerHTML"
-			class="grid grid-cols-2 gap-3"
+			class="flex flex-col gap-3"
 		>
 			<input type="hidden" name="id" value={item.id} />
 			<Button type="submit" name="answer" value="yes" class="w-full">
@@ -523,13 +523,13 @@ function NewCategoryForm({
 							value={String(row.transactionId)}
 							checked={ticked ? ticked.includes(row.transactionId) : true}
 						>
-							{row.merchant} · {formatCents(Math.abs(row.amountCents))} ·{" "}
+							{row.label} · {formatCents(Math.abs(row.amountCents))} ·{" "}
 							{shortDay(row.date, today)}
 						</Chip>
 					</li>
 				))}
 			</ul>
-			<div class="grid grid-cols-2 gap-3">
+			<div class="flex flex-col gap-3">
 				<Button type="submit" name="answer" value="yes" class="w-full">
 					{item.existing
 						? `Yes, add to ${item.existing}`

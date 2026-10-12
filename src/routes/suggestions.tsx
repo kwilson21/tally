@@ -388,7 +388,7 @@ suggestions.post(PATH, async (c) => {
 					.run();
 				if (result.meta.changes === 0) return stale();
 				const after = await suggestionQueue(db);
-				return done(`Counted ${item.merchant} as income.`, after);
+				return done(`Counted ${item.label} as income.`, after);
 			}
 			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
@@ -421,7 +421,7 @@ suggestions.post(PATH, async (c) => {
 					.run();
 				if (result.meta.changes === 0) return stale();
 				const after = await suggestionQueue(db);
-				return done(`Left ${item.merchant} out of the budget.`, after);
+				return done(`Left ${item.label} out of the budget.`, after);
 			}
 			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
@@ -454,7 +454,7 @@ suggestions.post(PATH, async (c) => {
 					.run();
 				if (result.meta.changes === 0) return stale();
 				const after = await suggestionQueue(db);
-				return done(`Set ${item.merchant} to ${item.category}.`, after);
+				return done(`Set ${item.label} to ${item.category}.`, after);
 			}
 			if (answer === "else") {
 				const chosen = Number(form.get("category")?.toString() ?? "");
@@ -477,13 +477,14 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND ${categoryAskedSql("transactions")}`,
+						WHERE id = ? AND ${categoryAskedSql("transactions")}
+							AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
 					)
-					.bind(category.id, who, item.transactionId)
+					.bind(category.id, who, item.transactionId, category.id)
 					.run();
 				if (result.meta.changes === 0) return stale();
 				const after = await suggestionQueue(db);
-				return done(`Set ${item.merchant} to ${category.name}.`, after);
+				return done(`Set ${item.label} to ${category.name}.`, after);
 			}
 			break;
 		}

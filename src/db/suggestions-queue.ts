@@ -14,6 +14,7 @@ import { maybeIncomeConfidenceSql } from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
 import { neverSuggestedSql } from "./never-suggest";
+import { ownNameSql } from "./own-name";
 
 /** A transaction a person is asked about: income, a transfer, or a category guess. */
 export type TransactionSuggestion = {
@@ -28,6 +29,8 @@ export type TransactionSuggestion = {
 	merchantKey: string;
 	/** The store's name: its display name, or its key tidied. */
 	merchant: string;
+	/** What the card calls it: the transaction's own name (This one only), else the store's name. */
+	label: string;
 	/** How sure Tally's guess is, as a whole percent ("Tally's guess · 64% sure"). */
 	sure: number;
 	/** The category Tally guessed (category kind only). */
@@ -51,6 +54,8 @@ export type NewCategorySuggestion = {
 		amountCents: number;
 		merchantKey: string;
 		merchant: string;
+		/** What the card calls it: the transaction's own name (This one only), else the store's name. */
+		label: string;
 	}[];
 	/** The stores behind the rows, each once, in the order they show. */
 	stores: { merchantKey: string; merchant: string }[];
@@ -86,7 +91,7 @@ const ORDER: SuggestionKind[] = [
 	"name",
 ];
 
-const LABEL_SQL = `m.display_name AS displayName`;
+const LABEL_SQL = `m.display_name AS displayName, ${ownNameSql("t")} AS ownName`;
 const JOIN_MERCHANT = `LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}`;
 
 type Candidate = {
@@ -96,10 +101,18 @@ type Candidate = {
 	bankText: string;
 	merchantKey: string;
 	displayName: string | null;
+	ownName: string | null;
 };
 
 const merchantLabel = (displayName: string | null, key: string) =>
 	displayName || tidyName(key);
+
+/** What a card calls a transaction: its own name (This one only), else its store's. All four kinds share this rule. */
+const cardLabel = (row: {
+	ownName: string | null;
+	displayName: string | null;
+	merchantKey: string;
+}) => row.ownName ?? merchantLabel(row.displayName, row.merchantKey);
 
 /**
  * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked.
@@ -137,6 +150,7 @@ async function incomeSuggestions(
 				bankText: row.bankText,
 				merchantKey: row.merchantKey,
 				merchant: merchantLabel(row.displayName, row.merchantKey),
+				label: cardLabel(row),
 				sure: confidencePercent(row.incomeConfidence ?? 0),
 				categoryId: null,
 				category: null,
@@ -181,6 +195,7 @@ async function transferSuggestions(
 				bankText: row.bankText,
 				merchantKey: row.merchantKey,
 				merchant: merchantLabel(row.displayName, row.merchantKey),
+				label: cardLabel(row),
 				sure: confidencePercent(row.transferConfidence),
 				categoryId: null,
 				category: null,
@@ -232,6 +247,7 @@ async function categorySuggestions(
 			bankText: row.bankText,
 			merchantKey: row.merchantKey,
 			merchant: merchantLabel(row.displayName, row.merchantKey),
+			label: cardLabel(row),
 			sure: confidencePercent(row.categoryConfidence),
 			categoryId: row.categoryId,
 			category: row.category,
@@ -257,12 +273,17 @@ async function newCategorySuggestions(
 	);
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, m.display_name AS displayName
+			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, m.display_name AS displayName, ${ownNameSql("t")} AS ownName
 			FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 			WHERE t.id IN (SELECT value FROM json_each(?))`,
 		)
 		.bind(JSON.stringify(ids))
-		.all<{ id: number; merchantKey: string; displayName: string | null }>();
+		.all<{
+			id: number;
+			merchantKey: string;
+			displayName: string | null;
+			ownName: string | null;
+		}>();
 	const byId = new Map(results.map((row) => [row.id, row]));
 	const items: { item: NewCategorySuggestion; order: number }[] = [];
 	for (const suggestion of suggestions) {
@@ -276,6 +297,7 @@ async function newCategorySuggestions(
 					amountCents: row.amountCents,
 					merchantKey: found.merchantKey,
 					merchant: merchantLabel(found.displayName, found.merchantKey),
+					label: cardLabel(found),
 				},
 			];
 		});
