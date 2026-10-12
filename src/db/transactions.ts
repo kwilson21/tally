@@ -1907,7 +1907,9 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * `categoryAsked` is false when no category is active. Then a category question isn't asked, so its category
  * confidence is never stored: an outgoing purchase (whose income answer can't apply, since income is money in)
  * would be asked again every night. Only credits are asked about then, and not a credit a person reviewed for its
- * category alone, which would also have no category question to answer.
+ * category alone, which would also have no category question to answer. A credit's income answer is then what
+ * marks it asked: a low one is stored as its `income_confidence`, so it isn't asked again, and a high one sets
+ * `flag_income` and leaves the queue.
  *
  * With `ids`, only those rows are considered: the ones a sync just brought in, or the one a person
  * just added a note to. They go in as one JSON array read by `json_each`, since D1 allows 100 bound
@@ -1954,7 +1956,7 @@ export async function pendingForJev(
 			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
 			WHERE NOT ${FOLLOWS_PURCHASE} AND (
-				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND (? = 1 OR (t.amount_cents <= 0 AND NOT ${CATEGORY_ONLY})))
+				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND (? = 1 OR (t.amount_cents < 0 AND t.income_confidence IS NULL AND NOT ${CATEGORY_ONLY})))
 				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (${EMPTY_NOTE} OR t.kind IS NULL OR t.for_person_id IS NULL))
 			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})

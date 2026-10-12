@@ -224,6 +224,67 @@ describe("categorizePending", () => {
 		expect(sent).toEqual([]);
 	});
 
+	it("doesn't ask again about a credit Jev answers as not income when no categories are active, so the next credit gets its question", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.prepare("UPDATE categories SET archived=1").run();
+		await switchTo({ categories: true, income: true });
+		for (const [date, amount, rawName] of [
+			[`${MONTH}-22`, 0, "ZERO AMOUNT"],
+			[`${MONTH}-21`, 500, "NEWER PURCHASE"],
+			[`${MONTH}-20`, -1500, "NEWER CREDIT"],
+			[`${MONTH}-05`, -2000, "OLDER CREDIT"],
+		] as const)
+			await db
+				.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,?,?)",
+				)
+				.bind(date, amount, rawName)
+				.run();
+		const sent: string[] = [];
+		// The newer credit is not income (a low answer); the older one is (flag_income drops it from the queue).
+		const fetchImpl = async (_url: string, init?: RequestInit) => {
+			const body = String(init?.body);
+			sent.push(body);
+			return Response.json({
+				answers: {
+					transfer: { noul: 0.01 },
+					reimbursement: { noul: 0.01 },
+					income: { noul: body.includes("NEWER CREDIT") ? 0.01 : 0.99 },
+				},
+			});
+		};
+		// One call a run: a credit answered as not income must not keep the run on it night after night.
+		expect(
+			await categorizePending(withKey, fetchImpl, {
+				rulesApplied: true,
+				maxCalls: 1,
+			}),
+		).toEqual({ asked: 1, applied: 0 });
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toContain("NEWER CREDIT");
+
+		sent.length = 0;
+		expect(
+			await categorizePending(withKey, fetchImpl, {
+				rulesApplied: true,
+				maxCalls: 1,
+			}),
+		).toEqual({ asked: 1, applied: 0 });
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toContain("OLDER CREDIT");
+		expect(sent.join("\n")).not.toContain("NEWER CREDIT");
+
+		// Both credits are answered and the purchases (and a zero amount, which is not money in) never asked: nothing is sent again.
+		sent.length = 0;
+		expect(
+			await categorizePending(withKey, fetchImpl, {
+				rulesApplied: true,
+				maxCalls: 1,
+			}),
+		).toEqual({ asked: 0, applied: 0 });
+		expect(sent).toEqual([]);
+	});
+
 	it("does not read or send history when category guessing is off, but does when it is on", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const target = await db
