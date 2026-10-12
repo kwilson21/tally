@@ -294,6 +294,8 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			name: hold.display_name,
 			lostLinks,
 			alreadyRestored: false as const,
+			// The entry's new id, so its row in the list can take focus (#397).
+			id: mappedId(Number(transaction.id)),
 		};
 	} catch {
 		return null;

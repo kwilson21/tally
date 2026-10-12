@@ -950,3 +950,94 @@ describe("cash delete undo", () => {
 		).toBeLessThanOrEqual(3);
 	});
 });
+
+// #397: after Undo, focus goes to the restored row's link when the list shows it. When it doesn't, the
+// Deleted toast's own end moves focus to the Transactions heading in toast.js (the heading sits outside #page).
+describe("where focus goes after Undo (#397)", () => {
+	const undo = (token: string, back = "/transactions") =>
+		request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ token, back }),
+		});
+	const tokenOf = (response: Response) =>
+		JSON.parse(response.headers.get("HX-Trigger") ?? "{}").toast.undo as string;
+	const feedbackOf = (response: Response) =>
+		JSON.parse(response.headers.get("HX-Trigger") ?? "{}");
+	/** A cash entry dated today, so the default list shows it; its id is the newest. */
+	async function todayCash(name: string) {
+		const inserted = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) SELECT id,?,1250,?,'test' FROM accounts WHERE type='cash' LIMIT 1",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE), name)
+			.run();
+		return Number(inserted.meta.last_row_id);
+	}
+	const idNamed = async (name: string) =>
+		(
+			await env.DB.prepare("SELECT id FROM transactions WHERE raw_name=?")
+				.bind(name)
+				.first<{ id: number }>()
+		)?.id;
+
+	it("names the Undo its restored toast answers, so the Deleted toast ends with it", async () => {
+		const id = await todayCash("Undo names its toast");
+		const deleted = await deleteRequest(id, env.DB);
+		const token = tokenOf(deleted);
+		const restored = await undo(token);
+		const feedback = feedbackOf(restored.res);
+		expect(feedback.toast).toMatchObject({
+			type: "success",
+			undoDone: token,
+		});
+		expect(feedback.announce).toMatch(/ is back\.$/);
+	});
+
+	it("names no Undo in an expired one, which leaves its Deleted toast alone", async () => {
+		const id = await todayCash("Expired undo");
+		const token = tokenOf(await deleteRequest(id, env.DB));
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		const expired = await undo(token);
+		expect(feedbackOf(expired.res).toast.undoDone).toBeUndefined();
+	});
+
+	it("focuses the restored row's link, and nothing else, when the list shows the row", async () => {
+		const id = await todayCash("Focus the restored row");
+		const token = tokenOf(await deleteRequest(id, env.DB));
+		const restored = await undo(token);
+		const newId = await idNamed("Focus the restored row");
+		expect(newId).toBeDefined();
+		const html = restored.html;
+		expect(html).toMatch(
+			new RegExp(`<a href="/transactions/${newId}[^"]*"[^>]*autofocus`),
+		);
+		expect(html.match(/autofocus/g)).toHaveLength(1);
+		expect(html).not.toMatch(/<p id="result-count"[^>]*autofocus/);
+		expect(html).not.toMatch(/<h1[^>]*autofocus/);
+	});
+
+	it("links the restored row by its new id when the old one was taken", async () => {
+		const id = await todayCash("Reused id before undo");
+		const token = tokenOf(await deleteRequest(id, env.DB));
+		// The newest id is free again, so this entry takes it.
+		expect(await todayCash("Took the old id")).toBe(id);
+		const restored = await undo(token);
+		const newId = await idNamed("Reused id before undo");
+		expect(newId).not.toBe(id);
+		expect(restored.html).toMatch(
+			new RegExp(`<a href="/transactions/${newId}[^"]*"[^>]*autofocus`),
+		);
+	});
+
+	it("gives no row or heading autofocus when the list doesn't show the restored row", async () => {
+		const id = await todayCash("Hidden by a filter");
+		const token = tokenOf(await deleteRequest(id, env.DB));
+		const restored = await undo(token, "/transactions?q=no-such-merchant");
+		expect(feedbackOf(restored.res).announce).toMatch(/ is back\.$/);
+		expect(restored.html).not.toContain("autofocus");
+	});
+});
