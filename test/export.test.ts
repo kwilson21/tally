@@ -389,6 +389,7 @@ describe("data exports", () => {
 				"parent_id",
 				"pending",
 				"plaid_category",
+				"plaid_detailed_category",
 				"plaid_transaction_id",
 				"raw_name",
 				"refund_of_id",
