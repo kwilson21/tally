@@ -491,7 +491,7 @@ describe("Link a payment lists a split change's dismissal, and linking it links 
 		expect(await membershipStatus()).toBe("paid");
 	});
 
-	it("still hides a payment a person marked Not this one", async () => {
+	it("lists a payment a person marked Not this one last, under 'You said not this one' (#340)", async () => {
 		await db.batch([
 			db
 				.prepare(
@@ -512,8 +512,9 @@ describe("Link a payment lists a split change's dismissal, and linking it links 
 		await post(`/bills/${MEMBERSHIP}/occurrences/2026/unlink`, {});
 
 		const html = await picker();
-		expect(html).toContain(`value="${LISTED}"`);
-		expect(html).not.toContain(`value="${NOT_THIS_ONE}"`);
+		const label = html.indexOf("You said not this one");
+		expect(label).toBeGreaterThan(html.indexOf(`value="${LISTED}"`));
+		expect(html.indexOf(`value="${NOT_THIS_ONE}"`)).toBeGreaterThan(label);
 	});
 });
 

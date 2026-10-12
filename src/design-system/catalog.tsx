@@ -641,9 +641,9 @@ const TOAST_SPEC: UseSpecText = {
 	affordance:
 		"A small paper pill with a hairline rule and the only lift Tally allows. It sits in Tally's frame, never over the page: on a phone, above the tab bar, at the top edge while a sheet is open, and 12 px above the action bar in Select mode, whatever its height (the bar is two lines, and taller when either wraps on a narrow phone); on desktop, beside the sidebar at the bottom. It isn't a control, so nothing about it looks pressable. An error one leads with the alert icon in the over token, so it is never colour alone.",
 	states:
-		"Success: the words. A deleted cash entry adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early, except by its own restore: the “… is back.” toast ends the Deleted toast it answers.",
+		"Success: the words. A deleted cash entry, or a payment a person said Not this one to, adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early, except by its own restore: the “… is back.” toast ends the Deleted toast it answers.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for three Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too); after a restore, focus is on the restored entry's row when the list shows it, and otherwise the heading takes it as the Deleted toast ends. Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for three Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too) or, on a bill's page, to its page title; after a restore, focus is on the restored entry's row when the list shows it, and otherwise the heading takes it as the Deleted toast ends; after an Undo of a Not this one, focus is on that month's Not this one button. Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; while its request is in flight it is off, and a request that fails turns it back on while the toast is still up, with focus back on it unless the person has moved focus elsewhere. Other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
@@ -651,7 +651,7 @@ const TOAST_SPEC: UseSpecText = {
 	edges:
 		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
-		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
+		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, a Not this one says “Payment unlinked” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
@@ -1372,7 +1372,7 @@ function Rows() {
 				title="Bill occurrence and payment picker"
 				tier="visual"
 				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none."
+				sentence="A bill page shows paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A payment the person said Not this one to is still offered, last, under “You said not this one”."
 			>
 				<State label="Paid occurrence">
 					<div inert>
@@ -1449,6 +1449,39 @@ function Rows() {
 									dateLabel: "Sep 23",
 									amountCents: 14200,
 									excluded: true,
+								},
+							]}
+							periods={[
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
+							]}
+						/>
+					</div>
+				</State>
+				<State label="A payment the person said Not this one to (listed last)">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
+							bill={{ frequency: "monthly", anchorMonth: null }}
+							candidates={[
+								{
+									id: 1,
+									displayName: "City Electric",
+									date: "2026-09-24",
+									dateLabel: "Sep 24",
+									amountCents: 14150,
+								},
+								{
+									id: 2,
+									displayName: "Zelle",
+									date: "2026-09-23",
+									dateLabel: "Sep 23",
+									amountCents: 14200,
+									turnedAway: true,
 								},
 							]}
 							periods={[
@@ -3660,6 +3693,17 @@ function Feedback() {
 						data-ds-undo-expires-in-ms="10000"
 					>
 						Show an Undo toast
+					</Button>
+					<Button
+						type="button"
+						kind="secondary"
+						data-ds-toast="success"
+						data-ds-message="Payment unlinked"
+						data-ds-undo="catalog-demo-token"
+						data-ds-undo-expires-in-ms="10000"
+						data-ds-undo-action="/bills/1/undo-unlink"
+					>
+						Show a Payment unlinked toast
 					</Button>
 				</div>
 				<UseSpec spec={TOAST_SPEC} />
