@@ -7,6 +7,7 @@ import {
 	MAX_CALLS_PER_RUN,
 } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
+import { readAiTally } from "../src/db/ai-log";
 import {
 	AI_SWITCHES_ALL_ON,
 	type AiSwitches,
@@ -1739,6 +1740,34 @@ describe("categorizePending", () => {
 				});
 				expect(result.asked).toBe(1);
 				expect(await callsUsed("2026-10-06")).toBe(1);
+			});
+
+			it("dates the log row of an answer that comes back after midnight with the new day, in the new month", async () => {
+				quiet();
+				await db.prepare("DELETE FROM ai_log").run();
+				vi.useFakeTimers({ toFake: ["Date"] });
+				// Eastern, the demo's zone: 03:59:50 UTC on the 1st is 23:59:50 on the 31st, and the answer
+				// comes back at 04:00:05 UTC, 00:00:05 on the 1st, before the zone's clocks change that day.
+				vi.setSystemTime(new Date("2026-11-01T03:59:50Z"));
+				const jev = fakeJev(() => {
+					vi.setSystemTime(new Date("2026-11-01T04:00:05Z"));
+					return reply(0.95);
+				});
+				await categorizePending(withKey, jev.fetchImpl);
+				expect(jev.calls()).toBe(1);
+				const logged = await db
+					.prepare("SELECT kind, household_day FROM ai_log")
+					.all<{ kind: string; household_day: string }>();
+				expect([
+					...new Set(logged.results.map((row) => row.household_day)),
+				]).toEqual(["2026-11-01"]);
+				expect(logged.results.map((row) => row.kind)).toContain("category");
+				// The call stays charged to the day it was sent.
+				expect(await callsUsed("2026-10-31")).toBe(1);
+				expect(await callsUsed("2026-11-01")).toBe(0);
+				const tally = await readAiTally(db, "2026-11-01");
+				expect(tally.month).toBe("2026-11");
+				expect(tally.sorted).toBe(1);
 			});
 
 			it("reads the household's zone once, not for every call", async () => {

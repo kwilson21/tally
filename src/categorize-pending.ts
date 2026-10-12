@@ -209,15 +209,16 @@ export async function categorizePending(
 				const decision = decide(result.answer, categories, JEV_THRESHOLD, {
 					categories: before.categories,
 				});
-				// The log row for what this answer applies (spec §8.6) is saved in the same batch: only a transaction
-				// that had no Jev category or income before the run is counted, and the log checks the answer is
-				// still in place.
+				// The log row for what this answer applies (spec §8.6) is saved in the same batch, dated with the
+				// household's day when the answer is saved: work finished after midnight counts in the day it was
+				// applied. Only a transaction that had no Jev category or income before the run is counted, and the
+				// log checks the answer is still in place.
 				const written = await saveJevResult(env.DB, tx.id, decision, {
 					categoryOnly: tx.categoryOnly,
 					categoryAsked: categories.length > 0,
 					switches: { income: before.income, categories: before.categories },
 					log: {
-						day,
+						day: todayIn(timeZone),
 						category:
 							decision.categoryId !== null && tx.categorySource === null,
 						income: tx.incomeSource !== "jev",

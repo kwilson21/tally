@@ -1930,7 +1930,7 @@ export async function saveJevResult(
 		categoryOnly?: boolean;
 		categoryAsked?: boolean;
 		switches?: { income: boolean; categories?: boolean };
-		/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day. */
+		/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
 		log?: { day: string; category: boolean; income: boolean };
 	} = {},
 ): Promise<boolean> {
