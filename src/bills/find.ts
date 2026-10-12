@@ -104,18 +104,23 @@ export function threeMonthsBack(today: string) {
 /** A charge's merchant key and raw name; a split part has its purchase's. */
 const CHARGE_KEY = `COALESCE(${merchantKeySql("p")},${merchantKeySql("t")})`;
 const CHARGE_RAW = "COALESCE(p.raw_name,t.raw_name)";
+/** A charge's Plaid categories; a split part has its purchase's, since saveSplit doesn't copy them. */
+const CHARGE_PLAID = "COALESCE(p.plaid_category,t.plaid_category)";
+const CHARGE_PLAID_DETAILED =
+	"COALESCE(p.plaid_detailed_category,t.plaid_detailed_category)";
 const chargeMerchant = (column: "display_name" | "default_category_id") =>
 	merchantColumnOfSql(CHARGE_KEY, column);
 
 /**
  * Suggests bills from the last three months of charges, one per merchant key. A charge is left out when
  * its key is marked Not a bill, or an existing bill covers it: by its key, or by its raw name for a bill
- * saved under the bank's raw text, before the key existed. A payee is left out while one of its two latest
- * charges is linked to a bill, by hand or by the matcher, and comes back once both are left unlinked. Of the
- * rest, a charge in the budget is suggested, and so is a loan payment Plaid left out at sync, unless its
- * detailed category is a card payment or it has none stored. Any other exclusion keeps a charge out: Jev's,
- * a person's, or Plaid's transfer rule, which is where card payments and moves between the family's own
- * accounts go. A charge a person brought back into the budget counts as spending and can be suggested.
+ * saved under the bank's raw text, before the key existed. A payee's charges up to its latest payment linked
+ * to a bill, by hand or by the matcher, are left out, so it is suggested again only after two monthly payments
+ * in a row are left unlinked. Of the rest, a charge in the budget is suggested, and so is a loan payment Plaid
+ * left out at sync, unless its detailed category is a card payment or it has none stored. Any other exclusion
+ * keeps a charge out: Jev's, a person's, or Plaid's transfer rule, which is where card payments and moves
+ * between the family's own accounts go. A charge a person brought back into the budget counts as spending and
+ * can be suggested.
  */
 export async function loadBillSuggestions(
 	db: D1Database,
@@ -123,11 +128,10 @@ export async function loadBillSuggestions(
 ): Promise<BillSuggestion[]> {
 	const from = threeMonthsBack(today);
 	const { results } = await db
-		.prepare(`WITH linked_payees AS (SELECT rawName FROM (SELECT ${CHARGE_KEY} AS rawName,
-	   EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AS linked,
-	   ROW_NUMBER() OVER (PARTITION BY ${CHARGE_KEY} ORDER BY t.date DESC, t.id DESC) AS newest
+		.prepare(`WITH last_linked AS (SELECT ${CHARGE_KEY} AS rawName, MAX(t.date) AS date
 	  FROM transactions t LEFT JOIN transactions p ON p.id=t.parent_id
-	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.is_split=0) WHERE linked=1 AND newest<=2)
+	  JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.is_split=0 GROUP BY 1)
 	SELECT ${CHARGE_KEY} AS rawName,
 	  ${CHARGE_RAW} AS bankText,
 	  ${chargeMerchant("display_name")} AS displayName,
@@ -138,9 +142,9 @@ export async function loadBillSuggestions(
 	  LEFT JOIN categories tc ON tc.id=t.category_id
 	  LEFT JOIN categories dc ON dc.id=${chargeMerchant("default_category_id")}
 	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.flag_income=0
-	   AND (t.excluded=0 OR (t.excluded_source='plaid' AND t.plaid_category='LOAN_PAYMENTS' AND t.plaid_detailed_category IS NOT NULL AND t.plaid_detailed_category<>'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'))
+	   AND (t.excluded=0 OR (t.excluded_source='plaid' AND ${CHARGE_PLAID}='LOAN_PAYMENTS' AND ${CHARGE_PLAID_DETAILED} IS NOT NULL AND ${CHARGE_PLAID_DETAILED}<>'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'))
 	   AND t.is_split=0 AND NOT ${merchantNotABillSql(CHARGE_KEY)}
-	   AND ${CHARGE_KEY} NOT IN (SELECT rawName FROM linked_payees)
+	   AND t.date > COALESCE((SELECT l.date FROM last_linked l WHERE l.rawName=${CHARGE_KEY}), '')
 	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE ${isMerchantTextOfSql(CHARGE_KEY, CHARGE_RAW, "b.merchant_raw_name", "b.merchant_raw_text")})
 	  ORDER BY ${CHARGE_KEY},t.date`)
 		.bind(from, today, from, today)
