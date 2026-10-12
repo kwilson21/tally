@@ -772,6 +772,20 @@ describe("only the newest plain or error toast shows", () => {
 		vi.advanceTimersByTime(1);
 		expect(toasts.children).toHaveLength(0);
 	});
+
+	it("keeps the first bill Undo toast when a second Not this one's Undo toast comes", async () => {
+		const { body, toasts } = await page();
+		const notThisOne = {
+			message: "Payment unlinked",
+			undoExpiresInMs: 10000,
+			undoAction: "/bills/1/undo-unlink",
+		};
+		fire(body, "toast", { ...notThisOne, undo: "1.first" });
+		const first = toasts.children[0];
+		fire(body, "toast", { ...notThisOne, undo: "1.second" });
+		expect(toasts.children).toHaveLength(2);
+		expect(toasts.children[0]).toBe(first);
+	});
 });
 
 describe("focus on an Undo toast", () => {

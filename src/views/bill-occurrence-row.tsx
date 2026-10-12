@@ -166,7 +166,8 @@ export function BillOccurrenceRow({
 					method="post"
 					action={unlink}
 					hx-post={unlink}
-					hx-target="body"
+					hx-target="#page"
+					hx-select="#page"
 					hx-swap="outerHTML"
 				>
 					<Button kind="text" type="submit" class="-ml-2" autofocus={focus}>

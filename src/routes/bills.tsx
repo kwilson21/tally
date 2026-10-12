@@ -1503,8 +1503,8 @@ async function billPage(
 					again for that month.
 				</p>
 				{picker}
+				<div id="sheet" />
 			</div>
-			<div id="sheet" />
 		</Layout>,
 	);
 }
@@ -1633,15 +1633,18 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 		.bind(id, period)
 		.first<{ transaction_id: number }>();
 	if (!linked) return c.notFound();
-	const [, dismissal] = await c.env.DB.batch([
+	// The token is random and saved on this Not this one, so its Undo works once (#340). It keeps the payment's id,
+	// so a Not this one that later moves to another payment is refused, as before.
+	const undoToken = `${linked.transaction_id}.${crypto.randomUUID()}`;
+	await c.env.DB.batch([
 		c.env.DB.prepare(
 			"DELETE FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
 		).bind(id, period),
 		c.env.DB.prepare(
-			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','dismissed')",
-		).bind(id, period, linked.transaction_id),
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status,undo_token) VALUES(?,?,?,'user','dismissed',?)",
+		).bind(id, period, linked.transaction_id, undoToken),
 	]);
-	const undo = await unlinkUndo(c.env.DB, Number(dismissal?.meta.last_row_id));
+	const undo = await unlinkUndo(c.env.DB, undoToken);
 	return feedbackRedirect(
 		c,
 		id,
@@ -1657,25 +1660,16 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 });
 /**
  * The Undo for a Not this one (#340): its token, and the rest of its ten seconds, counted by the database's clock as
- * its created_at was. The Undo's token names the Not this one's row, its payment and the second it was saved, so a
- * later Not this one that SQLite gives the same id doesn't match.
+ * its created_at was. The row is found by its undo_token, which is random, so a later Not this one never matches it.
  */
-async function unlinkUndo(db: D1Database, dismissal: number) {
+async function unlinkUndo(db: D1Database, token: string) {
 	const row = await db
 		.prepare(
-			"SELECT id, transaction_id AS transactionId, strftime('%s', created_at) AS savedAt, CAST(MAX(0, MIN(10000, (julianday(created_at) + 10.0 / 86400 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM bill_payments WHERE id=?",
+			"SELECT CAST(MAX(0, MIN(10000, (julianday(created_at) + 10.0 / 86400 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM bill_payments WHERE undo_token=?",
 		)
-		.bind(dismissal)
-		.first<{
-			id: number;
-			transactionId: number;
-			savedAt: string;
-			ms: number;
-		}>();
-	return {
-		token: `${row?.id}.${row?.transactionId}.${row?.savedAt}`,
-		ms: row?.ms ?? 0,
-	};
+		.bind(token)
+		.first<{ ms: number }>();
+	return { token, ms: row?.ms ?? 0 };
 }
 /**
  * Undo for a Not this one (#340): relinks the payment to its month and lifts the dismissal. The token works once and
@@ -1685,37 +1679,29 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 	const id = Number(c.req.param("id"));
 	const form = await c.req.parseBody();
 	const token = String(form.token ?? "");
-	// The token's parts, when it has the right shape: the dismissal's id, its payment and its saved second.
-	const [dismissalId, transactionId, savedAt] = /^\d+\.\d+\.\d+$/.test(token)
-		? token.split(".")
-		: [];
+	// The token's payment, when it has the right shape: its transaction id, a dot and the random UUID saved on the Not this one.
+	const [, transactionId] = /^(\d+)\.([0-9a-f-]{36})$/i.exec(token) ?? [];
 	// The Not this one the token names, if it is still there, and whether its ten seconds are still running.
-	const held = dismissalId
+	const held = transactionId
 		? await c.env.DB.prepare(
-				"SELECT transaction_id AS transactionId, period, julianday('now')-julianday(created_at)<10.0/86400 AS fresh FROM bill_payments WHERE id=? AND transaction_id=? AND strftime('%s', created_at)=? AND bill_id=? AND status='dismissed' AND matched_by='user'",
+				"SELECT transaction_id AS transactionId, period, julianday('now')-julianday(created_at)<10.0/86400 AS fresh FROM bill_payments WHERE undo_token=? AND transaction_id=? AND bill_id=? AND status='dismissed' AND matched_by='user'",
 			)
-				.bind(Number(dismissalId), Number(transactionId), savedAt, id)
+				.bind(token, Number(transactionId), id)
 				.first<{ transactionId: number; period: string; fresh: number }>()
 		: null;
 	// The link comes back as the matcher's ('auto'): the dismissal doesn't remember how the payment was linked, and most
 	// links are the matcher's. Only a hand link's "by hand" label is lost (the export keeps the column). The guard checks
-	// the token's three parts again, since the read above and this batch don't run atomically.
+	// the token again, since the read above and this batch don't run atomically.
 	const restored = held?.fresh
 		? (
 				await c.env.DB.batch([
 					c.env.DB.prepare(
 						`INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
-						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE id=?4 AND transaction_id=?3 AND strftime('%s', created_at)=?5 AND status='dismissed' AND matched_by='user' AND julianday('now')-julianday(created_at)<10.0/86400)
+						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE undo_token=?4 AND transaction_id=?3 AND status='dismissed' AND matched_by='user' AND julianday('now')-julianday(created_at)<10.0/86400)
 						 AND NOT EXISTS(SELECT 1 FROM bill_payments WHERE bill_id=?1 AND period=?2 AND status='linked')
 						 AND NOT EXISTS(SELECT 1 FROM bill_payments WHERE transaction_id=?3 AND status='linked')
 						 AND EXISTS(SELECT 1 FROM transactions WHERE id=?3 AND is_split=0 AND flag_income=0 AND amount_cents>0)`,
-					).bind(
-						id,
-						held.period,
-						held.transactionId,
-						Number(dismissalId),
-						savedAt,
-					),
+					).bind(id, held.period, held.transactionId, token),
 					c.env.DB.prepare(liftNotThisOneSql).bind(
 						id,
 						held.period,
@@ -1744,6 +1730,8 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 		false,
 		restored ? held?.period : undefined,
 	);
+	// The Undo may come from an open Edit sheet, whose /edit address the bar still shows: the bill's own address replaces it.
+	response.headers.set("HX-Push-Url", `/bills/${id}`);
 	// Each outcome claims only what is true of the payment: the link is back, the month has another, or it stays unlinked.
 	// Every answer ends this Undo's toast, so undoDone names its token on each one (#340, #397).
 	let toast: { message: string; type: "success" | "error"; undoDone?: string };

@@ -34,16 +34,13 @@ const linkPayment = (transaction: number) =>
 const undo = (token: string) =>
 	post(`/bills/${BILL}/undo-unlink`, { token, back: `/bills/${BILL}` });
 const token = (res: Response) => String(trigger(res).toast.undo);
-/** The Undo token for a Not this one, built from its row as bills.tsx builds it: id, payment, and the second it was saved. */
-const tokenOf = async (dismissal: number) => {
-	const row = await env.DB.prepare(
-		"SELECT transaction_id AS transactionId, strftime('%s', created_at) AS savedAt FROM bill_payments WHERE id=?",
-	)
-		.bind(dismissal)
-		.first<{ transactionId: number; savedAt: string }>();
-	return `${dismissal}.${row?.transactionId}.${row?.savedAt}`;
-};
-const idOf = (undoToken: string) => Number(undoToken.split(".")[0]);
+/** The row a Not this one's Undo token was saved on, by its undo_token column (0 once that row is gone). */
+const dismissalIdOf = async (undoToken: string) =>
+	(
+		await env.DB.prepare("SELECT id FROM bill_payments WHERE undo_token=?")
+			.bind(undoToken)
+			.first<{ id: number }>()
+	)?.id ?? 0;
 const linkedTo = () =>
 	env.DB.prepare(
 		"SELECT transaction_id AS transactionId FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
@@ -96,12 +93,16 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 			type: "success",
 			undoAction: `/bills/${BILL}/undo-unlink`,
 		});
+		// The token is the payment's id, a dot and a random UUID, and the Not this one it undoes stores that same token.
+		expect(toast.undo).toMatch(
+			/^9401\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+		);
 		const dismissal = await env.DB.prepare(
-			"SELECT id, strftime('%s', created_at) AS savedAt FROM bill_payments WHERE bill_id=? AND period=? AND status='dismissed'",
+			"SELECT undo_token AS undoToken FROM bill_payments WHERE bill_id=? AND period=? AND status='dismissed'",
 		)
 			.bind(BILL, PERIOD)
-			.first<{ id: number; savedAt: string }>();
-		expect(toast.undo).toBe(`${dismissal?.id}.9401.${dismissal?.savedAt}`);
+			.first<{ undoToken: string }>();
+		expect(dismissal?.undoToken).toBe(toast.undo);
 		expect(toast.undoExpiresInMs).toBeGreaterThan(8000);
 		expect(toast.undoExpiresInMs).toBeLessThanOrEqual(10000);
 		expect(announce).toBe("Payment unlinked. Undo for 10 seconds.");
@@ -140,15 +141,13 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 	});
 
 	it("does nothing after ten seconds and says the Undo expired", async () => {
-		const dismissal = idOf(token(await unlink()));
+		const expired = token(await unlink());
 		await env.DB.prepare(
-			"UPDATE bill_payments SET created_at=datetime('now','-11 seconds') WHERE id=?",
+			"UPDATE bill_payments SET created_at=datetime('now','-11 seconds') WHERE undo_token=?",
 		)
-			.bind(dismissal)
+			.bind(expired)
 			.run();
 
-		// Backdating the row changes its token, so the Undo is posted with the token the row has now.
-		const expired = await tokenOf(dismissal);
 		const res = await undo(expired);
 		expect(trigger(res).toast).toEqual({
 			message: "Undo expired. The payment stays unlinked.",
@@ -187,16 +186,17 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		expect(await linkedTo()).toEqual({ transactionId: 9401 });
 	});
 
-	it("an old Undo doesn't restore a later Not this one that reuses its id", async () => {
+	it("an old Undo doesn't restore a later Not this one that reuses its row id", async () => {
 		const unlinked = await unlink();
 		const old = token(unlinked);
 		// SQLite gives a later dismissal the same id once the highest row is gone: the old row is deleted, and a
 		// Not this one for another payment, saved three seconds ago, takes its id.
+		const oldId = await dismissalIdOf(old);
 		await env.DB.batch([
-			env.DB.prepare("DELETE FROM bill_payments WHERE id=?").bind(idOf(old)),
+			env.DB.prepare("DELETE FROM bill_payments WHERE id=?").bind(oldId),
 			env.DB.prepare(
 				"INSERT INTO bill_payments(id,bill_id,period,transaction_id,matched_by,status,created_at) VALUES(?,?,?,9402,'user','dismissed',datetime('now','-3 seconds'))",
-			).bind(idOf(old), BILL, PERIOD),
+			).bind(oldId, BILL, PERIOD),
 		]);
 
 		const res = await undo(old);
@@ -295,5 +295,64 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 			.bind(BILL, lastMonth)
 			.first<{ n: number }>();
 		expect(lastMonthRows?.n).toBe(1);
+	});
+
+	it("an Undo works once, and the next Not this one's Undo has a token of its own", async () => {
+		const first = token(await unlink());
+		expect(trigger(await undo(first)).toast).toEqual({
+			message: "Payment linked again",
+			type: "success",
+			undoDone: first,
+		});
+
+		const second = token(await unlink());
+		expect(second).not.toBe(first);
+		// The first token is spent, so posting it again links nothing, even when both were saved in the same second.
+		expect(trigger(await undo(first)).toast).toEqual({
+			message: "Undo expired.",
+			type: "error",
+			undoDone: first,
+		});
+		expect(await linkedTo()).toBeNull();
+
+		expect(trigger(await undo(second)).toast).toEqual({
+			message: "Payment linked again",
+			type: "success",
+			undoDone: second,
+		});
+		expect(await linkedTo()).toEqual({ transactionId: 9401 });
+	});
+
+	it("the bill page keeps its Edit sheet inside #page, so an Undo's #page swap empties it (#340)", async () => {
+		const html = await (
+			await exports.default.fetch(`${BASE}/bills/${BILL}`)
+		).text();
+		expect(html.indexOf('id="page"')).toBeLessThan(html.indexOf('id="sheet"'));
+		expect(html.indexOf('id="sheet"')).toBeLessThan(html.indexOf("</main>"));
+		expect(html.slice(html.indexOf("</main>"))).not.toContain('id="sheet"');
+		// The sheet is the last thing in #page, so it is inside the swapped element and not after it.
+		expect(html).toContain('<div id="sheet"></div></div></main>');
+	});
+
+	it("an Undo from an open Edit sheet pushes the bill's own address and leaves the sheet empty (#340)", async () => {
+		const res = await undo(token(await unlink()));
+		expect(res.headers.get("HX-Push-Url")).toBe(`/bills/${BILL}`);
+		expect(await res.text()).toContain('<div id="sheet"></div></div></main>');
+	});
+
+	it("a Not this one swaps only #page, so a second one leaves the first one's Undo toast in place (#340)", async () => {
+		const html = await (
+			await exports.default.fetch(`${BASE}/bills/${BILL}`)
+		).text();
+		const form =
+			html.match(
+				new RegExp(
+					`<form[^>]*action="/bills/${BILL}/occurrences/${PERIOD}/unlink"[^>]*>`,
+				),
+			)?.[0] ?? "";
+		expect(form).toContain('hx-target="#page"');
+		expect(form).toContain('hx-select="#page"');
+		expect(form).toContain('hx-swap="outerHTML"');
+		expect(form).not.toContain('hx-target="body"');
 	});
 });
