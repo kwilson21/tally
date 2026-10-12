@@ -78,25 +78,25 @@ describe("listTransactions", () => {
 		);
 		expect((await getTransaction(env.DB, 901))?.countsInMonth).toBe("2026-08");
 	});
-	// September has 42: 39 others, and the demo's three Daycare Fridays (Sept 4, 11 and 18).
+	// September has 43: 39 others, the demo's three Daycare Fridays (Sept 4, 11 and 18), and Rent's $600 on the 1st.
 	it("lists this month newest first, one page at a time", async () => {
 		const first = await list("");
-		expect(first).toMatchObject({ total: 42, page: 1, pages: 2 });
+		expect(first).toMatchObject({ total: 43, page: 1, pages: 2 });
 		expect(first.rows).toHaveLength(PAGE_SIZE);
 		const second = await list("page=2");
-		expect(second).toMatchObject({ total: 42, page: 2, pages: 2 });
-		expect(second.rows).toHaveLength(42 - PAGE_SIZE);
+		expect(second).toMatchObject({ total: 43, page: 2, pages: 2 });
+		expect(second.rows).toHaveLength(43 - PAGE_SIZE);
 		const dates = [...first.rows, ...second.rows].map((r) => r.date);
 		expect(dates).toEqual([...dates].sort().reverse());
 		expect(new Set([...first.rows, ...second.rows].map((r) => r.id)).size).toBe(
-			42,
+			43,
 		);
 	});
 
 	it("shows the last page when asked for one past the end", async () => {
 		const { page, rows } = await list("page=99");
 		expect(page).toBe(2);
-		expect(rows).toHaveLength(42 - PAGE_SIZE);
+		expect(rows).toHaveLength(43 - PAGE_SIZE);
 	});
 
 	it("has one empty page when nothing matches", async () => {

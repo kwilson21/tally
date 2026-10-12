@@ -530,8 +530,10 @@ describe("GET / with the demo seed", () => {
 		const withBills = dollars((await home()).html);
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const withoutBills = dollars((await home()).html);
-		// Electric $142, Netflix $15.49, Internet $65 and Daycare's next Friday $240 (the paid ones are spent).
-		expect(withoutBills - withBills).toBe(462);
+		// Electric $142, Netflix $15.49, Internet $65 and Daycare's next Friday $240 (the paid ones are spent), and Rent's
+		// $600 still to pay this month (Rent is paid in parts, decision 101). Rent's own $1,200 budget and its $600 spent
+		// net out, so Safe to spend is what it was.
+		expect(withoutBills - withBills).toBe(1062);
 	});
 
 	it.each([
@@ -908,8 +910,8 @@ describe("GET / with no data", () => {
 		const { html } = await home();
 		expect(html.match(/No budgets/g)?.length).toBe(1);
 		expect(html).toMatch(/<h3[^>]*>Not budgeted<\/h3>/);
-		// Six seeded categories, Childcare included.
-		expect(html.match(/Add a budget/g)?.length).toBe(6);
+		// Seven seeded categories, Childcare and Rent included.
+		expect(html.match(/Add a budget/g)?.length).toBe(7);
 		expect(html).toMatch(/<a href="\/budget\/1"/);
 	});
 });

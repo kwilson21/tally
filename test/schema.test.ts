@@ -164,16 +164,21 @@ describe("schema", () => {
 		).rejects.toThrow();
 	});
 
-	it("allows only one linked payment per bill period", async () => {
+	it("allows several linked payments per bill period, but one transaction pays one bill (decision 101)", async () => {
 		await db
 			.prepare(
 				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (1, '2026-09', 1, 'auto', 'linked')",
 			)
 			.run();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (1, '2026-09', 2, 'user', 'linked')",
+			)
+			.run();
 		await expect(
 			db
 				.prepare(
-					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (1, '2026-09', 2, 'auto', 'linked')",
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (1, '2026-08', 1, 'user', 'linked')",
 				)
 				.run(),
 		).rejects.toThrow();

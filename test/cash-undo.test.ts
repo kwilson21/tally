@@ -643,6 +643,12 @@ describe("cash delete undo", () => {
 			"SELECT id, name FROM bills WHERE active=1 AND id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
 		).first<{ id: number; name: string }>();
 		if (!bill) throw new Error("bill seed missing");
+		// The cash entry pays the bill in full, so the occurrence is Paid rather than part paid (decision 101).
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=(SELECT amount_cents FROM bills WHERE id=?) WHERE id=?",
+		)
+			.bind(bill.id, id)
+			.run();
 		await env.DB.prepare(
 			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
 		)

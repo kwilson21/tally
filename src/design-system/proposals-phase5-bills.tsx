@@ -225,7 +225,13 @@ const paidWith = (
 	displayName: string,
 	dateLabel: string,
 	amountCents: number,
-) => ({ displayName, dateLabel, amountCents, matchedBy: "auto" as const });
+) => ({
+	transactionId: 0,
+	displayName,
+	dateLabel,
+	amountCents,
+	matchedBy: "auto" as const,
+});
 
 /** The Bills screen's top, dimmed behind a sheet. */
 const billsBehind = (
@@ -307,14 +313,14 @@ const weeklyPage = (
 			period="2026-10-02"
 			label="Fri, Oct 2"
 			status="paid"
-			payment={paidWith("Little Sprouts", "Oct 2", DAYCARE.amountCents)}
+			payments={[paidWith("Little Sprouts", "Oct 2", DAYCARE.amountCents)]}
 		/>
 		<BillOccurrenceRow
 			billId={2}
 			period="2026-09-25"
 			label="Fri, Sep 25"
 			status="paid"
-			payment={paidWith("Little Sprouts", "Sep 25", DAYCARE.amountCents)}
+			payments={[paidWith("Little Sprouts", "Sep 25", DAYCARE.amountCents)]}
 		/>
 		<BillOccurrenceRow
 			billId={2}
@@ -518,7 +524,7 @@ const augustRent = (
 		period="2026-08"
 		label="August"
 		status="paid"
-		payment={paidWith("Harbor Property", "Aug 1", RENT.amountCents)}
+		payments={[paidWith("Harbor Property", "Aug 1", RENT.amountCents)]}
 	/>
 );
 
@@ -861,7 +867,7 @@ const netflixMonth = (
 		period={period}
 		label={label}
 		status={status}
-		payment={paid ? paidWith("Netflix", paid[0], paid[1]) : undefined}
+		payments={paid ? [paidWith("Netflix", paid[0], paid[1])] : []}
 	/>
 );
 

@@ -75,13 +75,13 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 		await db.prepare("DROP INDEX categories_name_nocase").run();
 		await db
 			.prepare(
-				"INSERT INTO categories (id, name, icon, color) VALUES (7, 'gas', 'tag', 'cat-blue')",
+				"INSERT INTO categories (id, name, icon, color) VALUES (8, 'gas', 'tag', 'cat-blue')",
 			)
 			.run();
 		for (const sql of statements) await db.prepare(sql).run();
 		const names = (await categories()).map((c) => c.name);
 		expect(names).toContain("Gas");
-		expect(names).toContain("gas (7)");
+		expect(names).toContain("gas (8)");
 		await expect(
 			db
 				.prepare(
@@ -96,15 +96,15 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 		await db.prepare("DROP INDEX categories_name_nocase").run();
 		await db
 			.prepare(
-				"INSERT INTO categories (id, name, icon, color) VALUES (7, 'gas', 'tag', 'cat-blue'), (8, 'gas (7)', 'tag', 'cat-blue')",
+				"INSERT INTO categories (id, name, icon, color) VALUES (8, 'gas', 'tag', 'cat-blue'), (9, 'gas (8)', 'tag', 'cat-blue')",
 			)
 			.run();
 		for (const sql of statements) await db.prepare(sql).run();
 		const names = (await categories()).map((c) => c.name);
 		expect(names).toContain("Gas");
 		// The name someone chose stays; only the generated one moves.
-		expect(names).toContain("gas (7)");
-		expect(names.some((n) => /^gas \(7-[0-9a-f]{8}\)$/.test(n))).toBe(true);
+		expect(names).toContain("gas (8)");
+		expect(names.some((n) => /^gas \(8-[0-9a-f]{8}\)$/.test(n))).toBe(true);
 	});
 
 	it("shortens a long renamed name so it stays within the form's 40 characters", async () => {

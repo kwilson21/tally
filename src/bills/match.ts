@@ -316,7 +316,9 @@ export async function matchBillPayments(
 	if (!assignments.length) return 0;
 	const result = await db
 		.prepare(
-			"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT json_extract(value,'$.billId'),json_extract(value,'$.period'),json_extract(value,'$.transactionId'),'auto','linked' FROM json_each(?)",
+			// An occurrence with a payment already linked (a part payment, too) takes no more from the matcher. The unique
+			// index on one bill and period is gone (migration 0049), so this check is what keeps two runs from linking twice.
+			"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT json_extract(value,'$.billId'),json_extract(value,'$.period'),json_extract(value,'$.transactionId'),'auto','linked' FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM bill_payments l WHERE l.bill_id=json_extract(value,'$.billId') AND l.period=json_extract(value,'$.period') AND l.status='linked')",
 		)
 		.bind(
 			JSON.stringify(

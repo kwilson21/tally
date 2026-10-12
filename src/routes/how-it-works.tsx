@@ -534,8 +534,10 @@ howItWorks.get("/how-it-works", async (c) => {
 
 				<Section id="bills" title="Bills">
 					<p class="mt-2">
-						Tally matches each bill occurrence to at most one payment, while you
-						stay in control of every link.
+						Tally matches each bill occurrence to one payment, while you stay in
+						control of every link. A bill paid in parts takes more: you link
+						each extra payment by hand, and the month is Paid once they reach
+						90% of its amount.
 					</p>
 					<p class="mt-3">Bills puts each active bill in one of four groups:</p>
 					<dl class="mt-3 divide-y divide-rule border-y border-rule">
