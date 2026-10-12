@@ -126,7 +126,10 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					}
 					if (announcement) {
 						document.body.dispatchEvent(
-							new CustomEvent("announce", { detail: { value: announcement } }),
+							new CustomEvent("announce", {
+								bubbles: true,
+								detail: { value: announcement },
+							}),
 						);
 					}
 					if (!newSummary) {
@@ -278,6 +281,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						if (announcement) {
 							document.body.dispatchEvent(
 								new CustomEvent("announce", {
+									bubbles: true,
 									detail: { value: announcement },
 								}),
 							);
