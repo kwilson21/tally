@@ -266,7 +266,7 @@ const STATEMENTS = [
 	// counts that purchase, so one purchase is never counted twice (spec section 8.6, one category row and one income row per
 	// transaction). A category row that neither moved nor collided stays on the pending id. The trigger ai_log_forget_deleted
 	// (migration 0041) clears its transaction_id when the final DELETE below removes the pending row, so it still counts, with
-	// no transaction. No statement sets that id to NULL itself.
+	// no transaction. No statement here sets that id to NULL itself (sync.ts does, for a Jev category a bank correction clears).
 	`DELETE FROM ai_log WHERE transaction_id = ${PENDING} AND ${READY}
 	 AND EXISTS (SELECT 1 FROM ai_log own WHERE own.transaction_id = ${POSTED} AND own.kind = ai_log.kind)`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
