@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
@@ -1701,6 +1701,47 @@ describe("select several transactions", () => {
 			}
 		});
 
+		/**
+		 * Select all's Exclude with one tick on split part 990 (category 1), which the category 2 search does not
+		 * match: the tick is a row the filters no longer match, so it takes its whole purchase (110, 990 and 991),
+		 * and each category 2 row is excluded on its own. `tick` is the form's field for that tick (#321).
+		 */
+		const expectWholePurchaseTick = async (tick: [string, string]) => {
+			await splitParent();
+			const back = "/transactions?month=all&category=2";
+			const matched = new Set(
+				(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE is_split=0 AND category_id=2",
+					).all<{ id: number }>()
+				).results.map((row) => row.id),
+			);
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/exclude",
+				new URLSearchParams([tick, ["all", "1"], ["back", back]]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe(`Excluded ${matched.size + 1} transactions.`);
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (matched.has(row.id)) expect(row.excluded).toBe(1);
+				else if ([110, 990, 991].includes(row.id))
+					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		};
+
+		it("with Select all, a tick the filters no longer match excludes its whole purchase, and the matched rows each on their own (#321)", async () => {
+			await expectWholePurchaseTick(["ids", "990"]);
+		});
+
+		it("with Select all, a held tick the filters no longer match is a tick again, so it excludes its whole purchase too (#321)", async () => {
+			await expectWholePurchaseTick(["held", "990"]);
+		});
+
 		it("with Select all, the toast and the bill note count only the rows this Exclude excludes, not matches already excluded (#321)", async () => {
 			const matched = await seedMatches();
 			// Jev excluded 30 of the matches already; the bar still counts them on the default All view.
@@ -2169,6 +2210,131 @@ describe("select several transactions", () => {
 			expect(listed.headers.get("HX-Push-Url") ?? "").toContain(
 				`unticked=${x}`,
 			);
+		});
+
+		describe("a Select all list keeps the month on screen once the month turns over (#321)", () => {
+			beforeEach(async () => {
+				const rows: [number, string][] = [
+					[5301, "2026-10-05"],
+					[5302, "2026-10-20"],
+					[5303, "2026-11-02"],
+				];
+				await env.DB.batch(
+					rows.map(([id, date]) =>
+						env.DB.prepare(
+							"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id) SELECT ?1,account_id,?2,1200,'ZQ TURNOVER',2 FROM transactions WHERE id=110",
+						).bind(id, date),
+					),
+				);
+			});
+
+			afterEach(() => {
+				vi.useRealTimers();
+			});
+
+			/** Sets the clock. Only Date is faked, as in household-today.test.ts. */
+			const atInstant = (instant: string) => {
+				vi.useFakeTimers({ toFake: ["Date"] });
+				vi.setSystemTime(new Date(instant));
+			};
+			const OCTOBER = "2026-10-31T16:00:00Z";
+			const NOVEMBER = "2026-11-01T16:00:00Z";
+
+			/** The bar's back, as the Select all list on the TURNOVER search draws its hidden field. */
+			const barBack = async () => {
+				const html = await (
+					await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")
+				).text();
+				return (
+					attribute(
+						html.match(/<input[^>]*id="selection-back"[^>]*>/)?.[0] ?? "",
+						"value",
+					) ?? ""
+				);
+			};
+			/** The month an address names, or null when it names none. */
+			const monthOf = (address: string) =>
+				new URL(address, "http://tally.test").searchParams.get("month");
+
+			it("names the month on screen in the bar's back, even when that is this month", async () => {
+				atInstant(OCTOBER);
+				expect(monthOf(await barBack())).toBe("2026-10");
+			});
+
+			it("counts the month on screen on the next month", async () => {
+				atInstant(OCTOBER);
+				const back = await barBack();
+				atInstant(NOVEMBER);
+				const counted = await (
+					await request(
+						`/transactions/select/count?${new URLSearchParams([
+							["back", back],
+							["all", "1"],
+						])}`,
+					)
+				).text();
+				expect(counted).toContain("2 selected");
+			});
+
+			it("excludes the month on screen on the next month, and pushes an address that names it", async () => {
+				atInstant(OCTOBER);
+				const back = await barBack();
+				atInstant(NOVEMBER);
+				const res = await post(
+					"/transactions/select/exclude",
+					new URLSearchParams({ all: "1", back }),
+				);
+				expect(res.status).toBe(200);
+				expect(
+					JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+				).toBe("Excluded 2 transactions.");
+				expect(monthOf(res.headers.get("HX-Push-Url") ?? "")).toBe("2026-10");
+				const rows = await env.DB.prepare(
+					"SELECT id, excluded FROM transactions WHERE raw_name = 'ZQ TURNOVER' ORDER BY id",
+				).all<{ id: number; excluded: number }>();
+				expect(rows.results).toEqual([
+					{ id: 5301, excluded: 1 },
+					{ id: 5302, excluded: 1 },
+					{ id: 5303, excluded: 0 },
+				]);
+			});
+
+			it("sets the category of the month on screen on the next month, and pushes an address that names it", async () => {
+				atInstant(OCTOBER);
+				const back = await barBack();
+				atInstant(NOVEMBER);
+				const res = await post(
+					"/transactions/select/category/save",
+					new URLSearchParams({ all: "1", back, category: "1" }),
+				);
+				expect(res.status).toBe(200);
+				expect(
+					JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+				).toBe("Set 2 transactions to Groceries.");
+				expect(monthOf(res.headers.get("HX-Push-Url") ?? "")).toBe("2026-10");
+				const rows = await env.DB.prepare(
+					"SELECT id, category_id FROM transactions WHERE raw_name = 'ZQ TURNOVER' ORDER BY id",
+				).all<{ id: number; category_id: number }>();
+				expect(rows.results).toEqual([
+					{ id: 5301, category_id: 1 },
+					{ id: 5302, category_id: 1 },
+					{ id: 5303, category_id: 2 },
+				]);
+			});
+
+			it("pushes no month for an Exclude in the month on screen, as the address was before", async () => {
+				atInstant(OCTOBER);
+				const res = await post(
+					"/transactions/select/exclude",
+					new URLSearchParams({
+						all: "1",
+						back: "/transactions?q=ZQ+TURNOVER&month=2026-10",
+					}),
+				);
+				expect(res.headers.get("HX-Push-Url")).toBe(
+					"/transactions?q=ZQ+TURNOVER",
+				);
+			});
 		});
 	});
 });

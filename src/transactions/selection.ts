@@ -88,12 +88,23 @@ export function unique(ids: number[]): number[] {
 	return [...new Set(ids)];
 }
 
-/** The rows a settled selection acts on: in "all" mode the matches less the unticked rows, then the ticks. */
+/**
+ * The rows the whole set holds, in "all" mode: the matches less the unticked rows, held ticks included (they are
+ * matches). Off-filter ticks are not in it. Outside "all" mode the set is empty.
+ */
+export function setIds(
+	selection: Selection,
+	matched: readonly number[],
+): number[] {
+	if (!selection.all) return [];
+	const off = new Set(selection.unticked);
+	return matched.filter((id) => !off.has(id));
+}
+
+/** The rows a settled selection acts on: the set's rows (setIds), then the ticks. */
 export function selectedIds(
 	selection: Selection,
 	matched: readonly number[],
 ): number[] {
-	if (!selection.all) return selection.ticks;
-	const off = new Set(selection.unticked);
-	return [...matched.filter((id) => !off.has(id)), ...selection.ticks];
+	return [...setIds(selection, matched), ...selection.ticks];
 }

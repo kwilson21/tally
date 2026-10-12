@@ -84,6 +84,7 @@ import {
 	NO_SELECTION,
 	type Selection,
 	selectedIds,
+	setIds,
 	settle,
 	ticksFrom,
 	unticksFrom,
@@ -207,6 +208,12 @@ type ListOptions = {
 function listHref(filters: Filters, thisMonth: string) {
 	const query = filtersToQuery(filters, thisMonth);
 	return `/transactions${query ? `?${query}` : ""}`;
+}
+/** The list URL for these filters with the month always named, even this month: the month on screen (#321). */
+function pinnedListHref(filters: Filters, thisMonth: string) {
+	const query = new URLSearchParams(filtersToQuery(filters, thisMonth));
+	query.set("month", filters.month);
+	return `/transactions?${query}`;
 }
 /**
  * Whether the household has nothing at all yet, and what it is waiting for (spec §8.5). The demo
@@ -460,6 +467,9 @@ async function renderList(
 		</nav>
 	);
 	const back = listHref(filters, today.slice(0, 7));
+	// The select bar's back always names the month on screen, even this month, so a Select all list that
+	// outlives the month turning over keeps acting on the month it shows (#321).
+	const selectionBack = pinnedListHref(filters, today.slice(0, 7));
 	const clearFiltersHref = listHref(
 		{
 			...filters,
@@ -765,7 +775,12 @@ async function renderList(
 						hx-target="#selected-count"
 						hx-swap="innerHTML"
 					>
-						<input id="selection-back" type="hidden" name="back" value={back} />
+						<input
+							id="selection-back"
+							type="hidden"
+							name="back"
+							value={selectionBack}
+						/>
 						<section id="results" class="mt-2" aria-label="Results">
 							{suggestedNameNote}
 							{/* The limit's words are the bar's alone (SelectionLimit), so a refusal over 100 says them once. */}
@@ -828,7 +843,7 @@ async function renderList(
 								notOnPage={offPage.length}
 								rows={offPageRows}
 								notOnPageIds={offPage.map((row) => row.id)}
-								back={back}
+								back={selectionBack}
 								pageIds={pageIds}
 								selection={current}
 								unselected={unselected}
@@ -1018,7 +1033,10 @@ transactions.get("/transactions/select/count", async (c) => {
 	const unselected = matched.filter((id) => !pickedSet.has(id)).length;
 	const notOnPage = selection.ticks.filter((id) => !onPage.has(id)).length;
 	// Each tap keeps the selection in the address, replacing its entry rather than adding one, so a reload keeps it (#350).
-	c.header("HX-Replace-Url", selectModeHref(back, selection));
+	c.header(
+		"HX-Replace-Url",
+		selectModeHref(listAddress(c, today, back), selection),
+	);
 	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
 	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
 	const lineGone = params.has(NOT_ON_PAGE_FIELD) && notOnPage === 0;
@@ -1128,6 +1146,7 @@ function monthWordsFor(month: string, today: string) {
  * What a bar action acts on (#321): the selection the form posts, settled against the filters `back` lists, as
  * the rows the action changes. A tick to a gone or split row drops out first, and a refusal over 100 ticks keeps
  * every one and trims none (#350). The matches are read now, so the action changes what they are at this moment.
+ * `set` is the rows the whole set holds (setIds), empty outside "all" mode: an all-mode Exclude changes those one by one.
  */
 async function postedSelection(
 	c: Context<App>,
@@ -1148,9 +1167,10 @@ async function postedSelection(
 	);
 	const ids = selectedIds(selection, matched);
 	if (selection.ticks.length > MAX_SELECTED)
-		return { ids: [], selection, error: TOO_MANY };
+		return { ids: [], set: [], selection, error: TOO_MANY };
 	return {
 		ids,
+		set: setIds(selection, matched),
 		selection,
 		error: ids.length === 0 ? NONE_SELECTED : undefined,
 	};
@@ -1302,14 +1322,15 @@ async function finishSelection(
 	back: string,
 	message: string,
 ) {
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	const address = listAddress(c, today, back);
+	if (!c.req.header("HX-Request")) return c.redirect(address, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
 	// The list is out of select mode, so the address bar is too.
-	c.header("HX-Push-Url", back);
-	return renderList(c, today, filtersFrom(c, today, back), {
+	c.header("HX-Push-Url", address);
+	return renderList(c, today, filtersFrom(c, today, address), {
 		focusHeading: true,
 	});
 }
@@ -1352,28 +1373,47 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	const found = await firstRuleOfferAmong(c.env.DB, ids, cat.id);
 	const tx = found ? await getTransaction(c.env.DB, found.transactionId) : null;
 	if (!found || !tx) return finishSelection(c, today, back, message);
+	// The rule offer's address leaves this month out, as the list's does (listAddress).
+	const address = listAddress(c, today, back);
 	const value: RuleOfferValue = {
 		merchantKey: found.merchantKey,
 		categoryId: found.categoryId,
 		count: found.count,
 		merchant: tx.displayName || tidyName(tx.rawName),
 		category: cat.name,
-		back,
+		back: address,
 	};
 	const announce = ruleOfferAnnouncement(value, message);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce }),
 	);
-	c.header("HX-Push-Url", back);
-	return renderRuleOffer(c, today, back, value);
+	c.header("HX-Push-Url", address);
+	return renderRuleOffer(c, today, address, value);
 });
+
+/** Excludes the rows named by id, each on its own (`?1` the JSON ids, `?2` the actor), and returns the ones it changed. */
+const EXCLUDE_ROWS = `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
+		WHERE excluded=0 AND id IN (SELECT value FROM json_each(?1)) RETURNING id`;
+/** The edit panel's exclude for a tick: a part excludes its whole purchase, its parent and every sibling (`?1`, `?2` as above). */
+const EXCLUDE_PURCHASE = `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
+		WHERE excluded=0 AND (
+			id IN (SELECT value FROM json_each(?1))
+			OR parent_id IN (SELECT value FROM json_each(?1))
+			OR id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
+			OR parent_id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
+		)`;
 
 transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
-	const { ids, selection, error } = await postedSelection(c, form, back, today);
+	const { ids, set, selection, error } = await postedSelection(
+		c,
+		form,
+		back,
+		today,
+	);
 	if (error)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			selecting: true,
@@ -1381,23 +1421,33 @@ transactions.post("/transactions/select/exclude", async (c) => {
 			status: 422,
 			selectionError: error,
 		});
-	// With Select all, Exclude changes the matched rows not excluded yet (RETURNING names them), so a matched split part is excluded on its own (P81 A); ticked rows keep the edit panel's rule that a part excludes its whole purchase.
-	const exclude = selection.all
-		? `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
-		WHERE excluded=0 AND id IN (SELECT value FROM json_each(?1)) RETURNING id`
-		: `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
-		WHERE excluded=0 AND (
-			id IN (SELECT value FROM json_each(?1))
-			OR parent_id IN (SELECT value FROM json_each(?1))
-			OR id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
-			OR parent_id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
-		)`;
-	const changed = await c.env.DB.prepare(exclude)
-		.bind(JSON.stringify(ids), actor(c))
-		.all<{ id: number }>();
-	// The toast and the bill note count what this Exclude excluded: with Select all a match that was excluded
-	// already is not counted again, and ticked rows count as the bar does.
-	const excluded = selection.all ? changed.results.map((row) => row.id) : ids;
+	// With Select all, the set's rows (held ticks included) are excluded one by one, and RETURNING names the ones
+	// this changes, so a matched split part is excluded on its own (P81 A). The ticks are rows the filters no longer
+	// match, so each takes its whole purchase, as the edit panel does. That statement runs second: run first, it
+	// could exclude a matched sibling before RETURNING reads it.
+	let excluded: number[];
+	if (selection.all) {
+		const statements = [
+			c.env.DB.prepare(EXCLUDE_ROWS).bind(JSON.stringify(set), actor(c)),
+		];
+		if (selection.ticks.length > 0)
+			statements.push(
+				c.env.DB.prepare(EXCLUDE_PURCHASE).bind(
+					JSON.stringify(selection.ticks),
+					actor(c),
+				),
+			);
+		const [changed] = await c.env.DB.batch<{ id: number }>(statements);
+		const setExcluded = changed?.results.map((row) => row.id) ?? [];
+		// The toast and the bill note count what this Exclude excluded: a match that was excluded already is not
+		// counted again, and ticks count as the bar counts them.
+		excluded = [...setExcluded, ...selection.ticks];
+	} else {
+		await c.env.DB.prepare(EXCLUDE_PURCHASE)
+			.bind(JSON.stringify(ids), actor(c))
+			.run();
+		excluded = ids;
+	}
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
 	const paying = await payingBillsCount(c.env.DB, excluded);
@@ -2230,6 +2280,14 @@ const filtersFrom = (c: Context<App>, today: string, url: string) =>
 		today.slice(0, 7),
 		isDemo(c),
 	);
+
+/**
+ * The address a select-mode action writes to the browser, from its `back`: the list's own address, which leaves
+ * this month out as list addresses do (#211). A month that has turned over stays named, so the list after the
+ * action shows the month it acted on (#321).
+ */
+const listAddress = (c: Context<App>, today: string, back: string) =>
+	listHref(filtersFrom(c, today, back), today.slice(0, 7));
 
 const cashValues = (today: string, form?: FormData): CashValues => ({
 	date: form?.get("date")?.toString() ?? today,

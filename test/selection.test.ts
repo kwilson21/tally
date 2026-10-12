@@ -3,6 +3,7 @@ import {
 	NO_SELECTION,
 	type Selection,
 	selectedIds,
+	setIds,
 	settle,
 } from "../src/transactions/selection";
 
@@ -67,6 +68,21 @@ describe("settle (#321, #350)", () => {
 			const once = settle(selection, matched);
 			expect(settle(once, matched)).toEqual(once);
 		}
+	});
+});
+
+describe("setIds (#321)", () => {
+	it("in all mode, returns the matched rows less the unticked, held ticks included, and leaves out off-filter ticks", () => {
+		const settled = settle(
+			whole({ ticks: [9], held: [2], unticked: [1] }),
+			new Set([1, 2, 3]),
+		);
+		expect(setIds(settled, [1, 2, 3])).toEqual([2, 3]);
+	});
+
+	it("outside all mode, returns nothing, whatever the ticks", () => {
+		expect(setIds(NO_SELECTION, [1, 2])).toEqual([]);
+		expect(setIds({ ...NO_SELECTION, ticks: [4, 5] }, [1, 2])).toEqual([]);
 	});
 });
 
