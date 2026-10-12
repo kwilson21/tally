@@ -335,6 +335,37 @@ describe("income", () => {
 			kind: "income",
 		});
 	});
+
+	it("Yes on the question counts the items left after the line hides the store's other credits", async () => {
+		const ids = await oneOfEach();
+		// A second Venmo credit: the Venmo line hides it too, so the count the announcer reads must drop
+		// by it as well (the count is taken once the line is written, not before).
+		await insertTx({
+			raw: VENMO,
+			amount: -180000,
+			incomeConfidence: 0.5,
+			date: "2026-10-01",
+		});
+		await post(
+			"/settings/suggestions",
+			{ id: `income-${ids.income}`, answer: "no" },
+			true,
+		);
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{
+				id: `income-${ids.income}`,
+				answer: "ask_yes",
+				kind: "income",
+				store: VENMO,
+			},
+			true,
+		);
+		expect(textOf(html)).toContain("Suggestions · 1 of 4");
+		expect(trigger(res).announce).toBe(
+			"Got it. Tally won't suggest income for Venmo again. Change it in Settings. 4 left to check.",
+		);
+	});
 });
 
 describe("transfers", () => {
@@ -473,6 +504,8 @@ describe("categories", () => {
 		);
 		expect(res.status).toBe(422);
 		expect(textOf(html)).toContain("Pick a category.");
+		// The error points at the chips, so Something else is open with them in it.
+		expect(html).toMatch(/<details[^>]*\bopen/);
 	});
 });
 
@@ -600,6 +633,7 @@ describe("names", () => {
 		expect(textOf(html)).toContain(
 			"Pick a name, keep the bank's, or type your own.",
 		);
+		expect(html).toMatch(/<details[^>]*\bopen/);
 	});
 });
 
@@ -695,6 +729,61 @@ describe("Settings' Never suggest list", () => {
 		expect(
 			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
 		).toMatchObject({ n: 0 });
+	});
+
+	it("says the year of a No from an earlier year", async () => {
+		const year = new Date().getUTCFullYear();
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'income', ?)",
+			)
+			.bind(VENMO, `${year - 1}-12-31`)
+			.run();
+		const { html } = await get("/settings");
+		expect(textOf(html)).toContain(`You said No on Dec 31, ${year - 1}`);
+	});
+
+	it("keeps the Always search through a Remove, both with and without script", async () => {
+		const eatingOut = await categoryId("Eating Out");
+		for (let i = 0; i < 21; i++)
+			await db
+				.prepare(
+					"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES (?, ?, ?)",
+				)
+				.bind(`MATCH ${i}`, `Match ${i}`, eatingOut)
+				.run();
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'income', '2026-10-03')",
+			)
+			.bind(VENMO)
+			.run();
+		const rule = await row("SELECT id FROM never_suggest_rules");
+		const search = await get("/settings?rules_search=Match");
+		expect(search.html).toMatch(
+			/never-suggest\/remove"[\s\S]*?name="rules_search" value="Match"/,
+		);
+		const scripted = await post(
+			"/settings/never-suggest/remove",
+			{ id: String(rule?.id), rules_search: "Match" },
+			true,
+		);
+		expect(textOf(scripted.html)).toContain("merchants matching “Match”");
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'income', '2026-10-03')",
+			)
+			.bind(VENMO)
+			.run();
+		const again = await row("SELECT id FROM never_suggest_rules");
+		const plain = await post("/settings/never-suggest/remove", {
+			id: String(again?.id),
+			rules_search: "Match",
+		});
+		expect(plain.res.status).toBe(303);
+		expect(plain.res.headers.get("location")).toBe(
+			"/settings?rules_search=Match#merchant-rules",
+		);
 	});
 });
 

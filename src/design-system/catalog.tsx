@@ -2239,7 +2239,7 @@ function SuggestionsReview() {
 					"WhyLink",
 					"Icon",
 				]}
-				sentence="One item on Settings' Suggestions screen, one question at a time: the store's name in the serif with its bank text, amount and day; the dashed Maybe tag as the question, Tally's guess with a Why?; Yes as the full-width primary; Something else opening in place with no script; No on income, a transfer or a new category; a quiet Skip. A name Tally guessed says so with the sparkles icon, and a name the bank sent says From your bank. A new category ticks each purchase."
+				sentence="One item on Settings' Suggestions screen, one question at a time: the store's name in the serif with its bank text, amount and day; the dashed Maybe tag as the question, Tally's guess with a Why?; Yes as the full-width primary; Something else opening in place with no script, open again when its answer is refused; No on income, a transfer or a new category; a quiet Skip. A name Tally guessed says so with the sparkles icon, and a name the bank sent says From your bank. A new category ticks each purchase."
 			>
 				<div hx-ignore class="grid gap-8 md:grid-cols-2">
 					{[
@@ -2322,8 +2322,12 @@ function SuggestionsReview() {
 								decidedOn: "2026-10-09",
 							},
 						]}
+						today="2026-10-10"
 					/>
-					<NeverSuggestList rules={[] as NeverSuggestRule[]} />
+					<NeverSuggestList
+						rules={[] as NeverSuggestRule[]}
+						today="2026-10-10"
+					/>
 				</div>
 			</Specimen>
 		</Group>
@@ -4023,6 +4027,7 @@ function SettingsGroup() {
 				<State label="More than 20 merchants · search and count">
 					<MerchantRules
 						id="catalog-merchant-rules"
+						today="2026-10-10"
 						total={34}
 						rules={[
 							{

@@ -236,7 +236,7 @@ suggestions.post(PATH, async (c) => {
 			toast: {
 				message,
 				type: "success",
-				announce: `${message}. ${left(queueAfter)}`,
+				announce: `${message.replace(/\.$/, "")}. ${left(queueAfter)}`,
 			},
 		});
 	};
@@ -272,6 +272,8 @@ suggestions.post(PATH, async (c) => {
 				kind: kind as NeverSuggestKind,
 				decidedOn: today,
 			});
+		// The line hides the store's other items, so the count is taken once it is written.
+		const after = await suggestionQueue(db);
 		const labels = joinStores([...(await storeLabels(db, stores)).values()]);
 		const message =
 			kind === "income"
@@ -279,7 +281,7 @@ suggestions.post(PATH, async (c) => {
 				: kind === "transfer"
 					? `Got it. Tally won't suggest a transfer for ${labels} again. Change it in Settings.`
 					: `Got it. Tally won't suggest a new category for ${labels} again. Change it in Settings.`;
-		return done(message, queue);
+		return done(message, after);
 	}
 
 	const item = queue.find((candidate) => candidate.id === id);
@@ -496,7 +498,9 @@ suggestions.post(PATH, async (c) => {
 
 /**
  * The question after a No, drawn in place of the item. It is drawn here rather than redirected, since
- * the question exists only in this response (its stores come back from the form).
+ * the question exists only in this response (its stores come back from the form). Without JavaScript
+ * this is the one answer that is not a redirect: a reload re-posts the No, and that post finds the item
+ * already answered (it has left the queue), so it redirects like any other stale answer.
  */
 function askScreen(c: Context<App>, ask: Ask) {
 	return renderScreen(c, { ask, focus: true });

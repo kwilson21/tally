@@ -30,11 +30,14 @@ export function MerchantRules({
 	focusHeading,
 	error,
 	neverRules = [],
+	today,
 }: {
 	id?: string;
 	rules: MerchantRule[];
 	/** The "Never suggest" lines, under the same heading (issue #195). */
 	neverRules?: NeverSuggestRule[];
+	/** The household's today, for the year on a No's day. */
+	today: string;
 	total: number;
 	search?: string;
 	focusRuleIndex?: number;
@@ -166,7 +169,7 @@ export function MerchantRules({
 					)}
 				</div>
 			</div>
-			<NeverSuggestList rules={neverRules} />
+			<NeverSuggestList rules={neverRules} search={search} today={today} />
 		</section>
 	);
 }
@@ -175,7 +178,16 @@ export function MerchantRules({
  * The "Never suggest" list under the same heading (issue #195, decision 101): one line per No the family
  * said Yes to, the day of it, and a Remove whose name says which line it takes away.
  */
-export function NeverSuggestList({ rules }: { rules: NeverSuggestRule[] }) {
+export function NeverSuggestList({
+	rules,
+	search = "",
+	today,
+}: {
+	rules: NeverSuggestRule[];
+	/** The Always search, kept through a Remove so the list above still shows it. */
+	search?: string;
+	today: string;
+}) {
 	return (
 		<div class="mt-8">
 			<h3 class="text-xl font-semibold">Never suggest</h3>
@@ -190,7 +202,7 @@ export function NeverSuggestList({ rules }: { rules: NeverSuggestRule[] }) {
 								<span class="min-w-0 flex-1">
 									<span class="block text-lg leading-6">{line}</span>
 									<span class="block leading-6 text-muted">
-										You said No on {shortDay(rule.decidedOn, rule.decidedOn)}
+										You said No on {shortDay(rule.decidedOn, today)}
 									</span>
 								</span>
 								<form
@@ -202,6 +214,9 @@ export function NeverSuggestList({ rules }: { rules: NeverSuggestRule[] }) {
 									hx-swap="outerHTML"
 								>
 									<input type="hidden" name="id" value={String(rule.id)} />
+									{search && (
+										<input type="hidden" name="rules_search" value={search} />
+									)}
 									<Button type="submit" kind="text">
 										Remove<span class="sr-only"> {line}</span>
 									</Button>

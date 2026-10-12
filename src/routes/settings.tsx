@@ -663,6 +663,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				focusHeading={view.focusMerchantHeading}
 				error={view.merchantRuleError}
 				neverRules={neverRules}
+				today={today}
 				search={
 					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
 				}
@@ -729,6 +730,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	);
 }
 
+/** Settings' rules, with the Always search kept in the address (a Remove without script returns here). */
+function rulesAddress(search: string): string {
+	return `/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`;
+}
+
 settings.post("/settings/merchant-rules/remove", async (c) => {
 	const form = await c.req.formData();
 	const merchantKey = String(form.get("merchant") ?? "");
@@ -770,16 +776,14 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 			...ruleFocus(focusRules.rules, merchantKey),
 		});
 	}
-	return c.redirect(
-		`/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`,
-		303,
-	);
+	return c.redirect(rulesAddress(search), 303);
 });
 
 // Remove takes one "Never suggest" line away and says so; the suggestion may come back as a fresh guess.
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
 	const id = Number(form.get("id")?.toString() ?? "");
+	const search = String(form.get("rules_search") ?? "");
 	const removed =
 		Number.isInteger(id) && id > 0
 			? await removeNeverSuggest(c.env.DB, id)
@@ -790,7 +794,7 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 				"HX-Trigger",
 				JSON.stringify({ announce: "Tally's rules list updated." }),
 			);
-		return renderSettings(c, { rulesSearch: "" });
+		return renderSettings(c, { rulesSearch: search });
 	}
 	const message = "Removed. Tally can suggest that again.";
 	if (c.req.header("HX-Request")) {
@@ -801,9 +805,9 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 				announce: `${message} ${neverSuggestRuleLine(removed)} is gone.`,
 			}),
 		);
-		return renderSettings(c, { rulesSearch: "" });
+		return renderSettings(c, { rulesSearch: search });
 	}
-	return c.redirect("/settings#merchant-rules", 303);
+	return c.redirect(rulesAddress(search), 303);
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {

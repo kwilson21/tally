@@ -203,7 +203,12 @@ export function SuggestionCard({
 					<MaybeQuestion>Maybe {item.category}</MaybeQuestion>
 					<Guess sure={item.sure} section="categorization" />
 					<YesForm action={action} item={item} yes={`Yes, ${item.category}`} />
-					<SomethingElse action={action} item={item} categories={categories} />
+					<SomethingElse
+						action={action}
+						item={item}
+						categories={categories}
+						open={Boolean(error)}
+					/>
 				</>
 			)}
 			{item.kind === "new_category" && (
@@ -224,7 +229,12 @@ export function SuggestionCard({
 						item={item}
 						yes={`Yes, ${item.review.names[0] ?? ""}`}
 					/>
-					<SomethingElse action={action} item={item} categories={categories} />
+					<SomethingElse
+						action={action}
+						item={item}
+						categories={categories}
+						open={Boolean(error)}
+					/>
 				</>
 			)}
 			<p class="text-center">
@@ -395,13 +405,16 @@ function SomethingElse({
 	action,
 	item,
 	categories,
+	open = false,
 }: {
 	action: string;
 	item: SuggestionItem;
 	categories: { id: number; name: string }[];
+	/** Open when the answer it gave was refused, so the error's chips or names are on screen. */
+	open?: boolean;
 }) {
 	return (
-		<details class="group rounded-control border border-rule px-4">
+		<details class="group rounded-control border border-rule px-4" open={open}>
 			<summary class="flex min-h-11 cursor-pointer items-center justify-between text-lg">
 				Something else
 				<Icon
