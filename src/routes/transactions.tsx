@@ -104,6 +104,7 @@ import {
 } from "../views/maybe-category";
 import { MoneyInput } from "../views/money-input";
 import {
+	EDIT_FORM_GROUP,
 	NameChoices,
 	OWN_VALUE,
 	pickValue,
@@ -1475,7 +1476,7 @@ function EditSheet({
 			<form
 				method="post"
 				action={`/transactions/${tx.id}`}
-				class="mt-4 flex flex-col gap-3 border-t border-rule pt-4"
+				class={`mt-4 flex flex-col gap-3 border-t border-rule pt-4 ${EDIT_FORM_GROUP}`}
 				hx-post={`/transactions/${tx.id}`}
 				hx-disable="findAll button[type=submit]"
 				hx-indicator="#edit-save"
@@ -1611,9 +1612,13 @@ function EditSheet({
 								part: typeof tx.parentId === "number",
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								// The note shows only where a one-off name would make Jev guess again (rename.ts).
+								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
+								// category drawn as none or as saved: a save that posts another one keeps that one (rename.ts).
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
+									values.newCategory !== true &&
+									(values.categoryId === null ||
+										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
 										included: !values.excluded || tx.paysBill === true,
@@ -1621,6 +1626,8 @@ function EditSheet({
 										income: values.income,
 										followsPurchase: purchase !== undefined,
 									}),
+								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
+								excludeCounts: tx.paysBill !== true,
 								today,
 								scope: nameScope,
 							}}

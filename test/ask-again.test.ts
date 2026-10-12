@@ -523,6 +523,69 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		);
 	});
 
+	it("puts the note under the edit form's named group, so picking another control folds it away", async () => {
+		await pickedByTally(await firstCategory());
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		const editForm = html
+			.split("<form")
+			.find((part) => part.includes(`action="/transactions/${bakery}"`));
+		expect(editForm?.slice(0, editForm.indexOf(">"))).toContain("group/edit");
+		const note = html.match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1];
+		expect(note).toContain(
+			"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
+		);
+	});
+
+	it("draws no note on a 422 redraw that posts another category, since the save keeps that one", async () => {
+		const category = await firstCategory();
+		const other = (
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 AND id != ? ORDER BY id LIMIT 1",
+				)
+				.bind(category)
+				.first<{ id: number }>()
+		)?.id as number;
+		await pickedByTally(category);
+		fakeJev();
+		const { response, html } = await save(bakery, {
+			category: String(other),
+			name_pick: "own",
+			merchant: "",
+			name_scope: "one",
+		});
+		expect(response.status).toBe(422);
+		expect(html).not.toContain("Tally guesses its category again.");
+	});
+
+	it("keeps the note on a 422 redraw that posts the row's own category", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		fakeJev();
+		const { response, html } = await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "",
+			name_scope: "one",
+		});
+		expect(response.status).toBe(422);
+		expect(html).toContain("Tally guesses its category again.");
+	});
+
+	it("draws no note on a row whose category was set by a person, even with no category id", async () => {
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = NULL, category_source = 'user' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		expect(await panel({ JEV_API_KEY: "jev-key" })).not.toContain(
+			"Tally guesses its category again.",
+		);
+	});
+
 	it("keeps Tally's category, and says nothing of guessing again, while the categories switch is off", async () => {
 		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, categories: false });
 		const category = await firstCategory();

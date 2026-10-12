@@ -18,6 +18,7 @@ const rename: RenameFacts = {
 	owned: [],
 	thisOwn: null,
 	tallyCategory: true,
+	excludeCounts: true,
 	today: "2026-10-11",
 	scope: "one",
 };
@@ -29,6 +30,15 @@ function radio(html: string, value: string): string {
 		.find((part) => part.includes(`value="${value}"`));
 	if (!tag) throw new Error(`no radio with value ${value}`);
 	return tag;
+}
+
+/** The class of the re-guess note under This one only, or "" when the markup draws no note. */
+function guessAgainClass(markup: string): string {
+	return (
+		markup.match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1] ?? ""
+	);
 }
 
 describe("the Name row's choices carry the class that opens the Rename list", () => {
@@ -71,5 +81,64 @@ describe("the Name row's choices carry the class that opens the Rename list", ()
 		);
 		expect(settings).not.toContain("This one only");
 		expect(settings).not.toContain("group-has-[.name-pick:checked]:flex");
+	});
+});
+
+// The re-guess note under This one only folds away once the edit form's controls move off the state it was
+// drawn from (CSS only, decision 101). Its hooks are literal classes, and the form is the named group/edit.
+describe("the re-guess note follows the edit form's controls", () => {
+	const markup = (facts: RenameFacts) =>
+		String(
+			NameChoices({
+				id: "name",
+				names: ["Blue Bottle Coffee"],
+				source: "guess",
+				tidied: "Blue bottle cof",
+				rawName: "SQ *BLUE BOTTLE COF 0412",
+				rename: facts,
+			}),
+		);
+
+	it("says Tally guesses its category again in a note with the muted look and its own class", () => {
+		const html = markup(rename);
+		expect(html).toContain("Tally guesses its category again.");
+		expect(guessAgainClass(html)).toContain("text-sm text-muted");
+	});
+
+	it("folds the note away when another category, Income, or the refund link is picked", () => {
+		const hooks = guessAgainClass(markup(rename));
+		expect(hooks).toContain(
+			"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
+		);
+		expect(hooks).toContain(
+			"group-has-[input[name=income]:checked:not([checked])]/edit:hidden",
+		);
+		expect(hooks).toContain(
+			"group-has-[input[name=income][checked]:not(:checked)]/edit:hidden",
+		);
+		expect(hooks).toContain(
+			"group-has-[input[name=refund\\_of]:checked:not([checked])]/edit:hidden",
+		);
+	});
+
+	it("folds the note away when Exclude changes, unless the row pays a bill", () => {
+		const counted = guessAgainClass(markup(rename));
+		expect(counted).toContain(
+			"group-has-[input[name=excluded]:checked:not([checked])]/edit:hidden",
+		);
+		expect(counted).toContain(
+			"group-has-[input[name=excluded][checked]:not(:checked)]/edit:hidden",
+		);
+		const paysBill = guessAgainClass(
+			markup({ ...rename, excludeCounts: false }),
+		);
+		expect(paysBill).toContain("input[name=category]");
+		expect(paysBill).not.toContain("input[name=excluded]");
+	});
+
+	it("draws no note when Tally did not pick the category", () => {
+		expect(markup({ ...rename, tallyCategory: false })).not.toContain(
+			"Tally guesses its category again.",
+		);
 	});
 });

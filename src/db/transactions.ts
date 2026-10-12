@@ -618,7 +618,7 @@ export type NameChoices = {
 	owned: OwnedRow[];
 	/** This transaction's own name, or null. */
 	thisOwn: string | null;
-	/** Tally picked this transaction's category, or it has none: a one-off name makes Tally guess again. */
+	/** Tally picked this transaction's category, or it has none and no one set one: a one-off name makes Tally guess again (oneOffGuessesAgain). */
 	tallyCategory: boolean;
 };
 
@@ -810,7 +810,9 @@ export async function getTransaction(
 			total: merchantTotal,
 			owned,
 			thisOwn: thisOwnName,
-			tallyCategory: r.categorySource === "jev" || r.categoryId === null,
+			tallyCategory:
+				r.categorySource === "jev" ||
+				(r.categoryId === null && r.categorySource === null),
 		},
 	};
 }

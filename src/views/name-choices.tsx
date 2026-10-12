@@ -52,6 +52,11 @@ export const OWN_VALUE = "own";
 export const NAME_PICK_CLASS = "name-pick";
 /** The class of the "Type your own" radio: the field under it is shown while it is ticked. */
 export const OWN_PICK_CLASS = "name-own";
+/**
+ * The edit panel's form: its category, Exclude, Income and refund controls fold the re-guess note under This one
+ * only away once they change (CSS only), so it is a named group that NameChoices' and the Chips' unnamed `group` don't meet.
+ */
+export const EDIT_FORM_GROUP = "group/edit";
 
 /**
  * In the list, for a name Tally guessed (P87 B, decision 80): the sparkles icon, "Tally's guess" under the
@@ -75,6 +80,12 @@ function SourceLine({ id, source }: { id: string; source: NameSource }) {
 		</div>
 	);
 }
+
+/**
+ * A muted line under a choice's words. A note given with `class` carries it too, for a hook of its own
+ * (the re-guess note folds away with the edit form's controls).
+ */
+type ChoiceNote = string | { text: string; class: string };
 
 /**
  * One choice on its own line (decision 101): a real radio, 44px tall, its words beside it and any muted
@@ -101,7 +112,7 @@ function Choice({
 	radioClass?: string;
 	autofocus?: boolean;
 	describedBy?: string;
-	notes?: string[];
+	notes?: ChoiceNote[];
 	children: string;
 }) {
 	return (
@@ -117,9 +128,13 @@ function Choice({
 			/>
 			<span class="flex min-w-0 flex-col wrap-anywhere">
 				<span>{children}</span>
-				{notes.map((note) => (
-					<span class="text-sm text-muted">{note}</span>
-				))}
+				{notes.map((note) => {
+					const { text, class: hook = "" } =
+						typeof note === "string" ? { text: note, class: "" } : note;
+					return (
+						<span class={`text-sm text-muted ${hook}`.trim()}>{text}</span>
+					);
+				})}
 			</span>
 		</label>
 	);
@@ -137,8 +152,10 @@ export type RenameFacts = {
 	owned: OwnedRow[];
 	/** This transaction's own name, when it has one. */
 	thisOwn: string | null;
-	/** Tally picked this transaction's category, or it has none, and Jev can be asked: "This one only" makes Tally guess again. */
+	/** Tally picked this transaction's category, or it has none and no one set one, and Jev can be asked: "This one only" makes Tally guess again. */
 	tallyCategory: boolean;
+	/** Whether Exclude changes whether Jev can be asked about the row: false for a payment linked to a bill, which counts whatever its exclusion. */
+	excludeCounts: boolean;
 	/** Today's date, for the dates of the other own names. */
 	today: string;
 	/** The scope that is ticked: "all" when the merchant is renamed, otherwise "this one only". */
@@ -146,6 +163,17 @@ export type RenameFacts = {
 	/** Override only for isolated catalog specimens, so their radio groups stay apart. */
 	scopeName?: string;
 };
+
+/**
+ * The re-guess note's hooks (CSS only, decision 101, read from EDIT_FORM_GROUP): it folds away once another
+ * category is picked, Income changes, or the refund link changes, since the save then keeps the person's
+ * category or Jev isn't asked. It only ever hides what was drawn, so where :has() isn't supported it stays.
+ * Each hook is a literal class, so Tailwind compiles it. Tailwind reads a bare underscore in an arbitrary value
+ * as a space, so refund_of keeps its escape: String.raw leaves the backslash in the class, as the stylesheet expects.
+ */
+const GUESS_AGAIN_FOLDS = String.raw`group-has-[input[name=category]:checked:not([checked])]/edit:hidden group-has-[input[name=income]:checked:not([checked])]/edit:hidden group-has-[input[name=income][checked]:not(:checked)]/edit:hidden group-has-[input[name=refund\_of]:checked:not([checked])]/edit:hidden`;
+/** GUESS_AGAIN_FOLDS, and also on Exclude, where Exclude changes whether Jev is asked (excludeCounts). */
+const GUESS_AGAIN_FOLDS_ON_EXCLUDE = `${GUESS_AGAIN_FOLDS} group-has-[input[name=excluded]:checked:not([checked])]/edit:hidden group-has-[input[name=excluded][checked]:not(:checked)]/edit:hidden`;
 
 /**
  * The Rename list (decision 101, Name row round 2 A): "This one only" (ticked by default) and "All N from
@@ -160,6 +188,7 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 		owned,
 		thisOwn,
 		tallyCategory,
+		excludeCounts,
 		today,
 		scope,
 		scopeName = "name_scope",
@@ -177,7 +206,16 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 					checked={scope !== "all"}
 					notes={[
 						...(others ? [others] : []),
-						...(tallyCategory ? ["Tally guesses its category again."] : []),
+						...(tallyCategory
+							? [
+									{
+										text: "Tally guesses its category again.",
+										class: excludeCounts
+											? GUESS_AGAIN_FOLDS_ON_EXCLUDE
+											: GUESS_AGAIN_FOLDS,
+									},
+								]
+							: []),
 					]}
 				>
 					This one only
