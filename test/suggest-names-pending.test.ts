@@ -5,6 +5,7 @@ import { resetDemo } from "../src/demo/reset";
 import {
 	nameCallLimit,
 	suggestMerchantNames,
+	suggestTransactionNotes,
 } from "../src/suggest-names-pending";
 
 // The nightly names step (spec §7, §8.6, §9; #33): Workers AI is asked, once per bank text, only for a
@@ -109,8 +110,9 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi(() => ({ response: "Unique Shop" }));
 		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
-		// One candidate query, one batch save and fixed switch reads; 100 per-row saves exceed this.
-		expect(statements).toBeLessThanOrEqual(10);
+		// One candidate query, then a switch read and a batch save for every five calls: 1 + 1 + 20 × 2 = 42.
+		// A save per name would be 100 or more.
+		expect(statements).toBeLessThanOrEqual(42);
 	});
 
 	it("asks once for a merchant Plaid didn't name and keeps the names, pending, without renaming it", async () => {
@@ -255,7 +257,7 @@ describe("suggestMerchantNames", () => {
 			suggested: 0,
 		});
 		expect(await merchants()).toEqual([]);
-		// It checks once after a batch of at most 25, then makes no further calls.
+		// It checks after a batch of at most five, then makes no further calls.
 		expect(ai.run).toHaveBeenCalledTimes(2);
 
 		await saveAiSwitches(db, { names: true });
@@ -343,6 +345,24 @@ describe("suggestMerchantNames", () => {
 		});
 	});
 
+	// The names switch is read every five calls, as the notes' switch is, so one turned off mid-run stops within five.
+	it("stops within five calls when the names switch is turned off during the run", async () => {
+		await addTransactions(
+			Array.from({ length: 30 }, (_, i) => ({ rawName: `SWITCH SHOP ${i}` })),
+		);
+		const ai = fakeAi(() => ({ response: "A Name" }));
+		ai.run.mockImplementationOnce(async () => {
+			await saveAiSwitches(db, { names: false });
+			return { response: "A Name" };
+		});
+		expect(await suggestMerchantNames({ DB: db, AI: ai })).toEqual({
+			asked: 5,
+			suggested: 0,
+		});
+		expect(ai.run).toHaveBeenCalledTimes(5);
+		expect(await merchants()).toEqual([]);
+	});
+
 	it("makes no request at all when its deadline has already passed", async () => {
 		await addTransactions([{ rawName: RAW }]);
 		const ai = fakeAi(() => ({ response: "Blue Bottle Coffee" }));
@@ -354,5 +374,66 @@ describe("suggestMerchantNames", () => {
 		).toEqual({ asked: 0, suggested: 0 });
 		expect(ai.run).not.toHaveBeenCalled();
 		expect(await merchants()).toEqual([]);
+	});
+});
+
+/** `n` charges Jev said a note could help with, already asked about, none with a note yet (decision 103). */
+async function addNoteCandidates(n: number) {
+	await db
+		.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+			 INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing)
+			 SELECT 'plaid-note-' || i, 1, '2026-09-20', 650, 'NOTE SHOP ' || i, 'Note Shop', 1, 1 FROM n`,
+		)
+		.bind(n)
+		.run();
+}
+
+describe("suggestTransactionNotes", () => {
+	// A note Workers AI answered empty is remembered as tried, so the nightly notes move on to the
+	// next charges and the names get the night's calls; the names then run on their own calls.
+	it("doesn't ask again about a note Workers AI answered empty, so the names still get their calls", async () => {
+		await addNoteCandidates(nameCallLimit);
+		const night1 = fakeAi(() => ({ response: "" }));
+		expect(await suggestTransactionNotes({ DB: db, AI: night1 })).toEqual({
+			asked: nameCallLimit,
+			suggested: 0,
+		});
+		expect(night1.run).toHaveBeenCalledTimes(nameCallLimit);
+
+		await addTransactions([
+			{ rawName: "SHOP ONE" },
+			{ rawName: "SHOP TWO" },
+			{ rawName: "SHOP THREE" },
+		]);
+		const night2 = fakeAi(() => ({ response: "" }));
+		expect(await suggestTransactionNotes({ DB: db, AI: night2 })).toEqual({
+			asked: 0,
+			suggested: 0,
+		});
+		expect(night2.run).not.toHaveBeenCalled();
+		expect(
+			await suggestMerchantNames({ DB: db, AI: night2 }, nameCallLimit),
+		).toEqual({ asked: 3, suggested: 0 });
+		expect(night2.run).toHaveBeenCalledTimes(3);
+	});
+
+	it("asks again about a note whose call failed", async () => {
+		await addNoteCandidates(1);
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const failing = fakeAi(() => {
+			throw new Error("capacity");
+		});
+		expect(await suggestTransactionNotes({ DB: db, AI: failing })).toEqual({
+			asked: 1,
+			suggested: 0,
+		});
+		logged.mockRestore();
+
+		const working = fakeAi(() => ({ response: "" }));
+		expect(await suggestTransactionNotes({ DB: db, AI: working })).toEqual({
+			asked: 1,
+			suggested: 0,
+		});
 	});
 });

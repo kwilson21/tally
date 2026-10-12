@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Decision, NONE_FIT } from "../src/ai/decide";
+import type { Decision } from "../src/ai/decide";
 import {
 	categorizePending,
 	jevCallLimit,
@@ -127,33 +127,36 @@ describe("categorizePending", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await db.prepare("UPDATE categories SET archived=1").run();
 		await switchTo({ categories: true, income: true });
+		// A credit: an outgoing purchase is not asked about at all with no active categories (#302).
 		const id = Number(
 			(
 				await db
 					.prepare(
-						"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,500,'NO ACTIVE CATEGORIES') RETURNING id",
+						"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,-500,'NO ACTIVE CATEGORIES') RETURNING id",
 					)
 					.bind(`${MONTH}-20`)
 					.first<{ id: number }>()
 			)?.id,
 		);
-		await categorizePending(
-			withKey,
-			async () =>
-				Response.json({
-					answers: {
-						category: { type: "choice", choice: NONE_FIT, confidence: 0.99 },
-						transfer: { noul: 0 },
-						reimbursement: { noul: 0 },
-						income: { noul: 0 },
-					},
-				}),
-			{ rulesApplied: true, onlyIds: [id] },
-		);
+		// Only the transfer, reimbursement and income answers come back: no category question was asked.
+		expect(
+			await categorizePending(
+				withKey,
+				async () =>
+					Response.json({
+						answers: {
+							transfer: { noul: 0.01 },
+							reimbursement: { noul: 0.01 },
+							income: { noul: 0.01 },
+						},
+					}),
+				{ rulesApplied: true, onlyIds: [id] },
+			),
+		).toEqual({ asked: 1, applied: 0 });
 		expect(
 			await db
 				.prepare(
-					"SELECT category_confidence, jev_category_id, jev_none_fit FROM transactions WHERE id=?",
+					"SELECT category_confidence, jev_category_id, jev_none_fit, excluded, transfer_confidence, income_confidence FROM transactions WHERE id=?",
 				)
 				.bind(id)
 				.first(),
@@ -161,12 +164,64 @@ describe("categorizePending", () => {
 			category_confidence: null,
 			jev_category_id: null,
 			jev_none_fit: 0,
+			excluded: 0,
+			transfer_confidence: 0.01,
+			income_confidence: 0.01,
 		});
 		await db.prepare("UPDATE categories SET archived=0").run();
 		await switchTo({ categories: true, income: true });
 		expect((await pendingForJev(db, 50)).some((row) => row.id === id)).toBe(
 			true,
 		);
+	});
+
+	it("asks about an older credit rather than the newest purchases when the household has no active categories, and doesn't ask about the purchases again", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.prepare("UPDATE categories SET archived=1").run();
+		await switchTo({ categories: true, income: true });
+		for (const [date, amount, rawName] of [
+			[`${MONTH}-21`, 500, "NEWER PURCHASE A"],
+			[`${MONTH}-20`, 700, "NEWER PURCHASE B"],
+			[`${MONTH}-19`, 900, "NEWER PURCHASE C"],
+			[`${MONTH}-05`, -2000, "OLDER CREDIT"],
+		] as const)
+			await db
+				.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,?,?)",
+				)
+				.bind(date, amount, rawName)
+				.run();
+		const sent: string[] = [];
+		const fetchImpl = async (_url: string, init?: RequestInit) => {
+			sent.push(String(init?.body));
+			return Response.json({
+				answers: {
+					transfer: { noul: 0.01 },
+					reimbursement: { noul: 0.01 },
+					income: { noul: 0.99 },
+				},
+			});
+		};
+		// Two calls at most, so the newest purchases would fill the run if they were still asked about.
+		expect(
+			await categorizePending(withKey, fetchImpl, {
+				rulesApplied: true,
+				maxCalls: 2,
+			}),
+		).toEqual({ asked: 1, applied: 0 });
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toContain("OLDER CREDIT");
+		expect(sent.join("\n")).not.toContain("NEWER PURCHASE");
+
+		// The credit's income answer is kept, so it isn't asked again, and no purchase is asked either.
+		sent.length = 0;
+		expect(
+			await categorizePending(withKey, fetchImpl, {
+				rulesApplied: true,
+				maxCalls: 2,
+			}),
+		).toEqual({ asked: 0, applied: 0 });
+		expect(sent).toEqual([]);
 	});
 
 	it("does not read or send history when category guessing is off, but does when it is on", async () => {

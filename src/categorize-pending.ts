@@ -128,6 +128,7 @@ export async function categorizePending(
 	// The run asks about no more than the query limit allows, and reserves no more than that.
 	const waiting = await pendingForJev(env.DB, Math.min(cap, maxCalls), {
 		categories: start.categories,
+		categoryAsked: categories.length > 0,
 		income: start.income,
 		details: start.details,
 		ids: onlyIds,

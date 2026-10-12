@@ -1904,6 +1904,11 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * bill counts, so it is asked about too, and likewise for its category only. A stored confidence means Jev
  * already looked and wasn't sure (decision 27).
  *
+ * `categoryAsked` is false when no category is active. Then a category question isn't asked, so its category
+ * confidence is never stored: an outgoing purchase (whose income answer can't apply, since income is money in)
+ * would be asked again every night. Only credits are asked about then, and not a credit a person reviewed for its
+ * category alone, which would also have no category question to answer.
+ *
  * With `ids`, only those rows are considered: the ones a sync just brought in, or the one a person
  * just added a note to. They go in as one JSON array read by `json_each`, since D1 allows 100 bound
  * values in a statement and a bank's first sync brings in thousands.
@@ -1915,11 +1920,13 @@ export async function pendingForJev(
 		categories = true,
 		income = true,
 		details = false,
+		categoryAsked = true,
 		ids,
 	}: {
 		categories?: boolean;
 		income?: boolean;
 		details?: boolean;
+		categoryAsked?: boolean;
 		ids?: number[];
 	} = {},
 ): Promise<
@@ -1947,7 +1954,7 @@ export async function pendingForJev(
 			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
 			WHERE NOT ${FOLLOWS_PURCHASE} AND (
-				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL)
+				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND (? = 1 OR (t.amount_cents <= 0 AND NOT ${CATEGORY_ONLY})))
 				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (${EMPTY_NOTE} OR t.kind IS NULL OR t.for_person_id IS NULL))
 			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
@@ -1957,7 +1964,8 @@ export async function pendingForJev(
 			LIMIT ?`,
 		)
 		.bind(
-			categories || income ? 1 : 0,
+			(categories && categoryAsked) || income ? 1 : 0,
+			categoryAsked ? 1 : 0,
 			details ? 1 : 0,
 			categories || details ? 1 : 0,
 			...(ids ? [JSON.stringify(ids)] : []),
@@ -2145,7 +2153,8 @@ export async function saveJevDetails(
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
  * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
- * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent.
+ * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent. A row with `note_tried_at`
+ * set is left out: Workers AI answered it, even with no note, or a person saved its note empty.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
@@ -2166,8 +2175,8 @@ export async function transactionsNeedingNoteGuess(
 			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
 				${merchantColumnSql("t", "display_name")} AS displayName, ${NAME_SUGGESTION_COLUMNS}
 			 FROM transactions t
-			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
-			 ORDER BY t.note_tried_at IS NOT NULL, t.note_tried_at, t.date DESC, t.id DESC LIMIT ?`,
+			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
+			 ORDER BY t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
 		.all<{
@@ -2182,7 +2191,11 @@ export async function transactionsNeedingNoteGuess(
 	return results;
 }
 
-/** Stores successful note guesses together; one JSON parameter stays below D1's bind limit. */
+/**
+ * Stores successful note guesses, and marks each call Workers AI answered as tried, even when its answer
+ * was empty, so it isn't asked again. The caller leaves out a failed call, which is asked again tomorrow.
+ * One JSON parameter for each stays below D1's bind limit.
+ */
 export async function saveNoteAttempts(
 	db: D1Database,
 	attempted: number[],
