@@ -20,6 +20,7 @@ import {
 	nameSource,
 	offeredNames,
 	shownName,
+	usableSuggestedNames,
 } from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
@@ -138,6 +139,12 @@ export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.da
 const suggestedNameMatch = (namesOn: boolean) =>
 	`EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL${namesOn ? "" : " AND m.suggested_name = m.raw_name"} AND m.suggested_name LIKE ? ESCAPE '\\')`;
 
+/** The note a row shows; with the details switch off a guessed note is hidden (#314). Needs `t`. */
+const visibleNoteSql = (detailsOn: boolean) =>
+	detailsOn
+		? "t.note"
+		: "CASE WHEN t.note_guessed = 1 THEN NULL ELSE t.note END";
+
 export const PAGE_SIZE = 25;
 
 // "Needs category" mirrors Home's effective category: linked refunds follow the purchase,
@@ -251,7 +258,7 @@ export async function listTransactions(
 			if (amount === null || amount.plain) {
 				categoryPattern = pattern;
 				alternatives.push(
-					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(t.note, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR c.name LIKE ? ESCAPE '\\')`,
+					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(${visibleNoteSql(detailsOn)}, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR c.name LIKE ? ESCAPE '\\')`,
 				);
 				args.push(pattern, pattern, pattern, pattern, pattern, pattern);
 			}
@@ -310,7 +317,7 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : `CASE WHEN ${detailsOn ? "1" : "0"} = 0 AND t.note_guessed = 1 THEN NULL ELSE t.note END`} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : visibleNoteSql(detailsOn)} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -1599,6 +1606,7 @@ export async function pendingForJev(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${merchantColumnSql("t", "display_name")} AS displayName,
+				${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
 				t.details_asked AS detailsAsked,
@@ -1630,13 +1638,27 @@ export async function pendingForJev(
 				categoryOnly: number;
 				merchantKey: string;
 				detailsAsked: number;
+				suggestedNames: string | null;
+				suggestionStatus: string | null;
 			}
 		>();
-	return results.map((transaction) => ({
-		...transaction,
-		categoryOnly: transaction.categoryOnly === 1,
-		detailsAsked: transaction.detailsAsked === 1,
-	}));
+	return results.map(
+		({ suggestedNames, suggestionStatus, ...transaction }) => ({
+			...transaction,
+			// With no name chosen, Jev is told the bank's own store name, never a name Tally guessed (decision 103).
+			displayName:
+				transaction.displayName ??
+				usableSuggestedNames({
+					stored: suggestedNames,
+					status: suggestionStatus,
+					key: transaction.merchantKey,
+					namesOn: false,
+				})[0] ??
+				null,
+			categoryOnly: transaction.categoryOnly === 1,
+			detailsAsked: transaction.detailsAsked === 1,
+		}),
+	);
 }
 
 /** The recent categories chosen by a person or merchant rule, fetched once for a Jev page. */
@@ -1751,10 +1773,16 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
 /**
  * Stores only Jev's valid detail choices, and records that this transaction was asked once. A Kind or For a
  * person cleared (`kind_cleared`, `for_person_cleared`) is a deliberate empty choice, so Jev doesn't fill it (#304).
+ * Jev's what-it-was answer (`note_worth_writing`, decision 103) is written with that first ask, and never again.
  */
 export async function saveJevDetails(
 	db: D1Database,
-	details: { id: number; kind: string | null; forPersonId: number | null }[],
+	details: {
+		id: number;
+		kind: string | null;
+		forPersonId: number | null;
+		noteWorthWriting: number | null;
+	}[],
 ): Promise<void> {
 	if (details.length === 0) return;
 	const result = await db
@@ -1762,7 +1790,8 @@ export async function saveJevDetails(
 			`WITH answers AS (
 				SELECT json_extract(value, '$.id') AS id,
 					json_extract(value, '$.kind') AS kind,
-					json_extract(value, '$.forPersonId') AS forPersonId
+					json_extract(value, '$.forPersonId') AS forPersonId,
+					json_extract(value, '$.noteWorthWriting') AS noteWorthWriting
 				FROM json_each(?)
 			)
 			UPDATE transactions SET
@@ -1770,6 +1799,7 @@ export async function saveJevDetails(
 				kind_guessed = CASE WHEN kind IS NULL AND kind_cleared = 0 AND (SELECT kind FROM answers WHERE answers.id = transactions.id) IS NOT NULL THEN 1 ELSE kind_guessed END,
 				for_person_id = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN (SELECT forPersonId FROM answers WHERE answers.id = transactions.id) ELSE for_person_id END,
 				for_person_guessed = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
+				note_worth_writing = (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id),
 				details_asked = 1, updated_at = datetime('now')
 			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)`,
 		)
@@ -1778,19 +1808,44 @@ export async function saveJevDetails(
 	void result;
 }
 
-/** The bounded set of note guesses for this run; Jev must have asked before Workers AI sees the text. */
+/**
+ * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
+ * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
+ * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
+ * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent.
+ */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
 	limit: number,
-): Promise<{ id: number; rawName: string }[]> {
+): Promise<
+	{
+		id: number;
+		rawName: string;
+		merchantName: string | null;
+		displayName: string | null;
+		suggestedNames: string | null;
+		suggestionStatus: string | null;
+		merchantKey: string;
+	}[]
+> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName FROM transactions t
-			 WHERE t.details_asked = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
+			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
+				${merchantColumnSql("t", "display_name")} AS displayName, ${NAME_SUGGESTION_COLUMNS}
+			 FROM transactions t
+			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
 			 ORDER BY t.note_tried_at IS NOT NULL, t.note_tried_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
-		.all<{ id: number; rawName: string }>();
+		.all<{
+			id: number;
+			rawName: string;
+			merchantName: string | null;
+			displayName: string | null;
+			suggestedNames: string | null;
+			suggestionStatus: string | null;
+			merchantKey: string;
+		}>();
 	return results;
 }
 

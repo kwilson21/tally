@@ -443,6 +443,16 @@ describe("resetDemo", () => {
 		expect(others?.n).toBe(0);
 	});
 
+	it("seeds the Costco split parts as the person's own picks, with no Jev confidence", async () => {
+		await resetDemo(env.DB, "2026-09-22");
+		const { results } = await env.DB.prepare(
+			"SELECT category_source AS source, category_confidence AS confidence FROM transactions WHERE parent_id IS NOT NULL ORDER BY id",
+		).all<{ source: string | null; confidence: number | null }>();
+		expect(results).toHaveLength(2);
+		for (const part of results)
+			expect(part).toEqual({ source: "user", confidence: null });
+	});
+
 	it("replaces all data with the seed, and running it twice gives the same result", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		await resetDemo(env.DB, "2026-09-22");

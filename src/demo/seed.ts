@@ -490,6 +490,7 @@ export function buildSeed(today: string): Seed {
 	if (costco) {
 		costco.isSplit = true;
 		const parentId = costcoIndex + 1;
+		// The person split this purchase and picked each part's category, so neither is Jev's pick.
 		transactions.push(
 			{
 				...spend(
@@ -499,6 +500,8 @@ export function buildSeed(today: string): Seed {
 					GROCERIES,
 					15000,
 				),
+				categorySource: "user",
+				categoryConfidence: null,
 				parentId,
 			},
 			{
@@ -509,6 +512,8 @@ export function buildSeed(today: string): Seed {
 					HOUSEHOLD,
 					3742,
 				),
+				categorySource: "user",
+				categoryConfidence: null,
 				parentId,
 			},
 		);

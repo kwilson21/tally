@@ -275,6 +275,21 @@ describe("rowCaption", () => {
 		).toBe("Refund for Sep 5");
 	});
 
+	it("keeps a refunded bill payment's refund and bill together ahead of its note (#313)", () => {
+		const payment = {
+			...base,
+			note: "Dinner",
+			paysBill: true,
+			billName: "Electric",
+		};
+		expect(rowCaption({ ...payment, refundedCents: 1500 })).toEqual({
+			kind: "needs",
+			caption: "$15.00 refunded · paid Electric bill",
+			tag: true,
+		});
+		expect(rowCaption(payment).caption).toBe("paid Electric bill");
+	});
+
 	it("flags what needs a category, showing the raw name when it differs", () => {
 		expect(rowCaption(base)).toEqual({
 			kind: "needs",

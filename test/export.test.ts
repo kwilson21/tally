@@ -333,6 +333,7 @@ describe("data exports", () => {
 				"note_guessed",
 				"note_tried_at",
 				"note_dismissed",
+				"note_worth_writing",
 				"kind",
 				"kind_guessed",
 				"kind_cleared",
