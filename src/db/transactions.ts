@@ -192,7 +192,12 @@ const RAW_SHOW_SQL: Record<Show, string | null> = {
  * What the filters match, as SQL (#211, #321): the joins their terms read, and the terms with their binds,
  * in order, to be AND-ed. The list and Select all share it, so a filter added later reaches both.
  */
-export function filterMatch(f: Filters, namesOn: boolean, ids?: number[]) {
+export function filterMatch(
+	f: Filters,
+	namesOn: boolean,
+	detailsOn: boolean,
+	ids?: number[],
+) {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
 	const rowMonth = f.raw ? "substr(t.date,1,7)" : COUNTED_MONTH;
@@ -289,6 +294,7 @@ export async function listTransactions(
 	const { joins, where, args, categoryPattern, amountSearch } = filterMatch(
 		f,
 		namesOn,
+		detailsOn,
 		ids,
 	);
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
@@ -472,8 +478,8 @@ export async function selectableMatchIds(
 	db: D1Database,
 	f: Filters,
 ): Promise<number[]> {
-	const { names: namesOn } = await readAiSwitches(db);
-	const match = filterMatch(f, namesOn);
+	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
+	const match = filterMatch(f, namesOn, detailsOn);
 	const { results } = await db
 		.prepare(
 			`SELECT t.id FROM transactions t ${match.joins} WHERE ${["t.is_split = 0", ...match.where].join(" AND ")}`,
