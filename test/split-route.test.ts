@@ -453,6 +453,18 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 			announce: string;
 		};
 
+	/** The bank change: PURCHASE is whole again, its parts gone, and its note names the bills by id. */
+	async function bankChangeRemovedSplit(bills: string) {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(
+				PURCHASE,
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET is_split = 0, split_removed_from_cents = 5000, split_removed_bills = ? WHERE id = ?",
+			).bind(bills, PURCHASE),
+		]);
+	}
+
 	it("says the bill is no longer paid when a split is removed", async () => {
 		const response = await post(`/transactions/${PURCHASE}/split/remove`, [
 			["back", "/transactions"],
@@ -527,23 +539,38 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 		expect(sent.announce).toBe("Saved split for Costco.");
 	});
 
+	it("clears the bank change's bill names and amount when the purchase is split again", async () => {
+		await bankChangeRemovedSplit(
+			'[{"billId":9820,"name":"Costco membership","period":"2026"}]',
+		);
+
+		const response = await post(`/transactions/${PURCHASE}/split`, [
+			["part_category", "4"],
+			["part_category", "1"],
+			["part_amount", "35"],
+			["part_amount", "15"],
+			["back", "/transactions"],
+		]);
+
+		expect(response.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT is_split, split_removed_from_cents, split_removed_bills FROM transactions WHERE id = ?",
+			)
+				.bind(PURCHASE)
+				.first(),
+		).toEqual({
+			is_split: 1,
+			split_removed_from_cents: null,
+			split_removed_bills: null,
+		});
+	});
+
 	describe("after a bank change removed the split and the bill is paid again", () => {
 		const COSTCO_JSON =
 			'[{"billId":9820,"name":"Costco membership","period":"2026"}]';
 		const UNPAID_SENTENCE =
 			"The Costco membership bill for 2026 is no longer paid.";
-
-		/** The bank change: PURCHASE is whole again, its parts gone, and its note names the bills by id. */
-		async function bankChangeRemovedSplit(bills: string) {
-			await env.DB.batch([
-				env.DB.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(
-					PURCHASE,
-				),
-				env.DB.prepare(
-					"UPDATE transactions SET is_split = 0, split_removed_from_cents = 5000, split_removed_bills = ? WHERE id = ?",
-				).bind(bills, PURCHASE),
-			]);
-		}
 
 		const editPanel = async () =>
 			(await exports.default.fetch(`${BASE}/transactions/${PURCHASE}`)).text();
