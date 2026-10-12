@@ -853,6 +853,48 @@ describe("focus on an Undo toast", () => {
 	});
 });
 
+// #340: any answer the server gives to a bill's Undo ends its toast (undoDone names the token). The disabled Undo
+// drops focus to the body, so the bill's title takes it.
+describe("a bill's Undo answer ends its toast", () => {
+	const TOKEN = "12.9401.1791234567";
+	const billUndoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Payment unlinked. Undo for 10 seconds.",
+			undo: TOKEN,
+			undoExpiresInMs: 10000,
+			undoAction: "/bills/1/undo-unlink",
+		});
+
+	it.each([
+		["Undo expired. The payment stays unlinked.", "error"],
+		["That month already has a payment linked.", "success"],
+	])(
+		"ends the Undo toast with '%s', and focus goes to the bill's title",
+		async (message, type) => {
+			const { body, document, toasts, heading } = await page({
+				billPage: true,
+			});
+			const titleFocus = vi.spyOn(heading, "focus");
+			billUndoToast(body);
+			const undo = toasts.children[0] as FakeNode;
+			const form = undo.all().find((node) => node.tag === "form") as FakeNode;
+			form.dispatchEvent(new Event("submit"));
+			document.activeElement = body;
+			fire(body, "toast", { message, type, undoDone: TOKEN });
+			expect(toasts.children).not.toContain(undo);
+			expect(toasts.children).toHaveLength(1);
+			const answer = toasts.children[0] as FakeNode;
+			expect(answer.words()).toBe(message);
+			expect(answer.attrs.get("role")).toBe(
+				type === "error" ? "alert" : "status",
+			);
+			expect(titleFocus).toHaveBeenCalledTimes(1);
+			expect(document.activeElement).toBe(heading);
+			expect(heading.attrs.get("tabindex")).toBe("-1");
+		},
+	);
+});
+
 describe("an Undo request that fails", () => {
 	const undoToast = (body: EventTarget) =>
 		fire(body, "toast", {
