@@ -27,7 +27,8 @@
  *   leaves the posted row in Needs category with the note. A refund of one of its parts is unlinked with the
  *   purchase's date (decision 99). When the posted row keeps its own split, a pending part's bill payment stays paid on
  *   the posted part with the same amount and category, and otherwise it is unlinked, with no dismissal, so the matcher
- *   may link it again when it still matches (decisions 99 and 101).
+ *   may link it again when it still matches (decisions 99 and 105). A person's own Not this one on a pending part moves
+ *   to the posted row, and each posted part starts with it.
  * - Tally's AI log of what it did (spec section 5) follows the category it counts: its row moves to the posted row
  *   only when the pending row's category moves with it, so a person's later change is counted only on a category
  *   Tally still holds. Otherwise the row keeps counting with no transaction. An income row always moves.
@@ -37,6 +38,10 @@
 
 // Parameters, shared by every statement: 1 the pending id, 2 the posted id, 3 the bank's amount in
 // cents now, 4 and 5 the Item row and its lock, 6 to 8 the posted date, bank text and merchant name.
+import {
+	movePartDismissalsSql,
+	purchaseDismissalsToPartsSql,
+} from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { hasIncomeAnswerSql } from "../db/income";
 
@@ -245,11 +250,13 @@ const STATEMENTS = [
 	`UPDATE OR IGNORE bill_payments SET transaction_id = ${KEEP_PART}
 	 WHERE status = 'linked' AND transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING})
 	 AND ${READY} AND ${KEEP_PART} IS NOT NULL`,
-	// A pending part's bill payment that the posted part didn't keep is unlinked, with no dismissal, so the matcher may link
-	// it again when it still matches (decisions 99 and 101). The parts that moved to the posted row are not the pending
-	// row's parts any more, so their payments stay with them.
-	`DELETE FROM bill_payments
-	 WHERE status = 'linked' AND transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${READY}`,
+	// A person's own Not this one on a pending part moves to the posted row, and each posted part starts with the posted
+	// row's (decision 105). Both run while the pending parts still hang under the pending row, before the delete below.
+	movePartDismissalsSql(PENDING, POSTED, READY),
+	purchaseDismissalsToPartsSql(POSTED, READY),
+	// A pending part's bill payment that the posted part didn't keep goes with the pending row's delete below, with no
+	// dismissal, so the matcher may link it again when it still matches (decisions 99 and 105). The parts that moved to
+	// the posted row are not the pending row's parts any more, so their payments stay with them.
 	// Tally's log of the pending row's income moves to the posted row (spec section 5). It always moves, since the tally
 	// never reads the transaction of an income row, so it can't miscount. A category row moved above, with its category.
 	`UPDATE OR IGNORE ai_log SET transaction_id = ${POSTED} WHERE kind = 'income' AND transaction_id = ${PENDING} AND ${READY}`,

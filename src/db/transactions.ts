@@ -1,6 +1,10 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
+import {
+	movePartDismissalsSql,
+	purchaseDismissalsToPartsSql,
+} from "../bills/split-dismissals";
 import { STILL_UNPAID_BILLS_SQL, type UnpaidBill } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
@@ -1346,7 +1350,8 @@ const namedBills = (bills: UnpaidBill[]): UnpaidBill[] =>
  * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
  * keeps its unlink date on each new part, so the parts still say why (decision 99). The bill payments
  * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills
- * are returned by name (decisions 99 and 101).
+ * are returned by name (decisions 99 and 105). A person's own Not this one is kept on the purchase, and each
+ * new part starts with it.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1364,6 +1369,9 @@ export async function saveSplit(
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	const unchanged =
 		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	// The same check with numbered parameters, for the statements that keep a person's Not this one (decision 105).
+	const unchangedNumbered =
+		"EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)";
 	const reviewColumns = ", income_source, credit_reviewed, credit_reviewed_by";
 	const reviewValues =
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
@@ -1422,13 +1430,14 @@ export async function saveSplit(
 				WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ? OR id = ?) AND ${unchanged}`,
 			)
 			.bind(parentId, parentId, parentId, total),
-		...park,
-		// The replaced parts' bill payments are unlinked here, and no dismissal is left (decision 101). Kept ones moved above.
+		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105). It runs before
+		// park, since a payment a person linked by hand is parked as a dismissal on the purchase and would hide that one.
 		db
-			.prepare(
-				`DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?) AND ${unchanged}`,
-			)
-			.bind(parentId, parentId, total),
+			.prepare(movePartDismissalsSql("?1", "?1", unchangedNumbered))
+			.bind(parentId, total),
+		...park,
+		// The replaced parts go with their bill payments, which are unlinked with no dismissal left (decision 105).
+		// Kept ones moved above.
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
 			.bind(parentId, parentId, total),
@@ -1454,6 +1463,10 @@ export async function saveSplit(
 				),
 		),
 		...restore,
+		// Each new part starts with the purchase's own Not this one (decision 105), once the kept payments are restored.
+		db
+			.prepare(purchaseDismissalsToPartsSql("?1", unchangedNumbered))
+			.bind(parentId, total),
 		markParent,
 	];
 	const results = await db.batch(statements);
@@ -1630,9 +1643,9 @@ export async function correctCashSplit(
 /**
  * Deletes a split and restores its parent atomically, unlinking refunds of its parts and unlinking the bill
  * payments of its parts with no dismissal left, so the matcher may link them to the purchase again (decisions
- * 99 and 101). Returns the refunds' dates and the bills, by name. A split refund's parent is
- * whole again and counts by its own link, so that link is checked like a new one (src/db/refunded.ts) and
- * dropped if the refund no longer fits; its date is returned too.
+ * 99 and 105). A person's own Not this one on a part is kept on the purchase. Returns the refunds' dates and
+ * the bills, by name. A split refund's parent is whole again and counts by its own link, so that link is
+ * checked like a new one (src/db/refunded.ts) and dropped if the refund no longer fits; its date is returned too.
  */
 export async function removeSplit(
 	db: D1Database,
@@ -1651,11 +1664,8 @@ export async function removeSplit(
 				"UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=?)",
 			)
 			.bind(parentId),
-		db
-			.prepare(
-				"DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?)",
-			)
-			.bind(parentId),
+		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105).
+		db.prepare(movePartDismissalsSql("?1", "?1", "1")).bind(parentId),
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
 		db
 			.prepare(

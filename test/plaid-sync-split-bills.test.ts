@@ -207,17 +207,18 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 		expect(unpaidBillsNote(detail?.splitRemovedBills)).toBe("");
 	});
 
-	it("keeps a person's own Not this one on the purchase when the sync removes the split", async () => {
+	it("keeps a person's own Not this one from a part on the purchase when the sync removes the split", async () => {
 		const { item, purchase } = await splitPurchase();
 		await env.DB.prepare(
 			"UPDATE bills SET merchant_raw_name = 'Costco' WHERE id = ?",
 		)
 			.bind(MEMBERSHIP)
 			.run();
+		// A person marked the part's payment Not this one, so it is a dismissal on the part, not a link.
 		await env.DB.prepare(
-			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026', ?, 'user', 'dismissed')",
+			"UPDATE bill_payments SET status = 'dismissed', matched_by = 'user' WHERE bill_id = ?",
 		)
-			.bind(MEMBERSHIP, purchase)
+			.bind(MEMBERSHIP)
 			.run();
 
 		await syncItem(

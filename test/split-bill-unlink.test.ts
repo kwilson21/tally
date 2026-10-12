@@ -242,7 +242,7 @@ async function dismissedPayments(billId: number) {
 	return results;
 }
 
-describe("a split change leaves no dismissal, so the matcher may link the bill again (decision 101)", () => {
+describe("a split change leaves no dismissal, so the matcher may link the bill again (decision 105)", () => {
 	// The parts sum to $42.00, which the bill's tolerance accepts once they are one purchase again.
 	const smallPart = { ...groceriesPart, cents: 200 };
 
@@ -517,8 +517,44 @@ describe("Link a payment lists a split change's dismissal, and linking it links 
 	});
 });
 
-describe("a split change leaves no dismissal, and a person's Not this one is kept (decision 101)", () => {
+/** A person's Not this one for the membership's 2026 payment, on a transaction, as the matcher reads it. */
+const notThisOne = (transactionId: number) =>
+	db
+		.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026', ?, 'user', 'dismissed')",
+		)
+		.bind(MEMBERSHIP, transactionId)
+		.run();
+
+/** The dismissal a person's Not this one leaves on a transaction, as dismissedPayments reads it. */
+const userDismissal = (transactionId: number) => ({
+	transaction_id: transactionId,
+	period: "2026",
+	matched_by: "user",
+	status: "dismissed",
+});
+
+/** An unsplit $42.00 Costco purchase, as the bank sent it. */
+const seedPurchase = () =>
+	db
+		.prepare(
+			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (?, 3, '2026-09-15', 4200, 'COSTCO')",
+		)
+		.bind(PURCHASE)
+		.run();
+
+describe("a person's own Not this one survives a split change (decision 105)", () => {
 	const smallPart = { ...groceriesPart, cents: 200 };
+	const partWithoutBill = {
+		id: PART_MEMBERSHIP,
+		cents: 4000,
+		categoryId: KIDS,
+	};
+	// The parts a $42.00 purchase splits into, one of which the membership's $40.00 still matches within 10%.
+	const replacement = [
+		{ categoryId: KIDS, amountCents: 3800 },
+		{ categoryId: GROCERIES, amountCents: 400 },
+	];
 
 	it("leaves no dismissal through two replacements", async () => {
 		await seedSplit([membershipPart, smallPart]);
@@ -588,14 +624,119 @@ describe("a split change leaves no dismissal, and a person's Not this one is kep
 			"test",
 		);
 
+		// The purchase keeps its own, and each new part starts with it.
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
+			[PURCHASE, ...(await partIds(PURCHASE))].map(userDismissal),
+		);
+	});
+
+	it("keeps a person's Not this one on a part on the purchase when the split is removed", async () => {
+		await seedSplit([partWithoutBill, smallPart]);
+		await notThisOne(PART_MEMBERSHIP);
+
+		await removeSplit(db, PURCHASE, "test");
+		await matchBillPayments(db, TODAY);
+
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
 		expect(await dismissedPayments(MEMBERSHIP)).toEqual([
-			{
-				transaction_id: PURCHASE,
-				period: "2026",
-				matched_by: "user",
-				status: "dismissed",
-			},
+			userDismissal(PURCHASE),
 		]);
+	});
+
+	it("keeps a person's Not this one on a part on the purchase and on each new part when the parts are replaced", async () => {
+		await seedSplit([partWithoutBill, smallPart]);
+		await notThisOne(PART_MEMBERSHIP);
+
+		await saveSplit(db, PURCHASE, replacement, "test");
+		await matchBillPayments(db, TODAY);
+
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
+			[PURCHASE, ...(await partIds(PURCHASE))].map(userDismissal),
+		);
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+	});
+
+	it("gives every part of a first split the Not this one the unsplit purchase has", async () => {
+		await seedPurchase();
+		await notThisOne(PURCHASE);
+
+		await saveSplit(db, PURCHASE, replacement, "test");
+		await matchBillPayments(db, TODAY);
+
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
+			[PURCHASE, ...(await partIds(PURCHASE))].map(userDismissal),
+		);
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+	});
+
+	it("starts a split made after a removal with the purchase's Not this one", async () => {
+		await seedPurchase();
+		await notThisOne(PURCHASE);
+		await saveSplit(db, PURCHASE, replacement, "test");
+		await removeSplit(db, PURCHASE, "test");
+
+		await saveSplit(db, PURCHASE, replacement, "test");
+		await matchBillPayments(db, TODAY);
+
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
+			[PURCHASE, ...(await partIds(PURCHASE))].map(userDismissal),
+		);
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+	});
+
+	it("keeps a payment a person linked by hand on its new part, with no dismissal left behind", async () => {
+		await seedSplit([membershipPart, smallPart]);
+		await db
+			.prepare(
+				"UPDATE bill_payments SET matched_by = 'user' WHERE transaction_id = ?",
+			)
+			.bind(PART_MEMBERSHIP)
+			.run();
+
+		await saveSplit(
+			db,
+			PURCHASE,
+			[
+				{ categoryId: KIDS, amountCents: 4000 },
+				{ categoryId: GROCERIES, amountCents: 200 },
+			],
+			"test",
+		);
+
+		const [kept] = await partIds(PURCHASE);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: kept, parentId: PURCHASE, matchedBy: "user" },
+		]);
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
+	});
+
+	it("keeps a part's Not this one when a hand-linked payment for the same bill is kept beside it", async () => {
+		await seedSplit([membershipPart, smallPart]);
+		await db
+			.prepare(
+				"UPDATE bill_payments SET matched_by = 'user' WHERE transaction_id = ?",
+			)
+			.bind(PART_MEMBERSHIP)
+			.run();
+		await notThisOne(PART_GROCERIES);
+
+		await saveSplit(
+			db,
+			PURCHASE,
+			[
+				{ categoryId: KIDS, amountCents: 4000 },
+				{ categoryId: GROCERIES, amountCents: 200 },
+			],
+			"test",
+		);
+
+		const parts = await partIds(PURCHASE);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: parts[0], matchedBy: "user" },
+		]);
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
+			[PURCHASE, ...parts].map(userDismissal),
+		);
 	});
 
 	it("gives a new split of the purchase no dismissal, after removeSplit", async () => {
