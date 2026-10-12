@@ -581,6 +581,61 @@ describe("transfers", () => {
 		expect(textOf(html)).not.toContain("Leave it out of the budget?");
 		expect(textOf(html)).toContain("Suggestions · 1 of 4");
 	});
+
+	it("doesn't ask a transfer about a payment linked to a bill, and a stale Yes for it leaves it as it was", async () => {
+		const ids = await oneOfEach();
+		const bill = await row(
+			"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Card', 20000, 1, 'monthly', ?) RETURNING id",
+			CHASE,
+		);
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, ids.transfer)
+			.run();
+		const { html } = await get("/settings/suggestions");
+		expect(html).not.toContain(`value="transfer-${ids.transfer}"`);
+		expect(textOf((await get("/settings")).html)).toContain(
+			"4 suggestions to check",
+		);
+		const before = await row(
+			"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
+			ids.transfer,
+		);
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id: `transfer-${ids.transfer}`, answer: "yes" },
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(
+			await row(
+				"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
+				ids.transfer,
+			),
+		).toEqual(before);
+	});
+
+	it("a person's explicit include settles the transfer Maybe: a Yes for it leaves it in the budget", async () => {
+		const ids = await oneOfEach();
+		await db
+			.prepare("UPDATE transactions SET excluded_source = 'user' WHERE id = ?")
+			.bind(ids.transfer)
+			.run();
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id: `transfer-${ids.transfer}`, answer: "yes" },
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(
+			await row(
+				"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
+				ids.transfer,
+			),
+		).toMatchObject({ excluded: 0, excluded_source: "user" });
+	});
 });
 
 describe("categories", () => {
@@ -715,6 +770,49 @@ describe("categories", () => {
 		expect(textOf(html)).toContain("Pick a category.");
 		// The error points at the chips, so Something else is open with them in it.
 		expect(html).toMatch(/<details[^>]*\bopen/);
+	});
+
+	it("Yes on an excluded bill payment's category sets it as the person's", async () => {
+		const eatingOut = await categoryId("Eating Out");
+		const paying = await insertTx({
+			raw: "GYM MEMBERSHIP",
+			amount: 2300,
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		await db
+			.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
+			.bind(paying)
+			.run();
+		const bill = await row(
+			"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Gym', 2300, 1, 'monthly', 'GYM MEMBERSHIP') RETURNING id",
+		);
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, paying)
+			.run();
+		const { html } = await get("/settings/suggestions");
+		expect(html).toContain(`value="category-${paying}"`);
+		expect(textOf((await get("/settings")).html)).toContain(
+			"1 suggestion to check",
+		);
+		await post(
+			"/settings/suggestions",
+			{ id: `category-${paying}`, answer: "yes" },
+			true,
+		);
+		expect(
+			await row(
+				"SELECT category_id, category_source, excluded FROM transactions WHERE id = ?",
+				paying,
+			),
+		).toMatchObject({
+			category_id: eatingOut,
+			category_source: "user",
+			excluded: 1,
+		});
 	});
 });
 

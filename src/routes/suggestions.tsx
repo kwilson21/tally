@@ -18,7 +18,11 @@ import {
 	type NeverSuggestKind,
 	questionStores,
 } from "../db/never-suggest";
-import { type SuggestionItem, suggestionQueue } from "../db/suggestions-queue";
+import {
+	type SuggestionItem,
+	suggestionQueue,
+	transferAskedSql,
+} from "../db/suggestions-queue";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -410,7 +414,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET excluded = 1, excluded_source = 'user', transfer_confidence = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND excluded = 0 AND refund_of_id IS NULL`,
+						WHERE id = ? AND ${transferAskedSql("transactions")}`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -423,7 +427,7 @@ suggestions.post(PATH, async (c) => {
 				const result = await db
 					.prepare(
 						`UPDATE transactions SET transfer_maybe_declined = 1
-						WHERE id = ? AND transfer_maybe_declined = 0 AND excluded = 0 AND COALESCE(excluded_source, '') != 'user' AND refund_of_id IS NULL`,
+						WHERE id = ? AND ${transferAskedSql("transactions")}`,
 					)
 					.bind(item.transactionId)
 					.run();

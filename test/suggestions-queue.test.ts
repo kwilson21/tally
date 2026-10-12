@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AI_SWITCHES_ALL_ON, type AiSwitches } from "../src/db/ai-switches";
 import { addNeverSuggest } from "../src/db/never-suggest";
-import { suggestionQueue } from "../src/db/suggestions-queue";
+import { suggestionQueue, transferAskedSql } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 
 // The one review screen's queue (spec §8.6, decisions 79 and 101, issue #195): every "Maybe …" a person
@@ -375,6 +375,34 @@ describe("suggestionQueue", () => {
 		expect(income).toEqual([paying]);
 	});
 
+	it("never asks a transfer about a payment linked to a bill, since leaving it out can't take it out of the budget", async () => {
+		const paying = await transaction({
+			amount: 20000,
+			raw: "CHASE CARD PAYMENT",
+			transferConfidence: 0.5,
+		});
+		const unlinked = await transaction({
+			amount: 20000,
+			raw: "CHASE CARD OTHER",
+			transferConfidence: 0.5,
+		});
+		const bill = await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Card', 20000, 1, 'monthly', 'CHASE CARD PAYMENT') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, paying)
+			.run();
+		const transfers = (await suggestionQueue(db, AI_SWITCHES_ALL_ON)).flatMap(
+			(item) => (item.kind === "transfer" ? [item.transactionId] : []),
+		);
+		expect(transfers).toEqual([unlinked]);
+	});
+
 	it("never asks a category for a transaction a person or Tally left out of the budget", async () => {
 		await transaction({
 			amount: 2300,
@@ -388,6 +416,38 @@ describe("suggestionQueue", () => {
 				(item) => item.kind === "category",
 			),
 		).toEqual([]);
+	});
+
+	it("asks the category of an excluded transaction that pays a bill, as its row shows the Maybe, and not one left out", async () => {
+		const paying = await transaction({
+			amount: 2300,
+			raw: "GYM MEMBERSHIP",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+			excluded: 1,
+		});
+		await transaction({
+			amount: 2300,
+			raw: "LEFT OUT TAQ",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+			excluded: 1,
+		});
+		const bill = await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Gym', 2300, 1, 'monthly', 'GYM MEMBERSHIP') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, paying)
+			.run();
+		const categories = (await suggestionQueue(db, AI_SWITCHES_ALL_ON)).flatMap(
+			(item) => (item.kind === "category" ? [item.transactionId] : []),
+		);
+		expect(categories).toEqual([paying]);
 	});
 
 	it("asks no category about a credit held for review until a person or Tally reviews it, as Organize leaves it out, but still asks money out", async () => {
@@ -418,5 +478,73 @@ describe("suggestionQueue", () => {
 
 	it("is empty when nothing waits", async () => {
 		expect(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).toEqual([]);
+	});
+});
+
+describe("transferAskedSql", () => {
+	it("matches only a plain unsure transfer, the same check the queue and the Yes and No writes share", async () => {
+		const plain = await transaction({
+			amount: 20000,
+			raw: "PLAIN TRANSFER",
+			transferConfidence: 0.5,
+		});
+		await transaction({
+			amount: 20000,
+			raw: "USER INCLUDED",
+			transferConfidence: 0.5,
+			excludedSource: "user",
+		});
+		await transaction({
+			amount: 20000,
+			raw: "LEFT OUT BY TALLY",
+			transferConfidence: 0.5,
+			excluded: 1,
+		});
+		await transaction({
+			amount: 20000,
+			raw: "FLAGGED TRANSFER",
+			transferConfidence: 0.5,
+			flagTransfer: 1,
+		});
+		await transaction({ amount: 20000, raw: "JEV SURE NOW" });
+		await transaction({
+			amount: 20000,
+			raw: "INCOME ROW",
+			transferConfidence: 0.5,
+			flagIncome: 1,
+		});
+		const declined = await transaction({
+			amount: 20000,
+			raw: "DECLINED TRANSFER",
+			transferConfidence: 0.5,
+		});
+		await db
+			.prepare(
+				"UPDATE transactions SET transfer_maybe_declined = 1 WHERE id = ?",
+			)
+			.bind(declined)
+			.run();
+		const bill = await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Card', 20000, 1, 'monthly', 'LINKED PAYMENT') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const paying = await transaction({
+			amount: 20000,
+			raw: "LINKED PAYMENT",
+			transferConfidence: 0.5,
+		});
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, paying)
+			.run();
+		const asked = await db
+			.prepare(
+				`SELECT id FROM transactions WHERE ${transferAskedSql("transactions")} ORDER BY id`,
+			)
+			.all<{ id: number }>();
+		expect(asked.results.map((row) => row.id)).toEqual([plain]);
 	});
 });

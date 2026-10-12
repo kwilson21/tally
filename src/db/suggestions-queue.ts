@@ -168,7 +168,19 @@ async function incomeSuggestions(
 		}));
 }
 
-/** Transfer: money out or in Tally is unsure is a transfer and nobody has decided, or said No to (`transfer_maybe_declined`). */
+/**
+ * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias).
+ */
+export const transferAskedSql = (alias: string) =>
+	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.transfer_confidence IS NOT NULL
+		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
+		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = 0
+		AND NOT ${paysBillSql(alias)})`;
+
+/**
+ * Transfer: money out or in Tally is unsure is a transfer and nobody has decided, or said No to (`transfer_maybe_declined`).
+ * A payment linked to a bill is never asked, since it counts whatever its exclusion (spec §6.1 rule 4).
+ */
 async function transferSuggestions(
 	db: D1Database,
 	never: Set<string>,
@@ -178,9 +190,7 @@ async function transferSuggestions(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS bankText, ${merchantKeySql("t")} AS merchantKey, ${LABEL_SQL},
 				t.transfer_confidence AS transferConfidence
 			FROM transactions t ${JOIN_MERCHANT}
-			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.transfer_confidence IS NOT NULL
-				AND t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(t.excluded_source, '') != 'user' AND t.refund_of_id IS NULL
-				AND t.flag_income = 0 AND t.transfer_maybe_declined = 0`,
+			WHERE ${transferAskedSql("t")}`,
 		)
 		.all<Candidate & { transferConfidence: number }>();
 	return results
@@ -210,7 +220,8 @@ async function transferSuggestions(
 /**
  * A category Tally guessed and nobody has set. Shown the same way as the row's dashed "Maybe" (the
  * category join in `MAYBE_CATEGORY_COLUMNS`): an active category, and an unsure guess. A credit held for
- * review waits until it is reviewed, as Needs category and Organize leave it out (decision 70).
+ * review waits until it is reviewed, as Needs category and Organize leave it out (decision 70). A payment
+ * linked to a bill is asked even when excluded, as its row shows the Maybe (`jevAsksAboutSql` keeps the rest out).
  */
 async function categorySuggestions(
 	db: D1Database,
@@ -222,7 +233,7 @@ async function categorySuggestions(
 			FROM transactions t ${JOIN_MERCHANT}
 			JOIN categories c ON c.id = t.jev_category_id AND c.archived = 0
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.category_id IS NULL AND t.category_source IS NULL
-				AND t.category_confidence < ? AND t.flag_income = 0 AND t.excluded = 0 AND ${jevAsksAboutSql("t")}
+				AND t.category_confidence < ? AND t.flag_income = 0 AND ${jevAsksAboutSql("t")}
 				AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`,
 		)
 		.bind(JEV_THRESHOLD)
