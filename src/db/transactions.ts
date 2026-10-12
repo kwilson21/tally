@@ -197,27 +197,18 @@ const RAW_SHOW_SQL: Record<Show, string | null> = {
 	excluded: bankRowSql(SHOW_SQL.excluded ?? ""),
 };
 
-/** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
-export async function listTransactions(
-	db: D1Database,
+/**
+ * What the filters match, as SQL (#211, #321): the joins their terms read, and the terms with their binds,
+ * in order, to be AND-ed. The list and Select all share it, so a filter added later reaches both.
+ */
+export function filterMatch(
 	f: Filters,
-	/** Only these transactions, unpaged and whatever the filters (see listRowsByIds). */
+	namesOn: boolean,
+	detailsOn: boolean,
 	ids?: number[],
-): Promise<{
-	rows: ListRow[];
-	total: number;
-	page: number;
-	pages: number;
-	/** What the rows matched the search by, for the count's note (#211). */
-	matched: SearchMatch;
-}> {
+) {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
-	const {
-		names: namesOn,
-		details: detailsOn,
-		income: incomeOn,
-	} = await readAiSwitches(db);
 	const rowMonth = f.raw ? "substr(t.date,1,7)" : COUNTED_MONTH;
 	const rowCategory = f.raw ? "t.category_id" : COUNTED_CATEGORY;
 	if (f.month !== "all") {
@@ -286,12 +277,46 @@ export async function listTransactions(
 		}
 	}
 
-	// The row shows the category it counts in, so a linked refund shows its purchase's.
-	const from = `FROM transactions t
-			${COUNTED_JOINS}
+	return {
+		joins: `${COUNTED_JOINS}
 			LEFT JOIN categories c ON c.id = ${COUNTED_CATEGORY}
 			${MAYBE_CATEGORY_JOINS}
-			LEFT JOIN transactions p ON p.id = t.parent_id
+			LEFT JOIN transactions p ON p.id = t.parent_id`,
+		where,
+		args,
+		categoryPattern,
+		amountSearch,
+	};
+}
+
+/** One page of transactions matching the filters, newest first. A page past the end shows the last page. */
+export async function listTransactions(
+	db: D1Database,
+	f: Filters,
+	/** Only these transactions, unpaged and whatever the filters (see listRowsByIds). */
+	ids?: number[],
+): Promise<{
+	rows: ListRow[];
+	total: number;
+	page: number;
+	pages: number;
+	/** What the rows matched the search by, for the count's note (#211). */
+	matched: SearchMatch;
+}> {
+	const {
+		names: namesOn,
+		details: detailsOn,
+		income: incomeOn,
+	} = await readAiSwitches(db);
+	const { joins, where, args, categoryPattern, amountSearch } = filterMatch(
+		f,
+		namesOn,
+		detailsOn,
+		ids,
+	);
+	// The row shows the category it counts in, so a linked refund shows its purchase's.
+	const from = `FROM transactions t
+			${joins}
 			${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`;
 
 	// What the rows matched, in the same statement as the count (#211): whether any counted row matched by its
@@ -466,6 +491,25 @@ export async function listRowsByIds(
 		ids,
 	);
 	return rows;
+}
+
+/**
+ * The rows a bulk action can change (no split parent) that the filters match, whatever the page (#321): what
+ * Select all means. Counted on every request, so a changed filter or a new transaction changes the set.
+ */
+export async function selectableMatchIds(
+	db: D1Database,
+	f: Filters,
+): Promise<number[]> {
+	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
+	const match = filterMatch(f, namesOn, detailsOn);
+	const { results } = await db
+		.prepare(
+			`SELECT t.id FROM transactions t ${match.joins} WHERE ${["t.is_split = 0", ...match.where].join(" AND ")}`,
+		)
+		.bind(...match.args)
+		.all<{ id: number }>();
+	return results.map((row) => row.id);
 }
 
 /**
@@ -2330,11 +2374,12 @@ export async function payingBillsCount(
 	ids: number[],
 ): Promise<number> {
 	if (ids.length === 0) return 0;
+	// One bind for the whole list (D1 takes 100 binds at most), so Select all can count past 100 (#321).
 	const row = await db
 		.prepare(
-			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (${ids.map(() => "?").join(",")}) AND ${paysBillSql("t")}`,
+			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${paysBillSql("t")}`,
 		)
-		.bind(...ids)
+		.bind(JSON.stringify(ids))
 		.first<{ n: number }>();
 	return row?.n ?? 0;
 }
