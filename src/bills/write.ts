@@ -27,6 +27,11 @@ export type BillFields = {
 	anchorDate?: string | null;
 	categoryId: number;
 	merchantRawName: string;
+	/**
+	 * The bank text as the person typed it, before it became a key; a bill from before Phase 3.5 keeps its
+	 * merchant_raw_text flag only when this is its stored text. Defaults to merchantRawName.
+	 */
+	typedMerchantText?: string;
 };
 
 /** True when no other active bill has the name; binds the bill's own id (null for a new bill), then the name. */
@@ -89,8 +94,9 @@ export async function insertBill(
  * that is the bill's own, as it is stored (spaces and A to Z case aside), is never checked, so a
  * bill that already shares its name with another one (the data may hold such pairs from before this
  * rule) can still have its amount or day changed; only a new name has to be free.
- * A changed merchant text is a new write, saved as a key (`merchant_raw_text` 0); an unchanged one keeps
- * its flag, so a bill from before Phase 3.5 keeps matching on the bank's raw text (spec §6.1).
+ * A changed merchant text is a new write, saved as a key (`merchant_raw_text` 0): the typed text
+ * (`typedMerchantText`) differs from the stored one, even when its key is the stored text. A text the bill
+ * already has keeps its flag, so a bill from before Phase 3.5 keeps matching on the bank's raw text (spec §6.1).
  * `dropDismissals` is for a changed schedule: old dismissals no longer apply (period keys have
  * different shapes, YYYY-MM against YYYY), and they go in the same batch, once the update applied.
  */
@@ -128,7 +134,7 @@ export async function updateBill(
 			f.anchorMonth,
 			f.anchorDate ?? null,
 			f.categoryId,
-			f.merchantRawName,
+			f.typedMerchantText ?? f.merchantRawName,
 			f.merchantRawName,
 			id,
 			f.name,

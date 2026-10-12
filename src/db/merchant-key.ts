@@ -93,3 +93,22 @@ export const merchantTextArgs = (bill: {
 export function sameMerchantSql(a: string, b: string): string {
 	return `(${merchantKeySql(a)} = ${merchantKeySql(b)} OR (${a}.raw_name = ${b}.raw_name AND (NULLIF(${a}.merchant_name, '') IS NULL OR NULLIF(${b}.merchant_name, '') IS NULL)))`;
 }
+
+/**
+ * The merchant key of the newest transaction whose bank text (its raw name) is `bankText`, or `bankText`
+ * itself when no transaction has it. A bill typed with the bank's text saves this key, so its payments,
+ * which match by key, match it (spec §6.1; #338). The newest charge decides, as a bank text's Plaid name does.
+ */
+export async function merchantKeyOfBankText(
+	db: D1Database,
+	bankText: string,
+): Promise<string> {
+	const row = await db
+		.prepare(
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions
+			 WHERE raw_name = ? ORDER BY date DESC, id DESC LIMIT 1`,
+		)
+		.bind(bankText)
+		.first<{ merchantKey: string }>();
+	return row?.merchantKey ?? bankText;
+}

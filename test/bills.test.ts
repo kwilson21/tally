@@ -528,6 +528,139 @@ describe("Bills", () => {
 		).toBe(4250);
 	});
 
+	describe("the bank text a bill is typed with", () => {
+		const saveBill = (path: string, fields: Record<string, string>) =>
+			exports.default.fetch(`http://tally.test${path}`, {
+				method: "POST",
+				redirect: "manual",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams(fields),
+			});
+		const stored = (name: string) =>
+			env.DB.prepare(
+				"SELECT id, merchant_raw_name AS text, merchant_raw_text AS flag FROM bills WHERE name = ?",
+			)
+				.bind(name)
+				.first<{ id: number; text: string; flag: number }>();
+
+		it("saves the store the bank names, so the charge with that bank text links to the bill", async () => {
+			// The demo's $16.43 CVS charge. Its own day is the bill's due day, so the charge is the one it links.
+			const charge = await env.DB.prepare(
+				"SELECT id, date FROM transactions WHERE raw_name = 'CHECKCARD 0921 CVS'",
+			).first<{ id: number; date: string }>();
+			const res = await saveBill("/bills", {
+				name: "Pharmacy",
+				amount: "16.43",
+				due_day: String(Number(charge?.date.slice(8))),
+				frequency: "monthly",
+				category_id: "1",
+				merchant_raw_name: "CHECKCARD 0921 CVS",
+			});
+			expect(res.status).toBe(303);
+			const bill = await stored("Pharmacy");
+			expect(bill).toMatchObject({ text: "CVS Pharmacy", flag: 0 });
+			const linked = await env.DB.prepare(
+				"SELECT transaction_id AS id FROM bill_payments WHERE bill_id = ? AND status = 'linked'",
+			)
+				.bind(bill?.id)
+				.all();
+			expect(linked.results).toEqual([{ id: charge?.id }]);
+		});
+
+		it("saves a bank text no transaction has as typed", async () => {
+			const text = "SUNNY VALLEY PET 0412";
+			expect(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = ?",
+				)
+					.bind(text)
+					.first("n"),
+			).toBe(0);
+			const res = await saveBill("/bills", {
+				name: "Vet",
+				amount: "40",
+				due_day: "5",
+				frequency: "monthly",
+				category_id: "1",
+				merchant_raw_name: text,
+			});
+			expect(res.status).toBe(303);
+			expect(await stored("Vet")).toMatchObject({ text, flag: 0 });
+		});
+
+		it("keeps a bill saved under the bank text before merchant keys while only its amount changes", async () => {
+			await env.DB.prepare(
+				"INSERT INTO bills (id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text) VALUES (9681,'Legacy pharmacy',1643,14,'monthly',1,'CHECKCARD 0921 CVS',1)",
+			).run();
+			const res = await saveBill("/bills/9681", {
+				name: "Legacy pharmacy",
+				amount: "17.00",
+				due_day: "14",
+				frequency: "monthly",
+				category_id: "1",
+				merchant_raw_name: "CHECKCARD 0921 CVS",
+			});
+			expect(res.status).toBe(303);
+			expect(
+				await env.DB.prepare(
+					"SELECT amount_cents AS cents, merchant_raw_name AS text, merchant_raw_text AS flag FROM bills WHERE id = 9681",
+				).first(),
+			).toEqual({ cents: 1700, text: "CHECKCARD 0921 CVS", flag: 1 });
+		});
+
+		it("saves a bank text typed on an edit as its transaction's key", async () => {
+			await env.DB.prepare(
+				"INSERT INTO bills (id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text) VALUES (9682,'Changed pharmacy',1643,14,'monthly',1,'OLD PHARMACY TEXT',1)",
+			).run();
+			const res = await saveBill("/bills/9682", {
+				name: "Changed pharmacy",
+				amount: "16.43",
+				due_day: "14",
+				frequency: "monthly",
+				category_id: "1",
+				merchant_raw_name: "CHECKCARD 0921 CVS",
+			});
+			expect(res.status).toBe(303);
+			expect(await stored("Changed pharmacy")).toMatchObject({
+				text: "CVS Pharmacy",
+				flag: 0,
+			});
+		});
+
+		it("clears the legacy flag when a changed bank text's store is the text the bill already holds", async () => {
+			// The demo's $16.43 CVS charge, on the day the bill is due, as the first test above uses.
+			const charge = await env.DB.prepare(
+				"SELECT id, date FROM transactions WHERE raw_name = 'CHECKCARD 0921 CVS'",
+			).first<{ id: number; date: string }>();
+			const dueDay = String(Number(charge?.date.slice(8)));
+			await env.DB.prepare(
+				"INSERT INTO bills (id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text) VALUES (9683,'Legacy CVS',1643,?,'monthly',1,'CVS Pharmacy',1)",
+			)
+				.bind(Number(dueDay))
+				.run();
+			const res = await saveBill("/bills/9683", {
+				name: "Legacy CVS",
+				amount: "16.43",
+				due_day: dueDay,
+				frequency: "monthly",
+				category_id: "1",
+				merchant_raw_name: "CHECKCARD 0921 CVS",
+			});
+			expect(res.status).toBe(303);
+			expect(await stored("Legacy CVS")).toMatchObject({
+				text: "CVS Pharmacy",
+				flag: 0,
+			});
+			const linked = await env.DB.prepare(
+				"SELECT transaction_id AS id FROM bill_payments WHERE bill_id = 9683 AND status = 'linked'",
+			).all();
+			expect(linked.results).toEqual([{ id: charge?.id }]);
+		});
+	});
+
 	it("focuses the sheet heading and uses CSS to reveal the yearly month", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/new")
