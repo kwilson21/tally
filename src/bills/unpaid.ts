@@ -65,7 +65,17 @@ export function unpaidBillsNote(stored: string | null | undefined): string {
  * It must run before those parts are deleted, since their payments go with them.
  */
 export const UNPAID_BILLS_SQL = (parent: string) =>
-	`NULLIF((SELECT json_group_array(json_object('name', name, 'period', period)) FROM (
-		SELECT b.name AS name, bp.period AS period FROM bill_payments bp
+	`NULLIF((SELECT json_group_array(json_object('billId', billId, 'name', name, 'period', period)) FROM (
+		SELECT b.id AS billId, b.name AS name, bp.period AS period FROM bill_payments bp
 		JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
 		WHERE part.parent_id = ${parent} AND bp.status = 'linked' ORDER BY bp.id)), '[]')`;
+
+/**
+ * SQL for the bills in a stored split_removed_bills value (`column`) that are still unpaid: the entries whose
+ * occurrence has no linked payment now, as the same JSON, or NULL when none. An entry without a billId can't
+ * be checked, so it stays. A bill paid again drops out of the purchase's note (decision 99).
+ */
+export const STILL_UNPAID_BILLS_SQL = (column: string) =>
+	`(SELECT NULLIF(json_group_array(json(e.value)), '[]') FROM json_each(${column}) e
+		WHERE NOT EXISTS (SELECT 1 FROM bill_payments bp
+			WHERE bp.bill_id = json_extract(e.value, '$.billId') AND bp.period = json_extract(e.value, '$.period') AND bp.status = 'linked'))`;

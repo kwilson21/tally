@@ -213,7 +213,7 @@ function splitBillStatements(
 		).bind(plaidTransactionId, cents, itemRowId, lockId),
 		env.DB.prepare(
 			`UPDATE bill_payments SET transaction_id = ${purchase}, status = 'dismissed', matched_by = 'auto'
-			 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${purchase}) AND status = 'linked' AND ${OWNS_LOCK}`,
+			 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${purchase}) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto')) AND ${OWNS_LOCK}`,
 		).bind(
 			plaidTransactionId,
 			cents,

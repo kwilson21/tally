@@ -13,7 +13,8 @@ import { encryptToken } from "../src/plaid/token-crypto";
 const KEY = btoa("01234567890123456789012345678901");
 const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
 const MEMBERSHIP = 9840;
-const MEMBERSHIP_JSON = '[{"name":"Costco membership","period":"2026"}]';
+const MEMBERSHIP_JSON =
+	'[{"billId":9840,"name":"Costco membership","period":"2026"}]';
 
 const response = (body: unknown) =>
 	new Response(JSON.stringify(body), {
@@ -236,6 +237,49 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 				.bind(MEMBERSHIP, purchase)
 				.first<{ n: number }>(),
 		).toEqual({ n: 1 });
+	});
+
+	it("carries a dismissal a replacement left on its parts onto the purchase when the bank changes the amount again", async () => {
+		const { item, purchase } = await splitPurchase();
+		await env.DB.prepare(
+			"UPDATE bills SET merchant_raw_name = 'Costco' WHERE id = ?",
+		)
+			.bind(MEMBERSHIP)
+			.run();
+		// A person replaces the parts, unlinking the bill: each new part is dismissed for it.
+		await saveSplit(
+			env.DB,
+			purchase,
+			[
+				{ categoryId: 4, amountCents: 3500 },
+				{ categoryId: 1, amountCents: 1500 },
+			],
+			"person@example.com",
+		);
+
+		// $42.00 on the same day: the bill's tolerance would link the purchase if nothing dismissed it.
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 42 })] }),
+		);
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		const { results } = await env.DB.prepare(
+			"SELECT bill_id, period, transaction_id, matched_by, status FROM bill_payments WHERE bill_id = ?",
+		)
+			.bind(MEMBERSHIP)
+			.all();
+		// Each new part carried a copy, and each copy moves onto the purchase.
+		expect(results.length).toBeGreaterThan(0);
+		for (const row of results)
+			expect(row).toEqual({
+				bill_id: MEMBERSHIP,
+				period: "2026",
+				transaction_id: purchase,
+				matched_by: "auto",
+				status: "dismissed",
+			});
 	});
 
 	it("stores no bill names when the split's parts paid none", async () => {

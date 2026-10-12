@@ -499,8 +499,8 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 		const response = await post(`/transactions/${PURCHASE}/split`, [
 			["part_category", "4"],
 			["part_category", "1"],
-			["part_amount", "40"],
-			["part_amount", "10"],
+			["part_amount", "35"],
+			["part_amount", "15"],
 			["back", "/transactions"],
 		]);
 		expect(response.status).toBe(200);
@@ -511,5 +511,93 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 		expect(sent.announce).toBe(
 			"Saved split for Costco. The Costco membership bill for 2026 is no longer paid.",
 		);
+	});
+
+	it("says nothing about a bill when the parts keep its payment", async () => {
+		const response = await post(`/transactions/${PURCHASE}/split`, [
+			["part_category", "4"],
+			["part_category", "2"],
+			["part_amount", "40"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		expect(response.status).toBe(200);
+		const sent = await trigger(response);
+		expect(sent.toast.message).toBe("Split Costco");
+		expect(sent.announce).toBe("Saved split for Costco.");
+	});
+
+	describe("after a bank change removed the split and the bill is paid again", () => {
+		const COSTCO_JSON =
+			'[{"billId":9820,"name":"Costco membership","period":"2026"}]';
+		const UNPAID_SENTENCE =
+			"The Costco membership bill for 2026 is no longer paid.";
+
+		/** The bank change: PURCHASE is whole again, its parts gone, and its note names the bills by id. */
+		async function bankChangeRemovedSplit(bills: string) {
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(
+					PURCHASE,
+				),
+				env.DB.prepare(
+					"UPDATE transactions SET is_split = 0, split_removed_from_cents = 5000, split_removed_bills = ? WHERE id = ?",
+				).bind(bills, PURCHASE),
+			]);
+		}
+
+		const editPanel = async () =>
+			(await exports.default.fetch(`${BASE}/transactions/${PURCHASE}`)).text();
+		const linkByHand = (bill: number, period: string, transaction: number) =>
+			post(`/bills/${bill}/link`, [
+				["transaction_id", String(transaction)],
+				["period", period],
+				["opened_period", period],
+			]);
+
+		it("drops the bill sentence from the edit panel and the list once the purchase is linked to the bill", async () => {
+			await bankChangeRemovedSplit(COSTCO_JSON);
+			expect(await editPanel()).toContain(UNPAID_SENTENCE);
+
+			await linkByHand(9820, "2026", PURCHASE);
+
+			const html = await editPanel();
+			expect(html).toContain("so its split was removed.");
+			expect(html).not.toContain("no longer paid");
+			const list = await (
+				await exports.default.fetch(`${BASE}/transactions?q=COSTCO&month=all`)
+			).text();
+			expect(list).toContain("so its split was removed.");
+			expect(list).not.toContain("no longer paid");
+		});
+
+		it("drops the bill sentence the same way when a different payment is linked to the occurrence", async () => {
+			await env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (9833, 3, '2026-09-15', 5000, 'COSTCO')",
+			).run();
+			await bankChangeRemovedSplit(COSTCO_JSON);
+
+			await linkByHand(9820, "2026", 9833);
+
+			const html = await editPanel();
+			expect(html).toContain("so its split was removed.");
+			expect(html).not.toContain("no longer paid");
+		});
+
+		it("names the bill still unpaid when another one is paid again", async () => {
+			await bankChangeRemovedSplit(
+				'[{"billId":9820,"name":"Costco membership","period":"2026"},{"billId":9821,"name":"Water","period":"2026-09"}]',
+			);
+			await env.DB.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (9834, 3, '2026-09-15', 4000, 'COSTCO')",
+			).run();
+
+			await linkByHand(9820, "2026", 9834);
+
+			const html = await editPanel();
+			expect(html).toContain(
+				"The Water bill for September 2026 is no longer paid.",
+			);
+			expect(html).not.toContain(UNPAID_SENTENCE);
+		});
 	});
 });

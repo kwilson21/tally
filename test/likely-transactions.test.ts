@@ -4,9 +4,11 @@ import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import {
 	addLikely,
 	LIKELY_LIMIT,
+	type LikelyRow,
 	likelyTransactions,
 } from "../src/db/likely-transactions";
 import { resetDemo } from "../src/demo/reset";
+import { TransactionRow } from "../src/views/transaction-row";
 
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
@@ -397,6 +399,34 @@ describe("addLikely", () => {
 		expect(await splitBills(ticked)).toBeNull();
 		expect(await splitBills(unticked)).toBe(
 			'[{"name":"Water","period":"2026-09"}]',
+		);
+	});
+
+	it("gives a likely row its bank-change note, so its row names the bill still unpaid (decision 99)", async () => {
+		const row = await tx(
+			`${THIS}-07`,
+			18742,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		await env.DB.prepare(
+			"UPDATE transactions SET split_removed_from_cents = 18742, split_removed_bills = ? WHERE id = ?",
+		)
+			.bind('[{"billId":9860,"name":"Costco membership","period":"2026"}]', row)
+			.run();
+
+		const likely = (
+			await likelyTransactions(env.DB, saved, "Pet Care", TODAY)
+		).find((found) => found.id === row);
+
+		expect(likely?.splitRemovedFromCents).toBe(18742);
+		expect(likely?.splitRemovedBills).toBe(
+			'[{"billId":9860,"name":"Costco membership","period":"2026"}]',
+		);
+		expect(
+			await TransactionRow({ row: likely as LikelyRow }).toString(),
+		).toContain(
+			"The bank changed this from $187.42, so its split was removed. The Costco membership bill for 2026 is no longer paid.",
 		);
 	});
 

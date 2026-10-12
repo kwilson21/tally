@@ -205,7 +205,7 @@ const STATEMENTS = [
 	// A bill payment of a part that goes with the pending row is dismissed on the posted row, so the matcher does not link it again
 	// (decision 99). The parts that moved to the posted row are not its parts any more, so they keep theirs.
 	`UPDATE bill_payments SET transaction_id = ${POSTED}, status = 'dismissed', matched_by = 'auto'
-	 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND status = 'linked' AND ${READY}`,
+	 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto')) AND ${READY}`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
 	`DELETE FROM transactions WHERE id = ${PENDING} AND ${READY}`,
 ];

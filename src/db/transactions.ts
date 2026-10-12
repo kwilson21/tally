@@ -1,7 +1,7 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
-import type { UnpaidBill } from "../bills/unpaid";
+import { STILL_UNPAID_BILLS_SQL, type UnpaidBill } from "../bills/unpaid";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import {
 	type Edit,
@@ -321,7 +321,7 @@ export async function listTransactions(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : visibleNoteSql(detailsOn)} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
-				t.split_removed_from_cents AS splitRemovedFromCents, t.split_removed_bills AS splitRemovedBills,
+				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
 				t.excluded, ${paysBillSql("t")} AS paysBill,
@@ -637,7 +637,7 @@ export async function getTransaction(
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
 				t.for_person_id AS forPersonId, (SELECT name FROM household_people WHERE id = t.for_person_id) AS forPersonName, t.for_person_guessed AS forPersonGuessed,
 				t.is_split AS isSplit, NULL AS parentName,
-				t.split_removed_from_cents AS splitRemovedFromCents, t.split_removed_bills AS splitRemovedBills,
+				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
 				t.excluded, ${paysBillSql("t")} AS paysBill,
@@ -1275,20 +1275,75 @@ async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
 async function partBills(
 	db: D1Database,
 	parentId: number,
-): Promise<PartBill[]> {
+): Promise<PartPayment[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT b.id AS billId, b.name AS name, bp.period AS period FROM bill_payments bp
-			JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
+			`SELECT bp.id AS paymentId, b.id AS billId, b.name AS name, bp.period AS period,
+			part.amount_cents AS amountCents, part.category_id AS categoryId
+			FROM bill_payments bp JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
 			WHERE part.parent_id = ? AND bp.status = 'linked' ORDER BY bp.id`,
 		)
 		.bind(parentId)
-		.all<PartBill>();
+		.all<PartPayment>();
 	return results;
 }
 
 /** A bill a part's linked payment pays, with the bill's id: the key a dismissal records (decision 99). */
 type PartBill = UnpaidBill & { billId: number };
+
+/** A linked payment on a part, with the part's amount and category: what a replacement can keep it by. */
+type PartPayment = PartBill & {
+	paymentId: number;
+	amountCents: number;
+	categoryId: number | null;
+};
+
+/** A bill occurrence a dismissal is recorded for: the bill's id and the period, as bill_payments keys it. */
+type BillKey = { billId: number; period: string };
+
+/**
+ * The auto dismissals (decision 99) on a purchase's parts and on the purchase itself. A split change's
+ * dismissal moves with the parts when they change again, and a new split of the purchase starts with it.
+ */
+async function splitDismissals(
+	db: D1Database,
+	parentId: number,
+): Promise<BillKey[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT bp.bill_id AS billId, bp.period AS period FROM bill_payments bp
+			WHERE bp.status = 'dismissed' AND bp.matched_by = 'auto'
+			AND (bp.transaction_id = ? OR bp.transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?))`,
+		)
+		.bind(parentId, parentId)
+		.all<BillKey>();
+	return results;
+}
+
+/**
+ * Pairs each linked payment with the first unused new part of the same amount and category, oldest payment
+ * first (decision 99). A payment with no such part is lost: its bill is unpaid, and it is named.
+ */
+function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
+	const used = new Set<number>();
+	const kept: { paymentId: number; index: number }[] = [];
+	const lost: PartBill[] = [];
+	for (const payment of payments) {
+		const index = parts.findIndex(
+			(part, i) =>
+				!used.has(i) &&
+				part.amountCents === payment.amountCents &&
+				part.categoryId === payment.categoryId,
+		);
+		if (index === -1) {
+			lost.push(payment);
+		} else {
+			used.add(index);
+			kept.push({ paymentId: payment.paymentId, index });
+		}
+	}
+	return { kept, lost };
+}
 
 /** The bills as the toast names them: a name and an occurrence, without the id. */
 const namedBills = (bills: PartBill[]): UnpaidBill[] =>
@@ -1321,7 +1376,17 @@ export async function saveSplit(
 	const reviewValues =
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
 	const unlinked = await linkedRefundDates(db, parentId, true);
-	const bills = await partBills(db, parentId);
+	const payments = await partBills(db, parentId);
+	const { kept, lost } = keepPayments(payments, parts);
+	// The dismissals each new part gets: the bills the replaced parts lost, and the earlier split changes' (decision 99).
+	const dismissals = [
+		...new Map(
+			[...lost, ...(await splitDismissals(db, parentId))].map((bill) => [
+				`${bill.billId}:${bill.period}`,
+				{ billId: bill.billId, period: bill.period },
+			]),
+		).values(),
+	];
 	const linkedPurchase = await db
 		.prepare(
 			"SELECT refund_of_id AS refundOfId, date FROM transactions WHERE id = ?",
@@ -1330,13 +1395,64 @@ export async function saveSplit(
 		.first<{ refundOfId: number | null; date: string }>();
 	const inheritedRefundLink =
 		"CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END";
-	const results = await db.batch([
+	// A kept payment is parked on the purchase as dismissed, out of the way of the parts it leaves, and moved to its
+	// new part last. Only linked rows are unique, so the parked row can't clash (decision 99).
+	const park =
+		kept.length > 0
+			? [
+					db
+						.prepare(
+							`UPDATE bill_payments SET transaction_id = ?, status = 'dismissed'
+							WHERE id IN (SELECT value FROM json_each(?)) AND status = 'linked' AND ${unchanged}`,
+						)
+						.bind(
+							parentId,
+							JSON.stringify(kept.map((keep) => keep.paymentId)),
+							parentId,
+							total,
+						),
+				]
+			: [];
+	const unlinkRefund = db
+		.prepare(
+			`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)`,
+		)
+		.bind(parentId, total);
+	// Each new part is dismissed for the bills the replaced parts paid, as Not this one records it, so the
+	// matcher does not link one of those bills to a new part by itself (decision 99). Nothing when none.
+	const dismiss =
+		dismissals.length > 0
+			? db
+					.prepare(
+						`INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status)
+						SELECT json_extract(b.value, '$.billId'), json_extract(b.value, '$.period'), part.id, 'auto', 'dismissed'
+						FROM json_each(?1) b JOIN transactions part ON part.parent_id = ?2
+						WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ?2 AND amount_cents = ?3)`,
+					)
+					.bind(JSON.stringify(dismissals), parentId, total)
+			: null;
+	// Each kept payment moves to the new part at its position in the sheet, which the new parts' ids follow.
+	const restore = kept.map((keep) =>
+		db
+			.prepare(
+				`UPDATE bill_payments SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1 OFFSET ?), status = 'linked'
+				WHERE id = ? AND transaction_id = ? AND status = 'dismissed' AND ${unchanged}`,
+			)
+			.bind(parentId, keep.index, keep.paymentId, parentId, parentId, total),
+	);
+	const markParent = db
+		.prepare(
+			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
+		)
+		.bind(by, parentId, total);
+	const statements = [
 		db
 			.prepare(
 				`UPDATE transactions SET refund_of_id = NULL
 				WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ? OR id = ?) AND ${unchanged}`,
 			)
 			.bind(parentId, parentId, parentId, total),
+		...park,
 		// The replaced parts' bill payments are unlinked by name here, not left to the parts' cascade (decision 99).
 		db
 			.prepare(
@@ -1348,11 +1464,7 @@ export async function saveSplit(
 			.bind(parentId, parentId, total),
 		// With the old parts gone and before the new ones take the parent's link: if the whole refund
 		// no longer fits its purchase, the link goes, and the new parts start unlinked.
-		db
-			.prepare(
-				`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)`,
-			)
-			.bind(parentId, total),
+		unlinkRefund,
 		...parts.map((part) =>
 			db
 				.prepare(`INSERT INTO transactions
@@ -1371,35 +1483,16 @@ export async function saveSplit(
 					total,
 				),
 		),
-		// Each new part is dismissed for the bills the replaced parts paid, as Not this one records it, so the
-		// matcher does not link one of those bills to a new part by itself (decision 99). Nothing when none.
-		...(bills.length
-			? [
-					db
-						.prepare(
-							`INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status)
-							SELECT json_extract(b.value, '$.billId'), json_extract(b.value, '$.period'), part.id, 'auto', 'dismissed'
-							FROM json_each(?1) b JOIN transactions part ON part.parent_id = ?2
-							WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ?2 AND amount_cents = ?3)`,
-						)
-						.bind(
-							JSON.stringify(
-								bills.map(({ billId, period }) => ({ billId, period })),
-							),
-							parentId,
-							total,
-						),
-				]
-			: []),
-		db
-			.prepare(
-				"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
-			)
-			.bind(by, parentId, total),
-	]);
-	const saved = (results.at(-1)?.meta.changes ?? 0) > 0;
+		...(dismiss ? [dismiss] : []),
+		...restore,
+		markParent,
+	];
+	const results = await db.batch(statements);
+	const saved =
+		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
 	// A refund's own link is kept by its new parts, unless it no longer fit: then it is the one unlinked.
-	const refundUnlinked = (results[3]?.meta.changes ?? 0) > 0;
+	const refundUnlinked =
+		(results[statements.indexOf(unlinkRefund)]?.meta.changes ?? 0) > 0;
 	return {
 		saved,
 		unlinked: !saved
@@ -1409,7 +1502,8 @@ export async function saveSplit(
 				: refundUnlinked
 					? [linkedPurchase.date]
 					: [],
-		bills: saved ? namedBills(bills) : [],
+		// Only the bills a person's split change unlinked are named; a payment a new part kept says nothing (decision 99).
+		bills: saved ? namedBills(lost) : [],
 	};
 }
 
@@ -1589,7 +1683,7 @@ export async function removeSplit(
 			.bind(parentId),
 		db
 			.prepare(
-				"UPDATE bill_payments SET transaction_id = ?1, status = 'dismissed', matched_by = 'auto' WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?1) AND status = 'linked'",
+				"UPDATE bill_payments SET transaction_id = ?1, status = 'dismissed', matched_by = 'auto' WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?1) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto'))",
 			)
 			.bind(parentId),
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),

@@ -1486,7 +1486,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await row("posted-1")).toMatchObject({
 			id: ids.posted,
 			is_split: 0,
-			split_removed_bills: '[{"name":"Water","period":"2026-09"}]',
+			split_removed_bills:
+				'[{"billId":9850,"name":"Water","period":"2026-09"}]',
 		});
 		expect(
 			await count(
@@ -1515,7 +1516,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await row("posted-1")).toMatchObject({
 			id: ids.posted,
 			is_split: 0,
-			split_removed_bills: '[{"name":"Water","period":"2026-09"}]',
+			split_removed_bills:
+				'[{"billId":9851,"name":"Water","period":"2026-09"}]',
 		});
 		expect(
 			(
@@ -1524,6 +1526,40 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				).all()
 			).results,
 		).toEqual([{ transaction_id: ids.posted, status: "dismissed" }]);
+	});
+
+	it("carries a dismissal a part held onto the posted row when the amount changed (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const parts = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (9852, 'Water', 1500, 28, 'monthly', NULL, NULL, 'Shop', 1)",
+			),
+			// A person's earlier Not this one on the part, as a split change's replacement leaves it.
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9852, '2026-09', ?, 'auto', 'dismissed')",
+			).bind(parts[0]),
+		]);
+
+		// $15.00 posted on the bill's due date: the bill's amount would link it if nothing dismissed it.
+		await post(item, { amount: 15 });
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, period, matched_by, status FROM bill_payments WHERE bill_id = 9852",
+				).all()
+			).results,
+		).toEqual([
+			{
+				transaction_id: ids.posted,
+				period: "2026-09",
+				matched_by: "auto",
+				status: "dismissed",
+			},
+		]);
 	});
 
 	it("clears the note a bank change left on the posted row when the posted row takes the split (decision 99)", async () => {
