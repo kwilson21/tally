@@ -24,7 +24,20 @@ export type BillSchedule = {
 	dueDay: number;
 	anchorMonth?: number | null;
 	anchorDate?: string | null;
+	/** The day the bill was added (`bills.added_on`, decision 99): an occurrence due before it is handled. */
+	addedOn?: string | null;
 };
+
+/**
+ * Decision 99 (#337): an occurrence due before the day its bill was added is already handled, so it is not
+ * overdue, not set aside and not still to pay. A payment that links it still shows it Paid, so `linked` keeps it.
+ * A bill with no added day (`addedOn` null) has no such occurrences.
+ */
+export const handledBeforeAdded = (
+	addedOn: string | null | undefined,
+	dueDate: string,
+	linked: boolean,
+) => !linked && !!addedOn && dueDate < addedOn;
 
 export function billCadenceLabel(bill: BillSchedule) {
 	if (bill.frequency === "weekly")
@@ -158,9 +171,12 @@ export function billOccurrence(
 	today: string,
 	linked: boolean | ReadonlySet<string>,
 ): { dueDate: string; period: string; status: BillStatus } {
-	const occurrences = periodicOccurrences(bill, today);
 	const isLinked = (period: string) =>
 		typeof linked === "boolean" ? linked : linked.has(period);
+	// Left out before anything below judges them: an occurrence handled before its bill was added (decision 99).
+	const occurrences = periodicOccurrences(bill, today).filter(
+		(o) => !handledBeforeAdded(bill.addedOn, o.dueDate, isLinked(o.period)),
+	);
 	if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
 		let index = occurrences.findIndex((o) => o.dueDate >= today);
 		if (index < 0) index = occurrences.length - 1;

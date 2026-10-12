@@ -318,7 +318,7 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 	it("rejects an add whose month the amount row can't hold, and leaves no bill behind", async () => {
 		const before = await snapshot();
 		await expect(
-			insertBill(env.DB, fields({ name: "Gym" }), "2026-13"),
+			insertBill(env.DB, fields({ name: "Gym" }), "2026-13-01"),
 		).rejects.toThrow();
 		expect(await snapshot()).toEqual(before);
 	});
@@ -326,7 +326,7 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 	it("refuses an add under an active bill's name, and writes no bill and no amount row", async () => {
 		const before = await snapshot();
 		expect(
-			await insertBill(env.DB, fields({ name: " water " }), "2026-10"),
+			await insertBill(env.DB, fields({ name: " water " }), "2026-10-01"),
 		).toBe(false);
 		expect(await snapshot()).toEqual(before);
 	});
@@ -336,7 +336,7 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 			await insertBill(
 				env.DB,
 				fields({ name: "Old phone plan", amountCents: 3000 }),
-				"2026-10",
+				"2026-10-01",
 			),
 		).toBe(true);
 		const added = await env.DB.prepare(

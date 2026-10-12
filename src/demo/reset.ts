@@ -78,6 +78,9 @@ export async function resetDemo(
 ): Promise<void> {
 	const seed = buildSeed(today);
 	const todayDay = Number(today.slice(8, 10));
+	// The demo's bills count as added long before its history (decision 99, #337), so every seeded occurrence is
+	// judged as it was before that rule. No screen shows the day a demo bill was added.
+	const addedOn = "2000-01-01";
 	if (todayDay < 4) {
 		const waterPayment = seed.transactions.find(
 			(transaction) =>
@@ -199,9 +202,9 @@ export async function resetDemo(
 		...demoBills(today, seed.transactions).map((bill) =>
 			db
 				.prepare(
-					"INSERT INTO bills (id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,active) VALUES (?,?,?,?,?,?,?,?,?)",
+					"INSERT INTO bills (id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,active,added_on) VALUES (?,?,?,?,?,?,?,?,?,?)",
 				)
-				.bind(...bill),
+				.bind(...bill, addedOn),
 		),
 		// Each bill's first amount row (decision 101), as migration 0044 gives one: this month, so a bill has
 		// no earlier price. Netflix's is from the seed's first month instead, so its earlier price is there

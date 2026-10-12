@@ -1,4 +1,4 @@
-import { householdMonth } from "../dates";
+import { householdMonth, householdToday } from "../dates";
 
 // The writes that make a bill's name count (spec §8.5): no two active bills share a name, ignoring
 // case and surrounding spaces. The form checks first, for a friendly message, but two saves can both
@@ -43,14 +43,16 @@ const OWN_OR_FREE = `(lower(trim(name))=lower(trim(?)) OR ${FREE})`;
  * Adds a bill. False, with nothing written, when an active bill already has its name. Its merchant text
  * is a key, not the bank's raw text from before Phase 3.5, so `merchant_raw_text` is 0 (spec §6.1). Its
  * first `bill_amounts` row is this month's (the household's), so the amount applies from this month on.
+ * `added_on` is the day it was added (decision 99): the household's today, or the day the caller has.
  */
 export async function insertBill(
 	db: D1Database,
 	f: BillFields,
-	/** The household's month (YYYY-MM) when the caller has it; read here otherwise. */
-	month?: string,
+	/** The household's day (YYYY-MM-DD) when the caller has it; read here otherwise. */
+	today?: string,
 ): Promise<boolean> {
-	const at = month ?? (await householdMonth(db));
+	const day = today ?? (await householdToday(db));
+	const at = day.slice(0, 7);
 	// One batch, so the bill and its first row land together or not at all. The row goes to whichever active
 	// bill has the new name and no row yet. That is only the bill just added, because every bill has a row
 	// (from migration 0044's backfill, from insertBill, and from the demo reset). The same rule keeps a refused
@@ -58,8 +60,8 @@ export async function insertBill(
 	const [added] = await db.batch([
 		db
 			.prepare(
-				`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,anchor_date,category_id,merchant_raw_name,merchant_raw_text)
-				 SELECT ?,?,?,?,?,?,?,?,0 WHERE ${FREE}`,
+				`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,anchor_date,category_id,merchant_raw_name,merchant_raw_text,added_on)
+				 SELECT ?,?,?,?,?,?,?,?,0,? WHERE ${FREE}`,
 			)
 			.bind(
 				f.name,
@@ -70,6 +72,7 @@ export async function insertBill(
 				f.anchorDate ?? null,
 				f.categoryId,
 				f.merchantRawName,
+				day,
 				null,
 				f.name,
 			),
