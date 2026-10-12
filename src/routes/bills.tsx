@@ -992,8 +992,9 @@ async function save(c: Context<App>, id?: number) {
 	}
 	if (Object.keys(errors).length)
 		return page(c, { bill: bill ?? undefined, values, errors, bigAmount });
-	// Typed bank text saves its transaction's merchant key, so the bill's payments match it (spec §6.1). A text the
-	// bill already has is saved as it is, so an unchanged legacy bill keeps matching by bank text (write.ts).
+	// Typed bank text saves its transaction's merchant key, so the bill's payments match it (spec §6.1). Only a
+	// text the bill already has keeps the bill's old bank-text flag, so an unchanged legacy bill keeps matching
+	// by bank text (write.ts).
 	const merchantRawName =
 		bill?.merchant_raw_name === values.merchant_raw_name
 			? values.merchant_raw_name
@@ -1010,6 +1011,7 @@ async function save(c: Context<App>, id?: number) {
 		anchorDate: values.frequency === "biweekly" ? anchorDate : null,
 		categoryId: Number(values.category_id),
 		merchantRawName,
+		typedMerchantText: values.merchant_raw_name,
 	};
 	// Old dismissals have no meaning once the schedule changes (links can't exist here, checked above).
 	// The household's date is read once, here, and its month is what a changed amount applies from.

@@ -629,6 +629,36 @@ describe("Bills", () => {
 				flag: 0,
 			});
 		});
+
+		it("clears the legacy flag when a changed bank text's store is the text the bill already holds", async () => {
+			// The demo's $16.43 CVS charge, on the day the bill is due, as the first test above uses.
+			const charge = await env.DB.prepare(
+				"SELECT id, date FROM transactions WHERE raw_name = 'CHECKCARD 0921 CVS'",
+			).first<{ id: number; date: string }>();
+			const dueDay = String(Number(charge?.date.slice(8)));
+			await env.DB.prepare(
+				"INSERT INTO bills (id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text) VALUES (9683,'Legacy CVS',1643,?,'monthly',1,'CVS Pharmacy',1)",
+			)
+				.bind(Number(dueDay))
+				.run();
+			const res = await saveBill("/bills/9683", {
+				name: "Legacy CVS",
+				amount: "16.43",
+				due_day: dueDay,
+				frequency: "monthly",
+				category_id: "1",
+				merchant_raw_name: "CHECKCARD 0921 CVS",
+			});
+			expect(res.status).toBe(303);
+			expect(await stored("Legacy CVS")).toMatchObject({
+				text: "CVS Pharmacy",
+				flag: 0,
+			});
+			const linked = await env.DB.prepare(
+				"SELECT transaction_id AS id FROM bill_payments WHERE bill_id = 9683 AND status = 'linked'",
+			).all();
+			expect(linked.results).toEqual([{ id: charge?.id }]);
+		});
 	});
 
 	it("focuses the sheet heading and uses CSS to reveal the yearly month", async () => {
