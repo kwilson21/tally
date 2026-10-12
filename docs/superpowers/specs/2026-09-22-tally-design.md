@@ -167,7 +167,7 @@ Schema changes use numbered D1 migration files in `migrations/`.
 
 **If several candidates qualify,** the matcher picks the one closest to the due date, then the one closest in amount, then the earliest by `id`, so the result is always the same.
 
-**When matching runs:** after each sync, and after a bill is created or edited. It only fills occurrences that have no payment yet and never changes an existing link.
+**When matching runs:** after each sync, and after a bill is created, edited or reactivated. It only fills occurrences that have no payment yet and never changes an existing link.
 
 **People override the matcher.** From a bill, a person can link a transaction by hand (`matched_by = user`), choosing which occurrence it pays. For monthly and yearly bills, the picker lists unclaimed transactions (a payment a split change unlinked is listed; see Splits below) within 30 days of the due date, and accepts one only within that window; for weekly bills it is within 3 days, the same window as the matcher, so its windows do not overlap; for every other frequency it stays at 30 days. It orders by same merchant first, then closest amount (decision 60). A person can unlink a wrong match. Unlinking records a `dismissed` row, so the matcher won't pick that transaction for that occurrence again. From Phase 5 (decision 74): a bill saved without a merchant key gets the key of the first payment linked to it by hand; a person can link more than one payment to an occurrence (a bill paid in parts), while the matcher still links one; a payment linked to a bill takes its category as set out in §7.
 
