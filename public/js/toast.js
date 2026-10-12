@@ -36,7 +36,7 @@
 	}
 
 	// The Undo toasts on screen, each with the token its Undo posts. A newer plain or error toast never removes
-	// one of them early; only the restore's own toast ends the one it answers (undoDone, below).
+	// one of them early; only an Undo's answer ends the one it answers (undoDone, below).
 	const undoToasts = new WeakMap();
 	// Each Undo form's button and toast, so a failed Undo request can turn its button back on while its
 	// toast is still up (the error toast says to try again).
@@ -88,15 +88,18 @@
 
 	// Takes a toast off the page. Focus on the toast would be lost with it, so the Transactions heading takes it
 	// (every Transactions page has one, the first-visit page too). `lostToo` also counts focus on nothing: a
-	// disabled Undo button drops focus to the body, so a restore's toast (undoDone) uses it. A timer doesn't, since
-	// it would scroll the page to the heading when focus is only on the body.
+	// disabled Undo button drops focus to the body, so an Undo's answer (undoDone: a restore's, or a bill Undo's
+	// refusal) uses it. A timer doesn't, since it would scroll the page to the heading when focus is only on the body.
 	function takeOffPage(toast, lostToo = false) {
 		const active = document.activeElement;
 		if (
 			toast.contains(active) ||
 			(lostToo && (!active || active === document.body))
 		) {
-			const heading = document.getElementById("transactions-title");
+			// A page without the Transactions title (a bill's page) takes focus on its own page-title.
+			const heading =
+				document.getElementById("transactions-title") ??
+				document.getElementById("page-title");
 			if (heading) {
 				heading.setAttribute("tabindex", "-1");
 				heading.focus();
@@ -119,6 +122,8 @@
 			undo,
 			undoExpiresInMs,
 			undoDone,
+			// Where the Undo posts: the cash-delete Undo unless the toast names another (a Not this one's, #340).
+			undoAction = "/transactions/undo-cash-delete",
 		} = event.detail ?? {};
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
@@ -141,7 +146,7 @@
 				" pointer-events-auto flex items-center justify-center gap-4";
 			const form = document.createElement("form");
 			form.method = "post";
-			form.action = "/transactions/undo-cash-delete";
+			form.action = undoAction;
 			form.setAttribute("hx-post", form.action);
 			form.setAttribute("hx-target", "#page");
 			form.setAttribute("hx-select", "#page");
@@ -177,8 +182,9 @@
 			for (const old of [...(region?.children ?? [])]) {
 				if (!undoToasts.has(old)) old.remove();
 			}
-		// The one exception: a successful Undo's toast names the Deleted toast it answers, and that one ends now,
-		// since the entry is back (#397). The other Undo toasts run their own time.
+		// The one exception: an Undo's answer names the Undo toast it answers, and that one ends now. A successful
+		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a bill Undo's refusal ends its
+		// toast too (#340). The other Undo toasts run their own time.
 		if (undoDone)
 			for (const old of [...(region?.children ?? [])]) {
 				if (undoToasts.get(old) === undoDone) takeOffPage(old, true);

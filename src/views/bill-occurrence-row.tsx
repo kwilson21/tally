@@ -128,6 +128,7 @@ export function BillOccurrenceRow({
 	status,
 	payment,
 	priceOffer,
+	focus = false,
 }: {
 	billId: number;
 	period: string;
@@ -135,6 +136,8 @@ export function BillOccurrenceRow({
 	status: BillStatus | "not-paid";
 	payment?: OccurrencePayment;
 	priceOffer?: OccurrencePriceOffer | null;
+	/** Takes focus when the page arrives, as after an Undo that linked this payment again (#340). */
+	focus?: boolean;
 }) {
 	const unlink = `/bills/${billId}/occurrences/${period}/unlink`;
 	if (priceOffer && !payment)
@@ -163,10 +166,11 @@ export function BillOccurrenceRow({
 					method="post"
 					action={unlink}
 					hx-post={unlink}
-					hx-target="body"
+					hx-target="#page"
+					hx-select="#page"
 					hx-swap="outerHTML"
 				>
-					<Button kind="text" type="submit" class="-ml-2">
+					<Button kind="text" type="submit" class="-ml-2" autofocus={focus}>
 						Not this one
 					</Button>
 				</form>
