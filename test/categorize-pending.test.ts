@@ -1,13 +1,17 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NONE_FIT } from "../src/ai/decide";
+import { type Decision, NONE_FIT } from "../src/ai/decide";
 import {
 	categorizePending,
 	jevCallLimit,
 	MAX_CALLS_PER_RUN,
 } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
-import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import {
+	AI_SWITCHES_ALL_ON,
+	type AiSwitches,
+	saveAiSwitches,
+} from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { loadMonth } from "../src/db/month";
 import {
@@ -15,6 +19,7 @@ import {
 	monthCounts,
 	needsCategoryCount,
 	pendingForJev,
+	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -76,6 +81,33 @@ const callsUsed = async (day?: string) =>
 
 const switchTo = (over: Partial<typeof AI_SWITCHES_ALL_ON>) =>
 	saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, details: false, ...over });
+
+/**
+ * The database as a run sees it, where a Settings save lands while the first answer is being saved: the
+ * answer's own batch completes first, so it is saved under the switches as they were, and then `off` is
+ * saved, before the run reads the switches again for its next call.
+ */
+function saveDuringFirstAnswer(
+	off: Partial<AiSwitches>,
+	jev: { calls: () => number },
+): D1Database {
+	let saved = false;
+	return new Proxy(db, {
+		get(target, property) {
+			const value = Reflect.get(target, property);
+			if (property === "batch")
+				return async (statements: D1PreparedStatement[]) => {
+					const results = await target.batch(statements);
+					if (!saved && jev.calls() >= 1) {
+						saved = true;
+						await saveAiSwitches(target, off);
+					}
+					return results;
+				};
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	}) as D1Database;
+}
 
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
@@ -1887,6 +1919,23 @@ describe("categorizePending", () => {
 			expect(await callsUsed()).toBe(2);
 		});
 
+		it("sends no call after the switch is turned off while an answer is being saved, and gives back the rest", async () => {
+			quiet();
+			const jev = fakeJev(() => reply(0.95));
+			const result = await categorizePending(
+				{
+					...withKey,
+					DB: saveDuringFirstAnswer({ sortOnArrival: false }, jev),
+				},
+				jev.fetchImpl,
+				await bySync(),
+			);
+			expect(jev.calls()).toBe(1);
+			expect(result.asked).toBe(1);
+			// The nine reserved calls it didn't use are given back to the day, leaving the one it made.
+			expect(await callsUsed()).toBe(1);
+		});
+
 		it("is not what stops the nightly run, which has no such switch", async () => {
 			quiet();
 			const jev = jevWith(async (call) => {
@@ -2294,8 +2343,9 @@ describe("the AI switches", () => {
 		expect(jev.calls()).toBe(10);
 	});
 
-	// Someone can save the switches while a run is going, so they are read again for each call: as its
-	// answer comes back, before that answer is saved, and before the next call is sent.
+	// Someone can save the switches while a run is going. They are read before each call, and a save checks
+	// that the switches its call was asked under are still on, so an answer that arrives after one of them went
+	// off is thrown away and its transaction waits for the next run.
 	describe("turned off while a run is going", () => {
 		/** A Jev that runs `during` as its nth answer is on its way back, then answers. */
 		function jevWith(
@@ -2329,6 +2379,24 @@ describe("the AI switches", () => {
 			expect(await needsCategoryCount(db, MONTH)).toBe(10);
 		});
 
+		it("sends no call after the switches are turned off while an answer is being saved", async () => {
+			const jev = fakeJev(() => reply(0.95));
+			const result = await categorizePending(
+				{
+					...withKey,
+					DB: saveDuringFirstAnswer(
+						{ categories: false, income: false, details: false },
+						jev,
+					),
+				},
+				jev.fetchImpl,
+			);
+			// The first answer was saved under the switches it was asked under; the next call is never sent.
+			expect(jev.calls()).toBe(1);
+			expect(result).toEqual({ asked: 1, applied: 1 });
+			expect(await needsCategoryCount(db, MONTH)).toBe(9);
+		});
+
 		it("keeps what it saved before they went off, and sends nothing after", async () => {
 			const jev = jevWith(
 				async (call) => {
@@ -2344,7 +2412,7 @@ describe("the AI switches", () => {
 			expect(await needsCategoryCount(db, MONTH)).toBe(9);
 		});
 
-		it("drops a category from the answer on its way back when categories went off, and carries on for income", async () => {
+		it("throws away an answer that arrives after categories went off, and carries on for income", async () => {
 			const asked = (await pendingForJev(db, 40)).map((t) => t.id);
 			const jev = jevWith(
 				async (call) => {
@@ -2361,12 +2429,19 @@ describe("the AI switches", () => {
 					)
 					.all()
 			).results;
-			// Only the first answer, which arrived while categories were on, was applied.
+			// Only the first answer, which arrived while categories were on, was applied. The second was asked
+			// under categories, so it was thrown away whole: its row is still unsorted.
 			expect(rows.filter((r) => r.category_id !== null)).toHaveLength(1);
 			expect(rows.filter((r) => r.jev_category_id !== null)).toHaveLength(1);
+			expect(
+				await db
+					.prepare("SELECT category_confidence FROM transactions WHERE id = ?")
+					.bind(asked[1])
+					.first(),
+			).toEqual({ category_confidence: null });
 		});
 
-		it("doesn't use an income answer that arrives after income went off", async () => {
+		it("throws away an income answer that arrives after income went off, so its transaction waits for the next run", async () => {
 			await onlyOneCreditPending();
 			const jev = jevWith(
 				async () => {
@@ -2375,13 +2450,83 @@ describe("the AI switches", () => {
 				() => flagged({ income: 0.99 }),
 			);
 			await categorizePending(withKey, jev.fetchImpl);
+			// The whole answer was asked under income, so none of it is kept, not even its category.
 			expect(
 				await db
 					.prepare(
 						"SELECT category_id, flag_income, income_source FROM transactions WHERE id = 1",
 					)
 					.first(),
-			).toEqual({ category_id: 2, flag_income: 0, income_source: null });
+			).toEqual({ category_id: null, flag_income: 0, income_source: null });
+			expect((await pendingForJev(db, 40)).map((t) => t.id)).toContain(1);
+		});
+
+		describe("saving one answer whose switches went off", () => {
+			const eatingOutId = async () =>
+				(
+					await db
+						.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
+						.first<{ id: number }>()
+				)?.id as number;
+			const answerFor = (categoryId: number): Decision => ({
+				categoryId,
+				suggestedCategoryId: categoryId,
+				confidence: 0.95,
+				flags: { transfer: false, reimbursement: false, income: false },
+			});
+			const logRowsFor = async (id: number) =>
+				(
+					await db
+						.prepare(
+							"SELECT COUNT(*) AS n FROM ai_log WHERE transaction_id = ?",
+						)
+						.bind(id)
+						.first<{ n: number }>()
+				)?.n;
+
+			it("writes neither the answer nor its log row once categories went off, since it was asked under them", async () => {
+				await onlyOneCreditPending();
+				await db.prepare("DELETE FROM ai_log WHERE transaction_id = 1").run();
+				const options = {
+					categoryAsked: true,
+					switches: { income: true, categories: true },
+					log: { day: TODAY, category: true, income: false },
+				};
+				const answer = answerFor(await eatingOutId());
+				await setSwitches({ categories: false });
+				const before = await snapshot();
+				expect(await saveJevResult(db, 1, answer, options)).toBe(false);
+				expect(await snapshot()).toEqual(before);
+				expect(await logRowsFor(1)).toBe(0);
+				// Once categories are on again, the same answer is written and logged.
+				await setSwitches({});
+				expect(await saveJevResult(db, 1, answer, options)).toBe(true);
+				expect(await logRowsFor(1)).toBe(1);
+			});
+
+			it("writes neither the category nor its log row for a reviewed credit once categories went off", async () => {
+				await db
+					.prepare(
+						"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = NULL, flag_income = 0, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user', excluded = 0, excluded_source = NULL, flag_transfer = 0, flag_reimbursement = 0 WHERE id = 1",
+					)
+					.run();
+				await db.prepare("DELETE FROM ai_log WHERE transaction_id = 1").run();
+				const options = {
+					categoryOnly: true,
+					categoryAsked: true,
+					switches: { income: true, categories: true },
+					log: { day: TODAY, category: true, income: false },
+				};
+				const answer = answerFor(await eatingOutId());
+				await setSwitches({ categories: false });
+				const before = await snapshot();
+				expect(await saveJevResult(db, 1, answer, options)).toBe(false);
+				expect(await snapshot()).toEqual(before);
+				expect(await logRowsFor(1)).toBe(0);
+				await setSwitches({});
+				expect(await saveJevResult(db, 1, answer, options)).toBe(true);
+				expect(await logRowsFor(1)).toBe(1);
+			});
 		});
 
 		it("skips a credit a person reviewed once categories are off, since only its category could be asked", async () => {

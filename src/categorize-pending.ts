@@ -3,7 +3,7 @@
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { decide } from "./ai/decide";
 import { householdTimeZone, todayIn } from "./dates";
-import { type AiSwitches, asksJev, readAiSwitches } from "./db/ai-switches";
+import { asksJev, readAiSwitches } from "./db/ai-switches";
 import { giveBackJevCalls, reserveJevCalls } from "./db/jev-calls";
 import {
 	applyMerchantRules,
@@ -27,7 +27,7 @@ export const jevCallLimit = (env: { DEMO?: string }) =>
 
 /**
  * The most calls one run makes, whatever the day's cap still allows; what's left waits for the next
- * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read, and
+ * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read before it, and
  * the answer saved with its log row in one batch), plus a few for setup and one merchant-history read:
  * 300 calls is about 901 queries. So production's 09:40 run does nothing else, and the sync (09:00) and
  * the names with the first pass (09:20, where 100 names and 200 calls are about the same) are runs of
@@ -75,10 +75,10 @@ export type PassOptions = {
  * §8.6, decision 73), so the nightly runs and a run after a sync agree: with categories and income
  * both off Jev isn't asked at all, with categories off its category and its transfer and
  * reimbursement flags are dropped, and with income off its income answer is. The switches can be
- * saved while a run is going, so they are read again for each call: as its answer comes back, before
- * that answer is saved, and before the next call is sent (one read serves both, see the loop). An answer
- * that comes back after both went off is thrown away, and a run started by a sync stops once "sort as
- * they arrive" is off.
+ * saved while a run is going, so they are read before each call, and the save checks that the switches
+ * the call was asked under are still on: an answer that comes back after one of them went off is thrown
+ * away, and its transaction waits for the next run. A run started by a sync stops sending once "sort as
+ * they arrive" is off, and keeps the answer already on its way.
  *
  * Every call counts against the household's day (decisions 56, 68 and 79). The run reserves the calls
  * it wants in one step before it starts, gives back what it didn't use when it ends (db/jev-calls.ts),
@@ -144,10 +144,6 @@ export async function categorizePending(
 		forPersonId: number | null;
 		noteWorthWriting: number | null;
 	}[] = [];
-	// The switches read after one answer also serve as the read before the next call, since only that answer's
-	// save runs in between. That keeps a call at three D1 statements (this read, and the answer saved with its
-	// log row in one batch), inside the 1,000 a run may make. Do not "fix" this back to a read per call.
-	let fresh: AiSwitches | null = null;
 	try {
 		const histories = start.categories
 			? await merchantCategoryHistoryForJev(env.DB, waiting)
@@ -160,10 +156,9 @@ export async function categorizePending(
 				console.log("jev: stopped at the time budget");
 				return done;
 			}
-			// Someone may have turned a switch off since the last read, so the switches are read before each call
-			// (or reused from the last answer's read, see `fresh` above).
-			const before = fresh ?? (await readAiSwitches(env.DB));
-			fresh = null;
+			// Someone may have turned a switch off since the last call, so the switches are read before each one.
+			// That is one D1 statement a call, with the answer's save (two) inside the 1,000 a run may make.
+			const before = await readAiSwitches(env.DB);
 			if (!asksJev(before) || (bySync && !before.sortOnArrival)) return done;
 			// A credit a person reviewed, or an excluded payment that pays a bill, is asked about only for its category.
 			if (tx.categoryOnly && !before.categories && !before.details) continue;
@@ -206,15 +201,13 @@ export async function categorizePending(
 				continue;
 			}
 			failuresInARow = 0;
-			// Read again, since the request took a while: an answer is used only as the switches stand now.
-			const now = await readAiSwitches(env.DB);
-			if (!asksJev(now)) return done;
+			// The answer is saved only while the switches it was asked under are still on (saveJevResult checks).
 			if (
-				(now.categories || now.income) &&
-				(!tx.categoryOnly || now.categories)
+				(before.categories || before.income) &&
+				(!tx.categoryOnly || before.categories)
 			) {
 				const decision = decide(result.answer, categories, JEV_THRESHOLD, {
-					categories: now.categories,
+					categories: before.categories,
 				});
 				// The log row for what this answer applies (spec §8.6) is saved in the same batch: only a transaction
 				// that had no Jev category or income before the run is counted, and the log checks the answer is
@@ -222,7 +215,7 @@ export async function categorizePending(
 				const written = await saveJevResult(env.DB, tx.id, decision, {
 					categoryOnly: tx.categoryOnly,
 					categoryAsked: categories.length > 0,
-					switches: { income: now.income, categories: now.categories },
+					switches: { income: before.income, categories: before.categories },
 					log: {
 						day,
 						category:
@@ -232,7 +225,7 @@ export async function categorizePending(
 				});
 				if (written && decision.categoryId !== null) done.applied += 1;
 			}
-			if (detailRequested && now.details) {
+			if (detailRequested) {
 				const kind = result.answer.kind;
 				const kindValue =
 					kind &&
@@ -257,8 +250,6 @@ export async function categorizePending(
 						worth !== undefined && worth >= JEV_THRESHOLD ? 1 : 0,
 				});
 			}
-			// Nothing but this answer's save (if one ran) comes between `now` and the next call, so `now` serves as its read.
-			fresh = now;
 		}
 	} finally {
 		try {

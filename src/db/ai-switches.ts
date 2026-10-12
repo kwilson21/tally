@@ -39,6 +39,22 @@ export const asksJev = (s: AiSwitches): boolean =>
 	s.categories || s.income || s.details;
 
 /**
+ * The guard a save appends to its WHERE clause, bound with `stillOnKeys`: it holds while none of these
+ * switches has been turned off since they were read.
+ */
+export const STILL_ON_SQL =
+	"NOT EXISTS (SELECT 1 FROM household_settings WHERE value = 'off' AND key IN (SELECT value FROM json_each(?)))";
+
+/** The JSON array of setting keys for the switches given as true, for `STILL_ON_SQL`; none given is no guard. */
+export function stillOnKeys(switches: Partial<AiSwitches>): string {
+	return JSON.stringify(
+		(Object.keys(KEYS) as (keyof AiSwitches)[])
+			.filter((name) => switches[name] === true)
+			.map((name) => KEYS[name]),
+	);
+}
+
+/**
  * Reads the switches. Only a stored "off" turns one off. A database error is thrown, never guessed
  * around, so a run can't call an AI the household turned off.
  */

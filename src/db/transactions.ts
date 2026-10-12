@@ -26,7 +26,7 @@ import {
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { JEV_ANSWER_LOG_SQL, KEPT_NAME_LOG_SQL } from "./ai-log";
-import { readAiSwitches } from "./ai-switches";
+import { readAiSwitches, STILL_ON_SQL, stillOnKeys } from "./ai-switches";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
@@ -1918,7 +1918,9 @@ async function saveJevAnswer(
  * uncategorized with no source, so a person's choice made in the meantime always wins.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
  * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice, and it never
- * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). Returns whether it wrote the row.
+ * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). It writes
+ * only while every switch the answer was asked under is still on, so a late answer is thrown away and the transaction
+ * waits for the next run. Returns whether it wrote the row.
  */
 export async function saveJevResult(
 	db: D1Database,
@@ -1932,6 +1934,10 @@ export async function saveJevResult(
 		log?: { day: string; category: boolean; income: boolean };
 	} = {},
 ): Promise<boolean> {
+	const stillOn = stillOnKeys({
+		categories: options.switches?.categories,
+		income: options.switches?.income,
+	});
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
 		// It never writes income, so its log row carries no income.
@@ -1944,7 +1950,7 @@ export async function saveJevResult(
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND ${INCLUDED_ROW} AND is_split = 0`,
+					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}`,
 			)
 			.bind(
 				options.categoryAsked === false ? null : d.categoryId,
@@ -1953,6 +1959,7 @@ export async function saveJevResult(
 				options.categoryAsked === false ? null : d.suggestedCategoryId,
 				options.categoryAsked === false || !d.noneFit ? 0 : 1,
 				id,
+				stillOn,
 			);
 		return saveJevAnswer(
 			db,
@@ -1995,7 +2002,8 @@ export async function saveJevResult(
 					(category_id IS NULL AND category_source IS NULL)
 					OR (amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0
 						AND credit_reviewed_by IS NULL AND COALESCE(income_source, '') != 'user')
-				)`,
+				)
+				AND ${STILL_ON_SQL}`,
 		)
 		.bind(
 			options.categoryAsked === false ? null : d.categoryId,
@@ -2028,6 +2036,7 @@ export async function saveJevResult(
 			excludes,
 			excludes,
 			id,
+			stillOn,
 		);
 	return saveJevAnswer(db, update, id, options.log);
 }
