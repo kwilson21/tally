@@ -209,7 +209,8 @@ async function transferSuggestions(
 
 /**
  * A category Tally guessed and nobody has set. Shown the same way as the row's dashed "Maybe" (the
- * category join in `MAYBE_CATEGORY_COLUMNS`): an active category, and an unsure guess.
+ * category join in `MAYBE_CATEGORY_COLUMNS`): an active category, and an unsure guess. A credit held for
+ * review waits until it is reviewed, as Needs category and Organize leave it out (decision 70).
  */
 async function categorySuggestions(
 	db: D1Database,
@@ -221,7 +222,8 @@ async function categorySuggestions(
 			FROM transactions t ${JOIN_MERCHANT}
 			JOIN categories c ON c.id = t.jev_category_id AND c.archived = 0
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.category_id IS NULL AND t.category_source IS NULL
-				AND t.category_confidence < ? AND t.flag_income = 0 AND t.excluded = 0 AND ${jevAsksAboutSql("t")}`,
+				AND t.category_confidence < ? AND t.flag_income = 0 AND t.excluded = 0 AND ${jevAsksAboutSql("t")}
+				AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`,
 		)
 		.bind(JEV_THRESHOLD)
 		.all<

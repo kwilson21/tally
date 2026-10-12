@@ -390,6 +390,32 @@ describe("suggestionQueue", () => {
 		).toEqual([]);
 	});
 
+	it("asks no category about a credit held for review until a person or Tally reviews it, as Organize leaves it out, but still asks money out", async () => {
+		const held = await transaction({
+			amount: -2500,
+			raw: "VENMO 123",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		const spent = await transaction({
+			amount: 2300,
+			raw: "SQ *LUPITAS TAQ 2210",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		const categories = async () =>
+			(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).flatMap((item) =>
+				item.kind === "category" ? [item.transactionId] : [],
+			);
+		expect(await categories()).toEqual([spent]);
+		expect(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).toHaveLength(1);
+		await db
+			.prepare("UPDATE transactions SET credit_reviewed = 1 WHERE id = ?")
+			.bind(held)
+			.run();
+		expect((await categories()).sort()).toEqual([held, spent].sort());
+	});
+
 	it("is empty when nothing waits", async () => {
 		expect(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).toEqual([]);
 	});

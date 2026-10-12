@@ -445,7 +445,7 @@ suggestions.post(PATH, async (c) => {
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND jev_category_id IS NOT NULL
 							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = transactions.jev_category_id AND c.archived = 0)
-							AND ${jevAsksAboutSql("transactions")}`,
+							AND ${jevAsksAboutSql("transactions")} AND (amount_cents >= 0 OR credit_reviewed = 1)`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -474,7 +474,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND ${jevAsksAboutSql("transactions")}`,
+						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND ${jevAsksAboutSql("transactions")} AND (amount_cents >= 0 OR credit_reviewed = 1)`,
 					)
 					.bind(category.id, who, item.transactionId)
 					.run();

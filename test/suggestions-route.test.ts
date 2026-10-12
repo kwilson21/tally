@@ -718,6 +718,64 @@ describe("categories", () => {
 	});
 });
 
+describe("a held credit's category answer waits until the credit is reviewed (decision 70)", () => {
+	it("is in the queue once reviewed, and a stale answer to it sets no category until it is", async () => {
+		const eatingOut = await categoryId("Eating Out");
+		const groceries = await categoryId("Groceries");
+		const credit = await insertTx({
+			raw: "ZELLE PAYMENT",
+			amount: -2500,
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		const setReview = (reviewed: number) =>
+			db
+				.prepare("UPDATE transactions SET credit_reviewed = ? WHERE id = ?")
+				.bind(reviewed, credit)
+				.run();
+		await setReview(1);
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="category-${credit}"`,
+		);
+		await setReview(0);
+		const yes = await post(
+			"/settings/suggestions",
+			{ id: `category-${credit}`, answer: "yes" },
+			true,
+		);
+		expect(trigger(yes.res).toast?.message).toBe(
+			"That one was already answered.",
+		);
+		const picked = await post(
+			"/settings/suggestions",
+			{
+				id: `category-${credit}`,
+				answer: "else",
+				category: String(groceries),
+			},
+			true,
+		);
+		expect(trigger(picked.res).toast?.message).toBe(
+			"That one was already answered.",
+		);
+		expect(
+			await row("SELECT category_id FROM transactions WHERE id = ?", credit),
+		).toMatchObject({ category_id: null });
+		await setReview(1);
+		await post(
+			"/settings/suggestions",
+			{ id: `category-${credit}`, answer: "yes" },
+			true,
+		);
+		expect(
+			await row(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				credit,
+			),
+		).toMatchObject({ category_id: eatingOut, category_source: "user" });
+	});
+});
+
 describe("new categories", () => {
 	it("Yes creates the category with its ticked purchases", async () => {
 		const ids = await oneOfEach();
