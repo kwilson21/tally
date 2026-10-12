@@ -12,6 +12,7 @@ import {
 	saveSuggestion,
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
+import { tidyName } from "../src/transactions/tidy-name";
 
 // The nightly step for new category suggestions (spec §7, §8.6, #51). Code finds the transactions Jev
 // was sure no category fit and groups them by theme; only a group of three or more asks Workers AI for a
@@ -613,5 +614,35 @@ describe("suggestNewCategories", () => {
 			"Subscriptions",
 		])
 			expect(lines).not.toContain(leaked);
+	});
+});
+
+describe("the category-suggestion card's rows", () => {
+	it("show a row's own name exactly as typed, and tidy only the store's or bank's text", async () => {
+		const [named, shouted, plain] = await addMany(3);
+		await suggestNewCategories({
+			DB: db,
+			AI: fakeAi(() => ({ response: "Subscriptions" })),
+		});
+		await db
+			.prepare("UPDATE transactions SET own_name = ? WHERE id = ?")
+			.bind("Dog bed", named)
+			.run();
+		await db
+			.prepare("UPDATE transactions SET own_name = ? WHERE id = ?")
+			.bind("DOG BED", shouted)
+			.run();
+		const [shown] = await pendingSuggestions(db);
+		const display = (id: number | undefined) =>
+			shown?.rows.find((r) => r.id === id)?.displayName;
+		expect(display(named)).toBe("Dog bed");
+		expect(display(shouted)).toBe("DOG BED");
+		const plainRaw = (
+			await db
+				.prepare("SELECT raw_name AS rawName FROM transactions WHERE id = ?")
+				.bind(plain)
+				.first<{ rawName: string }>()
+		)?.rawName;
+		expect(display(plain)).toBe(tidyName(plainRaw ?? ""));
 	});
 });

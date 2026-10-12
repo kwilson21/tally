@@ -145,6 +145,7 @@ export function SuggestionCard({
 	today,
 	skipHref,
 	categories,
+	values,
 	error,
 	focus = false,
 }: {
@@ -156,6 +157,8 @@ export function SuggestionCard({
 	skipHref: string;
 	/** Active categories, for Something else on a category guess. */
 	categories: { id: number; name: string }[];
+	/** What the Name row held when it was posted, shown again with its error. */
+	values?: { picked?: string | null; own?: string };
 	error?: string;
 	focus?: boolean;
 }) {
@@ -168,7 +171,8 @@ export function SuggestionCard({
 			) : (
 				<TransactionHeading item={item} today={today} focus={focus} />
 			)}
-			{error && (
+			{/* A name's error sits under its Name row, where its choice is (NameChoices), so it is not repeated here. */}
+			{error && item.kind !== "name" && (
 				<p role="alert" class="text-sm text-over">
 					{error}
 				</p>
@@ -207,7 +211,7 @@ export function SuggestionCard({
 						action={action}
 						item={item}
 						categories={categories}
-						open={Boolean(error)}
+						error={error}
 					/>
 				</>
 			)}
@@ -233,7 +237,8 @@ export function SuggestionCard({
 						action={action}
 						item={item}
 						categories={categories}
-						open={Boolean(error)}
+						values={values}
+						error={error}
 					/>
 				</>
 			)}
@@ -405,16 +410,22 @@ function SomethingElse({
 	action,
 	item,
 	categories,
-	open = false,
+	values,
+	error,
 }: {
 	action: string;
 	item: SuggestionItem;
 	categories: { id: number; name: string }[];
-	/** Open when the answer it gave was refused, so the error's chips or names are on screen. */
-	open?: boolean;
+	/** What the Name row held when it was posted, shown again with its error. */
+	values?: { picked?: string | null; own?: string };
+	/** The refusal to show: open with it, so its chips or names are on screen. */
+	error?: string;
 }) {
 	return (
-		<details class="group rounded-control border border-rule px-4" open={open}>
+		<details
+			class="group rounded-control border border-rule px-4"
+			open={Boolean(error)}
+		>
 			<summary class="flex min-h-11 cursor-pointer items-center justify-between text-lg">
 				Something else
 				<Icon
@@ -450,7 +461,10 @@ function SomethingElse({
 						names={item.review.names}
 						source={item.review.source}
 						tidied={item.review.tidied}
-						count={item.review.count}
+						picked={values?.picked}
+						own={values?.own}
+						error={error}
+						focusFirst={Boolean(error)}
 					/>
 				)}
 				<Button type="submit" name="answer" value="else" class="w-full">

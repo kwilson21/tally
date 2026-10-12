@@ -124,6 +124,15 @@ describe("groupNoneFit", () => {
 		expect(group?.merchants).toEqual(["Netflix", "Disney Plus", "Hulu"]);
 	});
 
+	it("names each distinct name once, so a merchant's rows with their own names are each named", () => {
+		const [group] = groupNoneFit([
+			row("T", "Amazon", "AMAZON"),
+			row("T", "Dog bed", "AMAZON"),
+			row("T", "Cat tree", "AMAZON"),
+		]);
+		expect(group?.merchants).toEqual(["Amazon", "Cat tree", "Dog bed"]);
+	});
+
 	it("tells Workers AI about no more than ten merchants, so a long backfill can't make a long prompt", () => {
 		expect(MAX_MERCHANTS_SENT).toBe(10);
 		const rows = Array.from({ length: 25 }, (_, i) =>

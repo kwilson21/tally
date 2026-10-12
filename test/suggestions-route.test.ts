@@ -809,7 +809,12 @@ describe("names", () => {
 		await oneOfEach();
 		await post(
 			"/settings/suggestions",
-			{ id: await nameId(), answer: "else", merchant: "Blue Bottle" },
+			{
+				id: await nameId(),
+				answer: "else",
+				name_pick: "own",
+				merchant: "Blue Bottle",
+			},
 			true,
 		);
 		expect(
@@ -821,7 +826,7 @@ describe("names", () => {
 		await oneOfEach();
 		await post(
 			"/settings/suggestions",
-			{ id: await nameId(), answer: "else", name_pick: "keep" },
+			{ id: await nameId(), answer: "else", name_pick: "store" },
 			true,
 		);
 		expect(
@@ -843,7 +848,12 @@ describe("names", () => {
 		expect(textOf(chip.html)).toContain("Pick one of the names shown.");
 		const long = await post(
 			"/settings/suggestions",
-			{ id: await nameId(), answer: "else", merchant: "x".repeat(81) },
+			{
+				id: await nameId(),
+				answer: "else",
+				name_pick: "own",
+				merchant: "x".repeat(81),
+			},
 			true,
 		);
 		expect(long.res.status).toBe(422);
@@ -908,6 +918,205 @@ describe("names", () => {
 		expect(html).toContain(raw);
 		const heading = html.split("<h2").find((part) => part.includes(raw)) ?? "";
 		expect(heading.slice(0, heading.indexOf(">"))).toContain("wrap-anywhere");
+	});
+});
+
+describe("names: the toast counts only the transactions whose shown name changes (decision 101)", () => {
+	const NAMES = "Blue Bottle Coffee\nBlue Bottle\nBlue Bottle Cafe";
+
+	/** Blue Bottle's charges, with a name waiting for them, as the screen asks it. */
+	async function blueCharges(count = 3) {
+		for (let i = 0; i < count; i += 1)
+			await insertTx({ raw: BLUE, amount: 650 });
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
+			)
+			.bind(BLUE, NAMES)
+			.run();
+	}
+
+	/** Gives the first `count` top-level charges of Blue Bottle a name of their own. */
+	async function ownNames(count: number) {
+		const { results } = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT ?",
+			)
+			.bind(BLUE, count)
+			.all<{ id: number }>();
+		for (const { id } of results)
+			await db
+				.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+				.bind(id)
+				.run();
+	}
+
+	const answer = async (fields: Record<string, string>) =>
+		post("/settings/suggestions", { id: await nameId(), ...fields }, true);
+
+	it("leaves out a charge with its own name, so one of three is kept and two are renamed", async () => {
+		await blueCharges();
+		await ownNames(1);
+		const { res } = await answer({
+			answer: "else",
+			name_pick: "s:Blue Bottle",
+		});
+		expect(trigger(res)).toEqual({
+			toast: {
+				message: "Renamed 2 transactions to Blue Bottle",
+				type: "success",
+			},
+			announce: "Renamed 2 transactions to Blue Bottle. Nothing left to check.",
+		});
+	});
+
+	it("says one transaction, not transactions, when a single charge changes", async () => {
+		await blueCharges();
+		await ownNames(2);
+		const { res } = await answer({
+			answer: "else",
+			name_pick: "s:Blue Bottle",
+		});
+		expect(trigger(res).toast?.message).toBe(
+			"Renamed 1 transaction to Blue Bottle",
+		);
+	});
+
+	it("counts only the charges the bank's name changes for, when a person keeps it", async () => {
+		await blueCharges();
+		await ownNames(1);
+		const { res } = await answer({ answer: "else", name_pick: "store" });
+		expect(trigger(res).toast?.message).toBe(
+			"Kept the bank's name for 2 transactions",
+		);
+	});
+
+	it("says what was saved, with no count, when every charge keeps its own name", async () => {
+		await blueCharges();
+		await ownNames(3);
+		const { res } = await answer({
+			answer: "else",
+			name_pick: "s:Blue Bottle",
+		});
+		expect(trigger(res)).toEqual({
+			toast: {
+				message: "Saved Blue Bottle for the transactions that come later",
+				type: "success",
+			},
+			announce:
+				"Saved Blue Bottle for the transactions that come later. Nothing left to check.",
+		});
+	});
+
+	it("says the bank's name is kept for the transactions that come later, when every charge keeps its own name", async () => {
+		await blueCharges();
+		await ownNames(3);
+		const { res } = await answer({ answer: "else", name_pick: "store" });
+		expect(trigger(res).toast?.message).toBe(
+			"Kept the bank's name for the transactions that come later",
+		);
+	});
+
+	it("does not count a split part's own name: its purchase is the charge that counts", async () => {
+		await blueCharges();
+		const purchase = await row(
+			"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT 1",
+			BLUE,
+		);
+		await db
+			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+			.bind(purchase?.id)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, own_name) VALUES (?, 1, '2026-09-20', 300, ?, ?, 'Part')",
+			)
+			.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id)
+			.run();
+		const { res } = await answer({
+			answer: "else",
+			name_pick: "s:Blue Bottle",
+		});
+		expect(trigger(res).toast?.message).toBe(
+			"Renamed 3 transactions to Blue Bottle",
+		);
+	});
+
+	it("counts a split as renamed, even when every part has its own name", async () => {
+		await blueCharges(2);
+		const purchase = await row(
+			"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT 1",
+			BLUE,
+		);
+		await db
+			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+			.bind(purchase?.id)
+			.run();
+		for (const part of ["Part A", "Part B"])
+			await db
+				.prepare(
+					"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, own_name) VALUES (?, 1, '2026-09-20', 300, ?, ?, ?)",
+				)
+				.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id, part)
+				.run();
+		const { res } = await answer({
+			answer: "else",
+			name_pick: "s:Blue Bottle",
+		});
+		expect(trigger(res).toast?.message).toBe(
+			"Renamed 2 transactions to Blue Bottle",
+		);
+	});
+
+	it("keeps the header counting every charge, whatever keeps its own name", async () => {
+		await blueCharges();
+		await ownNames(1);
+		const { html } = await get("/settings/suggestions");
+		expect(textOf(html)).toContain("3 transactions");
+	});
+
+	it("a typed name counts only under Type your own, and turns the suggestions down", async () => {
+		await blueCharges();
+		const alone = await answer({ answer: "else", merchant: "Typed" });
+		expect(alone.res.status).toBe(422);
+		expect(textOf(alone.html)).toContain(
+			"Pick a name, keep the bank's, or type your own.",
+		);
+		expect(
+			await row(
+				"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
+				BLUE,
+			),
+		).toMatchObject({ display_name: null, suggestion_status: "pending" });
+		await answer({ answer: "else", name_pick: "own", merchant: "The Bottle" });
+		expect(
+			await row(
+				"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
+				BLUE,
+			),
+		).toMatchObject({
+			display_name: "The Bottle",
+			suggestion_status: "rejected",
+		});
+	});
+
+	it("an empty typed name's error sits in the field under Type your own, which stays ticked", async () => {
+		await blueCharges();
+		const { res, html } = await answer({
+			answer: "else",
+			name_pick: "own",
+			merchant: "",
+		});
+		expect(res.status).toBe(422);
+		const id = (await nameId()).slice("name-".length);
+		expect(html).toMatch(
+			new RegExp(`<p id="suggestion-${id}-own-error" role="alert"`),
+		);
+		expect(html).not.toMatch(new RegExp(`<p id="suggestion-${id}-error"`));
+		expect(html.indexOf(`id="suggestion-${id}-own-error"`)).toBeGreaterThan(
+			html.indexOf("group-has-[.name-own:checked]:block"),
+		);
+		expect(html).toMatch(/<input[^>]*value="own"[^>]*name-own/);
 	});
 });
 

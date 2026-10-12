@@ -5,7 +5,11 @@ import {
 	createFromSuggestion,
 	dismissSuggestion,
 } from "../db/category-suggestions";
-import { type NameChoice, settleSuggestion } from "../db/merchant-names";
+import {
+	type NameChoice,
+	type NameReview,
+	settleSuggestion,
+} from "../db/merchant-names";
 import {
 	addNeverSuggest,
 	NEVER_SUGGEST_KINDS,
@@ -16,7 +20,12 @@ import { type SuggestionItem, suggestionQueue } from "../db/suggestions-queue";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
-import { KEEP_VALUE, MAX_OWN_NAME, pickValue } from "../views/name-choices";
+import {
+	MAX_OWN_NAME,
+	OWN_VALUE,
+	pickValue,
+	STORE_VALUE,
+} from "../views/name-choices";
 import {
 	AskFirst,
 	joinStores,
@@ -38,7 +47,7 @@ type Ask = {
 };
 
 /** What the form held when it was posted, shown again with its error. */
-type Values = { id: string };
+type Values = { id: string; picked?: string | null; own?: string };
 
 export const suggestions = new Hono<App>();
 
@@ -178,6 +187,7 @@ function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
 								today={today}
 								categories={input.categories}
 								skipHref={skipAddress(current, skipped, again)}
+								values={values?.id === current.id ? values : undefined}
 								error={error}
 								focus={focus}
 							/>
@@ -515,30 +525,27 @@ suggestions.post(PATH, async (c) => {
 		}
 		case "name": {
 			const review = item.review;
+			// A charge with its own name keeps it when the merchant is named, so only the others change (decision 101).
+			const changed = review.count - review.owned;
 			if (answer === "yes") {
-				const settled = await settleSuggestion(db, item.merchantKey, {
+				const value: NameChoice = {
 					kind: "name",
 					name: review.names[0] ?? review.tidied,
-				});
+				};
+				const settled = await settleSuggestion(db, item.merchantKey, value);
 				if (!settled) return stale();
 				const after = await suggestionQueue(db);
-				return done(
-					`Renamed ${review.count} ${review.count === 1 ? "transaction" : "transactions"} to ${review.names[0] ?? review.tidied}`,
-					after,
-				);
+				return done(savedMessage(value, changed), after);
 			}
 			if (answer === "else") {
-				const choice = readChoice(
-					item,
-					form.get("name_pick")?.toString() ?? null,
-					form.get("merchant")?.toString().trim() ?? "",
-				);
+				const picked = form.get("name_pick")?.toString() ?? null;
+				const own = form.get("merchant")?.toString().trim() ?? "";
+				const choice = readChoice(review, picked, own);
 				if (!choice.ok)
 					return renderScreen(c, {
-						values: { id },
+						values: { id, picked, own },
 						error: choice.error,
 						status: 422,
-						focus: true,
 					});
 				const settled = await settleSuggestion(
 					db,
@@ -547,13 +554,7 @@ suggestions.post(PATH, async (c) => {
 				);
 				if (!settled) return stale();
 				const after = await suggestionQueue(db);
-				const count = review.count;
-				const transactions = count === 1 ? "transaction" : "transactions";
-				const message =
-					choice.value.kind === "keep"
-						? `Kept the bank's name for ${count} ${transactions}`
-						: `Renamed ${count} ${transactions} to ${choice.value.name}`;
-				return done(message, after);
+				return done(savedMessage(choice.value, changed), after);
 			}
 			break;
 		}
@@ -571,20 +572,25 @@ function askScreen(c: Context<App>, ask: Ask) {
 	return renderScreen(c, { ask, focus: true });
 }
 
-/** What a person chose for a name: a typed name first, then a chip, which must be one of the names shown. */
+/** What a person chose on the Name row (decision 101): the typed name under "Type your own", the store's own name, or a suggestion the form showed. */
 function readChoice(
-	item: Extract<SuggestionItem, { kind: "name" }>,
+	review: NameReview,
 	picked: string | null,
 	own: string,
 ): { ok: true; value: NameChoice } | { ok: false; error: string } {
-	if (own.length > MAX_OWN_NAME)
-		return {
-			ok: false,
-			error: `Keep the name under ${MAX_OWN_NAME} characters.`,
-		};
-	if (own) return { ok: true, value: { kind: "name", name: own } };
-	if (picked === KEEP_VALUE) return { ok: true, value: { kind: "keep" } };
-	const name = item.review.names.find((n) => pickValue(n) === picked);
+	// A typed name counts only while "Type your own" is ticked (decision 101).
+	if (picked === OWN_VALUE) {
+		if (own === "")
+			return { ok: false, error: "Type a name here, or pick one above." };
+		if (own.length > MAX_OWN_NAME)
+			return {
+				ok: false,
+				error: `Keep the name under ${MAX_OWN_NAME} characters.`,
+			};
+		return { ok: true, value: { kind: "name", name: own } };
+	}
+	if (picked === STORE_VALUE) return { ok: true, value: { kind: "keep" } };
+	const name = review.names.find((n) => pickValue(n) === picked);
 	if (name) return { ok: true, value: { kind: "name", name } };
 	return {
 		ok: false,
@@ -592,4 +598,19 @@ function readChoice(
 			? "Pick one of the names shown."
 			: "Pick a name, keep the bank's, or type your own.",
 	};
+}
+
+/**
+ * The toast's words for a saved choice, counting only the charges whose shown name changed. When every charge
+ * keeps its own name, nothing is counted and the words say the choice is for the transactions that come later.
+ */
+function savedMessage(choice: NameChoice, changed: number): string {
+	const word = changed === 1 ? "transaction" : "transactions";
+	if (changed === 0)
+		return choice.kind === "keep"
+			? "Kept the bank's name for the transactions that come later"
+			: `Saved ${choice.name} for the transactions that come later`;
+	return choice.kind === "keep"
+		? `Kept the bank's name for ${changed} ${word}`
+		: `Renamed ${changed} ${word} to ${choice.name}`;
 }

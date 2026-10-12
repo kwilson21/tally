@@ -96,6 +96,21 @@ async function twoMerchants() {
 	await suggest(LUPITA, "Lupita's Taqueria");
 }
 
+/** Gives the first `count` top-level charges of one bank text a name of their own. */
+async function ownNames(rawName: string, count: number) {
+	const { results } = await db
+		.prepare(
+			"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT ?",
+		)
+		.bind(rawName, count)
+		.all<{ id: number }>();
+	for (const { id } of results)
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(id)
+			.run();
+}
+
 describe("namesToReview", () => {
 	it("lists the merchants with names waiting, most transactions first, with what each needs", async () => {
 		await twoMerchants();
@@ -108,6 +123,7 @@ describe("namesToReview", () => {
 				names: ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
 				source: "tally",
 				count: 3,
+				owned: 0,
 			},
 			{
 				key: LUPITA,
@@ -117,8 +133,35 @@ describe("namesToReview", () => {
 				names: ["Lupita's Taqueria"],
 				source: "tally",
 				count: 1,
+				owned: 0,
 			},
 		]);
+	});
+
+	it("counts the top-level charges that keep their own name as owned, a split part's own name not among them", async () => {
+		await twoMerchants();
+		await ownNames(BLUE, 2);
+		const [blue] = await namesToReview(db);
+		expect(blue).toMatchObject({ key: BLUE, count: 3, owned: 2 });
+		// A split part's own name is not counted: its purchase is the top-level row.
+		const purchase = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL AND own_name IS NULL ORDER BY id LIMIT 1",
+			)
+			.bind(BLUE)
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+			.bind(purchase?.id)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, own_name) VALUES (?, 1, '2026-09-20', 300, ?, ?, 'Part')",
+			)
+			.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id)
+			.run();
+		const [again] = await namesToReview(db);
+		expect(again).toMatchObject({ count: 3, owned: 2 });
 	});
 
 	it("leaves out a merchant that was decided, named by a person, has nothing to suggest, or has no transactions left", async () => {
@@ -185,8 +228,19 @@ describe("namesToReview with several bank texts for one merchant", () => {
 				// Plaid's name is the merchant's key, so a suggestion equal to it is the bank's own.
 				source: "bank",
 				count: 4,
+				owned: 0,
 			},
 		]);
+	});
+
+	it("totals the owned charges across a merchant's bank texts, the way count is totalled", async () => {
+		await charges("TARGET 1234", 3, "Target");
+		await charges("TGT*0099 SF", 1, "Target");
+		await ownNames("TARGET 1234", 1);
+		await ownNames("TGT*0099 SF", 1);
+		await suggest("Target", "Target Stores");
+		const [review] = await namesToReview(db);
+		expect(review).toMatchObject({ key: "Target", count: 4, owned: 2 });
 	});
 
 	it("shows the text with the most charges among those that have a name to offer", async () => {
@@ -217,7 +271,7 @@ describe("namesToReview with several bank texts for one merchant", () => {
 		);
 		const { html } = await get("/settings/suggestions");
 		expect(textOf(html)).toContain("The bank says TGT*0099 SF");
-		expect(textOf(html)).toContain("For all 4 transactions");
+		expect(textOf(html)).toContain("Type your own");
 	});
 });
 

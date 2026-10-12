@@ -4,6 +4,7 @@ import { tidyName } from "../transactions/tidy-name";
 import { categoryNames } from "./categories";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
+import { ownNameSql } from "./own-name";
 import type { ListRow } from "./transactions";
 
 export type NoneFitTransaction = {
@@ -31,13 +32,17 @@ export async function noneFitTransactions(
 	if (!groups.length) return [];
 	const { results } = await db
 		.prepare(`SELECT t.id, ${theme} theme, ${merchantKeySql("t")} merchantKey,
-			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant
+			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant, ${ownNameSql("t")} ownName
 		FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 		JOIN json_each(?) selected ON selected.value = ${theme}
 		WHERE ${eligible} ORDER BY t.date DESC, t.id DESC LIMIT 500`)
 		.bind(JSON.stringify(groups.map((group) => group.theme)), JEV_THRESHOLD)
-		.all<NoneFitTransaction>();
-	return results.map((row) => ({ ...row, merchant: tidyName(row.merchant) }));
+		.all<NoneFitTransaction & { ownName: string | null }>();
+	// A one-off name is the name a person typed, so the model sees it exactly as typed; the rest are tidied.
+	return results.map(({ ownName, ...row }) => ({
+		...row,
+		merchant: ownName ?? tidyName(row.merchant),
+	}));
 }
 
 const placeholders = () => `SELECT value FROM json_each(?)`;
@@ -189,7 +194,7 @@ export async function pendingSuggestions(
 		)
 		SELECT r.id, r.name, r.n, r.total, t.id AS transactionId, t.date, t.amount_cents amountCents, t.raw_name rawName,
 			COALESCE(m.display_name, t.merchant_name, t.raw_name) displayName, t.note, t.excluded, t.flag_income income,
-			t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending
+			t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending, ${ownNameSql("t")} AS ownName
 		FROM ranked r JOIN transactions t ON t.category_suggestion_id = r.id
 		LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
 		WHERE r.rank <= ? AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
@@ -203,6 +208,7 @@ export async function pendingSuggestions(
 				pending: number;
 				n: number;
 				total: number;
+				ownName: string | null;
 			}
 		>();
 	const byId = new Map<number, PendingSuggestion>();
@@ -212,14 +218,16 @@ export async function pendingSuggestions(
 			suggestion = { id: row.id, name: row.name, rows: [] };
 			byId.set(row.id, suggestion);
 		}
-		const { transactionId, n: _n, total: _total, ...tx } = row;
+		const { transactionId, n: _n, total: _total, ownName, ...tx } = row;
 		suggestion.rows.push({
 			...tx,
 			id: transactionId,
+			// A name given to this row alone is shown exactly as typed; only the store's or bank's text is tidied.
 			displayName:
-				tx.displayName === tx.displayName.toUpperCase()
+				ownName ??
+				(tx.displayName === tx.displayName.toUpperCase()
 					? tidyName(tx.displayName)
-					: tx.displayName,
+					: tx.displayName),
 			excluded: !!tx.excluded,
 			income: !!tx.income,
 			pending: !!tx.pending,

@@ -573,7 +573,9 @@ describe("GET /transactions/:id", () => {
 		).toBe(7);
 		expect(html).toContain("Always for this merchant");
 		expect(html).toContain("Count as income");
-		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value="Local Bakery"/);
+		// "Type your own" starts empty; the store's own name is the choice that shows what it is.
+		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value=""/);
+		expect(html).toContain('value="store"');
 		expect(html).toMatch(/<label for="note"[^>]*>What it was<\/label>/);
 		expect(html).toMatch(
 			/<a href="\/transactions\?uncategorized=1"[^>]*>Cancel<\/a>/,
@@ -727,6 +729,7 @@ describe("GET /transactions/:id", () => {
 describe("POST /transactions/:id", () => {
 	const save = {
 		category: "2",
+		name_pick: "own",
 		merchant: "Local Bakery",
 		note: "",
 		back: "/transactions?uncategorized=1",
@@ -1315,6 +1318,7 @@ describe("POST /transactions/:id", () => {
 		)?.id;
 		const { res } = await post(`/transactions/${paypal}`, {
 			...save,
+			name_pick: "",
 			merchant: "",
 		});
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
@@ -1498,7 +1502,6 @@ describe("excluding a transaction (spec §6, #27)", () => {
 
 	it("excludes on save, and says so", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, {
-			merchant: "Local Bakery",
 			note: "",
 			excluded: "1",
 			back: "/transactions?uncategorized=1",
@@ -1576,6 +1579,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 	it("opens the Name row when a failed save brings back a typed new name", async () => {
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: "99",
+			name_pick: "own",
 			merchant: "Corner Bakery",
 			note: "",
 			back: "/transactions",

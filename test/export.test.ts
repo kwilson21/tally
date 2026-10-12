@@ -105,6 +105,31 @@ describe("data exports", () => {
 		expect(csv).toMatch(/ZETA MART 5678,Zeta Stores,/);
 	});
 
+	it("gives the CSV an own_name column right after merchant: the name a person gave that one transaction, empty otherwise", async () => {
+		await env.DB.prepare("UPDATE transactions SET raw_name = ? WHERE id = 1")
+			.bind("AMAZON MKTPL*2K4")
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)",
+		)
+			.bind("AMAZON MKTPL*2K4", "Amazon")
+			.run();
+		await env.DB.prepare("UPDATE transactions SET own_name = ? WHERE id = 1")
+			.bind("Dog bed")
+			.run();
+
+		const csv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+		const [header = "", ...rows] = csv.split("\r\n");
+
+		expect(header).toBe(
+			"date,bank name,merchant,own_name,amount (USD; positive = money out),category,excluded,kind,for,note,account",
+		);
+		expect(csv).toMatch(/,AMAZON MKTPL\*2K4,Amazon,Dog bed,/);
+		expect(rows.filter((row) => row.includes("Dog bed"))).toHaveLength(1);
+	});
+
 	it("neutralizes formulas in CSV text fields without changing numeric amounts", async () => {
 		await env.DB.prepare("UPDATE accounts SET name = ? WHERE id = 1")
 			.bind("@checking")
@@ -153,6 +178,26 @@ describe("data exports", () => {
 
 		expect(csv).not.toContain("SPLIT PARENT");
 		expect(csv).toContain("SPLIT CHILD");
+	});
+
+	it("own_name is the name a person gave that row, so a split part without one of its own leaves it empty; merchant still says the store", async () => {
+		await env.DB.prepare(
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, is_split, parent_id, own_name)
+			 VALUES (9011, 1, '2026-09-20', 3000, 'SPLIT PURCHASE PARENT', 1, NULL, 'Dog bed'),
+			        (9012, 1, '2026-09-20', 1000, 'SPLIT PART PLAIN', 0, 9011, NULL),
+			        (9013, 1, '2026-09-20', 2000, 'SPLIT PART NAMED', 0, 9011, 'Cat food')`,
+		).run();
+
+		const csv = await (
+			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
+		).text();
+		const row = (raw: string) =>
+			csv.split("\r\n").find((line) => line.includes(raw)) ?? "";
+
+		expect(csv).not.toContain("SPLIT PURCHASE PARENT");
+		// The parent's name is not this part's own name (decision 79), so the column is empty for it.
+		expect(row("SPLIT PART PLAIN").split(",")[3]).toBe("");
+		expect(row("SPLIT PART NAMED").split(",")[3]).toBe("Cat food");
 	});
 
 	it("downloads RFC 4180 CSV with dollar amounts in Plaid's sign convention", async () => {
@@ -343,6 +388,7 @@ describe("data exports", () => {
 				"kind_cleared",
 				"for_person_id",
 				"for_person_guessed",
+				"own_name",
 				"for_person_cleared",
 				"income_maybe_declined",
 				"transfer_maybe_declined",
