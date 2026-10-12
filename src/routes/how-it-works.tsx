@@ -483,8 +483,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>
 							You choose in a transaction's edit panel, or in Settings under
-							Merchant names. Pick a suggestion, keep the bank's name, or type
-							your own. A name you typed always wins.
+							Suggestions. Pick a suggestion, keep the bank's name, or type your
+							own. A name you typed always wins.
 						</li>
 						<li>
 							Tally asks once for each bank text, overnight. Turn it off with

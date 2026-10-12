@@ -82,26 +82,17 @@ const ORDER: SuggestionKind[] = [
 	"name",
 ];
 
-const ruleKey = (
-	kind: NeverSuggestKind,
-	merchantKey: string,
-	categoryId: number | null = null,
-) => `${kind}\u0000${merchantKey}\u0000${categoryId ?? ""}`;
+const ruleKey = (kind: NeverSuggestKind, merchantKey: string) =>
+	`${kind}\u0000${merchantKey}`;
 
 /** Every "Never suggest" line, as lookups: a store with a line for a kind is never asked about it. */
 async function neverSuggestLines(db: D1Database): Promise<Set<string>> {
 	const { results } = await db
 		.prepare(
-			"SELECT merchant_key AS merchantKey, kind, category_id AS categoryId FROM never_suggest_rules",
+			"SELECT merchant_key AS merchantKey, kind FROM never_suggest_rules",
 		)
-		.all<{
-			merchantKey: string;
-			kind: NeverSuggestKind;
-			categoryId: number | null;
-		}>();
-	return new Set(
-		results.map((row) => ruleKey(row.kind, row.merchantKey, row.categoryId)),
-	);
+		.all<{ merchantKey: string; kind: NeverSuggestKind }>();
+	return new Set(results.map((row) => ruleKey(row.kind, row.merchantKey)));
 }
 
 const LABEL_SQL = `m.display_name AS displayName`;
@@ -219,7 +210,6 @@ async function transferSuggestions(
  */
 async function categorySuggestions(
 	db: D1Database,
-	never: Set<string>,
 ): Promise<{ item: TransactionSuggestion; order: number }[]> {
 	const { results } = await db
 		.prepare(
@@ -238,26 +228,22 @@ async function categorySuggestions(
 				category: string;
 			}
 		>();
-	return results
-		.filter(
-			(row) => !never.has(ruleKey("category", row.merchantKey, row.categoryId)),
-		)
-		.map((row) => ({
-			order: row.id,
-			item: {
-				kind: "category",
-				id: `category-${row.id}`,
-				transactionId: row.id,
-				date: row.date,
-				amountCents: row.amountCents,
-				bankText: row.bankText,
-				merchantKey: row.merchantKey,
-				merchant: merchantLabel(row.displayName, row.merchantKey),
-				sure: confidencePercent(row.categoryConfidence),
-				categoryId: row.categoryId,
-				category: row.category,
-			},
-		}));
+	return results.map((row) => ({
+		order: row.id,
+		item: {
+			kind: "category",
+			id: `category-${row.id}`,
+			transactionId: row.id,
+			date: row.date,
+			amountCents: row.amountCents,
+			bankText: row.bankText,
+			merchantKey: row.merchantKey,
+			merchant: merchantLabel(row.displayName, row.merchantKey),
+			sure: confidencePercent(row.categoryConfidence),
+			categoryId: row.categoryId,
+			category: row.category,
+		},
+	}));
 }
 
 /**
@@ -338,7 +324,6 @@ async function newCategorySuggestions(
 async function nameSuggestions(
 	db: D1Database,
 	switches: AiSwitches,
-	never: Set<string>,
 ): Promise<{ item: NameSuggestion; order: number }[]> {
 	const reviews = await namesToReview(db, switches);
 	if (reviews.length === 0) return [];
@@ -353,20 +338,18 @@ async function nameSuggestions(
 		.bind(JSON.stringify(keys))
 		.all<{ merchantKey: string; latest: string; totalCents: number }>();
 	const totals = new Map(results.map((row) => [row.merchantKey, row]));
-	return reviews
-		.filter((review) => !never.has(ruleKey("name", review.key)))
-		.map((review) => ({
-			order: review.id,
-			item: {
-				kind: "name",
-				id: `name-${review.id}`,
-				rowId: review.id,
-				merchantKey: review.key,
-				date: totals.get(review.key)?.latest ?? "",
-				totalCents: totals.get(review.key)?.totalCents ?? 0,
-				review,
-			},
-		}));
+	return reviews.map((review) => ({
+		order: review.id,
+		item: {
+			kind: "name",
+			id: `name-${review.id}`,
+			rowId: review.id,
+			merchantKey: review.key,
+			date: totals.get(review.key)?.latest ?? "",
+			totalCents: totals.get(review.key)?.totalCents ?? 0,
+			review,
+		},
+	}));
 }
 
 /** Newest first within a kind: the newest charge's date, then the higher row number. */
@@ -392,9 +375,9 @@ export async function suggestionQueue(
 	const [income, transfer, category, newCategory, names] = await Promise.all([
 		s.income ? incomeSuggestions(db, never) : [],
 		s.categories ? transferSuggestions(db, never) : [],
-		s.categories ? categorySuggestions(db, never) : [],
+		s.categories ? categorySuggestions(db) : [],
 		s.categories ? newCategorySuggestions(db, never) : [],
-		nameSuggestions(db, s, never),
+		nameSuggestions(db, s),
 	]);
 	const byKind: Record<SuggestionKind, SuggestionItem[]> = {
 		income: newestFirst(income),

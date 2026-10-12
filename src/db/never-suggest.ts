@@ -4,9 +4,8 @@
 import { tidyName } from "../transactions/tidy-name";
 import { merchantKeySql } from "./merchant-key";
 
+// A name or a category has no No, so only these three suggestions ever write a line (decision 101).
 export const NEVER_SUGGEST_KINDS = [
-	"name",
-	"category",
 	"new_category",
 	"income",
 	"transfer",
@@ -20,9 +19,6 @@ export type NeverSuggestRule = {
 	/** What the line calls the store: its display name, or its key tidied. */
 	merchant: string;
 	kind: NeverSuggestKind;
-	categoryId: number | null;
-	/** The refused category's name, for a category line. */
-	category: string | null;
 	/** The household's day of the No, as YYYY-MM-DD. */
 	decidedOn: string;
 };
@@ -32,24 +28,19 @@ type Row = {
 	merchantKey: string;
 	displayName: string | null;
 	kind: NeverSuggestKind;
-	categoryId: number | null;
-	category: string | null;
 	decidedOn: string;
 };
 
 const RULE_SELECT = `SELECT r.id, r.merchant_key AS merchantKey, m.display_name AS displayName, r.kind,
-	r.category_id AS categoryId, c.name AS category, r.decided_on AS decidedOn
+	r.decided_on AS decidedOn
 	FROM never_suggest_rules r
-	LEFT JOIN merchants m ON m.raw_name = r.merchant_key
-	LEFT JOIN categories c ON c.id = r.category_id`;
+	LEFT JOIN merchants m ON m.raw_name = r.merchant_key`;
 
 const toRule = (row: Row): NeverSuggestRule => ({
 	id: row.id,
 	merchantKey: row.merchantKey,
 	merchant: row.displayName || tidyName(row.merchantKey),
 	kind: row.kind,
-	categoryId: row.categoryId,
-	category: row.category,
 	decidedOn: row.decidedOn,
 });
 
@@ -97,21 +88,19 @@ export async function addNeverSuggest(
 	{
 		merchantKey,
 		kind,
-		categoryId = null,
 		decidedOn,
 	}: {
 		merchantKey: string;
 		kind: NeverSuggestKind;
-		categoryId?: number | null;
 		decidedOn: string;
 	},
 ): Promise<boolean> {
 	const result = await db
 		.prepare(
-			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, category_id, decided_on)
-			VALUES (?, ?, ?, ?)`,
+			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+			VALUES (?, ?, ?)`,
 		)
-		.bind(merchantKey, kind, categoryId, decidedOn)
+		.bind(merchantKey, kind, decidedOn)
 		.run();
 	return result.meta.changes > 0;
 }
@@ -145,10 +134,6 @@ export function neverSuggestRuleLine(rule: NeverSuggestRule): string {
 			return `Never suggest a transfer for ${rule.merchant}`;
 		case "new_category":
 			return `Never suggest a new category for ${rule.merchant}`;
-		case "name":
-			return `Never suggest a name for ${rule.merchant}`;
-		case "category":
-			return `Never suggest ${rule.category ?? "a category"} for ${rule.merchant}`;
 	}
 }
 

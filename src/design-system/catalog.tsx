@@ -2420,8 +2420,6 @@ function SuggestionsReview() {
 								merchantKey: "VENMO",
 								merchant: "Venmo",
 								kind: "income",
-								categoryId: null,
-								category: null,
 								decidedOn: "2026-10-03",
 							},
 							{
@@ -2429,8 +2427,6 @@ function SuggestionsReview() {
 								merchantKey: "CHEWY.COM 1",
 								merchant: "Chewy",
 								kind: "new_category",
-								categoryId: null,
-								category: null,
 								decidedOn: "2026-10-09",
 							},
 						]}

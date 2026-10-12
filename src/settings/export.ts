@@ -28,8 +28,7 @@ const EXPORT_COLUMNS = {
 	household_members:
 		"email, first_seen_at, last_seen_at, session_issued_at, removed_at",
 	household_people: "id, name",
-	never_suggest_rules:
-		"id, merchant_key, kind, category_id, decided_on, created_at",
+	never_suggest_rules: "id, merchant_key, kind, decided_on, created_at",
 } as const;
 
 /** A dollar value for a spreadsheet, calculated without turning stored money into a float. */

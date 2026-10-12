@@ -393,7 +393,6 @@ describe("data exports", () => {
 			],
 			household_people: ["id", "name"],
 			never_suggest_rules: [
-				"category_id",
 				"created_at",
 				"decided_on",
 				"id",

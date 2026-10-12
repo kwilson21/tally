@@ -8,6 +8,7 @@ import {
 import { type NameChoice, settleSuggestion } from "../db/merchant-names";
 import {
 	addNeverSuggest,
+	NEVER_SUGGEST_KINDS,
 	type NeverSuggestKind,
 	questionStores,
 } from "../db/never-suggest";
@@ -25,7 +26,6 @@ import {
 type App = { Bindings: Env };
 
 const PATH = "/settings/suggestions";
-const ANSWER_KINDS: NeverSuggestKind[] = ["income", "transfer", "new_category"];
 const MAX_STORE_KEY = 500;
 
 /** A question the No just raised: its store(s) and what the check says (decision 101). */
@@ -314,7 +314,10 @@ suggestions.post(PATH, async (c) => {
 			.getAll("store")
 			.map((store) => store.toString())
 			.filter((store) => store.length > 0 && store.length <= MAX_STORE_KEY);
-		if (!ANSWER_KINDS.includes(kind as NeverSuggestKind) || stores.length === 0)
+		if (
+			!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind) ||
+			stores.length === 0
+		)
 			return stale();
 		if (answer === "ask_not_now") {
 			const message = "Kept it as it is.";

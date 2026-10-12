@@ -25,14 +25,16 @@ beforeEach(async () => {
 });
 
 describe("never_suggest_rules table", () => {
-	it("holds only the five kinds of suggestion", async () => {
-		await expect(
-			db
-				.prepare(
-					"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO', 'bogus', '2026-10-03')",
-				)
-				.run(),
-		).rejects.toThrow();
+	it("holds only the three kinds of suggestion a Yes can write", async () => {
+		for (const kind of ["name", "category", "bogus"]) {
+			await expect(
+				db
+					.prepare(
+						`INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO', '${kind}', '2026-10-03')`,
+					)
+					.run(),
+			).rejects.toThrow();
+		}
 	});
 
 	it("keeps one line per store and kind, so a repeat Yes adds nothing", async () => {
