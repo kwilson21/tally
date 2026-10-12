@@ -146,7 +146,7 @@ export async function saveOrganizeGroup(
 		updates.push(
 			db
 				.prepare(
-					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
+					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 						updated_by = ?, updated_at = datetime('now')
 					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})`,
 				)

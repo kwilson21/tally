@@ -1200,7 +1200,7 @@ async function billPage(
 		const due = occurrenceDate(bill, pickerPeriod);
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,${merchantColumnSql("t", "display_name")} AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),
@@ -1485,12 +1485,17 @@ bills.post("/bills/:id/link", async (c) => {
 	}
 	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
 	// linking never writes (spec §6.1 rule 4, §8.5).
-	const result = await c.env.DB.prepare(
-		`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?)`,
-	)
-		.bind(id, period, transaction, transaction, due, manualWindow)
-		.run();
-	if (!result.meta.changes)
+	// A split change's dismissal of this payment (decision 99) is replaced by the link, which leaves one linked row.
+	// It is kept when the link wasn't made, since the DELETE needs the linked row this payment just got.
+	const [insert] = await c.env.DB.batch([
+		c.env.DB.prepare(
+			`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?)`,
+		).bind(id, period, transaction, transaction, due, manualWindow),
+		c.env.DB.prepare(
+			`DELETE FROM bill_payments WHERE bill_id=? AND period=? AND transaction_id=? AND status='dismissed' AND matched_by='auto' AND EXISTS(SELECT 1 FROM bill_payments WHERE bill_id=? AND period=? AND transaction_id=? AND status='linked')`,
+		).bind(id, period, transaction, id, period, transaction),
+	]);
+	if (!insert?.meta.changes)
 		return billPage(
 			c,
 			id,

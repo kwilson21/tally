@@ -1631,7 +1631,7 @@ describe("syncItem", () => {
 
 			it("is not over-refunded when the split is removed", async () => {
 				const { refundId } = await trimmedSplit();
-				const unlinked = await removeSplit(
+				const { unlinked } = await removeSplit(
 					env.DB,
 					refundId,
 					"person@example.com",
@@ -1659,7 +1659,11 @@ describe("syncItem", () => {
 					],
 					"person@example.com",
 				);
-				expect(result).toEqual({ saved: true, unlinked: ["2026-09-10"] });
+				expect(result).toEqual({
+					saved: true,
+					unlinked: ["2026-09-10"],
+					bills: [],
+				});
 				expect(await refundedCents()).toBe(0);
 			});
 
@@ -1687,7 +1691,7 @@ describe("syncItem", () => {
 					date: "2026-09-02",
 				});
 				expect(
-					await removeSplit(env.DB, refund.id, "person@example.com"),
+					(await removeSplit(env.DB, refund.id, "person@example.com")).unlinked,
 				).toEqual([]);
 				expect(await stillLinked()).toEqual(["refund"]);
 			});
