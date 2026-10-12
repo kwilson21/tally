@@ -94,7 +94,7 @@ describe("select several transactions", () => {
 
 	it("a person's category for a restored purchase clears its note and takes the person's source", async () => {
 		await env.DB.prepare(
-			"UPDATE transactions SET category_id=2, category_source='jev', split_removed_from_cents=1234 WHERE id=111",
+			'UPDATE transactions SET category_id=2, category_source=\'jev\', split_removed_from_cents=1234, split_removed_bills=\'[{"name":"Water","period":"2026-09"}]\' WHERE id=111',
 		).run();
 		const res = await request("/transactions/select/category/save", {
 			method: "POST",
@@ -108,12 +108,13 @@ describe("select several transactions", () => {
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
-				"SELECT category_id,category_source,split_removed_from_cents FROM transactions WHERE id=111",
+				"SELECT category_id,category_source,split_removed_from_cents,split_removed_bills FROM transactions WHERE id=111",
 			).first(),
 		).toEqual({
 			category_id: 1,
 			category_source: "user",
 			split_removed_from_cents: null,
+			split_removed_bills: null,
 		});
 	});
 
