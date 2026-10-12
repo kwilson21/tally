@@ -1605,6 +1605,7 @@ function EditSheet({
 							}
 							picked={namePick}
 							own={values.displayName ?? ""}
+							ownName={tx.ownName}
 							error={errors.merchant}
 							rename={{
 								merchant: tx.nameChoices.merchantLabel,
@@ -1628,6 +1629,9 @@ function EditSheet({
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
+								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
+								// against (followsPurchaseAfterSave), so the chip folds the note only where one is drawn.
+								reviewCounts: linkedPurchase !== undefined,
 								today,
 								scope: nameScope,
 							}}

@@ -7,6 +7,7 @@ import {
 	OWN_VALUE,
 	pickValue,
 	type RenameFacts,
+	SAME_NAME_CLASS,
 } from "../src/views/name-choices";
 
 // Decision 101 (Name row round 2 A): the Rename list opens while a Name row choice is ticked, and the
@@ -19,6 +20,7 @@ const rename: RenameFacts = {
 	thisOwn: null,
 	tallyCategory: true,
 	excludeCounts: true,
+	reviewCounts: true,
 	today: "2026-10-11",
 	scope: "one",
 };
@@ -105,20 +107,38 @@ describe("the re-guess note follows the edit form's controls", () => {
 		expect(guessAgainClass(html)).toContain("text-sm text-muted");
 	});
 
-	it("folds the note away when another category, Income, or the refund link is picked", () => {
-		const hooks = guessAgainClass(markup(rename));
-		expect(hooks).toContain(
-			"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
-		);
-		expect(hooks).toContain(
-			"group-has-[input[name=income]:checked:not([checked])]/edit:hidden",
-		);
-		expect(hooks).toContain(
-			"group-has-[input[name=income][checked]:not(:checked)]/edit:hidden",
-		);
-		expect(hooks).toContain(
-			"group-has-[input[name=refund\\_of]:checked:not([checked])]/edit:hidden",
-		);
+	// One row per posted field the re-guess reads (name-choices.tsx lists them, and says which are hidden or
+	// need no hook). A checkbox folds both ways, a radio when it is ticked; a field with no hook has none.
+	const both = (field: string) => [
+		`group-has-[input[name=${field}]:checked:not([checked])]/edit:hidden`,
+		`group-has-[input[name=${field}][checked]:not(:checked)]/edit:hidden`,
+	];
+	it.each([
+		{
+			field: "category",
+			hooks: [
+				"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
+			],
+		},
+		{ field: "excluded", hooks: both("excluded") },
+		{ field: "income", hooks: both("income") },
+		{
+			field: "refund_of",
+			hooks: [
+				"group-has-[input[name=refund\\_of]:checked:not([checked])]/edit:hidden",
+			],
+		},
+		{ field: "creditReviewed", hooks: both("creditReviewed") },
+		{
+			field: "name_pick",
+			hooks: ["group-has-[.name-same:checked]/edit:hidden"],
+		},
+		{ field: "merchant", hooks: [] },
+		{ field: "name_scope", hooks: [] },
+	])("the note's hooks for $field", ({ field, hooks }) => {
+		const note = guessAgainClass(markup(rename));
+		for (const hook of hooks) expect(note).toContain(hook);
+		if (hooks.length === 0) expect(note).not.toContain(`input[name=${field}]`);
 	});
 
 	it("folds the note away when Exclude changes, unless the row pays a bill", () => {
@@ -139,6 +159,70 @@ describe("the re-guess note follows the edit form's controls", () => {
 	it("draws no note when Tally did not pick the category", () => {
 		expect(markup({ ...rename, tallyCategory: false })).not.toContain(
 			"Tally guesses its category again.",
+		);
+	});
+
+	it("folds the note on the review chip only while a linked purchase is there to count", () => {
+		const linked = guessAgainClass(markup(rename));
+		expect(linked).toContain(
+			"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
+		);
+		expect(linked).toContain(
+			"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+		);
+		expect(
+			guessAgainClass(markup({ ...rename, reviewCounts: false })),
+		).not.toContain("input[name=creditReviewed]");
+	});
+});
+
+/** The values of the radios whose class list carries `cls`. */
+function radiosWith(html: string, cls: string): string[] {
+	return html
+		.split("<input")
+		.filter((part) => part.includes('type="radio"'))
+		.filter((part) =>
+			(part.match(/class="([^"]*)"/)?.[1] ?? "").split(" ").includes(cls),
+		)
+		.map((part) => part.match(/value="([^"]*)"/)?.[1] ?? "");
+}
+
+// A Name row choice whose name the save would treat as no rename carries SAME_NAME_CLASS, and the note folds on it
+// (the route's guard: the store's tidied name, or a suggested name, equal to the row's own name).
+describe("the Name row marks the row's own name, so picking it folds the note", () => {
+	const draw = (ownName: string | null | undefined) =>
+		String(
+			NameChoices({
+				id: "name",
+				names: ["Blue Bottle Coffee", "Blue Bottle"],
+				source: "guess",
+				tidied: "Blue bottle cof",
+				rawName: "SQ *BLUE BOTTLE COF 0412",
+				ownName,
+				rename,
+			}),
+		);
+
+	it("marks the suggested choice that is the row's own name", () => {
+		expect(radiosWith(draw("Blue Bottle"), SAME_NAME_CLASS)).toEqual([
+			pickValue("Blue Bottle"),
+		]);
+	});
+
+	it("marks the store's choice when the tidied name is the row's own name", () => {
+		expect(radiosWith(draw("Blue bottle cof"), SAME_NAME_CLASS)).toEqual([
+			"store",
+		]);
+	});
+
+	it("marks no choice when the row has no own name", () => {
+		expect(radiosWith(draw(null), SAME_NAME_CLASS)).toEqual([]);
+		expect(radiosWith(draw(undefined), SAME_NAME_CLASS)).toEqual([]);
+	});
+
+	it("gives the note the fold that follows the marked choice", () => {
+		expect(guessAgainClass(draw("Blue Bottle"))).toContain(
+			"group-has-[.name-same:checked]/edit:hidden",
 		);
 	});
 });

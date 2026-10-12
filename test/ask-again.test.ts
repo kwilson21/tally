@@ -975,6 +975,68 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		});
 		expect(await ownNameOf(bakery)).toBe("Dog bowl");
 	});
+
+	/** The re-guess note as the panel draws it, with its classes. */
+	const noteClass = (html: string) =>
+		html.match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1] ?? "";
+	/** Makes the bakery row a credit (negative), linked to a purchase of the household's, or unlinked. */
+	const creditLinked = async (linked: boolean) => {
+		const purchase = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE amount_cents > 0 AND excluded = 0 AND parent_id IS NULL AND is_split = 0 AND id != ? ORDER BY id LIMIT 1",
+			)
+			.bind(bakery)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -650, refund_of_id = ?, credit_reviewed = 0 WHERE id = ?",
+			)
+			.bind(linked ? purchase?.id : null, bakery)
+			.run();
+	};
+
+	it("on a linked, unreviewed credit, the note folds on the review chip both ways, since ticking it makes the refund follow its purchase", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(true);
+		const note = noteClass(await panel({ JEV_API_KEY: "jev-key" }));
+		expect(note).toContain(
+			"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
+		);
+		expect(note).toContain(
+			"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+		);
+	});
+
+	it("on an unlinked credit, the note has no review hooks, since no purchase is linked for a review to count", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(false);
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(html).toContain("Tally guesses its category again.");
+		expect(noteClass(html)).not.toContain("input[name=creditReviewed]");
+	});
+
+	it("marks the suggested name the row already shows as its own, so ticking it folds the note: the save keeps Tally's category", async () => {
+		await pickedByTally(await firstCategory());
+		await db
+			.prepare(
+				"UPDATE merchants SET display_name = NULL, suggested_name = 'Bakery Lane', suggestion_status = 'pending' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+			)
+			.run();
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Bakery Lane' WHERE id = ?")
+			.bind(bakery)
+			.run();
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		const radio = html
+			.split("<input")
+			.find((part) => part.includes('value="s:Bakery Lane"'));
+		expect(radio).toContain("name-same");
+		expect(noteClass(html)).toContain(
+			"group-has-[.name-same:checked]/edit:hidden",
+		);
+	});
 });
 
 describe("asking again honors what everything else does", () => {

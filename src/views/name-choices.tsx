@@ -57,6 +57,11 @@ export const OWN_PICK_CLASS = "name-own";
  * only away once they change (CSS only), so it is a named group that NameChoices' and the Chips' unnamed `group` don't meet.
  */
 export const EDIT_FORM_GROUP = "group/edit";
+/**
+ * The class of the Name row choice whose name the save would treat as no rename (the route's guard): the store's
+ * tidied name, or a suggested name, equal to the row's own name. The re-guess note folds on it (GUESS_AGAIN_FOLDS).
+ */
+export const SAME_NAME_CLASS = "name-same";
 
 /**
  * In the list, for a name Tally guessed (P87 B, decision 80): the sparkles icon, "Tally's guess" under the
@@ -156,6 +161,8 @@ export type RenameFacts = {
 	tallyCategory: boolean;
 	/** Whether Exclude changes whether Jev can be asked about the row: false for a payment linked to a bill, which counts whatever its exclusion. */
 	excludeCounts: boolean;
+	/** Whether a linked purchase that isn't excluded is drawn: then the review chip decides whether the refund follows it, so it folds the note. */
+	reviewCounts: boolean;
 	/** Today's date, for the dates of the other own names. */
 	today: string;
 	/** The scope that is ticked: "all" when the merchant is renamed, otherwise "this one only". */
@@ -165,15 +172,62 @@ export type RenameFacts = {
 };
 
 /**
- * The re-guess note's hooks (CSS only, decision 101, read from EDIT_FORM_GROUP): it folds away once another
- * category is picked, Income changes, or the refund link changes, since the save then keeps the person's
- * category or Jev isn't asked. It only ever hides what was drawn, so where :has() isn't supported it stays.
- * Each hook is a literal class, so Tailwind compiles it. Tailwind reads a bare underscore in an arbitrary value
- * as a space, so refund_of keeps its escape: String.raw leaves the backslash in the class, as the stylesheet expects.
+ * The re-guess note's hooks (CSS only, decision 101, read from EDIT_FORM_GROUP). The note folds away once a field the
+ * save reads moves from the state the panel drew it in: the save then keeps the person's category, or Jev isn't asked.
+ * It only ever hides what was drawn, so where :has() isn't supported it stays. A checkbox folds both ways (ticked now
+ * but drawn unticked, and the reverse); a radio folds when it is ticked but was drawn unticked. Each hook is a literal
+ * class, so Tailwind compiles it. Tailwind reads a bare underscore in an arbitrary value as a space, so refund_of keeps
+ * its escape: String.raw leaves the backslash in the class, as the stylesheet expects.
+ *
+ * Every posted field the re-guess reads at save time (oneOffGuessesAgain, the route's `row`, followsPurchaseAfterSave
+ * and parseEdit), and the hook that covers it or why it needs none:
+ * - category (a radio; NewCategoryChip and SuggestedCategoryChip post it too): covered here. new_category_name counts
+ *   only while category is "new", so the same hook covers it.
+ * - excluded (a checkbox): EXCLUDE_FOLDS, while excludeCounts holds. A bill payment counts whatever its exclusion.
+ * - income (a checkbox): covered here, both ways. income_was is the state it was drawn in, so it needs no hook.
+ * - refund_of (a radio): covered here. A link also includes the row (excludedNow) and reviews the credit.
+ * - creditReviewed (a checkbox): REVIEW_FOLDS, while reviewCounts holds (a linked purchase that isn't excluded). A new
+ *   link already folds through refund_of. creditReviewed_was is the state it was drawn in, and creditReviewedVisible
+ *   only says the chip was drawn, so neither needs a hook.
+ * - name_pick (a radio): covered here, by the choice SAME_NAME_CLASS marks. Ticking another name brings the note back.
+ * - merchant (the typed name under Type your own): no hook. CSS can't read typed text, so retyping the row's own name
+ *   keeps the note, and the save is still right: the route keeps the row's name. This is the one known limit.
+ * - name_scope: no hook. The note is a line under This one only and describes that choice whichever scope is ticked.
+ * - Hidden or server-side, so no hook: merchant_was, jevCategories, paysBill, isSplit and the stored category.
+ *   details_action=keep and displayed_name_guess: with nothing ticked the Rename list is hidden, and the save names
+ *   Tally's guess for All, so no note shows.
+ * - The rest parseEdit reads (always, always_was, rule_category_was, note, note_was, kind, kind_was, for_person_id,
+ *   for_person_id_was, details_visible) doesn't feed the re-guess.
  */
-const GUESS_AGAIN_FOLDS = String.raw`group-has-[input[name=category]:checked:not([checked])]/edit:hidden group-has-[input[name=income]:checked:not([checked])]/edit:hidden group-has-[input[name=income][checked]:not(:checked)]/edit:hidden group-has-[input[name=refund\_of]:checked:not([checked])]/edit:hidden`;
-/** GUESS_AGAIN_FOLDS, and also on Exclude, where Exclude changes whether Jev is asked (excludeCounts). */
-const GUESS_AGAIN_FOLDS_ON_EXCLUDE = `${GUESS_AGAIN_FOLDS} group-has-[input[name=excluded]:checked:not([checked])]/edit:hidden group-has-[input[name=excluded][checked]:not(:checked)]/edit:hidden`;
+const GUESS_AGAIN_FOLDS = [
+	"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
+	"group-has-[input[name=income]:checked:not([checked])]/edit:hidden",
+	"group-has-[input[name=income][checked]:not(:checked)]/edit:hidden",
+	String.raw`group-has-[input[name=refund\_of]:checked:not([checked])]/edit:hidden`,
+	"group-has-[.name-same:checked]/edit:hidden",
+];
+/** Exclude changes whether Jev is asked, unless the row pays a bill (excludeCounts). */
+const EXCLUDE_FOLDS = [
+	"group-has-[input[name=excluded]:checked:not([checked])]/edit:hidden",
+	"group-has-[input[name=excluded][checked]:not(:checked)]/edit:hidden",
+];
+/** The review chip decides whether a linked refund follows its purchase, so it counts while a purchase is linked (reviewCounts). */
+const REVIEW_FOLDS = [
+	"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
+	"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+];
+
+/** The classes of the re-guess note under This one only: the hooks that apply to the row it is drawn for. */
+function guessAgainFolds({
+	excludeCounts,
+	reviewCounts,
+}: Pick<RenameFacts, "excludeCounts" | "reviewCounts">): string {
+	return [
+		...GUESS_AGAIN_FOLDS,
+		...(excludeCounts ? EXCLUDE_FOLDS : []),
+		...(reviewCounts ? REVIEW_FOLDS : []),
+	].join(" ");
+}
 
 /**
  * The Rename list (decision 101, Name row round 2 A): "This one only" (ticked by default) and "All N from
@@ -189,6 +243,7 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 		thisOwn,
 		tallyCategory,
 		excludeCounts,
+		reviewCounts,
 		today,
 		scope,
 		scopeName = "name_scope",
@@ -210,9 +265,7 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 							? [
 									{
 										text: "Tally guesses its category again.",
-										class: excludeCounts
-											? GUESS_AGAIN_FOLDS_ON_EXCLUDE
-											: GUESS_AGAIN_FOLDS,
+										class: guessAgainFolds({ excludeCounts, reviewCounts }),
 									},
 								]
 							: []),
@@ -253,6 +306,7 @@ export function NameChoices({
 	rawName,
 	picked,
 	own = "",
+	ownName = null,
 	error,
 	focusFirst = false,
 	rename,
@@ -276,6 +330,11 @@ export function NameChoices({
 	picked?: string | null;
 	/** What was typed in the field. */
 	own?: string;
+	/**
+	 * The name the row shows as its own (tx.ownName: a split part's inherited name counts). A choice of that name is
+	 * no rename to the save, so it carries SAME_NAME_CLASS. Left out where the row has no own name.
+	 */
+	ownName?: string | null;
 	error?: string;
 	focusFirst?: boolean;
 	/** The Rename list's facts; left out where a name is never for one transaction. */
@@ -304,6 +363,7 @@ export function NameChoices({
 						pick
 						autofocus={focusFirst && index === 0}
 						describedBy={`${sourceId}-${index}`}
+						radioClass={name === ownName ? SAME_NAME_CLASS : ""}
 					>
 						{name}
 					</Choice>
@@ -317,6 +377,7 @@ export function NameChoices({
 				value={STORE_VALUE}
 				checked={picked === STORE_VALUE}
 				pick
+				radioClass={tidied === ownName ? SAME_NAME_CLASS : ""}
 				notes={
 					rawName && rawName !== tidied ? [`The bank says ${rawName}`] : []
 				}
