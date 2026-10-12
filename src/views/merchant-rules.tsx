@@ -30,12 +30,15 @@ export function MerchantRules({
 	focusHeading,
 	error,
 	neverRules = [],
+	neverFocus,
 	today,
 }: {
 	id?: string;
 	rules: MerchantRule[];
 	/** The "Never suggest" lines, under the same heading (issue #195). */
 	neverRules?: NeverSuggestRule[];
+	/** Where focus goes after a "Never suggest" Remove (issue #195). */
+	neverFocus?: NeverSuggestFocus;
 	/** The household's today, for the year on a No's day. */
 	today: string;
 	total: number;
@@ -169,33 +172,54 @@ export function MerchantRules({
 					)}
 				</div>
 			</div>
-			<NeverSuggestList rules={neverRules} search={search} today={today} />
+			<NeverSuggestList
+				rules={neverRules}
+				search={search}
+				today={today}
+				target={id}
+				focus={neverFocus}
+			/>
 		</section>
 	);
 }
 
+/** Where focus goes after a "Never suggest" Remove: a line's Remove by its position, or the heading. */
+export type NeverSuggestFocus = { index?: number; heading?: boolean };
+
 /**
  * The "Never suggest" list under the same heading (issue #195, decision 101): one line per No the family
- * said Yes to, the day of it, and a Remove whose name says which line it takes away.
+ * said Yes to, the day of it, and a Remove whose name says which line it takes away. `target` is the id of
+ * the section the Remove swaps (the MerchantRules section it sits in), so the swap finds it wherever it is drawn.
  */
 export function NeverSuggestList({
 	rules,
 	search = "",
 	today,
+	target,
+	focus = {},
 }: {
 	rules: NeverSuggestRule[];
 	/** The Always search, kept through a Remove so the list above still shows it. */
 	search?: string;
 	today: string;
+	/** The id of the section this list is drawn in; a Remove swaps that section. */
+	target: string;
+	focus?: NeverSuggestFocus;
 }) {
 	return (
 		<div class="mt-8">
-			<h3 class="text-xl font-semibold">Never suggest</h3>
+			<h3
+				tabindex={focus.heading ? -1 : undefined}
+				autofocus={focus.heading || undefined}
+				class="text-xl font-semibold"
+			>
+				Never suggest
+			</h3>
 			{rules.length === 0 ? (
 				<EmptyState kind="done" sentence="Tally hasn't been told No yet." />
 			) : (
 				<ul class="mt-2 divide-y divide-rule border-y border-rule">
-					{rules.map((rule) => {
+					{rules.map((rule, index) => {
 						const line = neverSuggestRuleLine(rule);
 						return (
 							<li class="flex min-h-16 items-center gap-4 py-2">
@@ -209,15 +233,19 @@ export function NeverSuggestList({
 									method="post"
 									action="/settings/never-suggest/remove"
 									hx-post="/settings/never-suggest/remove"
-									hx-target="#merchant-rules"
-									hx-select="#merchant-rules"
+									hx-target={`#${target}`}
+									hx-select={`#${target}`}
 									hx-swap="outerHTML"
 								>
 									<input type="hidden" name="id" value={String(rule.id)} />
 									{search && (
 										<input type="hidden" name="rules_search" value={search} />
 									)}
-									<Button type="submit" kind="text">
+									<Button
+										type="submit"
+										kind="text"
+										autofocus={focus.index === index || undefined}
+									>
 										Remove<span class="sr-only"> {line}</span>
 									</Button>
 								</form>

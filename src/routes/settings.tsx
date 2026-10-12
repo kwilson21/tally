@@ -140,6 +140,8 @@ type View = {
 	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
 	focusRuleIndex?: number;
 	focusMerchantHeading?: boolean;
+	/** Focus the "Never suggest" line at this position after a Remove, or its heading when none is left. */
+	focusNever?: { index?: number; heading?: boolean };
 	merchantRuleError?: string;
 	/** What was typed, shown again with the errors. */
 	values?: { name: string };
@@ -663,6 +665,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				focusHeading={view.focusMerchantHeading}
 				error={view.merchantRuleError}
 				neverRules={neverRules}
+				neverFocus={view.focusNever}
 				today={today}
 				search={
 					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
@@ -780,20 +783,24 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 });
 
 // Remove takes one "Never suggest" line away and says so; the suggestion may come back as a fresh guess.
+// Focus goes to the next line's Remove (the one above it when it was the last), or to the heading when none is left.
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
 	const id = Number(form.get("id")?.toString() ?? "");
 	const search = String(form.get("rules_search") ?? "");
+	const lines = await neverSuggestRules(c.env.DB);
 	const removed =
 		Number.isInteger(id) && id > 0
 			? await removeNeverSuggest(c.env.DB, id)
 			: null;
 	if (!removed) {
-		if (c.req.header("HX-Request"))
-			c.header(
-				"HX-Trigger",
-				JSON.stringify({ announce: "Tally's rules list updated." }),
-			);
+		// A line that is already gone: a plain form goes back to the rules, as a Remove that worked does.
+		if (!c.req.header("HX-Request"))
+			return c.redirect(rulesAddress(search), 303);
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ announce: "Tally's rules list updated." }),
+		);
 		return renderSettings(c, { rulesSearch: search });
 	}
 	const message = "Removed. Tally can suggest that again.";
@@ -805,7 +812,13 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 				announce: `${message} ${neverSuggestRuleLine(removed)} is gone.`,
 			}),
 		);
-		return renderSettings(c, { rulesSearch: search });
+		const index = lines.findIndex((line) => line.id === removed.id);
+		const left = lines.length - 1;
+		return renderSettings(c, {
+			rulesSearch: search,
+			focusNever:
+				left === 0 ? { heading: true } : { index: Math.min(index, left - 1) },
+		});
 	}
 	return c.redirect(rulesAddress(search), 303);
 });

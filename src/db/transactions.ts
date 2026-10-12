@@ -325,7 +325,7 @@ export async function listTransactions(
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				${BILL_NAME_COLUMN},
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=p.id AND bp.status='linked' LIMIT 1) AS parentBillName,
-				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence,
+				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, CASE WHEN ${hasIncomeAnswerSql("t")} OR t.income_maybe_declined = 1 THEN NULL ELSE t.income_confidence END AS incomeConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				${MAYBE_CATEGORY_COLUMNS},
 				${COUNTS_IN_MONTH_COLUMN}
@@ -640,7 +640,7 @@ export async function getTransaction(
 				${REFUNDED_COLUMN},
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				${BILL_NAME_COLUMN},
-				${PENDING_SQL} AS pending, t.flag_income AS income, CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				${PENDING_SQL} AS pending, t.flag_income AS income, CASE WHEN ${hasIncomeAnswerSql("t")} OR t.income_maybe_declined = 1 THEN NULL ELSE t.income_confidence END AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser, t.income_source AS incomeSource,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,

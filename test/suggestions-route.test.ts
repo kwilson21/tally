@@ -170,6 +170,30 @@ const row = (sql: string, ...binds: unknown[]) =>
 		.bind(...binds)
 		.first<Record<string, unknown>>();
 
+/** The flags a Maybe answer could change: a No must leave every one of them as it was (spec §8.6). */
+const moneyState = (id: number) =>
+	row(
+		`SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by, excluded, excluded_source, flag_transfer
+		FROM transactions WHERE id = ?`,
+		id,
+	);
+
+/** Home for October, as text: what needs a category and what is spent (a No leaves both alone). */
+const homeText = async () => textOf((await get("/?month=2026-10")).html);
+
+/** The transactions list for October, as text: where a Maybe income chip would show on a row. */
+const listText = async () =>
+	textOf((await get("/transactions?month=2026-10")).html);
+
+/** The Never suggest line whose Remove takes focus after a swap: the one drawn with autofocus. */
+const focusedNeverLine = (html: string) =>
+	html
+		.split("<li ")
+		.find(
+			(item) =>
+				item.includes("autofocus") && item.includes("never-suggest/remove"),
+		) ?? "";
+
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
 	await db.batch([
@@ -328,25 +352,66 @@ describe("income", () => {
 		expect(textOf(html)).toContain("Suggestions · 1 of 4");
 	});
 
-	it("No records it as not income and asks first, adding no line until Yes", async () => {
+	it("No changes nothing that counts, hides that Maybe, and asks first", async () => {
 		const ids = await oneOfEach();
-		const { html } = await post(
+		const before = await moneyState(ids.income);
+		const homeBefore = await homeText();
+		expect(await listText()).toContain("Maybe income");
+		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id: `income-${ids.income}`, answer: "no" },
 			true,
 		);
+		expect(res.status).toBe(200);
 		const text = textOf(html);
 		expect(text).toContain("Not counted as income");
 		expect(text).toContain("Don't suggest income again for Venmo?");
 		expect(text).toContain("Say yes and Tally stops asking this for Venmo.");
-		const tx = await row(
-			"SELECT flag_income, credit_reviewed_by FROM transactions WHERE id = ?",
-			ids.income,
-		);
-		expect(tx).toMatchObject({ flag_income: 0, credit_reviewed_by: "user" });
+		// The transaction keeps its flags and its review, and Home's counts and spending don't move.
+		expect(await moneyState(ids.income)).toEqual(before);
+		expect(await homeText()).toEqual(homeBefore);
 		expect(
 			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
 		).toMatchObject({ n: 0 });
+		// The Maybe leaves the queue, the Band and the transaction's row.
+		expect(textOf((await get("/settings/suggestions")).html)).toContain(
+			"Suggestions · 1 of 4",
+		);
+		expect(textOf((await get("/settings")).html)).toContain(
+			"4 suggestions to check",
+		);
+		expect(await listText()).not.toContain("Maybe income");
+	});
+
+	it("a later Jev answer can't raise the same income Maybe again", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `income-${ids.income}`, answer: "no" },
+			true,
+		);
+		await db
+			.prepare("UPDATE transactions SET income_confidence = 0.3 WHERE id = ?")
+			.bind(ids.income)
+			.run();
+		const { html } = await get("/settings/suggestions");
+		expect(textOf(html)).not.toContain("Count it as income, not spending?");
+		expect(textOf(html)).toContain("Suggestions · 1 of 4");
+	});
+
+	it("the question after a No on the last item drops the count rather than saying 0 left", async () => {
+		const id = await insertTx({
+			raw: VENMO,
+			amount: -250000,
+			incomeConfidence: 0.5,
+		});
+		const { html } = await post(
+			"/settings/suggestions",
+			{ id: `income-${id}`, answer: "no" },
+			true,
+		);
+		expect(textOf(html)).toContain("Don't suggest income again for");
+		expect(textOf(html)).not.toMatch(/Suggestions · \d|\b0 left\b/);
 	});
 
 	it("Yes writes no line for a store the income is not from", async () => {
@@ -474,8 +539,10 @@ describe("transfers", () => {
 		);
 	});
 
-	it("No keeps it in the budget and asks first", async () => {
+	it("No changes nothing that counts, hides that Maybe, and asks first", async () => {
 		const ids = await oneOfEach();
+		const before = await moneyState(ids.transfer);
+		const homeBefore = await homeText();
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${ids.transfer}`, answer: "no" },
@@ -485,12 +552,30 @@ describe("transfers", () => {
 		expect(textOf(html)).toContain(
 			"Don't suggest a transfer again for Chase card payment?",
 		);
+		expect(await moneyState(ids.transfer)).toEqual(before);
+		expect(await homeText()).toEqual(homeBefore);
 		expect(
-			await row(
-				"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
-				ids.transfer,
-			),
-		).toMatchObject({ excluded: 0, excluded_source: "user" });
+			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
+		).toMatchObject({ n: 0 });
+		expect(textOf((await get("/settings/suggestions")).html)).not.toContain(
+			"Leave it out of the budget?",
+		);
+	});
+
+	it("a later Jev answer can't raise the same transfer Maybe again", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `transfer-${ids.transfer}`, answer: "no" },
+			true,
+		);
+		await db
+			.prepare("UPDATE transactions SET transfer_confidence = 0.4 WHERE id = ?")
+			.bind(ids.transfer)
+			.run();
+		const { html } = await get("/settings/suggestions");
+		expect(textOf(html)).not.toContain("Leave it out of the budget?");
+		expect(textOf(html)).toContain("Suggestions · 1 of 4");
 	});
 });
 
@@ -895,6 +980,48 @@ describe("Settings' Never suggest list", () => {
 		expect(plain.res.status).toBe(303);
 		expect(plain.res.headers.get("location")).toBe(
 			"/settings?rules_search=Match#merchant-rules",
+		);
+	});
+
+	it("a plain Remove of a line already gone goes back to Settings' rules, not to the form's own address", async () => {
+		const { res } = await post("/settings/never-suggest/remove", {
+			id: "999999",
+		});
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe("/settings#merchant-rules");
+	});
+
+	it("after Remove, focus moves to the next line's Remove, or to the heading when none is left", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO', 'income', '2026-10-03')",
+			),
+			db.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('CHEWY.COM 1', 'new_category', '2026-10-09')",
+			),
+		]);
+		// Newest first: Chewy is the first line, so its Remove is the first; Venmo's comes after it.
+		const chewy = await row(
+			"SELECT id FROM never_suggest_rules WHERE merchant_key = 'CHEWY.COM 1'",
+		);
+		const first = await post(
+			"/settings/never-suggest/remove",
+			{ id: String(chewy?.id) },
+			true,
+		);
+		expect(focusedNeverLine(first.html)).toContain(
+			"Never suggest income for Venmo",
+		);
+		const venmo = await row(
+			"SELECT id FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
+		);
+		const last = await post(
+			"/settings/never-suggest/remove",
+			{ id: String(venmo?.id) },
+			true,
+		);
+		expect(last.html).toMatch(
+			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
 		);
 	});
 });

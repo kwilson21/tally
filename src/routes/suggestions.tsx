@@ -153,21 +153,19 @@ function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
 				>
 					Settings
 				</a>
+				{/* The question has no count: the item it asks about has just left the queue, so "0 left" would read wrong. */}
 				{ask ? (
-					<>
-						<p class="mt-2 text-muted">Suggestions · {total} left</p>
-						<div class="mt-6">
-							<AskFirst
-								action={action}
-								kind={ask.kind}
-								id={ask.id}
-								name={ask.name}
-								stores={ask.stores}
-								check={ask.check}
-								focus={focus}
-							/>
-						</div>
-					</>
+					<div class="mt-6">
+						<AskFirst
+							action={action}
+							kind={ask.kind}
+							id={ask.id}
+							name={ask.name}
+							stores={ask.stores}
+							check={ask.check}
+							focus={focus}
+						/>
+					</div>
 				) : current ? (
 					<>
 						<p class="mt-2 text-muted">
@@ -358,14 +356,14 @@ suggestions.post(PATH, async (c) => {
 				const after = await suggestionQueue(db);
 				return done(`Counted ${item.merchant} as income.`, after);
 			}
+			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user', income_confidence = NULL,
-							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND flag_income = 0 AND amount_cents < 0 AND refund_of_id IS NULL`,
+						`UPDATE transactions SET income_maybe_declined = 1
+						WHERE id = ? AND income_maybe_declined = 0 AND flag_income = 0 AND amount_cents < 0 AND refund_of_id IS NULL`,
 					)
-					.bind(who, item.transactionId)
+					.bind(item.transactionId)
 					.run();
 				if (result.meta.changes === 0) return stale();
 				return askScreen(c, {
@@ -391,14 +389,14 @@ suggestions.post(PATH, async (c) => {
 				const after = await suggestionQueue(db);
 				return done(`Left ${item.merchant} out of the budget.`, after);
 			}
+			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET excluded = 0, excluded_source = 'user', transfer_confidence = NULL,
-							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND excluded = 0 AND COALESCE(excluded_source, '') != 'user' AND refund_of_id IS NULL`,
+						`UPDATE transactions SET transfer_maybe_declined = 1
+						WHERE id = ? AND transfer_maybe_declined = 0 AND excluded = 0 AND COALESCE(excluded_source, '') != 'user' AND refund_of_id IS NULL`,
 					)
-					.bind(who, item.transactionId)
+					.bind(item.transactionId)
 					.run();
 				if (result.meta.changes === 0) return stale();
 				return askScreen(c, {

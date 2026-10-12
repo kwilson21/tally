@@ -979,7 +979,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			env.DB.prepare(
 				`SELECT category_id, category_source, category_confidence, jev_category_id,
 					flag_transfer, transfer_confidence, flag_reimbursement, flag_income, income_confidence, income_source,
-					excluded, excluded_source, credit_reviewed, credit_reviewed_by
+					excluded, excluded_source, credit_reviewed, credit_reviewed_by,
+					income_maybe_declined, transfer_maybe_declined
 				 FROM transactions WHERE plaid_transaction_id = ?`,
 			)
 				.bind(plaidId)
@@ -1055,6 +1056,26 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			expect(await answerOf("posted-1")).toMatchObject({
 				income_confidence: 0.4,
 				transfer_confidence: 0.3,
+			});
+		});
+
+		it("moves a No on a Maybe onto the posted row, so the posted row isn't asked about it again (decision 101)", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6, income_maybe_declined = 1, transfer_maybe_declined = 1 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -42 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_confidence: 0.5,
+				transfer_confidence: 0.6,
+				income_maybe_declined: 1,
+				transfer_maybe_declined: 1,
+				flag_income: 0,
+				excluded: 0,
+				credit_reviewed: 0,
 			});
 		});
 

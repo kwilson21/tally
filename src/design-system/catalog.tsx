@@ -2341,10 +2341,12 @@ function SuggestionsReview() {
 							},
 						]}
 						today="2026-10-10"
+						target="never-suggest-list"
 					/>
 					<NeverSuggestList
 						rules={[] as NeverSuggestRule[]}
 						today="2026-10-10"
+						target="never-suggest-list"
 					/>
 				</div>
 			</Specimen>

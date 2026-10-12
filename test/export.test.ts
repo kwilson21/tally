@@ -339,6 +339,8 @@ describe("data exports", () => {
 				"for_person_id",
 				"for_person_guessed",
 				"for_person_cleared",
+				"income_maybe_declined",
+				"transfer_maybe_declined",
 				"parent_id",
 				"pending",
 				"plaid_category",
@@ -386,6 +388,7 @@ describe("data exports", () => {
 			household_people: ["id", "name"],
 			never_suggest_rules: [
 				"category_id",
+				"created_at",
 				"decided_on",
 				"id",
 				"kind",

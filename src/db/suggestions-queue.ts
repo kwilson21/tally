@@ -118,7 +118,10 @@ type Candidate = {
 const merchantLabel = (displayName: string | null, key: string) =>
 	displayName || tidyName(key);
 
-/** Income: a credit Tally is unsure is income and nobody has decided (spec §8.6, "Jev's income answer is used"). */
+/**
+ * Income: a credit Tally is unsure is income and nobody has decided, or said No to (`income_maybe_declined`, decision 101).
+ * Spec §8.6, "Jev's income answer is used".
+ */
 async function incomeSuggestions(
 	db: D1Database,
 	never: Set<string>,
@@ -126,7 +129,7 @@ async function incomeSuggestions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS bankText, ${merchantKeySql("t")} AS merchantKey, ${LABEL_SQL},
-				CASE WHEN ${hasIncomeAnswerSql("t")} THEN NULL ELSE t.income_confidence END AS incomeConfidence,
+				CASE WHEN ${hasIncomeAnswerSql("t")} OR t.income_maybe_declined = 1 THEN NULL ELSE t.income_confidence END AS incomeConfidence,
 				t.flag_income AS income, t.credit_reviewed AS creditReviewed, t.excluded AS excluded
 			FROM transactions t ${JOIN_MERCHANT}
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.income_confidence IS NOT NULL AND t.refund_of_id IS NULL`,
@@ -168,7 +171,7 @@ async function incomeSuggestions(
 		}));
 }
 
-/** Transfer: money out or in Tally is unsure is a transfer and nobody has decided (`transfer_confidence`). */
+/** Transfer: money out or in Tally is unsure is a transfer and nobody has decided, or said No to (`transfer_maybe_declined`). */
 async function transferSuggestions(
 	db: D1Database,
 	never: Set<string>,
@@ -180,7 +183,7 @@ async function transferSuggestions(
 			FROM transactions t ${JOIN_MERCHANT}
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.transfer_confidence IS NOT NULL
 				AND t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(t.excluded_source, '') != 'user' AND t.refund_of_id IS NULL
-				AND t.flag_income = 0`,
+				AND t.flag_income = 0 AND t.transfer_maybe_declined = 0`,
 		)
 		.all<Candidate & { transferConfidence: number }>();
 	return results
