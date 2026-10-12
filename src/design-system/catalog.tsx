@@ -4087,6 +4087,20 @@ function SettingsGroup() {
 						/>
 					</div>
 				</State>
+				<State label="Names switched off: its line says Suggest store names · Off">
+					<div class="max-w-xl">
+						<AiTally
+							tally={{
+								month: "2026-10",
+								sorted: 84,
+								changed: 5,
+								named: 12,
+								paychecks: 2,
+							}}
+							switches={{ names: false, categories: true, income: true }}
+						/>
+					</div>
+				</State>
 				<State label="Early in a month with nothing yet: last month's, labelled with its name">
 					<div class="max-w-xl">
 						<AiTally
