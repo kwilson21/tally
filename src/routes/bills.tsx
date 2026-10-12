@@ -47,6 +47,7 @@ import { billPeriodMonth, type CountedBill } from "../db/counted-month";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
+	merchantKeyOfBankText,
 	merchantTextArgs,
 } from "../db/merchant-key";
 import { ownNameSql } from "../db/own-name";
@@ -1001,6 +1002,13 @@ async function save(c: Context<App>, id?: number) {
 	}
 	if (Object.keys(errors).length)
 		return page(c, { bill: bill ?? undefined, values, errors, bigAmount });
+	// Typed bank text saves its transaction's merchant key, so the bill's payments match it (spec §6.1). Only a
+	// text the bill already has keeps the bill's old bank-text flag, so an unchanged legacy bill keeps matching
+	// by bank text (write.ts).
+	const merchantRawName =
+		bill?.merchant_raw_name === values.merchant_raw_name
+			? values.merchant_raw_name
+			: await merchantKeyOfBankText(c.env.DB, values.merchant_raw_name);
 	const fields: BillFields = {
 		name: values.name,
 		amountCents: cents,
@@ -1012,7 +1020,8 @@ async function save(c: Context<App>, id?: number) {
 				: null,
 		anchorDate: values.frequency === "biweekly" ? anchorDate : null,
 		categoryId: Number(values.category_id),
-		merchantRawName: values.merchant_raw_name,
+		merchantRawName,
+		typedMerchantText: values.merchant_raw_name,
 	};
 	// Old dismissals have no meaning once the schedule changes (links can't exist here, checked above).
 	// The household's date is read once, here, and its month is what a changed amount applies from.

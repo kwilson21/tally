@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { matchBillPayments } from "../src/bills/match";
 import { insertBill, updateBill } from "../src/bills/write";
-import { merchantKeySql } from "../src/db/merchant-key";
+import { merchantKeyOfBankText, merchantKeySql } from "../src/db/merchant-key";
 import {
 	applyMerchantRules,
 	getTransaction,
@@ -1084,6 +1084,41 @@ describe("bills saved under the bank's raw text", () => {
 		// A new text is a new write: a key.
 		await updateBill(db, id, { ...fields, merchantRawName: "Comcast" }, false);
 		expect(await flagOf(id)).toEqual({ text: "Comcast", flag: 0 });
+	});
+});
+
+describe("merchantKeyOfBankText", () => {
+	it("gives the key of the newest transaction that carries the bank text", async () => {
+		await insert(
+			{
+				id: 8801,
+				date: "2026-08-02",
+				cents: 1200,
+				raw: "TARGET 1234",
+				merchant: "Target",
+			},
+			{
+				id: 8802,
+				date: "2026-09-02",
+				cents: 1300,
+				raw: "TARGET 1234",
+				merchant: "Target Corp",
+			},
+		);
+		expect(await merchantKeyOfBankText(db, "TARGET 1234")).toBe("Target Corp");
+	});
+
+	it("gives the bank text itself when its transaction has no merchant name, or when no transaction has it", async () => {
+		await insert({
+			id: 8811,
+			date: "2026-09-02",
+			cents: 900,
+			raw: "LOCAL DELI",
+		});
+		expect(await merchantKeyOfBankText(db, "LOCAL DELI")).toBe("LOCAL DELI");
+		expect(await merchantKeyOfBankText(db, "NO SUCH BANK TEXT")).toBe(
+			"NO SUCH BANK TEXT",
+		);
 	});
 });
 

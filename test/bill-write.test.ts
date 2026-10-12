@@ -162,6 +162,65 @@ describe("bill writes", () => {
 			});
 		});
 
+		describe("a bill from before Phase 3.5 with its bank text", () => {
+			// Its text is the key of the bank text it was saved under, so the flag is what tells the two apart.
+			const insertLegacy = async () =>
+				Number(
+					(
+						await env.DB.prepare(
+							`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text)
+							 VALUES('Legacy pharmacy',1643,14,'monthly',1,'CVS Pharmacy',1)`,
+						).run()
+					).meta.last_row_id,
+				);
+			const flagOf = (id: number) =>
+				env.DB.prepare(
+					"SELECT merchant_raw_name, merchant_raw_text FROM bills WHERE id=?",
+				)
+					.bind(id)
+					.first();
+
+			it("clears the bank-text flag when the typed text differs, even if its key is the text the bill holds", async () => {
+				const id = await insertLegacy();
+				expect(
+					await updateBill(
+						env.DB,
+						id,
+						fields({
+							name: "Legacy pharmacy",
+							merchantRawName: "CVS Pharmacy",
+							typedMerchantText: "CHECKCARD 0921 CVS",
+						}),
+						false,
+					),
+				).toBe(true);
+				expect(await flagOf(id)).toMatchObject({
+					merchant_raw_name: "CVS Pharmacy",
+					merchant_raw_text: 0,
+				});
+			});
+
+			it("keeps the flag when the typed text is the bill's own", async () => {
+				const id = await insertLegacy();
+				expect(
+					await updateBill(
+						env.DB,
+						id,
+						fields({
+							name: "Legacy pharmacy",
+							merchantRawName: "CVS Pharmacy",
+							typedMerchantText: "CVS Pharmacy",
+						}),
+						false,
+					),
+				).toBe(true);
+				expect(await flagOf(id)).toMatchObject({
+					merchant_raw_name: "CVS Pharmacy",
+					merchant_raw_text: 1,
+				});
+			});
+		});
+
 		describe("bills that already share a name", () => {
 			// Two active Rent bills, as a family's data may already hold. Ids 9 and 10 (Daycare is 8).
 			beforeEach(async () => {
