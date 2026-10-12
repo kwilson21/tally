@@ -108,6 +108,11 @@ export type NameReview = {
 	source: NameSource;
 	/** Its charges, a split counted once. */
 	count: number;
+	/**
+	 * Its charges that keep a name of their own when the merchant is named. A split purchase counts as changed even when
+	 * every part has its own name: its parent row and each part's 'Split from' caption show the store's name.
+	 */
+	owned: number;
 };
 
 /** Plain code-point order, as the database sorts text, so ties fall the same way everywhere. */
@@ -130,7 +135,8 @@ export async function namesToReview(
 	const namesOn = (switches ?? (await readAiSwitches(db))).names;
 	const { results } = await db
 		.prepare(
-			`SELECT m.raw_name AS key, m.rowid AS id, m.suggested_name AS stored, t.raw_name AS bankText, COUNT(*) AS count
+			`SELECT m.raw_name AS key, m.rowid AS id, m.suggested_name AS stored, t.raw_name AS bankText, COUNT(*) AS count,
+				SUM(t.own_name IS NOT NULL) AS owned
 			 FROM merchants m JOIN transactions t ON ${merchantKeySql("t")} = m.raw_name AND t.parent_id IS NULL
 			 WHERE m.suggestion_status = 'pending' AND m.display_name IS NULL AND COALESCE(m.suggested_name, '') != ''
 			 GROUP BY m.raw_name, t.raw_name`,
@@ -141,6 +147,7 @@ export async function namesToReview(
 			stored: string;
 			bankText: string;
 			count: number;
+			owned: number;
 		}>();
 	const byKey = new Map<string, typeof results>();
 	for (const row of results) {
@@ -151,6 +158,7 @@ export async function namesToReview(
 	const reviews: NameReview[] = [];
 	for (const [key, texts] of byKey) {
 		const total = texts.reduce((sum, text) => sum + text.count, 0);
+		const owned = texts.reduce((sum, text) => sum + text.owned, 0);
 		// The text with the most charges first, then A to Z, so the choice is the same every time.
 		texts.sort(
 			(a, b) => b.count - a.count || compareText(a.bankText, b.bankText),
@@ -169,6 +177,7 @@ export async function namesToReview(
 				names,
 				source: nameSource(names, key),
 				count: total,
+				owned,
 			});
 			break;
 		}

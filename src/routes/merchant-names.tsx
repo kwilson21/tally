@@ -9,10 +9,11 @@ import { Button } from "../views/button";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
 import {
-	KEEP_VALUE,
 	MAX_OWN_NAME,
 	NameChoices,
+	OWN_VALUE,
 	pickValue,
+	STORE_VALUE,
 } from "../views/name-choices";
 
 type App = { Bindings: Env };
@@ -114,7 +115,6 @@ async function renderReview(
 								names={review.names}
 								source={review.source}
 								tidied={review.tidied}
-								count={review.count}
 								picked={values?.key === review.key ? values.picked : null}
 								own={values?.key === review.key ? values.own : ""}
 								error={error}
@@ -182,10 +182,9 @@ merchantNames.post("/settings/names", async (c) => {
 		return stale(c, next);
 
 	const left = (await namesToReview(c.env.DB)).length;
-	const message =
-		choice.value.kind === "keep"
-			? `Kept the bank's name for ${review.count} ${transactions(review.count)}`
-			: `Renamed ${review.count} ${transactions(review.count)} to ${choice.value.name}`;
+	// A charge with its own name keeps it when the merchant is named, so only the others change (decision 101).
+	const changed = review.count - review.owned;
+	const message = savedMessage(choice.value, changed);
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	return renderReview(c, {
 		focus: true,
@@ -197,6 +196,20 @@ merchantNames.post("/settings/names", async (c) => {
 	});
 });
 
+/**
+ * The toast's words for a saved choice, counting only the charges whose shown name changed. When every charge
+ * keeps its own name, nothing is counted and the words say the choice is for the transactions that come later.
+ */
+function savedMessage(choice: NameChoice, changed: number): string {
+	if (changed === 0)
+		return choice.kind === "keep"
+			? "Kept the bank's name for the transactions that come later"
+			: `Saved ${choice.name} for the transactions that come later`;
+	return choice.kind === "keep"
+		? `Kept the bank's name for ${changed} ${transactions(changed)}`
+		: `Renamed ${changed} ${transactions(changed)} to ${choice.name}`;
+}
+
 function stale(c: Context<App>, next: string) {
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	const message = "That merchant was already named.";
@@ -206,19 +219,24 @@ function stale(c: Context<App>, next: string) {
 	});
 }
 
-/** What a person chose: a typed name first, then a chip, which must be one of the names the form showed. */
+/** What a person chose on the Name row (decision 101): the typed name under "Type your own", the store's own name, or a suggestion the form showed. */
 function readChoice(
 	review: NameReview,
 	picked: string | null,
 	own: string,
 ): { ok: true; value: NameChoice } | { ok: false; error: string } {
-	if (own.length > MAX_OWN_NAME)
-		return {
-			ok: false,
-			error: `Keep the name under ${MAX_OWN_NAME} characters.`,
-		};
-	if (own) return { ok: true, value: { kind: "name", name: own } };
-	if (picked === KEEP_VALUE) return { ok: true, value: { kind: "keep" } };
+	// A typed name counts only while "Type your own" is ticked (decision 101).
+	if (picked === OWN_VALUE) {
+		if (own === "")
+			return { ok: false, error: "Type a name here, or pick one above." };
+		if (own.length > MAX_OWN_NAME)
+			return {
+				ok: false,
+				error: `Keep the name under ${MAX_OWN_NAME} characters.`,
+			};
+		return { ok: true, value: { kind: "name", name: own } };
+	}
+	if (picked === STORE_VALUE) return { ok: true, value: { kind: "keep" } };
 	const name = review.names.find((n) => pickValue(n) === picked);
 	if (name) return { ok: true, value: { kind: "name", name } };
 	return {

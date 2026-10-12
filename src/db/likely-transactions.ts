@@ -9,6 +9,7 @@ import { tidyName } from "../transactions/tidy-name";
 import { readAiSwitches } from "./ai-switches";
 import { COUNTED_JOINS, paysBillSql } from "./counted-month";
 import { merchantColumnSql, sameMerchantSql } from "./merchant-key";
+import { ownNameSql } from "./own-name";
 import {
 	BILL_NAME_COLUMN,
 	COUNTS_IN_MONTH_COLUMN,
@@ -44,6 +45,7 @@ type LikelyRecord = Omit<
 	| "paysBill"
 > & {
 	merchantName: string | null;
+	ownName: string | null;
 	suggestedNames: string | null;
 	suggestionStatus: string | null;
 	merchantKey: string;
@@ -61,7 +63,7 @@ type LikelyRecord = Omit<
 // refunds and caption as the list draws them (MAYBE_CATEGORY_COLUMNS, REFUNDED_COLUMN, BILL_NAME_COLUMN and
 // COUNTS_IN_MONTH_COLUMN, and the caption's refund and bank-change fields), so a row reads the same here.
 const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-	${merchantColumnSql("t", "display_name")} AS merchantName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note, t.note_guessed AS noteGuessed,
+	${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note, t.note_guessed AS noteGuessed,
 	t.excluded AS excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 	t.category_id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 	${MAYBE_CATEGORY_COLUMNS}, ${REFUNDED_COLUMN},
@@ -145,6 +147,7 @@ export async function likelyTransactions(
 	return results.map(
 		({
 			merchantName,
+			ownName,
 			suggestedNames,
 			suggestionStatus,
 			merchantKey,
@@ -152,6 +155,7 @@ export async function likelyTransactions(
 		}) => {
 			const shown = shownName({
 				chosen: merchantName,
+				ownName,
 				stored: suggestedNames,
 				status: suggestionStatus,
 				key: merchantKey,

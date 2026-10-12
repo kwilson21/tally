@@ -19,9 +19,10 @@ export function groupNoneFit(rows: NoneFit[]) {
 		.sort(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b, "en"))
 		.map(([theme, group]) => {
 			const counts = new Map<string, { count: number; merchant: string }>();
+			// Counted by the name sent, so each distinct name is named once, even under one merchant's key.
 			for (const row of group) {
-				const found = counts.get(row.merchantKey);
-				counts.set(row.merchantKey, {
+				const found = counts.get(row.merchant);
+				counts.set(row.merchant, {
 					count: (found?.count ?? 0) + 1,
 					merchant: row.merchant,
 				});

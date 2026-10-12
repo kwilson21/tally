@@ -27,10 +27,21 @@ export type Edit = {
 	 */
 	nameChanged?: boolean;
 	/**
-	 * "Keep the bank's name" was chosen from the suggested names (P29 A): the merchant keeps its tidied
-	 * bank text, and its suggestions are turned down. Only with no name typed.
+	 * Which transactions a name reaches (decision 101): "one" gives this transaction its own name and
+	 * leaves the merchant alone; "all" renames the merchant. Left out means "all", for callers that build an
+	 * edit without a form; the form always says which.
+	 */
+	nameScope?: "one" | "all";
+	/**
+	 * "The store's own name" was chosen (decision 101): the bank's text tidied stays, and the merchant's
+	 * suggestions are turned down when the name is for all of them. Its display name is then empty.
 	 */
 	keepBankName?: boolean;
+	/**
+	 * Jev answers categories now: its key is set and the categories switch is on. The route sets it; a
+	 * one-off name lets Tally guess the category again only then (src/transactions/rename.ts).
+	 */
+	jevCategories?: boolean;
 	note: string | null;
 	noteWas?: string | null;
 	noteProvided?: boolean;
@@ -194,25 +205,21 @@ export function parseEdit(
 	const alwaysForMerchant = form.get("always") === "1";
 	const alwaysWas = form.get("always_was") === "1";
 	const ruleCategoryWas = Number(form.get("rule_category_was")) || null;
-	// A name typed in the field is a person's own and wins over a chip. The chips (P29 A) post `name_pick`:
-	// "s:" and a suggested name, or "keep" for the bank's. No chip is chosen to start with.
-	const typedName = text(form, "merchant");
+	// The Name row is one choice (decision 101), posted as `name_pick`: "s:" and a suggested name, "store" for
+	// the store's own name (the bank's text tidied, which clears a name), or "own" for the name typed in the
+	// field. Only the ticked choice counts, and nothing is ticked at rest, so a save for another reason never
+	// renames anything.
 	const pick = text(form, "name_pick");
+	const typedName = pick === "own" ? text(form, "merchant") : "";
 	const pickedName = pick.startsWith("s:") ? pick.slice(2).trim() : "";
-	const displayName = typedName || pickedName;
-	const keepBankName = !typedName && pick === "keep";
-	// The panel says what the name field held when it was drawn (`merchant_was`). A field that still holds
-	// it is not a rename, and an emptied one is a person clearing the name; with no `merchant_was` the field
-	// is read as it always was.
+	const keepBankName = pick === "store";
+	const displayName = pick === "own" ? typedName : pickedName;
+	// The panel says what the name field held when it was drawn (`merchant_was`). With "own" ticked, a typed
+	// name the merchant already has is no rename of the merchant under All, so the merchant keeps it. Under
+	// This one only it still names this transaction. (A save under All that replaces this transaction's own
+	// name counts as a change too; savePanel sets that once it knows the row has one.)
 	const shown = form.get("merchant_was");
 	const fieldChanged = shown === null || typedName !== String(shown).trim();
-	const nameChanged = typedName
-		? fieldChanged
-		: pickedName
-			? true
-			: keepBankName
-				? false
-				: fieldChanged;
 	const note = text(form, "note");
 	const rawKind = text(form, "kind");
 	const allowedKinds = ["subscription", "one_off", "bill", "transfer"];
@@ -222,6 +229,15 @@ export function parseEdit(
 	const rawPerson = text(form, "for_person_id");
 	const forPersonId = rawPerson ? Number(rawPerson) : null;
 	const keepDetails = form.get("details_action") === "keep";
+	// "Rename" (decision 101): this transaction alone, unless the scope says all the merchant's. A ticked name
+	// under "Looks right" takes this choice like Save does; with nothing ticked, savePanel names the store's
+	// guess for all (src/routes/transactions.tsx).
+	const nameScope: "one" | "all" =
+		form.get("name_scope") === "all" ? "all" : "one";
+	const nameChanged =
+		pick === "own"
+			? nameScope === "one" || fieldChanged
+			: pickedName !== "" || keepBankName;
 	const detailsVisible = form.has("details_visible")
 		? form.get("details_visible") !== "0"
 		: undefined;
@@ -245,6 +261,8 @@ export function parseEdit(
 	}
 	if (displayName.length > MAX_NAME)
 		errors.merchant = `Keep the name under ${MAX_NAME} characters.`;
+	else if (pick === "own" && displayName === "")
+		errors.merchant = "Type a name here, or pick one above.";
 	if (note.length > MAX_NOTE)
 		errors.note = `Keep the note under ${MAX_NOTE} characters.`;
 	if (rawKind && !allowedKinds.includes(rawKind))
@@ -267,6 +285,7 @@ export function parseEdit(
 			merchantRuleWas: ruleCategoryWas,
 			displayName: displayName || null,
 			nameChanged,
+			nameScope,
 			keepBankName,
 			note: note || null,
 			...(form.has("details_visible")

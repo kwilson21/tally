@@ -2,7 +2,9 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { namesToReview, settleSuggestion } from "../src/db/merchant-names";
+import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { allUpdateCount } from "../src/transactions/rename";
 
 // The Settings review of suggested merchant names (P29 A, decision 64, #33): a Band on Settings leads
 // to one merchant at a time, like Organize. A person chooses a suggestion, keeps the bank's name, or
@@ -96,6 +98,43 @@ async function twoMerchants() {
 	await suggest(LUPITA, "Lupita's Taqueria");
 }
 
+/** Gives the first `count` top-level charges of one bank text a name of their own. */
+async function ownNames(rawName: string, count: number) {
+	const { results } = await db
+		.prepare(
+			"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT ?",
+		)
+		.bind(rawName, count)
+		.all<{ id: number }>();
+	for (const { id } of results)
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(id)
+			.run();
+}
+
+/** Makes the first BLUE charge without a name of its own a split, with one part per name (null: no name). */
+async function splitBlue(partNames: (string | null)[]) {
+	const purchase = await db
+		.prepare(
+			"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL AND own_name IS NULL ORDER BY id LIMIT 1",
+		)
+		.bind(BLUE)
+		.first<{ id: number }>();
+	await db
+		.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+		.bind(purchase?.id)
+		.run();
+	for (const own of partNames)
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, own_name) VALUES (?, 1, '2026-09-20', 300, ?, ?, ?)",
+			)
+			.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id, own)
+			.run();
+	return purchase?.id as number;
+}
+
 describe("namesToReview", () => {
 	it("lists the merchants with names waiting, most transactions first, with what each needs", async () => {
 		await twoMerchants();
@@ -108,6 +147,7 @@ describe("namesToReview", () => {
 				names: ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
 				source: "tally",
 				count: 3,
+				owned: 0,
 			},
 			{
 				key: LUPITA,
@@ -117,8 +157,35 @@ describe("namesToReview", () => {
 				names: ["Lupita's Taqueria"],
 				source: "tally",
 				count: 1,
+				owned: 0,
 			},
 		]);
+	});
+
+	it("counts the top-level charges that keep their own name as owned, a split part's own name not among them", async () => {
+		await twoMerchants();
+		await ownNames(BLUE, 2);
+		const [blue] = await namesToReview(db);
+		expect(blue).toMatchObject({ key: BLUE, count: 3, owned: 2 });
+		// A split part's own name is not counted: its purchase is the top-level row.
+		const purchase = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL AND own_name IS NULL ORDER BY id LIMIT 1",
+			)
+			.bind(BLUE)
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+			.bind(purchase?.id)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, own_name) VALUES (?, 1, '2026-09-20', 300, ?, ?, 'Part')",
+			)
+			.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id)
+			.run();
+		const [again] = await namesToReview(db);
+		expect(again).toMatchObject({ count: 3, owned: 2 });
 	});
 
 	it("leaves out a merchant that was decided, named by a person, has nothing to suggest, or has no transactions left", async () => {
@@ -185,8 +252,19 @@ describe("namesToReview with several bank texts for one merchant", () => {
 				// Plaid's name is the merchant's key, so a suggestion equal to it is the bank's own.
 				source: "bank",
 				count: 4,
+				owned: 0,
 			},
 		]);
+	});
+
+	it("totals the owned charges across a merchant's bank texts, the way count is totalled", async () => {
+		await charges("TARGET 1234", 3, "Target");
+		await charges("TGT*0099 SF", 1, "Target");
+		await ownNames("TARGET 1234", 1);
+		await ownNames("TGT*0099 SF", 1);
+		await suggest("Target", "Target Stores");
+		const [review] = await namesToReview(db);
+		expect(review).toMatchObject({ key: "Target", count: 4, owned: 2 });
 	});
 
 	it("shows the text with the most charges among those that have a name to offer", async () => {
@@ -217,7 +295,7 @@ describe("namesToReview with several bank texts for one merchant", () => {
 		);
 		const { html } = await get("/settings/names");
 		expect(textOf(html)).toContain("The bank says TGT*0099 SF");
-		expect(textOf(html)).toContain("For all 4 transactions");
+		expect(textOf(html)).toContain("Type your own");
 	});
 });
 
@@ -375,6 +453,12 @@ describe("GET /settings/names", () => {
 		expect(html).toMatch(/<h2[^>]*wrap-anywhere[^>]*>/);
 	});
 
+	it("says what the bank sent once: in the page's header, not again under the store's name", async () => {
+		await twoMerchants();
+		const { html } = await get("/settings/names");
+		expect(textOf(html).match(/The bank says/g)).toHaveLength(1);
+	});
+
 	it("shows the first merchant: what the bank says, the suggested names, keeping the bank's, and your own", async () => {
 		await twoMerchants();
 		const { res, html } = await get("/settings/names");
@@ -389,25 +473,19 @@ describe("GET /settings/names", () => {
 			"s:Blue Bottle Coffee",
 			"s:Blue Bottle",
 			"s:Blue Bottle Cafe",
-			"keep",
+			"store",
+			"own",
 		]);
-		expect(html).toContain("Keep “Blue bottle cof”");
+		// The store's own name, with what the bank says under it.
+		expect(text).toContain("Blue bottle cof");
+		expect(text).toContain("The bank says");
 		// Where the names came from, under them: the sparkles icon, "Tally's guess" and a Why? (P87 B).
 		expect(html).toMatch(
-			/<span id="review-source"[^>]*><svg[^>]*>.*?<\/svg>\s*Tally&#39;s guess<\/span>/,
+			/<span id="review-source-0"[^>]*><svg[^>]*>.*?<\/svg>\s*Tally&#39;s guess<\/span>/,
 		);
 		expect(html).toContain('href="/how-it-works#names"');
-		expect(text).toContain("Or your own");
-		expect(
-			html.match(/A name typed here is used instead of any name above\./g),
-		).toHaveLength(1);
-		const ownField = html.match(/<input[^>]*id="review-own"[^>]*>/)?.[0] ?? "";
-		const hintId = ownField.match(/aria-describedby="([^"]+)"/)?.[1];
-		expect(hintId).toBe("review-own-hint");
-		expect(html).toMatch(
-			/<label[^>]*>Or your own<\/label>[\s\S]*?A name typed here is used instead of any name above\. For all 3 transactions from this merchant\./,
-		);
-		expect(text).toContain("For all 3 transactions from this merchant.");
+		// "Type your own" has its field, named for what it is.
+		expect(html).toMatch(/<label[^>]*>Your own name<\/label>/);
 		expect(text).toContain("Save and next");
 		expect(text).toContain("Skip");
 		// Nothing is chosen to start with.
@@ -423,7 +501,7 @@ describe("GET /settings/names", () => {
 			await saveAiSwitches(db, { names: !off });
 			const { html } = await get("/settings/names");
 			expect(html).toMatch(
-				/<p id="review-source" class="text-sm text-muted">From your bank<\/p>/,
+				/<p id="review-source-0" class="text-sm text-muted">From your bank<\/p>/,
 			);
 			expect(html).toContain('value="s:Comcast"');
 			expect(html).not.toContain("Tally&#39;s guess");
@@ -508,11 +586,11 @@ describe("POST /settings/names", () => {
 		expect(textOf(html)).toContain("1 of 1 · 1 transaction");
 	});
 
-	it("a typed name is the person's own and wins over a chip", async () => {
+	it("a typed name counts under Type your own, and turns the suggestions down", async () => {
 		await twoMerchants();
 		await save({
 			key: BLUE,
-			name_pick: "s:Blue Bottle",
+			name_pick: "own",
 			merchant: "The Bottle",
 		});
 		expect(await merchant(BLUE)).toEqual({
@@ -523,7 +601,7 @@ describe("POST /settings/names", () => {
 
 	it("keeping the bank's name turns the suggestions down and keeps the tidied text", async () => {
 		await twoMerchants();
-		const { res } = await save({ key: BLUE, name_pick: "keep" });
+		const { res } = await save({ key: BLUE, name_pick: "store" });
 		expect(await merchant(BLUE)).toEqual({
 			display_name: null,
 			suggestion_status: "rejected",
@@ -533,15 +611,141 @@ describe("POST /settings/names", () => {
 		);
 	});
 
+	describe("the toast counts only the transactions whose shown name changes (decision 101)", () => {
+		it("leaves out a charge with its own name, so one of three is kept and two are renamed", async () => {
+			await twoMerchants();
+			await ownNames(BLUE, 1);
+			const { res } = await save({ key: BLUE, name_pick: "s:Blue Bottle" });
+			expect(trigger(res)).toEqual({
+				toast: {
+					message: "Renamed 2 transactions to Blue Bottle",
+					type: "success",
+				},
+				announce: "Renamed 2 transactions to Blue Bottle. 1 left to check.",
+			});
+		});
+
+		it("says one transaction, not transactions, when a single charge changes", async () => {
+			await twoMerchants();
+			await ownNames(BLUE, 2);
+			const { res } = await save({ key: BLUE, name_pick: "s:Blue Bottle" });
+			expect(trigger(res)).toEqual({
+				toast: {
+					message: "Renamed 1 transaction to Blue Bottle",
+					type: "success",
+				},
+				announce: "Renamed 1 transaction to Blue Bottle. 1 left to check.",
+			});
+		});
+
+		it("counts only the charges the bank's name changes for, when a person keeps it", async () => {
+			await twoMerchants();
+			await ownNames(BLUE, 1);
+			const { res } = await save({ key: BLUE, name_pick: "store" });
+			expect(trigger(res).toast?.message).toBe(
+				"Kept the bank's name for 2 transactions",
+			);
+		});
+
+		it("says what was saved, with no count, when every charge keeps its own name", async () => {
+			await twoMerchants();
+			await ownNames(BLUE, 3);
+			const { res } = await save({ key: BLUE, name_pick: "s:Blue Bottle" });
+			expect(trigger(res)).toEqual({
+				toast: {
+					message: "Saved Blue Bottle for the transactions that come later",
+					type: "success",
+				},
+				announce:
+					"Saved Blue Bottle for the transactions that come later. 1 left to check.",
+			});
+		});
+
+		it("says the bank's name is kept for the transactions that come later, when every charge keeps its own name", async () => {
+			await twoMerchants();
+			await ownNames(BLUE, 3);
+			const { res } = await save({ key: BLUE, name_pick: "store" });
+			expect(trigger(res).toast?.message).toBe(
+				"Kept the bank's name for the transactions that come later",
+			);
+		});
+
+		it("does not count a split part's own name: its purchase is the charge that counts", async () => {
+			await twoMerchants();
+			const purchase = await db
+				.prepare(
+					"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT 1",
+				)
+				.bind(BLUE)
+				.first<{ id: number }>();
+			await db
+				.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+				.bind(purchase?.id)
+				.run();
+			await db
+				.prepare(
+					"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, own_name) VALUES (?, 1, '2026-09-20', 300, ?, ?, 'Part')",
+				)
+				.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id)
+				.run();
+			const { res } = await save({ key: BLUE, name_pick: "s:Blue Bottle" });
+			expect(trigger(res).toast?.message).toBe(
+				"Renamed 3 transactions to Blue Bottle",
+			);
+		});
+
+		it("counts a split as renamed while its parent shows the store's name, even when every part has its own name, as the edit panel's All does", async () => {
+			await charges(BLUE, 2);
+			await suggest(BLUE, "Blue Bottle Coffee\nBlue Bottle\nBlue Bottle Cafe");
+			const splitId = await splitBlue(["Part A", "Part B"]);
+			const plain = await db
+				.prepare(
+					"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL AND id != ?",
+				)
+				.bind(BLUE, splitId)
+				.first<{ id: number }>();
+			const [review] = await namesToReview(db);
+			expect(review).toMatchObject({ key: BLUE, count: 2, owned: 0 });
+			const shown = await getTransaction(db, plain?.id as number);
+			expect(
+				allUpdateCount({
+					total: shown?.nameChoices.total ?? 0,
+					owned: shown?.nameChoices.owned ?? [],
+				}),
+			).toBe(2);
+			const { html } = await get(`/transactions/${plain?.id}?month=all`);
+			expect(html).toContain("Both from Blue bottle cof");
+			const { res } = await save({ key: BLUE, name_pick: "s:Blue Bottle" });
+			expect(trigger(res).toast?.message).toBe(
+				"Renamed 2 transactions to Blue Bottle",
+			);
+		});
+
+		it("keeps the page header counting every charge, whatever keeps its own name", async () => {
+			await twoMerchants();
+			await ownNames(BLUE, 1);
+			const { html } = await get("/settings/names");
+			expect(textOf(html)).toContain("1 of 2 · 3 transactions");
+		});
+	});
+
 	it("asks for a choice when none was made, and changes nothing", async () => {
 		await twoMerchants();
+		// A typed name counts only under "Type your own", so a name typed alone is no choice either.
+		expect((await save({ key: BLUE, merchant: "Typed" })).res.status).toBe(422);
 		const { res, html } = await save({ key: BLUE });
 		expect(res.status).toBe(422);
 		expect(html).toContain('role="alert"');
 		expect(textOf(html)).toContain(
 			"Pick a name, keep the bank's, or type your own.",
 		);
-		expect(html).toMatch(/<fieldset[^>]*aria-describedby="review-own-error"/);
+		// The choice error sits under the list, before the "Your own name" field's hidden wrapper, so it shows.
+		expect(html).toMatch(/<p id="review-error" role="alert"/);
+		expect(html).not.toContain("review-own-error");
+		expect(html.indexOf('id="review-error"')).toBeLessThan(
+			html.indexOf("group-has-[.name-own:checked]:block"),
+		);
+		expect(html).toMatch(/<fieldset[^>]*aria-describedby="review-error"/);
 		expect(html).toMatch(/name="name_pick"[^>]*autofocus/);
 		expect(await merchant(BLUE)).toMatchObject({
 			suggestion_status: "pending",
@@ -552,12 +756,37 @@ describe("POST /settings/names", () => {
 		await twoMerchants();
 		const stale = await save({ key: BLUE, name_pick: "s:Something Else" });
 		expect(stale.res.status).toBe(422);
-		const long = await save({ key: BLUE, merchant: "x".repeat(81) });
+		expect(stale.html).toMatch(/<p id="review-error" role="alert"/);
+		expect(textOf(stale.html)).toContain("Pick one of the names shown.");
+		expect(stale.html.indexOf('id="review-error"')).toBeLessThan(
+			stale.html.indexOf("group-has-[.name-own:checked]:block"),
+		);
+		const long = await save({
+			key: BLUE,
+			name_pick: "own",
+			merchant: "x".repeat(81),
+		});
 		expect(long.res.status).toBe(422);
 		expect(textOf(long.html)).toContain("Keep the name under 80 characters.");
 		expect(await merchant(BLUE)).toMatchObject({
 			suggestion_status: "pending",
 		});
+	});
+
+	it("an empty typed name's error sits in the field under Type your own, which stays ticked", async () => {
+		await twoMerchants();
+		const { res, html } = await save({
+			key: BLUE,
+			name_pick: "own",
+			merchant: "",
+		});
+		expect(res.status).toBe(422);
+		expect(html).toMatch(/<p id="review-own-error" role="alert"/);
+		expect(html).not.toMatch(/<p id="review-error"/);
+		expect(html.indexOf('id="review-own-error"')).toBeGreaterThan(
+			html.indexOf("group-has-[.name-own:checked]:block"),
+		);
+		expect(html).toMatch(/<input[^>]*value="own"[^>]*name-own/);
 	});
 
 	it("when the merchant was already named elsewhere, says so and shows the next one without changing it", async () => {

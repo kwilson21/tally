@@ -9,6 +9,7 @@ import {
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
+import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import {
 	addLikely,
@@ -73,6 +74,7 @@ import {
 	SHOWS,
 } from "../transactions/filters";
 import { refundTooBigMessage } from "../transactions/refund-guards";
+import { jevAsksAbout, oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
 import {
 	categoryRuleOffer,
@@ -102,9 +104,11 @@ import {
 } from "../views/maybe-category";
 import { MoneyInput } from "../views/money-input";
 import {
-	KEEP_VALUE,
+	EDIT_FORM_GROUP,
 	NameChoices,
+	OWN_VALUE,
 	pickValue,
+	STORE_VALUE,
 	SUGGESTED_NAME_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
@@ -152,6 +156,11 @@ type Category = { id: number; name: string; icon: string; color: string };
 
 /** The demo, where "Without Tally" (`?raw=1`) lives; the family app has no such view (spec §8.6). */
 const isDemo = (c: Context<App>) => c.env.DEMO === "true";
+
+/** Whether Jev answers categories now: its key is set and the categories switch is on, the test settings' Jev run makes too. */
+const jevAnswersCategories = async (c: Context<App>) =>
+	Boolean((c.env as Env & { JEV_API_KEY?: string }).JEV_API_KEY) &&
+	(await readAiSwitches(c.env.DB)).categories;
 
 /** Consecutive rows that share a date, in list order. */
 function byDay(rows: ListRow[]): [string, ListRow[]][] {
@@ -1207,7 +1216,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		merchantKey: found.merchantKey,
 		categoryId: found.categoryId,
 		count: found.count,
-		merchant: tx.displayName || tidyName(tx.rawName),
+		merchant: tx.storeName,
 		category: cat.name,
 		back,
 	};
@@ -1283,13 +1292,17 @@ type SheetProps = {
 	refunds?: RefundPurchase[];
 	/** The household's date, for the transaction's "Today" label. */
 	today: string;
-	/** The name chip that was chosen when the form was posted, shown again after an error. */
+	/** The Name row choice that was ticked when the form was posted, shown again after an error. */
 	namePick?: string | null;
 	/**
 	 * What the name field held when the panel was first drawn, which a redraw after an error carries
 	 * through from the posted form, unchanged. Without it the panel is first drawn: the merchant's name now.
 	 */
 	nameWas?: string | null;
+	/** The Rename list's choice as it was posted ("all" renames the merchant); "one" when first drawn. */
+	nameScope?: "one" | "all";
+	/** Jev answers categories now, so a one-off name's Rename list says Tally guesses again (decision 101). */
+	jevCategories?: boolean;
 	/**
 	 * The panel is already open and is drawn again where it is, so it isn't drawn arriving: Keep it,
 	 * after the delete question. A field's error and the question itself are known from the props.
@@ -1334,6 +1347,8 @@ function EditSheet({
 	today,
 	namePick = null,
 	nameWas = null,
+	nameScope = "one",
+	jevCategories = false,
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
@@ -1461,7 +1476,7 @@ function EditSheet({
 			<form
 				method="post"
 				action={`/transactions/${tx.id}`}
-				class="mt-4 flex flex-col gap-3 border-t border-rule pt-4"
+				class={`mt-4 flex flex-col gap-3 border-t border-rule pt-4 ${EDIT_FORM_GROUP}`}
 				hx-post={`/transactions/${tx.id}`}
 				hx-disable="findAll button[type=submit]"
 				hx-indicator="#edit-save"
@@ -1578,36 +1593,51 @@ function EditSheet({
 							tx.nameFromBank ? "bank" : tx.nameSuggested ? "guess" : "person"
 						}
 						guessed={tx.nameSuggested || tx.nameFromBank}
-						open={Boolean(
-							errors.merchant ||
-								namePick ||
-								values.displayName !== tx.merchantName,
-						)}
+						open={Boolean(errors.merchant || namePick)}
 					>
-						{tx.nameChoices ? (
-							<NameChoices
-								id="name"
-								names={tx.nameChoices.names}
-								source={tx.nameChoices.source}
-								tidied={tx.nameChoices.tidied}
-								count={tx.nameChoices.count}
-								picked={namePick}
-								own={values.displayName ?? ""}
-								error={errors.merchant}
-							/>
-						) : (
-							<TextInput
-								id="merchant"
-								label="Name"
-								name="merchant"
-								value={values.displayName ?? ""}
-								placeholder={tx.rawName}
-								autocomplete="off"
-								surface="paper"
-								hint="Renames every transaction from this merchant."
-								error={errors.merchant}
-							/>
-						)}
+						<NameChoices
+							id="name"
+							names={tx.nameChoices.names}
+							source={tx.nameChoices.source}
+							tidied={tx.nameChoices.tidied}
+							rawName={
+								tx.accountType === "cash" ? undefined : tx.nameChoices.rawName
+							}
+							picked={namePick}
+							own={values.displayName ?? ""}
+							ownName={tx.ownName}
+							error={errors.merchant}
+							rename={{
+								merchant: tx.nameChoices.merchantLabel,
+								total: tx.nameChoices.total,
+								part: typeof tx.parentId === "number",
+								owned: tx.nameChoices.owned,
+								thisOwn: tx.nameChoices.thisOwn,
+								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
+								// category drawn as none or as saved: a save that posts another one, or ticks Always for this
+								// merchant, keeps the category (rename.ts).
+								tallyCategory:
+									tx.nameChoices.tallyCategory &&
+									values.newCategory !== true &&
+									values.alwaysForMerchant !== true &&
+									(values.categoryId === null ||
+										values.categoryId === tx.categoryId) &&
+									jevCategories &&
+									jevAsksAbout({
+										included: !values.excluded || tx.paysBill === true,
+										isSplit: tx.isSplit === true,
+										income: values.income,
+										followsPurchase: purchase !== undefined,
+									}),
+								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
+								excludeCounts: tx.paysBill !== true,
+								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
+								// against (followsPurchaseAfterSave), so the chip folds the note only where one is drawn.
+								reviewCounts: linkedPurchase !== undefined,
+								today,
+								scope: nameScope,
+							}}
+						/>
 					</DetailRow>
 					<DetailRow
 						id="detail-note"
@@ -2297,7 +2327,8 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 			tx.merchantRuleCategoryId !== null &&
 			tx.merchantRuleCategoryId === tx.categoryId,
 		merchantRuleWas: tx.merchantRuleCategoryId,
-		displayName: tx.merchantName,
+		// Nothing is typed yet: "Type your own" starts empty (decision 101).
+		displayName: null,
 		note: tx.note,
 		excluded: tx.excluded,
 		income: tx.income,
@@ -2314,6 +2345,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		).all<HouseholdPerson>()
 	).results;
 	const refunds = await refundPurchases(c.env.DB, tx);
+	const jevCategories = await jevAnswersCategories(c);
 	return renderList(c, today, filters, {
 		sheet: (categories, today) => (
 			<EditSheet
@@ -2330,6 +2362,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 				refunds={refunds}
 				today={today}
 				still={asksFromThisPage(c)}
+				jevCategories={jevCategories}
 			/>
 		),
 	});
@@ -2814,6 +2847,9 @@ function pendingEditOf(form: FormData): string {
 	return fields.toString();
 }
 
+/** What the announcer adds when a one-off name makes Tally guess the category again (decision 101), saved or kept. */
+const GUESSES_AGAIN = "Tally guesses its category again.";
+
 /**
  * Saves the edit panel as `form` posted it, for `tx` (spec §8): the check, the save, the toast and the
  * list again. Change the parts (spec §8.4) is a save that the amount breaks the parts of: it answers with
@@ -2872,25 +2908,57 @@ async function savePanel(
 		form.delete("new_category_name");
 		form.delete("always");
 	}
-	// A name chip counts only while it is still offered: the panel may have been opened before "Suggest store
+	// A name choice counts only while it is still offered: the panel may have been opened before "Suggest store
 	// names" went off or before the suggestion was settled elsewhere, and a person's save must not accept or
 	// turn down a guess they can no longer see. A name typed in the field is always their own.
 	const pick = form.get("name_pick")?.toString() ?? "";
-	const offered = tx.nameChoices?.names ?? [];
+	const offered = tx.nameChoices.names;
 	const stillOffered =
-		pick === KEEP_VALUE
-			? tx.nameChoices !== null && tx.nameChoices !== undefined
-			: offered.some((name) => pickValue(name) === pick);
+		pick === STORE_VALUE ||
+		pick === OWN_VALUE ||
+		offered.some((name) => pickValue(name) === pick);
 	if (pick && !stillOffered) form.delete("name_pick");
-	if (keptDetails && !form.has("merchant") && !form.has("name_pick")) {
+	// "Looks right" with nothing ticked confirms Tally's guess for the store, as it does without the Rename list:
+	// it names the merchant (all), whatever scope the hidden list posted (decision 101). A guess the panel
+	// no longer offers, because the merchant was named since it was drawn, names nothing.
+	if (keptDetails && !form.has("name_pick")) {
 		const displayedGuess = form.get("displayed_name_guess")?.toString() ?? "";
-		if (displayedGuess) form.set("name_pick", pickValue(displayedGuess));
+		if (displayedGuess && offered.includes(displayedGuess)) {
+			form.set("name_pick", pickValue(displayedGuess));
+			form.set("name_scope", "all");
+		}
 	}
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),
 		people.map((person) => person.id),
 	);
+	// The store's own name turns the suggestions down only when the panel offers some: with the names switch
+	// off Tally's guesses are hidden, and a save can't turn down what a person can't see (decision 80).
+	if (parsed.ok && offered.length === 0) parsed.value.keepBankName = false;
+	const jevCategories = await jevAnswersCategories(c);
+	if (parsed.ok) parsed.value.jevCategories = jevCategories;
+	// "All" with a typed name the merchant already has changes no merchant name, but it still replaces this
+	// transaction's own name (decision 101), so the save counts as a name change for this one.
+	if (
+		parsed.ok &&
+		pick === OWN_VALUE &&
+		parsed.value.nameScope === "all" &&
+		tx.nameChoices.thisOwn !== null
+	)
+		parsed.value.nameChanged = true;
+	// Under This one only, the name this transaction already shows as its own is no rename: nothing is written,
+	// and Tally doesn't guess its category again (rename.ts oneOffGuessesAgain). The name compared is the one the
+	// row shows (tx.ownName, which a split part inherits from its purchase), and a store's name is the tidied bank
+	// text, as saveEdit writes it.
+	if (
+		parsed.ok &&
+		parsed.value.nameScope === "one" &&
+		parsed.value.nameChanged !== false &&
+		tx.ownName !== null &&
+		(parsed.value.displayName ?? tidyName(tx.rawName)) === tx.ownName
+	)
+		parsed.value.nameChanged = false;
 
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
@@ -2941,6 +3009,8 @@ async function savePanel(
 					today={today}
 					namePick={form.get("name_pick")?.toString() ?? null}
 					nameWas={form.get("merchant_was")?.toString() ?? null}
+					nameScope={form.get("name_scope") === "all" ? "all" : "one"}
+					jevCategories={jevCategories}
 					cashValues={cashValues}
 					changePartsTotalCents={changePartsTotalCents}
 				/>
@@ -3054,16 +3124,21 @@ async function savePanel(
 						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
 	}
-	// An unnamed merchant is named by its tidied text, never the raw bank string (#93), or by the
-	// suggestion its rows were showing when nothing was chosen (P29 A). The toast and the offer use this name.
-	// A panel that didn't rename the merchant names it as stored, not as it was drawn.
-	const name =
-		(parsed.value.nameChanged === false
+	// The rule offer asks about the whole store, so a name given to this one transaction ("This one only")
+	// doesn't stand in for it. An unnamed store is named by its tidied text, never the raw bank string (#93),
+	// or by the suggestion its rows were showing when nothing was chosen (P29 A). A panel that didn't rename
+	// the store names it as stored, not as it was drawn.
+	// A save that turns the store's suggestions down is one renaming the merchant with the bank's text (saveEdit's
+	// renamesMerchant); under This one only the suggestions stay, and the rows keep reading them.
+	const turnsDownSuggestions =
+		parsed.value.keepBankName === true &&
+		parsed.value.nameChanged !== false &&
+		parsed.value.nameScope !== "one";
+	const storeName =
+		(parsed.value.nameChanged === false || parsed.value.nameScope === "one"
 			? tx.merchantName
 			: parsed.value.displayName) ??
-		(tx.nameSuggested && !parsed.value.keepBankName
-			? tx.displayName
-			: tidyName(tx.rawName));
+		(turnsDownSuggestions ? tidyName(tx.rawName) : tx.storeName);
 	const ruleOfferRecord =
 		parsed.value.categoryId === null ||
 		parsed.value.categoryId === tx.categoryId ||
@@ -3077,7 +3152,7 @@ async function savePanel(
 		ruleOfferRecord && offerCategory
 			? {
 					...ruleOfferRecord,
-					merchant: name,
+					merchant: storeName,
 					category: offerCategory.name,
 					back,
 				}
@@ -3096,10 +3171,34 @@ async function savePanel(
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
+	// Linking a refund includes it, whatever the Exclude chip held.
+	const excludedNow =
+		refundOfId !== null && refundOfId !== current
+			? false
+			: parsed.value.excluded;
+	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
+	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
+	const guessAgain = oneOffGuessesAgain({
+		edit,
+		current: {
+			categoryId: tx.categoryId,
+			categorySource: tx.categorySource,
+		},
+		postedCategory: edit.categoryId,
+		row: {
+			included: !excludedNow || tx.paysBill === true,
+			isSplit: tx.isSplit === true,
+			income: parsed.value.income,
+			followsPurchase:
+				refunds.some((p) => p.id === refundOfId && !p.excluded) &&
+				followsPurchaseAfterSave(tx, { ...parsed.value, refundOfId }),
+		},
+	});
 	if (
-		(addedName || addedNote || changedDetails) &&
-		tx.categoryId === null &&
-		edit.categoryId === null
+		((addedName || addedNote || changedDetails) &&
+			tx.categoryId === null &&
+			edit.categoryId === null) ||
+		guessAgain
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
 	// A category made here offers the transactions that might belong in it, when there are any (decision 76).
@@ -3123,17 +3222,25 @@ async function savePanel(
 		return c.redirect(back, 303);
 	}
 
+	// The toast and the announcer say what the row reads once saved, read back from the database: its own name,
+	// else the merchant's, else the bank's text tidied (never the raw bank string, #93). A split part keeps its
+	// purchase's own name when All doesn't reach it, so the toast names that, not the name the save gave.
+	const after = await getTransaction(c.env.DB, tx.id);
+	const name = after?.displayName ?? tx.displayName;
+	// A save that chose no name while the row still shows an undecided guess named nothing: it says just "Saved.".
+	const unnamed = after?.nameSuggested === true;
 	// A category made in this save is named too, so the toast says what the transaction is now.
 	const category =
 		made?.name ?? categories.find((cat) => cat.id === edit.categoryId)?.name;
-	const saved = category
-		? `Saved. ${name} is now ${category}.`
-		: `Saved ${name}.`;
-	// Linking a refund includes it, whatever the Exclude chip held.
-	const excludedNow =
-		refundOfId !== null && refundOfId !== current
-			? false
-			: parsed.value.excluded;
+	// A one-off name that made Tally guess the category again had its category cleared (saveEdit), so the
+	// category the save posted is not what the row now shows: the announcer says Tally guesses it again.
+	const saved = unnamed
+		? "Saved."
+		: guessAgain
+			? `Saved ${name}. ${GUESSES_AGAIN}`
+			: category
+				? `Saved. ${name} is now ${category}.`
+				: `Saved ${name}.`;
 	const exclusion =
 		excludedNow === tx.excluded
 			? ""
@@ -3142,13 +3249,24 @@ async function savePanel(
 					? " It still counts while it pays a bill."
 					: " It's excluded from the budget."
 				: " It counts in the budget again.";
-	const saveWords =
-		(keptDetails ? `Kept the details for ${name}.` : saved) + exclusion;
+	const keptWords = unnamed
+		? "Kept the details."
+		: guessAgain
+			? `Kept the details for ${name}. ${GUESSES_AGAIN}`
+			: `Kept the details for ${name}.`;
+	const saveWords = (keptDetails ? keptWords : saved) + exclusion;
+	const toastMessage = unnamed
+		? keptDetails
+			? "Kept details."
+			: "Saved."
+		: keptDetails
+			? `Kept details for ${name}`
+			: `Saved ${name}`;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
 			toast: {
-				message: keptDetails ? `Kept details for ${name}` : `Saved ${name}`,
+				message: toastMessage,
 				type: "success",
 			},
 			announce: ruleOffer
@@ -3371,7 +3489,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 				tx.merchantRuleCategoryId !== null &&
 				tx.merchantRuleCategoryId === tx.categoryId,
 			merchantRuleWas: tx.merchantRuleCategoryId,
-			displayName: tx.merchantName,
+			displayName: null,
 			note: tx.note,
 			excluded: tx.excluded,
 			refundOfId: tx.refundOfId ?? null,
@@ -3379,6 +3497,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			forPersonId: tx.forPersonId,
 		};
 		const refunds = await refundPurchases(c.env.DB, tx);
+		const jevCategories = await jevAnswersCategories(c);
 		return renderList(c, today, filtersFrom(c, today, back), {
 			sheet: (categories, today) => (
 				<EditSheet
@@ -3390,6 +3509,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 					refunds={refunds}
 					deleteConfirm
 					today={today}
+					jevCategories={jevCategories}
 				/>
 			),
 		});

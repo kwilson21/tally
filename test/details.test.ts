@@ -918,6 +918,8 @@ describe("transaction detail guesses", () => {
 			back: "/transactions",
 			merchant_was: "",
 			name_pick: "s:Corner Coffee",
+			// A ticked name takes the Rename list's choice, as Save does: All renames the merchant (decision 101).
+			name_scope: "all",
 			note: "Dinner",
 			kind: "one_off",
 			for_person_id: String(person?.id),
@@ -1040,13 +1042,13 @@ describe("transaction detail guesses", () => {
 		const id = await charge();
 		await db
 			.prepare(
-				"INSERT INTO merchants (raw_name,suggested_name,suggestion_status) VALUES ('COFFEE SHOP','Coffee Shop','pending')",
+				"INSERT INTO merchants (raw_name,suggested_name,suggestion_status) VALUES ('COFFEE SHOP','Corner Coffee','pending')",
 			)
 			.run();
 		const saved = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "",
-			displayed_name_guess: "Coffee Shop",
+			displayed_name_guess: "Corner Coffee",
 			note: "",
 			details_action: "keep",
 		});
@@ -1057,7 +1059,7 @@ describe("transaction detail guesses", () => {
 					"SELECT display_name,suggestion_status FROM merchants WHERE raw_name='COFFEE SHOP'",
 				)
 				.first(),
-		).toEqual({ display_name: "Coffee Shop", suggestion_status: "accepted" });
+		).toEqual({ display_name: "Corner Coffee", suggestion_status: "accepted" });
 	});
 
 	it("does not reuse a removed highest household person id", async () => {

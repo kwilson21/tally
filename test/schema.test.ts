@@ -98,6 +98,7 @@ describe("schema", () => {
 				"details_asked",
 				"note_tried_at",
 				"note_dismissed",
+				"own_name",
 			]),
 		);
 		expect(await columns("household_people")).toEqual(
