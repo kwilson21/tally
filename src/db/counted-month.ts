@@ -46,6 +46,18 @@ export const paysBillSql = (alias: string) =>
 export const includedSql = (alias: string) =>
 	`(${alias}.excluded = 0 OR ${paysBillSql(alias)})`;
 
+/**
+ * Whether Jev can be asked about the category of the row `alias` names, as jevAsksAbout (rename.ts) says for a
+ * row as a save leaves it: included, not a split, not income, and not a refund that follows its purchase. This
+ * is the rows pendingForJev classifies (NEEDS_JEV_CLASSIFICATION and NOT FOLLOWS_PURCHASE in
+ * src/db/transactions.ts); keep it in step with them, and with jevAsksAbout. Qualify every column: INCLUDED_ROW
+ * is unqualified, so it is ambiguous inside an UPDATE ... FROM transactions AS p.
+ */
+export const jevAsksAboutSql = (alias: string) =>
+	`(${includedSql(alias)} AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0
+		AND NOT (${alias}.amount_cents < 0 AND COALESCE(${alias}.credit_reviewed, 0) = 1
+			AND EXISTS (SELECT 1 FROM transactions jrp WHERE jrp.id = ${alias}.refund_of_id AND jrp.excluded = 0)))`;
+
 /** Tally or the bank marked it as a transfer. */
 export const markedTransferSql = (alias: string) =>
 	`(${alias}.flag_transfer = 1 OR COALESCE(${alias}.excluded_source = 'plaid', 0))`;
