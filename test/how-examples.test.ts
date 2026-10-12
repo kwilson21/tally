@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { BillStatus } from "../src/bills/status";
 import { netWorthCents } from "../src/db/accounts";
 import {
+	billStatusExamples,
 	budgetExample,
 	categorizationExample,
 	exclusionsExample,
@@ -369,5 +371,59 @@ describe("exclusionsExample", () => {
 			"This month, 1 transaction is excluded (1 reimbursement), so it doesn't count toward spending or safe to spend.",
 		);
 		expect(exclusionsExample(none)).toBe("Nothing is excluded this month.");
+	});
+});
+
+describe("billStatusExamples", () => {
+	const bill = (
+		name: string,
+		status: BillStatus,
+		dueDate: string,
+		extra: { paidDate?: string | null; active?: boolean } = {},
+	) => ({ name, status, dueDate, paidDate: null, active: true, ...extra });
+
+	it("names one of the household's own bills for each status, with its dates", () => {
+		expect(
+			billStatusExamples(
+				[
+					bill("Electric", "overdue", "2026-10-03"),
+					bill("Internet", "due", "2026-10-14"),
+					bill("Gym", "upcoming", "2026-10-25"),
+					bill("Water", "paid", "2026-10-03", { paidDate: "2026-10-04" }),
+				],
+				"2026-10-10",
+			),
+		).toEqual({
+			overdue: "For example: Electric, due Oct 3.",
+			due: "For example: Internet, due Oct 14.",
+			upcoming: "For example: Gym, due Oct 25.",
+			paid: "For example: Water, due Oct 3, paid Oct 4.",
+		});
+	});
+
+	it("says in a plain sentence when no bill has a status", () => {
+		expect(
+			billStatusExamples([bill("Gym", "upcoming", "2026-10-25")], "2026-10-10"),
+		).toMatchObject({
+			overdue: "No bill is overdue right now.",
+			due: "No bill is due in the next 7 days right now.",
+			paid: "No bill has been paid yet this month.",
+		});
+	});
+
+	it("leaves out inactive bills", () => {
+		expect(
+			billStatusExamples(
+				[bill("Old phone plan", "overdue", "2026-10-15", { active: false })],
+				"2026-10-10",
+			).overdue,
+		).toBe("No bill is overdue right now.");
+	});
+
+	it("names the year of a due date in another year", () => {
+		expect(
+			billStatusExamples([bill("Gym", "upcoming", "2027-01-25")], "2026-10-10")
+				.upcoming,
+		).toBe("For example: Gym, due Jan 25, 2027.");
 	});
 });

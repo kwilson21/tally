@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { billOccurrence, billOccurrenceForMonth } from "../src/bills/status";
+import {
+	billOccurrence,
+	billOccurrenceForMonth,
+	billScheduleLabel,
+} from "../src/bills/status";
 import { BillRow, billStatusLine } from "../src/views/bill-row";
 
 describe("bill status", () => {
@@ -323,5 +327,51 @@ describe("BillRow cadence", () => {
 	it("leaves a quarterly or monthly row's status sentence as it is", () => {
 		expect(rowText("quarterly", 9)).not.toContain("every 3 months");
 		expect(rowText("monthly", 9)).not.toContain("· every");
+	});
+});
+
+describe("the schedule an inactive bill shows", () => {
+	it.each([
+		[{ frequency: "monthly", dueDay: 15 }, "Monthly, on the 15th"],
+		[{ frequency: "monthly", dueDay: 1 }, "Monthly, on the 1st"],
+		[{ frequency: "yearly", dueDay: 15, anchorMonth: 7 }, "Yearly, on Jul 15"],
+		// A day past the anchor month's end reads as that month's last day, as the due date clamps it.
+		[{ frequency: "yearly", dueDay: 30, anchorMonth: 2 }, "Yearly, on Feb 29"],
+		[{ frequency: "yearly", dueDay: 29, anchorMonth: 2 }, "Yearly, on Feb 29"],
+		[
+			{ frequency: "quarterly", dueDay: 31, anchorMonth: 4 },
+			"Quarterly, from Apr 30",
+		],
+		[{ frequency: "weekly", dueDay: 1 }, "Weekly, on Mondays"],
+		[{ frequency: "weekly", dueDay: 7 }, "Weekly, on Sundays"],
+		[{ frequency: "biweekly", dueDay: 5 }, "Every two weeks, on Fridays"],
+		[
+			{ frequency: "quarterly", dueDay: 15, anchorMonth: 1 },
+			"Quarterly, from Jan 15",
+		],
+	] as const)("reads %j as %s", (schedule, words) => {
+		expect(billScheduleLabel(schedule)).toBe(words);
+	});
+
+	it("shows the schedule on an inactive row instead of its due date", () => {
+		const html = String(
+			BillRow({
+				bill: {
+					id: 7,
+					name: "Old phone plan",
+					amountCents: 4500,
+					status: "upcoming",
+					dueDate: "2026-11-15",
+					icon: "bills",
+					color: "cat-blue",
+					active: false,
+					frequency: "monthly",
+					dueDay: 15,
+				},
+				today: "2026-10-05",
+			}),
+		);
+		expect(html).toContain("Monthly, on the 15th");
+		expect(html).not.toContain("Due ");
 	});
 });

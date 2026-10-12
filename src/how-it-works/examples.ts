@@ -1,9 +1,51 @@
 // The worked examples on the How Tally works page (spec §9), written by code from the demo's own
 // numbers. Exact cents, so budget − spent always equals the result shown.
+import type { BillStatus } from "../bills/status";
 import type { MonthSummary } from "../budget";
-import { monthName } from "../dates";
+import { monthName, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { type TrendsPage, trendsAmount } from "../trends";
+
+/** A bill as the Bills page groups it: the occurrence it shows, and whether the bill is active. */
+export type BillStatusRow = {
+	name: string;
+	status: BillStatus;
+	dueDate: string;
+	paidDate?: string | null;
+	active: boolean;
+};
+
+/**
+ * The Bills section's example under each status (#341): one of the household's own active bills in that status,
+ * named with its dates, or a plain sentence when no bill is in it. Dates are read against `today` for the year.
+ */
+export function billStatusExamples(
+	rows: BillStatusRow[],
+	today: string,
+): Record<BillStatus, string> {
+	const active = rows.filter((row) => row.active);
+	const first = (status: BillStatus) =>
+		active.find((row) => row.status === status);
+	const due = (row: BillStatusRow) => `due ${shortDay(row.dueDate, today)}`;
+	const overdue = first("overdue");
+	const soon = first("due");
+	const upcoming = first("upcoming");
+	const paid = first("paid");
+	return {
+		overdue: overdue
+			? `For example: ${overdue.name}, ${due(overdue)}.`
+			: "No bill is overdue right now.",
+		due: soon
+			? `For example: ${soon.name}, ${due(soon)}.`
+			: "No bill is due in the next 7 days right now.",
+		upcoming: upcoming
+			? `For example: ${upcoming.name}, ${due(upcoming)}.`
+			: "No bill is upcoming right now.",
+		paid: paid
+			? `For example: ${paid.name}, ${due(paid)}${paid.paidDate ? `, paid ${shortDay(paid.paidDate, today)}` : ""}.`
+			: "No bill has been paid yet this month.",
+	};
+}
 
 const plural = (n: number, one: string, many: string) =>
 	`${n} ${n === 1 ? one : many}`;

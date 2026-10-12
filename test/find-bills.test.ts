@@ -244,11 +244,33 @@ describe("finding bills", () => {
 		).toContainEqual(expect.objectContaining({ rawName: "PAID OUT" }));
 	});
 
-	it("never suggests a steady card payment that Plaid excluded as a transfer", async () => {
+	it.each([
+		["car", "LOAN_PAYMENTS_CAR_PAYMENT", "CAR LOAN"],
+		["mortgage", "LOAN_PAYMENTS_MORTGAGE_PAYMENT", "MORTGAGE LOAN"],
+		["student-loan", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT", "STUDENT LOAN"],
+		["personal-loan", "LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT", "PERSONAL LOAN"],
+		["other loan", "LOAN_PAYMENTS_OTHER_PAYMENT", "OTHER LOAN"],
+	] as const)(
+		"suggests a steady %s payment the bank marked as a loan, excluded at sync",
+		async (_label, detailed, rawName) => {
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await insertCandidate(rawName);
+			await env.DB.prepare(
+				"UPDATE transactions SET plaid_category='LOAN_PAYMENTS', plaid_detailed_category=?, excluded=1, excluded_source='plaid' WHERE raw_name=?",
+			)
+				.bind(detailed, rawName)
+				.run();
+			expect(
+				await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+			).toContainEqual(expect.objectContaining({ rawName }));
+		},
+	);
+
+	it("never suggests a steady card payment that Plaid excluded as a loan payment", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("CARD PAYMENT");
 		await env.DB.prepare(
-			"UPDATE transactions SET plaid_category='LOAN_PAYMENTS', excluded=1, excluded_source='plaid' WHERE raw_name=?",
+			"UPDATE transactions SET plaid_category='LOAN_PAYMENTS', plaid_detailed_category='LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', excluded=1, excluded_source='plaid' WHERE raw_name=?",
 		)
 			.bind("CARD PAYMENT")
 			.run();
@@ -257,9 +279,110 @@ describe("finding bills", () => {
 		).not.toContainEqual(expect.objectContaining({ rawName: "CARD PAYMENT" }));
 	});
 
+	it("never suggests a steady move between the family's own accounts that Plaid excluded", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("OWN ACCOUNT MOVE");
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category='TRANSFER_OUT', plaid_detailed_category='TRANSFER_OUT_ACCOUNT_TRANSFER', excluded=1, excluded_source='plaid' WHERE raw_name=?",
+		)
+			.bind("OWN ACCOUNT MOVE")
+			.run();
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(
+			expect.objectContaining({ rawName: "OWN ACCOUNT MOVE" }),
+		);
+	});
+
+	it("never suggests a loan payment Plaid excluded before its detailed category was stored", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("OLD LOAN");
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category='LOAN_PAYMENTS', excluded=1, excluded_source='plaid' WHERE raw_name=?",
+		)
+			.bind("OLD LOAN")
+			.run();
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(expect.objectContaining({ rawName: "OLD LOAN" }));
+	});
+
+	it.each([
+		["by hand", "user"],
+		["by the matcher", "auto"],
+	] as const)(
+		"never suggests a payee whose payment is linked to a bill %s",
+		async (_label, matchedBy) => {
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await insertCandidate("OAK STREET RENTALS");
+			const rent = await insertBill("Rent", "LANDLORD CO");
+			await linkCharge(rent, "OAK STREET RENTALS", 10, matchedBy);
+			expect(
+				await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+			).not.toContainEqual(
+				expect.objectContaining({ rawName: "OAK STREET RENTALS" }),
+			);
+		},
+	);
+
+	it("suggests a payee again once two monthly payments after its linked one are left unlinked", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("OAK STREET RENTALS");
+		await insertCharge("OAK STREET RENTALS", 70);
+		const rent = await insertBill("Rent", "LANDLORD CO");
+		await linkCharge(rent, "OAK STREET RENTALS", 70, "user");
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).toContainEqual(
+			expect.objectContaining({ rawName: "OAK STREET RENTALS" }),
+		);
+	});
+
+	it("keeps a payee hidden while only one monthly payment follows its linked one", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("OAK STREET RENTALS");
+		await insertCharge("OAK STREET RENTALS", 70);
+		const rent = await insertBill("Rent", "LANDLORD CO");
+		await linkCharge(rent, "OAK STREET RENTALS", 40, "user");
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(
+			expect.objectContaining({ rawName: "OAK STREET RENTALS" }),
+		);
+	});
+
+	it.each([
+		["by hand", "user"],
+		["by the matcher", "auto"],
+	] as const)(
+		"keeps a payee hidden when another charge falls between its linked payment and one unlinked payment %s",
+		async (_label, matchedBy) => {
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await insertCandidate("OAK STREET RENTALS");
+			await insertCharge("OAK STREET RENTALS", 11);
+			const rent = await insertBill("Rent", "LANDLORD CO");
+			await linkCharge(rent, "OAK STREET RENTALS", 40, matchedBy);
+			expect(
+				await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+			).not.toContainEqual(
+				expect.objectContaining({ rawName: "OAK STREET RENTALS" }),
+			);
+		},
+	);
+
 	it.each([
 		["Jev", "flag_transfer=1, excluded=1, excluded_source='jev'", "JEV MOVE"],
 		["a person", "excluded=1, excluded_source='user'", "PERSON MOVE"],
+		[
+			"Jev on a car loan",
+			"plaid_category='LOAN_PAYMENTS', plaid_detailed_category='LOAN_PAYMENTS_CAR_PAYMENT', excluded=1, excluded_source='jev'",
+			"JEV LOAN",
+		],
+		[
+			"a person on a car loan",
+			"plaid_category='LOAN_PAYMENTS', plaid_detailed_category='LOAN_PAYMENTS_CAR_PAYMENT', excluded=1, excluded_source='user'",
+			"PERSON LOAN",
+		],
 	] as const)(
 		"never suggests a steady charge left out of the budget by %s",
 		async (_label, mutation, rawName) => {
@@ -312,6 +435,54 @@ describe("finding bills", () => {
 		expect(
 			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
 		).toContainEqual(expect.objectContaining({ rawName: "SPLIT BACK" }));
+	});
+
+	it("suggests a split part of a steady car-loan payment Plaid excluded", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("SPLIT LOAN");
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category='LOAN_PAYMENTS', plaid_detailed_category='LOAN_PAYMENTS_CAR_PAYMENT', excluded=1, excluded_source='plaid' WHERE raw_name=?",
+		)
+			.bind("SPLIT LOAN")
+			.run();
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT LOAN' ORDER BY date DESC LIMIT 1",
+		).first<{ id: number; account_id: number; date: string }>();
+		await env.DB.batch([
+			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?").bind(
+				parent?.id,
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,parent_id,excluded,excluded_source) VALUES(?,?,1000,'PART',4,?,1,'plaid')",
+			).bind(parent?.account_id, parent?.date, parent?.id),
+		]);
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).toContainEqual(expect.objectContaining({ rawName: "SPLIT LOAN" }));
+	});
+
+	it("never suggests a split part of a card payment Plaid excluded", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await insertCandidate("SPLIT CARD");
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category='LOAN_PAYMENTS', plaid_detailed_category='LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', excluded=1, excluded_source='plaid' WHERE raw_name=?",
+		)
+			.bind("SPLIT CARD")
+			.run();
+		const parent = await env.DB.prepare(
+			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT CARD' ORDER BY date DESC LIMIT 1",
+		).first<{ id: number; account_id: number; date: string }>();
+		await env.DB.batch([
+			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?").bind(
+				parent?.id,
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id,parent_id,excluded,excluded_source) VALUES(?,?,1000,'PART',4,?,1,'plaid')",
+			).bind(parent?.account_id, parent?.date, parent?.id),
+		]);
+		expect(
+			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE)),
+		).not.toContainEqual(expect.objectContaining({ rawName: "SPLIT CARD" }));
 	});
 
 	it("names a suggestion by the merchant's chosen name, never by a name that is only suggested (decision 64)", async () => {
@@ -549,5 +720,43 @@ async function insertCandidate(
 		 SELECT id,?,1000,?,4,? FROM accounts LIMIT 1`,
 	)
 		.bind(daysAgo(10), rawName, merchantName)
+		.run();
+}
+
+/** One $10 charge for `rawName`, `days` days ago. */
+async function insertCharge(rawName: string, days: number) {
+	await env.DB.prepare(
+		`INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id)
+		 SELECT id,?,1000,?,4 FROM accounts LIMIT 1`,
+	)
+		.bind(daysAgo(days), rawName)
+		.run();
+}
+
+/** A monthly bill whose bank text is `merchantRawName`, so no merchant key of its own covers the payee. */
+async function insertBill(name: string, merchantRawName: string) {
+	return env.DB.prepare(
+		"INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(?,100000,1,'monthly',1,?) RETURNING id",
+	)
+		.bind(name, merchantRawName)
+		.first<number>("id");
+}
+
+/** Links the `rawName` charge `days` days ago to `billId` for that month, by hand or by the matcher. */
+async function linkCharge(
+	billId: number | null,
+	rawName: string,
+	days: number,
+	matchedBy: "user" | "auto",
+) {
+	const transaction = await env.DB.prepare(
+		"SELECT id FROM transactions WHERE raw_name=? AND date=?",
+	)
+		.bind(rawName, daysAgo(days))
+		.first<number>("id");
+	await env.DB.prepare(
+		"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,?,'linked')",
+	)
+		.bind(billId, daysAgo(days).slice(0, 7), transaction, matchedBy)
 		.run();
 }

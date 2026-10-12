@@ -2,11 +2,13 @@ import {
 	type BillFrequency,
 	type BillStatus,
 	billCadenceLabel,
+	billScheduleLabel,
 } from "../bills/status";
 import { dayLabel, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
+import { WhyLink } from "./why-link";
 
 export type BillRowData = {
 	id: number;
@@ -21,16 +23,44 @@ export type BillRowData = {
 	color: string;
 	frequency?: BillFrequency;
 	dueDay?: number;
+	/** The month a yearly or quarterly bill is anchored to (`bills.anchor_month`). */
+	anchorMonth?: number | null;
+	/** False for an inactive bill, whose row shows its schedule instead of a status sentence. Absent counts as active. */
+	active?: boolean;
 };
 
 const STATUS_HEADING = {
-	overdue: { text: "Overdue", icon: "alert", tone: "text-over" },
-	due: { text: "Due in the next 7 days", icon: "bills", tone: "text-ink" },
-	upcoming: { text: "Upcoming", icon: "bills", tone: "text-muted" },
-	paid: { text: "Paid this month", icon: "check", tone: "text-ok" },
+	overdue: {
+		text: "Overdue",
+		icon: "alert",
+		tone: "text-over",
+		why: "overdue",
+	},
+	due: {
+		text: "Due in the next 7 days",
+		icon: "bills",
+		tone: "text-ink",
+		why: "due in the next 7 days",
+	},
+	upcoming: {
+		text: "Upcoming",
+		icon: "bills",
+		tone: "text-muted",
+		why: "upcoming",
+	},
+	paid: {
+		text: "Paid this month",
+		icon: "check",
+		tone: "text-ok",
+		why: "paid this month",
+	},
 } as const;
 
-/** A bill group names status with both an icon and words, never color alone. */
+/**
+ * A bill group names status with both an icon and words, never color alone, then a Why? to How Tally works'
+ * Bills section (decision 65, #341). The Why? sits beside the heading, not inside it, so the heading's name stays
+ * the status; the group's total ends the row.
+ */
 export function BillStatusHeading({
 	status,
 	totalCents,
@@ -40,20 +70,22 @@ export function BillStatusHeading({
 }) {
 	const look = STATUS_HEADING[status];
 	return (
-		<h2 class="flex items-center gap-2 text-sm text-muted">
-			<span class="flex min-w-0 items-center gap-2">
+		<div class="flex items-center gap-2 text-sm text-muted">
+			<h2 class="flex min-w-0 items-center gap-2">
 				<span class={look.tone}>
 					<Icon name={look.icon} class="size-4" />
 				</span>
 				{look.text}
-			</span>
+			</h2>
+			<span aria-hidden="true">·</span>
+			<WhyLink section="bills" topic={look.why} />
 			{totalCents !== undefined && (
 				<span class="ml-auto shrink-0">
 					{formatCents(totalCents)}
 					{status === "upcoming" ? " this month" : ""}
 				</span>
 			)}
-		</h2>
+		</div>
 	);
 }
 
@@ -108,6 +140,24 @@ function calendarDay(value: string) {
 }
 
 /**
+ * A row's muted second line: an inactive bill's schedule (#341), else its status sentence, with a weekly or
+ * every-two-weeks bill's interval after it.
+ */
+function secondLine(bill: BillRowData, today: string) {
+	if (bill.active === false)
+		return billScheduleLabel({
+			frequency: bill.frequency ?? "monthly",
+			dueDay: bill.dueDay ?? 1,
+			anchorMonth: bill.anchorMonth,
+		});
+	return `${billStatusLine(bill, today)}${
+		bill.frequency && ["weekly", "biweekly"].includes(bill.frequency)
+			? ` · ${billCadenceLabel({ frequency: bill.frequency, dueDay: bill.dueDay ?? 1 })}`
+			: ""
+	}`;
+}
+
+/**
  * One bill: category, name, status sentence, and its amount. When a payment from the same merchant came at
  * another price, the status sentence is two caption lines instead (P36 B, decision 72): "Price changed?" in
  * ink, then what was paid in muted words. The row grows a line, so they aren't truncated on a phone, and it
@@ -137,10 +187,7 @@ export function BillRow({
 					</>
 				) : (
 					<span class="block truncate leading-6 text-muted">
-						{billStatusLine(bill, today)}
-						{bill.frequency && ["weekly", "biweekly"].includes(bill.frequency)
-							? ` · ${billCadenceLabel({ frequency: bill.frequency, dueDay: bill.dueDay ?? 1 })}`
-							: ""}
+						{secondLine(bill, today)}
 					</span>
 				)}
 			</span>

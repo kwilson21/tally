@@ -40,7 +40,10 @@ type PlaidTransaction = {
 	pending: boolean;
 	/** On a posted transaction, the id of the pending one it replaces, when the bank gave one. */
 	pending_transaction_id?: string | null;
-	personal_finance_category?: { primary?: string | null } | null;
+	personal_finance_category?: {
+		primary?: string | null;
+		detailed?: string | null;
+	} | null;
 };
 
 type SyncResponse = {
@@ -664,8 +667,8 @@ export async function syncItem(
 				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
-							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, flag_income, excluded, excluded_source, pending)
-						 SELECT ?, id, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' AND ? < 0 THEN 1 ELSE 0 END,
+							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, plaid_detailed_category, credit_reviewed, flag_income, excluded, excluded_source, pending)
+						 SELECT ?, id, ?, ?, ?, ?, ?, ?, CASE WHEN ? < 0 THEN 0 ELSE 1 END, CASE WHEN ? = '${PLAID_INCOME_CATEGORY}' AND ? < 0 THEN 1 ELSE 0 END,
 							CASE WHEN ${isPlaidTransferSql("?")} THEN 1 ELSE 0 END,
 							CASE WHEN ${isPlaidTransferSql("?")} THEN 'plaid' ELSE NULL END, ? FROM accounts
 						 WHERE plaid_account_id = ? AND ${OWNS_LOCK}
@@ -684,6 +687,7 @@ export async function syncItem(
 							raw_name = excluded.raw_name,
 							merchant_name = excluded.merchant_name,
 							plaid_category = excluded.plaid_category,
+							plaid_detailed_category = excluded.plaid_detailed_category,
 							${plaidTransferRuleSql("excluded.plaid_category", "excluded.amount_cents")},
 							pending = excluded.pending,
 							updated_at = datetime('now')`,
@@ -694,6 +698,7 @@ export async function syncItem(
 						transaction.name,
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
+						transaction.personal_finance_category?.detailed ?? null,
 						plaidAmountToCents(transaction.amount),
 						transaction.personal_finance_category?.primary ?? null,
 						cents,
@@ -770,7 +775,7 @@ export async function syncItem(
 							${clearJevAnswersOnAmountChange("amount_cents != ?")},
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?, merchant_name = ?,
-							plaid_category = ?, pending = ?,
+							plaid_category = ?, plaid_detailed_category = ?, pending = ?,
 							${plaidTransferRuleSql("?", "?")},
 							flag_income = ${syncedIncomeFlagSql("transactions", "?", "?")},
 							income_source = CASE WHEN income_source = 'jev' AND amount_cents != ? THEN NULL ELSE income_source END,
@@ -798,6 +803,7 @@ export async function syncItem(
 						transaction.name,
 						merchantNameOf(transaction),
 						transaction.personal_finance_category?.primary ?? null,
+						transaction.personal_finance_category?.detailed ?? null,
 						transaction.pending ? 1 : 0,
 						transaction.personal_finance_category?.primary ?? null,
 						cents,

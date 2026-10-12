@@ -257,6 +257,58 @@ describe("syncItem", () => {
 		]);
 	});
 
+	it("stores Plaid's detailed category beside its primary one, when a transaction is added and when the bank modifies it", async () => {
+		const id = await addItem();
+		const stored = () =>
+			env.DB.prepare(
+				"SELECT plaid_category, plaid_detailed_category FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						added: [
+							transaction({
+								personal_finance_category: {
+									primary: "LOAN_PAYMENTS",
+									detailed: "LOAN_PAYMENTS_CAR_PAYMENT",
+								},
+							}),
+						],
+					}),
+				),
+			),
+		);
+		expect(await stored()).toEqual({
+			plaid_category: "LOAN_PAYMENTS",
+			plaid_detailed_category: "LOAN_PAYMENTS_CAR_PAYMENT",
+		});
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() =>
+				response(
+					page({
+						modified: [
+							transaction({
+								personal_finance_category: {
+									primary: "LOAN_PAYMENTS",
+									detailed: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+								},
+							}),
+						],
+					}),
+				),
+			),
+		);
+		expect(await stored()).toEqual({
+			plaid_category: "LOAN_PAYMENTS",
+			plaid_detailed_category: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+		});
+	});
+
 	it("removes split children and remembers the old total when the bank changes an amount", async () => {
 		const id = await addItem();
 		await syncItem(

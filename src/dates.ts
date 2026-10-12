@@ -122,6 +122,10 @@ export function shortMonthName(month: string): string {
 	return SHORT[Number(month.slice(5, 7)) - 1] ?? month;
 }
 
+/** Month 7 and day 15 → "Jul 15", for a day that repeats each year (no year is named). */
+export const monthDay = (month: number, day: number) =>
+	`${SHORT[month - 1]} ${day}`;
+
 /** "Sep 5", or "Dec 31, 2025" when its year isn't the year of `beside` (both YYYY-MM-DD). */
 export function shortDay(date: string, beside: string): string {
 	const label = `${SHORT[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;

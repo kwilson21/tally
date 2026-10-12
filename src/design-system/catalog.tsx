@@ -1574,7 +1574,7 @@ function Rows() {
 				title="BillRow and bill status heading"
 				tier="visual"
 				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
-				sentence="Bills shows a quiet monthly total and still-to-pay line; each group ends with its total, and each bill shows its category, name, status sentence and amount."
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence."
 			>
 				<State label="Bills totals">
 					<div class="max-w-xl">
@@ -1744,6 +1744,51 @@ function Rows() {
 									paidDate: "2026-09-23",
 									icon: "household",
 									color: "cat-blue",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Inactive, showing its monthly schedule instead of a due date">
+					<div class="max-w-xl">
+						<ul>
+							<BillRow
+								href="#bill-row"
+								today="2026-10-04"
+								bill={{
+									id: 7,
+									name: "Old phone plan",
+									amountCents: 4500,
+									status: "upcoming",
+									dueDate: "2026-10-15",
+									icon: "bills",
+									color: "cat-slate",
+									active: false,
+									frequency: "monthly",
+									dueDay: 15,
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Inactive, showing its yearly schedule">
+					<div class="max-w-xl">
+						<ul>
+							<BillRow
+								href="#bill-row"
+								today="2026-10-04"
+								bill={{
+									id: 6,
+									name: "Soccer league",
+									amountCents: 6500,
+									status: "upcoming",
+									dueDate: "2027-07-15",
+									icon: "kids",
+									color: "cat-ochre",
+									active: false,
+									frequency: "yearly",
+									dueDay: 15,
+									anchorMonth: 7,
 								}}
 							/>
 						</ul>

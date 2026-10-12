@@ -25,6 +25,11 @@ const endsWithRule = (ending: string, display: RegExp) =>
 		(rule) => rule.selector.endsWith(ending) && display.test(rule.body),
 	);
 
+/** The Bills group under a status heading. Each group is one `<section`, so a check reads only that group's own total. */
+const groupUnder = (html: string, heading: string) =>
+	html.split("<section").find((part) => part.includes(`>${heading}</h2>`)) ??
+	"";
+
 /** The page's row for one occurrence: its `<li>` block, found by its label as a whole (not "Fri, Oct 2" in "Fri, Oct 23"). */
 // A row is found by its label, which may carry the occurrence's amount after " · " (decision 101).
 const occurrenceRow = (html: string, label: string) =>
@@ -110,13 +115,15 @@ describe("Bills", () => {
 			expect(html).toMatch(
 				/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
 			);
-			for (const heading of [
-				/Overdue<\/span><span class="ml-auto shrink-0">\$123\.45<\/span>/,
-				/Due in the next 7 days<\/span><span class="ml-auto shrink-0">\$234\.56<\/span>/,
-				/Upcoming<\/span><span class="ml-auto shrink-0">\$345\.67 this month<\/span>/,
-				/Paid this month<\/span><span class="ml-auto shrink-0">\$12\.34<\/span>/,
-			])
-				expect(html).toMatch(heading);
+			for (const [status, total] of [
+				["Overdue", "$123.45"],
+				["Due in the next 7 days", "$234.56"],
+				["Upcoming", "$345.67 this month"],
+				["Paid this month", "$12.34"],
+			] as const)
+				expect(groupUnder(html, status)).toContain(
+					`<span class="ml-auto shrink-0">${total}</span>`,
+				);
 		},
 	);
 	it.each([
@@ -179,10 +186,8 @@ describe("Bills", () => {
 			])
 				expect(html.includes(status)).toBe(groups.includes(status));
 			for (const status of groups)
-				expect(html).toMatch(
-					new RegExp(
-						`${status}<\\/span><span class="ml-auto shrink-0">\\$100\\.00`,
-					),
+				expect(groupUnder(html, status)).toContain(
+					'<span class="ml-auto shrink-0">$100.00',
 				);
 		},
 	);
@@ -219,12 +224,13 @@ describe("Bills", () => {
 			];
 			const groups = new Map<string, { total: number; rowTotal: number }>();
 			for (const [, section] of sections) {
+				// The group's total is the only ml-auto span in its section (rows never use it).
 				const heading = section?.match(
-					/<h2[^>]*>[\s\S]*?<span class="ml-auto shrink-0">\$([\d,]+\.\d{2})/,
+					/<span class="ml-auto shrink-0">\$([\d,]+\.\d{2})/,
 				);
 				if (!heading || !section) continue;
 				const title = section.match(
-					/>(Overdue|Due in the next 7 days|Upcoming|Paid this month)<\/span>/,
+					/>(Overdue|Due in the next 7 days|Upcoming|Paid this month)<\/h2>/,
 				)?.[1];
 				if (!title) continue;
 				const rows = [
@@ -266,7 +272,8 @@ describe("Bills", () => {
 		const link =
 			/<a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a>/;
 		expect(html).toMatch(link);
-		expect(html.match(/\/how-it-works#bills/g)).toHaveLength(1);
+		// Only the page's own link: each status heading's Why? goes to the same section too (#341).
+		expect(html.match(/aria-label="How this works: bills"/g)).toHaveLength(1);
 		const at = (text: string | RegExp) =>
 			typeof text === "string" ? html.indexOf(text) : html.search(text);
 		expect(at("bills to pay soon")).toBeLessThan(at(link));
@@ -1028,11 +1035,11 @@ describe("Bills", () => {
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
 		// Due is the shown Oct 16 Friday. Upcoming is Oct 23 and Oct 30 plus the monthly bill's Oct 28.
-		expect(html).toMatch(
-			/Due in the next 7 days<\/span><span class="ml-auto shrink-0">\$240\.00<\/span>/,
+		expect(groupUnder(html, "Due in the next 7 days")).toContain(
+			'<span class="ml-auto shrink-0">$240.00</span>',
 		);
-		expect(html).toMatch(
-			/Upcoming<\/span><span class="ml-auto shrink-0">\$580\.00 this month<\/span>/,
+		expect(groupUnder(html, "Upcoming")).toContain(
+			'<span class="ml-auto shrink-0">$580.00 this month</span>',
 		);
 		expect(html).toContain("$820 still to pay in October");
 	});
@@ -2738,6 +2745,100 @@ describe("Bill guards", () => {
 		});
 	});
 
+	describe("reactivating links the payments that arrived while the bill was off", () => {
+		// Today is 14 October 2026 and the bill is due on the 12th. Its payment came on the 11th, while it was off.
+		const linkedPayments = async (billId: number) =>
+			(
+				await env.DB.prepare(
+					"SELECT period, transaction_id AS transactionId FROM bill_payments WHERE bill_id=? AND status='linked' ORDER BY period",
+				)
+					.bind(billId)
+					.all<{ period: string; transactionId: number }>()
+			).results;
+		const pageText = async (path: string) =>
+			(await exports.default.fetch(`http://tally.test${path}`)).text();
+
+		beforeEach(async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date("2026-10-14T16:00:00Z"));
+			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bills"),
+				env.DB.prepare("DELETE FROM bill_payments"),
+				env.DB.prepare(
+					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,active,added_on) VALUES(9801,'Reactivate fixture',4500,12,'monthly',5,'REACTIVATE FIXTURE',0,'2026-09-01')",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9801,1,'2026-10-11',4500,'REACTIVATE FIXTURE')",
+				),
+			]);
+		});
+		afterEach(() => vi.useRealTimers());
+
+		it("links the payment, shows the bill Paid, and leaves it out of Home's bills due soon", async () => {
+			expect(await linkedPayments(9801)).toEqual([]);
+			const res = await post("/bills/9801/reactivate", new URLSearchParams());
+			expect(res.headers.get("HX-Trigger")).toContain("Bill reactivated");
+			expect(await linkedPayments(9801)).toEqual([
+				{ period: "2026-10", transactionId: 9801 },
+			]);
+			const bills = await pageText("/bills");
+			expect(bills).toContain("Paid this month");
+			expect(bills).not.toContain("Overdue");
+			expect(await pageText("/")).not.toContain("Bills due soon");
+		});
+
+		it("still sets a reactivated bill with no payment aside on Home", async () => {
+			// The control for the test above: without its payment, the overdue bill is set aside.
+			await env.DB.prepare("DELETE FROM transactions WHERE id=9801").run();
+			await post("/bills/9801/reactivate", new URLSearchParams());
+			expect(await linkedPayments(9801)).toEqual([]);
+			const home = await pageText("/");
+			expect(home).toContain("Bills due soon");
+			expect(home).toContain("Reactivate fixture");
+		});
+
+		it("matches each occurrence at its own month's amount (decision 101)", async () => {
+			// September's occurrence was 40.00; the amount changed to 45.00 from October on.
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bill_amounts(bill_id,effective_month,amount_cents) VALUES(9801,'2026-08',4000),(9801,'2026-10',4500)",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9802,1,'2026-09-13',4000,'REACTIVATE FIXTURE')",
+				),
+			]);
+			await post("/bills/9801/reactivate", new URLSearchParams());
+			expect(await linkedPayments(9801)).toEqual([
+				{ period: "2026-09", transactionId: 9802 },
+				{ period: "2026-10", transactionId: 9801 },
+			]);
+		});
+
+		it("keeps a payment for an occurrence due before the bill was added as Paid (decision 99)", async () => {
+			// Added on the 13th, after this month's due date: the payment still pays the 12th's occurrence.
+			await env.DB.prepare(
+				"UPDATE bills SET added_on='2026-10-13' WHERE id=9801",
+			).run();
+			await post("/bills/9801/reactivate", new URLSearchParams());
+			expect(await linkedPayments(9801)).toEqual([
+				{ period: "2026-10", transactionId: 9801 },
+			]);
+			const bills = await pageText("/bills");
+			expect(bills).toContain("Paid this month");
+			expect(bills).not.toContain("Overdue");
+		});
+
+		it("links nothing when the reactivation is refused for a name an active bill has", async () => {
+			await env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9810,'reactivate FIXTURE',4000,3,'monthly',5,'OTHER PLACE')",
+			).run();
+			const res = await post("/bills/9801/reactivate", new URLSearchParams());
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(await linkedPayments(9801)).toEqual([]);
+		});
+	});
+
 	describe("amounts over $100,000.00", () => {
 		it("comes back with the alert line and an unticked chip, and saves nothing", async () => {
 			const before = await billCount();
@@ -2943,5 +3044,83 @@ describe("Bill guards", () => {
 			).text();
 			expect(confirmChip(bad)).toBeUndefined();
 		});
+	});
+});
+
+describe("Bills' status headings and inactive bills", () => {
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T16:00:00Z"));
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await env.DB.prepare("DELETE FROM bills").run();
+		const [paid, earlier] = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 2",
+			).all<{ id: number }>()
+		).results;
+		await env.DB.batch([
+			// Overdue: due Oct 3 and not paid.
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9711,'Why overdue fixture',10000,3,'monthly',5,'WHY OVERDUE FIXTURE')",
+			),
+			// Due in the next 7 days: Oct 14, not paid.
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9712,'Why due fixture',10000,14,'monthly',5,'WHY DUE FIXTURE')",
+			),
+			// Upcoming: Oct 25, with September paid.
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9713,'Why upcoming fixture',10000,25,'monthly',5,'WHY UPCOMING FIXTURE')",
+			),
+			// Paid this month: Oct 3 is paid.
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9714,'Why paid fixture',10000,3,'monthly',5,'WHY PAID FIXTURE')",
+			),
+			// Inactive: shows its schedule, not a due date.
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,active) VALUES(9715,'Old phone plan',4500,15,'monthly',5,'OLD PHONE PLAN FIXTURE',0)",
+			),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9713,'2026-09',?,'user','linked')",
+		)
+			.bind(earlier?.id ?? 0)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9714,'2026-10',?,'user','linked')",
+		)
+			.bind(paid?.id ?? 0)
+			.run();
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it.each([
+		["Overdue", "overdue"],
+		["Due in the next 7 days", "due in the next 7 days"],
+		["Upcoming", "upcoming"],
+		["Paid this month", "paid this month"],
+	])(
+		"gives the %s heading a Why? to the Bills section of How Tally works, beside it and not inside it",
+		async (heading, topic) => {
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills")
+			).text();
+			const group = groupUnder(html, heading);
+			expect(group).toContain(`aria-label="Why? ${topic}"`);
+			expect(group).toMatch(
+				new RegExp(
+					`>${heading}</h2><span aria-hidden="true">·</span><a href="/how-it-works#bills" aria-label="Why\\? ${topic}"`,
+				),
+			);
+		},
+	);
+
+	it("shows an inactive bill's schedule under Inactive, in place of a due date", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		const row =
+			html.split("<li").find((item) => item.includes(">Old phone plan<")) ?? "";
+		expect(row).toContain("Monthly, on the 15th");
+		expect(row).not.toContain("Due ");
 	});
 });
