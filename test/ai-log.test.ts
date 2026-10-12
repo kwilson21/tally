@@ -8,7 +8,7 @@ import {
 } from "../src/db/ai-log";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { settleSuggestion } from "../src/db/merchant-names";
-import { saveEdit } from "../src/db/transactions";
+import { removeSplit, saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { buildSeed } from "../src/demo/seed";
 import { app } from "../src/index";
@@ -284,6 +284,96 @@ describe("the tally's counts", () => {
 		expect(await readAiTally(db, TODAY)).toMatchObject({
 			sorted: 4,
 			changed: 2,
+		});
+	});
+
+	/** The two first active categories, to give a sorted transaction and its split parts. */
+	const twoCategories = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 2",
+				)
+				.all<{ id: number }>()
+		).results.map((row) => row.id);
+
+	/** A transaction Jev sorted into `categoryId`, logged as Tally's pick; returns its id and amount. */
+	const sortedByJev = async (categoryId: number) => {
+		const [id] = await someIds(1);
+		const amount = (
+			await db
+				.prepare("SELECT amount_cents AS amount FROM transactions WHERE id = ?")
+				.bind(id)
+				.first<{ amount: number }>()
+		)?.amount as number;
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev' WHERE id = ?",
+			)
+			.bind(categoryId, id)
+			.run();
+		await logCategory(id as number, TODAY);
+		return { id: id as number, amount };
+	};
+
+	it("counts a transaction Tally sorted and a person split, with a part in another category, as changed", async () => {
+		const [x, y] = await twoCategories();
+		const { id, amount } = await sortedByJev(x as number);
+		const half = Math.trunc(amount / 2);
+		const split = await saveSplit(
+			db,
+			id,
+			[
+				{ categoryId: x as number, amountCents: half },
+				{ categoryId: y as number, amountCents: amount - half },
+			],
+			"test",
+		);
+		expect(split.saved).toBe(true);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 1,
+		});
+	});
+
+	it("doesn't count a split whose parts all keep Tally's category", async () => {
+		const [x] = await twoCategories();
+		const { id, amount } = await sortedByJev(x as number);
+		const half = Math.trunc(amount / 2);
+		const split = await saveSplit(
+			db,
+			id,
+			[
+				{ categoryId: x as number, amountCents: half },
+				{ categoryId: x as number, amountCents: amount - half },
+			],
+			"test",
+		);
+		expect(split.saved).toBe(true);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
+		});
+	});
+
+	it("stops counting it once the split is removed", async () => {
+		const [x, y] = await twoCategories();
+		const { id, amount } = await sortedByJev(x as number);
+		const half = Math.trunc(amount / 2);
+		await saveSplit(
+			db,
+			id,
+			[
+				{ categoryId: x as number, amountCents: half },
+				{ categoryId: y as number, amountCents: amount - half },
+			],
+			"test",
+		);
+		expect(await readAiTally(db, TODAY)).toMatchObject({ changed: 1 });
+		await removeSplit(db, id, "test");
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
 		});
 	});
 

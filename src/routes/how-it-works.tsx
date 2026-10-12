@@ -643,8 +643,8 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>
 							Sorted counts the transactions Tally gave a category this month.
 							You changed counts the ones you changed afterwards, by picking
-							another category or with an Always rule you made. A bill's
-							category never counts.
+							another category, splitting it with a part in another category, or
+							with an Always rule you made. A bill's category never counts.
 						</li>
 						<li>
 							Cleaned counts the store names Tally guessed that you kept. A name

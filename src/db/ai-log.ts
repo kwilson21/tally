@@ -2,7 +2,7 @@
 // written when it applies it (a Jev answer's rows in the same D1 batch as its save, so the two land
 // together or not at all), and the tally read back from it. Code does all the counting; no AI is called
 // here. The log has no amounts, and a person's later change is never written: "you changed" is read from
-// the transaction as it stands (`category_source`).
+// the transaction as it stands (`category_source`, and a split's parts).
 import { monthsBefore } from "../dates";
 
 /** One month's counts for the tally (spec §8.6). `changed` is the categories a person changed. */
@@ -11,7 +11,7 @@ export type AiTallyCounts = {
 	month: string;
 	/** Transactions Tally gave a category. */
 	sorted: number;
-	/** Of those, the ones a person changed later, by a pick or an Always rule (never a bill's category). */
+	/** Of those, the ones a person changed later, by a pick, an Always rule, or a split part given another category (never a bill's category). */
 	changed: number;
 	/** Merchant names Tally guessed that a person kept. */
 	named: number;
@@ -22,10 +22,11 @@ export type AiTallyCounts = {
 /**
  * The tally's one read (spec §8.6): the log rows whose day is in last month or this one, grouped by month and
  * kind. `?1` is the first day of last month and `?2` the first day of next month, which is not included, so
- * the household_day index serves the read, as in src/db/budgets.ts.
+ * the household_day index serves the read, as in src/db/budgets.ts. A split counts as changed when one of its
+ * parts has another category than the parent, which the transactions_parent index serves.
  */
 export const AI_TALLY_SQL = `SELECT substr(l.household_day, 1, 7) AS month, l.kind AS kind, COUNT(*) AS total,
-	SUM(CASE WHEN t.category_source IN ('user', 'merchant_rule') THEN 1 ELSE 0 END) AS changed
+	SUM(CASE WHEN t.category_source IN ('user', 'merchant_rule') OR (t.is_split = 1 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = t.id AND part.category_id IS NOT t.category_id)) THEN 1 ELSE 0 END) AS changed
  FROM ai_log l
  LEFT JOIN transactions t ON t.id = l.transaction_id AND l.kind = 'category'
  WHERE l.household_day >= ?1 AND l.household_day < ?2
