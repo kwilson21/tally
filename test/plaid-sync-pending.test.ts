@@ -2114,6 +2114,127 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await row("posted-1")).toMatchObject({ is_split: 1 });
 	});
 
+	it("dismisses a removed pending split's bill on each part of the posted row's own split, so the matcher does not link it again (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 700, 534);
+		// A split made in the app carries the purchase's merchant name, so the matcher can see its parts.
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Shop' WHERE parent_id = ?",
+		)
+			.bind(ids.posted)
+			.run();
+		const pending = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9860, 'Water', 650, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9860, '2026-09', ?, 'auto', 'linked')",
+			).bind(pending[0]),
+		]);
+
+		await post(item);
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9860 AND status = 'linked'",
+			),
+		).toBe(0);
+		for (const part of own) {
+			expect(
+				await count(
+					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9860 AND period = '2026-09' AND transaction_id = ? AND status = 'dismissed' AND matched_by = 'auto'",
+					part,
+				),
+			).toBe(1);
+		}
+	});
+
+	it("keeps a pending part's bill payment on the posted part with the same amount and category (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Shop' WHERE parent_id = ?",
+		)
+			.bind(ids.posted)
+			.run();
+		const pending = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9861, 'Water', 600, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9861, '2026-09', ?, 'auto', 'linked')",
+			).bind(pending[0]),
+		]);
+
+		await post(item);
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, matched_by, status FROM bill_payments WHERE bill_id = 9861",
+				).all()
+			).results,
+		).toEqual([
+			{ transaction_id: own[0], matched_by: "auto", status: "linked" },
+		]);
+	});
+
+	it("does not keep a pending part's bill payment on a posted part that already pays another bill, and dismisses it on each part instead (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Shop' WHERE parent_id = ?",
+		)
+			.bind(ids.posted)
+			.run();
+		const pending = await splitInto(ids.pending, 600, 634);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9862, 'Gas', 600, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9863, 'Water', 600, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9862, '2026-09', ?, 'user', 'linked')",
+			).bind(own[0]),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9863, '2026-09', ?, 'auto', 'linked')",
+			).bind(pending[0]),
+		]);
+
+		await post(item);
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id, status FROM bill_payments WHERE bill_id = 9862",
+				).all()
+			).results,
+		).toEqual([{ transaction_id: own[0], status: "linked" }]);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9863 AND status = 'linked'",
+			),
+		).toBe(0);
+		for (const part of own) {
+			expect(
+				await count(
+					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9863 AND period = '2026-09' AND transaction_id = ? AND status = 'dismissed' AND matched_by = 'auto'",
+					part,
+				),
+			).toBe(1);
+		}
+	});
+
 	it("does the same when the drop came on an earlier page than the link", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
