@@ -159,17 +159,18 @@ async function incomeSuggestions(
 }
 
 /**
- * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). A store with a "Never suggest" transfer line is never asked (decision 101).
+ * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). A store with a "Never suggest" transfer line is never asked (decision 101). A credit held for review waits until it is reviewed (decision 70).
  */
 export const transferAskedSql = (alias: string) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.transfer_confidence IS NOT NULL
 		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = 0
+		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
 		AND NOT ${paysBillSql(alias)} AND NOT ${neverSuggestedSql(merchantKeySql(alias), "transfer")})`;
 
 /**
  * Transfer: money out or in Tally is unsure is a transfer and nobody has decided, or said No to (`transfer_maybe_declined`).
- * A payment linked to a bill is never asked, since it counts whatever its exclusion (spec §6.1 rule 4).
+ * A credit held for review waits until it is reviewed (decision 70). A payment linked to a bill is never asked, since it counts whatever its exclusion (spec §6.1 rule 4).
  */
 async function transferSuggestions(
 	db: D1Database,

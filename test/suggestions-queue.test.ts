@@ -669,6 +669,33 @@ describe("transferAskedSql", () => {
 			),
 		).toEqual([]);
 	});
+
+	it("never asks a held credit (not reviewed, so not spending yet) as a transfer, but asks a reviewed one (decision 70)", async () => {
+		const held = await transaction({
+			amount: -20000,
+			raw: "HELD CREDIT",
+			transferConfidence: 0.5,
+		});
+		const reviewed = await transaction({
+			amount: -20000,
+			raw: "REVIEWED CREDIT",
+			transferConfidence: 0.5,
+			creditReviewed: 1,
+			creditReviewedBy: "user",
+		});
+		const asked = await db
+			.prepare(
+				`SELECT id FROM transactions WHERE ${transferAskedSql("transactions")}`,
+			)
+			.all<{ id: number }>();
+		expect(asked.results.map((row) => row.id)).not.toContain(held);
+		expect(asked.results.map((row) => row.id)).toContain(reviewed);
+		const transfers = (await suggestionQueue(db, AI_SWITCHES_ALL_ON)).flatMap(
+			(item) => (item.kind === "transfer" ? [item.transactionId] : []),
+		);
+		expect(transfers).toContain(reviewed);
+		expect(transfers).not.toContain(held);
+	});
 });
 
 describe("incomeAskedSql", () => {

@@ -643,6 +643,62 @@ describe("transfers", () => {
 			),
 		).toMatchObject({ excluded: 0, excluded_source: "user" });
 	});
+
+	it("a held credit (not reviewed yet, so not spending) is never asked as a transfer, and its stale answers change nothing", async () => {
+		const held = await insertTx({
+			raw: "HELD TRANSFER CREDIT",
+			amount: -20000,
+			transferConfidence: 0.5,
+		});
+		const reviewed = await insertTx({
+			raw: "REVIEWED TRANSFER CREDIT",
+			amount: -20000,
+			transferConfidence: 0.5,
+		});
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(reviewed)
+			.run();
+		const { html } = await get("/settings/suggestions");
+		expect(html).not.toContain(`value="transfer-${held}"`);
+		expect(html).toContain(`value="transfer-${reviewed}"`);
+		const before = await moneyState(held);
+		const yes = await post(
+			"/settings/suggestions",
+			{ id: `transfer-${held}`, answer: "yes" },
+			true,
+		);
+		expect(trigger(yes.res).toast?.message).toBe(
+			"That one was already answered.",
+		);
+		const no = await post(
+			"/settings/suggestions",
+			{ id: `transfer-${held}`, answer: "no" },
+			true,
+		);
+		expect(trigger(no.res).toast?.message).toBe(
+			"That one was already answered.",
+		);
+		expect(
+			await row(
+				"SELECT transfer_maybe_declined, excluded, excluded_source FROM transactions WHERE id = ?",
+				held,
+			),
+		).toMatchObject({
+			transfer_maybe_declined: 0,
+			excluded: 0,
+			excluded_source: null,
+		});
+		expect(await moneyState(held)).toEqual(before);
+		const kept = await post(
+			"/settings/suggestions",
+			{ id: `transfer-${reviewed}`, answer: "no" },
+			true,
+		);
+		expect(textOf(kept.html)).toContain("Kept in the budget");
+	});
 });
 
 describe("categories", () => {
