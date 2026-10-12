@@ -480,6 +480,141 @@ describe("the tally's counts", () => {
 			changed: 0,
 		});
 	});
+
+	/**
+	 * One purchase the bank stored twice: a pending row (at `cents`) and its posted row (at `postedCents`), each
+	 * with its own columns set by SQL, and the pending row's log row (category or income) written before the merge
+	 * runs as sync runs it. Returns both ids.
+	 */
+	const mergedPurchase = async ({
+		pending,
+		posted,
+		cents = 1200,
+		postedCents = cents,
+		logged,
+	}: {
+		pending: string;
+		posted: string;
+		cents?: number;
+		postedCents?: number;
+		logged: "category" | "income";
+	}) => {
+		const storeRow = async (
+			plaidId: string,
+			isPending: number,
+			amount: number,
+			set: string,
+		) => {
+			const row = await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, updated_by)
+					 VALUES (1, ?, ?, 'CORNER COFFEE', ?, ?, 'test') RETURNING id`,
+				)
+				.bind(TODAY, amount, plaidId, isPending)
+				.first<{ id: number }>();
+			if (set)
+				await db
+					.prepare(`UPDATE transactions SET ${set} WHERE id = ?`)
+					.bind(row?.id)
+					.run();
+			return row?.id as number;
+		};
+		const pendingId = await storeRow("pend-m", 1, cents, pending);
+		const postedId = await storeRow("post-m", 0, postedCents, posted);
+		if (logged === "category") await logCategory(pendingId, TODAY);
+		else await logIncome(pendingId, TODAY);
+		const item = await db
+			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE plaid_items SET sync_lock_id = 'lock-m' WHERE id = ?")
+			.bind(item?.id)
+			.run();
+		await db.batch(
+			mergePendingIntoPosted(db, item?.id as number, "lock-m", "pend-m", {
+				id: "post-m",
+				cents: postedCents,
+				date: TODAY,
+				name: "CORNER COFFEE",
+				merchantName: null,
+				plaidCategory: null,
+			}),
+		);
+		return { pendingId, postedId };
+	};
+
+	it("doesn't count a Jev pick as changed when a person had already picked on the posted row", async () => {
+		await mergedPurchase({
+			pending:
+				"category_id = 1, category_source = 'jev', category_confidence = 0.9, jev_category_id = 1",
+			posted: "category_id = 1, category_source = 'user'",
+			logged: "category",
+		});
+		expect(await idsWhere("plaid_transaction_id = 'pend-m'")).toEqual([]);
+		expect(await logIds("category")).toEqual([null]);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
+		});
+	});
+
+	it("keeps a Jev pick out of the count once the bank changed the amount and a person picks later", async () => {
+		await mergedPurchase({
+			pending:
+				"category_id = 1, category_source = 'jev', category_confidence = 0.9, jev_category_id = 1",
+			posted: "",
+			postedCents: 1500,
+			logged: "category",
+		});
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE plaid_transaction_id = 'post-m'",
+			)
+			.run();
+		expect(await logIds("category")).toEqual([null]);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
+		});
+	});
+
+	it("moves a person's pick on the pending row with its log row, so the posted row counts as changed", async () => {
+		const { postedId } = await mergedPurchase({
+			pending:
+				"category_id = 1, category_source = 'user', category_confidence = NULL, jev_category_id = 1",
+			posted: "",
+			logged: "category",
+		});
+		expect(await logIds("category")).toEqual([postedId]);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 1,
+		});
+	});
+
+	it("doesn't move a Jev pick onto a posted row a merchant rule already sorted", async () => {
+		await mergedPurchase({
+			pending:
+				"category_id = 1, category_source = 'jev', category_confidence = 0.9, jev_category_id = 1",
+			posted: "category_id = 1, category_source = 'merchant_rule'",
+			logged: "category",
+		});
+		expect(await logIds("category")).toEqual([null]);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
+		});
+	});
+
+	it("still moves a pending row's income log to the posted row", async () => {
+		const { postedId } = await mergedPurchase({
+			pending: "flag_income = 1, income_source = 'jev'",
+			posted: "",
+			cents: -1200,
+			logged: "income",
+		});
+		expect(await logIds("income")).toEqual([postedId]);
+	});
 });
 
 describe("a deleted transaction's log row", () => {

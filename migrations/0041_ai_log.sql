@@ -2,8 +2,9 @@
 -- with no amounts, counted from the day this ships (nothing is backfilled).
 --   kind              'category': Jev gave a transaction its category. 'income': Jev marked it as income.
 --                     'name': a person kept a name Tally guessed for a merchant.
---   transaction_id    the transaction, for category and income. Pending-merge moves it to the posted row,
---                     and the trigger below clears it when the transaction is deleted.
+--   transaction_id    the transaction, for category and income. Pending-merge moves it to the posted row when the
+--                     pending row's category goes with it; otherwise it keeps counting with no transaction, and the
+--                     trigger below clears it when the transaction is deleted.
 --   merchant_raw_name the merchant, for name (merchants.raw_name, its key).
 --   household_day     the household's date when Tally did it (YYYY-MM-DD); its month is the first 7 characters.
 --   created_at        when the row was written.
