@@ -109,7 +109,10 @@
 	// The toast the last "toast" event made. failed() reads it straight after dispatching, since the
 	// event is synchronous.
 	let lastToast = null;
-	document.body.addEventListener("toast", (event) => {
+	// Both events are heard on document. htmx sends each HX-Trigger event from its request's element, or from
+	// document once that element has left the page: an Undo form whose toast ends during the restore's own
+	// triggers (#397). plaid-link.js sends announce from the body, and it bubbles up to document.
+	const onToast = (event) => {
 		const {
 			message,
 			type = "success",
@@ -207,9 +210,10 @@
 			() => takeOffPage(toast),
 			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
 		);
-	});
+	};
+	document.addEventListener("toast", onToast);
 
-	document.body.addEventListener("announce", (event) => {
+	const onAnnounce = (event) => {
 		const region = document.getElementById("announcer");
 		const message = event.detail?.value;
 		if (!region || !message) return;
@@ -217,7 +221,8 @@
 		requestAnimationFrame(() => {
 			region.textContent = message;
 		});
-	});
+	};
+	document.addEventListener("announce", onAnnounce);
 
 	// A failed request shows an error toast, and the page is left as it is, so an open sheet keeps
 	// what was typed. htmx 4's names: htmx:error is a request that never got an answer (the network
@@ -260,7 +265,7 @@
 			document.getElementById("toasts")?.contains(lastFailure.toast)
 		)
 			return;
-		document.body.dispatchEvent(
+		document.dispatchEvent(
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);
 		lastFailure = { message, at: now, toast: lastToast };
@@ -309,10 +314,8 @@
 	const sent = query.get("sent");
 	if (sent === "feedback") {
 		const message = "Thanks. Sent.";
-		document.body.dispatchEvent(
-			new CustomEvent("toast", { detail: { message } }),
-		);
-		document.body.dispatchEvent(
+		document.dispatchEvent(new CustomEvent("toast", { detail: { message } }));
+		document.dispatchEvent(
 			new CustomEvent("announce", { detail: { value: message } }),
 		);
 		query.delete("sent");

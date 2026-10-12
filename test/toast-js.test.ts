@@ -136,7 +136,20 @@ async function page({
 	const heading = new FakeNode("h1");
 	const documentElement = new FakeNode("html");
 	const body = new EventTarget();
-	const document = Object.assign(new EventTarget(), {
+	const documentTarget = new EventTarget();
+	// As in a page, the body sits inside the document: an event sent from the body that bubbles reaches the
+	// document's listeners, as htmx's events and plaid-link.js's announce do. toast.js listens on the document.
+	const sendFromBody = body.dispatchEvent.bind(body);
+	body.dispatchEvent = (event: Event) => {
+		if (event.bubbles)
+			documentTarget.dispatchEvent(
+				new CustomEvent(event.type, {
+					detail: (event as CustomEvent).detail,
+				}),
+			);
+		return sendFromBody(event);
+	};
+	const document = Object.assign(documentTarget, {
 		body,
 		documentElement,
 		activeElement: body as unknown,
@@ -192,6 +205,7 @@ async function page({
 		documentElement,
 		body,
 		toasts,
+		announcer,
 		htmx,
 		resultCount,
 		heading,
@@ -1019,6 +1033,46 @@ describe("the restored entry's toast ends its own Undo toast", () => {
 		vi.advanceTimersByTime(10000);
 		expect(focus).not.toHaveBeenCalled();
 		expect(document.activeElement).toBe(body);
+	});
+
+	it("still says 'is back' when htmx sends it from document, since the Undo form has left the page", async () => {
+		const { body, document, toasts, announcer } = await page();
+		undoToast(body, "token-coffee", "Deleted Coffee, $5.00.");
+		const deleted = toasts.children[0] as FakeNode;
+		// The restore's toast goes first, from the Undo form, and it ends the Deleted toast that holds the form.
+		restored(body, "token-coffee");
+		expect(toasts.children).not.toContain(deleted);
+		// htmx sends the next HX-Trigger key from document once its source element is off the page.
+		fire(document, "announce", { value: "Coffee is back." });
+		expect(announcer.words()).toBe("Coffee is back.");
+	});
+});
+
+describe("the announcer and the toasts, however they are sent", () => {
+	it("says an announce that plaid-link.js sends from the body, which bubbles up to the document", async () => {
+		const { body, announcer } = await page();
+		body.dispatchEvent(
+			new CustomEvent("announce", {
+				bubbles: true,
+				detail: { value: "Bank linked." },
+			}),
+		);
+		expect(announcer.words()).toBe("Bank linked.");
+	});
+
+	it("says an announce htmx sends from document", async () => {
+		const { document, announcer } = await page();
+		fire(document, "announce", { value: "Saved." });
+		expect(announcer.words()).toBe("Saved.");
+	});
+
+	it("shows a toast htmx sends from document", async () => {
+		const { document, toasts } = await page();
+		fire(document, "toast", { message: "Saved Groceries' budget." });
+		expect(toasts.children).toHaveLength(1);
+		expect((toasts.children[0] as FakeNode).words()).toBe(
+			"Saved Groceries' budget.",
+		);
 	});
 });
 
