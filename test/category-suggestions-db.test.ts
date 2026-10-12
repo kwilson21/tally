@@ -745,14 +745,17 @@ describe("createFromSuggestion", () => {
 		const removed = (tx: number) =>
 			db
 				.prepare(
-					"SELECT split_removed_from_cents FROM transactions WHERE id = ?",
+					"SELECT split_removed_from_cents, split_removed_bills FROM transactions WHERE id = ?",
 				)
 				.bind(tx)
-				.first<{ split_removed_from_cents: number | null }>();
+				.first<{
+					split_removed_from_cents: number | null;
+					split_removed_bills: string | null;
+				}>();
 		for (const tx of [made[0], made[3]] as number[])
 			await db
 				.prepare(
-					"UPDATE transactions SET split_removed_from_cents = 18742 WHERE id = ?",
+					'UPDATE transactions SET split_removed_from_cents = 18742, split_removed_bills = \'[{"name":"Water","period":"2026-09"}]\' WHERE id = ?',
 				)
 				.bind(tx)
 				.run();
@@ -768,9 +771,11 @@ describe("createFromSuggestion", () => {
 			category_source: "user",
 		});
 		expect(await removed(made[0] as number)).toEqual({
+			split_removed_bills: null,
 			split_removed_from_cents: null,
 		});
 		expect(await removed(made[3] as number)).toEqual({
+			split_removed_bills: '[{"name":"Water","period":"2026-09"}]',
 			split_removed_from_cents: 18742,
 		});
 	});

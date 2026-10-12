@@ -772,6 +772,24 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("keeps the RuleOffer specimen's two forms inside an inert wrapper, so Yes cannot post", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="rule-offer"')[1]?.split("</section>")[0] ?? "";
+		// Both forms are present, so the loop below cannot pass by finding none.
+		expect(section.match(/<form\b/g)).toHaveLength(2);
+		const openDivs: boolean[] = [];
+		for (const match of section.matchAll(
+			/<div\b[^>]*>|<\/div>|<form\b[^>]*>/g,
+		)) {
+			const tag = match[0];
+			if (tag === "</div>") openDivs.pop();
+			else if (tag.startsWith("<div"))
+				openDivs.push(/\sinert(?:\s|>|=)/.test(tag));
+			else expect(openDivs, tag).toContain(true);
+		}
+	});
+
 	it("gives every specimen one tier, and makes Visual ones inert to htmx", async () => {
 		const { html } = await get("/design-system");
 		const tags = specimens(html);

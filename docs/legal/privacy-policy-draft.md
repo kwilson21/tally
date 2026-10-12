@@ -37,6 +37,10 @@ The following behavior is present in merged PR 148. Its Wrangler configuration l
 - The PR 148 layout-preview code uses a strict static-label and layout-marker projection, removing unmarked content and blocking inputs, hidden/file controls, finance content, charts and image-like elements, and private subtrees before rendering. Its feature is hard-disabled because the synthetic browser-pixel and OCR leakage checks could not be run with the available browser dependencies. No actual preview capture is currently enabled or claimed. The earlier PR 148 preview's ten-minute age check limited display eligibility; it was not automatic deletion. The current script removes a stored preview entry only when it runs on the feedback form; otherwise browser storage may remain until the tab session ends or the person clears site data.
 - PR 148 separates same-origin return navigation from the approved route category stored with feedback. This draft makes no claim that historical D1 rows or previously filed GitHub issues have been rewritten or scrubbed.
 
+### App version on feedback (after PR 148)
+
+Since #351 (migration `0036_feedback_app_version.sql`), a new feedback row also stores the app version, the deployed release name such as v2026.10.11 abc1234, when the deployment sets `APP_VERSION` (the README's release steps set it on every deploy); without it, the field is left empty. It is stored whether or not the technical-details choice is enabled, so the technical-details exclusions above, which name build identifiers, don't cover it. It is not sent to the private GitHub issue.
+
 ## Information from other services
 
 Plaid supplies bank connection and transaction data. For technical categorization, Tally sends Jev at `api.typesafe.ai` one transaction at a time: the bank's raw transaction name, display merchant name, absolute amount in cents, direction (money out or money in), account type, Plaid category when present, and available household category choices. The request asks Jev for a category and transfer, reimbursement, and income flags. It does not send the transaction date, note, or account name.

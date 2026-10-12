@@ -1,3 +1,4 @@
+import { unpaidBillsNote } from "../bills/unpaid";
 import { shortDay } from "../dates";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
@@ -67,7 +68,7 @@ export function rowCaption(row: ListRow): Caption {
 		row.splitRemovedFromCents !== null &&
 		row.splitRemovedFromCents !== undefined
 	) {
-		const note = `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.`;
+		const note = `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.${unpaidBillsNote(row.splitRemovedBills)}`;
 		return row.categoryId === null
 			? { kind: "needs", caption: note, tag: true }
 			: {
