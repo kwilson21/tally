@@ -735,7 +735,6 @@ const TIME_ZONE_SPEC: UseSpecText = {
 		"Time zone · {Eastern} (Eastern, Central, Mountain, Pacific, Alaska, Hawaii; the others by city) · Other time zones · Decides when a new month starts and when a bill is due. Transactions keep the bank's dates. · Save · Saving… · Cancel · Toast: Saved time zone · Announced: Saved time zone. Months and bills now follow {Central} time. · Error: Choose a time zone from the list.",
 };
 
-// The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
 const BILL_AMOUNT_SPEC: UseSpecText = {
 	purpose:
 		"Show a bill's amount history in the words a person needs: what its price is now, when it last changed, and what an edit applies to.",
@@ -754,13 +753,14 @@ const BILL_AMOUNT_SPEC: UseSpecText = {
 		"Price went up to {$17.99} in {October} · Price went down to {$14.99} in {October} · October · {$17.99} · Applies from {October} on. Earlier months keep {$15.49}.",
 };
 
+// The price-changed offer's use spec (decision 72, P36 B): every line answered before the owner signs it off.
 const BILL_PRICE_SPEC: UseSpecText = {
 	purpose:
 		"Tell a person a payment from a bill's merchant came at another price, and let them update the bill to it or say it isn't that bill's.",
 	affordance:
 		"On Bills the row says “Price changed?” in ink with what was paid under it in muted words, so it reads without color, and the whole row is still the link to the bill's page. On the page the month asks in a sentence, with one primary button, “Update the bill to $17.99”, and “Not this bill” as terracotta text under it. Nothing changes until one is pressed.",
 	states:
-		"Shown: an active bill whose current month has no payment, and a payment from the same merchant within 5 days of its due date, money out, outside ±10% of the bill's amount, not linked to another bill and not already turned away for that month. Not shown: a payment inside ±10% (the matcher links it), a paid month, an inactive bill, a month already answered. Buttons: rest, hover, the focus-visible ring and pressed; the primary shows “Updating…” with the spinner and is disabled while it saves. Error: “That price change isn't on offer any more.” in role=alert, when the offer went away, or the bill's amount or the charge changed, after the page was drawn: Update saves only the two prices the person saw.",
+		"Shown: an active bill whose current month has no payment, and a payment from the same merchant within 5 days of its due date, money out, outside ±10% of the bill's amount, not linked to another bill and not already turned away for that month. Not shown: a payment inside ±10% (the matcher links it), a paid month, an inactive bill, a month already answered. Buttons: rest, hover, the focus-visible ring and pressed; the primary shows “Updating…” with the spinner and is disabled while it saves. Error: “That price change isn't on offer any more.” in role=alert, when the offer went away, or the bill's amount or the charge changed, after the page was drawn: Update saves only if the payment, its charge, the month's amount and the bill's current amount are all still the ones the page showed.",
 	feedback:
 		"Update: the page comes back with the month Paid and the new amount under the name, a toast “Bill updated to $17.99”, and the announcer says “Bill updated to $17.99 and the payment linked”. Not this bill: the month is an ordinary unpaid one again, with Link a payment; the toast says “Left the bill at $15.49” and the announcer “Price change dismissed. The bill stays $15.49.” The payment isn't offered again for that month.",
 	input:
@@ -1978,7 +1978,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.” after the category it went back to, or in Needs category with none, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
 			>
 				<State label="Above the list, once only while a suggested name is shown">
 					<div class="max-w-xl">
