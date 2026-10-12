@@ -1570,8 +1570,8 @@ bills.post("/bills/:id/link", async (c) => {
 	}
 	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
 	// linking never writes (spec §6.1 rule 4, §8.5).
-	// A split change's dismissal of this payment (decision 99) is replaced by the link, which leaves one linked row.
-	// It is kept when the link wasn't made, since the DELETE needs the linked row this payment just got.
+	// An automatic dismissal an earlier build left on this payment (decision 99) is replaced by the link, which leaves one
+	// linked row. It is kept when the link wasn't made, since the DELETE needs the linked row this payment just got.
 	const [insert] = await c.env.DB.batch([
 		c.env.DB.prepare(
 			`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?)`,

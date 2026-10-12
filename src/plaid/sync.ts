@@ -1,3 +1,4 @@
+import { movePartDismissalsSql } from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
@@ -194,7 +195,8 @@ const OWNS_LOCK =
 
 /**
  * Before a bank change removes a split (its amount changed), the bills its parts paid are kept on the
- * purchase for its note, and their payments are dismissed on the purchase, so the matcher does not link them again (decision 99).
+ * purchase for its note, and their payments are unlinked with no dismissal left, so the matcher may link
+ * the bill to the purchase again when it still matches (decisions 99 and 105).
  * Both run before the parts are deleted.
  */
 function splitBillStatements(
@@ -205,23 +207,21 @@ function splitBillStatements(
 	cents: number,
 ): D1PreparedStatement[] {
 	const purchase =
-		"(SELECT id FROM transactions WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ?)";
+		"(SELECT id FROM transactions WHERE plaid_transaction_id = ?1 AND is_split = 1 AND amount_cents != ?2)";
 	return [
 		env.DB.prepare(
 			`UPDATE transactions SET split_removed_bills = ${UNPAID_BILLS_SQL("transactions.id")}
 			 WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ? AND ${OWNS_LOCK}`,
 		).bind(plaidTransactionId, cents, itemRowId, lockId),
+		// A person's own Not this one on a part moves onto the purchase before the parts go, which takes the rest of
+		// their payments with them (decision 105).
 		env.DB.prepare(
-			`UPDATE bill_payments SET transaction_id = ${purchase}, status = 'dismissed', matched_by = 'auto'
-			 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${purchase}) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto')) AND ${OWNS_LOCK}`,
-		).bind(
-			plaidTransactionId,
-			cents,
-			plaidTransactionId,
-			cents,
-			itemRowId,
-			lockId,
-		),
+			movePartDismissalsSql(
+				purchase,
+				purchase,
+				"EXISTS (SELECT 1 FROM plaid_items WHERE id = ?3 AND sync_lock_id = ?4 AND disconnected_at IS NULL)",
+			),
+		).bind(plaidTransactionId, cents, itemRowId, lockId),
 	];
 }
 
