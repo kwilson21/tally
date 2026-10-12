@@ -2255,6 +2255,16 @@ describe("select several transactions", () => {
 			/** The month an address names, or null when it names none. */
 			const monthOf = (address: string) =>
 				new URL(address, "http://tally.test").searchParams.get("month");
+			/** The back an Add cash address carries: the list the sheet returns to. */
+			const backOf = (address: string) =>
+				new URL(address, "http://tally.test").searchParams.get("back") ?? "";
+			/** The Add cash link on the TURNOVER Select all list, as drawn at the moment. */
+			const addCashTag = async () =>
+				(
+					await (
+						await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")
+					).text()
+				).match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
 
 			it("names the month on screen in the bar's back, even when that is this month", async () => {
 				atInstant(OCTOBER);
@@ -2331,6 +2341,100 @@ describe("select several transactions", () => {
 						back: "/transactions?q=ZQ+TURNOVER&month=2026-10",
 					}),
 				);
+				expect(res.headers.get("HX-Push-Url")).toBe(
+					"/transactions?q=ZQ+TURNOVER",
+				);
+			});
+
+			it("names the month on screen in the Add cash link's back, in its href and hx-get, and keeps all", async () => {
+				atInstant(OCTOBER);
+				const link = await addCashTag();
+				const href = attribute(link, "href") ?? "";
+				expect(monthOf(backOf(href))).toBe("2026-10");
+				expect(new URL(href, "http://tally.test").searchParams.get("all")).toBe(
+					"1",
+				);
+				expect(monthOf(backOf(attribute(link, "hx-get") ?? ""))).toBe(
+					"2026-10",
+				);
+			});
+
+			it("keeps the month on screen in the Add cash sheet on the next month, in its close link, Cancel and back field", async () => {
+				atInstant(OCTOBER);
+				const href = attribute(await addCashTag(), "href") ?? "";
+				atInstant(NOVEMBER);
+				const sheet = await (
+					await request(href, { headers: { "HX-Request": "true" } })
+				).text();
+				const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+				const cancel = sheet.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+				for (const link of [backdrop ?? "", cancel]) {
+					const address = attribute(link, "href") ?? "";
+					expect(monthOf(address)).toBe("2026-10");
+					expect(
+						new URL(address, "http://tally.test").searchParams.get("all"),
+					).toBe("1");
+				}
+				const backField = attribute(
+					sheet.match(/<input[^>]*name="back"[^>]*>/)?.[0] ?? "",
+					"value",
+				);
+				expect(backField).toBe(backOf(href));
+				expect(monthOf(backField ?? "")).toBe("2026-10");
+			});
+
+			it("keeps the month on screen when the Add cash form is refused on the next month, in its close link, Cancel and back field", async () => {
+				atInstant(OCTOBER);
+				const back = backOf(attribute(await addCashTag(), "href") ?? "");
+				atInstant(NOVEMBER);
+				const res = await post(
+					"/transactions/cash",
+					new URLSearchParams({
+						amount: "0",
+						date: "2026-11-01",
+						merchant: "Corner shop",
+						category: "1",
+						note: "",
+						back,
+						select: "1",
+						all: "1",
+					}),
+				);
+				expect(res.status).toBe(422);
+				const html = await res.text();
+				const backdrop = html.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
+				const cancel = html.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+				for (const link of [backdrop ?? "", cancel]) {
+					const address = attribute(link, "href") ?? "";
+					expect(monthOf(address)).toBe("2026-10");
+					expect(
+						new URL(address, "http://tally.test").searchParams.get("all"),
+					).toBe("1");
+				}
+				expect(
+					attribute(
+						html.match(/<input[^>]*name="back"[^>]*>/)?.[0] ?? "",
+						"value",
+					),
+				).toBe(back);
+			});
+
+			it("pushes the list's address, with no month, for a saved Add cash on the month on screen", async () => {
+				atInstant(OCTOBER);
+				const res = await post(
+					"/transactions/cash",
+					new URLSearchParams({
+						amount: "12.00",
+						date: "2026-10-31",
+						merchant: "Turnover cafe",
+						category: "1",
+						note: "",
+						back: "/transactions?q=ZQ+TURNOVER&month=2026-10",
+						select: "1",
+						all: "1",
+					}),
+				);
+				expect(res.status).toBe(200);
 				expect(res.headers.get("HX-Push-Url")).toBe(
 					"/transactions?q=ZQ+TURNOVER",
 				);

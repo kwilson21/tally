@@ -519,7 +519,8 @@ async function renderList(
 	const htmx = c.req.header("HX-Request") === "true";
 	// In Select mode the Add cash sheet's close link and Cancel keep the ticks (#350). The link carries them as
 	// drawn, for a browser without JavaScript; with it, the request sends them as they are when the link is tapped.
-	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(back)}`;
+	// In Select mode the sheet returns to the pinned back, so the month on screen survives the month turning over (#321).
+	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(selecting ? selectionBack : back)}`;
 	const cashHref = selecting ? selectModeHref(cashPath, current) : cashPath;
 	const cashGet = selecting ? selectModeHref(cashPath, NO_SELECTION) : cashPath;
 	// A list reply in Select mode pushes the address with the settled selection in it, so a reload keeps it (#350, #321).
@@ -2452,6 +2453,9 @@ transactions.post("/transactions/cash", async (c) => {
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
+	// In Select mode the reply's address is the list's own, keeping a month that has turned over on screen (#321);
+	// otherwise it is the back as sent, as it always was.
+	const address = selecting ? listAddress(c, today, back) : back;
 	const offerRecord = await categoryRuleOffer(
 		c.env.DB,
 		saved.merchant,
@@ -2469,14 +2473,14 @@ transactions.post("/transactions/cash", async (c) => {
 					...offerRecord,
 					merchant: savedTx?.displayName || tidyName(saved.merchant),
 					category: categoryName,
-					back,
+					back: address,
 				}
 			: null;
 	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
 	if (!c.req.header("HX-Request"))
 		return offer
-			? renderRuleOffer(c, today, back, offer)
-			: c.redirect(back, 303);
+			? renderRuleOffer(c, today, address, offer)
+			: c.redirect(address, 303);
 	// The save's own words come first in the announcement, with or without the question after them.
 	const savedWords = `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`;
 	if (offer) {
@@ -2487,8 +2491,8 @@ transactions.post("/transactions/cash", async (c) => {
 				announce: ruleOfferAnnouncement(offer, savedWords),
 			}),
 		);
-		c.header("HX-Push-Url", back);
-		return renderRuleOffer(c, today, back, offer);
+		c.header("HX-Push-Url", address);
+		return renderRuleOffer(c, today, address, offer);
 	}
 	c.header(
 		"HX-Trigger",
@@ -2497,10 +2501,10 @@ transactions.post("/transactions/cash", async (c) => {
 			announce: savedWords,
 		}),
 	);
-	c.header("HX-Push-Url", back);
+	c.header("HX-Push-Url", address);
 	// The pressed button leaves with the swap, so focus goes to the title instead.
 	if (wasFirstVisit) swapWholePage(c);
-	return renderList(c, today, filtersFrom(c, today, back), {
+	return renderList(c, today, filtersFrom(c, today, address), {
 		focusHeading: wasFirstVisit,
 	});
 });
