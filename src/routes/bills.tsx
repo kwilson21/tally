@@ -1225,6 +1225,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 		))
 			result.add(occurrence.period);
 	}
+	// The picker and the link routes keep every period, handled ones included (decision 99); only the Payments list leaves them out.
 	result.add(
 		billOccurrence(
 			{
@@ -1232,7 +1233,6 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 				dueDay: bill.due_day,
 				anchorMonth: bill.anchor_month,
 				anchorDate: bill.anchor_date,
-				addedOn: bill.added_on,
 			},
 			today,
 			new Set(),

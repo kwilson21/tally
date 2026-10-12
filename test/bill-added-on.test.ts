@@ -19,7 +19,7 @@ import { billStatusLine } from "../src/views/bill-row";
 // links that earlier occurrence still shows it as Paid, and the matcher still links it.
 
 const db = env.DB;
-const IDS = [9701, 9702, 9703, 9704, 9705, 9706, 9707, 9708];
+const IDS = [9701, 9702, 9703, 9704, 9705, 9706, 9707, 9708, 9710];
 
 async function clean() {
 	await db.batch([
@@ -269,6 +269,21 @@ describe("the bill's own page leaves out a due date before the day the bill was 
 			"http://tally.test/bills/9706/occurrences/2026-10/link",
 		);
 		expect(picker.status).toBe(200);
+	});
+
+	it("still opens the picker for a handled yearly occurrence more than six months back, and its page lists no row for it", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name,added_on) VALUES(9710,'Car insurance',120000,3,'yearly',3,'INSURER','2026-10-10')",
+			)
+			.run();
+		vi.setSystemTime(new Date("2026-10-12T16:00:00Z"));
+		const picker = await exports.default.fetch(
+			"http://tally.test/bills/9710/occurrences/2026/link",
+		);
+		expect(picker.status).toBe(200);
+		const html = await billPageAt(9710, "2026-10-12T16:00:00Z");
+		expect(paymentRow(html, "March")).toBe("");
 	});
 
 	it("still lists a payment that links a handled occurrence as Paid", async () => {
