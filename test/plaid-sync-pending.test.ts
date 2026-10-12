@@ -818,6 +818,21 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		});
 	});
 
+	it("carries Jev's what-it-was answer onto the posted row, so a yes still gets a note and a no stays a no", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await env.DB.prepare(
+			"UPDATE transactions SET note_worth_writing = 1, details_asked = 1 WHERE id = ?",
+		)
+			.bind(ids.pending)
+			.run();
+		await post(item, {});
+		expect(await row("posted-1")).toMatchObject({
+			details_asked: 1,
+			note_worth_writing: 1,
+		});
+	});
+
 	it("does not wipe a posted row's guessed Kind or For with a pending row that has no answer (#315)", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item, { amount: -42 });
