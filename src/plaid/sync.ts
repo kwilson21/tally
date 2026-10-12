@@ -126,9 +126,10 @@ const copyMerchantRowSql = (ownsLock: string) =>
 
 /**
  * Gives each Plaid name the "Never suggest" lines of the bank text it came with (decision 101), with each line's
- * day. It runs on every page that names the store, not only the first time: lines are a set, so a union never
- * loses a No, and a line the name already has keeps its own day. The bank-text line stays, since charges with no
- * Plaid name still key on it. One `?`: the same pairs as copyMerchantRowSql.
+ * day. It runs on every page that names the store, not only the first time: lines are a set, and a line the name
+ * already has keeps its own day. A Remove takes a line away under every key the store goes by at once
+ * (removeNeverSuggest), so this copy never brings a removed line back. The bank-text line stays, since charges with
+ * no Plaid name still key on it. One `?`: the same pairs as copyMerchantRowSql.
  */
 const copyNeverSuggestSql = (ownsLock: string) =>
 	`WITH pair(k, t) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))

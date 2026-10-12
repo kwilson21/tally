@@ -758,6 +758,83 @@ describe("Never suggest lines in the card (decision 101)", () => {
 	});
 });
 
+describe("Remove takes a store's linked Never suggest lines away together (decision 101)", () => {
+	const neverLine = (merchantKey: string, kind: string, decidedOn: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, ?, ?)",
+			)
+			.bind(merchantKey, kind, decidedOn)
+			.run();
+	const lineId = async (merchantKey: string) =>
+		(
+			await db
+				.prepare(
+					"SELECT id FROM never_suggest_rules WHERE merchant_key = ? AND kind = 'income'",
+				)
+				.bind(merchantKey)
+				.first<{ id: number }>()
+		)?.id ?? 0;
+	/** The Never suggest line whose Remove takes focus after a swap: the one drawn with autofocus. */
+	const focusedLine = (html: string) =>
+		html
+			.split("<li ")
+			.find(
+				(item) =>
+					item.includes("autofocus") && item.includes("never-suggest/remove"),
+			) ?? "";
+	const linked = async () => {
+		// The charge is what links the two lines: its bank text and the Plaid name it came with (decision 101).
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name) VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', -2500, 'VENMO 123', 'Venmo')",
+			)
+			.bind(`plaid-${crypto.randomUUID()}`)
+			.run();
+		await neverLine("VENMO 123", "income", "2026-10-04");
+		await neverLine("Venmo", "income", "2026-10-03");
+	};
+
+	it("with a line of another store left, lists only that line and focuses its Remove", async () => {
+		await linked();
+		await neverLine("Chewy", "income", "2026-09-01");
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+		]);
+		expect(
+			html
+				.split("<li ")
+				.filter((item) => item.includes("never-suggest/remove")),
+		).toHaveLength(1);
+		expect(focusedLine(html)).toContain("for Chewy");
+	});
+
+	it("with no other line left, focuses the heading and says Tally hasn't been told No yet", async () => {
+		await linked();
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+		]);
+		expect(html).toMatch(
+			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
+		);
+		expect(textOf(html)).toContain("Tally hasn't been told No yet.");
+	});
+
+	it("the toast and announcement name the line clicked, though other lines went with it", async () => {
+		await linked();
+		await neverLine("Chewy", "income", "2026-09-01");
+		const { res } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+		]);
+		expect(trigger(res).toast?.message).toBe(
+			"Removed. Tally can suggest that again.",
+		);
+		expect(trigger(res).announce).toContain(
+			"Never suggest income for Venmo is gone.",
+		);
+	});
+});
+
 describe("the Band follows the Settings swaps that change the queue (#195)", () => {
 	const BAND_OOB = 'hx-select-oob="#names-band"';
 	const tagOf = (html: string, pattern: RegExp) =>

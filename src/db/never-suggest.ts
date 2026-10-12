@@ -106,23 +106,31 @@ export async function addNeverSuggest(
 }
 
 /**
- * Removes one line and returns it, so the toast can name it. A stale Remove (the line is gone already)
- * returns null and changes nothing.
+ * Removes the clicked line and returns it, so the toast can name it, with how many lines went. The store's
+ * other lines of the same kind go too: the store-name line and the bank-text lines of its charges, under
+ * every key the store goes by (decision 101), so a later sync can't copy a removed line back. A stale Remove
+ * (the line is gone already) returns null and changes nothing.
  */
 export async function removeNeverSuggest(
 	db: D1Database,
 	id: number,
-): Promise<NeverSuggestRule | null> {
+): Promise<{ rule: NeverSuggestRule; removedCount: number } | null> {
 	const rule = await db
 		.prepare(`${RULE_SELECT} WHERE r.id = ?`)
 		.bind(id)
 		.first<Row>();
 	if (!rule) return null;
 	const result = await db
-		.prepare("DELETE FROM never_suggest_rules WHERE id = ?")
-		.bind(id)
+		.prepare(
+			`WITH names(n) AS (SELECT ?1 UNION SELECT merchant_name FROM transactions WHERE raw_name = ?1 AND NULLIF(merchant_name, '') IS NOT NULL),
+				keys(k) AS (SELECT n FROM names UNION SELECT raw_name FROM transactions WHERE merchant_name IN (SELECT n FROM names))
+			DELETE FROM never_suggest_rules WHERE kind = ?2 AND merchant_key IN (SELECT k FROM keys)`,
+		)
+		.bind(rule.merchantKey, rule.kind)
 		.run();
-	return result.meta.changes > 0 ? toRule(rule) : null;
+	return result.meta.changes > 0
+		? { rule: toRule(rule), removedCount: result.meta.changes }
+		: null;
 }
 
 /** The line as Settings reads it aloud and shows it: "Never suggest income for Venmo". */

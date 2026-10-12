@@ -87,7 +87,8 @@ describe("never_suggest_rules table", () => {
 		});
 		const [rule] = await neverSuggestRules(db);
 		const removed = await removeNeverSuggest(db, rule?.id ?? 0);
-		expect(removed?.kind).toBe("transfer");
+		expect(removed?.rule.kind).toBe("transfer");
+		expect(removed?.removedCount).toBe(1);
 		expect(await neverSuggestRules(db)).toEqual([]);
 		expect(await removeNeverSuggest(db, rule?.id ?? 0)).toBeNull();
 	});
@@ -200,6 +201,61 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 		expect((await getTransaction(db, chewy))?.maybeCategoryName).toBe(
 			"new:Pet Care",
 		);
+	});
+});
+
+describe("Remove takes the store's linked lines away with the one clicked (decision 101)", () => {
+	const lines = async () =>
+		(await neverSuggestRules(db))
+			.map((rule) => `${rule.merchantKey}:${rule.kind}`)
+			.sort();
+
+	beforeEach(async () => {
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-03', -2500, 'VENMO 123', 'Venmo')`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`)
+			.run();
+		await addNeverSuggest(db, {
+			merchantKey: "VENMO 123",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "transfer",
+			decidedOn: "2026-10-03",
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "CHEWY",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+	});
+
+	it("removing the bank-text line also removes the store-name line of the same kind, and nothing else", async () => {
+		const bank = (await neverSuggestRules(db)).find(
+			(rule) => rule.merchantKey === "VENMO 123",
+		);
+		const removed = await removeNeverSuggest(db, bank?.id ?? 0);
+		expect(removed?.rule.kind).toBe("income");
+		expect(removed?.removedCount).toBe(2);
+		expect(await lines()).toEqual(["CHEWY:income", "Venmo:transfer"]);
+	});
+
+	it("removing the store-name line also removes the bank-text line of the same kind", async () => {
+		const name = (await neverSuggestRules(db)).find(
+			(rule) => rule.merchantKey === "Venmo" && rule.kind === "income",
+		);
+		await removeNeverSuggest(db, name?.id ?? 0);
+		expect(await lines()).toEqual(["CHEWY:income", "Venmo:transfer"]);
 	});
 });
 

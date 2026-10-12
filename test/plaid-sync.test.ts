@@ -6,6 +6,7 @@ import { householdToday } from "../src/dates";
 import { readAiTally } from "../src/db/ai-log";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
+import { removeNeverSuggest } from "../src/db/never-suggest";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import {
 	getTransaction,
@@ -814,6 +815,28 @@ describe("syncItem", () => {
 				{ merchant_key: "VENMO 123", kind: "income", decided_on: "2026-10-03" },
 				{ merchant_key: "Venmo", kind: "income", decided_on: "2026-09-01" },
 			]);
+		});
+
+		it("a Remove of the Plaid name's line takes the bank-text line too, so a later sync can't copy it back", async () => {
+			const id = await addItem();
+			await env.DB.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO 123', 'income', '2026-10-03')",
+			).run();
+			await syncVenmo(id, "venmo-1", -25);
+			const named = await env.DB.prepare(
+				"SELECT id FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
+			).first<{ id: number }>();
+			await removeNeverSuggest(env.DB, named?.id ?? 0);
+			await syncVenmo(id, "venmo-2", -10);
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5 WHERE plaid_transaction_id = 'venmo-2'",
+			).run();
+			expect(await lines()).toEqual([]);
+			const asked = (await suggestionQueue(env.DB, AI_SWITCHES_ALL_ON)).filter(
+				(item) => item.kind === "income",
+			);
+			expect(asked).toHaveLength(1);
+			expect(asked[0]).toMatchObject({ merchantKey: "Venmo" });
 		});
 
 		it("stops suggesting income for the new charge's Plaid name, as it does for the bank text", async () => {
