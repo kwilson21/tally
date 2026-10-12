@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { AFTER_SYNC_BATCH, askAgainMany } from "../categorize-pending";
+import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import { type AiTallyCounts, readAiTally } from "../db/ai-log";
 import {
@@ -72,7 +72,10 @@ export const settings = new Hono<App>();
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
-/** Every form on the page swaps the Categories section in place; without JavaScript it posts normally. */
+/**
+ * Every form on the page swaps the Categories section in place; without JavaScript it posts normally. The
+ * Band above Categories follows the review queue, so each swap also draws it again (`hx-select-oob`).
+ */
 const swap = (url: string, indicator: string) => ({
 	method: "post" as const,
 	action: url,
@@ -81,6 +84,7 @@ const swap = (url: string, indicator: string) => ({
 	"hx-indicator": `#${indicator}`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
+	"hx-select-oob": "#names-band",
 	"hx-swap": "outerHTML",
 });
 
@@ -94,6 +98,7 @@ const action = (url: string, formId: string) => ({
 	"hx-disable": `#${formId} button[type=submit]`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
+	"hx-select-oob": "#names-band",
 	"hx-swap": "outerHTML",
 });
 
@@ -873,30 +878,20 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		);
 		return current;
 	}
-	const env = c.env as Env & { JEV_API_KEY?: string };
-	if (
-		result.leftOut.length &&
-		env.JEV_API_KEY &&
-		(await readAiSwitches(c.env.DB)).categories
-	)
-		// waitUntil starts a promise at once; yield this turn so the page can answer first.
-		c.executionCtx.waitUntil(
-			new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
-				askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
-			),
-		);
-	const out = result.leftOut.length;
+	await askAgainLeftOut(
+		c.env as Env & { JEV_API_KEY?: string },
+		result.leftOut,
+		(work) => c.executionCtx.waitUntil(work),
+	);
 	const count = result.moved;
 	const transactions = `${count} transaction${count === 1 ? "" : "s"}`;
 	const message = result.attached
 		? `Added ${transactions} to ${result.name}`
 		: `Created ${result.name} with ${transactions}`;
-	return done(
-		c,
-		message,
-		`${message}.${out ? ` The ${out} you left out ${out === 1 ? "goes" : "go"} back to Tally to sort again.` : ""}`,
-		{ hash: "categories" },
-	);
+	const left = leftOutSentence(result.leftOut.length);
+	return done(c, message, `${message}.${left ? ` ${left}` : ""}`, {
+		hash: "categories",
+	});
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {

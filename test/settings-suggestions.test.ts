@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { categorizePending } from "../src/categorize-pending";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { saveSuggestion } from "../src/db/category-suggestions";
+import {
+	pendingSuggestions,
+	saveSuggestion,
+} from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { settings } from "../src/routes/settings";
 
@@ -199,6 +202,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM transactions"),
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
+		db.prepare("DELETE FROM never_suggest_rules"),
 		db.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'"),
 	]);
 	await saveAiSwitches(db, { details: false });
@@ -689,6 +693,140 @@ describe("creating the category", () => {
 	it("is a stale-safe form: a suggestion that doesn't exist is the same current-list answer", async () => {
 		const { res } = await create(9999, [1], [1]);
 		expect(res.status).toBe(404);
+	});
+});
+
+describe("Never suggest lines in the card (decision 101)", () => {
+	/** Two purchases at one store and one at another, under one pending suggestion (three make one). */
+	async function twoStores() {
+		const a1 = await addTx("CHEWY.COM", 6412);
+		const a2 = await addTx("CHEWY.COM", 4100);
+		const b = await addTx("PETSMART 0412", 2399);
+		const id = (await saveSuggestion(db, "Pet Care", [a1, a2, b])) as number;
+		return { id, a: [a1, a2], b };
+	}
+	const neverLine = (merchantKey: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-03')",
+			)
+			.bind(merchantKey)
+			.run();
+
+	it("leaves a store with a line out of the card, and shows the others", async () => {
+		const { a, b } = await twoStores();
+		await neverLine("PETSMART 0412");
+		const [suggestion] = await pendingSuggestions(db);
+		const kept = suggestion?.rows.map((r) => r.id) ?? [];
+		expect(kept).toHaveLength(2);
+		expect(kept).toEqual(expect.arrayContaining(a));
+		const { html } = await get();
+		for (const id of a) expect(html).toContain(`name="shown" value="${id}"`);
+		expect(html).not.toContain(`name="shown" value="${b}"`);
+	});
+
+	it("drops the card when every store has a line, without counting it as more, and keeps it pending for Remove", async () => {
+		const { id } = await twoStores();
+		await neverLine("CHEWY.COM");
+		await neverLine("PETSMART 0412");
+		const pending = await pendingSuggestions(db);
+		expect(pending).toEqual([]);
+		expect(pending.more).toBe(0);
+		const { html } = await get();
+		expect(html).not.toContain("data-suggestion=");
+		expect(await status(id)).toBe("pending");
+		await db
+			.prepare("DELETE FROM never_suggest_rules WHERE merchant_key = ?")
+			.bind("CHEWY.COM")
+			.run();
+		expect((await pendingSuggestions(db)).map((s) => s.id)).toEqual([id]);
+	});
+
+	it("files nothing for a store with a line, even when a stale form ticks its row", async () => {
+		const { id, ids } = await petCare();
+		await neverLine("PETSMART 0412");
+		const { res } = await create(id, ids, ids);
+		expect(res.status).toBe(200);
+		const [chewy, , petsmart] = ids;
+		expect(await row(petsmart as number)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+		expect(await row(chewy as number)).toMatchObject({
+			category_source: "user",
+		});
+	});
+});
+
+describe("the Band follows the Settings swaps that change the queue (#195)", () => {
+	const BAND_OOB = 'hx-select-oob="#names-band"';
+	const tagOf = (html: string, pattern: RegExp) =>
+		pattern.exec(html)?.[0] ?? "";
+	const neverLine = (merchantKey: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-03')",
+			)
+			.bind(merchantKey)
+			.run();
+
+	it("swaps the Band with the create form and the Dismiss button of a suggestion card", async () => {
+		const { id } = await petCare();
+		const { html } = await get();
+		expect(
+			tagOf(
+				html,
+				new RegExp(
+					`<form[^>]*action="/settings/suggestions/${id}/create"[^>]*>`,
+				),
+			),
+		).toContain(BAND_OOB);
+		expect(
+			tagOf(
+				html,
+				new RegExp(
+					`<button[^>]*formaction="/settings/suggestions/${id}/dismiss"[^>]*>`,
+				),
+			),
+		).toContain(BAND_OOB);
+	});
+
+	it("swaps the Band with a Never suggest Remove, and with a Categories form built by swap()", async () => {
+		await neverLine("CHEWY.COM");
+		const { html } = await get();
+		expect(
+			tagOf(html, /<form[^>]*action="\/settings\/never-suggest\/remove"[^>]*>/),
+		).toContain(BAND_OOB);
+		expect(
+			tagOf(html, /<form[^>]*action="\/settings\/categories"[^>]*>/),
+		).toContain(BAND_OOB);
+	});
+
+	it("draws the Band empty when a Dismiss takes the only waiting suggestion away", async () => {
+		const { id } = await petCare();
+		const { html } = await post(`/settings/suggestions/${id}/dismiss`);
+		expect(html).toContain('<div id="names-band"></div>');
+	});
+
+	it("draws the Band with its count when a Never suggest Remove brings a hidden suggestion back", async () => {
+		await petCare();
+		for (const store of [
+			"CHEWY.COM",
+			"BANFIELD PET HOSPITAL",
+			"PETSMART 0412",
+			"AMAZON GIFT",
+		])
+			await neverLine(store);
+		expect(textOf((await get()).html)).not.toContain("Suggested: Pet Care");
+		const line = await db
+			.prepare(
+				"SELECT id FROM never_suggest_rules WHERE merchant_key = 'CHEWY.COM'",
+			)
+			.first<{ id: number }>();
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(line?.id)],
+		]);
+		expect(html).toMatch(/<div id="names-band">[\s\S]*?1 suggestion to check/);
 	});
 });
 

@@ -320,6 +320,31 @@ describe("suggestionQueue", () => {
 		expect(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).toEqual([]);
 	});
 
+	it("keeps a credit linked to a purchase out of the category queue, as its row shows no Maybe, and asks it once the purchase is left out", async () => {
+		const purchase = await transaction({ amount: 5000, raw: "SHOP PURCHASE" });
+		const refund = await transaction({
+			amount: -2000,
+			raw: "SHOP REFUND",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+			creditReviewed: 1,
+		});
+		await db
+			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+			.bind(purchase, refund)
+			.run();
+		const categories = async () =>
+			(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).flatMap((item) =>
+				item.kind === "category" ? [item.transactionId] : [],
+			);
+		expect(await categories()).toEqual([]);
+		await db
+			.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
+			.bind(purchase)
+			.run();
+		expect(await categories()).toEqual([refund]);
+	});
+
 	it("asks about an excluded credit that pays a bill, as its row shows it as Maybe income, and not one left out", async () => {
 		const paying = await transaction({
 			amount: -250000,

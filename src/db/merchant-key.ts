@@ -9,7 +9,8 @@
  * Each merchant has one settings row in `merchants`, found by its key, and a charge reads only that row,
  * so every bank text that shares a key shares one rule, name and Not a bill. A row saved before Plaid
  * named a merchant is under its bank text, which is the key of the charges that have no merchant name,
- * and sync copies it to the merchant's key when Plaid first names the merchant (src/plaid/sync.ts).
+ * and sync copies it to the merchant's key when Plaid first names the merchant (src/plaid/sync.ts). When Plaid
+ * first names a store, its "Never suggest" lines carry over to the new key with its other settings (decision 101).
  *
  * Bills keep a flag instead (`bills.merchant_raw_text`): a bill saved before the key existed (1) holds
  * the bank's raw text and matches by raw name, and a bill saved since (0) holds a key and matches by key.

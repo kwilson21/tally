@@ -4,10 +4,12 @@
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { confidencePercent } from "../ai/confidence";
 import { isUnsure, maybeIncomeVisible } from "../ai/maybe";
+import { sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
+import { categoryNames } from "./categories";
 import { pendingSuggestions } from "./category-suggestions";
-import { paysBillSql } from "./counted-month";
+import { jevAsksAboutSql, paysBillSql } from "./counted-month";
 import { hasIncomeAnswerSql } from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
@@ -40,6 +42,8 @@ export type NewCategorySuggestion = {
 	suggestionId: number;
 	/** The name Tally suggested, tidied: "Pet Care". */
 	name: string;
+	/** The family's active category with this name, as it stored it, when it already has one (decision 101). */
+	existing: string | null;
 	date: string;
 	rows: {
 		transactionId: number;
@@ -218,7 +222,7 @@ async function categorySuggestions(
 			FROM transactions t ${JOIN_MERCHANT}
 			JOIN categories c ON c.id = t.jev_category_id AND c.archived = 0
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.category_id IS NULL AND t.category_source IS NULL
-				AND t.category_confidence < ? AND t.flag_income = 0 AND t.excluded = 0`,
+				AND t.category_confidence < ? AND t.flag_income = 0 AND t.excluded = 0 AND ${jevAsksAboutSql("t")}`,
 		)
 		.bind(JEV_THRESHOLD)
 		.all<
@@ -248,16 +252,17 @@ async function categorySuggestions(
 
 /**
  * New categories: the pending suggestions from Settings, each with its purchases. A store whose "Never
- * suggest" line for a new category is set drops out of the suggestion, and a suggestion with no store left
- * is not asked at all (decision 101).
+ * suggest" line for a new category is set drops out of the suggestion (pendingSuggestions leaves its rows
+ * out), and a suggestion with no store left is not asked at all (decision 101).
  */
 async function newCategorySuggestions(
 	db: D1Database,
-	never: Set<string>,
 ): Promise<{ item: NewCategorySuggestion; order: number }[]> {
 	// Every pending suggestion, not only the ten Settings lists: the count covers every kind (decision 101).
 	const suggestions = await pendingSuggestions(db, Number.MAX_SAFE_INTEGER);
 	if (suggestions.length === 0) return [];
+	// The same check Settings makes for its "Add to" button: an active category with the name, as sameName reads it.
+	const active = (await categoryNames(db)).filter((c) => !c.archived);
 	const ids = suggestions.flatMap((suggestion) =>
 		suggestion.rows.map((row) => row.id),
 	);
@@ -274,8 +279,7 @@ async function newCategorySuggestions(
 	for (const suggestion of suggestions) {
 		const rows = suggestion.rows.flatMap((row) => {
 			const found = byId.get(row.id);
-			if (!found || never.has(ruleKey("new_category", found.merchantKey)))
-				return [];
+			if (!found) return [];
 			return [
 				{
 					transactionId: row.id,
@@ -298,13 +302,15 @@ async function newCategorySuggestions(
 					]),
 			).values(),
 		];
+		const name = tidyName(suggestion.name);
 		items.push({
 			order: suggestion.id,
 			item: {
 				kind: "new_category",
 				id: `new-${suggestion.id}`,
 				suggestionId: suggestion.id,
-				name: tidyName(suggestion.name),
+				name,
+				existing: active.find((c) => sameName(c.name, name))?.name ?? null,
 				date: rows.reduce(
 					(latest, row) => (row.date > latest ? row.date : latest),
 					"",
@@ -376,7 +382,7 @@ export async function suggestionQueue(
 		s.income ? incomeSuggestions(db, never) : [],
 		s.categories ? transferSuggestions(db, never) : [],
 		s.categories ? categorySuggestions(db) : [],
-		s.categories ? newCategorySuggestions(db, never) : [],
+		s.categories ? newCategorySuggestions(db) : [],
 		nameSuggestions(db, s),
 	]);
 	const byKind: Record<SuggestionKind, SuggestionItem[]> = {

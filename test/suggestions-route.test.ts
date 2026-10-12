@@ -1,7 +1,10 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { Hono } from "hono";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { JEV_URL } from "../src/ai/categorize";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
+import { suggestions } from "../src/routes/suggestions";
 
 // The one review screen for every "Maybe …" (issue #195, decisions 79 and 101): Settings' Band leads to
 // it, one item at a time in the order money first, then categories, new categories and names. A Yes
@@ -781,6 +784,237 @@ describe("new categories", () => {
 			)
 			.all<{ key: string }>();
 		expect(lines.results.map((line) => line.key)).toEqual(["CHEWY.COM 1"]);
+	});
+});
+
+/** The purchases a new-category form ticks: the checkbox values that carry `checked`. */
+const checkedTicks = (html: string) =>
+	[...html.matchAll(/<input[^>]*name="ticked"[^>]*>/g)]
+		.filter((input) => /\schecked(=|\s|\/|>)/.test(input[0]))
+		.map((input) => Number(/value="(\d+)"/.exec(input[0])?.[1]));
+
+describe("new category answers that are refused keep the ticks", () => {
+	it("draws no tick after a refusal when none was ticked, rather than ticking them all again", async () => {
+		const ids = await oneOfEach();
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "yes",
+				shown: ids.pets.map(String),
+			},
+			true,
+		);
+		expect(res.status).toBe(422);
+		expect(checkedTicks(html)).toEqual([]);
+	});
+
+	it("keeps only the ticks the person made after a refusal", async () => {
+		const ids = await oneOfEach();
+		await db
+			.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES ('Pet Care', 'tag', 'cat-blue', 99, 1)",
+			)
+			.run();
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "yes",
+				shown: ids.pets.map(String),
+				ticked: [String(ids.pets[0])],
+			},
+			true,
+		);
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain(
+			"An archived category has that name. Restore it instead.",
+		);
+		expect(checkedTicks(html)).toEqual([ids.pets[0]]);
+	});
+});
+
+describe("a new category the family already has is added to, and the button says so (decision 101)", () => {
+	/** The new-category question: the money and category items before it are set aside. */
+	const newCategoryPage = async (ids: {
+		income: number;
+		transfer: number;
+		category: number;
+	}) =>
+		get(
+			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}&skip=category-${ids.category}`,
+		);
+
+	it("reads 'Yes, add to' with the family's own name for it, and not 'Yes, create'", async () => {
+		const ids = await oneOfEach();
+		await db
+			.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99)",
+			)
+			.run();
+		const { html } = await newCategoryPage(ids);
+		expect(textOf(html)).toContain("Maybe new: Pet Care");
+		expect(textOf(html)).toContain("Yes, add to pet care");
+		expect(textOf(html)).not.toContain("Yes, create");
+	});
+
+	it("reads 'Yes, create' with the suggested name when the family has no such category", async () => {
+		const ids = await oneOfEach();
+		const { html } = await newCategoryPage(ids);
+		expect(textOf(html)).toContain("Maybe new: Pet Care");
+		expect(textOf(html)).toContain("Yes, create Pet Care");
+		expect(textOf(html)).not.toContain("Yes, add to");
+	});
+});
+
+describe("a Yes files only the rows its question still shows (decision 101)", () => {
+	it("files the store's rows the question shows, and leaves a store that got a No line unfiled, even from a stale form", async () => {
+		const ids = await oneOfEach();
+		const [chewy, petsmart, banfield] = ids.pets;
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('PETSMART 22', 'new_category', '2026-10-03')",
+			)
+			.run();
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "yes",
+				shown: ids.pets.map(String),
+				ticked: ids.pets.map(String),
+			},
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(
+			await row("SELECT category_source FROM transactions WHERE id = ?", chewy),
+		).toMatchObject({ category_source: "user" });
+		expect(
+			await row(
+				"SELECT category_source FROM transactions WHERE id = ?",
+				banfield,
+			),
+		).toMatchObject({ category_source: "user" });
+		expect(
+			await row(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				petsmart,
+			),
+		).toMatchObject({ category_id: null, category_source: null });
+	});
+});
+
+describe("Yes on a new category asks Jev again about the rows left out (decision 79)", () => {
+	const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+	app.use("*", async (c, next) => {
+		c.set("actor", "test@example.com");
+		await next();
+	});
+	app.route("/", suggestions);
+	let waitUntil: ReturnType<typeof vi.fn<(promise: Promise<unknown>) => void>>;
+	const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
+	const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
+
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		waitUntil = vi.fn<(promise: Promise<unknown>) => void>((promise) => {
+			void promise.catch(() => {});
+		});
+	});
+
+	/** A fake Jev that answers Eating Out, and records the bank text of each transaction it is asked about. */
+	function fakeJev() {
+		const asked: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+				if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
+				const body = JSON.parse(String(init?.body)) as {
+					state: { bank_description: string };
+				};
+				asked.push(body.state.bank_description);
+				return Response.json({
+					answers: {
+						category: {
+							type: "choice",
+							choice: "Eating Out",
+							confidence: 0.95,
+						},
+						transfer: { type: "noul", noul: 0.01 },
+						reimbursement: { type: "noul", noul: 0.01 },
+						income: { type: "noul", noul: 0.01 },
+					},
+				});
+			}),
+		);
+		return asked;
+	}
+
+	async function answerYes(
+		fields: Record<string, string | string[]>,
+		bindings: Record<string, unknown>,
+	) {
+		const body = new URLSearchParams();
+		for (const [key, value] of Object.entries(fields))
+			for (const v of Array.isArray(value) ? value : [value])
+				body.append(key, v);
+		const res = await app.request(
+			"/settings/suggestions",
+			{
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: body.toString(),
+			},
+			{ ...env, ...bindings },
+			ctx(),
+		);
+		return { res, html: await res.text() };
+	}
+
+	it("asks Jev about the unticked purchase once the page has answered, and says it goes back to sort again", async () => {
+		const ids = await oneOfEach();
+		const asked = fakeJev();
+		const [first, second] = ids.pets;
+		const { res } = await answerYes(
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "yes",
+				shown: ids.pets.map(String),
+				ticked: [String(first), String(second)],
+			},
+			{ JEV_API_KEY: "jev-key" },
+		);
+		expect(res.status).toBe(200);
+		expect(waitUntil).toHaveBeenCalledTimes(1);
+		await background();
+		expect(asked).toEqual(["BANFIELD 5"]);
+		expect(trigger(res).announce).toContain(
+			"The 1 you left out goes back to Tally to sort again.",
+		);
+	});
+
+	it("schedules nothing without a Jev key", async () => {
+		const ids = await oneOfEach();
+		const asked = fakeJev();
+		await answerYes(
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "yes",
+				shown: ids.pets.map(String),
+				ticked: [String(ids.pets[0])],
+			},
+			{ JEV_API_KEY: undefined },
+		);
+		expect(waitUntil).not.toHaveBeenCalled();
+		expect(asked).toEqual([]);
 	});
 });
 

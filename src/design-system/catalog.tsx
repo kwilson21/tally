@@ -2304,6 +2304,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 		id: "new-4",
 		suggestionId: 4,
 		name: "Pet Care",
+		existing: null,
 		date: "2026-10-02",
 		rows: [
 			{
@@ -2396,6 +2397,23 @@ function SuggestionsReview() {
 							/>
 						</div>
 					))}
+					<State label="The family already has this category: Yes, add to Pet Care">
+						<div class="max-w-md">
+							<SuggestionCard
+								action="/settings/suggestions"
+								item={{
+									...(reviewItems.newCategory as Extract<
+										SuggestionItem,
+										{ kind: "new_category" }
+									>),
+									existing: "Pet Care",
+								}}
+								today={REVIEW_TODAY}
+								skipHref="/settings/suggestions?skip=income-1"
+								categories={reviewCategories}
+							/>
+						</div>
+					</State>
 				</div>
 			</Specimen>
 			<Specimen

@@ -1,10 +1,12 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
 } from "../db/category-suggestions";
+import { jevAsksAboutSql } from "../db/counted-month";
 import {
 	type NameChoice,
 	type NameReview,
@@ -47,7 +49,12 @@ type Ask = {
 };
 
 /** What the form held when it was posted, shown again with its error. */
-type Values = { id: string; picked?: string | null; own?: string };
+type Values = {
+	id: string;
+	picked?: string | null;
+	own?: string;
+	ticked?: number[];
+};
 
 export const suggestions = new Hono<App>();
 
@@ -297,14 +304,15 @@ suggestions.post(PATH, async (c) => {
 	const queue = await suggestionQueue(db);
 	const { skipped, again } = requestedReview(c.req.url, queue);
 	const next = reviewAddress(skipped, again);
-	const done = (message: string, queueAfter: SuggestionItem[]) => {
+	// `extra` is one more sentence for the announcer, such as what a create left out; the toast keeps its words.
+	const done = (message: string, queueAfter: SuggestionItem[], extra = "") => {
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		return renderScreen(c, {
 			focus: true,
 			toast: {
 				message,
 				type: "success",
-				announce: `${message.replace(/\.$/, "")}. ${left(queueAfter)}`,
+				announce: `${message.replace(/\.$/, "")}. ${extra ? `${extra} ` : ""}${left(queueAfter)}`,
 			},
 		});
 	};
@@ -436,7 +444,8 @@ suggestions.post(PATH, async (c) => {
 						`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND jev_category_id IS NOT NULL
-							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = transactions.jev_category_id AND c.archived = 0)`,
+							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = transactions.jev_category_id AND c.archived = 0)
+							AND ${jevAsksAboutSql("transactions")}`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -465,7 +474,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
+						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND ${jevAsksAboutSql("transactions")}`,
 					)
 					.bind(category.id, who, item.transactionId)
 					.run();
@@ -477,14 +486,16 @@ suggestions.post(PATH, async (c) => {
 		}
 		case "new_category": {
 			if (answer === "yes") {
+				// Only the rows this question shows can be filed, whatever an older form posted (decision 101).
+				const asked = new Set(item.rows.map((row) => row.transactionId));
 				const shown = form
 					.getAll("shown")
 					.map((value) => Number(value.toString()))
-					.filter((n) => Number.isInteger(n) && n > 0);
+					.filter((n) => Number.isInteger(n) && asked.has(n));
 				const ticked = form
 					.getAll("ticked")
 					.map((value) => Number(value.toString()))
-					.filter((n) => Number.isInteger(n) && n > 0);
+					.filter((n) => Number.isInteger(n) && asked.has(n));
 				const result = await createFromSuggestion(
 					db,
 					item.suggestionId,
@@ -494,7 +505,7 @@ suggestions.post(PATH, async (c) => {
 				if (!result.ok) {
 					if (result.reason === "gone") return stale();
 					return renderScreen(c, {
-						values: { id },
+						values: { id, ticked },
 						error:
 							result.error ??
 							"Tick at least one transaction, or dismiss this suggestion.",
@@ -502,11 +513,16 @@ suggestions.post(PATH, async (c) => {
 						focus: true,
 					});
 				}
+				await askAgainLeftOut(
+					c.env as Env & { JEV_API_KEY?: string },
+					result.leftOut,
+					(work) => c.executionCtx.waitUntil(work),
+				);
 				const after = await suggestionQueue(db);
 				const message = result.attached
 					? `Added ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"} to ${result.name}.`
 					: `Made ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`;
-				return done(message, after);
+				return done(message, after, leftOutSentence(result.leftOut.length));
 			}
 			if (answer === "no") {
 				const dismissed = await dismissSuggestion(db, item.suggestionId);

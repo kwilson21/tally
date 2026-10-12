@@ -235,6 +235,8 @@ export function NeverSuggestList({
 									hx-post="/settings/never-suggest/remove"
 									hx-target={`#${target}`}
 									hx-select={`#${target}`}
+									// A line back in place can bring a suggestion back to the review, so the Band follows.
+									hx-select-oob="#names-band"
 									hx-swap="outerHTML"
 								>
 									<input type="hidden" name="id" value={String(rule.id)} />

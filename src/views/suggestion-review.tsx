@@ -157,8 +157,8 @@ export function SuggestionCard({
 	skipHref: string;
 	/** Active categories, for Something else on a category guess. */
 	categories: { id: number; name: string }[];
-	/** What the Name row held when it was posted, shown again with its error. */
-	values?: { picked?: string | null; own?: string };
+	/** What the form held when it was posted (the Name row, or the ticks), shown again with its error. */
+	values?: { picked?: string | null; own?: string; ticked?: number[] };
 	error?: string;
 	focus?: boolean;
 }) {
@@ -218,7 +218,12 @@ export function SuggestionCard({
 			{item.kind === "new_category" && (
 				<>
 					<MaybeQuestion>Maybe new: {item.name}</MaybeQuestion>
-					<NewCategoryForm action={action} item={item} today={today} />
+					<NewCategoryForm
+						action={action}
+						item={item}
+						today={today}
+						ticked={values?.ticked}
+					/>
 				</>
 			)}
 			{item.kind === "name" && (
@@ -483,10 +488,13 @@ function NewCategoryForm({
 	action,
 	item,
 	today,
+	ticked,
 }: {
 	action: string;
 	item: Extract<SuggestionItem, { kind: "new_category" }>;
 	today: string;
+	/** The ticks a refused answer posted; left out, every purchase starts ticked. */
+	ticked?: number[];
 }) {
 	return (
 		<form
@@ -512,7 +520,7 @@ function NewCategoryForm({
 							type="checkbox"
 							name="ticked"
 							value={String(row.transactionId)}
-							checked
+							checked={ticked ? ticked.includes(row.transactionId) : true}
 						>
 							{row.merchant} · {formatCents(Math.abs(row.amountCents))} ·{" "}
 							{shortDay(row.date, today)}
@@ -522,7 +530,9 @@ function NewCategoryForm({
 			</ul>
 			<div class="grid grid-cols-2 gap-3">
 				<Button type="submit" name="answer" value="yes" class="w-full">
-					{`Yes, create ${item.name}`}
+					{item.existing
+						? `Yes, add to ${item.existing}`
+						: `Yes, create ${item.name}`}
 				</Button>
 				<Button
 					kind="secondary"
