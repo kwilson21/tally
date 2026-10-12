@@ -7,6 +7,7 @@ import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { pendingSuggestions } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { tidyName } from "../src/transactions/tidy-name";
 
 // Spec §7, decision 79: when a person adds a clearer name or a note to a transaction that still needs
 // a category, Tally asks Jev again right away, after the page has answered (so a save never waits for
@@ -757,6 +758,159 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		expect(
 			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
 		).toBe("Kept the details for Dog bed.");
+	});
+
+	const ownNameOf = async (id: number) =>
+		(
+			await db
+				.prepare("SELECT own_name FROM transactions WHERE id = ?")
+				.bind(id)
+				.first<{ own_name: string | null }>()
+		)?.own_name;
+
+	it("picking the row's own name again under This one only keeps Tally's category and asks Jev nothing", async () => {
+		const category = await firstCategory();
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(bakery)
+			.run();
+		await pickedByTally(category);
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(await ownNameOf(bakery)).toBe("Dog bed");
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).not.toContain("Tally guesses its category again.");
+	});
+
+	it("picking the store's name again under This one only, when the row already shows it, keeps Tally's category and asks Jev nothing", async () => {
+		const category = await firstCategory();
+		const tidied = tidyName("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare("UPDATE transactions SET own_name = ? WHERE id = ?")
+			.bind(tidied, bakery)
+			.run();
+		await pickedByTally(category);
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: String(category),
+			name_pick: "store",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(await ownNameOf(bakery)).toBe(tidied);
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).not.toContain("Tally guesses its category again.");
+	});
+
+	it("picking the suggestion the row already shows under This one only keeps Tally's category, asks Jev nothing, and leaves the merchant's suggestion pending", async () => {
+		const category = await firstCategory();
+		await db
+			.prepare(
+				"UPDATE merchants SET display_name = NULL, suggested_name = 'Bakery Lane', suggestion_status = 'pending' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+			)
+			.run();
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Bakery Lane' WHERE id = ?")
+			.bind(bakery)
+			.run();
+		await pickedByTally(category);
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: String(category),
+			name_pick: "s:Bakery Lane",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(await ownNameOf(bakery)).toBe("Bakery Lane");
+		expect(
+			await db
+				.prepare(
+					"SELECT suggestion_status, display_name FROM merchants WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+				)
+				.first(),
+		).toEqual({ suggestion_status: "pending", display_name: null });
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).not.toContain("Tally guesses its category again.");
+	});
+
+	it("picking the purchase's own name again under This one only leaves a split part's own name NULL, keeps its category, and asks Jev nothing", async () => {
+		const category = await firstCategory();
+		await db
+			.prepare(
+				"UPDATE transactions SET is_split = 1, own_name = 'Dog bed' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		const part = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, category_id, category_source, category_confidence)
+				 VALUES (?, 1, '2026-09-22', 300, 'SQ *LOCAL BAKERY 4432', ?, ?, 'jev', 0.95) RETURNING id`,
+			)
+			.bind(`part-${crypto.randomUUID()}`, bakery, category)
+			.first<{ id: number }>();
+		const partId = part?.id as number;
+		const jev = fakeJev(() => reply(0.2));
+		await save(partId, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(partId)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(await ownNameOf(partId)).toBeNull();
+	});
+
+	it("typing a different name under This one only still asks Jev once and clears Tally's category", async () => {
+		const category = await firstCategory();
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(bakery)
+			.run();
+		await pickedByTally(category);
+		const jev = fakeJev(() => reply(0.2));
+		await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "Dog bowl",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(jev.bodies[0]?.state).toMatchObject({ merchant: "Dog bowl" });
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+		expect(await ownNameOf(bakery)).toBe("Dog bowl");
 	});
 });
 

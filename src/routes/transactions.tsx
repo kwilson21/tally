@@ -2913,6 +2913,18 @@ async function savePanel(
 		tx.nameChoices.thisOwn !== null
 	)
 		parsed.value.nameChanged = true;
+	// Under This one only, the name this transaction already shows as its own is no rename: nothing is written,
+	// and Tally doesn't guess its category again (rename.ts oneOffGuessesAgain). The name compared is the one the
+	// row shows (tx.ownName, which a split part inherits from its purchase), and a store's name is the tidied bank
+	// text, as saveEdit writes it.
+	if (
+		parsed.ok &&
+		parsed.value.nameScope === "one" &&
+		parsed.value.nameChanged !== false &&
+		tx.ownName !== null &&
+		(parsed.value.displayName ?? tidyName(tx.rawName)) === tx.ownName
+	)
+		parsed.value.nameChanged = false;
 
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
